@@ -13,6 +13,7 @@ import hashlib
 from typing import Any
 
 from decoy_engine.config._pipeline import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.generators.derivation import strategy_config_fingerprint, with_table
 from decoy_engine.plan import compile_plan
@@ -191,7 +192,7 @@ def digests(name: str) -> dict[str, Any]:
     # The pinned plan bytes embed the targets as captured, one shared path; the corpus now
     # validates with one path per table, so the pre-DUP-DEST spelling is restored here.
     cfg["targets"] = {n: {**t, "path": "o.csv"} for n, t in cfg["targets"].items()}
-    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     tables = generate_tables(plan)
     cells = hashlib.sha256()
     for t in sorted(tables):

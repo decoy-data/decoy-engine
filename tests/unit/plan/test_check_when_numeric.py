@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan._checks_correctness import check_when_string_output_on_numeric_unsupported
 from decoy_engine.plan._compile import compile_plan
 from decoy_engine.plan._errors import PlanCompileError
@@ -270,7 +271,11 @@ class TestWhenNumericUnderNoProfile:
         self, simple_config: dict[str, Any], simple_profile: Profile
     ) -> None:
         plan = compile_plan(
-            simple_config, simple_profile, decoy_engine_version="0.1.0", no_profile=True
+            simple_config,
+            simple_profile,
+            decoy_engine_version="0.1.0",
+            no_profile=True,
+            sources=NO_SOURCES,
         )
         assert "when_string_output_on_numeric_unsupported" in plan.plan_compile.checks_skipped
         assert "when_string_output_on_numeric_unsupported" not in plan.plan_compile.checks_passed

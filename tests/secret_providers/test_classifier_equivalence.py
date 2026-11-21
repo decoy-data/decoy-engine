@@ -17,6 +17,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution._technique_class import TECHNIQUE_CLASS_BY_STRATEGY
 from decoy_engine.keyprovider import KeyedStrategyRequiresSecret
@@ -108,7 +109,7 @@ def test_config_and_plan_classifiers_agree_on_recognised_strategies(strategy, de
     cfg = _compile(None, [col])
     prof = profile_source(cfg, seed=1)
     try:
-        plan = compile_plan(cfg, prof, decoy_engine_version="f13")
+        plan = compile_plan(cfg, prof, decoy_engine_version="f13", sources=NO_SOURCES)
     except PlanCompileError:
         assume(False)  # the compiler rejects this combination; nothing to classify
     assert bool(secret_requirements_for_config(cfg)) == bool(secret_requirements_for_plan(plan))

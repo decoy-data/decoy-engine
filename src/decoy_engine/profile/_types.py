@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.profiling._basis import key_claim_allowed
 
 
@@ -102,6 +103,11 @@ class ColumnProfile:
     # warn-only free-text gate), not identity-relevant data shape.
     avg_length: float | None = None
     max_length: int | None = None
+    # What the data is, from the source format and Arrow type (`classify_column`). Unlike
+    # `avg_length` it is in `profile_hash`: it changes masking and is not a function of `dtype`
+    # (an Arrow date and a string both read as `object`). A profile saved before this field
+    # loads as `unknown`, which fails closed.
+    shape: ColumnShape = ColumnShape.UNKNOWN
 
     def __post_init__(self) -> None:
         if not key_claim_allowed(not self.sampled, self.is_candidate_key_sampled):

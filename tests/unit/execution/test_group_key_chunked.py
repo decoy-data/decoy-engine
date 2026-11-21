@@ -31,6 +31,7 @@ import pytest
 
 from decoy_engine import run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked_oracle
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_fk import CHUNK_SAFE_STRATEGIES
@@ -126,7 +127,9 @@ def _compile_test_plan(config: dict, source: pa.Table, *, table: str):
     for tests that need a real `Plan` + registry + relationship_graph without
     going through the full chunked entrypoint."""
     profile = first_chunk_profile(source, table=table, engine_version=_ENGINE_VERSION)
-    plan = compile_plan(config, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     registry = get_default_registry()
     graph = RelationshipGraph(edges=(), ordering=())
     return plan, registry, graph

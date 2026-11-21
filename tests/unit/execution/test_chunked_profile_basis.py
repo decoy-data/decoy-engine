@@ -38,4 +38,5 @@ def test_empty_input_profile_is_whole_and_unchanged() -> None:
     assert profile_hash(profile) == _EMPTY_HASH
 
 
-_EMPTY_HASH = "c35dfed803fbfdf802713043b7673dd012748cb862a017a5cae28c92450712bf"
+# Moved once by COLUMN-SHAPE E1a: each hashed column now carries its `shape` (here `unknown`).
+_EMPTY_HASH = "190c85ce1c9b35f07781b1c2c6ffdfe5937708ff4a24030c4076eab5a0e14155"

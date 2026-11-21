@@ -10,6 +10,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation._plan_entry import generate_tables, generate_tables_streamed
 from decoy_engine.generation.pinned import compile_pinned_plan, execute_pinned
 from decoy_engine.plan import compile_plan
@@ -68,7 +69,9 @@ def family(
 
 
 def plan_of(config: dict[str, Any]) -> Any:
-    return compile_plan(copy.deepcopy(config), empty_profile(), decoy_engine_version="test")
+    return compile_plan(
+        copy.deepcopy(config), empty_profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )
 
 
 def run_route(

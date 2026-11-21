@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import Profile
@@ -41,7 +42,9 @@ def compile_and_generate(
     """`compile_plan` + `generate_tables`, forwarding the same kwargs
     `generate_tables(config, derive_key=..., instance_default_locale=...)`
     used to accept directly."""
-    plan = compile_plan(config, profile or empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(
+        config, profile or empty_profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )
     return generate_tables(
         plan, derive_key=derive_key, instance_default_locale=instance_default_locale
     )

@@ -27,6 +27,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._strategies._fpe import FpeStrategyHandler
 from decoy_engine.generation.pool._cache import PoolCache
@@ -751,7 +752,13 @@ class TestT8AuditSignal:
             },
         }
         cfg = PipelineConfig.model_validate(cfg_raw).model_dump()
-        plan = compile_plan(cfg, _EMPTY_PROFILE, decoy_engine_version="sp46-test", no_profile=True)
+        plan = compile_plan(
+            cfg,
+            _EMPTY_PROFILE,
+            decoy_engine_version="sp46-test",
+            no_profile=True,
+            sources=NO_SOURCES,
+        )
 
         warning_text = " ".join(plan.plan_compile.warnings)
         assert "phone_e164" in warning_text, (
@@ -811,6 +818,12 @@ class TestT8AuditSignal:
             },
         }
         cfg = PipelineConfig.model_validate(cfg_raw).model_dump()
-        plan = compile_plan(cfg, _EMPTY_PROFILE, decoy_engine_version="sp46-test", no_profile=True)
+        plan = compile_plan(
+            cfg,
+            _EMPTY_PROFILE,
+            decoy_engine_version="sp46-test",
+            no_profile=True,
+            sources=NO_SOURCES,
+        )
 
         assert "fpe_join_groups" in plan.plan_compile.checks_passed

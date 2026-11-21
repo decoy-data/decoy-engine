@@ -16,6 +16,7 @@ from datetime import datetime
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.contracts.distribution_behavior import (
     distribution_behavior_for,
 )
@@ -241,7 +242,7 @@ class TestPlanCompileStampsField:
         # so give truncate a valid length rather than an empty config.
         provider_config = {"length": 3} if strategy == "truncate" else None
         profile, config = self._profile_and_config(strategy, provider_config)
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         col_seed = plan.seed_envelope.per_table[0][1].per_column[0][1]
         assert col_seed.distribution_behavior == expected
 

@@ -44,6 +44,7 @@ import pytest
 
 from decoy_engine import run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked import check_chunked_compatibility, concat_masked_chunks
 from decoy_engine.execution._chunked_code_set import (
     aggregate_chunk_code_set_corpora,
@@ -547,7 +548,9 @@ class TestCorpusPinning:
         cfg = _config(tmp_path, columns)
         table = pa.table({"code": pa.array(["E11.9"], type=pa.string())})
         profile = first_chunk_profile(table, table="records", engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())
         records = resolve_pinned_code_set_records(plan, reg, graph, table="records")
@@ -576,7 +579,9 @@ class TestCorpusPinning:
             }
         )
         profile = first_chunk_profile(table, table="records", engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())
         records = resolve_pinned_code_set_records(plan, reg, graph, table="records")
@@ -641,7 +646,7 @@ class TestCorpusPinning:
         }
         cfg = _validated_dump(cfg)
         profile = profile_source(cfg, seed=_SEED)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())
         records_a = resolve_pinned_code_set_records(plan, reg, graph, table="a")

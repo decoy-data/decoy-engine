@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import run_config_only_checks
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan
 from tests.unit._dps_helpers import empty_profile
 
@@ -41,7 +42,11 @@ def _cfg(expr: str, a: dict[str, Any] | None = None, refs: list[str] | None = No
 
 def _compile(config: dict) -> Any:
     return compile_plan(
-        config, empty_profile(), decoy_engine_version="test", instance_default_locale=None
+        config,
+        empty_profile(),
+        decoy_engine_version="test",
+        instance_default_locale=None,
+        sources=NO_SOURCES,
     )
 
 

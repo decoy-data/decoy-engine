@@ -20,6 +20,7 @@ import pyarrow.compute as pc
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _column_access
 from decoy_engine.execution._column_access import (
     SIBLING_REFERENCE_KEYS,
@@ -338,7 +339,9 @@ def _compile(columns: list[dict[str, Any]], data: dict[str, pa.Array]) -> Any:
         "tables": [{"name": "t", "columns": columns}],
     }
     profile = first_chunk_profile(pa.table(data), table="t", engine_version=_VERSION)
-    return compile_plan(config, profile, decoy_engine_version=_VERSION, no_profile=True)
+    return compile_plan(
+        config, profile, decoy_engine_version=_VERSION, no_profile=True, sources=NO_SOURCES
+    )
 
 
 def _run_adapter(columns: list[dict[str, Any]], data: dict[str, pa.Array]) -> pa.Table:
@@ -354,7 +357,9 @@ def _run_adapter(columns: list[dict[str, Any]], data: dict[str, pa.Array]) -> pa
         "tables": [{"name": "t", "columns": columns}],
     }
     profile = first_chunk_profile(table, table="t", engine_version=_VERSION)
-    plan = compile_plan(config, profile, decoy_engine_version=_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     result = PandasExecutionAdapter().run(
         plan,
         {"t": table},

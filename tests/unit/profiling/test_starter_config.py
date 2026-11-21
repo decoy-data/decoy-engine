@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from decoy_engine import reasons, write_fixed_width
 from decoy_engine.config import PipelineConfig, PipelineConfigError, parse_pipeline_config
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.plan.checks import REQUIREMENTS_BY_STRATEGY, check_required_strategy_settings
 from decoy_engine.profile import profile_source
@@ -48,7 +49,7 @@ LAYOUT = {
 def _compile(config: dict[str, Any]) -> Any:
     dumped = PipelineConfig.model_validate(config).model_dump()
     profile = profile_source(dumped, seed=1)
-    return compile_plan(dumped, profile, decoy_engine_version="test")
+    return compile_plan(dumped, profile, decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def _write_sources(root: Path) -> dict[str, dict[str, Any]]:
@@ -524,7 +525,9 @@ def test_namespace_is_set_exactly_when_the_registry_requires_it(
     suggestion = ColumnSuggestion("t", "c", strategy, **extra)
     entry = _entry(suggestion)
     try:
-        check_required_strategy_settings({"tables": [{"name": "t", "columns": [entry]}]})
+        check_required_strategy_settings(
+            {"tables": [{"name": "t", "columns": [entry]}]}, sources=NO_SOURCES
+        )
     except PlanCompileError:
         required = True
     else:
@@ -532,7 +535,8 @@ def test_namespace_is_set_exactly_when_the_registry_requires_it(
     assert _needs_namespace(suggestion) is required
     if required:
         check_required_strategy_settings(
-            {"tables": [{"name": "t", "columns": [{**entry, "namespace": "c"}]}]}
+            {"tables": [{"name": "t", "columns": [{**entry, "namespace": "c"}]}]},
+            sources=NO_SOURCES,
         )
 
 

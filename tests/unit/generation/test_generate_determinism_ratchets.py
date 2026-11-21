@@ -75,6 +75,7 @@ _CHILD_SCRIPT = """
 import json, sys, hashlib
 from datetime import datetime, timezone
 from decoy_engine.config._pipeline import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import Profile
@@ -87,7 +88,7 @@ profile = Profile(
     profiled_at=datetime.now(timezone.utc),
     decoy_engine_version="test",
 )
-plan = compile_plan(cfg, profile, decoy_engine_version="test")
+plan = compile_plan(cfg, profile, decoy_engine_version="test", sources=NO_SOURCES)
 tables = generate_tables(plan)
 h = hashlib.sha256()
 for name in sorted(tables):

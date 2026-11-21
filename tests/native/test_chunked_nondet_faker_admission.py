@@ -18,6 +18,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked import (
     _conditional_admission_failures,
     check_chunked_compatibility,
@@ -110,7 +111,9 @@ def _first_chunk() -> pa.Table:
 
 def _compiled(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     profile = first_chunk_profile(_first_chunk(), table=TABLE, engine_version=ENGINE_VERSION)
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     seeds = dict(next(ts for (n, ts) in plan.seed_envelope.per_table if n == TABLE).per_column)
     return profile, seeds
 

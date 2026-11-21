@@ -24,6 +24,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import ExecutionError, ExecutionResult, PandasExecutionAdapter
 from decoy_engine.generation.composite import load_locality_table
 from decoy_engine.plan import compile_plan
@@ -70,7 +71,7 @@ def _sources(frames: dict[str, pd.DataFrame]) -> dict[str, pa.Table]:
 def _run(
     profile: Profile, config: dict[str, Any], frames: dict[str, pd.DataFrame]
 ) -> ExecutionResult:
-    plan = compile_plan(config, profile, decoy_engine_version=_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=_VERSION, sources=NO_SOURCES)
     ns_registry: NamespaceRegistry = build_namespace_registry(config, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

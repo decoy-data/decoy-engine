@@ -6,6 +6,7 @@ from datetime import datetime
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.profile import (
     ColumnProfile,
@@ -74,7 +75,7 @@ class TestNamespaceAmbiguity:
             },
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "namespace_ambiguity"
         assert "customer_id" in exc.value.message
 
@@ -103,7 +104,7 @@ class TestNamespaceAmbiguity:
         # spec §Tests "namespace_missing first clause", the code is now
         # namespace_missing.
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "namespace_missing"
         assert "namespace" in exc.value.message.lower()
 
@@ -128,7 +129,7 @@ class TestNamespaceAmbiguity:
             "namespaces": {"email_ns": {"declared_by": ["customers.email"]}},
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
-        compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
 
 
 class TestUnknownProvider:
@@ -149,7 +150,7 @@ class TestUnknownProvider:
             ],
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "unknown_provider"
         assert "completely_fake_provider" in exc.value.message
 
@@ -170,7 +171,7 @@ class TestUnknownProvider:
             ],
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
-        compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
 
 
 class TestFkPlanOrdering:
@@ -179,7 +180,9 @@ class TestFkPlanOrdering:
             "global_settings": {"seed": 1},
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
-        plan = compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         parent_pos = next(i for i, o in enumerate(plan.ordering) if o.table == "customers")
         child_pos = next(
             i
@@ -244,7 +247,7 @@ class TestFkPlanOrdering:
             ],
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(config, profile, decoy_engine_version="0.1.0")
+            compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "fk_cycle"
 
 
@@ -271,7 +274,7 @@ class TestBasicUniquenessPreFlight:
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "pool_capacity_pre_flight_unique"
 
     def test_accepts_pool_unique_with_sufficient_capacity(self, simple_profile: Profile) -> None:
@@ -294,7 +297,7 @@ class TestBasicUniquenessPreFlight:
             ],
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
-        compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
 
     def test_rejects_pool_unique_insufficient_capacity_provider_config_location(
         self, simple_profile: Profile
@@ -323,7 +326,7 @@ class TestBasicUniquenessPreFlight:
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "pool_capacity_pre_flight_unique"
 
     def test_accepts_pool_unique_sufficient_capacity_provider_config_location(
@@ -348,7 +351,7 @@ class TestBasicUniquenessPreFlight:
             ],
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
-        compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
 
     def test_no_pool_size_hint_passes(self, simple_profile: Profile) -> None:
         # When no pool_size is declared, the check passes silently (runtime catches).
@@ -370,7 +373,9 @@ class TestBasicUniquenessPreFlight:
             ],
             "relationships": SIMPLE_PROFILE_RELATIONSHIPS_BLOCK,
         }
-        plan = compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         # "Passes silently" means no deferred-capacity warning either, not
         # just no raise: the 10_000 default pool covers 10 rows, so nothing
         # is deferred to runtime. (This config's declared backend_type also
@@ -389,6 +394,7 @@ class TestCompositeColumnsLengthMatch:
             },
             composite_profile,
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
 
     def test_rejects_mismatched_composite_via_planner(self) -> None:

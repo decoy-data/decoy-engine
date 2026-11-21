@@ -14,6 +14,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import classify_table_kinds
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import ConfigError
 from decoy_engine.execution import _guards, run_pipeline
 from decoy_engine.plan import compile_plan
@@ -83,7 +84,9 @@ def test_loader_table_without_source_entry_is_refused_before_any_read() -> None:
 def test_dropped_declared_table_is_refused_after_the_plan() -> None:
     cfg = _config(names=("a", "b"))
     profile = profile_source(_config(names=("a",)), seed=1, supplied_sources={"a": _table()})
-    plan = compile_plan(_config(names=("a",)), profile, decoy_engine_version="0.1.0")
+    plan = compile_plan(
+        _config(names=("a",)), profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+    )
     with pytest.raises(ConfigError) as caught:
         _guards.refuse_dropped_declared_tables(classify_table_kinds(cfg), plan, {"a", "b"})
     record = reason_from_exception(caught.value)

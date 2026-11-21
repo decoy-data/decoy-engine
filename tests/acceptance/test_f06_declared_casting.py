@@ -14,6 +14,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from tests.acceptance._f06_support import (
     INT64,
     ISO_DATE,
@@ -741,10 +742,15 @@ def test_b6_output_failure_counts_as_output_quarantine(tmp_path: Path) -> None:
 # -- B7 legacy compatibility ------------------------------------------------------------------
 
 
-def test_b7_plan_version_is_4_and_v2_plans_still_load() -> None:
+def test_b7_plan_version_is_5_and_v2_plans_need_recompile() -> None:
     from decoy_engine.plan._compile import PLAN_VERSION
+    from decoy_engine.plan._errors import PlanCompileError
+    from decoy_engine.plan._serialize import plan_from_yaml
 
-    assert PLAN_VERSION == 4
+    assert PLAN_VERSION == 5
+    with pytest.raises(PlanCompileError) as refused:
+        plan_from_yaml("plan_version: 2\n")
+    assert refused.value.code == "plan_recompile_required"
 
 
 def test_b7_legacy_run_outputs_are_unchanged(tmp_path: Path) -> None:
@@ -771,9 +777,11 @@ def test_b7_legacy_plan_yaml_differs_only_by_the_documented_version_line(tmp_pat
             source_path=src,
         )
     )
-    plan = compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES
+    )
     text = plan_to_yaml(plan)
-    assert "plan_version: 4" in text
+    assert "plan_version: 5" in text
     assert "declared_casting" not in text  # an empty payload is omitted
 
 
@@ -785,8 +793,8 @@ def test_b7_f06_plan_round_trips_and_is_deterministic(tmp_path: Path) -> None:
     src = write_csv(tmp_path / "s.csv", ["id", "start"], [["1", "2026-02-01"]])
     cfg = validate(_people(tmp_path, "null"))
     profile = profile_source(cfg, seed=7)
-    a = compile_plan(cfg, profile, decoy_engine_version="t")
-    b = compile_plan(copy.deepcopy(cfg), profile, decoy_engine_version="t")
+    a = compile_plan(cfg, profile, decoy_engine_version="t", sources=NO_SOURCES)
+    b = compile_plan(copy.deepcopy(cfg), profile, decoy_engine_version="t", sources=NO_SOURCES)
     assert plan_to_yaml(a) == plan_to_yaml(b)
     again = plan_from_yaml(plan_to_yaml(a))
     assert again.declared_casting == a.declared_casting and a.declared_casting
@@ -800,7 +808,9 @@ def test_b7_unknown_format_in_a_serialized_plan_never_executes(tmp_path: Path) -
     from decoy_engine.profile._source import profile_source
 
     cfg = validate(_people(tmp_path, "null"))
-    text = plan_to_yaml(compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t"))
+    text = plan_to_yaml(
+        compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES)
+    )
     tampered = text.replace("date/iso8601/v1", "date/iso8601/v9", 1)
     with pytest.raises(Exception) as exc:
         plan_from_yaml(tampered)
@@ -808,6 +818,15 @@ def test_b7_unknown_format_in_a_serialized_plan_never_executes(tmp_path: Path) -
 
 
 _B7_DUMP_SHA256_WITH_HAS_HEADER = "5e4147baae457372e80f819346b646eb6f02c9f79fb53e5b8bfc2845e24ce905"
+
+# The fixture predates `ColumnProfile.shape`. Its profile hash moves once because `shape` is hashed
+# (COLUMN-SHAPE E1a); the config hash and every other line of the plan are unchanged.
+_BASELINE_PROFILE_HASH = (
+    "profile_hash: 1e5b08f74f7870e689271fb8ba9a3e2143cba8cc088ff2968c884eaedcad4220"
+)
+_SHAPED_PROFILE_HASH = (
+    "profile_hash: 0237ffceec65800308ae069d4dd042dc50c572788e0a4118ee85195eba3c0e85"
+)
 
 
 def test_b7_legacy_config_and_plan_match_the_baseline_fixture(tmp_path: Path) -> None:
@@ -853,9 +872,12 @@ def test_b7_legacy_config_and_plan_match_the_baseline_fixture(tmp_path: Path) ->
     run_cfg = json.loads(dump)
     run_cfg["sources"]["p"]["path"] = str(tmp_path / "p.csv")
     plan = compile_plan(
-        run_cfg, profile_source(run_cfg, seed=7), decoy_engine_version="legacy-fixture"
+        run_cfg,
+        profile_source(run_cfg, seed=7),
+        decoy_engine_version="legacy-fixture",
+        sources=NO_SOURCES,
     )
     assert plan.pipeline_config_hash == fixture["pipeline_config_hash"]
     assert plan_to_yaml(plan) == fixture["plan_yaml_at_baseline"].replace(
-        "plan_version: 2", "plan_version: 4", 1
-    )
+        "plan_version: 2", "plan_version: 5", 1
+    ).replace(_BASELINE_PROFILE_HASH, _SHAPED_PROFILE_HASH, 1)

@@ -15,14 +15,19 @@ from types import MappingProxyType
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
 
 __all__ = [
     "REQUIREMENTS_BY_STRATEGY",
+    "SHAPE_REQUIREMENTS_BY_STRATEGY",
+    "ShapeRequirement",
     "StrategyRequirement",
     "lookup_path",
     "requirement_applies",
     "requirement_missing",
     "requirements_for",
+    "shape_declaration_needed",
+    "shape_requirement_for",
 ]
 
 
@@ -57,17 +62,19 @@ def _namespace(strategy: str, what: str | None = None, **when: Any) -> StrategyR
 
 _PROVIDER = ("provider_config",)
 
+_DATE_SHIFT_FORMAT = StrategyRequirement(
+    (*_PROVIDER, "date_format"),
+    reasons.plan.DATE_SHIFT_REQUIRES_DATE_FORMAT,
+    "date_shift needs provider_config.date_format, the strftime format of its dates.",
+)
+
 REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = MappingProxyType(
     {
         "hash": (_namespace("hash"),),
         "fpe": (_namespace("fpe"),),
         "date_shift": (
             _namespace("date_shift"),
-            StrategyRequirement(
-                (*_PROVIDER, "date_format"),
-                reasons.plan.DATE_SHIFT_REQUIRES_DATE_FORMAT,
-                "date_shift needs provider_config.date_format, the strftime format of its dates.",
-            ),
+            _DATE_SHIFT_FORMAT,
         ),
         "bucket_perturb": (_namespace("bucket_perturb"),),
         "categorical": (_namespace("categorical"),),
@@ -95,6 +102,52 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
         ),
     }
 )
+
+
+@dataclass(frozen=True)
+class ShapeRequirement:
+    """A setting a strategy needs for the column shapes in ``needs_declaration``.
+
+    ``requirement`` is the setting itself, the same descriptor ``REQUIREMENTS_BY_STRATEGY`` holds,
+    so its code, path and message live in one place. A column whose resolved shape is not in
+    ``needs_declaration`` runs without the setting. ``declared_counts`` says that a top-level F06
+    date declaration also satisfies it.
+    """
+
+    family: str
+    requirement: StrategyRequirement
+    needs_declaration: frozenset[ColumnShape]
+    declared_counts: bool = False
+
+
+# Today's rule: ``date_shift`` needs its format on every shape.
+SHAPE_REQUIREMENTS_BY_STRATEGY: Mapping[str, ShapeRequirement] = MappingProxyType(
+    {
+        "date_shift": ShapeRequirement(
+            "date", _DATE_SHIFT_FORMAT, frozenset(ColumnShape), declared_counts=True
+        ),
+    }
+)
+
+
+def shape_requirement_for(strategy: str, req: StrategyRequirement) -> ShapeRequirement | None:
+    """The shape rule that governs ``req`` for ``strategy``, or None when ``req`` is not shape-bound."""
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy)
+    return shaped if shaped is not None and shaped.requirement is req else None
+
+
+def shape_declaration_needed(
+    shaped: ShapeRequirement, shape: ColumnShape, *, config_only: bool
+) -> bool:
+    """Whether a column of ``shape`` must carry the setting.
+
+    A config-only pass cannot see typed sources, so an ``unknown`` column is refused only when
+    every shape it could turn out to be needs the setting. Compile has the schema, so there an
+    ``unknown`` column is refused like text.
+    """
+    if config_only and shape is ColumnShape.UNKNOWN:
+        return all(s in shaped.needs_declaration for s in ColumnShape if s is not shape)
+    return shape in shaped.needs_declaration
 
 
 def requirements_for(strategy: str) -> tuple[StrategyRequirement, ...]:

@@ -21,6 +21,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
+
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "gen_cli"
 
 
@@ -100,7 +102,9 @@ def capture() -> dict[str, Any]:
         os.chdir(tmp)
         try:
             for label, config in (("statistical", stat_config()), ("graph", graph_config())):
-                plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+                plan = compile_plan(
+                    config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES
+                )
                 result[label] = {
                     "config": config,
                     "config_hash": _hash_config(config),

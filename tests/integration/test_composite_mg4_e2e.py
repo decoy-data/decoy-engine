@@ -18,6 +18,7 @@ from typing import Any
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection.detectors import _npi_valid
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.generation.composite import load_locality_table
@@ -84,7 +85,7 @@ def _composite_col(
 
 
 def _run(profile: Profile, config: dict[str, Any], df: pd.DataFrame, table_name: str):
-    plan = compile_plan(config, profile, decoy_engine_version=_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=_VERSION, sources=NO_SOURCES)
     ns_registry = build_namespace_registry(config, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

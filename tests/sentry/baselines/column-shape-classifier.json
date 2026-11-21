@@ -1,0 +1,21 @@
+{
+ "sentry_id": "column-shape-classifier",
+ "created_in": "COLUMN-SHAPE-E1a",
+ "entries": {
+  "classify_column::profile/_walk.py": {
+   "reason": "records the observed shape of each profiled column"
+  },
+  "classify_column::plan/checks/_column_shapes.py": {
+   "reason": "classifies a source schema the profile has no entry for"
+  },
+  "declared_shape::plan/checks/_column_shapes.py": {
+   "reason": "maps an F06 declaration to its shape"
+  },
+  "observed_shape::profile/_walk.py": {
+   "reason": "the walk records each column's shape"
+  },
+  "observed_shape::execution/_chunked_profile.py": {
+   "reason": "the Arrow twin of the walk records the same shape"
+  }
+ }
+}

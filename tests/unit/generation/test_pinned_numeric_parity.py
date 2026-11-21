@@ -15,6 +15,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation._admission import classify_plan
 from decoy_engine.generation._plan_entry import generate_tables
 from decoy_engine.generation.pinned import (
@@ -53,7 +54,9 @@ def _cfg(child_col: dict[str, Any]) -> dict[str, Any]:
 
 
 def _routes(cfg: dict[str, Any]) -> dict[str, pa.Table]:
-    plan = compile_plan(copy.deepcopy(cfg), empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(
+        copy.deepcopy(cfg), empty_profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )
     return {
         "whole": generate_tables(plan)["people"],
         "window": generate_rows(plan, table="people", offset=0, count=3, seed=SEED).table,

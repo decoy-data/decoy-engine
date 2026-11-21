@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
+
 ROOT = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
 FK = "_fk_keys.py"
 
@@ -249,7 +251,9 @@ def test_the_unified_config_set_equals_the_plan_set(
     cfg, tables = build_case(cls, tmp_path, expression)
     source = tables["t"]
     profile = first_chunk_profile(source, table="t", engine_version="o1")
-    plan = compile_plan(cfg, profile, decoy_engine_version="o1", no_profile=True)
+    plan = compile_plan(
+        cfg, profile, decoy_engine_version="o1", no_profile=True, sources=NO_SOURCES
+    )
     graph = RelationshipGraph(edges=(), ordering=())
     want = lossless_int_columns(plan, get_default_registry(), graph).for_table("t", source)
     assert lossless_int_columns_from_config(cfg, "t", source) == want, (cls, expression)

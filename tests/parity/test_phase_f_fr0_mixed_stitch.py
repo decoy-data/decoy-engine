@@ -27,6 +27,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import ParquetTransactionalSink
 from decoy_engine.generation import synthesize
 from tests.parity._f2_mixed_support import (
@@ -171,7 +172,7 @@ def generate_tables_via_plan_for(config: dict[str, Any]) -> dict[str, pa.Table]:
     from decoy_engine.plan import compile_plan
     from tests.parity import _f0_fixtures as fx
 
-    plan = compile_plan(config, fx._profile(), decoy_engine_version="fr0")
+    plan = compile_plan(config, fx._profile(), decoy_engine_version="fr0", sources=NO_SOURCES)
     return synthesize.generate_tables(plan)
 
 

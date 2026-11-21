@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan._checks_freetext_advisory import check_freetext_advisory
 from decoy_engine.plan._compile import compile_plan
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
@@ -222,7 +223,7 @@ class TestCompileIntegration:
         )
         config = copy.deepcopy(simple_config)
         config["tables"][0]["columns"].append({"name": "clinical_notes", "strategy": "passthrough"})
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert "freetext_advisory" in plan.plan_compile.checks_passed
         assert any(
             "freetext_advisory" in w and "clinical_notes" in w for w in plan.plan_compile.warnings
@@ -231,11 +232,15 @@ class TestCompileIntegration:
     def test_default_knob_does_not_perturb_pipeline_config_hash(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        p1 = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
 
         with_knob = copy.deepcopy(simple_config)
         with_knob["global_settings"]["freetext_advisory_min_avg_length"] = 999.0
         with_knob["global_settings"]["freetext_advisory_min_distinctness"] = 0.99
-        p2 = compile_plan(with_knob, simple_profile, decoy_engine_version="0.1.0")
+        p2 = compile_plan(
+            with_knob, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
 
         assert p1.pipeline_config_hash == p2.pipeline_config_hash

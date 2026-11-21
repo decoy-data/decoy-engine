@@ -81,7 +81,13 @@ def test_first_chunk_profile_claims_no_key(prefix: int, carried: frozenset[str])
 
 # AT-15: a source read to its end hashes as it did before the `n + 1` read. The value
 # was captured on the pre-change base (origin/main cc0149152).
-_WHOLE_READ_HASH = "58fd3b5435491ac108d987426c64dd2613d3aea44d1670b37f7c292f145084bd"
+# One digest per source format. COLUMN-SHAPE E1a moved them: each hashed column now carries its
+# `shape`, which is `text` for csv and `integer` for these parquet columns. The sample limit
+# still does not move either digest, which is what this test pins.
+_WHOLE_READ_HASH = {
+    "csv": "01f0580a0d67b06d105edbd814b31ff1f0b25022b150c4b17e29e1d0452eb98b",
+    "parquet": "ecf5675343a95c48b9dda7623d7ba611bf273484b92d1f09b94947176eecc84e",
+}
 
 
 @pytest.mark.parametrize("fmt", ["csv", "parquet"])
@@ -109,4 +115,4 @@ def test_fully_read_source_hash_is_unchanged(tmp_path: Path, fmt: str, limit: in
         {"global_settings": {"seed": 0}, "sources": {"t": descriptor}, "relationships": []}
     )
     profile = profile_source(config, sample_rows=limit, seed=0)
-    assert profile_hash(profile) == _WHOLE_READ_HASH
+    assert profile_hash(profile) == _WHOLE_READ_HASH[fmt]

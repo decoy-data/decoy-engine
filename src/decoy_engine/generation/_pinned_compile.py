@@ -27,6 +27,7 @@ from decoy_engine.config import (
     is_per_parent_aggregate,
     is_self_reference,
 )
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileAccess
 from decoy_engine.generation._pinned_plan import (
@@ -333,6 +334,7 @@ def compile_pinned_plan_with_generation(
             _empty_profile(reference),
             decoy_engine_version=str(engine_version),
             base_dir=base_dir,
+            sources=NO_SOURCES,
         )
     finally:
         snapshot_content_guard.reset(reset)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection.detectors import Span
 from decoy_engine.detection.ner import (
     DEFAULT_NER_MODEL,
@@ -406,7 +407,9 @@ class TestTextMaskNerModelVersionStamp:
         profile = first_chunk_profile(
             pa.Table.from_pandas(df, preserve_index=False), table="t", engine_version="x"
         )
-        plan = compile_plan(cfg, profile, decoy_engine_version="x", no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version="x", no_profile=True, sources=NO_SOURCES
+        )
         return dict(plan.seed_envelope.per_table[0][1].per_column)
 
     def test_text_mask_ner_column_carries_stubbed_version(self, monkeypatch) -> None:

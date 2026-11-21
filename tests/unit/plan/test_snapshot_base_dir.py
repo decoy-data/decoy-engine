@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import fileaccess
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline_isolated
 from decoy_engine.execution._pipeline_context import with_quarantine_path
 from decoy_engine.execution.capacity import _resolved_config_copy
@@ -53,7 +54,9 @@ def folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path
 
 
 def _compile(config: dict[str, Any], **kwargs: Any) -> Any:
-    return compile_plan(config, empty_profile(), decoy_engine_version="test", **kwargs)
+    return compile_plan(
+        config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES, **kwargs
+    )
 
 
 def _error(config: dict[str, Any], **kwargs: Any) -> tuple[str, str]:

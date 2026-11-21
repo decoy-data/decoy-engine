@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import compile_plan, declared_columns
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution._output_projection import known_output_columns
 from decoy_engine.fileaccess import ENTRY_POINTS
@@ -518,7 +519,7 @@ def test_declared_columns_agree_with_de03(tmp_path: Path) -> None:
         # The gate would refuse the columns the config leaves out, so profile a copy that
         # lists them and compile the original against that profile.
         profile = profile_source(declare_rest(copy.deepcopy(config)), seed=0)
-        plan = compile_plan(config, profile, decoy_engine_version="0")
+        plan = compile_plan(config, profile, decoy_engine_version="0", sources=NO_SOURCES)
         for name in tables:
             assert set(declared_columns(config, name)) - _drops(config, name) == set(
                 known_output_columns(plan, name)

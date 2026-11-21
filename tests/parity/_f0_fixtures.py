@@ -31,6 +31,7 @@ from typing import Any
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import Profile
@@ -140,7 +141,7 @@ def run_generate_tables(
     derive_key: Callable[[str], bytes] | None = None,
 ) -> dict[str, pa.Table]:
     """The `generate_tables` entry point on a freshly compiled Plan."""
-    plan = compile_plan(cfg, _profile(), decoy_engine_version="f0")
+    plan = compile_plan(cfg, _profile(), decoy_engine_version="f0", sources=NO_SOURCES)
     return generate_tables(
         plan, derive_key=derive_key, instance_default_locale=instance_default_locale
     )

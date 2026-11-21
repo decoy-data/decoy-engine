@@ -23,6 +23,21 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, Union, cast
 
+from decoy_engine.contracts.column_shape import ColumnShape
+
+# F06: bumped 2 -> 3 for the pinned `declared_casting` payload. A version-2 YAML loads with
+# `declared_casting=None` (it never declared any) and runs exactly as before.
+# DPS Scope B (guide 4.7): bumped 1 -> 2 for the pinned `GenerationPlan`
+# payload. A plan_version 1 YAML predates `generation` entirely and
+# deserializes with `generation=None` -- the correct pre-GA hard-delete
+# behavior (`generate_tables` raises the moment it's asked to generate).
+# GEN-TYPES E3: bumped 3 -> 4 for the pinned `generation.lookups` list (omitted when empty, so a
+# plan without lookups differs from its version-3 form only by the version line).
+# COLUMN-SHAPE E1a: bumped 4 -> 5 for `column_shapes` (omitted when empty). A stored older plan
+# has no shapes and is refused at load with a recompile message; a newer one is refused too.
+PLAN_VERSION = 5
+
+
 # Post-S5 R6 reshape (per spec §6 + cross-sprint contracts §2.4 + R6):
 # `deterministic_map` is REMOVED from the cardinality enumeration. The
 # conflated "deterministic-vs-random" semantic moved to a sibling
@@ -316,6 +331,18 @@ class Plan:
     # (table, column). None for a plan with no declared columns, and for any older serialized
     # plan, which then runs as it always did.
     declared_casting: DeclaredCastingPlan | None = None
+    # COLUMN-SHAPE (plan_version 5): the shape of each column under a shape-reading strategy,
+    # sorted by (table, column). Empty for a plan with no such column.
+    column_shapes: tuple[PlanColumnShape, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class PlanColumnShape:
+    """One column's resolved shape, as the compiler saw it."""
+
+    table: str
+    column: str
+    shape: ColumnShape
 
 
 # ---------------------------------------------------------------------

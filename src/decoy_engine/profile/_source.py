@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine._lexeme import profile_descriptors
+from decoy_engine.contracts.column_shape import source_format_for
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._declared_columns import (
     DeclarationRequest,
@@ -178,7 +179,8 @@ def profile_source(
             reader = ParquetFileSource.from_lazy(given)
         else:
             reader = ResidentTableSource(given)
-        tables.append(_profile_one_source(reader, residency=residency, **walk))
+        fmt = source_format_for(sources, table_name, resident=supplied)
+        tables.append(_profile_one_source(reader, residency=residency, source_format=fmt, **walk))
 
     return Profile(
         schema_version=1,
@@ -221,6 +223,7 @@ def _profile_one_source(
     sample_rows: int | None,
     residency: str,
     rng: random.Random,
+    source_format: str | None = None,
 ) -> TableProfile:
     """Profile one source into a TableProfile via its `ProfileSource` reader.
 
@@ -243,6 +246,7 @@ def _profile_one_source(
             sample_rows=sample_rows,
             rng=rng,
             arrow_schema=_nested_capable_schema(reader),
+            source_format=source_format,
         )
 
     if sample_rows is None:
@@ -289,6 +293,7 @@ def _profile_one_source(
         rng=rng,
         total_row_count=effective_total,
         arrow_schema=_nested_capable_schema(reader),
+        source_format=source_format,
     )
     return replace(table, row_count_exact=row_count.exact)
 

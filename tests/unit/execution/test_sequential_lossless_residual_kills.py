@@ -42,6 +42,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import PandasExecutionAdapter
 
 # 2**53 is the last integer every larger neighbour can no longer be represented
@@ -69,7 +70,7 @@ def _compile_job(config: dict[str, Any]):
 
     job_seed = _normalize_job_seed_int(config)
     profile = profile_source(config, seed=job_seed)
-    plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+    plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     ns = build_namespace_registry(config, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

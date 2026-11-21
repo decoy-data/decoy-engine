@@ -14,6 +14,7 @@ from pydantic import ValidationError
 import decoy_engine.config as config_pkg
 from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig, pre_scan_requested
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan._compile import compile_plan
 from decoy_engine.profile._source import profile_source
 
@@ -35,7 +36,9 @@ def _raw(tmp_path: Path, **extra: Any) -> dict[str, Any]:
 
 def _hash(tmp_path: Path, **extra: Any) -> str:
     cfg = PipelineConfig.model_validate(_raw(tmp_path, **extra)).model_dump()
-    plan = compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="legacy-fixture")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=7), decoy_engine_version="legacy-fixture", sources=NO_SOURCES
+    )
     return str(plan.pipeline_config_hash)
 
 

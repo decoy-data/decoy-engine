@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from decoy_engine.config import (
     pre_scan_hash_input,
@@ -51,6 +51,7 @@ from decoy_engine.config import (
 # deterministic_hash to keyed HMAC-SHA256 via _formula_hash_keyed. Bumping
 # requires a release-notes line per done-definition.md.
 from decoy_engine.config._subset_run import refuse_unapplied_subset
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import SEED_PROTOCOL_VERSION
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._checks import (
@@ -96,8 +97,10 @@ from decoy_engine.plan._graph import _build_namespaces, _build_relationships
 # Seed normalization lives in `plan/_seed.py` (single shared validator, F5).
 from decoy_engine.plan._seed_envelope import _build_seed_envelope
 from decoy_engine.plan._types import (
+    PLAN_VERSION,
     OrderingNode,
     Plan,
+    PlanColumnShape,
     PlanCompileResult,
 )
 from decoy_engine.plan.checks import (
@@ -105,20 +108,14 @@ from decoy_engine.plan.checks import (
     check_generate_columns,
     check_required_strategy_settings,
 )
+from decoy_engine.plan.checks._column_shapes import build_column_shapes
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
 from decoy_engine.plan.checks._text_mask_strategy import check_text_mask_strategies
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
-# F06: bumped 2 -> 3 for the pinned `declared_casting` payload. A version-2 YAML loads with
-# `declared_casting=None` (it never declared any) and runs exactly as before.
-# DPS Scope B (guide 4.7): bumped 1 -> 2 for the pinned `GenerationPlan`
-# payload. A plan_version 1 YAML predates `generation` entirely and
-# deserializes with `generation=None` -- the correct pre-GA hard-delete
-# behavior (`generate_tables` raises the moment it's asked to generate).
-# GEN-TYPES E3: bumped 3 -> 4 for the pinned `generation.lookups` list (omitted when empty, so a
-# plan without lookups differs from its version-3 form only by the version line).
-PLAN_VERSION = 4
+if TYPE_CHECKING:
+    from decoy_engine.contracts.column_shape import SourceFacts
 
 
 @entry_point
@@ -131,10 +128,12 @@ def compile_plan(
     file_access: FileAccess | None = None,
     base_dir: str | Path | None = None,
     instance_default_locale: Any = DEFERRED,
+    sources: SourceFacts,
 ) -> Plan:
     """Compile (config, profile, engine_version) into a frozen Plan.
 
     Args:
+        sources: the tables the caller supplied (schema, resident); required, `NO_SOURCES` if none.
         instance_default_locale: the locale a faker column without `locale` will generate in,
             when the caller knows it (`None` is Faker's en_US). The default leaves those
             columns to the check `run_generation` repeats with the real locale.
@@ -212,30 +211,26 @@ def compile_plan(
     # namespace and a one-way strategy. Config-only; both branches +
     # run_config_only_checks.
     check_vault_columns(config)
-    # Row 15 (SP-04 / P5.INFRA.1, 2026-06-27): reject unknown or structurally
-    # unsupported FPE checksum schemes at compile time. Config-only; both branches +
-    # run_config_only_checks.
+    # Row 15 (SP-04 / P5.INFRA.1, 2026-06-27): reject unknown or unsupported FPE checksum
+    # schemes at compile time. Config-only; both branches + run_config_only_checks.
     check_fpe_checksum_scheme(config)
     # Rows 16-20 (derived, derived_aggregate, grouped_series, windowed_date and group_key column
     # refs) and GEN-STRICT E2 (per-type generate column checks), through one wrapper. Config-only;
     # both branches + run_config_only_checks.
     check_generate_columns(config, default_locale=instance_default_locale)
-    # Row 27 (HC-3a, 2026-07-17): reject date_shift columns whose group_by
-    # (entity-anchor) column is missing. Config-only; both branches +
-    # run_config_only_checks.
+    # Row 27 (HC-3a, 2026-07-17): reject date_shift columns whose group_by (entity-anchor)
+    # column is missing. Config-only; both branches + run_config_only_checks.
     check_date_shift_group_by_refs(config)
     # D1c: preserve_values on date_shift / bucket_perturb (literals, format, group_by, FK
     # shape). Config-only; runs inside the date_shift_group_by_refs slot.
     check_date_preserve_values(config)
     check_date_shift_window(config)
-    # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit
-    # compile-time manifest warnings for every active group. Config-only; runs
-    # in both branches and in run_config_only_checks.
+    # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit compile-time
+    # manifest warnings for every active group. Config-only; both branches + run_config_only_checks.
     fpe_join_warnings = check_fpe_join_groups(config)
-    # Row 22 (Sprint 13 / coercion-13 S3, 2026-07-03): reject truncate columns
-    # whose length/keep/mask_char cannot mask the column (the primary silent-
-    # passthrough leak, finding 0.4). Config-only; both branches +
-    # run_config_only_checks.
+    # Row 22 (Sprint 13 / coercion-13 S3, 2026-07-03): reject truncate columns whose
+    # length/keep/mask_char cannot mask the column (the primary silent-passthrough leak,
+    # finding 0.4). Config-only; both branches + run_config_only_checks.
     check_truncate_config(config)
     # Row 23 (Sprint 13 / coercion-13 S3, GATE-1 Q4, 2026-07-03): reject
     # bucketize columns whose width cannot be resolved (sibling silent-
@@ -252,7 +247,8 @@ def compile_plan(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    check_required_strategy_settings(config)
+    column_shapes = build_column_shapes(config, profile=profile, sources=sources)
+    check_required_strategy_settings(config, sources=sources, shapes=column_shapes)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # Row 29 (HC-7, 2026-07-17): clinical free-text advisory. WARN-ONLY --
@@ -474,6 +470,10 @@ def compile_plan(
         ),
         generation=generation_plan,
         declared_casting=compile_declared_casting_contract(config),
+        column_shapes=tuple(
+            PlanColumnShape(table, column, shape)
+            for (table, column), shape in column_shapes.items()
+        ),
     )
 
 
@@ -563,7 +563,7 @@ def run_config_only_checks(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    check_required_strategy_settings(config)
+    check_required_strategy_settings(config, sources=NO_SOURCES)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # F06: declared parsing/casting contracts. Reported only when a config declares any, so a

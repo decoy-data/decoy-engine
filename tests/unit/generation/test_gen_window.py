@@ -10,6 +10,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation._plan_entry import generate_tables
 from decoy_engine.generation._window_admission import (
     GenerationAdmissionError,
@@ -81,7 +82,7 @@ def _class_a_plan(tmp_path: Any) -> Any:
         "global_settings": {"seed": SEED},
         "tables": [{"name": "t", "row_count": ROWS, "generate_columns": cols}],
     }
-    return compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    return compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def _full(plan: Any) -> pa.Table:
@@ -140,7 +141,7 @@ def test_parity_on_the_streamed_core_route() -> None:
         "global_settings": {"seed": 9},
         "tables": [{"name": "t", "row_count": 200, "generate_columns": cols}],
     }
-    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     full = generate_tables(plan)["t"]
     win = generate_rows(plan, table="t", offset=30, count=100, seed=9)
     assert win.table.to_pylist() == full.slice(30, 100).to_pylist()
@@ -521,7 +522,7 @@ def test_generate_rows_refuses_class_b_table() -> None:
         "global_settings": {"seed": 1},
         "tables": [{"name": "t", "row_count": 10, "generate_columns": cols}],
     }
-    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     assert classify_window(plan, "t").klass == "B"
     with pytest.raises(GenerationAdmissionError) as exc:
         generate_rows(plan, table="t", offset=0, count=5, seed=1)
