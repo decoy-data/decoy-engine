@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -21,6 +22,7 @@ from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._gated_string_guard import require_same_rows
+from decoy_engine.execution._when_gate import run_with_when_gate
 from decoy_engine.relationships._namespace import NamespaceRegistry
 from tests._declared_schema import declared_schema
 from tests.unit.execution import _c8_iii_c_support as sup
@@ -149,6 +151,102 @@ class TestCorrectHandlerUnchanged:
     def test_chunked_passes(self, tmp_path: Path) -> None:
         out = _run_chunked(tmp_path, lambda df: df)
         assert sum(t.num_rows for t in out) == 6
+
+
+class _CompositeStub:
+    """Wraps the real composite handler and applies `mutate` to its output frame."""
+
+    def __init__(self, inner: Any, mutate: _Mutate) -> None:
+        self._inner = inner
+        self._mutate = mutate
+
+    def run(self, df: pd.DataFrame, node: Any, ctx: Any) -> Any:
+        out, warns = self._inner.run(df, node, ctx)
+        return self._mutate(out), warns
+
+
+def _composite_run(tmp_path: Path, mutate: _Mutate | None) -> pa.Table:
+    def col(name: str, others: list[str]) -> dict[str, Any]:
+        return {
+            "name": name,
+            "strategy": "faker",
+            "provider": "composite_name_email",
+            "deterministic": True,
+            "namespace": "ne",
+            "coherent_with": others,
+            "cardinality_mode": "reuse",
+            "provider_config": {"pool_size": 20},
+        }
+
+    names = ("first_name", "last_name", "email")
+    cols = [col(n, [o for o in names if o != n]) for n in names]
+    table = pa.table(
+        {
+            "first_name": pa.array([f"F{i}" for i in range(6)]),
+            "last_name": pa.array([f"L{i}" for i in range(6)]),
+            "email": pa.array([f"e{i}@x.com" for i in range(6)]),
+        }
+    )
+    cfg, sources = mt.build_job(tmp_path, {"t": (cols, table)})
+    plan, graph, ns, registry = sup.compile_job(cfg)
+    adapter = PandasExecutionAdapter()
+    if mutate is not None:
+        adapter._composite_handler = _CompositeStub(adapter._composite_handler, mutate)  # type: ignore[assignment]
+    out = adapter.run(
+        plan,
+        sources,
+        registry=registry,
+        relationship_graph=graph,
+        namespace_registry=ns,
+    )
+    return out.outputs["t"]
+
+
+class TestCompositeRoute:
+    def test_correct_composite_passes(self, tmp_path: Path) -> None:
+        assert _composite_run(tmp_path, None).num_rows == 6
+        (tmp_path / "w").mkdir()
+        assert _composite_run(tmp_path / "w", lambda df: df).num_rows == 6
+
+    @pytest.mark.parametrize("kind", ["drop", "reorder"])
+    def test_changed_rows_refused(self, tmp_path: Path, kind: str) -> None:
+        with pytest.raises(ExecutionError) as exc:
+            _composite_run(tmp_path, _BAD[kind])
+        assert exc.value.code == _CODE
+        assert "table 't'" in str(exc.value)
+
+
+class _EchoHandler:
+    def __init__(self, mutate: _Mutate) -> None:
+        self._mutate = mutate
+
+    def run(self, df: pd.DataFrame, column: str, plan: Any, ctx: Any) -> Any:
+        return self._mutate(df), []
+
+
+class TestNonZeroStartIndex:
+    """A chunk sliced from a larger frame keeps its labels (here 1000..1002)."""
+
+    @staticmethod
+    def _call(mutate: _Mutate) -> pd.DataFrame:
+        df = pd.DataFrame({"c": ["a", "b", "c"]}, index=[1000, 1001, 1002])
+        plan = SimpleNamespace(when=None, strategy="redact")
+        ctx = SimpleNamespace(current_table="t")
+        out, _ = run_with_when_gate(_EchoHandler(mutate), df, "c", plan, ctx)  # type: ignore[arg-type]
+        return out
+
+    def test_correct_handler_passes(self) -> None:
+        assert list(self._call(lambda df: df).index) == [1000, 1001, 1002]
+
+    def test_dropping_handler_refused(self) -> None:
+        with pytest.raises(ExecutionError) as exc:
+            self._call(_drop_row)
+        assert exc.value.code == _CODE
+
+    def test_handler_that_resets_index_refused(self) -> None:
+        with pytest.raises(ExecutionError) as exc:
+            self._call(lambda df: df.reset_index(drop=True))
+        assert exc.value.code == _CODE
 
 
 class TestHelper:
