@@ -29,6 +29,8 @@ from __future__ import annotations
 import random
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.types as pat
 
 from decoy_engine._field_names import repeated_names
 from decoy_engine.internal.pandas_compat import canonical_dtype_label
@@ -46,6 +48,7 @@ def walk_dataframe(
     rng: random.Random,
     run_pii_detection: bool = False,
     total_row_count: int | None = None,
+    arrow_schema: pa.Schema | None = None,
 ) -> TableProfile:
     """Return a TableProfile for the given DataFrame.
 
@@ -78,6 +81,9 @@ def walk_dataframe(
             not the whole column. Default None means `df` IS the whole frame
             (the historical behavior): row_count is `len(df)` and internal
             reservoir sampling applies exactly as before.
+        arrow_schema: the source's Arrow schema, when the caller holds one. A list,
+            struct or map column holds unhashable cells in pandas, so its
+            `distinct_count` is None instead of a `nunique` call that would raise.
 
     Returns:
         TableProfile with one ColumnProfile per DataFrame column.
@@ -124,6 +130,7 @@ def walk_dataframe(
     else:
         sample_df = df
 
+    arrow_types = {f.name: f.type for f in arrow_schema} if arrow_schema is not None else {}
     columns: list[ColumnProfile] = []
     for col_name in df.columns:
         col_name_str = str(col_name)
@@ -136,10 +143,21 @@ def walk_dataframe(
             declared_pk_cols=declared_pk_cols,
             fk_specs=fk_specs,
             pii_class=pii_tags.get(col_name_str),
+            arrow_type=arrow_types.get(col_name_str),
         )
         columns.append(column)
 
     return TableProfile(name=table_name, row_count=row_count, columns=tuple(columns))
+
+
+def _is_nested(arrow_type: pa.DataType) -> bool:
+    return bool(
+        pat.is_list(arrow_type)
+        or pat.is_large_list(arrow_type)
+        or pat.is_fixed_size_list(arrow_type)
+        or pat.is_struct(arrow_type)
+        or pat.is_map(arrow_type)
+    )
 
 
 def _walk_column(
@@ -152,6 +170,7 @@ def _walk_column(
     declared_pk_cols: frozenset[str],
     fk_specs: dict[str, tuple[str, str]],
     pii_class: PIIClass | None,
+    arrow_type: pa.DataType | None = None,
 ) -> ColumnProfile:
     """Build a ColumnProfile for one column.
 
@@ -166,8 +185,10 @@ def _walk_column(
     distinct_count.
     """
     null_count = int(series.isna().sum())
-    distinct_count_raw = sample_series.dropna().nunique()
-    distinct_count = int(distinct_count_raw) if not pd.isna(distinct_count_raw) else None
+    distinct_count: int | None = None
+    if arrow_type is None or not _is_nested(arrow_type):
+        distinct_count_raw = sample_series.dropna().nunique()
+        distinct_count = int(distinct_count_raw) if not pd.isna(distinct_count_raw) else None
 
     # HC-7: string-length stats, from the same sample population as
     # distinct_count above (so avg_length and distinct_count are mutually

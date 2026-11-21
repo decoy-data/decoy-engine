@@ -136,6 +136,7 @@ def layer2_chunk_decision(inputs: PhysicalPlanInputs) -> tuple[ExecutionPlan | N
         substrate=inputs.resolved_substrate,
         source_tables=inputs.caller_sources,
         auto_chunk_threshold_rows=inputs.auto_chunk_threshold_rows,
+        dispatcher_lane=inputs.chunked_dispatcher_enabled,
     )
     route_chunked = inputs.auto_chunk and decision.mode == "chunked"
     return decision, route_chunked
