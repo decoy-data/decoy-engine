@@ -509,7 +509,6 @@ def _timestamps() -> pa.Table:
 
 _DECLINES: dict[str, tuple[pa.Table, list[dict[str, Any]], Callable[..., None] | None]] = {
     "faker_provider_outside_allowlist": (str_source(30), [nd_faker(provider="person_email")], None),
-    "faker_no_pool_size": (str_source(30), [nd_faker(pool_size=None)], None),
     "faker_unique": (str_source(30), [nd_faker(cardinality_mode="unique")], None),
     # `faker_when` / `cat_when` moved out of the decline set in C8-iii-d-2: a string-reference
     # `when:` now runs natively (see tests/physical/test_c8_iii_d2_unified_positional_when.py).

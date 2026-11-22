@@ -7,3 +7,5 @@ as the full-frame run. Output values do not change. Default `person_first_name` 
 `person_last_name` columns run on the native route, and tables of 100,000 rows or more run chunked
 instead of full frame. `chunked_strategy_conditions_unmet` no longer names `pool_size`. The
 out-of-core pool budget error no longer lists the provider, pool size or byte counts.
+The out-of-core pool budget now counts the measured size of each built pool, not 4,096 bytes per
+value, so a job with many default pools no longer fails for a reservation its pools do not use.

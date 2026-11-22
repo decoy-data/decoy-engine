@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext
+from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext, measured_pool_bytes
 from decoy_engine.generation.pool._builder import PoolBuilder
 from decoy_engine.providers_v2 import get_default_registry
 
@@ -153,8 +153,8 @@ def test_second_context_has_independent_state(registry):
 
 def test_reservation_refused_before_provider_allocation(registry):
     builder = _CountingPoolBuilder(registry)
-    # A 1-byte allowance cannot hold any pool: the reservation must refuse
-    # before the provider is ever allocated.
+    # A 1-byte allowance cannot hold any pool: the lower-bound check must
+    # refuse before the provider is ever allocated.
     ctx = _context(registry, max_pool_bytes=1, builder=builder)
     prepared = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG))
 
@@ -165,23 +165,67 @@ def test_reservation_refused_before_provider_allocation(registry):
     assert ctx.builds == 0
 
 
-def test_pool_bytes_bounded_by_allowance_not_row_count(registry):
-    # Allowance sized for exactly one default-ish pool; a larger second distinct
-    # pool is refused. The bound is the allowance, independent of any batch size.
+def test_w1b_a_huge_pool_size_is_refused_before_any_build(registry):
     builder = _CountingPoolBuilder(registry)
-    reserve_per_value = 4096
+    ctx = _context(registry, builder=builder)
+    prepared = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg={"pool_size": 10**9})
+    with pytest.raises(ExecutionError) as exc:
+        ctx.get_pool(prepared)
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert builder.build_calls == 0
+    assert ctx.pool_count == 0
+    for fragment in (_PROVIDER, str(10**9), str(64 * 1024 * 1024)):
+        assert fragment not in str(exc.value)
+
+
+def test_w1b_the_floor_is_the_real_cpython_str_cost_not_four_bytes(registry):
+    # 500,000 values pass a 4-byte floor (2 MB) in an 8 MiB allowance but cannot fit at the
+    # real floor (about 28 MB), so the refusal must come before any build.
+    builder = _CountingPoolBuilder(registry)
+    ctx = _context(registry, max_pool_bytes=8 * 1024 * 1024, builder=builder)
+    prepared = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg={"pool_size": 500_000})
+    with pytest.raises(ExecutionError) as exc:
+        ctx.get_pool(prepared)
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert builder.build_calls == 0
+
+
+def test_a_pool_that_measures_over_the_allowance_is_dropped_after_the_build(registry):
+    builder = _CountingPoolBuilder(registry)
+    probe = _context(registry, builder=builder)
+    measured = measured_pool_bytes(
+        probe.get_pool(probe.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    )
+    builder.build_calls = 0
+    # Above the per-value lower bound but below the measured size.
+    ctx = _context(registry, max_pool_bytes=measured - 1, builder=builder)
+    with pytest.raises(ExecutionError) as exc:
+        ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert builder.build_calls == 1
+    assert (ctx.builds, ctx.pool_count, ctx.reserved_bytes) == (0, 0, 0)
+
+
+def test_pool_bytes_bounded_by_allowance_not_row_count(registry):
+    # Allowance sized for exactly one pool; a second distinct pool is refused. The
+    # bound is the allowance, independent of any batch size.
+    builder = _CountingPoolBuilder(registry)
+    probe = _context(registry, builder=builder)
+    first = probe.get_pool(probe.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    one_pool = measured_pool_bytes(first)
     ctx = OocFakerPoolContext(
         registry=registry,
         job_seed=_JOB_SEED,
-        max_pool_bytes=16 * reserve_per_value,  # fits pool_size<=16 only
+        max_pool_bytes=one_pool,
         builder=builder,
     )
-    small = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg={"pool_size": 16})
-    ctx.get_pool(small)  # fits exactly
-    big = ctx.prepare(provider=_PROVIDER, namespace="ns2", cfg={"pool_size": 17})
+    ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))  # fits exactly
+    assert ctx.reserved_bytes == one_pool
+    other = ctx.prepare(provider=_PROVIDER, namespace="ns2", cfg=dict(_CFG))
     with pytest.raises(ExecutionError) as exc:
-        ctx.get_pool(big)
+        ctx.get_pool(other)
     assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert ctx.pool_count == 1
 
 
 def test_invalid_pool_size_rejected(registry):

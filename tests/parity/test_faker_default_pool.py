@@ -465,6 +465,21 @@ def _three_pools() -> list[dict[str, Any]]:
     ]
 
 
+def _stub_registry() -> Any:
+    """`person_first_name` rebound to long values: each pool measures about 41.6 MB, so three
+    distinct ones exceed a 100 MiB budget while two fit."""
+    from tests.physical.test_unified_slice_faker import CountingAdapter, rebound_registry
+
+    return rebound_registry(CountingAdapter(lambda i: f"{i:06d}" + "x" * 4090))
+
+
+def _three_stub_pools() -> list[dict[str, Any]]:
+    return [
+        _column(FIRST, name=name, deterministic=True, namespace=ns)
+        for name, ns in (("f1", "ns_a"), ("f2", "ns_b"), ("f3", "ns_c"))
+    ]
+
+
 @NEEDS_COMPANION
 def test_f6b_an_over_budget_job_fails_before_scratch_with_a_value_free_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -479,13 +494,19 @@ def test_f6b_an_over_budget_job_fails_before_scratch_with_a_value_free_message(
         return real_fresh(*a, **k)
 
     monkeypatch.setattr(_runner.ScratchArena, "fresh", spy)
-    cfg, src = _fk_job(tmp_path, _three_pools())
+    cfg, src = _fk_job(tmp_path, _three_stub_pools())
     with pytest.raises(ExecutionError) as info:
-        _run(cfg, src, execution_mode="out_of_core", out_of_core_budget_bytes=_BUDGET)
+        _run(
+            cfg,
+            src,
+            execution_mode="out_of_core",
+            out_of_core_budget_bytes=_BUDGET,
+            registry=_stub_registry(),
+        )
     assert info.value.code == "out_of_core_faker_pool_budget_exceeded"
     assert arenas == []
     message = str(info.value)
-    for fragment in (FIRST, LAST, str(DEFAULT), str(_BUDGET), str(DEFAULT * 4096), "ns_a"):
+    for fragment in (FIRST, LAST, str(DEFAULT), str(_BUDGET), "ns_a", "ns_b", "ns_c"):
         assert fragment not in message
     assert not list(tmp_path.glob("*.out.parquet"))
 
@@ -563,7 +584,7 @@ def test_f6b_the_executable_table_reserves_one_pool_per_identity(tmp_path: Path)
     pool = _context(plan)
     OocHashRun(faker_pool=pool).prepare_faker_tables(plan, {"P": (_FULL_SCHEMA, frozenset())})
     assert pool.pool_count == 3
-    assert pool.reserved_bytes == 3 * DEFAULT * 4096
+    assert 0 < pool.reserved_bytes < 3 * DEFAULT * 4096
 
 
 def test_f6b_the_skip_set_is_the_union_of_the_incoming_child_columns() -> None:
@@ -573,6 +594,66 @@ def test_f6b_the_skip_set_is_the_union_of_the_incoming_child_columns() -> None:
     ]
     assert fk_child_skip_columns(edges) == frozenset({"a", "b", "c"})  # type: ignore[arg-type]
     assert fk_child_skip_columns([]) == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# W1 (S0 from FAKER-NATIVE-WIDEN, moved here by the orchestrator). The out-of-core pool
+# reservation is the measured size of each built pool, not 4,096 bytes per value.
+# ---------------------------------------------------------------------------
+
+
+def _distinct_default_pools(count: int) -> list[dict[str, Any]]:
+    columns = []
+    for index in range(count):
+        provider = (FIRST, LAST)[index % 2]
+        columns.append(
+            _column(provider, name=f"w{index}", deterministic=True, namespace=f"ns_w{index // 2}")
+        )
+    return columns
+
+
+@NEEDS_COMPANION
+@pytest.mark.parametrize(
+    ("count", "budget"),
+    [(12, None), (3, _BUDGET)],
+    ids=["twelve_default_budget", "three_100mib"],
+)
+def test_w1_distinct_default_pools_run_under_the_measured_reservation(
+    tmp_path: Path, count: int, budget: int | None
+) -> None:
+    kw: dict[str, Any] = {} if budget is None else {"out_of_core_budget_bytes": budget}
+    cfg, src = _fk_job(tmp_path, _distinct_default_pools(count))
+    got = _run(cfg, src, execution_mode="out_of_core", **kw)
+    assert len(got.quality_metrics["out_of_core_faker"]) == count
+    ref = _run(cfg, src, execution_mode="full_frame")
+    assert got.outputs["P"].equals(ref.outputs["P"])
+
+
+@NEEDS_COMPANION
+def test_w1_reserved_bytes_are_the_sum_of_the_measured_pools(tmp_path: Path) -> None:
+    from decoy_engine.execution.out_of_core._faker_pool import measured_pool_bytes
+    from decoy_engine.generation.pool._builder import PoolBuilder
+
+    built: list[int] = []
+
+    class Measuring(PoolBuilder):
+        def build(self, provider: str, **kwargs: Any) -> Any:
+            pool = super().build(provider, **kwargs)
+            built.append(measured_pool_bytes(pool))
+            return pool
+
+    plan = _compiled(tmp_path)
+    registry = get_default_registry()
+    pool = OocFakerPoolContext(
+        registry=registry,
+        job_seed=plan.seed_envelope.job_seed,
+        max_pool_bytes=1 << 40,
+        builder=Measuring(registry),
+    )
+    OocHashRun(faker_pool=pool).prepare_faker_tables(plan, {"P": (_FULL_SCHEMA, frozenset())})
+    assert len(built) == 3
+    assert pool.reserved_bytes == sum(built)
+    assert pool.reserved_bytes < 3 * DEFAULT * 4096
 
 
 # ---------------------------------------------------------------------------
