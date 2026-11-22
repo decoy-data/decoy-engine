@@ -218,6 +218,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_platform_checks.py", "DIR_FD_ALLOWLIST"),
     ),
     Source(
+        "signature-exemptions",
+        "release/_signatures.py",
+        in_code("release/_signatures.py", "SIGNATURE_EXEMPTIONS"),
+    ),
+    Source(
         "ci-write-scopes",
         "_ci_lock_scan.py",
         in_code("_ci_lock_scan.py", "WRITE_ALLOWLIST"),

@@ -271,10 +271,9 @@ CERTIFIED_PLATFORM = PlatformTriple(
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
     (CERTIFIED_PLATFORM, "3.10.20.final"): frozenset(
         {
-            # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
-            # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
-            # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
-            # release stamp moves only the hashed engine version; rows since 0.18.0 stay so old snapshots compile (0.4.0: 6c0b2bbd...).
+            # decoy-engine dev/CI profile (`uv sync --frozen --extra dev --extra lint --extra vault
+            # --extra cloud`, Python 3.10.20). Re-pin from a fresh sync (installed_distribution_set,
+            # compute_lock_fingerprint). A stamp moves only the engine version; old snapshots stay.
             "bd14c8a5cc2d3896547f743150fdf35d340c1f2e95e923dcba6c00065bb53cfd",
             "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
             "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
@@ -299,6 +298,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
             "502037cad62e1e645a666eb088b0bc9f69fec82d2ac980b0c2d52a2cc707a7f1",
+            "f9708482fe4f95139ce9a1272f0110b38b8de83e8d2a567cca5b5f7c1f1ad2bf",
             # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
             # tooling, pinned in the CLI repo's requirements-certified.txt (reproduce: `--no-dev` install on
             # 3.10.20, then cert_smoke.py). All stay, newest first; 0.28.0 lacks joserfc.

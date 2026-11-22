@@ -40,6 +40,7 @@ TIER_EXCEPTIONS: Final[tuple[tuple[str, str, str], ...]] = (
     ("decoy_engine.detection", "log_detector_models", FROZEN),
     ("decoy_engine.detection", "log_detector_run", FROZEN),
     ("decoy_engine.detection", "ner_rates", FROZEN),
+    ("decoy_engine.plan", "NO_SOURCES", FROZEN),
     ("decoy_engine.plan.checks", "StrategyRequirement", FROZEN),
     ("decoy_engine.profile", "profile_relationships_from_config", FROZEN),
     ("decoy_engine.profiling", "ModelHit", FROZEN),
@@ -53,6 +54,7 @@ EXPERIMENTAL_MODULE: Final = "decoy_engine.sdk"
 # Experimental objects that live outside `sdk`, by identity: `(defining module, qualified name)`.
 # Every export of the object, at the root, in `providers` or elsewhere, takes the tier.
 EXPERIMENTAL_OBJECTS: Final[tuple[tuple[str, str], ...]] = (
+    ("decoy_engine.contracts.column_shape", "SourceFacts"),
     ("decoy_engine.internal.faker_setup", "atomic_swap_db_providers"),
     ("decoy_engine.internal.faker_setup", "load_custom_providers"),
     ("decoy_engine.internal.faker_setup", "register_faker_list_provider"),

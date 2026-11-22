@@ -210,6 +210,10 @@ dev = [
     # import. Test tool only: not shipped, so NOTICE does not change. `uv.lock` pins one exact
     # version; the dev/CI DP row (dp_provenance._CERTIFIED_STACKS) moves with it.
     "time-machine>=3.5.1",
+    # Signature sentry (tests/sentry/release/test_public_signatures.py): diffs the public API
+    # against the last release tag. Library only, not the `griffe` meta package. 2.3.1 is yanked
+    # and 2.3.2 dropped Python 3.10, so the lock resolves 2.3.0 at the engine floor. Dev only.
+    "griffelib>=2.3.0,<3",
 ]
 # Test-Quality Program (TQ-0, 2026-07-25): coverage measurement + mutation
 # grading. pytest-cov feeds the TQ-3 diff-coverage ratchet; mutmut grades
