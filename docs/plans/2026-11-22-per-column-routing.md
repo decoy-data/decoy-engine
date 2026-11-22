@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-22; Dennis R1 FAIL, items B1, B2, H, M and L closed in this revision)
+Status: plan (revision 3, 2026-11-22; Dennis R1 items closed in revision 2; revision 3 rebases the `when:` rule on WHEN-READS-SOURCE)
 
 # PER-COLUMN-ROUTING: native and Python columns in one table, on the chunked lane and the unified slice
 
@@ -9,6 +9,7 @@ Anchors: a path with no prefix is in this repository (decoy-engine) under `src/d
 Depends on, before S1 starts:
 
 - **ROUTE-LABEL-TRUTH slice 1** (`docs/plans/2026-11-22-route-label-truth.md`, branch `plan/route-label-truth`): `column_decline_code`, `PhysicalNode.decline_code`, the kernel-less family codes, `RouteSummary.executed_backends`, the CLI `mixed` label row, and the A5 carve-out (guarantee 8 there). The carve-out matters here: an oracle error raised by the Python half inside the unified slice is a `DecoyError` and must keep its own code and exit. Without the carve-out, `_unified_slice.py:358` would swallow it and rerun the table.
+- **WHEN-READS-SOURCE** (`docs/plans/2026-11-22-when-reads-source.md`, branch `plan/when-reads-source`): every route evaluates a `when:` on the original values of the columns it names (its guarantee 1). With that contract, a `when:` on a Python column reads the same values from the sub-table as from the full oracle run, whatever the other half masked, so this plan needs no `when:` handling across halves. It also removes the native `when_reads_masked_column` decline, so more `when:` columns land in N.
 - **UF-DOMAIN S1** (`origin/plan/uf-domain` at `cb4edf11d`, `docs/plans/2026-11-22-uf-domain.md` section 3 "After S1"): the one output assembler, `table_from_pandas_keeping_source_types` (`execution/_fk_keys.py:521`) widened to take the source table and `arrow_columns`; and `frame_columns(nodes, config, table)` (`execution/_unified_slice_resident_types.py`), the one definition of which columns a set of nodes reads. This plan adds one input to that assembler and calls `frame_columns` for the Python half. It adds no assembler of its own.
 
 Sources: vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md` ("A table takes one route"); `docs/records/2026-11-19-engine-speed-and-route-completeness.md` section 3 limit 2 and section 6; CLI `docs/roadmap/groups/run.md:34`.
@@ -42,7 +43,7 @@ No custom scheduler is added. The mixed route reuses the two executors the engin
 - `execution/_chunked_oracle.py:407-505`: the per-chunk body of `_oracle_masked` (guards, adapter call with `carry`, row-error fail-closed, DGRN offset). S0 factors it into one function that both the oracle loop and the mixed branch call.
 - `execution/native/_chunk_masking.py:56` `_mask_chunk_native`: the native chunk masker, column by column, with `unconfigured` passthrough.
 - `execution/physical/_shadow_coordinator.py` and `_shadow_batch_runner.py`: the unified slice's native executor; an unbound node is already skipped (`continue`).
-- `expressions/_when_parser.py:294` `when_column_refs` and `execution/native/_when_admission.py:85` `_earlier_writes`: which columns a `when:` reads, and which columns earlier nodes wrote.
+- `execution/_runner.py:354` `column_dependency_edges`: the created-column driver edges (from `scalar_creating_reads`) that decide which nodes must stay together.
 - `execution/_runner.py:354` `column_dependency_edges` (`_masked_driver_columns`): masked driver reads of formula, derived, nested and `group_key`.
 - `execution/_fk_keys.py:521` `table_from_pandas_keeping_source_types`, as widened by UF-DOMAIN S1: the one output assembler.
 - UF-DOMAIN `frame_columns`: the one definition of a node set's read columns.
@@ -54,13 +55,13 @@ No custom scheduler is added. The mixed route reuses the two executors the engin
 After this plan:
 
 1. **Partition.** One function, `partition_columns(plan, table, native_ok) -> ColumnPartition | RouteDeclineRecord`, splits a table's mask nodes into a native set N (nodes the lane's existing per-column checks admit) and a Python set P (the rest). `native_ok` is the lane's own per-node verdict: the per-node pass of `_static_route_decision` for the chunked lane, `PhysicalNode.execution is not None` for the unified slice. The partition adds no admission rule of its own.
-2. **When a table is mixed.** A table runs mixed when N and P are both non-empty, the table has no table-wide decline, and item 4 finds no cross-half read. If P is empty, the table runs today's native route. If N is empty, it runs today's route for P. Table-wide declines (FK, validators, vault, quarantine and the others) still send the whole table to today's route.
+2. **When a table is mixed.** A table runs mixed when N and P are both non-empty, the table has no table-wide decline, after item 4 has moved driver groups into P. If P is empty, the table runs today's native route. If N is empty, it runs today's route for P. Table-wide declines (FK, validators, vault, quarantine and the others) still send the whole table to today's route.
 3. **Execution of one batch** (a chunk on the chunked lane, the whole table on the unified slice):
    - N runs on the native executor over the batch, with every P target column passed as `unconfigured`.
    - P runs on `PandasExecutionAdapter.run` with `plan_for_nodes(plan, P)` and the sub-table `batch.select(frame_columns(P, config, table))`. `plan_for_nodes` keeps the full plan, including the full `seed_envelope`, and trims only the work nodes to P. `enforce_output_projection` (`execution/_output_projection.py:90-120`) checks output columns against `known_output_columns(plan, table)` (`:58-73`), which reads the seed envelope, so the sub-table's columns are all declared and no `undeclared_output_columns` is raised under either policy.
    - On the chunked lane the P call goes through the factored per-chunk oracle step (item 5), never a second copy of it.
    - The output is built by the one assembler: `table_from_pandas_keeping_source_types(frame=None, source=batch, untouched=..., arrow_columns=<N outputs>, python_half=<P output table>)`. `python_half` is the one input this plan adds. The assembler takes P target columns from it as stored, N target columns from `arrow_columns`, and every other column from `batch`. It asserts `python_half.num_rows == batch.num_rows` and each `arrow_columns` length, naming the half (`native` or `python`), and raises `HANDLER_ROW_COUNT_CHANGED` otherwise. Columns come out in source order (UF-DOMAIN assert). `require_same_rows` still guards each P node inside the adapter.
-4. **No reads across halves (one shared function).** `cross_half_read(partition, entries, registry) -> RouteDeclineRecord | None` is the one check, used by both lanes. For each P node it collects the columns the node reads: `_masked_driver_columns` (formula, derived, nested, `group_key` siblings) plus `when_column_refs` of its `when:` gate. It then calls `earlier_writes(target, entries, registry)` (today `_earlier_writes`, `native/_when_admission.py:85`, made public in place, not moved) for the columns written by nodes that run before the P node in work order. If a read column is an N target and is in that earlier-writes set, the oracle would show the P node the masked value while the sub-table holds the source value, so the table is not mixed: it records `per_column_cross_dependency` naming the first such P column in work order and runs today's route. If `earlier_writes` returns `None` (unknown writes), the table is not mixed either. A read of an N target written later in work order is allowed: the oracle shows the source value then, and so does the sub-table. In the other direction, an N node never reads a masked value: native `when:` admission already refuses one (`when_reads_masked_column`, through the same `_earlier_writes`) and `group_key` refuses a masked sibling (`group_key_sibling_*`). `cross_half_read` asserts this for N and declines if it ever fails. SOURCE-read drivers (`joint_mask` `key_by`) read the pre-mask value, which the sub-table holds.
+4. **Created columns stay with their drivers (one shared function).** A `when:` needs no rule here: under WHEN-READS-SOURCE it reads original values, which the sub-table holds. The only reads across columns that see a masked value are created-column drivers: a `formula`, `derived` or other creating strategy reads the masked value of its drivers (`scalar_creating_reads`, `execution/_column_access.py:391`), ordered by `column_dependency_edges` (`execution/_runner.py:354`). `group_drivers_into_python(partition, work) -> ColumnPartition` is the one function, used by both lanes. It takes the connected components of the `column_dependency_edges` graph over the table's nodes, and moves every component that holds a P node wholly into P. So a P created column and every N node that writes one of its drivers (and, transitively, their drivers) run together on the oracle, in the oracle's work order, and the created column sees the masked driver value exactly as today. An N creating node whose driver is a P target moves too. The native strategies that create columns today (`group_key`) read only unmasked siblings (`group_key_sibling_*` admission), so their component is all-N. If the move empties N, the table runs today's route for P. No decline code is needed. SOURCE-read drivers (`joint_mask` `key_by`, `date_shift` `group_by`) have no edge and read the original value, which the sub-table holds.
 5. **Chunked lane.** P is allowed only when the chunked oracle preflight (`_chunked_oracle._oracle_preflight`, `:91`) accepts the trimmed plan, the same check that runs today. Each chunk's P half runs through `oracle_chunk_step`, factored out of `_oracle_masked` (`_chunked_oracle.py:407-505`) in S0, so the one copy keeps: the per-chunk schema guards (FK passthrough, declared FK dtype, `text_mask`, `code_set`, `bucket_perturb`), the DGRN `row_offset` (`dgrn.validate_chunk_row_offset_range` and the global offset passed to the adapter), `carry` (`carry.adapter_input`, `diagnose_adapter`, `reattach`), and the `RowErrorsFailedError` fail-closed raise on any row error. The mixed loop advances `row_offset` once per chunk with `dgrn.advance_row_offset`. A row error in any chunk raises before that chunk is yielded, so the output sink publishes nothing. Whole-column families (`shuffle`, `geo_generalize`, `derived_aggregate`, `grouped_series` and an aggregate `formula`) are not row-local, so their table still does not chunk, as today.
 6. **Unified slice (full frame).** P may hold any strategy, including whole-column families. The adapter runs them over the full column, where they run today. A full-frame table with `shuffle` on one column and `hash` on nine runs the nine through the kernels and `shuffle` through the oracle over the whole column. A `DecoyError` from the P half propagates with its own code and exit (ROUTE-LABEL-TRUTH A5 carve-out).
 7. **Values.** Every column of a mixed output has exactly the values of its reference, null positions included, compared with `pa.Array.equals` after a cast to the reference's type:
@@ -71,7 +72,7 @@ After this plan:
 9. **Warnings.** The warnings of both halves are merged into one list, ordered stably by the canonical work-order index of the node that raised them (`_runner.in_work_order`). Projection warnings come last, as today. The merge is one small function, `merge_half_warnings`.
 10. **Evidence.** Each column's `executed_backend` is its half's backend: a P column records `pandas_oracle`, an N column its native backend. `chunked_route` and `unified_slice_activation` gain `mixed: true` for a mixed table. `RouteSummary.executed_backends` then shows both, and the CLI prints `mixed (native and Python columns)`.
 
-Non-goals: a single work-order loop that interleaves N and P nodes (it would allow cross-half reads, at the cost of a per-node conversion; 1.x if the cross-dependency decline shows up often in real configs); native kernels for any kernel-less family; mixing on FK, sequential, out-of-core or mixed-route FK tables; running the two halves in parallel; any change to which columns the native checks admit; any change to the output assembler beyond the `python_half` input.
+Non-goals: a single work-order loop that interleaves N and P nodes (it would let a driver stay native while its created column runs on the oracle, at the cost of a per-node conversion); native kernels for any kernel-less family; mixing on FK, sequential, out-of-core or mixed-route FK tables; running the two halves in parallel; any change to which columns the native checks admit; any change to the output assembler beyond the `python_half` input.
 
 ## 4. Enumerations
 
@@ -81,7 +82,7 @@ Non-goals: a single work-order loop that interleaves N and P nodes (it would all
 - A P node failure: the same typed error the oracle raises today for that node, with its code and exit (A5 carve-out on the unified slice; no wrapper on the chunked lane).
 - A P row error on the chunked lane: `RowErrorsFailedError` from `oracle_chunk_step`, before the chunk is yielded; the output sink discards (as `_chunked_oracle.py:490-503` today).
 - An N column failure: the same error the native lane raises today.
-- The cross-dependency decline is not an error: the table runs today's route.
+- Moving a driver group into P is not an error and records no decline; the moved columns report `executed_backend = pandas_oracle`.
 
 ### Routes
 
@@ -98,7 +99,6 @@ N/A: a table in any declared relationship is declined table-wide before partitio
 
 - `quality_metrics["chunked_route"]["mixed"]` and `quality_metrics["unified_slice_activation"]["mixed"]` (new booleans).
 - `executed_backend` per column can be `pandas_oracle` inside an admitted table.
-- New reason code `per_column_cross_dependency`.
 
 ### Output surfaces
 
@@ -134,7 +134,6 @@ The builder rechecks this table at DEVELOP against the head and adds any step it
 | `execution/native/_chunked_entry.py` | 689 (ceiling 689) | minus `_oracle_route` | about 630; ceiling ratchets down to `ceiling_for(loc)` |
 | `execution/native/chunked/_route_scan.py` (new) | 0 | the per-node pass of `_static_route_decision` (`_dispatch.py:283-389`, the loop that builds `reasons`, `declines` and `scalar_columns`) moved into `scan_table_nodes(...) -> NodeScan`, unchanged | about 120 |
 | `execution/native/_dispatch.py` | 679 (ceiling 688) | `_static_route_decision` calls `scan_table_nodes` | about 590; leaves the census (under 600) |
-| `execution/native/_when_admission.py` | n/a | `_earlier_writes` renamed `earlier_writes` (public in its module; callers updated) | +0 |
 
 Control: the auto-chunk suites (`tests/unit/execution/test_auto_chunk_*`), the chunked-oracle suites and the B6a/B6b suites pass unchanged. Size: about 310 lines moved, about 20 changed.
 
@@ -142,14 +141,13 @@ Control: the auto-chunk suites (`tests/unit/execution/test_auto_chunk_*`), the c
 
 | File | Lines now | Change | Expected after |
 |---|---|---|---|
-| `execution/pipeline/_column_partition.py` (new) | 0 | `ColumnPartition`, `partition_columns`, `plan_for_nodes`, `cross_half_read` | about 170 |
+| `execution/pipeline/_column_partition.py` (new) | 0 | `ColumnPartition`, `partition_columns`, `plan_for_nodes`, `group_drivers_into_python` | about 150 |
 | `execution/pipeline/_mixed_columns.py` (new) | 0 | `merge_half_warnings`, and `assemble_mixed(batch, partition, native_out, python_out)` which calls the one assembler | about 80 |
 | `execution/_fk_keys.py` | 575 + UF-DOMAIN S1 | `python_half: pa.Table | None` input to `table_from_pandas_keeping_source_types` | +15 |
 | `execution/native/chunked/_route_scan.py` | about 120 | `NodeScan` carries the per-node verdict that `partition_columns` reads | +10 |
 | `execution/native/_dispatch.py` | about 590 | the decision carries the partition when mixed | about 605 |
 | `execution/native/_chunked_entry.py` | about 630 | mixed branch in the chunk loop: `_mask_chunk_native` for N, `oracle_chunk_step` for P, `assemble_mixed`, one offset advance | about 655 |
 | `execution/native/_chunked_evidence.py` | 291 | `executed_backend` reads the column's half; `mixed` flag | about 305 |
-| `reasons/route/_slice.py` (from ROUTE-LABEL-TRUTH) | about 140 | `per_column_cross_dependency` | +6 |
 
 Also: `GUARDED_MODULES` in `tests/sentry/test_physical_seam_disconnection.py` gains both new `pipeline/` modules and `chunked/_oracle_step.py`; UF-DOMAIN's assembler sentry (`test_output_assembly_one_path.py`) needs no allowlist entry (no new `from_pandas`); the changelog fragment carries the `Breaking:` lines. Size: about 300 source lines, about 750 test lines.
 
@@ -161,7 +159,7 @@ Also: `GUARDED_MODULES` in `tests/sentry/test_physical_seam_disconnection.py` ga
 | `execution/_unified_slice.py` | about 490 after RLT | `_execute_admitted` runs the coordinator over N, `PandasExecutionAdapter.run` over P, then `assemble_mixed` | about 520 |
 | `execution/_unified_slice_evidence.py` | 246 | P nodes get node evidence with `executed_backend = pandas_oracle`; `mixed` flag | about 270 |
 | `execution/physical/_shadow_batch_runner.py` | 350 | none: the unbound-node `continue` already skips P nodes; a test pins it | 350 |
-| `docs/execution-backends.md` | n/a | "Mixed tables": what mixes, the cross-half rule, the type differences | +40 |
+| `docs/execution-backends.md` | n/a | "Mixed tables": what mixes, the driver-group rule, the type differences | +40 |
 | `docs/records/2026-12-xx-per-column-routing-bench.md` | new | the P-bench record | new |
 
 Size: about 130 source lines, about 550 test lines.
@@ -189,10 +187,10 @@ Fan-out after this plan and ROUTE-LABEL-TRUTH: `execution/pipeline/` 16 + 1 + 2 
 
 - **Principles.** Single responsibility at the seam: the partition decides, the two existing executors execute, the one assembler builds the output. No executor learns about the other. Open/closed: a strategy that gets a kernel later moves from P to N through the operator registry, with no change here.
 - **Pattern.** Spark `ArrowEvalPython` (only the read columns go to Python; results go back into the batch) and the Polars "read the input" rule between halves (section 2).
-- **One place per fact.** Read columns: `frame_columns` (UF-DOMAIN). Cross-half reads: `cross_half_read`, built on `when_column_refs`, `_masked_driver_columns` and `earlier_writes`. Native verdict per node: the lane's own check, passed as `native_ok`. Output assembly: the one assembler. Per-chunk oracle work: `oracle_chunk_step`. Warning order: `in_work_order`.
-- **Choke points.** (a) The one assembler: UF-DOMAIN's sentry already forbids a second `from_pandas` output path; this plan adds no allowlist entry. (b) `oracle_chunk_step`: a sentry test asserts that `adapter.run` is called in `execution/chunked/_oracle_step.py` and nowhere else on the chunked lane (AST scan of `_chunked_oracle.py`, `native/_chunked_entry.py` and `native/chunked/`). Mutation: call `state.adapter.run` directly in the mixed branch (sentry red). (c) `cross_half_read`: both lanes call it (spy test); mutation: drop the `when_column_refs` term (P2 `zz_email` red).
+- **One place per fact.** Read columns: `frame_columns` (UF-DOMAIN). Driver groups: `group_drivers_into_python`, built on `column_dependency_edges`. The `when:` contract: WHEN-READS-SOURCE. Native verdict per node: the lane's own check, passed as `native_ok`. Output assembly: the one assembler. Per-chunk oracle work: `oracle_chunk_step`. Warning order: `in_work_order`.
+- **Choke points.** (a) The one assembler: UF-DOMAIN's sentry already forbids a second `from_pandas` output path; this plan adds no allowlist entry. (b) `oracle_chunk_step`: a sentry test asserts that `adapter.run` is called in `execution/chunked/_oracle_step.py` and nowhere else on the chunked lane (AST scan of `_chunked_oracle.py`, `native/_chunked_entry.py` and `native/chunked/`). Mutation: call `state.adapter.run` directly in the mixed branch (sentry red). (c) `group_drivers_into_python`: both lanes call it (spy test); mutation: move only the P node and not its drivers (P2 red).
 - **House style.** `ColumnPartition` and `NodeScan` are frozen dataclasses; no flag arguments; `assemble_mixed` takes the partition, not loose lists.
-- **Why not one interleaved loop.** It would need the oracle split into a per-node session, a pandas conversion per Python node, and a native-to-pandas value hand-off. It is slower and adds a third executor. The two-half design reuses the executors whole and is the faster option the owner direction asks for. The price is the cross-half decline, which keeps today's route for those tables.
+- **Why not one interleaved loop.** It would need the oracle split into a per-node session, a pandas conversion per Python node, and a native-to-pandas value hand-off. It is slower and adds a third executor. The two-half design reuses the executors whole and is the faster option the owner direction asks for. The price is that a driver of a Python created column runs on the oracle too.
 
 ## 8. Class table
 
@@ -201,7 +199,7 @@ Fan-out after this plan and ROUTE-LABEL-TRUTH: `execution/pipeline/` 16 + 1 + 2 
 | 1 | Value-bearing output | assembler errors, decline record, evidence | messages name half, table and column only; record is code and identifiers | P7 | add the first differing value to the message (P7 red) |
 | 2 | Cleanup missing on an exit path | chunked failure mid-stream | the existing output sink owns publish and discard; the mixed branch raises before yield | P6, P14 | yield before the row-error check (P14 red) |
 | 3 | State and concurrency | native threads | each half runs in turn; native threads apply to N only | P4 | n/a |
-| 4 | Route parity and silent fallback | partition, cross-half check, assembly | exact values per column (P1); cross-half reads decline with a code | P1, P2, P5 | drop the `when_column_refs` term (P2 red); swap two columns at assembly (P1 red) |
+| 4 | Route parity and silent fallback | partition, driver groups, assembly | exact values per column (P1); a created column and its drivers run in one half | P1, P2, P5 | split a driver group across halves (P2 red); swap two columns at assembly (P1 red) |
 | 5 | Referential integrity | FK tables | declined table-wide before partition | P8 | move the FK check after the partition (P8 red) |
 | 6 | Untrusted producer | adapter result for P | row count asserted at the assembler; only P targets taken from it | P6 | skip the row assert (P6 red) |
 | 7 | Check then use | partition decided once, executed per chunk | the decision carries the partition; per-chunk schema guards run in `oracle_chunk_step` | P9, P14 | skip the guards for P (P9 red) |
@@ -215,16 +213,17 @@ Fan-out after this plan and ROUTE-LABEL-TRUTH: `execution/pipeline/` 16 + 1 + 2 
 Each fails before the change unless marked control. "Mixed table" below means 9 native columns (`hash in ns` on strings, deterministic `categorical`, `date_shift`, `redact`) and at least one Python column.
 
 - **P1 exact values (Hypothesis).** Random mixed tables: column types from the admitted set, nulls, empty strings; P columns from `faker(address_full)`, `bucketize`, `top_code`, `code_set`, a row-wise `formula`, `windowed_date`, and a `when:` on a P column reading another P column. For every column, `mixed.column(c).equals(reference.column(c).cast(mixed_type))` with nulls in place, against the item 7 references (N columns: same table with every P column set to `passthrough`; P columns: `--no-native`). Column order equals the source schema. The cast is allowed only for the type pairs listed in section 10 B1; any other type difference fails. Fail-before: the evidence check (N columns ran on a kernel) fails because the table runs one route.
-- **P2 cross-half reads.** Each runs today's route, records `per_column_cross_dependency` naming the P column, and gives output equal to today's route byte for byte:
-  - `zz_email: faker(person_email)` with `when: "status == 'active'"`, `status: hash in ns`. `status` sorts before `zz_email`, so the oracle's `when:` sees the masked `status`.
-  - `formula` on a P column reading an earlier-sorted N column.
-  - control (mixed): `aa_email` with the same `when:`. `status` is written later, the oracle sees the source value, the sub-table holds the source value, and the table mixes with P1 values.
-  - `earlier_writes` returning `None` (an unknown-writes node before the P node): not mixed.
+- **P2 created columns and `when:` (needs WHEN-READS-SOURCE).**
+  - `aa_total: formula` reading `amount: hash in ns`, plus 8 other `hash` columns: `amount` moves into P with `aa_total`, both report `pandas_oracle`, the other 8 run native, and `aa_total` equals the oracle output (it reads the masked `amount`, as today). Fail-before: whole table on the oracle.
+  - A chain: `c: formula` reading `b: derived` reading `a: hash`: all three in P.
+  - A `formula` that reads only unconfigured source columns: only the formula moves to P.
+  - `zz_email: faker(person_email)` with `when: "status == 'active'"`, `status: hash in ns`: the table mixes (`status` in N, `zz_email` in P); the selected rows are the originally active ones, equal to the oracle under WHEN-READS-SOURCE; the `aa_email` rename gives identical output.
+  - Mutation: move only the P node and leave its driver in N (the `aa_total` case red).
 - **P3 determinism.** One mixed table run twice gives identical output bytes and identical `quality_metrics` (minus timings). Chunk size 7,000 versus 40,000 on 120,000 rows gives equal values per column.
 - **P4 threads.** `native_threads` 1 versus 4: identical output bytes.
 - **P5 whole-column on full frame.** 2,000 rows: `shuffle` on one column and `hash in ns` on nine. The unified slice admits mixed; the nine `executed_backend` values are native and `shuffle` is `pandas_oracle`; the `shuffle` column equals today's oracle output exactly. On 120,000 rows the same table still does not chunk and is mixed on full frame. Fail-before: whole table on the oracle.
 - **P6 row-count guard.** A P handler stub that drops a row: `HANDLER_ROW_COUNT_CHANGED` from `require_same_rows`. A stubbed half returning `n - 1` rows at the assembler: `HANDLER_ROW_COUNT_CHANGED` naming the half. No output is published on either lane.
-- **P7 value-free.** P2, P6 and P14 messages and evidence hold no seeded sentinel value.
+- **P7 value-free.** P6 and P14 messages and evidence hold no seeded sentinel value.
 - **P8 FK control.** A child table with an FK column and a P column: declined `fk_relationship`, today's route, output unchanged.
 - **P9 degenerate chunks and guards.** A 120,000-row mixed table whose last chunk is all-null for the `fpe` and `bucket_perturb` N columns and empty for a P column, plus a zero-row chunk: P1 values, degenerate types per the existing reconciliation. A `code_set` P column whose type drifts in chunk 3: the existing `code_set` schema guard raises, from `oracle_chunk_step`.
 - **P10 control: S0 moves.** The auto-chunk, chunked-oracle, B6a and B6b suites pass unchanged on the S0 head. `_chunked_entry.py` and `_dispatch.py` ceilings move down.
@@ -240,9 +239,9 @@ Performance (recorded, not a CI gate), on the Dell node with the native companio
 
 - **P-bench chunked.** 1,000,000 rows, 9 native columns plus one `faker(address_full)` column (chunked lane). Target: mixed at most 0.5 of today's time.
 - **P-bench full frame.** 90,000 rows, the same columns plus one `shuffle` column (full frame, unified slice). Target: mixed at most 0.5 of today's time.
-- A result over 0.8 on either run stops S2 and goes to the owner with the profile. The record also counts how many tables in the prod-sim configs mixed and how many declined `per_column_cross_dependency`.
+- A result over 0.8 on either run stops S2 and goes to the owner with the profile. The record also counts how many tables in the prod-sim configs mixed and how many columns moved into P as created-column drivers.
 
-Test scope: T0 per edit; T1 impact selection plus the named tests and guard tests; T3 full suite at each merge head (R3, masking route), diffed against the saved main baseline. Mutations: `partition_columns`, `cross_half_read`, `assemble_mixed` (order, row assert), `merge_half_warnings`, the `row_offset` passed to `oracle_chunk_step` and the per-column backend evidence, rerun on the final head of S1 and S2.
+Test scope: T0 per edit; T1 impact selection plus the named tests and guard tests; T3 full suite at each merge head (R3, masking route), diffed against the saved main baseline. Mutations: `partition_columns`, `group_drivers_into_python`, `assemble_mixed` (order, row assert), `merge_half_warnings`, the `row_offset` passed to `oracle_chunk_step` and the per-column backend evidence, rerun on the final head of S1 and S2.
 
 ## 10. Frozen contracts and compatibility
 
@@ -265,16 +264,16 @@ All of these are pre-V1 output or evidence changes under the owner direction of 
 
 - **A P handler reads a column it does not declare.** The sub-table lacks it and the adapter fails with a missing column. `frame_columns` is the one read set and P1 includes every P strategy that reads siblings. A strategy that reads an undeclared column is a declaration bug; the fix is to declare the read, not to widen the sub-table.
 - **A whole-table step of the adapter behaves differently on the sub-table.** The section 5 table lists each step and why it gives the same result; P1, P12 and P15 check the result. The builder rechecks the table at the head.
-- **The cross-half check misses a read channel.** B1 of the R1 review found one (`when:`). The check now unions `_masked_driver_columns` and `when_column_refs`; the P2 cases cover both, and the class-4 mutation removes the `when:` term. A new read channel (a new expression kind) must add itself to `cross_half_read`; the spy test fails if a lane skips it.
+- **A read channel that sees masked values is missed.** Under WHEN-READS-SOURCE only created-column drivers read masked values, and they all come from `scalar_creating_reads` through `column_dependency_edges`, the edges the oracle itself orders by. A new creating strategy declares its reads there or the oracle mis-orders it too. P2 covers formula, derived and chains.
 - **The S0 moves change behavior.** They are pure moves with the existing suites as control (P10), merged before any mixed code.
-- **Cross-half reads are common in real configs** (many `when:` gates read a `hash` column sorted earlier). Then fewer tables mix. The benchmark record counts them for the 1.x decision.
+- **Many tables have a Python created column with native drivers.** Then those drivers lose the kernel. The benchmark record counts the moved columns for the 1.x interleaved-loop decision.
 - **The two halves cost more than one oracle run on narrow tables.** The P half converts only `frame_columns(P)`, which is never more than the whole table. P-bench records both lanes.
 
 ## 12. Open questions for the owner
 
 Both answered at plan gate R1 (2026-11-22):
 
-1. **Cross-half reads.** Agreed: a table where a P node reads an N column written earlier (through `when:` or a masked driver) is not mixed in V1 and keeps today's route, coded `per_column_cross_dependency`. The interleaved loop is 1.x.
+1. **Reads across halves.** Agreed at R1, revised by the owner's WHEN-READS-SOURCE decision: `when:` needs no rule (it reads original values on every route); a Python created column runs together with its drivers in the Python half. The interleaved loop is 1.x.
 2. **Benchmark target.** Agreed: mixed at most 0.5 of today's time, recorded on the Dell, not a CI gate, with a full-frame run at 90,000 rows added; over 0.8 stops for the owner's call.
 
 No open questions remain.
