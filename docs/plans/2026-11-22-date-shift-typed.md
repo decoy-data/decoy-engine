@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-22; Dennis R1 items closed)
+Status: plan (revision 3, 2026-11-22; Dennis R1 and Codex R2 findings closed)
 
 # DATE-SHIFT-TYPED: `date_shift` on `date32` and zoned `timestamp` sources runs native, on the typed values
 
@@ -48,10 +48,10 @@ Search run: calendar-day arithmetic on zoned timestamps (PostgreSQL `timestamptz
 After S1 (DATE) and S2 (TIMESTAMP_TZ):
 
 1. A `date_shift` column whose plan shape is `DATE` over a resident `date32`, or `TIMESTAMP_TZ` over a resident `timestamp` with a zone (any unit), with a namespace, no `group_by`, no `when:`, and no `preserve_values`, runs native on the unified slice, the chunked route and the sequential route.
-2. The day offset of each row equals the oracle's offset for that row: the key bytes are `_canonicalize_source(value)` computed over the Arrow array (ISO date for `DATE`; `astimezone(UTC).isoformat()` for `TIMESTAMP_TZ`). A typed date and the same date stored as ISO text in another table get the same shift in the same namespace, as today.
+2. The day offset of each usable row equals the oracle's offset for that row: the key bytes are `_canonicalize_source(value)` computed over the Arrow array (ISO date for `DATE`; `astimezone(UTC).isoformat()` for `TIMESTAMP_TZ`). A typed date and the same date stored as ISO text in another table get the same shift in the same namespace, as today. A row rejected by guarantee 5 derives no key or offset.
 3. One arithmetic for both routes: `shift_typed_days(array, offsets) -> (shifted, failed)` in `transforms/date_shift.py`. The native route calls it on the resident array. The oracle calls it on an Arrow array built from the usable cells (section 4 "Exit paths"). Oracle and native output values agree by construction.
 4. The output column keeps the source Arrow type (`date32`; `timestamp` with the source unit and zone) on every route. On the unified slice the native output column goes to the UF-DOMAIN assembler through `arrow_columns`, never through the pandas frame.
-5. A shifted value outside the type's range (years 1 to 9999 for `date32`; the int64 range of the unit for `timestamp`) is a `format_error` row error and keeps its source value, on both routes.
+5. Before key construction, timezone conversion, formatting, or day addition, typed temporal values are read as their physical integer plus unit and checked with integer quotient/remainder and explicit bounds. A source timestamp whose UTC second is outside Python ISO years 1 to 9999, or whose local-time conversion cannot be represented, and any shifted value outside the source type's int64/unit range, is a `format_error` row error and keeps its source value on both routes. No Arrow floor, cast, timezone, formatting, or addition kernel receives a value that has not passed the applicable preflight.
 6. Deterministic: same seed, namespace and input give the same bytes on every route and every run. One named exception: a `date32` source value outside years 1 to 9999 (B4). The native routes keep it with a row error; the pandas route cannot convert the column and fails the job.
 
 Non-goals, each kept on its existing path with a coded reason:
@@ -107,7 +107,7 @@ Each item marked "byte change" is in section 10 and a `Breaking:` line.
 - B1 Column type, `TIMESTAMP_TZ`: keeps the source unit and zone on every route (guarantee 4). Not a byte change on the pandas route at pandas 2 (probed: `timestamp[us, UTC]` round-trips through pandas with its unit). T5 proves it on every route, unified included.
 - B2 Overlap resolution, `TIMESTAMP_TZ` and text zoned sources: an ambiguous local time keeps the source row's UTC offset if that offset is valid, else the earlier instant (Java rule), on both routes. Byte change where the oracle's DST-flag rule picked differently.
 - B3 Gap resolution: first valid instant after the gap, as today. No change; T4.
-- B4 Out of range: a `date32` source outside years 1 to 9999, and any shifted value outside the type range: row error, source kept. Byte change where the oracle raised or failed the job.
+- B4 Out of range: a `date32` source outside years 1 to 9999, a timestamp source outside the key/timezone preflight, and any shifted value outside the source type's range: row error, source kept. Byte change where the oracle raised or failed the job.
 - B5 Unified slice: the target column comes from the native Arrow output, so the pandas schema metadata does not list it (the UF-DOMAIN S1 rule).
 - Values for `DATE` sources in range: unchanged (T1).
 - Route evidence: `date_shift` native in place of `pandas_oracle`; two new decline codes.
@@ -119,17 +119,19 @@ Each item marked "byte change" is in section 10 and a `Breaking:` line.
 | File | Change | Lines (estimate) |
 |---|---|---|
 | `transforms/date_shift.py` (169) | `shift_typed_days(array, offsets)` for `date32`: cast to `int32`, add, range check against days -719162 and 2932896, return shifted array and failed mask | +35 |
-| `generation/pool/_canonicalize.py` | `canonicalize_typed_array(array) -> pa.Array` (binary keys): `date32` cast to `string`, then UTF-8 bytes; documented as equal to `_canonicalize_source` per value | +20 |
+| `generation/pool/_canonicalize.py` | `canonicalize_typed_array(array) -> (keys, failed)` (binary keys plus row mask): `date32` cast to `string`, then UTF-8 bytes; documented as equal to `_canonicalize_source` per usable value | +20 |
 | `execution/native/_date_shift_ext.py` (255) | `native_date_shift` branches on `shape`: typed keys, `_derive_offsets`, `shift_typed_days`, row errors | +30 |
 | `execution/native/_operator_config_rejections.py` (324) | skip the format check for a typed shape; `preserve_values` and resident-type declines for typed | +15 |
 | `execution/native/_real_type_admission.py` (196) | typed `date_shift` passes the source-type check when the shape and resident type match | +8 |
-| `execution/_operator_registry.py` (295) | `date_shift` unified domain gains `date32` | +2 |
+| `execution/_operator_registry.py` (295) | replace the three parallel resident-type fields with one `resident_type_domain` descriptor and one admission operation; migrate every operator without changing its domain, then add `date32` to `date_shift` | about +35/-15 |
+| `execution/_unified_slice_resident_types.py` | replace the three derived tables/functions with the descriptor's one admission operation | about -25 |
+| `execution/_unified_slice_admission.py` | call that operation instead of selecting positional, deterministic, then default tables | about -8 |
 | `execution/_unified_slice_evidence.py` (246) | a typed `date_shift` node's masked column is passed to the assembler in `arrow_columns`, not overlaid on the frame | +6 |
 | `execution/native/_chunked_schema_rule.py` | typed `date_shift` output pinned to the source type | +6 |
 | `execution/_strategies/_date_shift.py` (467) | `_shift_dates` keeps its cell pass, then calls `canonicalize_typed_array` and `shift_typed_days`; the per-row `timedelta` loop goes | -15, +12 |
 | `execution/native/_route_decline_codes.py` and the reasons catalog | two codes | +4 |
 | `changelog.d/date-shift-typed-date.md` | `### Changed` plus `Breaking:` (B4, B5) | new |
-| Tests | T1-T3, T7, T8, T10, sentry | about 260 |
+| Tests | T1-T3, T7, T8, T10, T11, sentry | about 280 |
 
 **S2 TIMESTAMP_TZ.**
 
@@ -138,16 +140,13 @@ Each item marked "byte change" is in section 10 and a `Breaking:` line.
 | `transforms/date_shift.py` | `shift_typed_days` for zoned `timestamp`: `local_timestamp`, add days in the unit with checked int64 arithmetic, `assume_timezone` with `earliest` and with `latest`, pick per row (section 7) | +40 |
 | `generation/pool/_canonicalize.py` | timestamp keys (section 7) | +25 |
 | `execution/_strategies/_date_shift.py` | `_shift_zoned` deleted; the typed and the text zoned paths call `shift_typed_days` on `pa.Array.from_pandas(parsed)`; the oracle output keeps the source dtype | -20, +10 |
-| `execution/_operator_registry.py` | `date_shift` unified domain admits zoned `timestamp` of any unit: a `unified_resident_type_predicate` field on `OperatorSpec`, used only by `date_shift` | +10 |
-| `execution/_unified_slice_resident_types.py` | the domain check calls the predicate when it is set | +6 |
+| `execution/_operator_registry.py` | extend the S1 descriptor's central named-family vocabulary with `zoned_timestamp`; add that family to `date_shift` (no new field or dispatch path) | about +8 |
 | native, config rejection, schema rule | same branches as S1 for the second shape | +15 |
 | `docs/compatibility-contract.md` | date_shift typed entries (B1-B5) | about 15 |
 | `changelog.d/date-shift-typed-timestamp.md` | `Breaking:` (B2, B4) | new |
 | Tests | T4-T6, T9 | about 250 |
 
-Two slices. `_strategies/_date_shift.py` shrinks.
-
-QA log item: `OperatorSpec` gets a fourth type-domain field (`unified_resident_types`, `positional_resident_types`, `deterministic_resident_types`, and now `unified_resident_type_predicate`). Logged as a QA follow-up to fold the four into one domain descriptor per operator; not in this row.
+Two slices. `_strategies/_date_shift.py` shrinks. The registry consolidation lands in S1 before either typed domain is admitted; S2 only adds the zoned-timestamp family rule to the same descriptor.
 
 ## 6. Placement
 
@@ -171,14 +170,16 @@ One arithmetic: `shift_typed_days` is the only code that adds calendar days to a
 - Seeded cases in the sentry's own test: one of each forbidden call in a scratch module; each must fail.
 - The mutation that must turn it red: put the `date + timedelta` loop back in `_shift_dates`.
 
-One key definition: `canonicalize_typed_array` must equal `[_canonicalize_source(v) for v in array.to_pylist()]`. For `TIMESTAMP_TZ` the key is built in four vector steps:
+One resident-domain mechanism: `_operator_registry.py` owns `ResidentTypeDomain`, the single `OperatorSpec.resident_type_domain` field, and its `admits(resident_type, params)` operation. The descriptor contains the existing default/positional/deterministic variants and each variant is one `ResidentTypeRule` made from an exact-type set plus an optional named family (`zoned_timestamp`); family evaluation is central, not an operator callback. This replaces, rather than supplements, `unified_resident_types`, `positional_resident_types`, and `deterministic_resident_types` at `_operator_registry.py:59-73`, the three derived mechanisms at `_unified_slice_resident_types.py:30-64`, and the selection chain at `_unified_slice_admission.py:513-521`. A registry guard asserts that every non-`group_key` operator has exactly one descriptor, the three old `OperatorSpec` fields no longer exist, all existing exact/positional/deterministic admissions are unchanged, and `date_shift` alone gains `date32` plus zoned timestamps. Mutations that must turn it red: restore any old field, bypass `admits` with a direct type check, or admit a naive timestamp.
 
-1. Convert to UTC and floor to whole seconds with `pc.floor_temporal(unit="second")`. Floor, not a truncating cast, so a pre-1970 value with a fraction gets the right second.
-2. Cast the floored value to `timestamp("s", "UTC")` and format it with `strftime("%Y-%m-%dT%H:%M:%S")`. At second unit `strftime` adds no fraction (probed).
-3. Compute the sub-second part as an integer in the source unit (value minus floored value). Append `.` plus 9 digits if the nanosecond part is non-zero, `.` plus 6 digits if only the microsecond part is non-zero, else nothing. This is Python `isoformat()` on a pandas `Timestamp`.
-4. Append `+00:00`.
+One key definition: for every timestamp that Python can represent, `canonicalize_typed_array` must equal `[_canonicalize_source(v) for v in array.to_pylist()]`; non-representable source rows take the guarantee-5 `format_error` exit before conversion to Python or key derivation. For `TIMESTAMP_TZ`, key construction never calls `floor_temporal` and proceeds as follows:
 
-T2 checks it with a property test (Hypothesis): dates over years 1 to 9999; timestamps over each unit and several zones, pre- and post-1970, with zero and non-zero micro and nano parts.
+1. View the UTC timestamp as its signed int64 count. For unit `s`, `ms`, `us`, or `ns`, compute `(whole_seconds, remainder) = divmod(count, units_per_second)` with checked integer quotient/remainder; Python/Euclidean division gives `0 <= remainder < units_per_second`, including negative fractional seconds, without subtracting a floored int64 value.
+2. Preflight `whole_seconds` against the inclusive UTC-second bounds for years 1 through 9999. Rows outside are marked failed and removed from all subsequent Arrow formatting/timezone operations. Format only safe whole seconds as `timestamp("s", "UTC")` with `strftime("%Y-%m-%dT%H:%M:%S")`.
+3. Append the fraction from `remainder`: 9 digits when a nanosecond remainder is not exactly microsecond precision, 6 digits for any other non-zero sub-second part (including millisecond values, as Python `datetime.isoformat()` emits), and nothing for zero. T2 pins the bytes against `_canonicalize_source` for every unit.
+4. Append `+00:00`. Separately, `shift_typed_days` first checks that the count has 24-hour offset headroom before `local_timestamp`; it checks `count + offset_days * units_per_day` through `count <= INT64_MAX - delta` / `count >= INT64_MIN - delta` before addition; and it checks target local seconds against the supported ISO-year bounds before `assume_timezone`. A failed row never reaches a timezone kernel or unchecked Arrow arithmetic.
+
+T2 checks representable values with a property test (Hypothesis): dates over years 1 to 9999; timestamps over each unit and several zones, pre- and post-1970, with zero and non-zero fractions. Its explicit boundary table also covers each unit's int64 minimum, minimum+1, maximum-1 and maximum; the negative fractional value `INT64_MIN + 1` for `ms`, `us`, and `ns`; and the nearest in-range values on both sides of the ISO-year preflight. Non-representable cells assert `format_error` plus source preservation and prove that the formatting/timezone kernels were not called for those cells.
 
 Overlap rule (S2), computed in Arrow: `e = assume_timezone(local, ambiguous="earliest")`, `l = assume_timezone(local, ambiguous="latest")`, both with `nonexistent="latest"`. Where `e == l` the time is not ambiguous. Where they differ, take the candidate whose UTC offset (`local - utc`) equals the source row's UTC offset; if neither does, take `e`. Each step is a vector operation; there is no per-row Python.
 
@@ -206,18 +207,19 @@ Smallest alternative considered: let native format typed values to text, call to
 ## 9. Acceptance tests (each fails before the change unless marked)
 
 - **T1 DATE identity.** A corpus of `date32` values covering years 1, 5, 99, 999, 1000, 1582, 1970, 2000, 9999, leap days, nulls, and offsets that cross 0001-01-01 and 9999-12-31. Before S1, the builder records today's oracle output for this corpus as a fixture. After S1, the oracle and the native kernel both equal the fixture for every in-range row (Arrow `equals` with type), and out-of-range rows are `format_error` with the source kept. Fail-before: the native half declines.
-- **T2 key bytes.** Property test: `canonicalize_typed_array` equals per-value `_canonicalize_source` for `date32` (S1) and zoned `timestamp` in `s`, `ms`, `us`, `ns` across UTC, `America/New_York`, `Europe/London`, `Australia/Lord_Howe`, pre- and post-1970, with zero and non-zero fractions (S2). Fail-before: the function does not exist.
+- **T2 key bytes and source preflight.** For usable rows, a property test asserts `canonicalize_typed_array` equals per-value `_canonicalize_source` for `date32` (S1) and zoned `timestamp` in `s`, `ms`, `us`, `ns` across UTC, `America/New_York`, `Europe/London`, `Australia/Lord_Howe`, pre- and post-1970, with zero and non-zero fractions (S2). A per-unit table supplies `INT64_MIN`, `INT64_MIN+1`, `INT64_MAX-1`, `INT64_MAX`; `INT64_MIN+1` is the negative-fraction underflow witness for `ms`, `us`, and `ns`; and cells immediately inside/outside both ISO-year bounds. It asserts exact keys for representable cells and `format_error` plus unchanged source for rejected cells on native and oracle routes. Spies assert rejected cells never enter formatting or timezone kernels. Fail-before: the function does not exist, and Arrow floor wraps the negative witnesses.
 - **T3 routes agree.** One config, `date32` column: 2,000 rows on the unified slice, 120,000 rows chunked, and a two-table FK job on the sequential route. Each output equals the oracle's on the same rows; route evidence names the native `date_shift`. A text column holding the same dates as ISO strings in the same namespace gets the same offsets. Fail-before: all three report `pandas_oracle`.
 - **T4 zoned corpus.** Every DST gap and overlap from 1970 to 2037 in the four zones above, shifted by offsets that land in and out of each: gap cells equal today's oracle output (B3, no change); overlap cells follow the Java rule (B2). The test counts the overlap cells where the old DST-flag rule differs and prints them; the PR reports the count. Fail-before: native declines.
 - **T5 unit and zone kept.** `timestamp[s, UTC]`, `timestamp[ms, Europe/London]`, `timestamp[us, America/New_York]`, `timestamp[ns, UTC]`: the output type equals the source type on the unified slice (2,000 rows; the cell that catches a frame overlay), chunked, sequential and oracle routes. Fail-before: the native routes decline.
-- **T6 int64 overflow.** `timestamp[ns, UTC]` values near 2262-04-11 with a positive window: shifted values past the range are `format_error` with the source kept, on native and oracle. Fail-before: the oracle raises.
+- **T6 per-unit checked shift boundaries.** For each of `timestamp[s]`, `[ms]`, `[us]`, and `[ns]`, exercise positive and negative values at `INT64_MIN`, `INT64_MIN+1`, `INT64_MAX-1`, and `INT64_MAX` with zero, positive, and negative day windows. Include the negative fractional-second underflow witnesses for `ms`, `us`, and `ns`. Rows that cannot be keyed or shifted are `format_error` with the source kept on native and oracle; safe near-boundary rows equal the integer quotient/remainder oracle and retain the exact unit/zone. Spies assert no failed row reaches floor (which production does not use), formatting, timezone conversion, or addition. Fail-before: the oracle raises or cannot convert extremes, and Arrow floor wraps negative witnesses.
 - **T7 errors carry no values.** Row errors and the two new decline codes contain no date text and no source value.
 - **T8 date32 beyond Python range (B4).** A `date32` value at year 10000: native keeps it with a `format_error`; the pandas route fails converting it (recorded, marked).
 - **T9 declines.** `group_by`, `when:`, `preserve_values`, `date64` resident under a `DATE` shape: each declines with its code from section 3 and runs on the oracle with today's output (control for the oracle half).
 - **T10 non-date cells on the oracle.** A `DATE`-shaped object column holding a `date`, a `datetime`, a string `"x"`, an int and a null: the `date` and the `datetime` (by its date) shift; `"x"` and the int are `format_error` row errors that keep the source; the null stays null. Equal to today's oracle output for the same column. Control: passes before and after.
+- **T11 one resident-domain descriptor.** In existing `tests/native/test_operator_registry.py` and `tests/sentry/test_operator_registry_sentry.py`, enumerate every operator and the default, positional, and deterministic parameter modes. Assert the new descriptor admits exactly the pre-change resident types for every existing cell, with only `date_shift/date32` added in S1 and zoned timestamps added in S2; naive timestamps and all other temporal types decline. Assert `OperatorSpec` has none of the three old fields and `_unified_slice_admission.py` contains one descriptor admission call rather than route-specific type tables. Mutations restoring an old field, a direct `date_shift` predicate, or a naive-timestamp admission turn it red.
 - **S sentry.** `test_date_shift_one_arithmetic.py` passes and fails on each seeded case.
 
-Mutations (record the head they ran on): off-by-one on the upper date bound (T1 red); key on the raw int32 day number (T2, T3 red); truncating cast in place of `floor_temporal` (T2 pre-1970 cells red); overlap rule replaced by plain `earliest` (T4 red on overlap cells where the source was standard time).
+Mutations (record the head they ran on): off-by-one on the upper date bound (T1 red); key on the raw int32 day number (T2, T3 red); replace Euclidean quotient/remainder with truncation toward zero (T2 negative-fraction cells red); delete the preflight before an Arrow floor/format/timezone/add operation (T2 or T6 red); overlap rule replaced by plain `earliest` (T4 red on overlap cells where the source was standard time).
 
 Performance evidence (performance.md): 1,000,000-row `date32` and `timestamp[us, UTC]` columns, oracle before and native after, three runs each on the Dell node through `vm-run`; record wall time, peak RSS, and the split of key formatting against HMAC. Numbers go in the PR bodies.
 
@@ -227,12 +229,12 @@ Performance evidence (performance.md): 1,000,000-row `date32` and `timestamp[us,
 - S1 fragment first line: `Breaking: date_shift on a date column runs natively; a date outside years 1 to 9999 is a row error that keeps the source instead of failing the job.`
 - S2 fragment first line: `Breaking: date_shift on a zoned timestamp runs natively, and an ambiguous local time after the shift keeps the source UTC offset when it can (text and typed sources).`
 - The `_chunked_schema_rule.py` statement "date_shift output is always `string`" (line 18) becomes "text sources give `string`; typed sources keep their type".
-- Offsets and key bytes: unchanged for every row (T1, T2). `SEED_PROTOCOL_VERSION` is not touched. Plan digest: the params gain `shape`, which is derived from the plan, not serialized config; the builder confirms the plan digest does not move.
+- Offsets and key bytes: unchanged for every usable row (T1, T2); newly rejected extreme rows previously failed the job and now have no key. `SEED_PROTOCOL_VERSION` is not touched. Plan digest: the params gain `shape`, which is derived from the plan, not serialized config; the builder confirms the plan digest does not move.
 
 ## 11. Pre-mortem
 
 - `strftime` zero-pads years below 1000 on Linux (probed). T2 runs on the Mac node too; if it fails there, the key builds the year with `pc.utf8_lpad` over the integer year.
-- `pc.local_timestamp` and `assume_timezone` behave differently across pyarrow versions (the floor is `pyarrow>=14`). The builder runs T2 and T4 on the lowest pinned pyarrow in CI as well as the current one.
+- `pc.local_timestamp`, `assume_timezone`, and `strftime` can behave differently across pyarrow versions. The builder runs T2, T4, and T6 on the lowest pinned pyarrow in CI as well as the current one.
 - The oracle change (B2) moves output for some rows already masked. Pre-V1, allowed by the owner direction; named in the Breaking line.
 - The sequential route has its own date_shift seam (called only when shape is None today). The builder confirms the sequential native op reads the same config rejection, so a typed column is not admitted on one route and declined on another; T3 covers it.
 - UF-DOMAIN S1 is not merged when S1 here starts. This plan does not start before it; the `arrow_columns` input is a hard dependency.
@@ -240,3 +242,7 @@ Performance evidence (performance.md): 1,000,000-row `date32` and `timestamp[us,
 ## 12. Open questions for the owner
 
 - **Q1.** The B2 overlap rule changes oracle output where a zone's base offset changed between the source and target dates. Recommended: accept (one rule on both routes, vectorized). T4 reports the count of changed cells before merge.
+
+## Deferred (V2-LOG)
+
+- **V2-LOG — sentry completeness.** The one-arithmetic AST sentry scans `execution/**/*.py`, so it catches the realistic bypass of restoring arithmetic in `_strategies/_date_shift.py` (`origin/main` lines 358-405), but it does not scan `transforms/`, where the approved `shift_typed_days` choke point lives (`transforms/date_shift.py:1-10`). Extending the scanner to distinguish the one allowed transform function from a second transform implementation is completeness hardening for V2; it does not change the V1 guard or verdict.
