@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.declared_casting._boundary import open_cast_run
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.execution import (
@@ -236,6 +237,7 @@ def _run_admitted(
                     expected=static.source_facts.get(name),
                     preresolved=carrier if carrier and carrier.table == name else None,
                     cast_run=cast_run,
+                    sources=NO_SOURCES,
                 )
             )
             mask_outputs.update(outputs)

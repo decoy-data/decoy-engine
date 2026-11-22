@@ -14,6 +14,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution.native._chunked_entry import aggregate_chunked_route_evidence
 from decoy_engine.execution.native._chunked_evidence import plan_column_backends
@@ -201,7 +202,12 @@ def test_the_evidence_planner_plans_arrow_python_for_text_mask() -> None:
     config = make_config([tm_col(), passthrough("p")])
     profile = first_chunk_profile(source(CORPUS), table=TABLE, engine_version=ENGINE_VERSION)
     plans = plan_column_backends(
-        config, profile, table=TABLE, engine_version=ENGINE_VERSION, registry=get_default_registry()
+        config,
+        profile,
+        table=TABLE,
+        engine_version=ENGINE_VERSION,
+        registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert {p.column: p.planned_backend for p in plans}["s"] == "arrow_python"
 

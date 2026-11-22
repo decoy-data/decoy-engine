@@ -367,25 +367,47 @@ def _uses_ner(entry: dict[str, Any]) -> bool:
     return "ner_model" in entry or "ner_entities" in entry
 
 
-def _example_entries() -> list[dict[str, Any]]:
-    """Every wizard example entry the config validator accepts on this machine.
+def _wizard_entries(*, needs_declaration: bool) -> list[dict[str, Any]]:
+    """Every wizard example entry the config validator accepts on this machine, split by whether
+    the strategy needs an F06 declaration on a text column (`cast_declared`, E3).
 
     An entry that names an NER model validates only where spaCy and the model are installed (the
-    validator reports `ner_spacy_not_installed` otherwise), so the property draws those only
-    there. The two NER tests below pin both outcomes.
+    validator reports `ner_spacy_not_installed` otherwise), so these draw those only there. The
+    two NER tests below pin both outcomes.
     """
     rows = []
     for info in strategy_catalog():
-        if info.offer_in_wizard:
-            shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(info.name)
-            if shaped is not None and shaped.cast_declared:
-                # A wizard entry has no F06 cast, which these need on a csv text column (E3). The
-                # starter and the wizard learn that in E5; until then they are not drawn here.
-                continue
+        shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(info.name)
+        declared = shaped is not None and shaped.cast_declared
+        if info.offer_in_wizard and declared == needs_declaration:
             entry = {"strategy": info.name, **info.example_options}
             if not _uses_ner(entry) or _ner_runnable(entry):
                 rows.append(entry)
     return rows
+
+
+def _example_entries() -> list[dict[str, Any]]:
+    """The wizard entries the starter review property draws: those that need no declaration."""
+    return _wizard_entries(needs_declaration=False)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="E5 teaches the starter F06 declarations (COLUMN-SHAPE-RULE plan, E5)",
+)
+@pytest.mark.parametrize(
+    "entry", _wizard_entries(needs_declaration=True), ids=lambda e: e["strategy"]
+)
+def test_a_wizard_entry_that_needs_a_declaration_applies(
+    starter: StarterConfig, entry: dict[str, Any]
+) -> None:
+    """A wizard entry carries no `logical_type`, so a numeric strategy on the starter's text
+    column is refused until E5 gives the entry a declaration. Strict: when E5 lands the entry
+    applies, this passes, and the marker must come off (the entry then joins the property)."""
+    result = apply_review(starter, [ReviewDecision("customers", "email", V.EDIT, entry=entry)])
+    parse_pipeline_config(result.config)
+    run_config_only_checks(swap_placeholder_namespaces(result.config)[0])
+    check_required_strategy_settings(result.config, sources=NO_SOURCES)
 
 
 @needs_ner

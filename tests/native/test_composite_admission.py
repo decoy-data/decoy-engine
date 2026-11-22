@@ -18,6 +18,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_carry import passthrough_columns, plan_carry
@@ -742,7 +743,7 @@ def test_registry_is_a_required_keyword() -> None:
     from decoy_engine.execution.native._chunked_evidence import plan_column_backends
 
     with pytest.raises(TypeError):
-        plan_column_backends({}, None, table=TABLE, engine_version="v")  # type: ignore[call-arg]
+        plan_column_backends({}, None, table=TABLE, engine_version="v", siblings=NO_SOURCES)  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         _pipeline_auto_chunk._legacy_route_evidence(  # type: ignore[call-arg]
             config,

@@ -10,9 +10,7 @@ loaded. This module imports ``pyarrow`` and ``_arrow_types`` only.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterator, Mapping
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -34,7 +32,6 @@ __all__ = [
     "declared_shape",
     "is_bounded_decimal",
     "is_nested_type",
-    "sibling_tables",
     "source_facts_of",
     "source_format_for",
     "table_source_facts",
@@ -94,25 +91,10 @@ def build_source_facts(
     )
 
 
-# The tables a job holds beside the one a route is masking. A compile reads the whole config, so a
-# per-table route must still shape the others by their own schemas, not by their file descriptors.
-_SIBLINGS: ContextVar[SourceFacts] = ContextVar("decoy_sibling_sources", default=NO_SOURCES)
-
-
-@contextmanager
-def sibling_tables(facts: SourceFacts) -> Iterator[None]:
-    """Name the job's other tables for every ``table_source_facts`` call inside the block."""
-    token = _SIBLINGS.set(facts)
-    try:
-        yield
-    finally:
-        _SIBLINGS.reset(token)
-
-
-def table_source_facts(table: str, schema: pa.Schema | None) -> SourceFacts:
-    """The facts for the one table a route is masking, beside the tables named by
-    ``sibling_tables``."""
-    own, siblings = build_source_facts(caller={table: schema}), _SIBLINGS.get()
+def table_source_facts(table: str, schema: pa.Schema | None, siblings: SourceFacts) -> SourceFacts:
+    """The job's ``siblings`` with the one table a route is masking set to its own schema: a
+    per-table route still shapes the other tables by their schemas, not by their descriptors."""
+    own = build_source_facts(caller={table: schema})
     return SourceFacts(
         schemas={**siblings.schemas, **own.schemas}, resident=siblings.resident | own.resident
     )

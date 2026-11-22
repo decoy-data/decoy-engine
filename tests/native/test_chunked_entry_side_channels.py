@@ -20,7 +20,6 @@ from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_oracle import _mask_pipeline_chunked
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.execution.native._dispatch import NativeRouteEvidence
-from decoy_engine.execution.native.chunked._core import mask_chunked as _run_mask_chunked
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.vault import collect_vault_entries
 from tests._declared_schema import declared_schema
@@ -49,6 +48,7 @@ from tests.native._chunked_entry_support import (
     truncate,
     vault_key,
 )
+from tests.native._chunked_entry_support import mask_chunked_in_job as _run_mask_chunked
 from tests.unit.execution.test_chunked_fk_gate_kills import _hash_config as _fk_config
 from tests.unit.vault._support import vault_writer
 
@@ -627,18 +627,19 @@ class _UnconvertibleAdapter(PandasExecutionAdapter):
         return dataclasses.replace(result, outputs={TABLE: out})
 
 
+# `ISO8601` is a pandas-only format the native lane declines, so the table stays on the oracle leg
+# that appends the failing chunk unnormalized. (`bucketize` over text needs an F06 declaration,
+# and a declared bad value is a hard error rather than a row error.)
+_ORACLE_ONLY_DATE_SHIFT: dict[str, Any] = {
+    "name": "age",
+    "strategy": "date_shift",
+    "namespace": "age_ns",
+    "provider_config": {"min_days": 30, "max_days": 60, "date_format": "ISO8601"},
+}
+
+
 def _row_error_setup() -> tuple[dict[str, Any], list[pa.Table]]:
-    config = make_config(
-        [
-            redact("s"),
-            {
-                "name": "age",
-                "strategy": "date_shift",
-                "namespace": "age_ns",
-                "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
-            },
-        ]
-    )
+    config = make_config([redact("s"), _ORACLE_ONLY_DATE_SHIFT])
     good = pa.table(
         {
             "s": pa.array(["a", "b"], pa.string()),
@@ -679,17 +680,7 @@ def test_unconvertible_column_maps_to_chunked_schema_mismatch() -> None:
 
 
 def test_row_error_chunk_with_an_unconvertible_column_raises_row_errors_not_mismatch() -> None:
-    config = make_config(
-        [
-            redact("s"),
-            {
-                "name": "age",
-                "strategy": "date_shift",
-                "namespace": "age_ns",
-                "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
-            },
-        ]
-    )
+    config = make_config([redact("s"), _ORACLE_ONLY_DATE_SHIFT])
     bad = pa.table(
         {
             "s": pa.array(["c", "d"], pa.string()),

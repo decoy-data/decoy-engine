@@ -32,7 +32,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons as reason_codes
 from decoy_engine._nested_json import nested_children
-from decoy_engine.contracts.column_shape import build_source_facts, sibling_tables
+from decoy_engine.contracts.column_shape import build_source_facts
 from decoy_engine.execution import _chunked_input, _pipeline_auto_chunk
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import provider_config_to_dict
@@ -381,23 +381,23 @@ def run_multi_table_split(
             }
         )
         # The dispatched table compiles the whole config, so it needs the siblings' schemas.
-        with sibling_tables(siblings):
-            out, unit_timings, unit_ms, unit_warnings, unit_metrics = (
-                _pipeline_auto_chunk.run_auto_chunk(
-                    config,
-                    resident_sources[table],
-                    table=table,
-                    engine_version=engine_version,
-                    registry=registry,
-                    adapter=adapter,
-                    vault_writer=None,
-                    chunk_size_rows=chunk_size_rows,
-                    key_provider=key_provider,
-                    native_threads=native_threads,
-                    dispatcher_enabled=True,
-                    **lane_extra,
-                )
+        out, unit_timings, unit_ms, unit_warnings, unit_metrics = (
+            _pipeline_auto_chunk.run_auto_chunk(
+                config,
+                resident_sources[table],
+                table=table,
+                engine_version=engine_version,
+                registry=registry,
+                adapter=adapter,
+                vault_writer=None,
+                chunk_size_rows=chunk_size_rows,
+                key_provider=key_provider,
+                native_threads=native_threads,
+                dispatcher_enabled=True,
+                sources=siblings,
+                **lane_extra,
             )
+        )
         dispatched_names.append(table)
         if sink is None:
             dispatched_out[table] = out[table]

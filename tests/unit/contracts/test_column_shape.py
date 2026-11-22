@@ -126,19 +126,12 @@ def test_vocabulary_is_closed() -> None:
     }  # fmt: skip
 
 
-def test_a_sibling_table_keeps_its_own_schema_inside_the_scope() -> None:
-    from decoy_engine.contracts.column_shape import (
-        NO_SOURCES,
-        sibling_tables,
-        source_facts_of,
-        table_source_facts,
-    )
+def test_table_source_facts_sets_one_table_beside_the_given_siblings() -> None:
+    from decoy_engine.contracts.column_shape import NO_SOURCES, source_facts_of, table_source_facts
 
     siblings = source_facts_of({"other": pa.table({"n": pa.array([1], pa.int64())})})
-    assert table_source_facts("mine", None).schemas == {}
-    with sibling_tables(siblings):
-        facts = table_source_facts("mine", pa.schema([("a", pa.string())]))
-        assert set(facts.schemas) == {"other", "mine"} and facts.resident == {"other", "mine"}
-    assert table_source_facts("mine", None).resident == {"mine"}
-    with sibling_tables(NO_SOURCES):
-        assert table_source_facts("mine", None).schemas == {}
+    facts = table_source_facts("mine", pa.schema([("a", pa.string())]), siblings)
+    assert set(facts.schemas) == {"other", "mine"} and facts.resident == {"other", "mine"}
+    assert table_source_facts("mine", None, siblings).resident == {"other", "mine"}
+    assert table_source_facts("mine", None, NO_SOURCES).schemas == {}
+    assert siblings.resident == {"other"}  # the passed facts are not changed

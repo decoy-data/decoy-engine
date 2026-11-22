@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from ..contracts.column_shape import source_format_for, table_source_facts
+from ..contracts.column_shape import NO_SOURCES, SourceFacts, source_format_for, table_source_facts
 from . import _chunked as _chunked_mod
 from . import _chunked_bucket_perturb as bucket_perturb_gate
 from . import _chunked_code_set as code_set_gate
@@ -106,6 +106,7 @@ def _oracle_preflight(
     secret_registry: Any = None,
     secret_cache_policy: Any = None,
     source_schema: pa.Schema | None = None,
+    sources: SourceFacts,
 ) -> OraclePreflightState:
     """Admit the keyed-mask secret, THEN run the eager half of the oracle.
 
@@ -144,6 +145,7 @@ def _oracle_preflight(
             warm_pools=warm_pools,
             carry_passthrough=carry_passthrough,
             source_schema=source_schema,
+            sources=sources,
         )
     except BaseException:
         admitted.close()
@@ -184,6 +186,7 @@ def _oracle_preflight_admitted(
     warm_pools: bool,
     carry_passthrough: bool,
     source_schema: pa.Schema | None = None,
+    sources: SourceFacts,
 ) -> OraclePreflightState:
     """The eager half of the oracle: every check that runs before a chunk masks.
 
@@ -208,16 +211,13 @@ def _oracle_preflight_admitted(
     chunk_iter = iter(chunks)
     first = next(chunk_iter, None)
     if first is not None:
-        # Duplicate field names first: every check below looks fields up by name. On later
-        # chunks the declaration check (innermost wrap) runs before the duplicate-name refusal.
+        # Duplicate field names first: every check below looks fields up by name.
         _guards.refuse_duplicate_field_names(table, first.schema.names)
-        # Every column must be declared (CONFIG-EXPLICIT E2d): the first chunk now, each later
-        # chunk lazily before it masks. Nothing is profiled, compiled or masked before this.
+        # Every column must be declared (CONFIG-EXPLICIT E2d): the first chunk now, later ones lazily.
         chunk_iter = declared.checked_stream(table, first, chunk_iter)
         chunk_iter = _guards.refused_per_chunk(chunk_iter, table=table)
-        # Before the carry plan, the profile and the compile: pandas would consume the
-        # stored index field, so a config naming it could not resolve (or raise a raw
-        # KeyError) after the work above had started.
+        # Before the carry plan, profile and compile: pandas would consume the stored index
+        # field, so a config naming it could not resolve (or raise a raw KeyError) later.
         reject_config_references_stored_index(config, table, first.schema, resolved_registry)
         from decoy_engine.execution._chunked_when_guard import plan_positional_when_guard
         from decoy_engine.execution.native._chunk_schema import stored_index_guard
@@ -225,9 +225,8 @@ def _oracle_preflight_admitted(
         # A stored-index change after chunk 0 is schema drift on both public entries.
         chunk_iter = stored_index_guard(first, chunk_iter, table=table)
         # A positional draw under `when:` runs chunked only with string target and references;
-        # the config veto cannot see Arrow types, so the first chunk is checked here and every
-        # later chunk through the wrap (C8-iii-d-2). Shared by both entries: the native route
-        # wraps `validated_rest` outside this, so a positional drift still raises here first.
+        # the config veto cannot see Arrow types, so the first chunk is checked here and later
+        # ones through the wrap (C8-iii-d-2). Shared by both entries.
         when_guard = plan_positional_when_guard(config, table)
         if when_guard is not None:
             when_guard.check_schema(first.schema, table=table)
@@ -235,7 +234,7 @@ def _oracle_preflight_admitted(
     # A keyed job with zero rows and a bad mask secret must still fail the fail-closed gate, so
     # the profile/plan/gate sequence runs for an empty source too; its return comes after.
     carry = None
-    facts = table_source_facts(table, first.schema if first is not None else source_schema)
+    facts = table_source_facts(table, first.schema if first is not None else source_schema, sources)
     fmt = source_format_for(config.get("sources"), table, resident=facts.resident)
     seen: dict[str, Any] = {"table": table, "engine_version": engine_version, "source_format": fmt}
     if first is None:
@@ -583,6 +582,7 @@ def _mask_declared(
         base_row_offset=base_row_offset,
         pool_cache=None,
         source_schema=source_schema,
+        sources=NO_SOURCES,
     )
     if state.first is None:
         # Admission cleared (or the plan is unkeyed); there is genuinely nothing to mask.
