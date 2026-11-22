@@ -263,6 +263,8 @@ list and points here for the pairs. A rename takes a new row in the release that
 | `CUSTOM_PROVIDERS_DIR` | `DECOY_CUSTOM_PROVIDERS_DIR` | config key | 0.24.0 | Environment variable, no alias. |
 <!-- renames-table:end -->
 
+F22 (atomic and idempotent publication, row 59) adds no public renames. The owner did not approve its four names (`CommitUncertain`, `LockUnavailable`, `LockTimeout`, `LeafTooLarge`) on 2026-11-12, so they stay internal `decoy_engine.fileaccess` classes, and a consumer sees them only as the reason codes `decoy/publication_commit_uncertain`, `decoy/publication_lock_unavailable`, `decoy/publication_lock_timeout` and `decoy/publication_failed`.
+
 **Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
 without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both
 compile entry points and before any source read. The engine no longer detects the format from a sample. A top-level
