@@ -11,11 +11,22 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import functools
+import io
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
+from decoy_engine import run_mask_pipeline_chunked
+from decoy_engine.execution import run_pipeline
+from decoy_engine.execution._fk_keys import _rebuilds_with_source_type
 from tests.native._b8_support import (
     Run,
     assert_same_as_oracle,
@@ -27,10 +38,18 @@ from tests.native._chunked_entry_support import (
     NEEDS_COMPANION,
     faker_col,
     hash_col,
+    key_provider,
     redact,
     truncate,
 )
 from tests.native._rev9_type_catalogue import CATALOGUE
+from tests.unit.execution._auto_chunk_support import (
+    TABLE,
+    make_cfg,
+    pass_col,
+    redact_col,
+    write_source,
+)
 
 _PARAMS = [(name, null) for name in CATALOGUE for null in (False, True)]
 _IDS = [f"{name}-{'null' if null else 'nonull'}" for name, null in _PARAMS]
@@ -256,3 +275,166 @@ def test_many_unusual_columns_in_one_table() -> None:
         for name in unconfigured:
             assert same_field(out.schema.field(name), src.schema.field(name)), name
             assert identical(out.select([name]), src.select([name])), name
+
+
+# ---------------------------------------------------------------------------
+# CHUNKED-STRUCT: untouched nested columns keep their source type on every route that
+# rebuilds output from pandas (docs/plans/2026-11-21-chunked-struct.md, AT-2 and AT-4).
+# ---------------------------------------------------------------------------
+
+_NESTED = ("addr", "tags", "attrs")
+_ADDR = pa.struct([("city", pa.string()), ("zip", pa.int32())])
+
+
+def _nested_table(
+    nulls: set[int] | None = None, rows: int = 3, *, email: bool = True, all_null: bool = False
+) -> pa.Table:
+    """Fixture F: rows 0 and 1 hold cells, the rest are null in every nested column."""
+    nulls = set(range(rows)) if all_null else (nulls if nulls is not None else {2})
+    cols: dict[str, pa.Array] = {}
+    if email:
+        cols["email"] = pa.array([f"u{i}@x.test" for i in range(rows)], pa.string())
+    cols["addr"] = pa.array(
+        [None if i in nulls else {"city": f"c{i}", "zip": i} for i in range(rows)], _ADDR
+    )
+    cols["tags"] = pa.array(
+        [None if i in nulls else [f"t{i}", "x"] for i in range(rows)], pa.list_(pa.string())
+    )
+    cols["attrs"] = pa.array(
+        [None if i in nulls else [("k", f"v{i}")] for i in range(rows)],
+        pa.map_(pa.string(), pa.string()),
+    )
+    return pa.table(cols)
+
+
+def _run(table: pa.Table, call: Callable[[dict[str, Any]], pa.Table]) -> pa.Table:
+    """`call` gets a config whose source file holds `table` (the profile reads the file)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = write_source(table, Path(tmp) / "t.parquet")
+        cols = [redact_col(n) if n == "email" else pass_col(n) for n in table.column_names]
+        return call(make_cfg(cols, path=path))
+
+
+def _resident(table: pa.Table) -> pa.Table:
+    return _run(
+        table,
+        lambda cfg: run_pipeline(
+            cfg, sources={TABLE: table}, engine_version="chunked-struct-test", auto_chunk=False
+        ).outputs[TABLE],
+    )
+
+
+def _oracle(table: pa.Table, chunk: int) -> pa.Table:
+    chunks = [table.slice(i, chunk) for i in range(0, table.num_rows, chunk)]
+    return _run(
+        table,
+        lambda cfg: pa.concat_tables(
+            list(
+                run_mask_pipeline_chunked(
+                    cfg,
+                    chunks,
+                    table=TABLE,
+                    source_schema=table.schema,
+                    engine_version="chunked-struct-test",
+                    key_provider=key_provider(),
+                )
+            )
+        ),
+    )
+
+
+def _assert_nested_exact(out: pa.Table, src: pa.Table) -> None:
+    names = [n for n in src.column_names if n != "email"]
+    assert out.num_rows == src.num_rows
+    assert out.select(names).schema == src.select(names).schema
+    assert out.select(names).equals(src.select(names))
+
+
+@pytest.mark.parametrize("nulls", [{2}, {0}, {0, 1, 2}])
+def test_oracle_keeps_nested_types_equal_to_resident(nulls: set[int]) -> None:
+    """AT-2a and AT-2b: chunk 2 leaves a one-row final chunk; the null row also goes first."""
+    src = _nested_table(nulls)
+    out = _oracle(src, 2)
+    _assert_nested_exact(out, src)
+    assert out.equals(_resident(src))
+
+
+@settings(derandomize=True, max_examples=25, deadline=None)
+@given(data=st.data())
+def test_oracle_nested_types_property(data: st.DataObject) -> None:
+    """AT-2c: row count, chunk size and null positions are drawn."""
+    rows = data.draw(st.integers(1, 8))
+    chunk = data.draw(st.integers(1, rows))
+    nulls = {i for i in range(rows) if data.draw(st.booleans())}
+    src = _nested_table(nulls, rows)
+    out = _oracle(src, chunk)
+    _assert_nested_exact(out, src)
+    assert out.equals(_resident(src))
+
+
+@pytest.mark.parametrize("name", ["addr", "tags", "attrs"])
+def test_oracle_all_nested_table_keeps_rows_and_types(name: str) -> None:
+    """AT-2e: no scalar column, so the rebuild has nothing for from_pandas to count rows by."""
+    src = _nested_table(email=False)
+    for table in (src, src.select([name])):
+        out = _oracle(table, 2)
+        assert out.num_rows == 3
+        _assert_nested_exact(out, table)
+
+
+@pytest.mark.parametrize("all_null", [False, True])
+def test_resident_keeps_nested_types(all_null: bool) -> None:
+    """AT-4a: int32 struct field kept; with every cell null the types do not become `null`."""
+    src = _nested_table(all_null=all_null)
+    out = _resident(src)
+    _assert_nested_exact(out, src)
+    assert out.schema.field("addr").type == _ADDR
+
+
+@pytest.mark.parametrize("columns", [("attrs",), _NESTED])
+def test_resident_all_nested_table_keeps_rows(columns: tuple[str, ...]) -> None:
+    """AT-4b: a map-only table raised `ArrowInvalid` (length 0) on main."""
+    src = _nested_table(email=False).select(list(columns))
+    out = _resident(src)
+    assert out.num_rows == 3
+    _assert_nested_exact(out, src)
+
+
+def _storable(arr: pa.Array) -> bool:
+    try:
+        pq.write_table(pa.table({"x": arr}), io.BytesIO())
+    except pa.ArrowNotImplementedError:
+        return False
+    return True
+
+
+_NESTED_PARAMS = [(n, null) for n, null in _PARAMS if pa.types.is_nested(CATALOGUE[n](False).type)]
+
+
+@pytest.mark.parametrize(
+    ("name", "null"),
+    _NESTED_PARAMS,
+    ids=[f"{n}-{'null' if z else 'nonull'}" for n, z in _NESTED_PARAMS],
+)
+def test_catalogue_nested_types_are_placed(name: str, null: bool) -> None:
+    """AT-2d: a nested type Parquet can store is rebuilt exactly; a type it cannot store is
+    outside the predicate. A fixed-size list with a null cell is a type Parquet stores but this
+    cell it cannot: pyarrow's writer raises `ArrowNotImplementedError` before any engine code
+    runs (plan section 4), so a source file cannot hold it."""
+    arr = CATALOGUE[name](null)
+    if not _storable(CATALOGUE[name](False)):
+        assert not _rebuilds_with_source_type(arr.type)
+        return
+    assert _rebuilds_with_source_type(arr.type)
+    if not _storable(arr):
+        with pytest.raises(pa.ArrowNotImplementedError):
+            pq.write_table(pa.table({"x": arr}), io.BytesIO())
+        return
+    src = pa.table({"email": pa.array(["a", "b", "c", "d", "e"]), "x": arr})
+    resident = functools.partial(_resident, src)
+    oracle = functools.partial(_oracle, src, 2)
+
+    for run in (resident, oracle):
+        out = run()
+        assert out.schema.field("x").type == src.schema.field("x").type
+        assert out.column("x").to_pylist() == src.column("x").to_pylist()

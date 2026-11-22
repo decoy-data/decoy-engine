@@ -151,7 +151,7 @@ from decoy_engine.execution._chunked_carry import untouched_columns
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
 from decoy_engine.execution._fk_keys import (
     lossless_int_columns,
-    table_from_pandas_keeping_maps,
+    table_from_pandas_keeping_source_types,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._guards import run_chunk_ingest_guards
@@ -523,7 +523,7 @@ def run_sequential(
                 from decoy_engine.execution._faker_degenerate_pin import pin_degenerate_to_string
 
                 out = pin_degenerate_to_string(
-                    table_from_pandas_keeping_maps(
+                    table_from_pandas_keeping_source_types(
                         frames[table],
                         src_schema,
                         untouched_columns(
