@@ -119,7 +119,7 @@ record reads unchanged. A sample stamps `quality_metrics["subset"]["sample"]`. `
 **Pre-GA additive field with NATIVE-MISSING-WARN (2026-11-21).** `ExecutionResult.native_fallback_code: str | None`
 (default `None`, hidden from `repr`, not compared) is `native_companion_missing` when the plan needs a compiled kernel
 and none that it needs is available. It is never written to a document. The reason `warning/native_companion_missing`
-is registered unreleased.
+ships in 0.28.3 (registry 1.33.0).
 
 **Pre-GA correction (main health, 2026-10-31).** `RESERVED_NAMES` of the `when` closed grammar gains `type`
 (additive to the list, breaking for a config whose `when:` references a column named `type`, which now fails

@@ -40,7 +40,7 @@ UNCOVERED_PII = _d(
     severity=Severity.WARNING,
     outcome=Outcome.FINDINGS,
     retry=RetryClass.NEVER,
-    since=UNRELEASED,
+    since="1.33.0",
 )
 UNCOVERED_PII_BLOCKED = _d(
     "uncovered_pii_blocked",
@@ -50,7 +50,7 @@ UNCOVERED_PII_BLOCKED = _d(
     severity=Severity.ERROR,
     outcome=Outcome.FINDINGS,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.33.0",
 )
 # SCAN-CHECKS (planned, row 32 DRIFT): `scan_baseline.on_drift` will rescan the sources at run
 # start and compare them with the baseline; no run reads it yet (`warning.drift_not_checked`). `warn` reports and the run continues; `fail` stops the run before any masking read.
