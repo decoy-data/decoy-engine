@@ -192,10 +192,9 @@ class _LocalStageDir:
 
     @_finished.setter
     def _finished(self, ended: bool) -> None:
+        """A stage only ever ends; assigning `True` also closes its read-only views."""
         if ended:
             self._life.end()
-        else:
-            self._life.finished = False
 
     def _check(self, *components: str) -> None:
         """Refuse a name that would leave the stage. Length and NUL are left to the operating

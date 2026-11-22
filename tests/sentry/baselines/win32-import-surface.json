@@ -24,7 +24,7 @@
   },
   "decoy_engine/fileaccess/_durable.py::dir-fd": {
    "reason": "EW1 inventory, owner EW2: directory-descriptor fsync walk, POSIX arm lands in EW2",
-   "max": 10
+   "max": 6
   },
   "decoy_engine/fileaccess/_durable.py::geteuid": {
    "reason": "EW1 inventory, owner EW2: the chain owner walk is skipped on win32 by EW2",

@@ -21,6 +21,7 @@ from decoy_engine._canonical._json import (
     strict_json_write,
 )
 from decoy_engine._canonical._strict_spec import (
+    UNIT_PATH_MAX_DEPTH,
     CountSpec,
     ExactSpec,
     ListSpec,
@@ -45,6 +46,7 @@ __all__ = [
     "MASK_MAX_DEPTH",
     "PROFILE_JSON_TOKENS",
     "STRICT_JSON_TOKENS",
+    "UNIT_PATH_MAX_DEPTH",
     "CanonicalJsonError",
     "CanonicalStringError",
     "CountSpec",

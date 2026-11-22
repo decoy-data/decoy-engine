@@ -63,6 +63,12 @@ def _leaf_flags() -> int:
     return _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.CLOEXEC | _osflags.NONBLOCK
 
 
+def _open_leaf_at(dir_fd: int, name: str) -> int:
+    """The one read-only open of `name` beneath the held `dir_fd`: never through a link, never
+    blocking on a FIFO. Every caller passes a name it already validated."""
+    return _call(os.open, name, _leaf_flags(), dir_fd=dir_fd)
+
+
 def _sync(dir_fd: int) -> None:
     """Best-effort fsync of the parent directory so a file rename survives a crash; a
     failure here never fails an output that has already been published."""
@@ -83,7 +89,7 @@ def _sync_tree(dir_fd: int) -> None:
             finally:
                 _close(child_fd)
         elif entry.is_file(follow_symlinks=False):
-            child_fd = _call(os.open, entry.name, _leaf_flags(), dir_fd=dir_fd)
+            child_fd = _open_leaf_at(dir_fd, entry.name)
             try:
                 _call(os.fsync, child_fd)
             finally:
@@ -93,7 +99,7 @@ def _sync_tree(dir_fd: int) -> None:
 
 def _sync_leaf_at(parent_fd: int, leaf: str) -> None:
     """fsync a bound leaf: its whole tree when it is a directory, else the file."""
-    leaf_fd = _call(os.open, leaf, _leaf_flags(), dir_fd=parent_fd)
+    leaf_fd = _open_leaf_at(parent_fd, leaf)
     try:
         if stat.S_ISDIR(os.fstat(leaf_fd).st_mode):
             _sync_tree(leaf_fd)
@@ -166,7 +172,7 @@ def _adopt_at(parent_fd: int, leaf: str, limit: int) -> bytes:
     """Read the regular file `leaf` beneath `parent_fd` (opened read-only, so a 0400 file opens,
     and never through a link) and fsync that same descriptor before returning its bytes, so the
     bytes handed back are the bytes made durable. Over `limit` raises `LeafTooLarge`."""
-    leaf_fd = _call(os.open, leaf, _leaf_flags(), dir_fd=parent_fd)
+    leaf_fd = _open_leaf_at(parent_fd, leaf)
     try:
         if not stat.S_ISREG(os.fstat(leaf_fd).st_mode):
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
@@ -304,7 +310,7 @@ def _read_member(
 def _read_member_at(parent_fd: int, leaf: str, component: str, limit: int) -> bytes:
     leaf_fd = _call(os.open, leaf, _DIR_FLAGS, dir_fd=parent_fd)
     try:
-        member_fd = _call(os.open, component, _leaf_flags(), dir_fd=leaf_fd)
+        member_fd = _open_leaf_at(leaf_fd, component)
         try:
             if not stat.S_ISREG(os.fstat(member_fd).st_mode):
                 raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
@@ -496,7 +502,7 @@ class _ReadOnlyStageDir:
     def open_file(self, component: str) -> int:
         fd = self._held()
         validate_component(component, self.display)
-        return _call(os.open, component, _leaf_flags(), dir_fd=fd)
+        return _open_leaf_at(fd, component)
 
     def create_file(self, component: str) -> int:
         _refuse_change()

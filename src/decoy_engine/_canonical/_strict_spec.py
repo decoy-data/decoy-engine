@@ -22,6 +22,7 @@ from typing import Any, Literal, NoReturn, Protocol
 from decoy_engine._canonical._json import CanonicalJsonError, StrictJsonError, strict_json_loads
 
 __all__ = [
+    "UNIT_PATH_MAX_DEPTH",
     "CountSpec",
     "ExactSpec",
     "ListSpec",

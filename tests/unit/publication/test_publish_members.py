@@ -155,6 +155,8 @@ def _plant(plant: str, stage: str) -> None:
     elif plant == "dir_for_file":
         os.unlink(os.path.join(stage, "orders.parquet"))
         os.mkdir(os.path.join(stage, "orders.parquet"))
+    elif plant == "planted_descriptor":
+        Path(stage, "_decoy_publication.json").write_bytes(b"{}")
     elif plant == "stray_in_nested":
         Path(stage, "a", "inner.txt").write_bytes(b"s")
     elif plant == "link_for_file":
@@ -175,6 +177,7 @@ def _plant(plant: str, stage: str) -> None:
         "fifo",
         "dir_for_file",
         "stray_in_nested",
+        "planted_descriptor",
         "link_for_file",
         "link_for_folder",
     ],
@@ -218,5 +221,38 @@ def test_both_forms_and_bad_units_refuse_before_any_read(base: Path, policy: str
                 publish_unit(out, txn, PublicationRequest("op-1"), **kwargs)
             assert caught.value.__cause__ is None and caught.value.__context__ is None
         assert stages_left(base) == []
+    finally:
+        close_root(root_fd)
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_tables_keep_their_meaning_parquet_with_a_footer_count(base: Path, policy: str) -> None:
+    """`tables=` and `publish_tables` bind Parquet files only: a name without `.parquet` is
+    refused before any I/O, a Parquet table records `rows`, and garbage bytes still fail."""
+    import pyarrow as pa
+
+    from decoy_engine.publication import PublicationRequest, publish_tables, publish_unit
+
+    out, root_fd = make_out(policy, base, "unit")
+    try:
+        request = PublicationRequest("op-1")
+        txn = out.begin("dir", "exclusive", label="publication")
+        _write(txn, "t.csv", b"a\n")
+        with pytest.raises(ValueError, match="invalid tables") as caught:
+            publish_unit(out, txn, request, tables=["t.csv"])
+        assert caught.value.__cause__ is None and caught.value.__context__ is None
+        with pytest.raises(ValueError, match="invalid tables"):
+            publish_tables(out, {"t": pa.table({"id": [1]})}, request)
+        assert stages_left(base) == []
+
+        txn = out.begin("dir", "exclusive", label="publication")
+        _write(txn, "bad.parquet", b"not a table")
+        receipt = publish_unit(out, txn, request, tables=["bad.parquet"])
+        assert receipt.outcome == "failed" and receipt.reason_code == "publication_failed"
+        assert not (base / "unit").exists()
+
+        ok = publish_tables(out, {"t.parquet": pa.table({"id": [1, 2]})}, request)
+        assert ok.outcome == "published"
+        assert [a["rows"] for a in descriptor(base / "unit")["artifacts"]] == [2]
     finally:
         close_root(root_fd)

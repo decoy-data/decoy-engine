@@ -190,6 +190,13 @@ def check_request(request: PublicationRequest, tables: Sequence[str] = ()) -> li
     return names
 
 
+def _require_parquet(names: Sequence[str]) -> None:
+    """`tables` and `publish_tables` bind Parquet files, and a Parquet table records its footer
+    row count, which the descriptor ties to the `.parquet` name (`has_row_count`)."""
+    if not all(n.endswith(".parquet") for n in names):
+        raise ValueError("invalid tables")
+
+
 def _unit_members(
     request: PublicationRequest, tables: Sequence[str], members: Sequence[Member]
 ) -> list[Member]:
@@ -197,6 +204,7 @@ def _unit_members(
     whole before any lock or stage read."""
     listed_members = list(members)
     names = check_request(request, tables)
+    _require_parquet(names)
     if names and listed_members:
         raise ValueError("pass tables or members, not both")
     if any(type(m) is not Member for m in listed_members):
@@ -441,6 +449,7 @@ def publish_tables(
     # components pass the same check, before any I/O. A table is staged flat.
     components = [f"{name}{suffix}" for name in names]
     check_request(request, components)
+    _require_parquet(components)
     check_member_paths(components, "invalid tables", flat=True)
     failure: str | None = None
     try:

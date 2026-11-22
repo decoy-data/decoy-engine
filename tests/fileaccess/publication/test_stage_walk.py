@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.fileaccess import FileAccessDenied, FileAccessUnavailable
 from tests.unit.publication._publish_support import POLICIES, close_root, make_out
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX stage traversal")
@@ -46,18 +47,18 @@ def _fill(txn: Any) -> Any:
     os.close(txn.create_file("f"))
     child = txn.create_dir("d")
     os.close(child.create_file("g"))
+    os.close(child.create_dir("e").create_file("h"))
     return txn
 
 
 def test_open_subdir_returns_read_only_view_over_a_real_folder(stage: tuple[Any, Path]) -> None:
     txn, _ = stage
     view = txn.open_subdir("d")
-    assert [e.name for e in view.entries()] == ["g"]
+    assert sorted(e.name for e in view.entries()) == ["e", "g"]
     fd = view.open_file("g")
     os.close(fd)
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(FileAccessUnavailable):
         view.create_file("x")
-    assert type(caught.value).__name__ == "FileAccessUnavailable"
 
 
 def test_open_subdir_refuses_link_file_and_dotdot(stage: tuple[Any, Path]) -> None:
@@ -72,7 +73,7 @@ def test_open_subdir_refuses_link_file_and_dotdot(stage: tuple[Any, Path]) -> No
     with pytest.raises(OSError) as caught:
         txn.open_subdir("f")
     assert caught.value.errno == errno.ENOTDIR
-    with pytest.raises(Exception):
+    with pytest.raises(FileAccessDenied):
         txn.open_subdir("..")
 
 
@@ -98,26 +99,34 @@ def test_every_mutation_through_a_view_refuses(stage: tuple[Any, Path]) -> None:
         lambda: view.remove("g"),
         lambda: view.rename("g", "h"),
     ):
-        with pytest.raises(Exception) as caught:
+        with pytest.raises(FileAccessUnavailable):
             call()
-        assert type(caught.value).__name__ == "FileAccessUnavailable"
-    assert [e.name for e in view.entries()] == ["g"]
+    assert sorted(e.name for e in view.entries()) == ["e", "g"]
 
 
-def test_use_after_the_stage_ends_refuses_and_closes_the_view(stage: tuple[Any, Path]) -> None:
+def test_use_after_the_stage_ends_refuses_and_closes_the_views(stage: tuple[Any, Path]) -> None:
     txn, _ = stage
     view = txn.open_subdir("d")
-    nested = view.open_subdir if False else None  # noqa: F841
-    fds_before = len(os.listdir("/proc/self/fd"))
+    nested = view.open_subdir("e")
+    held = [view._box.fd, nested._box.fd]
+    for fd in held:
+        os.fstat(fd)  # non-vacuity: both descriptors are open before the stage ends
     if hasattr(txn, "abort"):
         txn.abort()
     else:
         txn.reclaim()
-    assert len(os.listdir("/proc/self/fd")) < fds_before  # the registered view fd was closed
-    for call in (view.entries, lambda: view.open_file("g"), lambda: view.open_subdir("x")):
-        with pytest.raises(Exception) as caught:
-            call()
-        assert type(caught.value).__name__ == "FileAccessUnavailable"
-    with pytest.raises(Exception) as caught:
+    assert [view._box.fd, nested._box.fd] == [-1, -1]
+    for fd in held:
+        with pytest.raises(OSError) as caught:
+            os.fstat(fd)
+        assert caught.value.errno == errno.EBADF
+    for stage_view in (view, nested):
+        for call in (
+            stage_view.entries,
+            lambda v=stage_view: v.open_file("g"),
+            lambda v=stage_view: v.open_subdir("x"),
+        ):
+            with pytest.raises(FileAccessUnavailable):
+                call()
+    with pytest.raises(FileAccessUnavailable):
         txn.entries()
-    assert type(caught.value).__name__ == "FileAccessUnavailable"

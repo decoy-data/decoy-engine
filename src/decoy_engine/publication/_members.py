@@ -26,7 +26,7 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
-from decoy_engine._canonical import attempt, check_unit_path, check_unit_paths
+from decoy_engine._canonical import UNIT_PATH_MAX_DEPTH, attempt, check_unit_path, check_unit_paths
 from decoy_engine.fileaccess import (
     RESERVED_MEMBER_NAMES,
     STAGE_MARKER,
@@ -39,8 +39,13 @@ from decoy_engine.publication._types import ROLES, Role, has_row_count
 __all__ = ["Member", "check_member_paths", "measure_members", "stage_is_closed"]
 
 
-def _one(path: object) -> None:
-    check_unit_path(path, component_test=is_valid_component, reserved=RESERVED_MEMBER_NAMES)
+def _one(path: object, max_depth: int = UNIT_PATH_MAX_DEPTH) -> None:
+    check_unit_path(
+        path,
+        component_test=is_valid_component,
+        reserved=RESERVED_MEMBER_NAMES,
+        max_depth=max_depth,
+    )
 
 
 def check_member_paths(paths: Sequence[Any], message: str, *, flat: bool = False) -> None:
@@ -50,12 +55,7 @@ def check_member_paths(paths: Sequence[Any], message: str, *, flat: bool = False
 
     def check(listed: Sequence[Any]) -> None:
         for path in listed:
-            check_unit_path(
-                path,
-                component_test=is_valid_component,
-                reserved=RESERVED_MEMBER_NAMES,
-                max_depth=1 if flat else 8,
-            )
+            _one(path, 1 if flat else UNIT_PATH_MAX_DEPTH)
         check_unit_paths(listed)
 
     _, refused = attempt(check, paths)
