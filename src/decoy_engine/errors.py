@@ -493,6 +493,7 @@ class FixedWidthWriteError(DecoyError):
 CAPACITY_REASON_CODES: frozenset[str] = frozenset(
     {
         reasons.runtime.GENERATION_BUDGET_EXCEEDED,
+        reasons.runtime.NONFK_FULL_FRAME_CAPACITY_EXCEEDED,
         reasons.runtime.OUT_OF_CORE_INSUFFICIENT_MEMORY,
         reasons.runtime.OUT_OF_CORE_FANIN_EXCEEDS_BUDGET,
         reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED,

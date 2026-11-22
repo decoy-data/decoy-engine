@@ -49,6 +49,7 @@ from decoy_engine.execution.physical._plan import (
 )
 from decoy_engine.execution.physical._shadow_bindings import execution_binding_for_slice_node
 from decoy_engine.execution.physical._types import DriverId
+from decoy_engine.execution.pipeline import require_resident_fit
 
 if TYPE_CHECKING:
     from decoy_engine.execution._planner import ExecutionPlan
@@ -407,6 +408,9 @@ def compile_physical_plan(inputs: PhysicalPlanInputs) -> PhysicalPlan:
     # to, but the call must not be skipped, or a forced-mode failure a real
     # `run_pipeline` call would raise goes silently uncaught.
     selection = select_driver(inputs)
+    # The stored resident-fit verdict, never recomputed here: no host read, no probe.
+    if inputs.resident_fit is not None:
+        require_resident_fit(inputs.resident_fit)
 
     tables: list[PhysicalTable] = []
     if inputs.has_mask_table:
