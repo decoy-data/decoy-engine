@@ -88,7 +88,7 @@ One slice, two PRs.
 
 | New file | Directory | CODEMAP row | Sits beside |
 |---|---|---|---|
-| `test_cell_format_char_class.py` | `tests/unit/generation/` | engine "Generation": tests in `tests/unit/generation/` | existing cell-format tests |
+| `test_cell_format_char_class.py` | `tests/unit/generation/statistical/` | engine "Generation": the existing `statistical/` test subpackage (the flat `tests/unit/generation/` has 40 direct files) | existing cell-format tests |
 | `test_fit_code_columns.py` | `CLI:tests/e2e/first_user/` | CLI "Generation CLI helpers": tests in `tests/e2e/first_user/` | `test_fit_rows.py` |
 
 No new source files. The rule has one site (the fit read), so it gets no registry or sentry (cross-cutting rule: no registry for a rule with one site).
@@ -108,7 +108,7 @@ No new source files. The rule has one site (the fit read), so it gets no registr
 | 9 | Refactor drift | snapshots without the member | absent member means the lorem path, byte for byte | E6 | always draw digits (E6 red) |
 | 10 | Frozen contract drift | `distribution-snapshot/v1` and `/v2` cell-format block; fit output | optional member on both tags; old snapshots unchanged; compatibility-contract entry names the tags and the old-reader refusal | E6, E7, compat corpus | write `char_class` on every freetext column (E1 negative case red) |
 
-## 8. Acceptance tests (each fails before the change)
+## 8. Acceptance tests (each fails before the change, except E6, an unchanged-behavior control that passes before and after)
 
 Engine:
 
