@@ -75,7 +75,8 @@ below.
 | `redact`, `truncate` | named-Arrow | named-Arrow |
 | `passthrough` | no-op | no-op |
 | `code_set` | dedicated Python | dedicated Python |
-| `bucketize`, `shuffle`, `top_code`, `formula`, `derived`, `derived_aggregate`, `nested`, `joint_mask`, `geo_generalize`, `grouped_series`, `windowed_date`, `group_key` | dedicated Python (shared handler, no SEQ native admission) | dedicated Python |
+| `bucketize`, `shuffle`, `top_code`, `formula`, `derived`, `derived_aggregate`, `nested`, `joint_mask`, `geo_generalize`, `grouped_series`, `windowed_date` | dedicated Python (shared handler, no SEQ native admission) | dedicated Python |
+| `group_key` | compiled raw-hex kernel when the `group_by` sibling is admitted (`_sequential_native_group_key.py`, `decide_group_key`); otherwise the shared Python handler | dedicated Python |
 
 A non-injective but natively-capable strategy used as an FK key is declined with a
 reporting-only entry and the Python handler runs; the key surface stays correct.
@@ -92,7 +93,7 @@ The FK key surface here is only `hash`, `redact`, `truncate`, `passthrough`.
 | `bucket_perturb` (explicit `date_format`) | compiled Rust | excluded (off the key surface) |
 | `redact`, `truncate` | named-Arrow | named-Arrow |
 | `passthrough` | no-op | no-op |
-| `text_mask` | dedicated Python (per-cell loop; backlog: route through the span kernel) | excluded (off the key surface) |
+| `text_mask` | compiled span kernel for an admitted non-NER config on an exact-string source (`out_of_core/_text_mask_native.py`); NER configs and other sources stay on the dedicated Python per-cell loop | excluded (off the key surface) |
 | `code_set` (mask mode without `chapter_preserve`) | dedicated Python (no kernel on any route; backlog: Arrow dict-map) | excluded (off the key surface) |
 | `faker` (deterministic REUSE, exact-string, person-name provider) | compiled index selection | excluded (off the key surface) |
 | `date_shift`, `bucketize` | declined (`out_of_core_row_error_strategy_unsupported`) | excluded (off the key surface) |
@@ -127,7 +128,8 @@ oracle (`tests/parity/test_phase_d_dmp_multi_parent_ooc*.py`); parents whose mas
 differ fail closed (`out_of_core_fk_key_dtype_unsupported`) and the router keeps such a job on
 the sequential route. Distinct child keys referencing different parents are supported as before.
 A-9 delivered the admitted composite and multi-parent FK shapes. It did not schedule OOC
-`faker` or `date_shift`. Composite scalar children, composite chains, and unsupported key
+`date_shift`. OOC `faker` is admitted only for the deterministic-REUSE person-name variant on an
+exact-string source (see the `faker` qualification below); other faker shapes decline. Composite scalar children, composite chains, and unsupported key
 dtypes retain the restrictions above.
 
 OOC also declines when predicates, unsupported non-scalar work, self-referential relationships,
@@ -141,11 +143,12 @@ full-frame (or sequential) oracle instead; the out-of-core route never silently 
 through or drops a strategy. Some declines are inherent to a single-pass, per-column batch
 stream and are not a near-term wiring gap:
 
-- `faker` (`out_of_core_faker_pool_unsupported`): realistic name/address/value replacement draws
-  from a registry-backed value pool plus a cross-batch pool cache, which the registry-free
-  streaming kernel has no channel for. So realistic replacement does **not** run at out-of-core
-  scale today; this is a known limitation, not a silent no-op. A streamable value-pool design is
-  a separate V2 item.
+- `faker` shapes outside the admitted variant (`out_of_core_faker_pool_unsupported`,
+  `out_of_core_faker_source_type_unsupported`): the route has a bounded, run-scoped `PoolCache`
+  (`out_of_core/_faker_pool.py`), but `_compat.py` admits only a provider on the native
+  allowlist, `deterministic` with `cardinality_mode=reuse`, a namespace and an explicit
+  `pool_size`, and a source column of exact `string` type. Any other shape declines and
+  keeps the sequential or full-frame route; it is never a silent no-op.
 - `geo_generalize` (`out_of_core_whole_column_aggregation_unsupported`): its k-anonymity cascade
   thresholds each row's generalization level on whole-dataset counts (ZIP5/ZIP3/state or H3
   resolutions), which a single chunk cannot see.
@@ -196,9 +199,9 @@ Each cell is further qualified by the guards below.
 | `bucket_perturb` | OOC requires explicit `date_format` at route admission. Native execution further requires exact string, namespace, supported bucket and format, no timezone or special pandas format, and valid preserve_values. Runtime range guards still apply. |
 | `date_shift` | Native SEQ/chunked requires exact string, namespace, explicit non-special timezone-free format (plan compile requires one, except for a top-level declared-casting column), no group_by, integer day bounds within the accepted range, and valid preserve_values. Main OOC rejects the entire strategy. |
 | `faker` | Providers are person_first_name and person_last_name on these native paths. SEQ admits exact string with deterministic REUSE or positional REUSE. Chunked additionally admits bool/integer deterministic REUSE with its fixed-schema producer guarantee and accepted conversion metadata. Positional bool/integer/float REUSE requires explicit pool_size. Other modes and providers use their existing Python path. OOC admits the deterministic-REUSE person-name variant with an exact-string source through the compiled index selection (run-scoped pool); other faker shapes, and a non-string source, decline. |
-| `text_redact` / `text_mask` | Native paths have source/configuration guards. NER remains Python. OOC text_mask currently uses its dedicated loop, including batched NER inference. |
+| `text_redact` / `text_mask` | Native paths have source/configuration guards. NER remains Python. OOC text_mask runs the compiled span kernel for an admitted non-NER config on an exact-string source (`out_of_core/_mask_group_c.py:224-227`); NER configs keep the dedicated loop, including batched NER inference. |
 | `code_set` | OOC admits mask mode without chapter_preserve. Gen mode and chapter_preserve remain route declines. There is no named Arrow code-set kernel on main. |
-| `group_key` | SEQ has no native admission. Native chunked requires an exact string/int64/bool sibling, an unmasked non-self sibling, and valid even length in [8,64]. Unified full-frame also has a native implementation. |
+| `group_key` | SEQ runs the raw-hex kernel when `decide_group_key` admits the column: the `group_by` sibling is present, is not the column itself, is unmasked and not an FK key or FK child, and has Arrow type string, int64 or bool (`_sequential_native_group_key.py:106-130`); anything else keeps the shared Python handler. Native chunked requires an exact string/int64/bool sibling, an unmasked non-self sibling, and valid even length in [8,64]. Unified full-frame also has a native implementation. |
 | `redact` / `truncate` / `passthrough` | Keep the named-Arrow/no-op classifications, but do not promise arbitrary dtype/schema identity beyond each route's existing contract. |
 
 Masked nullable integer columns under `truncate` or `categorical` can fail with
@@ -231,14 +234,15 @@ These run their own Python handler by design, not the generic fallback:
   a non-string source decline (`out_of_core_faker_pool_unsupported` at routing, or
   a fail-closed `out_of_core_faker_source_type_unsupported` for a non-string
   source once the schema is seen).
-- out-of-core `text_mask`: the per-cell loop; the SEQ and native-chunked routes already use the
-  Rust span kernel (backlog: route OOC through it too).
+- out-of-core `text_mask` with an NER config, or a source the span kernel does not admit: the
+  per-cell loop. Other OOC `text_mask` configs run the Rust span kernel, as the SEQ and
+  native-chunked routes do.
 - the shared SEQ handlers listed in the sequential table (`bucketize`, `shuffle`, `top_code`,
   `formula`, `derived`, `derived_aggregate`, `nested`, `joint_mask`, `geo_generalize`,
-  `grouped_series`, `windowed_date`, `group_key`): full-frame handler by design, with no SEQ
-  native admission. `group_key` is the one of these with a native path on another route: it has
-  native implementations on the native-chunked route (above) and on eligible unified full-frame
-  execution.
+  `grouped_series`, `windowed_date`): full-frame handler by design, with no SEQ native
+  admission. `group_key` runs natively on SEQ when its sibling is admitted, and also on the
+  native-chunked route (above) and on eligible unified full-frame execution; otherwise it falls
+  to the shared Python handler.
 
 ## Route decision order (decide_execution_route)
 
@@ -262,8 +266,13 @@ Two independent routing layers compose in `_pipeline_routing.py`, in a fixed dec
    - a. **out_of_core** -- the bounded-RAM DuckDB route -- when the job is
         out-of-core-compatible (`check_out_of_core_compatibility` admits
         the plan: an accepted strategy set, an acyclic table-level FK
-        graph, no `when` predicate, single-parent-per-child) AND the
-        largest mask table is at/above `out_of_core_threshold_rows`.
+        graph, no `when` predicate; a multi-parent child is admitted) AND
+        either the default byte-estimate routing applies (a compat-admitted job takes this
+        route whatever its row count, unless the full-frame estimate fits and an FK key
+        dtype hazard sends it to sequential, see below; `out_of_core_threshold_rows` is not
+        consulted) or,
+        with that flag off or for a job outside its scope, the largest mask table is
+        at/above `out_of_core_threshold_rows`.
         `_pipeline_route_exec.run_out_of_core_route` executes + packages it.
         Inside that route, a sink-path table auto-selects the reorder driver
         over `_batch_join` once its largest incoming edge's deduped
@@ -274,8 +283,12 @@ Two independent routing layers compose in `_pipeline_routing.py`, in a fixed dec
    - b. **sequential** -- the bounded-memory (but O(cardinality), so still
         OOM-able at extreme scale) `run_sequential` path -- for a
         pure-mask FK job that is NOT out-of-core-eligible (an unsupported
-        strategy, a self-referential / cyclic FK, a multi-parent child)
-        or is below the out-of-core size threshold.
+        strategy, a self-referential FK, a multi-parent child whose
+        parents' masked key types differ, a key dtype the joiner rejects) or, when the row-count
+        gate is in force, is below the out-of-core size threshold. A job whose full-frame
+        estimate fits and that has an FK key dtype hazard (out-of-core rejects some key
+        types that sequential completes) also takes sequential. A cross-table cycle is
+        never sequential: bounded admission excludes it.
         `_pipeline_route_exec.run_sequential_route` executes + packages it.
    - c. **full_frame** -- the adapter-selected `run` path -- for a job with
         no relationships, and for a relationship job disqualified from
@@ -391,10 +404,10 @@ actually MEASURED this job's real full_frame peak (at small scale,
 extrapolated) and confirmed it clears the budget with margin. Checked
 ONLY after `full_frame_fits_estimate is True` fails to admit the job (a
 confirmed static fit never needs a probe) -- when it is `True`,
-`decide_execution_route` returns `full_frame` even for a job that would otherwise be
-out_of_core-eligible: a MEASURED fit beats a bounded-by-eligibility
-default, because full_frame is faster and the probe's `True` means the
-measurement, not a model, backs the decision. Anything other than `True`
+`decide_execution_route` returns `full_frame` only when no bounded route applies
+(`not bounded_eligible`). A bounded-eligible job, such as an out_of_core-compatible
+one, still takes its bounded route: the full-frame oracle is the slowest route per
+row, so a measured fit does not override eligibility. Anything other than `True`
 (`False` or `None` -- an inconclusive probe, or one that was never run
 because it was out of scope/unnecessary) falls straight through to the
 exact same bounded-by-eligibility logic below as if the probe did not
@@ -419,19 +432,27 @@ FITTING job takes out-of-core; a probe-recovered job still routes full-frame, an
 stays closed to validators.
 
 Priority (SC2), for a relationship-bearing PURE-MASK job under `auto`:
-out-of-core (when compat-admitted AND large) > sequential (bounded but
+out-of-core (when compat-admitted; AND large when the row-count gate is in force) > sequential (bounded but
 O(cardinality)) > full-frame. A large relationship job that no bounded
 route can take is REJECTED before read (`ExecutionError`
 `fk_full_frame_oom_risk_rejected`) rather than left to OOM full-frame.
 
 Out-of-core eligibility is a STRICT SUBSET of sequential eligibility: it
-needs the pure-mask FK shape (`_sequential_eligible`), an acyclic
-single-parent FK graph with only supported strategies
-(`out_of_core_compatible`), AND a largest mask table at/above
-`out_of_core_threshold_rows`. So a pure-mask FK job with an unsupported
-strategy, a cyclic/self-referential FK, or below the size threshold keeps
-taking the existing sequential route; only large, fully-supported FK jobs
-divert to streaming.
+needs the pure-mask FK shape (`_sequential_eligible`) and an acyclic
+FK graph (single- or multi-parent children) with only supported strategies
+(`out_of_core_compatible`). Under the default byte-estimate routing that is
+enough; the row-count gate (a largest mask table at/above
+`out_of_core_threshold_rows`) applies only when the flag is off or the job is
+outside its scope. So a pure-mask FK job with an unsupported strategy or a
+self-referential FK keeps taking the existing sequential route. A cross-table
+cycle (A -> B -> A) is excluded from bounded admission: it runs full-frame when
+memory admission passes, otherwise it is rejected with
+`fk_full_frame_oom_risk_rejected`.
+
+When the full-frame estimate fits (or the probe confirms a fit) and the job
+has an FK key dtype hazard, the router picks sequential instead of
+out-of-core. Probe recovery selects full-frame only when no bounded route
+applies.
 
 `largest_table_rows` carries the largest mask table's row count from the
 (SC7a bounded) profile metadata even on the lazy `source_loader` path where
@@ -473,7 +494,7 @@ threshold order, because out-of-core eligibility is a strict subset of
 sequential eligibility, and a sequential-eligible non-cyclic job takes the
 `sequential` early return in `decide_execution_route` before the reject test is evaluated. The
 reject branch is reached ONLY by full-frame-bound jobs (not
-sequential-eligible, or a cyclic FK graph), which no bounded route can take
+sequential-eligible, or a cross-table cyclic FK graph), which no bounded route can take
 at any threshold ordering. So the ordering is an explanatory expectation,
 not a load-bearing invariant, and is left to the operator rather than
 rejected at submit time.

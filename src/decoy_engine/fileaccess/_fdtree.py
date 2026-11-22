@@ -29,6 +29,9 @@ except ImportError:  # win32 has no fcntl: the lock is skipped there
 
 _DIR_FLAGS = _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC
 STAGE_MARKER = ".decoy-publication-stage"  # F26 G1(d) proof, kept in a bound unit as metadata
+DESCRIPTOR_NAME = "_decoy_publication.json"  # the publication descriptor, a member of every unit
+# Names a table may not take inside a publication directory. The one source for every check.
+RESERVED_MEMBER_NAMES = frozenset({DESCRIPTOR_NAME, STAGE_MARKER})
 STAGE_MAGIC = b"decoy-publication-stage-v1:"
 STAGE_HEX = "[0-9a-f]{12}"  # the token_hex(6) a stage name carries
 # Longer than any magic plus token plus newline: a read of this size that fills it is not a marker.

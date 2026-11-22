@@ -18,6 +18,7 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
+from decoy_engine.contracts.column_shape import ColumnShapes
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.date_preserve import has_preserve_values, preserve_config_problem
 from decoy_engine.transforms.date_shift import WINDOW_PROBLEMS, shift_window_problem
@@ -372,11 +373,12 @@ def _fk_shape_problem(
     return None
 
 
-def check_date_preserve_values(config: dict[str, Any]) -> None:
+def check_date_preserve_values(config: dict[str, Any], shapes: ColumnShapes | None = None) -> None:
     """Reject ``preserve_values`` configs the date operators cannot honour (D1c).
 
     Config-only, so a zero-row table or a ``when:`` that selects nothing still fails here, the
-    same way on the native and oracle routes. Value-free messages throughout.
+    same way on the native and oracle routes. Value-free messages throughout. ``shapes`` says which
+    ``date_shift`` columns are typed dates, which need no ``date_format`` for their sentinels.
 
     Raises:
         PlanCompileError: ``date_shift_preserve_values_invalid`` (bad literal, missing or
@@ -391,7 +393,7 @@ def check_date_preserve_values(config: dict[str, Any]) -> None:
         table_name = str(table_entry.get("name", "?"))
         for name, strategy, pc, prefix in _preserve_columns(table_entry):
             if strategy == "date_shift":
-                problem = preserve_config_problem(pc)
+                problem = preserve_config_problem(pc, (shapes or {}).get((table_name, name)))
                 if problem is not None:
                     raise PlanCompileError(
                         code=reasons.plan.DATE_SHIFT_PRESERVE_VALUES_INVALID,

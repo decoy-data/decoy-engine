@@ -10,12 +10,12 @@ callable predicate, so a refusal cannot echo config data. This module imports ``
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 
 __all__ = [
     "REQUIREMENTS_BY_STRATEGY",
@@ -27,6 +27,7 @@ __all__ = [
     "requirement_missing",
     "requirements_for",
     "shape_declaration_needed",
+    "shape_mismatch_message",
     "shape_requirement_for",
 ]
 
@@ -111,20 +112,43 @@ class ShapeRequirement:
     ``requirement`` is the setting itself, the same descriptor ``REQUIREMENTS_BY_STRATEGY`` holds,
     so its code, path and message live in one place. A column whose resolved shape is not in
     ``needs_declaration`` runs without the setting. ``declared_counts`` says that a top-level F06
-    date declaration also satisfies it.
+    date declaration also satisfies it. ``admitted`` is every shape the strategy can read at all;
+    any other known shape is refused as a mismatch, with ``hints`` (a fixed text per shape, else
+    ``default_hint``) saying what to do instead.
     """
 
     family: str
     requirement: StrategyRequirement
     needs_declaration: frozenset[ColumnShape]
     declared_counts: bool = False
+    admitted: frozenset[ColumnShape] = frozenset(ColumnShape)
+    default_hint: str = ""
+    hints: Mapping[ColumnShape, str] = field(default_factory=lambda: MappingProxyType({}))
 
 
-# Today's rule: ``date_shift`` needs its format on every shape.
+_DATE_SHIFT_HINT = (
+    "date_shift reads dates: use a date or zoned timestamp column, or text with a date_format."
+)
+
+# ``date_shift`` runs bare on a date or a zoned timestamp. Text needs its format, and so does an
+# ``unknown`` column (compile has no proof it is typed). Every other shape cannot be read.
 SHAPE_REQUIREMENTS_BY_STRATEGY: Mapping[str, ShapeRequirement] = MappingProxyType(
     {
         "date_shift": ShapeRequirement(
-            "date", _DATE_SHIFT_FORMAT, frozenset(ColumnShape), declared_counts=True
+            "date",
+            _DATE_SHIFT_FORMAT,
+            frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN}),
+            declared_counts=True,
+            admitted=frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN}) | TYPED_DATE_SHAPES,
+            default_hint=_DATE_SHIFT_HINT,
+            hints=MappingProxyType(
+                {
+                    ColumnShape.TIMESTAMP_NAIVE: (
+                        "cast it to a date or a zoned timestamp, or write it as text with a "
+                        "date_format."
+                    )
+                }
+            ),
         ),
     }
 )
@@ -134,6 +158,19 @@ def shape_requirement_for(strategy: str, req: StrategyRequirement) -> ShapeRequi
     """The shape rule that governs ``req`` for ``strategy``, or None when ``req`` is not shape-bound."""
     shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy)
     return shaped if shaped is not None and shaped.requirement is req else None
+
+
+def shape_mismatch_message(
+    strategy: str, shaped: ShapeRequirement, shape: ColumnShape, column: str, table: str
+) -> str | None:
+    """The fixed refusal text when ``strategy`` cannot read a ``shape`` column, else None."""
+    if shape in shaped.admitted:
+        return None
+    hint = shaped.hints.get(shape, shaped.default_hint)
+    return (
+        f"column {column!r} in table {table!r} is a {shape.value} column; "
+        f"{strategy} cannot read it. {hint}"
+    ).rstrip()
 
 
 def shape_declaration_needed(
