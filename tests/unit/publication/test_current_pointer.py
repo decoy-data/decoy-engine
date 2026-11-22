@@ -183,6 +183,10 @@ def test_read_value(raw: bytes | None, value: str | None, caplog: pytest.LogCapt
     assert all("r1" not in r.getMessage() and "x" not in r.getMessage() for r in warned)
 
 
+def test_read_value_refuses_an_inner_newline_even_when_accept_allows_it() -> None:
+    assert read_value(b"r1\nr2\n", lambda v: True) is None
+
+
 def test_read_value_refuses_5_kib_and_missing_newline_and_non_ascii(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
