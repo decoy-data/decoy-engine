@@ -50,7 +50,7 @@ DRIFT_NOT_CHECKED = _d(
     "drift_not_checked",
     "scan_baseline.on_drift is not checked by decoy run yet; the run continues without a drift "
     "check.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 FIT_JOINT_CELLS_TRUNCATED = _d(
     "fit_joint_cells_truncated", "Fit joint cells truncated.", since="1.22.0"
@@ -76,7 +76,7 @@ NATIVE_COMPANION_MISSING = _d(
     "native_companion_missing",
     "No compiled kernel ran: a native kernel this run needs is not available, so masking ran "
     "in Python.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 NESTED_CELL_JSON_PARSE_ERROR = _d("nested_cell_json_parse_error", "Nested cell JSON parse error.")
 NESTED_JSONPATH_PATH_OVERLAP = _d("nested_jsonpath_path_overlap", "Nested jsonpath path overlap.")

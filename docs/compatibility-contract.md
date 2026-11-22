@@ -119,7 +119,7 @@ record reads unchanged. A sample stamps `quality_metrics["subset"]["sample"]`. `
 **Pre-GA additive field with NATIVE-MISSING-WARN (2026-11-21).** `ExecutionResult.native_fallback_code: str | None`
 (default `None`, hidden from `repr`, not compared) is `native_companion_missing` when the plan needs a compiled kernel
 and none that it needs is available. It is never written to a document. The reason `warning/native_companion_missing`
-is registered unreleased.
+ships in 0.28.3 (registry 1.33.0).
 
 **Pre-GA correction (main health, 2026-10-31).** `RESERVED_NAMES` of the `when` closed grammar gains `type`
 (additive to the list, breaking for a config whose `when:` references a column named `type`, which now fails
@@ -262,6 +262,8 @@ list and points here for the pairs. A rename takes a new row in the release that
 | `route/run_storm` | `route/post_scan_integrity` | reason code | 0.17.0 | The old identity was a registry tombstone until 0.28.0 removed it. |
 | `CUSTOM_PROVIDERS_DIR` | `DECOY_CUSTOM_PROVIDERS_DIR` | config key | 0.24.0 | Environment variable, no alias. |
 <!-- renames-table:end -->
+
+F22 (atomic and idempotent publication, row 59) adds no public renames. The owner did not approve its four names (`CommitUncertain`, `LockUnavailable`, `LockTimeout`, `LeafTooLarge`) on 2026-11-12, so they stay internal `decoy_engine.fileaccess` classes, and a consumer sees them only as the reason codes `decoy/publication_commit_uncertain`, `decoy/publication_lock_unavailable`, `decoy/publication_lock_timeout` and `decoy/publication_failed`.
 
 **Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
 without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both

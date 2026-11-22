@@ -112,17 +112,17 @@ _d = _catalog.plan("PlanCompileError")
 PLAN_RECOMPILE_REQUIRED = _d(
     "plan_recompile_required",
     "A stored plan was written by an older engine; compile it again from its config.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 PLAN_VERSION_UNSUPPORTED = _d(
     "plan_version_unsupported",
     "A stored plan has a plan_version this engine does not support.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 STORED_SHAPE_UNKNOWN = _d(
     "stored_shape_unknown",
     "A stored plan names a column shape this engine does not know; compile the plan again.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 COLUMN_SHAPE_REQUIRED = _d(
     "column_shape_required",
@@ -132,12 +132,12 @@ COLUMN_SHAPE_REQUIRED = _d(
 COLUMN_SHAPE_MISMATCH = _d(
     "column_shape_mismatch",
     "A strategy cannot read the shape of the column it is set on.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 COLUMN_SHAPE_FORMAT_UNUSED = _d(
     "column_shape_format_unused",
     "A date_format is set on a column that is already a date, so it is not used.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 CONFIG_VALUE_NOT_JSON = _d(
     "config_value_not_json",

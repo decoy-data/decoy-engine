@@ -313,14 +313,14 @@ VAULT_ENTRY_TOO_LARGE = _d(
     "One vault entry is larger than a vault segment can hold.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.33.0",
 )
 VAULT_TAMPERED = _d(
     "vault_tampered",
     "The vault file was changed or cut short after it was written.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.33.0",
 )
 VAULT_UNREADABLE = _d(
     "vault_unreadable",
@@ -457,7 +457,7 @@ _d = _catalog.runtime("WindowedDateRowNumberError")
 WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE = _d(
     "windowed_date_row_number_out_of_range",
     "A windowed_date global row number is below 0 or at or above 2**62.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 
 _d = _catalog.runtime("GenerationError")
