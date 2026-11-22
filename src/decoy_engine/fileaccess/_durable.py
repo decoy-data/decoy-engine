@@ -25,6 +25,8 @@ from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validat
 from decoy_engine.fileaccess._output import (
     _CREATOR_KEY,
     _DIR_FLAGS,
+    DURABLE_LABELS,
+    DURABLE_REPLACE_LABELS,
     _call,
     _close,
     _restore_missing_owner_bits,
@@ -46,6 +48,7 @@ T = TypeVar("T")
 # that the entry is lost (PostgreSQL `fsync_fname_ext` tolerates EBADF and EINVAL; ENOTSUP is added
 # because FUSE and Darwin report it for a directory fsync). Any other errno is fatal.
 _DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
+FD_STAGED_LABELS = DURABLE_LABELS | DURABLE_REPLACE_LABELS  # staged through a held parent fd
 _POLL_S = 0.05
 _CHUNK = 1 << 16
 
@@ -357,3 +360,36 @@ def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> Non
         raise FileExistsError(errno.EEXIST, "output exists")
     if code:
         raise OSError(code, os.strerror(code))
+
+
+def publish_replace_durable(
+    parent_fd: int, stage_name: str, leaf: str, rename: Callable[[], None]
+) -> None:
+    """The one durable replace publish: fsync the stage, `rename()` it over `leaf` (a link at the
+    leaf is replaced, never written through), then fsync the directory inside `_sync_bound`, so a
+    failure after the rename is `CommitUncertain`: the new bytes are visible, not confirmed
+    durable. A failure before the rename removes only the stage and leaves the old leaf; the
+    error keeps its errno and nothing else. The caller owns the rename, so each policy keeps its
+    own path or descriptor call."""
+    validate_component(stage_name, _CREATOR_KEY)
+    validate_component(leaf, _CREATOR_KEY)
+    code = 0
+    try:
+        _sync_leaf_at(parent_fd, stage_name)
+        rename()
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    if code:
+        discard_stage_at(parent_fd, stage_name)
+        raise OSError(code, os.strerror(code))
+    _sync_bound(lambda: _fsync_dir(parent_fd))
+
+
+def _publish_labelled(
+    label: str, parent_fd: int, stage_name: str, leaf: str, rename: Callable[[], None]
+) -> None:
+    """The durable publish a label selects: replace for `DURABLE_REPLACE_LABELS`, else exclusive."""
+    if label in DURABLE_REPLACE_LABELS:
+        publish_replace_durable(parent_fd, stage_name, leaf, rename)
+    else:
+        publish_exclusive_durable(parent_fd, stage_name, leaf)

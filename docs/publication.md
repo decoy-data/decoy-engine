@@ -132,6 +132,33 @@ publish there keeps the plain rename until the Windows arm is built.
 
 All errors these paths raise carry an errno name and no path, file name or operating-system text.
 
+## The managed pointer
+
+`CurrentPointer(store, lock)` reads and swaps one small pointer file (`out/<name>/LATEST`) under
+the F22 lock, with a compare-and-swap on raw bytes. `store` is a `PointerStore`; `LocalPointerStore(leaf)`
+is the local one, and `lock` is the same leaf `OutputDir`, so `lock.lock(timeout_s)` takes
+`.LATEST.decoy-lock`. The constructor refuses a store whose `locator()` differs from the lock's leaf.
+
+- `read()` returns `PointerState(raw, version)`, or `PointerState(None, None)` when the file is
+  absent. A link, a special file, a file over 4 KiB, a policy denial or an I/O error raises
+  `PointerUnreadable`, a fixed message with no path or byte.
+- `locked(timeout_s)` yields a `HeldPointer`. `HeldPointer.swap(expected, new)` writes
+  `f"{new}\n"` (ASCII) only if the file still holds `expected.raw`. It returns `replaced`,
+  `stale` (the pointer moved), `uncertain` (the new bytes are visible, not confirmed durable),
+  `failed` (the replace did not happen) or `conflict`. A store answer of `unknown` gets one
+  outcome-check read. A `HeldPointer` used after its context exits raises `RuntimeError`.
+- `read_value(raw, accept)` returns the stripped value, or `None` and one value-free warning for a
+  value that is over 4096 bytes, not ASCII, has no single trailing newline or is rejected by `accept`.
+
+The write goes through the private file-access label `pointer`: a `0600` stage, fsync of the
+stage, rename over the leaf (a link at the leaf is replaced, never written through), then fsync of
+the parent. A parent fsync failure after the rename raises `CommitUncertain`, which the store maps
+to `uncertain`. `publish_replace_durable` fsyncs the file and its immediate parent only. No pointer
+path calls `sync_chain`: the run folder already exists from the chain-synced unit publish, so only
+the pointer's own file and parent are new. A crash can leave a private pointer stage beside
+`LATEST`; sweeping it is a named limit (V2-LOG). Only `publication/_current.py` may name the label
+(`tests/sentry/test_pointer_label_caller.py`).
+
 ## The vault commit
 
 `VaultWriter.publish(out)` writes the vault as `write` does (private stage, file fsync, exclusive

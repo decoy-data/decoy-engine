@@ -9,10 +9,9 @@ transaction, and every operation is one `dir_fd`-relative call with `O_NOFOLLOW`
 symlink planted in the stage is never followed.
 
 Publication keeps each sink's existing semantics: a directory stage publishes with plain
-`rename(2)` (an absent or empty destination, `ENOTEMPTY` on a non-empty one, stage intact for
-`abort()`); a file stage publishes with `link(2)` (`exclusive`, refuses any existing leaf) or
-`rename(2)` (`replace`). No path uses `RENAME_EXCHANGE`. A `DIRECTORY_PUBLISH_LABELS` stage is
-fsynced before the rename and its parent chain up to the capability root after it (`_durable`).
+`rename(2)` (`ENOTEMPTY` on a non-empty destination, stage intact for `abort()`), a file stage with
+`link(2)` (`exclusive`) or `rename(2)` (`replace`; the `pointer` label then fsyncs its parent). A
+`DIRECTORY_PUBLISH_LABELS` stage is fsynced before the rename and its parent chain after it.
 
 Directories are made by one core, `_make_dir_core`, with two entry points: `make_stage_dir_at`
 (private stage directories, exact 0700) and `make_parent_dir_at` (user-named output parents at
@@ -53,14 +52,14 @@ STAGE_PREFIX: dict[str, str] = {
     "vault": "_decoy_vault_stage_",
     "pack": "_decoy_pack_stage_",
     "publication": "._decoy_publication_pending_",
+    "pointer": "._decoy_pointer_stage_",
 }
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
-# Labels whose stage holds secrets or real data, so the stage file is 0600 at creation.
-PRIVATE_LABELS: frozenset[str] = frozenset({"quarantine", "isolated", "vault", "publication"})
-# Labels published durably and exclusively: the stage is fsynced by its writer
-# (`serial.write_durable`), linked to the leaf, then the parent is fsynced; that fsync is the
-# commit point and its failure is raised. A failure path removes only the unpublished stage,
-# never the leaf.
+DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})  # stage fsync, rename, parent fsync
+# Labels whose stage holds secrets or real data (0600 at creation); durable-replace ones included.
+PRIVATE_LABELS = DURABLE_REPLACE_LABELS | {"quarantine", "isolated", "vault", "publication"}
+# `DURABLE_LABELS` publish exclusively: the writer fsyncs the stage, it is linked, then the parent is
+# fsynced (the commit point; its failure is raised). A failure removes only the stage.
 DURABLE_LABELS: frozenset[str] = frozenset({"vault"})
 # Labels whose directory publish is durable (F22 5.1): the walk, the rename, then the chain.
 DIRECTORY_PUBLISH_LABELS: frozenset[str] = frozenset({"publication"})
@@ -356,11 +355,12 @@ class RootedOutputTxn(_StageDir):
         if issuer is not _ISSUER:
             raise FileAccessUnavailable("an output transaction is issued by an OutputDir")
         validate_component(leaf, display)
-        if label not in STAGE_PREFIX:
+        if label not in STAGE_PREFIX or (label in DURABLE_REPLACE_LABELS and mode != "replace"):
             raise deny(display)  # an in-place label exists only for the ambient policy
         if label == "publication" and kind != "dir":
             raise FileAccessUnavailable("a publication stage is a directory")
         self._durable = label in DURABLE_LABELS
+        self._durable_replace = label in DURABLE_REPLACE_LABELS
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS
         self.label, self.owner = label, owner  # read by `publish_unit`
         self._leaf = leaf
@@ -392,6 +392,10 @@ class RootedOutputTxn(_StageDir):
             return create_output_file_at(self._state.parent_fd, self._state.stage_name, self._mode)
         return super().create_file(component)
 
+    def _rename_stage(self) -> None:
+        parent = self._state.parent_fd
+        _call(os.replace, self._state.stage_name, self._leaf, src_dir_fd=parent, dst_dir_fd=parent)
+
     def publish(self) -> None:
         from decoy_engine.fileaccess import _durable
 
@@ -401,12 +405,14 @@ class RootedOutputTxn(_StageDir):
         if state.kind == "file" and not state.file_created:
             raise FileAccessUnavailable("nothing was staged")
         parent = state.parent_fd
-        if state.kind == "file" and self._publish_mode == "exclusive":
-            if self._durable:
+        if state.kind == "file" and (self._publish_mode == "exclusive" or self._durable_replace):
+            if self._durable or self._durable_replace:
                 try:
-                    _durable.publish_exclusive_durable(parent, state.stage_name, self._leaf)
+                    _durable._publish_labelled(
+                        self.label, parent, state.stage_name, self._leaf, self._rename_stage
+                    )
                 except OSError:
-                    _discard(state)  # the stage only; a linked leaf is never removed
+                    _discard(state)  # the stage only; a bound leaf is never removed
                     raise
             else:
                 try:
@@ -421,14 +427,11 @@ class RootedOutputTxn(_StageDir):
                 except FileExistsError:
                     _discard(state)
                     raise
-                try:
-                    os.unlink(state.stage_name, dir_fd=parent)
-                except OSError:
-                    pass
+                _durable.discard_stage_at(parent, state.stage_name)
         else:
             if self._durable_dir:  # a failure here leaves the stage for abort()
                 _durable._sync_tree(state.stage_fd)
-            _call(os.replace, state.stage_name, self._leaf, src_dir_fd=parent, dst_dir_fd=parent)
+            self._rename_stage()
             if state.kind == "file":
                 _durable._sync(parent)
         state.finished = True
