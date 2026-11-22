@@ -17,8 +17,6 @@ from decoy_engine import (
     ConnectorError,
     DecoyError,
     ExecutionContext,
-    LicenseError,
-    LicenseExpiredError,
     Logger,
     PipelineValidationError,
 )
@@ -125,7 +123,6 @@ def test_all_lists_every_public_name():
         # S22-CL-V1GRAPHRUNNER (2026-05-30): removed validate_graph,
         # validate_graph_full, normalize_config, run_graph, preview_graph,
         # RunResult, PreviewResult. V1 graph public surface retired.
-        "VALIDATION_CODES",
         "ValidationMessage",
         "ValidationResult",
         "profile_columns",
@@ -149,9 +146,6 @@ def test_all_lists_every_public_name():
         "ValidationError",
         "ConnectorError",
         "ConnectorAuthError",
-        "LicenseError",
-        "LicenseExpiredError",
-        "FlagPauseSignal",
         "register_faker_provider",
         "register_faker_list_provider",
         "unregister_faker_provider",
@@ -223,7 +217,6 @@ def test_all_lists_every_public_name():
         "ExecutionResult",
         "PandasExecutionAdapter",
         "StrategyError",
-        "get_default_executor",
         # Public strategy catalog: one row per scalar strategy handler.
         "StrategyInfo",
         "StrategyOption",
@@ -392,9 +385,6 @@ class TestExceptions:
 
     def test_connector_auth_error_subclasses_connector_error(self):
         assert issubclass(ConnectorAuthError, ConnectorError)
-
-    def test_license_expired_error_subclasses_license_error(self):
-        assert issubclass(LicenseExpiredError, LicenseError)
 
 
 class TestLoggerProtocol:
@@ -613,3 +603,20 @@ def test_quality_facade_exports_the_joint_cell_cap():
 
     assert "MAX_CONTINGENCY_TOP_K" in quality.__all__
     assert quality.MAX_CONTINGENCY_TOP_K == snapshot.MAX_CONTINGENCY_TOP_K == 1000
+
+
+REMOVED_PUBLIC_NAMES = (
+    "LicenseError",
+    "LicenseExpiredError",
+    "FlagPauseSignal",
+    "get_default_executor",
+    "VALIDATION_CODES",
+)
+
+
+@pytest.mark.parametrize("name", REMOVED_PUBLIC_NAMES)
+def test_removed_names_are_gone_from_the_public_surface(name):
+    assert name not in decoy_engine.__all__
+    assert not hasattr(decoy_engine, name)
+    with pytest.raises(AttributeError):
+        getattr(decoy_engine, name)

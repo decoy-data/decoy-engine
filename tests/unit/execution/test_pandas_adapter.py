@@ -16,7 +16,6 @@ from decoy_engine.execution import (
     ExecutionError,
     ExecutionResult,
     PandasExecutionAdapter,
-    get_default_executor,
 )
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
@@ -137,9 +136,6 @@ class TestPandasAdapter:
         assert adapter.supports_strategy("nope") is False
         adapter.shutdown()
         adapter.shutdown()
-
-    def test_get_default_executor_is_singleton(self) -> None:
-        assert get_default_executor() is get_default_executor()
 
 
 def _fpe_col() -> ColumnSeed:

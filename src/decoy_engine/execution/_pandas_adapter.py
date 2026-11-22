@@ -39,7 +39,6 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine.declared_casting._boundary import declared_date_shift_columns, native_date_columns
 from decoy_engine.execution._adapter import (
-    ExecutionAdapter,
     ExecutionResult,
     StrategyContext,
     StrategyHandler,
@@ -664,28 +663,3 @@ class PandasExecutionAdapter:
         if errored_keys_cache is not None:
             errored_keys_cache[cache_key] = errored
         return out
-
-
-_DEFAULT_EXECUTORS: dict[str, ExecutionAdapter] = {}
-
-
-def get_default_executor() -> ExecutionAdapter:
-    """Return the cached default execution adapter for the current substrate.
-
-    The engine constructs the adapter via `select_execution_adapter`, so a
-    caller routes a full job through it by calling this rather than
-    re-implementing adapter construction (best-practices section 3.3). One
-    cached instance per adapter label.
-    """
-    from decoy_engine.execution._substrate import SUBSTRATE, select_execution_adapter
-
-    substrate = SUBSTRATE
-    cached = _DEFAULT_EXECUTORS.get(substrate)
-    if cached is None:
-        cached = select_execution_adapter()
-        _DEFAULT_EXECUTORS[substrate] = cached
-    return cached
-
-
-def _reset_default_executor_for_tests() -> None:
-    _DEFAULT_EXECUTORS.clear()

@@ -12,7 +12,6 @@ Public API:
         ExecutionEvent,
         ExecutionError,
         StrategyError,
-        get_default_executor,
     )
 
 Landed so far: the runner core (`build_work_list` from the seed envelope +
@@ -92,7 +91,6 @@ from decoy_engine.execution._isolated_run import run_pipeline_isolated
 from decoy_engine.execution._job_estimate import JobEstimate, estimate_job
 from decoy_engine.execution._pandas_adapter import (
     PandasExecutionAdapter,
-    get_default_executor,
 )
 from decoy_engine.execution._pipeline import classify_table_kinds, run_pipeline
 from decoy_engine.execution._planner import (
@@ -170,7 +168,6 @@ __all__ = [
     "connect_duckdb",
     "estimate_job",
     "estimate_job_capacity",
-    "get_default_executor",
     "order_work",
     "probe_fits",
     "probe_peak_bytes",

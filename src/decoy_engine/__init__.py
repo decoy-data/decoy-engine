@@ -11,7 +11,7 @@ Public API (the contract CLI and platform code depend on):
     compile_plan      compile a validated config + Profile into a frozen Plan
                       (decoy_engine.plan)
     ExecutionAdapter / PandasExecutionAdapter /
-    select_execution_adapter / get_default_executor:
+    select_execution_adapter:
                       the plan-to-data execution boundary; the pandas adapter is
                       the parity oracle (native kernels are route-chosen). The caller runs
                       `select_execution_adapter().run(plan, source) -> ExecutionResult`.
@@ -34,8 +34,7 @@ Public API (the contract CLI and platform code depend on):
 
 Public exceptions (also in decoy_engine.errors):
     DecoyError, ConfigError, PipelineValidationError,
-    ConnectorError, ConnectorAuthError, LicenseError, LicenseExpiredError,
-    FlagPauseSignal, FixedWidthParseError
+    ConnectorError, ConnectorAuthError, FixedWidthParseError
 Anything not in __all__, and anything under decoy_engine.internal, is private.
 
 V2 NOTE: the V1 surface (``Masker``, ``DataGenerator``, ``run_graph``) was removed in S22; the
@@ -97,9 +96,6 @@ from decoy_engine.errors import (
     ConnectorError,
     DecoyError,
     FixedWidthParseError,
-    FlagPauseSignal,
-    LicenseError,
-    LicenseExpiredError,
     PipelineValidationError,
     ValidationError,
 )
@@ -116,7 +112,6 @@ from decoy_engine.execution import (
     classify_table_kinds,
     estimate_job,
     estimate_job_capacity,
-    get_default_executor,
     run_pipeline,
     select_execution_adapter,
 )
@@ -328,7 +323,6 @@ from decoy_engine.validation.post import (
     PostValidationRunner,
     QualitySummary,
 )
-from decoy_engine.validation_result import CODES as VALIDATION_CODES
 from decoy_engine.validation_result import ValidationMessage, ValidationResult
 from decoy_engine.vault import VaultError, VaultWriter, load_vault, vault_writer_for_config
 from decoy_engine.verification.postmask._blocked import PostScanBlockedError
@@ -373,7 +367,6 @@ __all__ = [
     "RUN_RESULT_SCHEMA",
     "SDK_VERSION",
     "SEED_PROTOCOL_VERSION",
-    "VALIDATION_CODES",
     "AdapterError",
     "BackendAdapter",
     "CallbackSink",
@@ -420,15 +413,12 @@ __all__ = [
     "FileSource",
     "FixedWidthParseError",
     "FkValidityReport",
-    "FlagPauseSignal",
     "GenerationError",
     "IdentityDomain",
     "JobEstimate",
     "KeyProvider",
     "KeyedColumn",
     "KeyedStrategyRequiresSecret",
-    "LicenseError",
-    "LicenseExpiredError",
     "Logger",
     "MaskSecretError",
     "MissingMaskSecret",
@@ -544,7 +534,6 @@ __all__ = [
     "event_to_legacy_dict",
     "generate_tables",
     "generated_table_to_pandas",
-    "get_default_executor",
     "get_default_pool_cache",
     "get_default_registry",
     "is_pre_ga",
