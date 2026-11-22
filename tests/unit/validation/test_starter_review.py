@@ -45,7 +45,6 @@ from decoy_engine.validation.starter_review import (
     apply_review,
     column_entry,
 )
-from tests._column_shapes import INT_DECL
 from tests._ner import needs_ner, ner_available
 
 CANARY = "CANARY-e1-7f3a"
@@ -378,11 +377,12 @@ def _example_entries() -> list[dict[str, Any]]:
     rows = []
     for info in strategy_catalog():
         if info.offer_in_wizard:
-            entry = {"strategy": info.name, **info.example_options}
             shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(info.name)
             if shaped is not None and shaped.cast_declared:
-                # E3: a numeric strategy over a csv text column needs its F06 cast.
-                entry.update(INT_DECL)
+                # A wizard entry has no F06 cast, which these need on a csv text column (E3). The
+                # starter and the wizard learn that in E5; until then they are not drawn here.
+                continue
+            entry = {"strategy": info.name, **info.example_options}
             if not _uses_ner(entry) or _ner_runnable(entry):
                 rows.append(entry)
     return rows

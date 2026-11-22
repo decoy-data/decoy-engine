@@ -45,11 +45,7 @@ from typing import Any, Literal
 import pyarrow as pa
 
 from decoy_engine.config._subset_run import refuse_unapplied_subset
-from decoy_engine.contracts.column_shape import (
-    NO_SOURCES,
-    SourceFacts,
-    table_source_facts,
-)
+from decoy_engine.contracts.column_shape import table_source_facts
 from decoy_engine.execution._guards import prepare_declared_execution_sources
 from decoy_engine.execution._operator_registry import OPERATORS, POSITIONAL_FAKER_SOURCE_TYPES
 from decoy_engine.execution._transforms_gate import reject_per_table_transforms
@@ -241,7 +237,6 @@ def _static_route_decision(
     engine_version: str,
     registry: Any = None,
     first_schema: pa.Schema | None = None,
-    sibling_sources: SourceFacts = NO_SOURCES,
 ) -> NativeRouteEvidence:
     """Config/profile-only admission: no I/O, no compiled-extension probe.
 
@@ -274,7 +269,7 @@ def _static_route_decision(
         profile,
         engine_version=engine_version,
         registry=registry,
-        sources=table_source_facts(table, first_schema, sibling_sources),
+        sources=table_source_facts(table, first_schema),
         resident_sources=sibling_resident_sources(config, table, first_schema),
     )
     table_nodes = [n for n in plan.nodes if n.table == table]
@@ -402,7 +397,6 @@ def plan_native_route(
     unconfigured_policy: Literal["warn", "error"] | None = None,
     registry: Any,
     c5c_ii_admission: C5cIiAdmissionContext | None = None,
-    sibling_sources: SourceFacts = NO_SOURCES,
 ) -> NativePreflight:
     """The full PREFLIGHT decision for `table`: config/profile admission, then
     (when `first_schema` is given) the actual first-chunk coverage + faker
@@ -446,7 +440,6 @@ def plan_native_route(
         engine_version=engine_version,
         registry=registry,
         first_schema=first_schema,
-        sibling_sources=sibling_sources,
     )
     # A declined `when:` column names the reroute reason even when another column would
     # have vetoed the table anyway: its meaning (leave unselected rows untouched)

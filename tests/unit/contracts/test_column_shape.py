@@ -124,3 +124,21 @@ def test_vocabulary_is_closed() -> None:
         "text", "date", "timestamp_tz", "timestamp_naive", "integer", "float",
         "decimal", "decimal_wide", "boolean", "other", "unknown",
     }  # fmt: skip
+
+
+def test_a_sibling_table_keeps_its_own_schema_inside_the_scope() -> None:
+    from decoy_engine.contracts.column_shape import (
+        NO_SOURCES,
+        sibling_tables,
+        source_facts_of,
+        table_source_facts,
+    )
+
+    siblings = source_facts_of({"other": pa.table({"n": pa.array([1], pa.int64())})})
+    assert table_source_facts("mine", None).schemas == {}
+    with sibling_tables(siblings):
+        facts = table_source_facts("mine", pa.schema([("a", pa.string())]))
+        assert set(facts.schemas) == {"other", "mine"} and facts.resident == {"other", "mine"}
+    assert table_source_facts("mine", None).resident == {"mine"}
+    with sibling_tables(NO_SOURCES):
+        assert table_source_facts("mine", None).schemas == {}

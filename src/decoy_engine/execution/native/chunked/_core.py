@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts
 from decoy_engine.execution.chunked import observe_chunked
 from decoy_engine.execution.native import _chunked_entry
 from decoy_engine.fileaccess import FileAccess
@@ -44,7 +43,6 @@ def mask_chunked(
     route_evidence_sink: list[NativeRouteEvidence] | None = None,
     pool_cache: PoolCache | None = None,
     file_access: FileAccess | None = None,
-    sibling_sources: SourceFacts = NO_SOURCES,
 ) -> Iterator[pa.Table]:
     """`run_mask_chunked` without the post-scan route guard."""
     # Looked up at call time, so a patched subset check holds.
@@ -77,6 +75,5 @@ def mask_chunked(
             native_threads=native_threads,
             route_evidence_sink=route_evidence_sink,
             pool_cache=pool_cache,
-            sibling_sources=sibling_sources,
         ),
     )

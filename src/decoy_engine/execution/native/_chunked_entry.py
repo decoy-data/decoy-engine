@@ -32,7 +32,6 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts
 from decoy_engine.execution import _chunked, _chunked_oracle
 from decoy_engine.execution import _chunked_bucket_perturb as bucket_perturb_gate
 from decoy_engine.execution import _chunked_dgrn as dgrn
@@ -437,7 +436,6 @@ def _run_chunked(
     route_evidence_sink: list[NativeRouteEvidence] | None = None,
     pool_cache: PoolCache | None = None,
     enforce_schema_rule: bool = True,
-    sibling_sources: SourceFacts = NO_SOURCES,
 ) -> Iterator[pa.Table]:
     """Preflight, route choice and the two chunk loops behind both public entry
     points. `enforce_schema_rule=False` is the legacy `run_native_or_oracle_chunked`
@@ -462,7 +460,6 @@ def _run_chunked(
         warm_pools=False,
         carry_passthrough=enforce_schema_rule,
         source_schema=captured_schema,
-        sibling_sources=sibling_sources,
     )
     if state.first is None:
         state.close_secret()
@@ -520,7 +517,6 @@ def _route_chunked(
         unconfigured_policy=state.projection_policy if enforce_schema_rule else None,
         registry=state.registry,
         c5c_ii_admission=c5c_ii_admission,
-        sibling_sources=state.sibling_sources,
     )
     decision = preflight.evidence
     if decision.native_admitted and enforce_schema_rule:
@@ -551,7 +547,6 @@ def _route_chunked(
             engine_version=engine_version,
             registry=state.registry,
             first_schema=state.first.schema,
-            sibling_sources=state.sibling_sources,
         )
         if chunk_result_sink is not None
         else ()
