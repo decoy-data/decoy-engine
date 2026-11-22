@@ -44,6 +44,7 @@ import pyarrow.parquet as pq
 from decoy_engine import reasons
 from decoy_engine.fileaccess import (
     DIRECTORY_PUBLISH_LABELS,
+    RESERVED_MEMBER_NAMES,
     CommitUncertain,
     FileAccessDenied,
     LeafTooLarge,
@@ -193,6 +194,9 @@ def _measure(txn: OutputTxn, tables: Sequence[str], request: PublicationRequest)
     return _Measured(descriptor, encode_descriptor(descriptor))
 
 
+_RESERVED_FOLDED = frozenset(n.casefold() for n in RESERVED_MEMBER_NAMES)
+
+
 def check_request(request: PublicationRequest, tables: Sequence[str] = ()) -> list[str]:
     """Refuse a request or table list `publish_unit` and `publish_tables` would not take, before
     any I/O; return the table list."""
@@ -203,7 +207,8 @@ def check_request(request: PublicationRequest, tables: Sequence[str] = ()) -> li
     names = list(tables)
     if any(type(n) is not str for n in names) or len(set(names)) != len(names):
         raise ValueError("invalid tables")
-    if DESCRIPTOR_NAME in names:
+    # Casefolded: macOS and Windows file systems treat a case variant as the same member.
+    if any(n.casefold() in _RESERVED_FOLDED for n in names):
         raise ValueError("invalid tables")
     return names
 
@@ -432,7 +437,9 @@ def publish_tables(
     from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 
     names = check_request(request, list(tables))
-    components = [f"{name}{suffix}" for name in names]
+    # The caller's suffix can complete a reserved name from a harmless key, so the derived
+    # components pass the same check, before any I/O.
+    components = check_request(request, [f"{name}{suffix}" for name in names])
     if not all(map(is_valid_component, components)) or len(set(components)) != len(components):
         raise ValueError("invalid tables")
     failure: str | None = None
