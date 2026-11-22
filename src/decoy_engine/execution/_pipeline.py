@@ -69,6 +69,7 @@ docstring describes.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -86,6 +87,7 @@ from decoy_engine.execution._planner import (
 )
 from decoy_engine.execution._substrate import require_optional_nonempty_str
 from decoy_engine.execution._transforms_prepare import prepare_transform_sources
+from decoy_engine.execution.pipeline._native_notice import native_fallback_code
 from decoy_engine.execution.pipeline._subset_stage import resolve_subset
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._readers import LazySource
@@ -357,4 +359,7 @@ def run_pipeline(
             decision = _ctx.decide_route(ctx)
             _dispatch.emit_route(_progress, decision)
             result = _dispatch.execute_route(ctx, decision, refusals)
+        # Set here, after the one `execute_route` call, so every route reports the same way and
+        # a run refused before it starts never claims a fallback.
+        result = dataclasses.replace(result, native_fallback_code=native_fallback_code(ctx.plan))
         return stage.stamp(result)
