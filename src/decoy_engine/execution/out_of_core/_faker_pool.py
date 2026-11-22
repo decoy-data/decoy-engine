@@ -187,10 +187,8 @@ class OocFakerPoolContext:
             raise ExecutionError(
                 code=reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED,
                 message=(
-                    f"faker pool for provider {prepared.provider!r} "
-                    f"(pool_size {prepared.pool_size}) needs {reservation} reserved bytes; "
-                    f"{self._reserved_bytes} of {self._max_pool_bytes} already reserved for "
-                    "this run. Reduce pool_size or raise the out-of-core pool budget."
+                    "the faker pools this run needs exceed the out-of-core pool budget. "
+                    "Reduce pool_size or raise the out-of-core pool budget."
                 ),
             )
         pool = self._builder.build(

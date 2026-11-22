@@ -219,6 +219,13 @@ class TableHashPlan:
         return self._bound if decision.native else None
 
 
+def fk_child_skip_columns(incoming_edges: Iterable[RelationshipEdge]) -> frozenset[str]:
+    """The child columns of a table's incoming FK edges: their masked values come from the
+    parent, so no column strategy runs on them. The one derivation both drivers and the runner's
+    pre-scratch preparation share."""
+    return frozenset(col for edge in incoming_edges for col in edge.child_columns)
+
+
 class OocHashRun:
     """Run-scoped hash decisions, collected across every table of one run.
 
@@ -249,6 +256,7 @@ class OocHashRun:
         self._text_mask_loaded = False
         self._text_mask_bound: BoundTextMaskKernel | None = None
         self._plans: list[TableHashPlan] = []
+        self._faker_plans: dict[str, TableFakerPlan | None] = {}
         self._remap: list[dict[str, Any]] = []
 
     def _kernel(self) -> BoundHashKernel | None:
@@ -319,6 +327,39 @@ class OocHashRun:
             kernel = load_text_redact_kernel()
             self._text_mask_bound = None if kernel is None else BoundTextMaskKernel(kernel)
         return self._text_mask_bound
+
+    def _decide_faker(
+        self, plan: Plan, table_name: str, source_schema: pa.Schema, skip_columns: frozenset[str]
+    ) -> TableFakerPlan | None:
+        """The one faker decision for a table: None when it has no executable faker column."""
+        seed = table_seed(plan, table_name)
+        faker_seeds = {
+            column: column_seed
+            for column, column_seed in (seed.per_column if seed is not None else ())
+            if column_seed.strategy == "faker"
+            and column not in skip_columns
+            and source_schema.get_field_index(column) >= 0
+        }
+        if not faker_seeds:
+            return None
+        return decide_faker_table(
+            table_name, source_schema, faker_seeds, self._faker_kernel(), self._faker_pool
+        )
+
+    def prepare_faker_tables(
+        self,
+        plan: Plan,
+        tables: Mapping[str, tuple[pa.Schema, frozenset[str]]],
+    ) -> None:
+        """Decide every executable table's faker columns before any scratch exists.
+
+        `decide_faker_table` resolves each pool identity, deduplicates it and reserves it against
+        the pool budget, so an over-budget job fails here, before the arena is made. The plans
+        are stored and `prepare_table` reuses them, so the decision runs once per table."""
+        for table_name, (source_schema, skip_columns) in tables.items():
+            self._faker_plans[table_name] = self._decide_faker(
+                plan, table_name, source_schema, skip_columns
+            )
 
     def prepare_table(
         self,
@@ -433,23 +474,12 @@ class OocHashRun:
             if text_mask_seeds
             else None
         )
-        faker_seeds = {
-            column: column_seed
-            for column, column_seed in (seed.per_column if seed is not None else ())
-            if column_seed.strategy == "faker"
-            and column not in skip_columns
-            and source_schema.get_field_index(column) >= 0
-        }
+        # Already decided (and its pools reserved) before the scratch arena was made, when the
+        # runner prepared the whole job; a standalone driver decides here.
         faker = (
-            decide_faker_table(
-                table_name,
-                source_schema,
-                faker_seeds,
-                self._faker_kernel(),
-                self._faker_pool,
-            )
-            if faker_seeds
-            else None
+            self._faker_plans[table_name]
+            if table_name in self._faker_plans
+            else self._decide_faker(plan, table_name, source_schema, skip_columns)
         )
         table_plan = TableHashPlan(
             decisions, self._bound, categorical, bucket, fpe, text_redact, text_mask, faker

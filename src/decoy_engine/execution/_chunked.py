@@ -37,10 +37,12 @@ categorical, exactly when their deterministic value-keyed path is the
 one that runs and every whole-run input is declared in config rather
 than derived from the data:
 
-- faker: `deterministic: true` + `namespace` + an explicit `pool_size`
-  (top-level `ColumnConfig.pool_size` or `provider_config.pool_size` --
-  DE-11 resolves whichever one is set, rejecting the config at compile
-  if both disagree) + `cardinality_mode` absent or `reuse`. The
+- faker: `deterministic: true` + `namespace` + `cardinality_mode` absent or
+  `reuse`. The pool size is not a condition: DE-11 resolves a declared
+  `pool_size` (top-level `ColumnConfig.pool_size` or
+  `provider_config.pool_size`, rejecting the config at compile if both
+  disagree) and an absent one resolves to the default through
+  `effective_pool_size`. The
   deterministic sampler maps each value via
   `derive_index(job_seed, namespace, canonicalize(value), pool_size)`,
   independent of row position or chunk arrival, and the pool build is
@@ -50,7 +52,7 @@ than derived from the data:
   allowed, byte-identical to the full-frame run of the same rows
   (pool_size controls collision rate, not admission).
 - faker, non-deterministic REUSE: position-keyed on `job_seed` and the row's global offset, so
-  it runs chunked with an explicit `pool_size` and a C1-allowlist provider (the namespace is
+  it runs chunked with a C1-allowlist provider (the namespace is
   optional) and without `when:`. See `native/_faker_positional_admission.py`.
 - categorical: deterministic (`deterministic: true` or `allow_collisions: true`) +
   `namespace` + explicit `provider_config.categories`, and NOT `from_profile`
@@ -232,22 +234,12 @@ def _conditional_admission_failures(col_entry: dict[str, Any]) -> list[str]:
     if faker_gate.is_positional_faker_entry(col_entry):
         # Non-deterministic REUSE is position-keyed, not deterministic: stage A is its whole veto.
         return faker_gate.positional_faker_failures(col_entry)
-    cfg = col_entry.get("provider_config") or {}
     failures: list[str] = []
     if not col_entry.get("deterministic"):
         failures.append("requires deterministic: true (whole-column draw; not chunk-safe)")
     if not col_entry.get("namespace"):
         failures.append("requires a namespace (the value-keyed mapping derives from it)")
     if strategy == "faker":
-        # DE-11: legal at either location; the compile resolver rejects a
-        # disagreeing pair, so this only checks at least one is present.
-        if col_entry.get("pool_size") is None and cfg.get("pool_size") is None:
-            failures.append(
-                "requires an explicit pool_size (top-level or "
-                "provider_config.pool_size) as the chunked capacity "
-                "declaration (the non-chunked default of 10000 is not "
-                "applied silently here)"
-            )
         if col_entry.get("cardinality_mode") not in (None, "reuse"):
             failures.append(
                 "requires cardinality_mode absent or 'reuse' (source-cardinality "
@@ -490,15 +482,9 @@ def _warm_faker_pools(
     if table_seed is None:
         return
     builder = PoolBuilder(registry)
-    for col_name, col_seed in table_seed.per_column:
+    for _col_name, col_seed in table_seed.per_column:
         if col_seed.strategy != "faker" or col_seed.provider is None:
             continue
-        if col_seed.pool_size is None:
-            # Admission should have rejected this config already.
-            raise ValueError(
-                f"chunked faker column {table}.{col_name} reached pool pre-warm "
-                "with no resolved pool_size; admission should have rejected it."
-            )
         # Task 3.1 HIGH 1: the pool_size/locale/build_config split lives in ONE
         # place shared with the oracle handler and the native route, so this
         # pre-warm cannot drift onto a different cache identity than they use.

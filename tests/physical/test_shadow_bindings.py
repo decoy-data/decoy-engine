@@ -142,7 +142,7 @@ def test_hash_node_binding_carries_key_source_and_namespace_not_bytes(tmp_path: 
         assert not isinstance(value, (bytes, bytearray))
 
 
-def test_faker_node_is_not_slice_bound(tmp_path: Path) -> None:
+def test_faker_node_without_pool_size_is_slice_bound(tmp_path: Path) -> None:
     source = pa.table({"c": pa.array(["a", "b"], type=pa.string())})
     plan = _plan_for(
         tmp_path,
@@ -158,7 +158,8 @@ def test_faker_node_is_not_slice_bound(tmp_path: Path) -> None:
     )
     node = plan.tables[0].nodes[0]
     assert node.strategy == "faker"
-    assert node.execution is None
+    assert node.execution is not None
+    assert node.execution.pool_binding.plan_pool_size is None
 
 
 def test_hash_without_namespace_is_not_bound(tmp_path: Path) -> None:

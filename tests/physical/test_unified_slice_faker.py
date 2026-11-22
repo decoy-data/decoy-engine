@@ -554,19 +554,6 @@ _DECLINE_CASES: dict[str, tuple[pa.Table, list[dict[str, Any]], Callable[..., No
         [faker_column(cardinality_mode="match_source_cardinality")],
         None,
     ),
-    "missing_pool_size": (
-        string_source(),
-        [
-            {
-                "name": "c",
-                "strategy": "faker",
-                "provider": "person_first_name",
-                "deterministic": True,
-                "namespace": "ns_faker",
-            }
-        ],
-        None,
-    ),
     "provider_outside_allowlist": (
         string_source(),
         [faker_column(provider="person_email")],
@@ -583,6 +570,30 @@ _DECLINE_CASES: dict[str, tuple[pa.Table, list[dict[str, Any]], Callable[..., No
     # test_c5c_i_unified_positional). Float is covered there too (it declines by raising the same
     # float-canonicalization error on both lanes, so it is not a clean-decline matrix case).
 }
+
+
+def _without_pool_size(**extra: Any) -> dict[str, Any]:
+    column = faker_column(**extra)
+    del column["pool_size"]
+    return column
+
+
+@NEEDS_COMPANION
+@pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+def test_10_missing_pool_size_runs_native_like_the_declared_default(
+    tmp_path: Path, deterministic: bool
+) -> None:
+    """No `pool_size` takes the default of 10000 on the lane: the lane runs (the oracle is
+    poisoned), equals the oracle, and equals the same column declaring `pool_size: 10000`."""
+    source = string_source(40)
+    extra: dict[str, Any] = {} if deterministic else {"deterministic": False}
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    omitted = Case(tmp_path / "a", source, [_without_pool_size(**extra)])
+    declared = Case(tmp_path / "b", source, [faker_column(pool_size=10_000, **extra)])
+    leaf = assert_lane_parity(omitted)
+    assert [e["operator"] for e in evidence_by_operator(leaf)] == [FAKER_OP]
+    assert lane_run(omitted).outputs["t"].equals(lane_run(declared).outputs["t"])
 
 
 @pytest.mark.parametrize("name", sorted(_DECLINE_CASES))

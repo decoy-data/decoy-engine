@@ -260,3 +260,7 @@ baseline = "tests/sentry/baselines/column-shape-classifier.json"
 [[sentry]]
 id = "signature-exemptions"
 baseline = "tests/sentry/baselines/signature-exemptions.json"
+
+[[sentry]]
+id = "faker-pool-size-one-resolver"
+baseline = "tests/sentry/baselines/faker-pool-size-one-resolver.json"

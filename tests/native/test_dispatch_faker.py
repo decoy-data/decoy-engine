@@ -182,7 +182,6 @@ def test_deterministic_reuse_faker_admits_on_native_pool_route() -> None:
             [_faker_column(cardinality_mode="scale_source_cardinality")],
             id="scale_cardinality_deterministic",
         ),
-        pytest.param([_faker_column(pool_size=None)], id="missing_pool_size"),
     ],
 )
 def test_non_c1_faker_variant_stays_on_oracle(columns: list[dict]) -> None:
@@ -342,12 +341,30 @@ def test_mixed_faker_and_hash_all_admit_when_faker_is_c1_variant() -> None:
     assert routed == {"FIRST": "native_pool", "SSN": "native_kernel"}
 
 
+def test_a_faker_column_without_pool_size_is_admitted_like_the_declared_default() -> None:
+    # The pool size resolves through `effective_pool_size`, so an absent one admits exactly as
+    # `pool_size: 10000` does.
+    kwargs = {
+        "table": "t",
+        "engine_version": _ENGINE_VERSION,
+        "registry": get_default_registry(),
+    }
+    omitted = plan_native_route(
+        _config(_faker_column(pool_size=None)), _profile("FIRST"), **kwargs
+    ).evidence
+    declared = plan_native_route(
+        _config(_faker_column(pool_size=10_000)), _profile("FIRST"), **kwargs
+    ).evidence
+    assert omitted.native_admitted is declared.native_admitted is True
+    assert omitted.node_routes == declared.node_routes
+
+
 def test_one_non_c1_faker_column_reroutes_whole_table_not_just_that_column() -> None:
     # Admission-level check (see the comment on test_non_c1_faker_variant_stays_
     # on_oracle for why this does not exercise the full chunked oracle fallback).
     config = _config(
         _faker_column("FIRST"),
-        _faker_column("LAST", provider="person_last_name", pool_size=None, namespace="ns_l"),
+        _faker_column("LAST", provider="address_city", deterministic=False, namespace="ns_l"),
     )
     decision = plan_native_route(
         config,
