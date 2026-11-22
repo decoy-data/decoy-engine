@@ -143,12 +143,12 @@ full-frame (or sequential) oracle instead; the out-of-core route never silently 
 through or drops a strategy. Some declines are inherent to a single-pass, per-column batch
 stream and are not a near-term wiring gap:
 
-- `faker` shapes outside the admitted deterministic-REUSE person-name variant
-  (`out_of_core_faker_pool_unsupported`): realistic name/address/value replacement draws
-  from a registry-backed value pool plus a cross-batch pool cache, which the registry-free
-  streaming kernel has no channel for. So those shapes do **not** run at out-of-core
-  scale today; this is a known limitation, not a silent no-op. A streamable value-pool design is
-  a separate V2 item.
+- `faker` shapes outside the admitted variant (`out_of_core_faker_pool_unsupported`,
+  `out_of_core_faker_source_type_unsupported`): the route has a bounded, run-scoped `PoolCache`
+  (`out_of_core/_faker_pool.py`), but `_compat.py` admits only a provider on the native
+  allowlist, `deterministic` with `cardinality_mode=reuse`, a namespace and an explicit
+  `pool_size`, and a source column of exact `string` type. Any other shape declines and
+  keeps the sequential or full-frame route; it is never a silent no-op.
 - `geo_generalize` (`out_of_core_whole_column_aggregation_unsupported`): its k-anonymity cascade
   thresholds each row's generalization level on whole-dataset counts (ZIP5/ZIP3/state or H3
   resolutions), which a single chunk cannot see.
@@ -268,7 +268,9 @@ Two independent routing layers compose in `_pipeline_routing.py`, in a fixed dec
         the plan: an accepted strategy set, an acyclic table-level FK
         graph, no `when` predicate; a multi-parent child is admitted) AND
         either the default byte-estimate routing applies (a compat-admitted job takes this
-        route whatever its row count; `out_of_core_threshold_rows` is not consulted) or,
+        route whatever its row count, unless the full-frame estimate fits and an FK key
+        dtype hazard sends it to sequential, see below; `out_of_core_threshold_rows` is not
+        consulted) or,
         with that flag off or for a job outside its scope, the largest mask table is
         at/above `out_of_core_threshold_rows`.
         `_pipeline_route_exec.run_out_of_core_route` executes + packages it.
@@ -281,9 +283,12 @@ Two independent routing layers compose in `_pipeline_routing.py`, in a fixed dec
    - b. **sequential** -- the bounded-memory (but O(cardinality), so still
         OOM-able at extreme scale) `run_sequential` path -- for a
         pure-mask FK job that is NOT out-of-core-eligible (an unsupported
-        strategy, a self-referential / cyclic FK, a multi-parent child whose
+        strategy, a self-referential FK, a multi-parent child whose
         parents' masked key types differ, a key dtype the joiner rejects) or, when the row-count
-        gate is in force, is below the out-of-core size threshold.
+        gate is in force, is below the out-of-core size threshold. A job whose full-frame
+        estimate fits and that has an FK key dtype hazard (out-of-core rejects some key
+        types that sequential completes) also takes sequential. A cross-table cycle is
+        never sequential: bounded admission excludes it.
         `_pipeline_route_exec.run_sequential_route` executes + packages it.
    - c. **full_frame** -- the adapter-selected `run` path -- for a job with
         no relationships, and for a relationship job disqualified from
@@ -439,8 +444,15 @@ FK graph (single- or multi-parent children) with only supported strategies
 enough; the row-count gate (a largest mask table at/above
 `out_of_core_threshold_rows`) applies only when the flag is off or the job is
 outside its scope. So a pure-mask FK job with an unsupported strategy or a
-cyclic/self-referential FK keeps taking the existing sequential route (or is
-rejected when no bounded route applies and full-frame memory admission fails).
+self-referential FK keeps taking the existing sequential route. A cross-table
+cycle (A -> B -> A) is excluded from bounded admission: it runs full-frame when
+memory admission passes, otherwise it is rejected with
+`fk_full_frame_oom_risk_rejected`.
+
+When the full-frame estimate fits (or the probe confirms a fit) and the job
+has an FK key dtype hazard, the router picks sequential instead of
+out-of-core. Probe recovery selects full-frame only when no bounded route
+applies.
 
 `largest_table_rows` carries the largest mask table's row count from the
 (SC7a bounded) profile metadata even on the lazy `source_loader` path where
@@ -482,7 +494,7 @@ threshold order, because out-of-core eligibility is a strict subset of
 sequential eligibility, and a sequential-eligible non-cyclic job takes the
 `sequential` early return in `decide_execution_route` before the reject test is evaluated. The
 reject branch is reached ONLY by full-frame-bound jobs (not
-sequential-eligible, or a cyclic FK graph), which no bounded route can take
+sequential-eligible, or a cross-table cyclic FK graph), which no bounded route can take
 at any threshold ordering. So the ordering is an explanatory expectation,
 not a load-bearing invariant, and is left to the operator rather than
 rejected at submit time.

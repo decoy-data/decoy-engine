@@ -52,9 +52,11 @@ table not listed under `tables:` is refused as before.
 
 A generate-only config with a non-empty `relationships:` block runs on the
 full-frame route. The chunked route and shadow generation decline such a
-config, and the run reports the full-frame route. A config with mask tables
-and relationships is routed by the FK router (sequential, out-of-core or
-full-frame; see `docs/execution-backends.md`).
+config, and the run reports the full-frame route. A pure-mask config
+with relationships is routed by the FK router, which chooses among sequential,
+out-of-core and full-frame. An eligible generate+mask config (one
+generate-parent to mask-child edge) can route `mixed`. See
+`docs/execution-backends.md`.
 
 ## Orphans
 

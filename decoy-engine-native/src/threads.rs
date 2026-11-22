@@ -5,8 +5,8 @@
 //! the rest of the process (including later DuckDB work). The shared pool is built once, sized to
 //! the host's available parallelism (see `shared_native_pool`); the per-call `native_threads`
 //! budget, resolved by `NativeThreadBudget::resolve`, limits how many work ranges a call splits
-//! into, not the pool size. The batch loops (`batch/ranges.rs`, `fpe.rs`) run their ranges on the
-//! shared pool.
+//! into, not the pool size. The batch loops (`batch/ranges.rs`, `fpe.rs`) run two or more ranges on
+//! the shared pool; a call with zero or one range runs serially and never builds it.
 //!
 //! Ownership + lifetime (Phase-0 Codex requirement): a `NativeThreadPool` owns exactly ONE
 //! long-lived `rayon::ThreadPool`, constructed once from a `NativeThreadBudget` and reused for
@@ -255,7 +255,8 @@ impl NativeThreadBudget {
 /// Owns the single long-lived Rayon thread pool built from a [`NativeThreadBudget`].
 ///
 /// Built ONCE (see the module doc on ownership + lifetime) and reused; never rebuilt per batch.
-/// The batch loops run their work ranges on it through `install`.
+/// The batch loops run two or more work ranges on it through `install`; zero or one range runs
+/// serially without building it.
 pub struct NativeThreadPool {
     pool: rayon::ThreadPool,
 }
@@ -307,8 +308,8 @@ static SHARED_POOL: OnceLock<Result<NativeThreadPool, DeriveError>> = OnceLock::
 /// This is the ONLY production path to a `NativeThreadPool` (its constructor is crate-internal),
 /// so the aggregate native-thread count is bounded across concurrent jobs by construction: there
 /// is exactly one pool, sized once to the host's available parallelism (the process capacity).
-/// The batch loops drive their parallel ranges by calling [`NativeThreadPool::install`] on this
-/// instance; a per-job `native_threads` budget caps the work WITHIN the shared pool, it never
+/// The batch loops drive two or more parallel ranges by calling [`NativeThreadPool::install`] on
+/// this instance (zero or one range runs serially without building it); a per-job `native_threads` budget caps the work WITHIN the shared pool, it never
 /// sizes a separate pool.
 ///
 /// Sizing note: rayon pools are fixed-size at build, so the first call fixes the size for the
