@@ -895,7 +895,7 @@ reason = "ambient CLI semantics: the one policy that follows a caller path; neve
 
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn._publish_durable"
+function = "LocalOutputTxn._publish_durable.rename"
 sink = "os.replace"
 ordinal = 0
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
