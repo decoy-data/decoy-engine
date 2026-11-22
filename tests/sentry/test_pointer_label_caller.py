@@ -23,7 +23,6 @@ ALLOWED: frozenset[Site] = frozenset(
         ("fileaccess/_types.py", "StageLabel", "subscript-element"),
         ("fileaccess/_output.py", "STAGE_PREFIX", "dict-key"),
         ("fileaccess/_output.py", "DURABLE_REPLACE_LABELS", "set-element"),
-        ("fileaccess/_output.py", "PRIVATE_LABELS", "set-element"),
     }
 )
 

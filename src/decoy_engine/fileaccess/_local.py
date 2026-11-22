@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import functools
 import logging
 import logging.handlers
 import os
@@ -407,11 +408,10 @@ class LocalOutputTxn(_LocalStageDir):
             raise FileAccessUnavailable("nothing was staged")
         self._finished = True
         try:
-            replace = self._label in DURABLE_REPLACE_LABELS
-            publish = (
-                _durable.publish_replace_durable if replace else _durable.publish_exclusive_durable
+            rename = functools.partial(os.replace, staged, self._target)
+            _durable._publish_labelled(
+                self._label, self._parent_fd, staged.name, self._target.name, rename
             )
-            publish(self._parent_fd, staged.name, self._target.name)
         finally:
             self._close_parent()
 

@@ -33,7 +33,6 @@ from decoy_engine.fileaccess._output import (
 )
 from decoy_engine.fileaccess._types import (
     CommitUncertain,
-    FileAccessUnavailable,
     LeafTooLarge,
     LockTimeout,
     LockUnavailable,
@@ -363,21 +362,21 @@ def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> Non
         raise OSError(code, os.strerror(code))
 
 
-def publish_replace_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
-    """The one durable replace publish: fsync the stage, `renameat(2)` it over `leaf` (a link
-    at the leaf is replaced, never written through), then fsync the directory inside
-    `_sync_bound`, so a failure after the rename is `CommitUncertain`: the new bytes are
-    visible, not confirmed durable. A failure before the rename removes only the stage and
-    leaves the old leaf; the error keeps its errno and nothing else."""
+def publish_replace_durable(
+    parent_fd: int, stage_name: str, leaf: str, rename: Callable[[], None]
+) -> None:
+    """The one durable replace publish: fsync the stage, `rename()` it over `leaf` (a link at the
+    leaf is replaced, never written through), then fsync the directory inside `_sync_bound`, so a
+    failure after the rename is `CommitUncertain`: the new bytes are visible, not confirmed
+    durable. A failure before the rename removes only the stage and leaves the old leaf; the
+    error keeps its errno and nothing else. The caller owns the rename, so each policy keeps its
+    own path or descriptor call."""
     validate_component(stage_name, _CREATOR_KEY)
     validate_component(leaf, _CREATOR_KEY)
-    if _osflags.WINDOWS:  # the dir_fd rename and directory fsync come with the Windows arm
-        raise FileAccessUnavailable("the durable replace comes with the Windows arm")
     code = 0
     try:
         _sync_leaf_at(parent_fd, stage_name)
-        if not _osflags.WINDOWS:
-            _call(os.replace, stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        rename()
     except OSError as exc:
         code = exc.errno or errno.EIO
     if code:
@@ -386,9 +385,11 @@ def publish_replace_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
     _sync_bound(lambda: _fsync_dir(parent_fd))
 
 
-def _publish_labelled(label: str, parent_fd: int, stage_name: str, leaf: str) -> None:
+def _publish_labelled(
+    label: str, parent_fd: int, stage_name: str, leaf: str, rename: Callable[[], None]
+) -> None:
     """The durable publish a label selects: replace for `DURABLE_REPLACE_LABELS`, else exclusive."""
-    publish = (
-        publish_replace_durable if label in DURABLE_REPLACE_LABELS else publish_exclusive_durable
-    )
-    publish(parent_fd, stage_name, leaf)
+    if label in DURABLE_REPLACE_LABELS:
+        publish_replace_durable(parent_fd, stage_name, leaf, rename)
+    else:
+        publish_exclusive_durable(parent_fd, stage_name, leaf)
