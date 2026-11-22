@@ -90,7 +90,7 @@ The field is set after `execute_route`, so a run refused before it starts never 
 | pip install, `--chunked` | no message | no message (the chunked path runs no kernel, G3) |
 | pip install, `--quiet` | no hint | no warning |
 | bundle install, healthy companion | no message | no message |
-| companion missing only `raw_hex`, hash plus group_key | no message | no message (hash ran native) |
+| companion missing only `raw_hex`, hash plus group_key | no message | no message (another needed kernel is available). On the unified-slice route admission needs every kernel of the table (`_unified_slice_admission.py:550-553`), so that table can run in Python with no notice. Partial companions only; V2-LOG: decide per table, as admission does |
 | companion missing only `raw_hex`, group_key only | no message | one `warning:` line |
 | present but broken companion, default intent | refused before the run (`C:src/decoy/_native_gate.py:376-385`) | unchanged |
 | run refused at plan compile | refusal only | refusal only |
