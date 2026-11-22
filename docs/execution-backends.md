@@ -404,10 +404,10 @@ actually MEASURED this job's real full_frame peak (at small scale,
 extrapolated) and confirmed it clears the budget with margin. Checked
 ONLY after `full_frame_fits_estimate is True` fails to admit the job (a
 confirmed static fit never needs a probe) -- when it is `True`,
-`decide_execution_route` returns `full_frame` even for a job that would otherwise be
-out_of_core-eligible: a MEASURED fit beats a bounded-by-eligibility
-default, because full_frame is faster and the probe's `True` means the
-measurement, not a model, backs the decision. Anything other than `True`
+`decide_execution_route` returns `full_frame` only when no bounded route applies
+(`not bounded_eligible`). A bounded-eligible job, such as an out_of_core-compatible
+one, still takes its bounded route: the full-frame oracle is the slowest route per
+row, so a measured fit does not override eligibility. Anything other than `True`
 (`False` or `None` -- an inconclusive probe, or one that was never run
 because it was out of scope/unnecessary) falls straight through to the
 exact same bounded-by-eligibility logic below as if the probe did not

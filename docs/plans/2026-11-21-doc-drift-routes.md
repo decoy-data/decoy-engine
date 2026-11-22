@@ -53,7 +53,7 @@ N/A: a doc correction needs no design. The record-correction note follows the en
 
 7. Same-document cleanup (Codex V2-LOG): `docs/relationships.md` generate-only wording; `docs/execution-backends.md` routing narrative (byte-estimate routing ignores `out_of_core_threshold_rows`; OOC admits multi-parent children) and the OOC faker text (only non-admitted shapes decline).
 
-Size: about 100 changed lines in 6 files.
+Size: about 170 changed lines in 7 files, plus this plan.
 
 ## 4. Behaviour
 
@@ -143,6 +143,7 @@ No new rule: docs only. A doc-claim sentry is Q1.
 | `execution-backends.md`, `relationships.md` | `docs/` | "Feature and contract docs" |
 | two records | `docs/records/` | "Plans, decisions, records" |
 | `lib.rs`, `threads.rs` | `decoy-engine-native/src/` | the companion crate (no CODEMAP row; existing files only, no new file) |
+| `doc-drift-routes.md` fragment | `changelog.d/` | "Changelog fragments" (`changelog.d/README.md`) |
 | this plan | `docs/plans/` | "Plans, decisions, records" |
 
 No new file in the build.
@@ -155,7 +156,7 @@ None. Full-suite trigger: no (docs and Rust doc comments; no test, fixture, lock
 
 | Slice | Repo | Content | Size | Risk | Gate |
 |---|---|---|---|---|---|
-| D1 | engine | the six edits in section 3, one changelog-free docs PR (`docs(routes): ...`) | about 60 lines, 6 files | R1 | Codex |
+| D1 | engine | the six edits in section 3, one docs PR (`docs(routes): ...`) with a changelog fragment | about 170 lines, 7 files plus this plan | R1 | Codex |
 
 After merge: CLI row 27 state to DONE with the PR number.
 
