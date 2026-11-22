@@ -419,6 +419,38 @@
       "since": "1.33.0",
       "summary": "scan_baseline.on_drift is not checked by decoy run yet; the run continues without a drift check.",
       "symbol": "DRIFT_NOT_CHECKED"
+    },
+    {
+      "code": "native_companion_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "No compiled kernel ran: a native kernel this run needs is not available, so masking ran in Python.",
+      "symbol": "NATIVE_COMPANION_MISSING"
     }
   ],
   "event_schema_version": 1,

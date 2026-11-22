@@ -23431,6 +23431,23 @@
     },
     {
       "namespace": "warning",
+      "code": "native_companion_missing",
+      "fields": {
+        "code": "9f1c1cac755114ec9d80e235d704db14f2fbf9684ade832681f7149b78b56914",
+        "context": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "deprecated_in": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "kind": "c94f9df6f3f7bc69e76a374ce4cd3e5d8766f2145a742ccb34d26e1954efd067",
+        "namespace": "c94f9df6f3f7bc69e76a374ce4cd3e5d8766f2145a742ccb34d26e1954efd067",
+        "owner": "5ff0c0b2f59479409299e2a8d3a6b42c3ab4a92dc9e4d80fcb848f9a0c1fa10f",
+        "replaced_by": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "rules": "ff6289444bef2e3738dd1f281a58964fd294d7f29da6395299a68e40f418bf10",
+        "since": "f7dd79ed03f841100a26a335e8298fb43d2064e7fd069787ceb05b90421caff0",
+        "summary": "76e23d15d44f72d2a862b0ec163e26b74e585ff621b4452e410a3c7db1ce60d3",
+        "symbol": "73734e976ed246f3c1e06beec5f54d80de3a401f46f5e1288ffc31265f637aef"
+      }
+    },
+    {
+      "namespace": "warning",
       "code": "nested_cell_duplicate_key",
       "fields": {
         "code": "3fc8f3e4ae6108f29ace094448106283e926bffb0683a235077849f367cd9905",
@@ -23855,6 +23872,6 @@
     "1.30.0": 178,
     "1.31.0": 9,
     "1.32.0": 41,
-    "1.33.0": 15
+    "1.33.0": 16
   }
 }

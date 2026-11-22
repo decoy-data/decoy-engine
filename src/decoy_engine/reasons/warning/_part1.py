@@ -76,7 +76,7 @@ NATIVE_COMPANION_MISSING = _d(
     "native_companion_missing",
     "No compiled kernel ran: a native kernel this run needs is not available, so masking ran "
     "in Python.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 NESTED_CELL_JSON_PARSE_ERROR = _d("nested_cell_json_parse_error", "Nested cell JSON parse error.")
 NESTED_JSONPATH_PATH_OVERLAP = _d("nested_jsonpath_path_overlap", "Nested jsonpath path overlap.")

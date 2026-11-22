@@ -19,6 +19,16 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - a vault written by this engine is `decoy-vault/v3`, which an older engine cannot open; keep the older engine's vaults for it or re-run the mask.
 - windowed_date produces different dates for the same seed (output-changing, pre-GA).
 
+### Added (native companion missing notice, NATIVE-MISSING-WARN E1, 2026-11-21)
+
+`ExecutionResult` gains `native_fallback_code`. It is `native_companion_missing` when the compiled plan needs a compiled kernel (hash, faker, categorical, bucket_perturb, group_key, date_shift or fpe columns) and none of the kernels it needs is available, so masking ran in Python. It is `None` otherwise. `run_pipeline` sets it after the route returns, so every route reports the same way, and a caller such as the CLI can print one notice. The field is hidden from `repr`, not compared and never written to the result document, so outputs and documents are byte-identical to before.
+
+The new reason `warning/native_companion_missing` is pending. `run_pipeline_isolated` does not carry the field.
+
+### Added (managed delivery pointer, DELIV E2a, 2026-11-21)
+
+`decoy_engine.publication` now exports `CurrentPointer`, `LocalPointerStore`, `PointerState`, `PointerResult`, `PointerStore`, `PointerUnreadable` and `read_value`. They read and swap one small pointer file under its F22 lock with a compare-and-swap on the raw bytes. The write uses a new private file-access label, `pointer`: it fsyncs the stage and the parent directory, and a parent fsync failure after the replace is reported as `uncertain`, not swallowed. No existing output changes.
+
 ### Changed (date_shift on typed dates, COLUMN-SHAPE-RULE E1b, 2026-11-21)
 
 `date_shift` now runs on a column that is already a date or a zoned timestamp (Parquet, DuckDB, a database or an Arrow table) with no `date_format`. The column's type comes from its source schema. The output keeps the type: a date stays a date, and a `date64` stays `date64`, an all-null chunk keeps the source type, and a zoned timestamp keeps its unit and its zone. A zoned timestamp moves by whole calendar days in its own zone, so its time of day holds across a DST change (as with PostgreSQL `timestamptz + interval '1 day'`). A typed date shifts as a calendar date, so `9999-12-31` no longer becomes a missing value. Before, a typed date was written back as text. A typed date and the same date as ISO text in one namespace get the same offset.
