@@ -26,6 +26,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.declared_casting import (
@@ -166,7 +167,7 @@ def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
     """(table, column) of each date_shift column that declares a date parse format.
 
     These are the columns that may run `date_shift` with no `date_format`: the declared contract
-    parses the cells first and the handler sees dates. The one list the runtime backstop reads.
+    parses the cells first and the handler sees dates. They keep their legacy text output.
     """
     block = getattr(plan, "declared_casting", None)
     return frozenset(
@@ -179,6 +180,20 @@ def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
             has_parse_format=True,
         )
     )
+
+
+def native_date_columns(plan: Any) -> Mapping[tuple[str, str], ColumnShape]:
+    """(table, column) -> shape of each column the plan lists as a native date or zoned timestamp.
+
+    The one list the runtime backstop reads: a column the plan does not list is never typed
+    here, whatever its data looks like. Declared date columns are not in it (they keep text).
+    """
+    declared = declared_date_shift_columns(plan)  # an F06 declaration also shapes as a date
+    return {
+        (s.table, s.column): s.shape
+        for s in getattr(plan, "column_shapes", None) or ()
+        if s.shape in TYPED_DATE_SHAPES and (s.table, s.column) not in declared
+    }
 
 
 @dataclass

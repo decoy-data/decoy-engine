@@ -29,3 +29,8 @@ class _FakeCtx:
         self.job_seed = _JOB_SEED
         self.mask_key = _JOB_SEED
         self.row_offset = 0
+        # date_shift reads where a column sits in the plan; a flat run has no plan entries.
+        self.nested_outer_column = ""
+        self.current_table = ""
+        self.native_date_columns: dict = {}
+        self.declared_date_columns: frozenset = frozenset()

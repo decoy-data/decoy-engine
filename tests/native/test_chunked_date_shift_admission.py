@@ -183,22 +183,22 @@ def test_a_large_string_source_runs_the_oracle_leg_and_matches_full_run(tmp_path
 
 @NEEDS_COMPANION
 def test_a_non_string_source_fails_closed_through_the_oracle_not_the_kernel() -> None:
-    """An int64 source never reaches the compiled kernel: the profile-typed static gate
-    declines it (`fallback_policy_not_native`) before the real-type gate is consulted. The
-    oracle's own behavior for it (every value is unparseable under the format) is
-    reproduced exactly: same error."""
+    """An int64 source never reaches the compiled kernel. COLUMN-SHAPE E1b admits typed dates
+    and text only, so the plan compile refuses an integer column with `column_shape_mismatch`
+    before any chunk is read (plan 2026-11-21-column-shape-rule, E1b: typed mismatch refused at
+    compile). That is a stronger fail-closed than the old per-row format errors, and the
+    forced-oracle leg gets the same refusal."""
     chunks = [pa.table({"d": pa.array([20240101, None], pa.int64()), "p": pa.array([1, 2])})]
     native = run_outcome(make_config([ds_col(), passthrough("p")]), chunks)
     forced = run_outcome(
         make_config([ds_col(), passthrough("p"), force_oracle(FORCE)]),
         [with_force(c) for c in chunks],
     )
-    assert native.ev[0].native_admitted is False
-    assert "fallback_policy_not_native:d" in (native.ev[0].reroute_reason or "")
-    assert isinstance(native.error, RowErrorsFailedError)
-    assert isinstance(forced.error, RowErrorsFailedError)
-    assert native.error.records == forced.error.records
-    assert native.ev[0].kernel_calls == {}
+    assert isinstance(native.error, PlanCompileError)
+    assert isinstance(forced.error, PlanCompileError)
+    assert native.error.code == forced.error.code == "column_shape_mismatch"
+    assert native.ev == []
+    assert native.out == []
 
 
 @NEEDS_COMPANION
@@ -596,9 +596,11 @@ def test_a_non_string_column_auto_routes_to_the_oracle_leg_with_the_full_frame_o
     cfg = _auto_config("int64", tmp_path)
     auto = _outcome(lambda: _auto(cfg, "int64", auto_chunk_threshold_rows=3, chunk_size_rows=4))
     full = _outcome(lambda: _auto(cfg, "int64", auto_chunk=False))
+    # Plan E1b: an integer column is refused at compile on both routes, before any row is read.
     assert type(auto) is type(full)
-    assert isinstance(auto, RowErrorsFailedError)
-    assert auto.records[0].trigger == full.records[0].trigger == "format_error"
+    assert isinstance(auto, PlanCompileError)
+    assert isinstance(full, PlanCompileError)
+    assert auto.code == full.code == "column_shape_mismatch"
 
 
 @NEEDS_COMPANION

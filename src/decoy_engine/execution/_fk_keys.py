@@ -482,15 +482,42 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
     )
 
 
+def _with_source_types(
+    table: pa.Table, schema: pa.Schema | None, names: Collection[str]
+) -> pa.Table:
+    """Give each named column its source Arrow type back where pandas lost it.
+
+    A date strategy hands pandas ``datetime.date`` cells, which Arrow reads as ``date32`` (so a
+    ``date64`` source changes type) and, for an all-null chunk, as ``null`` (so chunk schemas
+    differ). Only those two losses are repaired; any other type difference is left as it is.
+    """
+    if schema is None:
+        return table
+    for name in names:
+        if name not in table.column_names or name not in schema.names:
+            continue
+        want = schema.field(name).type
+        have = table.schema.field(name).type
+        if have != want and (
+            pa.types.is_null(have) or (pa.types.is_date64(want) and have == pa.date32())
+        ):
+            position = table.schema.get_field_index(name)
+            table = table.set_column(position, name, table.column(position).cast(want))
+    return table
+
+
 def table_from_pandas_keeping_maps(
-    frame: pd.DataFrame, schema: pa.Schema | None, untouched: Collection[str]
+    frame: pd.DataFrame,
+    schema: pa.Schema | None,
+    untouched: Collection[str],
+    keep_types: Collection[str] = (),
 ) -> pa.Table:
     """`pa.Table.from_pandas(frame)` that gives every untouched map column the source held its
     map type back. pandas holds a map cell as a list of key/value tuples, which pyarrow cannot
     infer a type from; the declared type rebuilds it exactly. `schema` is the source table's and
     `untouched` the columns no strategy changed (`_chunked_carry.untouched_columns`): a masked
     map column holds the strategy's own values and converts as it always did, like every other
-    column."""
+    column. `keep_types` names the date columns whose source type is restored on the way out."""
     maps = (
         [
             f
@@ -501,7 +528,9 @@ def table_from_pandas_keeping_maps(
         else []
     )
     if not maps:
-        return pa.Table.from_pandas(frame, preserve_index=False)
+        return _with_source_types(
+            pa.Table.from_pandas(frame, preserve_index=False), schema, keep_types
+        )
     table = pa.Table.from_pandas(frame.drop(columns=[f.name for f in maps]), preserve_index=False)
     for field in sorted(maps, key=lambda f: frame.columns.get_loc(f.name)):
         table = table.add_column(
@@ -509,7 +538,7 @@ def table_from_pandas_keeping_maps(
             field.name,
             pa.array(frame[field.name], type=field.type, from_pandas=True),
         )
-    return table
+    return _with_source_types(table, schema, keep_types)
 
 
 __all__ = [
