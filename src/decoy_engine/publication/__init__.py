@@ -6,6 +6,15 @@ The descriptor codec (``_descriptor.py``), the request and receipt types and the
 slices of the same package. Contract: ``docs/publication.md``.
 """
 
+from decoy_engine.publication._current import (
+    CurrentPointer,
+    LocalPointerStore,
+    PointerResult,
+    PointerState,
+    PointerStore,
+    PointerUnreadable,
+    read_value,
+)
 from decoy_engine.publication._descriptor import (
     ARTIFACT_FIELDS,
     DESCRIPTOR_NAME,
@@ -61,10 +70,16 @@ __all__ = [
     "Artifact",
     "ArtifactSummary",
     "CommitReceipt",
+    "CurrentPointer",
     "Descriptor",
     "DescriptorVault",
     "Exit",
+    "LocalPointerStore",
     "Outcome",
+    "PointerResult",
+    "PointerState",
+    "PointerStore",
+    "PointerUnreadable",
     "PublicationFailed",
     "PublicationRefused",
     "PublicationRequest",
@@ -83,5 +98,6 @@ __all__ = [
     "publish_tables",
     "publish_unit",
     "raise_for_outcome",
+    "read_value",
     "recover",
 ]
