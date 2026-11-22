@@ -21,7 +21,10 @@ from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
 from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
-from decoy_engine.execution.native._companion_status import KernelAvailability
+from decoy_engine.execution.native._companion_status import (
+    KernelAvailability,
+    native_kernel_availability,
+)
 from decoy_engine.execution.pipeline import _native_notice, route_summary
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import profile_source
@@ -46,6 +49,10 @@ def _plan(tmp_path: Path, columns: list[dict[str, Any]], data: dict[str, pa.Arra
 
 def _strings(n: int = 12) -> pa.Array:
     return pa.array([f"v{i}" for i in range(n)])
+
+
+def _group_key(name: str) -> dict[str, Any]:
+    return {"name": name, "strategy": "group_key", "provider_config": {"group_by": "g"}}
 
 
 def _spy_probe(monkeypatch: pytest.MonkeyPatch, answer: KernelAvailability) -> list[int]:
@@ -98,14 +105,19 @@ def test_without_an_injected_availability_the_plan_probes_once(
 # AT-2
 
 
+def _go(cfg: dict[str, Any], sources: Any, **kw: Any) -> Any:
+    # One thread so the run does not depend on the host's core count.
+    return run_pipeline(cfg, sources, engine_version="nmw-e1", native_threads=1, **kw)
+
+
 def _run_unified(tmp: Path) -> Any:
     cfg, table = scenarios.single_table(tmp)
-    return scenarios._go(cfg, {"t": table}, key_provider=scenarios.key_provider())
+    return _go(cfg, {"t": table}, key_provider=scenarios.key_provider())
 
 
 def _run_auto_chunk(tmp: Path) -> Any:
     cfg, table = scenarios.single_table(tmp)
-    return scenarios._go(
+    return _go(
         cfg,
         {"t": table},
         auto_chunk_threshold_rows=10,
@@ -117,11 +129,30 @@ def _run_auto_chunk(tmp: Path) -> Any:
 
 def _run_fk(tmp: Path, mode: str) -> Any:
     cfg, tables = scenarios.fk_job(tmp)
-    return scenarios._go(cfg, tables, execution_mode=mode, key_provider=scenarios.key_provider())
+    return _go(cfg, tables, execution_mode=mode, key_provider=scenarios.key_provider())
 
+
+def _route_evidence(result: Any) -> dict[str, Any]:
+    metrics = result.quality_metrics
+    return {
+        "mode": metrics.get("execution", {}).get("execution_mode"),
+        "lane": metrics.get("auto_chunk", {}).get("lane"),
+        "unified": "unified_slice_activation" in metrics,
+    }
+
+
+# What each fixture really ran, so a case cannot pass by taking another route. The unified slice
+# declines a hash column when no kernel is available, which is exactly when the code is set, so
+# that fixture lands on the full-frame route and the evidence says so.
+_EXPECTED_EVIDENCE = {
+    "unified_declined_full_frame": {"unified": False},
+    "auto_chunk": {"mode": "full_frame", "lane": "dispatcher", "unified": False},
+    "sequential": {"mode": "sequential", "lane": None, "unified": False},
+    "out_of_core": {"mode": "out_of_core", "lane": None, "unified": False},
+}
 
 _ROUTES = {
-    "unified_slice": _run_unified,
+    "unified_declined_full_frame": _run_unified,
     "auto_chunk": _run_auto_chunk,
     "sequential": lambda tmp: _run_fk(tmp, "sequential"),
     "out_of_core": lambda tmp: _run_fk(tmp, "out_of_core"),
@@ -134,6 +165,12 @@ def test_every_route_sets_the_field(
 ) -> None:
     _spy_probe(monkeypatch, _NONE_AVAILABLE)
     result = _ROUTES[route](tmp_path)
+    evidence = _route_evidence(result)
+    expected = _EXPECTED_EVIDENCE[route]
+    if route == "unified_declined_full_frame":
+        # Real admission follows the host: a built companion admits the hash column.
+        expected = {"unified": native_kernel_availability().crypto}
+    assert {key: evidence[key] for key in expected} == expected
     assert result.native_fallback_code == _CODE
 
 
@@ -202,10 +239,6 @@ def test_group_key_alone_reports_when_only_raw_hex_is_missing(tmp_path: Path) ->
         {"g": _strings(), "k": _strings()},
     )
     assert _native_notice.native_fallback_code(plan, _NO_RAW_HEX) == _CODE
-
-
-def _group_key(name: str) -> dict[str, Any]:
-    return {"name": name, "strategy": "group_key", "provider_config": {"group_by": "g"}}
 
 
 # AT-8
