@@ -32,7 +32,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons as reason_codes
 from decoy_engine._nested_json import nested_children
-from decoy_engine.contracts.column_shape import sibling_tables, source_facts_of
+from decoy_engine.contracts.column_shape import build_source_facts, sibling_tables
 from decoy_engine.execution import _chunked_input, _pipeline_auto_chunk
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import provider_config_to_dict
@@ -362,6 +362,14 @@ def run_multi_table_split(
     corpora: list[Any] = []
     route_by_table: dict[str, Any] = {}
     lane_blocks: dict[str, Mapping[str, Any]] = {}
+    # A lazy table's schema comes from the routing snapshot: reading it again would be a second footer read.
+    snapshot = input_facts or {}
+    siblings = build_source_facts(
+        caller={
+            n: snapshot[n].schema if n in snapshot else t.schema
+            for n, t in resident_sources.items()
+        }
+    )
     for table in split.dispatched:
         lane_extra: dict[str, Any] = (
             {}
@@ -373,7 +381,7 @@ def run_multi_table_split(
             }
         )
         # The dispatched table compiles the whole config, so it needs the siblings' schemas.
-        with sibling_tables(source_facts_of(resident_sources)):
+        with sibling_tables(siblings):
             out, unit_timings, unit_ms, unit_warnings, unit_metrics = (
                 _pipeline_auto_chunk.run_auto_chunk(
                     config,
