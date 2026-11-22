@@ -17,11 +17,10 @@ masking reproduces whole-column masking value-for-value, the chunk
 invariant. Three things this module enforces so that holds in practice:
 
 1. **Config-shape admission** (`bucket_perturb_conditional_failures`): an
-   explicit `date_format` only. The text transform refuses a missing
-   format (it never detects one from the cells); a native date column takes the
-   typed path, which is not chunk-admitted. The handler resolves an empty-string
-   `date_format` the same as absent (`cfg.get("date_format") or None`), so `""`
-   is rejected here too.
+   explicit `date_format` on a column the config proves is text. The text transform refuses a
+   missing format (it never detects one from the cells), and a native date column
+   takes the typed path with no format at all, so a column that may be typed is
+   left to plan compile.
 
 2. **Runtime source-dtype gate** (the text_mask/code_set trio, renamed):
    `apply_bucket_perturb` operates on date STRINGS (`series.astype(str)`,
@@ -29,8 +28,8 @@ invariant. Three things this module enforces so that holds in practice:
    unsafe case: an Arrow `int64` chunk with nulls renders to pandas
    `float64`, turning `"20240101"` into `"20240101.0"`, a chunk-boundary-
    dependent promotion. Only a chunk-stable string / large_string source is
-   admitted (a deliberately-proven subset -- date32/timestamp sources may in
-   fact convert chunk-stably, but that is unproven here).
+   admitted for a text column. A column the plan lists as a native date is not
+   gated: the typed path reads date objects, which do not depend on the chunk.
 
 3. **FK-key exclusion, BOTH orientations** (`reject_bucket_perturb_fk_keys`):
    `bucket_perturb` is admitted as a CONDITIONAL strategy, never joining
@@ -76,8 +75,12 @@ _SAFE_BUCKET_PERTURB_SOURCE_CHECKS = (pa.types.is_string, pa.types.is_large_stri
 
 
 def bucket_perturb_conditional_failures(col_entry: dict[str, Any]) -> list[str]:
-    """Unmet chunked-admission conditions for a `bucket_perturb` column: an
+    """Unmet chunked-admission conditions for a `bucket_perturb` column holding text: an
     explicit `date_format`. Empty list means the column is admitted.
+
+    The caller applies it only to a column the config proves is text (a CSV or fixed-width
+    source, a `nested` child). A column that may be a native date needs no format, and plan
+    compile decides it from the source schema.
     """
     cfg = col_entry.get("provider_config") or {}
     failures: list[str] = []
@@ -87,6 +90,20 @@ def bucket_perturb_conditional_failures(col_entry: dict[str, Any]) -> list[str]:
             "the handler treats an empty string the same as absent)"
         )
     return failures
+
+
+def config_proves_text(config: dict[str, Any], *, table: str, column: str) -> bool:
+    """Whether the config alone proves ``column`` holds text, the only case the format gate sees.
+
+    The shape comes from the same assembler plan compile and the config-only pass use, with no
+    source schema: a CSV or fixed-width source, a `nested` child or an F06 string declaration.
+    Any column that may turn out to be a native date is left to plan compile.
+    """
+    from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape
+    from decoy_engine.plan.checks._column_shapes import build_column_shapes
+
+    shapes = build_column_shapes(config, sources=NO_SOURCES)
+    return shapes.get((table, column)) is ColumnShape.TEXT
 
 
 def _bucket_perturb_node_columns(ordered_work: list[WorkNode], table: str) -> list[str]:
@@ -129,11 +146,16 @@ def bucket_perturb_source_columns(
 ) -> list[str]:
     """The bucket_perturb column names on `table`, resolved once from the
     plan's work list, so the manual entry can validate every chunk's schema
-    against them without rebuilding the work list per chunk."""
+    against them without rebuilding the work list per chunk.
+
+    A column the plan lists as a native date is left out: it is read as a date object, which is
+    stable across chunk boundaries, so only the text columns need the string-source gate."""
+    from decoy_engine.declared_casting._boundary import native_date_columns
     from decoy_engine.execution._runner import build_work_list, order_work
 
     ordered_work = order_work(build_work_list(plan, registry), relationship_graph)
-    return _bucket_perturb_node_columns(ordered_work, table)
+    typed = {column for (t, column) in native_date_columns(plan) if t == table}
+    return [c for c in _bucket_perturb_node_columns(ordered_work, table) if c not in typed]
 
 
 def reject_bucket_perturb_missing_namespace(

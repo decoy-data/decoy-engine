@@ -49,8 +49,7 @@ DATES = [
     dt.date(2024, 2, 3),
     dt.date(2024, 1, 15),
 ]
-# The chunked routes read text dates only (see the refusal test below).
-ROUTES = ("full_frame",)
+ROUTES = ("full_frame", "chunked", "native_chunked")
 REQUIRED = reasons.plan.COLUMN_SHAPE_REQUIRED
 MISMATCH = reasons.plan.COLUMN_SHAPE_MISMATCH
 FORMAT_UNUSED = str(reasons.plan.COLUMN_SHAPE_FORMAT_UNUSED)
@@ -201,13 +200,71 @@ def test_typed_date_runs_without_format_and_keeps_type(tmp_path: Path, route: st
     assert out.column("p").to_pylist() == list(range(len(DATES)))
 
 
-@pytest.mark.parametrize("route", ["chunked", "native_chunked"])
-def test_chunked_routes_refuse_a_date_column_with_a_code(tmp_path: Path, route: str) -> None:
-    """The chunked routes read text dates only, so a typed date stops before any chunk is read."""
+def _run_sequential(tmp_path: Path, typ: pa.DataType) -> pa.Table:
+    """A parent/child job takes the sequential route; the child holds a typed date column."""
+    refs = [f"r{i}" for i in range(len(DATES))]
+    parent = pa.table({"id": pa.array(refs)})
+    child = pa.table({"ref": pa.array(refs), "d": pa.array(DATES, typ)})
+    for name, table in (("parent", parent), ("t", child)):
+        pq.write_table(table, tmp_path / f"{name}.parquet")
+    raw = {
+        "version": 2,
+        "global_settings": {"seed": 7, "post_validation": False},
+        "sources": {
+            n: {"type": "file", "format": "parquet", "path": str(tmp_path / f"{n}.parquet")}
+            for n in ("parent", "t")
+        },
+        "targets": {
+            n: {"type": "file", "format": "csv", "path": f"/dev/null.{n}"} for n in ("parent", "t")
+        },
+        "tables": [
+            {"name": "parent", "columns": [{"name": "id", "strategy": "hash", "namespace": "fk"}]},
+            {
+                "name": "t",
+                "columns": [
+                    {"name": "ref", "strategy": "hash", "namespace": "fk"},
+                    {
+                        "name": "d",
+                        "strategy": "bucket_perturb",
+                        "namespace": NS,
+                        "provider_config": {"bucket": "month"},
+                    },
+                ],
+            },
+        ],
+        "relationships": [
+            {
+                "parent": {"table": "parent", "columns": ["id"]},
+                "children": [{"table": "t", "columns": ["ref"]}],
+                "orphan_policy": "preserve",
+                "namespace": "fk",
+            }
+        ],
+    }
+    result = run_pipeline(
+        PipelineConfig.model_validate(raw).model_dump(),
+        {"parent": parent, "t": child},
+        engine_version="e2",
+        execution_mode="sequential",
+        key_provider=key_provider(),
+    )
+    return result.outputs["t"]
+
+
+def test_sequential_route_runs_a_date_column_without_format(tmp_path: Path) -> None:
+    out = _run_sequential(tmp_path, pa.date32())
+    assert out.schema.field("d").type == pa.date32()
+    _same_month(DATES, out.column("d").to_pylist())
+
+
+def test_every_route_gives_the_same_dates(tmp_path: Path) -> None:
+    """One plan field, one rule: the routes agree on every cell."""
     table = _table(DATES, pa.date32())
-    with pytest.raises(PlanCompileError) as exc:
-        _run(_cfg(tmp_path, table), table, route)
-    assert exc.value.code == reasons.plan.CHUNKED_STRATEGY_CONDITIONS_UNMET
+    outputs = [
+        _run(_cfg(tmp_path, table), table, route).column("d").to_pylist() for route in ROUTES
+    ]
+    assert outputs[0] == outputs[1] == outputs[2]
+    assert outputs[0] == _run_sequential(tmp_path, pa.date32()).column("d").to_pylist()
 
 
 @pytest.mark.parametrize("bucket", ["week", "month", "quarter"])
