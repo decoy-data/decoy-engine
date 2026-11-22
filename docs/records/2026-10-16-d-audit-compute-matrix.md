@@ -1,5 +1,7 @@
 Status: record
 
+Correction 2026-11-21: since this record, SEQ `group_key` and out-of-core `text_mask` have native paths. See `docs/execution-backends.md` for the current table.
+
 # D-audit: compute-admission matrix and no-legacy classification
 
 Plan: `docs/plans/2026-10-16-phase-d-d-audit-no-legacy.md`. Tests: `tests/parity/test_phase_d_audit_no_legacy.py`, matrix derivation in `tests/parity/_d_audit_matrix.py`.

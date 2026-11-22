@@ -50,9 +50,13 @@ A relationship with a mask table on either side still needs a namespace, and
 the engine refuses it with `namespace_missing`. A relationship that names a
 table not listed under `tables:` is refused as before.
 
-A config with a non-empty `relationships:` block runs on the full-frame route,
-including a generate-only one. The chunked route and shadow generation decline
-such a config, and the run reports the full-frame route.
+A generate-only config with a non-empty `relationships:` block runs on the
+full-frame route. The chunked route and shadow generation decline such a
+config, and the run reports the full-frame route. A pure-mask config
+with relationships is routed by the FK router, which chooses among sequential,
+out-of-core and full-frame. An eligible generate+mask config (one
+generate-parent to mask-child edge) can route `mixed`. See
+`docs/execution-backends.md`.
 
 ## Orphans
 
@@ -267,12 +271,12 @@ is that an entire row erroring on ANY parent-key column should exclude it from
 ALL parent maps on that table. An audit + fix is needed; see
 `docs/backlog/s2-fk-leak-remediation-r3-guide.md` section 7.
 
-**Cross-table FK cycles support (Cam decision pending).** A mutual cycle
-(A references B, B references A) ran successfully under full-frame before S2.
-`run_pipeline`'s S2 routing now detects such cycles and falls back to full-frame
-automatically (non-regressing via the `execution_mode="auto"` heuristic). However,
-the question of whether cross-table FK cycles should be a *supported* topology
-at all is unresolved: they are neither forbidden by the schema validation layer
-nor embraced by the sequential execution path. Deciding on support/rejection is a
-product call; until then, the auto fallback keeps behavior stable. See
-`docs/backlog/s2-fk-leak-remediation-r3-guide.md` section 6.
+**Cross-table FK cycles (decided for V1).** A mutual cycle (A references B, B
+references A) ran successfully under full-frame before S2. `run_pipeline`'s S2
+routing detects such cycles and falls back to the full-frame route automatically
+(`decide_execution_route`, `src/decoy_engine/execution/_pipeline_routing.py`).
+The fallback runs only when full-frame memory admission passes. Otherwise the run
+is rejected before read (`fk_full_frame_oom_risk_rejected`), because no bounded
+route supports cycles. That is the V1 behavior. First-class cycle support on the
+bounded routes is a V2 candidate. See `docs/backlog/s2-fk-leak-remediation-r3-guide.md`
+section 6.
