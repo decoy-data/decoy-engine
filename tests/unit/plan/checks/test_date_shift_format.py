@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import REQUIREMENTS_BY_STRATEGY
 from decoy_engine.execution._adapter import StrategyContext
@@ -59,7 +60,9 @@ def _cfg(**provider_config: Any) -> dict[str, Any]:
     entry: dict[str, Any] = {"name": "dob", "strategy": "date_shift", "namespace": "ns"}
     if provider_config:
         entry["provider_config"] = provider_config
-    return {"tables": [{"name": "t", "columns": [entry]}]}
+    # A CSV source is text, so the config-only pass can refuse a missing format before any read.
+    sources = {"t": {"type": "file", "format": "csv", "path": "/dev/null"}}
+    return {"sources": sources, "tables": [{"name": "t", "columns": [entry]}]}
 
 
 def _nested_cfg(child: str, **strategy_config: Any) -> dict[str, Any]:
@@ -74,7 +77,7 @@ def _refused_by_both(cfg: dict[str, Any]) -> list[PlanCompileError]:
     errors = []
     for call in (
         lambda: run_config_only_checks(cfg),
-        lambda: compile_plan(cfg, _EMPTY, decoy_engine_version="0.1.0"),
+        lambda: compile_plan(cfg, _EMPTY, decoy_engine_version="0.1.0", sources=NO_SOURCES),
     ):
         with pytest.raises(PlanCompileError) as exc:
             call()
@@ -94,7 +97,7 @@ def test_missing_format_refused(bad: Any) -> None:
 
 
 def test_a_real_format_passes() -> None:
-    check_required_strategy_settings(_cfg(date_format="%Y-%m-%d"))
+    check_required_strategy_settings(_cfg(date_format="%Y-%m-%d"), sources=NO_SOURCES)
 
 
 # 2 ---------------------------------------------------------------------------------------------
@@ -128,13 +131,17 @@ def test_nested_child_refused() -> None:
     for err in _refused_by_both(_nested_cfg("date_shift")):
         assert err.code == CODE
         assert err.path == "tables.t.columns.doc.provider_config.strategy_config.date_format"
-    check_required_strategy_settings(_nested_cfg("date_shift", date_format="%Y-%m-%d"))
+    check_required_strategy_settings(
+        _nested_cfg("date_shift", date_format="%Y-%m-%d"), sources=NO_SOURCES
+    )
 
 
 def test_nested_hash_child_without_namespace_compiles() -> None:
     cfg = _nested_cfg("hash")
     del cfg["tables"][0]["columns"][0]["namespace"]
-    check_required_strategy_settings(cfg)  # a child takes its parent's namespace
+    check_required_strategy_settings(
+        cfg, sources=NO_SOURCES
+    )  # a child takes its parent's namespace
 
 
 # 4 ---------------------------------------------------------------------------------------------
@@ -170,7 +177,7 @@ def test_nested_child_does_not_inherit_the_declared_exemption() -> None:
     }
     cfg = {"tables": [{"name": "t", "columns": [_declared(), nested]}]}
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(cfg)
+        check_required_strategy_settings(cfg, sources=NO_SOURCES)
     assert exc.value.code == CODE
     assert exc.value.path == "tables.t.columns.doc.provider_config.strategy_config.date_format"
 
@@ -238,7 +245,7 @@ def test_shipped_testflight_configs_compile(job: str) -> None:
         if isinstance(c, dict) and c.get("strategy") == "date_shift"
     ]
     assert dated, job
-    check_required_strategy_settings({"tables": tables})
+    check_required_strategy_settings({"tables": tables}, sources=NO_SOURCES)
 
 
 def test_shipped_proof_manifest_date_shift_compiles() -> None:
@@ -249,7 +256,7 @@ def test_shipped_proof_manifest_date_shift_compiles() -> None:
     spec.loader.exec_module(mod)
     proofs = [p for p in mod.CAPABILITY_PROOFS if p.id == "mask.date_shift"]
     assert len(proofs) == 1
-    check_required_strategy_settings(copy.deepcopy(proofs[0].config))
+    check_required_strategy_settings(copy.deepcopy(proofs[0].config), sources=NO_SOURCES)
 
 
 # 8 ---------------------------------------------------------------------------------------------
@@ -288,7 +295,9 @@ def _compiles(config_: dict[str, Any]) -> None:
     from decoy_engine.profile import profile_source
 
     dumped = PipelineConfig.model_validate(config_).model_dump()
-    compile_plan(dumped, profile_source(dumped, seed=1), decoy_engine_version="test")
+    compile_plan(
+        dumped, profile_source(dumped, seed=1), decoy_engine_version="test", sources=NO_SOURCES
+    )
 
 
 @pytest.mark.parametrize(("fmt", "values"), list(_VARIANTS.items()))

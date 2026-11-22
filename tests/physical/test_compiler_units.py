@@ -372,6 +372,7 @@ def test_plan_hash_digest_construction_is_pinned(tmp_path: Path) -> None:
 
     from decoy_engine.execution.physical._inputs import (
         _canonical_config_json,
+        _column_shapes_part,
         _resident_source_fact,
     )
 
@@ -380,6 +381,7 @@ def test_plan_hash_digest_construction_is_pinned(tmp_path: Path) -> None:
     parts: tuple[object, ...] = (
         inputs.plan.pipeline_config_hash,
         inputs.plan.profile_hash,
+        _column_shapes_part(inputs.plan),
         _canonical_config_json(inputs.config),
         tuple(
             _resident_source_fact(name, inputs.caller_sources[name])

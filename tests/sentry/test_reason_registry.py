@@ -550,8 +550,6 @@ UNCLASSIFIED: dict[str, str] = {
     "NameHintLoaderError": "a reference-data load error; no stable code",
     "ModelPackLoadError": "a model-pack load error; no stable code",
     "Ff1Error": "an FF1 primitive error; surfaces as FpeUnencryptable/Checksum where it matters",
-    "LicenseError": "platform-owned license state, not a run failure",
-    "LicenseExpiredError": "platform-owned license state, not a run failure",
     "FieldMissing": "an internal memwatch parse signal, never surfaced",
     "PoolBuildFailed": "an internal shadow-plan signal, never surfaced",
     "_RejectError": "an internal parser signal, never surfaced",

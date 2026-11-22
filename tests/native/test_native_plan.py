@@ -12,6 +12,7 @@ from datetime import datetime
 import pyarrow as pa
 
 from decoy_engine.config._tables import GENERATE_TYPES
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._runner import build_work_list
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution.native._capabilities import capabilities_for
@@ -64,7 +65,9 @@ FORMULA_COL = {"name": "f", "strategy": "formula", "provider_config": {"formula"
 
 
 def test_mask_config_compiles_to_native_plan_with_requirements() -> None:
-    plan = compile_native_plan(_config(HASH_COL), _profile("c"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        _config(HASH_COL), _profile("c"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     assert isinstance(plan, NativeExecutionPlan)
     assert plan.nodes
     for node in plan.nodes:
@@ -73,7 +76,9 @@ def test_mask_config_compiles_to_native_plan_with_requirements() -> None:
 
 
 def test_work_nodes_carry_requirements_after_compile() -> None:
-    plan = compile_native_plan(_config(HASH_COL), _profile("c"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        _config(HASH_COL), _profile("c"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     for wn in plan.work_nodes:
         assert wn.requirements is not None
 
@@ -98,14 +103,18 @@ def test_mixed_config_rejects_only_when_a_node_is_non_native() -> None:
 
 
 def test_per_output_schema_present_for_static_nodes() -> None:
-    plan = compile_native_plan(_config(HASH_COL), _profile("c"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        _config(HASH_COL), _profile("c"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     schema = plan.output_schema_for("t")
     assert schema is not None
     assert isinstance(schema, pa.Schema)
 
 
 def test_engine_version_recorded() -> None:
-    plan = compile_native_plan(_config(HASH_COL), _profile("c"), engine_version="9.9.9")
+    plan = compile_native_plan(
+        _config(HASH_COL), _profile("c"), engine_version="9.9.9", sources=NO_SOURCES
+    )
     assert plan.engine_version == "9.9.9"
 
 
@@ -142,7 +151,9 @@ def test_build_work_list_unaffected_by_native_field() -> None:
     plan_config = _config(HASH_COL)
     from decoy_engine.plan import compile_plan
 
-    plan = compile_plan(plan_config, _profile("c"), decoy_engine_version="0.1.0")
+    plan = compile_plan(
+        plan_config, _profile("c"), decoy_engine_version="0.1.0", sources=NO_SOURCES
+    )
     for wn in build_work_list(plan, get_default_registry()):
         assert wn.requirements is None
 
@@ -227,7 +238,7 @@ def test_eligibility_and_compile_native_plan_agree_on_composite() -> None:
         ],
     }
     profile = _profile("first_name", "last_name", "email")
-    plan = compile_native_plan(cfg, profile, engine_version="0.1.0")
+    plan = compile_native_plan(cfg, profile, engine_version="0.1.0", sources=NO_SOURCES)
     plan_all_native = all(node.fallback_policy == "native" for node in plan.nodes)
     assert plan_all_native is False  # the composite node is python_only
     assert native_route_eligibility(cfg, table="t").accepted is plan_all_native
@@ -237,7 +248,7 @@ def test_eligibility_and_compile_native_plan_agree_on_hash() -> None:
     # The positive control: a scalar hash column is native on both paths.
     cfg = _config(HASH_COL)
     profile = _profile("c")
-    plan = compile_native_plan(cfg, profile, engine_version="0.1.0")
+    plan = compile_native_plan(cfg, profile, engine_version="0.1.0", sources=NO_SOURCES)
     plan_all_native = all(node.fallback_policy == "native" for node in plan.nodes)
     assert plan_all_native is True
     assert native_route_eligibility(cfg, table="t").accepted is plan_all_native
@@ -337,7 +348,7 @@ def _composite_fk_config() -> dict:
 
 def test_compile_native_plan_emits_composite_fk_group_node() -> None:
     plan = compile_native_plan(
-        _composite_fk_config(), _composite_fk_profile(), engine_version="0.1.0"
+        _composite_fk_config(), _composite_fk_profile(), engine_version="0.1.0", sources=NO_SOURCES
     )
     kinds = {node.kind for node in plan.nodes}
     assert "composite_fk_group" in kinds
@@ -350,7 +361,7 @@ def test_eligibility_with_profile_agrees_on_fk_group() -> None:
     # table as the compiled plan's all-native verdict.
     cfg = _composite_fk_config()
     profile = _composite_fk_profile()
-    plan = compile_native_plan(cfg, profile, engine_version="0.1.0")
+    plan = compile_native_plan(cfg, profile, engine_version="0.1.0", sources=NO_SOURCES)
     plan_all_native = all(node.fallback_policy == "native" for node in plan.nodes)
     result = native_route_eligibility(cfg, table="claims", profile=profile)
     assert result.accepted is plan_all_native

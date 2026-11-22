@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan, run_config_only_checks
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.profile import profile_source
@@ -55,9 +56,11 @@ NON_STRING = [1, 0, True, False, ["region == 'US'"], [], {}]
 
 def _compile(config: dict[str, Any], entry: str, profile: Any) -> Any:
     if entry == "compile_plan":
-        return compile_plan(config, profile, decoy_engine_version="0.1.0")
+        return compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     if entry == "compile_plan_no_profile":
-        return compile_plan(config, profile, decoy_engine_version="0.1.0", no_profile=True)
+        return compile_plan(
+            config, profile, decoy_engine_version="0.1.0", no_profile=True, sources=NO_SOURCES
+        )
     return run_config_only_checks(config)
 
 

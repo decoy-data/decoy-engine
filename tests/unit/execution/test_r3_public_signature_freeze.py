@@ -135,6 +135,7 @@ FROZEN_RESULT_FIELDS: tuple[tuple[str, str, bool, bool], ...] = (
     ("quarantine_access", "None", False, True),
     ("sample_source_rows", "None", False, False),
     ("publication_receipt", "None", True, True),
+    ("native_fallback_code", "None", False, False),
 )
 
 

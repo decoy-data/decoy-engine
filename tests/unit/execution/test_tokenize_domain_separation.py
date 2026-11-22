@@ -21,6 +21,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import derive
 from decoy_engine.execution import ExecutionError
 from tests.unit.execution.test_tokenize import FakeVault, _run
@@ -79,7 +80,7 @@ def _hash_column(df: pd.DataFrame, namespace: str = "pan_ns") -> list[str]:
             {"name": "t", "columns": [{"name": "pan", "strategy": "hash", "namespace": namespace}]}
         ],
     }
-    plan = compile_plan(config, profile, decoy_engine_version=_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=_VERSION, sources=NO_SOURCES)
     res = PandasExecutionAdapter().run(
         plan,
         {"t": pa.Table.from_pandas(df, preserve_index=False)},

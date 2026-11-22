@@ -24,6 +24,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.generation.pool._events import QualityWarning
@@ -79,6 +80,10 @@ class ExecutionResult:
     # F22: the reference sink's commit receipt (outcome, digests, counts; no path or name).
     # None when the run published through no `ParquetTransactionalSink`.
     publication_receipt: CommitReceipt | None = None
+    # NATIVE-MISSING-WARN: `native_companion_missing` when the plan needs a compiled kernel and
+    # none it needs is available; a registered code only. Hidden from repr, not compared and
+    # never written to a document: the CLI prints it, the result document does not carry it.
+    native_fallback_code: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def output(self) -> pa.Table:
@@ -254,10 +259,13 @@ class StrategyContext:
     # strategies rely on.
     row_offset: int = 0
     # (table, column) of every top-level date_shift column whose declared parse format supplies
-    # its date shape, so it needs no `provider_config.date_format`. Set from the plan by the
-    # routes that build a context; empty otherwise, which makes the date_shift handler refuse a
-    # missing format.
+    # its date shape. It keeps the legacy text output. Set from the plan by the routes that build
+    # a context; empty otherwise.
     declared_date_columns: frozenset[tuple[str, str]] = frozenset()
+    # (table, column) -> shape of every column the plan proves is a native date or zoned
+    # timestamp, so it needs no `provider_config.date_format`. Empty otherwise, which makes the
+    # date_shift handler refuse a missing format. Declared columns are not in it.
+    native_date_columns: Mapping[tuple[str, str], ColumnShape] = field(default_factory=dict)
     # Integer Faker sources that pandas widened to float64, as their original Arrow
     # columns keyed (table, column), so deterministic keying sees exact integers. The
     # adapter fills it per table or chunk and releases it with that frame.

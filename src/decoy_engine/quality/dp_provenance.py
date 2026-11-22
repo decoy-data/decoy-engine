@@ -271,12 +271,10 @@ CERTIFIED_PLATFORM = PlatformTriple(
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
     (CERTIFIED_PLATFORM, "3.10.20.final"): frozenset(
         {
-            # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
-            # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
-            # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
-            # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays
-            # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd..., 0.18.0 reproduces 31ecf945...;
-            # 7d1c1a2a... is the 0.19.0 lock (77), 78af2b5a... adds xdist, 5253dc79... timeout, then PyNaCl.
+            # decoy-engine dev/CI profile (`uv sync --frozen --extra dev --extra lint --extra vault
+            # --extra cloud`, Python 3.10.20). Re-pin from a fresh sync (installed_distribution_set,
+            # compute_lock_fingerprint). A stamp moves only the engine version; old snapshots stay.
+            "bd14c8a5cc2d3896547f743150fdf35d340c1f2e95e923dcba6c00065bb53cfd",
             "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
             "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
             "8e4bb9802809c624b81bac40e84ecd660c6e54e39fb2b80a6920789128d89d6e",
@@ -300,9 +298,11 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
             "502037cad62e1e645a666eb088b0bc9f69fec82d2ac980b0c2d52a2cc707a7f1",
+            "f9708482fe4f95139ce9a1272f0110b38b8de83e8d2a567cca5b5f7c1f1ad2bf",
             # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
             # tooling, pinned in the CLI repo's requirements-certified.txt (reproduce: `--no-dev` install on
-            # 3.10.20, then cert_smoke.py). All stay, newest first; 0.28.0 lacks joserfc, 00f45dee... pynacl.
+            # 3.10.20, then cert_smoke.py). All stay, newest first; 0.28.0 lacks joserfc.
+            "228ed71e6f0a6ba9d62c25abeff6e668a53a8851d68e313a2f946367b33d631a",
             "44aaa90fef509a80a7c3def099592c6c4326d47d8bbf79d9043171f8e3a61ba9",
             "b61dcfd6431f18667d85921b8aa71a78ccc92ebff0dfd46c76b8e04c4bd17c02",
             "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",

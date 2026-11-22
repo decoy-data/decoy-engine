@@ -5,7 +5,11 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from decoy_engine.execution._chunked_profile import empty_input_profile, first_chunk_profile
+from decoy_engine.execution._chunked_profile import (
+    empty_input_profile,
+    first_chunk_profile,
+    walk_one_table,
+)
 from decoy_engine.profile import profile_hash
 
 
@@ -38,4 +42,31 @@ def test_empty_input_profile_is_whole_and_unchanged() -> None:
     assert profile_hash(profile) == _EMPTY_HASH
 
 
-_EMPTY_HASH = "c35dfed803fbfdf802713043b7673dd012748cb862a017a5cae28c92450712bf"
+# Moved once by COLUMN-SHAPE E1a: each hashed column now carries its `shape` (here `unknown`).
+_EMPTY_HASH = "190c85ce1c9b35f07781b1c2c6ffdfe5937708ff4a24030c4076eab5a0e14155"
+
+_NESTED = {
+    "struct": pa.array([{"a": 1}, {"a": 2}], pa.struct([("a", pa.int32())])),
+    "list": pa.array([["x"], ["y", "z"]], pa.list_(pa.string())),
+    "map": pa.array([[("k", "v")], [("k", "w")]], pa.map_(pa.string(), pa.string())),
+}
+
+
+@pytest.mark.parametrize("kind", list(_NESTED))
+def test_first_chunk_profiles_a_nested_column(kind: str) -> None:
+    """AT-1: a nested cell does not hash, so its distinct count is unknown, not an error."""
+    table = pa.table({"email": ["a@x.test", "b@x.test"], "n": _NESTED[kind]})
+    columns = {
+        c.name: c
+        for c in first_chunk_profile(table, table="t", engine_version="0").tables[0].columns
+    }
+    assert columns["n"].distinct_count is None
+    assert columns["email"].distinct_count == 2
+    assert all(c.sampled is True for c in columns.values())
+
+
+@pytest.mark.parametrize("kind", list(_NESTED))
+def test_walk_one_table_on_a_one_column_nested_table(kind: str) -> None:
+    """AT-3: the `_chunked_carry.diagnose_profile` call shape."""
+    profile = walk_one_table(pa.table({"n": _NESTED[kind]}), table_name="t")
+    assert profile.columns[0].distinct_count is None

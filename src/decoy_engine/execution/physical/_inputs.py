@@ -284,6 +284,12 @@ def _resident_source_fact(name: str, source: pa.Table | LazySource) -> tuple[obj
     return _chunked_input.plan_fact(name, source)
 
 
+def _column_shapes_part(plan: Plan) -> str:
+    """Canonical JSON of `Plan.column_shapes`, sorted by table then column."""
+    rows = sorted([c.table, c.column, c.shape.value] for c in plan.column_shapes)
+    return canonical_json_bytes(rows).decode("utf-8")
+
+
 def compute_plan_hash(inputs: PhysicalPlanInputs) -> str:
     """`plan_hash` covers exactly the route-affecting members (D1's closing
     line). `Plan.pipeline_config_hash` / `Plan.profile_hash` are themselves
@@ -303,6 +309,9 @@ def compute_plan_hash(inputs: PhysicalPlanInputs) -> str:
     parts: tuple[object, ...] = (
         inputs.plan.pipeline_config_hash,
         inputs.plan.profile_hash,
+        # `Plan.column_shapes` is hashed beside the profile: a source-loader table has no
+        # profile entry, so its schema reaches the plan only through these shapes.
+        _column_shapes_part(inputs.plan),
         # The FULL config content the compiler consumes (`classify_job` reads
         # `inputs.config` directly), not just the subset `pipeline_config_hash`
         # folds in -- so a config field mutated after capture changes the hash.

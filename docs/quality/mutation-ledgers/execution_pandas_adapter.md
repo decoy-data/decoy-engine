@@ -8,8 +8,7 @@ RESOLVED). `_pandas_adapter.py` is the pandas-backed execution adapter:
 `_resolve_fk_node` / `_parent_map` (the FK parent-map resolution + orphan
 handling -- RI machinery), `run_single` (single-table convenience), `run_sequential`
 (a thin wrapper over `execution._sequential.run_sequential`), plus the handler
-table (`__init__`), the `_fk_key_value` compat wrapper, and the
-`get_default_executor` singleton. The RI-critical key IDENTITY is in `_fk_keys`
+table (`__init__`), the `_fk_key_value` compat wrapper. The RI-critical key IDENTITY is in `_fk_keys`
 (logic-100%, crown jewels); this module is the pandas-route resolution + dispatch
 layer. Not crypto/RI proper, so the bar is **75% of LOGIC mutants**.
 
@@ -53,7 +52,7 @@ The full triage then adjudicated all 211 survivors across three kill files:
 | `_parent_map` | 25 | 4 | 0 | 0 |
 | `run_sequential` (wrapper) | 20 | 2 | 0 | 0 |
 | `run_single` | 8 | 3 | 2 (prose) | 0 |
-| `__init__` / `_fk_key_value` / `get_default_executor` | 4 | 3 | 0 | 0 |
+| `__init__` / `_fk_key_value` | 4 | 3 | 0 | 0 |
 
 ## Kills
 
@@ -90,8 +89,7 @@ delegate -- byte parity or a coded divergence when nulled/dropped.
 ### Small surfaces -- `test_pandas_adapter_helper_kills.py` (10)
 `__init__` registers the fpe handler at the CONFIGURED chunk_count under the "fpe"
 key (a renamed key leaves the default-count SCALAR handler); `_fk_key_value`
-forwards the real value (not the null sentinel); `get_default_executor` returns a
-real adapter (not None); `run_single`'s multi-table guard raises the coded error
+forwards the real value (not the null sentinel); `run_single`'s multi-table guard raises the coded error
 with the identifying `table=` data.
 
 ## Non-residual survivors (36): 20 proven equivalent + 16 accepted non-contract
@@ -124,8 +122,7 @@ full-message-equality) but deliberately not killed; the rest are PROVEN EQUIVALE
   delegate builds a fresh PoolCache, byte-identical), `run_single` 18, 20, 25
   (`pool_cache=None` / `namespace_registry=None` forward -- `run` rebuilds /
   composite-only, byte-identical), `__init__` 1 (no-op), 2 (`self._fpe_chunk_count`
-  write-only, never read), `get_default_executor` 1 (`substrate=None` still returns a
-  valid adapter, only the cache key differs).
+  write-only, never read).
 
 ## Residual: none
 

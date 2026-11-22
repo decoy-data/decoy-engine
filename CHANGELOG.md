@@ -9,6 +9,105 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.28.3] - 2026-11-22
+
+### Breaking for consumers
+
+- `date_shift` on a number, boolean or decimal column (for example an `int64` holding `20240115` with a `date_format`) is now refused at compile; write the column as text first.
+- a stored plan from an older engine is refused until you compile it again, and every profile hash changes once.
+- `bucket_perturb` no longer passes source values through. When no `date_format` is set and the engine cannot detect one from the cells, the run now stops with `bucket_perturb_requires_date_format` instead of writing the column unchanged. A non-null cell that does not parse under the format is now a `format_error` row error, as it is for `date_shift`, so the run fails or quarantines the row instead of keeping the source text. A date outside pandas' range (before 1677 or after 2262, such as the sentinel 9999-12-31) is now a row error too; `preserve_values` keeps such a sentinel unchanged. Set `provider_config.date_format` (for example `%Y-%m-%d`) and fix or quarantine bad cells.
+- a vault written by this engine is `decoy-vault/v3`, which an older engine cannot open; keep the older engine's vaults for it or re-run the mask.
+- windowed_date produces different dates for the same seed (output-changing, pre-GA).
+- `compile_plan` now requires the keyword `sources`; pass `NO_SOURCES` when you hold no tables.
+- `VaultWriter`: the first parameter is renamed `mask_key` to `prepared`; a positional key still works, a `mask_key=` keyword call fails.
+
+### Added (native companion missing notice, NATIVE-MISSING-WARN E1, 2026-11-21)
+
+`ExecutionResult` gains `native_fallback_code`. It is `native_companion_missing` when the compiled plan needs a compiled kernel (hash, faker, categorical, bucket_perturb, group_key, date_shift or fpe columns) and none of the kernels it needs is available, so masking ran in Python. It is `None` otherwise. `run_pipeline` sets it after the route returns, so every route reports the same way, and a caller such as the CLI can print one notice. The field is hidden from `repr`, not compared and never written to the result document, so outputs and documents are byte-identical to before.
+
+The new reason `warning/native_companion_missing` is pending. `run_pipeline_isolated` does not carry the field.
+
+### Added (managed delivery pointer, DELIV E2a, 2026-11-21)
+
+`decoy_engine.publication` now exports `CurrentPointer`, `LocalPointerStore`, `PointerState`, `PointerResult`, `PointerStore`, `PointerUnreadable` and `read_value`. They read and swap one small pointer file under its F22 lock with a compare-and-swap on the raw bytes. The write uses a new private file-access label, `pointer`: it fsyncs the stage and the parent directory, and a parent fsync failure after the replace is reported as `uncertain`, not swallowed. No existing output changes.
+
+### Changed (date_shift on typed dates, COLUMN-SHAPE-RULE E1b, 2026-11-21)
+
+`date_shift` now runs on a column that is already a date or a zoned timestamp (Parquet, DuckDB, a database or an Arrow table) with no `date_format`. The column's type comes from its source schema. The output keeps the type: a date stays a date, and a `date64` stays `date64`, an all-null chunk keeps the source type, and a zoned timestamp keeps its unit and its zone. A zoned timestamp moves by whole calendar days in its own zone, so its time of day holds across a DST change (as with PostgreSQL `timestamptz + interval '1 day'`). A typed date shifts as a calendar date, so `9999-12-31` no longer becomes a missing value. Before, a typed date was written back as text. A typed date and the same date as ISO text in one namespace get the same offset.
+
+A `date_format` that is not text is refused on every column. A `date_format` set on such a column is not used, and compile adds the warning `plan/column_shape_format_unused`. A timestamp with no time zone, a number, a boolean or a decimal is refused at compile with `plan/column_shape_mismatch`. Before, a naive timestamp failed on the first row (`timezone_naive_datetime`), and a number column with a `date_format` (an `int64` holding `20240115`) was parsed as a date; write such a column as text first. `preserve_values` needs no `date_format` on a typed column. A text column still needs its format (`date_shift_requires_date_format`). Both new reasons are pending.
+
+`decoy validate` (the config-only check) no longer refuses a missing `date_format` on a Parquet, database or Arrow column, because it cannot tell a date from text without the schema. A CSV or fixed-width column is still refused there, and `validate compile` and `run` refuse a text column with no format.
+
+### Fixed (a table cannot take a reserved publication member name, F26-RESERVED-NAME, 2026-11-21)
+
+`publish_unit` and `publish_tables` now refuse a table named like the publication stage marker (`.decoy-publication-stage`) as well as the descriptor (`_decoy_publication.json`), in any letter case, before any file is touched. Before, only the exact descriptor name was refused. The error text is unchanged and does not name the table. Both names now come from one exported set, `fileaccess.RESERVED_MEMBER_NAMES`.
+
+### Changed (route docs match the code, DOC-DRIFT-ROUTES, 2026-11-22)
+
+The route docs and the native thread comments now match how a run picks its route. They cover the mixed route, cyclic FK jobs, the FK dtype-hazard rule, the out-of-core faker limits and when the shared thread pool is built. There is no behaviour change.
+
+### Changed (column shape in the profile and the plan, COLUMN-SHAPE-RULE E1a, 2026-11-21)
+
+Each profile column now carries a `shape` (`text`, `date`, `timestamp_tz`, `timestamp_naive`, `integer`, `float`, `decimal`, `decimal_wide`, `boolean`, `other` or `unknown`), read from the source format and the Arrow schema. A csv or fixed-width column is always `text`. The shape is part of `profile_hash`, so profile hashes and the physical `plan_hash` change once. A profile saved before this loads with `shape: unknown`. A shape token the engine does not know is refused when the profile is loaded.
+
+`PLAN_VERSION` is now 5 and a plan records `column_shapes` for each column under a strategy that reads the value (today `date_shift`). A stored plan is checked for its version before any other field. A version-4 plan is refused with `plan/plan_recompile_required`; compile it again from its config. A missing, non-integer or newer version is refused with `plan/plan_version_unsupported`, and a stored shape the engine does not know with `plan/stored_shape_unknown`. All three reasons are pending. `compile_plan` requires `sources` and `capture_physical_plan_inputs` gains `source_loader_schemas`, so a source-loader table and a zero-chunk typed input get their shapes too.
+
+No masking output changes: `date_shift` still needs `date_format` on every shape. The shape rule for typed sources lands in later slices.
+
+### Added (pre-scan config for the run-start check, PRE-SCAN-RUN E1, 2026-11-21)
+
+Writing a `pre_scan` block now turns the run-start pre-scan on, so a written default block stays in the dump (a block never written is still dropped). `decoy_engine.config.pre_scan_requested` is the one reader of that switch. `pre_scan.on_findings: warn | fail` (default `warn`) is new; under `fail` the effective `on_findings`, `detectors` and `ner_model` are part of the plan hash. `decoy-run-result/v1` gains the check id `pre_scan`, and `build_run_result(pre_checks=...)` accepts it before `scan_drift`. New pending reasons: `pre_scan/uncovered_pii`, `pre_scan/uncovered_pii_blocked` and `warning/drift_not_checked`. No run reads the block yet; the run-start step ships in the CLI.
+
+### Changed (bucket_perturb safety, COLUMN-SHAPE-RULE E0, 2026-11-21)
+
+Both the pandas transform and the native route (full-frame, sequential, chunked and shadow) report unparseable cells as row errors with the reason "value is not a parseable date under bucket_perturb". The out-of-core route has no row-error channel, so it refuses with `bucket_perturb_unparseable_no_row_channel` when it meets such a cell. `apply_bucket_perturb` takes an optional `format_errors` list and raises when a value fails to parse with no list given; `native_bucket_perturb` returns `(array, positions)`. New reasons, pending: `runtime/bucket_perturb_requires_date_format` and `runtime/bucket_perturb_unparseable_no_row_channel`. Detection itself stays until slice E2.
+
+### Changed (authenticated, versioned vault header, F09 E1, 2026-11-20)
+
+The vault is one libsodium secretstream (`crypto_secretstream_xchacha20poly1305`, through PyNaCl) with a closed-set JSON header bound to every segment as additional data. Each vault has its own key, derived with `vault-key/v2` and a random `vault_id`. The header records `key_version`, a key check value bound to `vault_id`, `entry_count` and `segment_rows`. A wrong secret gives `vault_key_mismatch` before any segment is decrypted and names the recorded key version. Once the key is right, any change, reorder, drop, duplicate or cut gives `vault_tampered` and returns no rows. A single entry over 64 MiB of Parquet gives `vault_entry_too_large` before any file is written. `load_vault` keeps its signature. The resume store's key check moved to one function, `key_check_value`, with byte-identical output.
+
+#### Added: header API and reasons
+
+`open_vault(path, prepared, *, vault=None, file_access=None)` returns an `OpenedVault` (`mapping`, `ambiguous_dropped`, `header`), where `header` is a `VaultHeader` of the non-secret fields (`format`, `key_version`, `vault_id`, `entry_count`, `ambiguous_dropped`, `segment_rows`). `VAULT_REFUSAL_CODES` names every code a vault read or write can raise. New reasons `runtime/vault_tampered` and `runtime/vault_entry_too_large`, pending.
+
+#### Changed: v2 vaults and the writer
+
+A `decoy-vault/v2` vault still opens: the v2 reader is kept, read-only, beside v3, and the compat corpus holds both files. A v2 vault is never adopted as a current vault. `VaultWriter` takes a `PreparedSecret` and still accepts the older `bytes` mask key; both give the same vault. The `bytes` form is not deprecated and has no removal date. A failed vault read now gives fixed error text and no longer repeats the file adapter's error message.
+
+### Fixed (release stamp keeps the UNRELEASED import, STAMP-IMPORT, 2026-11-21)
+
+The release stamp no longer deletes `from decoy_engine.reasons._types import UNRELEASED` from a reason module once its unreleased codes are stamped. Before, a branch that added a new `since=UNRELEASED` code to such a module merged clean and then raised `NameError` when `decoy_engine.reasons` loaded. Every reason module now binds it as the re-export `UNRELEASED as UNRELEASED`, so the unused-import rule stays on, and a sentry fails if a module lacks that binding. No code, version or message changed.
+
+### Fixed (a mask handler may not change the row count, HANDLER-ROW-COUNT, 2026-11-21)
+
+The pandas mask paths now refuse a handler that returns a different number of rows, or the same rows under a different index, than it was given. Before, a `when:`-gated run wrote the result back by index, so a dropped row became a null and the run reported success. The plain, gated, composite and chunked routes all raise `handler_row_count_changed`; the message names the table, column, strategy and the two counts, never a value. New reason, pending: `runtime/handler_row_count_changed`. No built-in handler changes rows, so shipped output is unchanged.
+
+### Changed (windowed_date offsets, GEN-WINDOWED-BATCH, 2026-11-20)
+
+`windowed_date` now draws each row's offset from the keyed index derivation that pooled sampling uses, in one batch per column, instead of a separate numpy generator per row. It is about 3 times faster on 200,000-row columns without the native companion and about 10 times faster with it, and about 2 to 3 times faster in a full generation run (see `docs/records/2026-11-20-gen-windowed-offsets-bench.md`). Dates stay inside the configured window, null anchors stay null, and output stays the same across runs, batch sizes, routes and thread counts. Output from earlier releases does not match: regenerate stored `windowed_date` output.
+
+Global row numbers must now be below 2^62 (before: below 2^64). A negative or larger row number raises the new reason `runtime/windowed_date_row_number_out_of_range`.
+
+`SEED_PROTOCOL_VERSION` does not change. A bump would rekey every keyed column and vault before GA, and only this site moves.
+
+A `windowed_date` window with `min_days` or `max_days` more than 106751 days from zero is now refused when the config is parsed, with the new reason `plan/windowed_date_window_out_of_range`. Before, such a window passed parsing and failed on the first row whose offset left the date range.
+
+### Changed (masked int, decimal and binary columns keep large tables chunked, NONFK-OOM, 2026-11-20)
+
+Under `auto`, a large non-FK table with a masked integer-with-nulls, decimal or binary column no
+longer falls back to full-frame when the column uses `hash` (no `when:`), `redact` (a string
+`redact_with`) or deterministic `faker` (integer sources only) and no other column reads it. The
+output values equal the full-frame result. An all-null column keeps the type the chunked route
+already gives it (`string` for `hash` and `redact` on an all-null int, decimal or binary column,
+where full-frame gives `null`), as for the types that were chunked before. Other strategies on
+these types, a `when:` on the column and `chunked_dispatcher_enabled=False` keep the full-frame
+route.
+
+### Fixed (post-scan relationship check on DuckDB 2.x, DUCKDB2-REGISTER, 2026-11-20)
+
+The post-scan relationship check no longer fails on DuckDB 2.x. A one-row count left its result unfinished, and DuckDB 2.x then refused the next `register()` on that connection (`ResourceInUseException`), so every run with a declared relationship ended in `check_error`. The same read pattern in the out-of-core joiners and the Postgres connector now drains its result too, through `fetch_row` and `fetch_scalar` in `decoy_engine/_duckdb_read`. A sentry fails on a new `fetchone` or `fetchmany` in a module that uses DuckDB. No output change on DuckDB 1.x.
+
 ## [0.28.2] - 2026-11-21
 
 ### Breaking for consumers

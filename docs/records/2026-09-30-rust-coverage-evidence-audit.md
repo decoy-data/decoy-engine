@@ -2,6 +2,8 @@
 
 Status: record
 
+Correction 2026-11-21: headline 2 is out of date. The chunked dispatcher is the default lane (`chunked_dispatcher_enabled=True`), and the global `CHUNKED_ROUTE_VETOED_STRATEGIES` set is empty; ordinary type and configuration gates still decline individual cells. The current state is in `docs/records/2026-11-19-engine-speed-and-route-completeness.md`.
+
 Date: 2026-09-30. Plan: `docs/plans/2026-09-30-rust-coverage-evidence-audit.md` (revision 3, Codex plan-gated). Evidence: `docs/records/audit-2026-09-30/`: environment and preflight, the branch-witness ledger (every row has a run id or a "code-inferred" reason), `runs.jsonl` (R001 to R085), stage summaries 2a to 2d, `provenance-2b.md`, and the Codex independent code-only audit.
 
 Pinned: decoy-engine `8dc559e5` (main after #180). The runs recorded `7cadcde0`, which is `8dc559e5` plus docs and audit scripts only (no `src/` change; `provenance-2b.md`). decoy-platform `0701a954` (origin/main, detached worktree). decoy-cli `b8274b01`. Native companion built from the pinned engine tree: `present=True ok=True`, ABI `decoy-native-abi-2`, module SHA-256 `1a3b2d18...b061`. Each run is a fresh subprocess; peak memory is the worker's own `VmHWM`. Stage 2b runs R025 to R042 predate per-run commit recording; `provenance-2b.md` documents their environment.

@@ -36,6 +36,7 @@ from decoy_engine import (
     run_pipeline,
 )
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import DeterminismError, derive
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution.out_of_core._mask import mask_batch
@@ -477,7 +478,7 @@ class TestSubstrateRekey:
         df = _frame(10)[["email"]]
         df.to_csv(tmp_path / "t.csv", index=False)
         prof = profile_source(cfg, seed=42)
-        plan = compile_plan(cfg, prof, decoy_engine_version=_EV)
+        plan = compile_plan(cfg, prof, decoy_engine_version=_EV, sources=NO_SOURCES)
         batch = pa.RecordBatch.from_pandas(df, preserve_index=False)
         base = mask_batch(plan, "t", batch, mask_key=_SECRET.mask_key()).column("email").to_pylist()
         again = (
@@ -614,7 +615,7 @@ def _keyed_plan(tmp_path):
     df = _frame(5)[["email"]]
     df.to_csv(tmp_path / "t.csv", index=False)
     prof = profile_source(cfg, seed=42)
-    return compile_plan(cfg, prof, decoy_engine_version=_EV)
+    return compile_plan(cfg, prof, decoy_engine_version=_EV, sources=NO_SOURCES)
 
 
 def _unkeyed_plan(tmp_path):
@@ -622,7 +623,7 @@ def _unkeyed_plan(tmp_path):
     df = _frame(5)[["email"]]
     df.to_csv(tmp_path / "t.csv", index=False)
     prof = profile_source(cfg, seed=42)
-    return compile_plan(cfg, prof, decoy_engine_version=_EV)
+    return compile_plan(cfg, prof, decoy_engine_version=_EV, sources=NO_SOURCES)
 
 
 _KEYED_COLS = [{"name": "email", "strategy": "hash", "namespace": "e_ns"}]
@@ -712,7 +713,7 @@ class TestFailClosedGate:
         df = pd.DataFrame({"payload": [f'{{"ssn": "12{i}-45-6789"}}' for i in range(5)]})
         df.to_csv(tmp_path / "t.csv", index=False)
         prof = profile_source(cfg, seed=42)
-        plan = compile_plan(cfg, prof, decoy_engine_version=_EV)
+        plan = compile_plan(cfg, prof, decoy_engine_version=_EV, sources=NO_SOURCES)
         assert plan_has_keyed_strategy(plan) is True, "nested(hash) must classify keyed"
         with pytest.raises(KeyedStrategyRequiresSecret):
             require_mask_key(plan, None)
@@ -742,7 +743,7 @@ class TestPublicEntryPointsGated:
         prof = profile_source(cfg, seed=42)
         from decoy_engine.relationships import build_namespace_registry
 
-        plan = compile_plan(cfg, prof, decoy_engine_version=_EV)
+        plan = compile_plan(cfg, prof, decoy_engine_version=_EV, sources=NO_SOURCES)
         ns = build_namespace_registry(cfg, prof)
         return plan, sources, ns
 
@@ -884,7 +885,7 @@ class TestVaultIsKeyedSurface:
         df = _frame(8)[["email"]]
         df.to_csv(tmp_path / "t.csv", index=False)
         prof = profile_source(cfg, seed=42)
-        return compile_plan(cfg, prof, decoy_engine_version=_EV)
+        return compile_plan(cfg, prof, decoy_engine_version=_EV, sources=NO_SOURCES)
 
     def test_redact_plus_vault_is_classified_keyed(self, tmp_path):
         # 6b root cause: redact is anonymising, but vault:true makes it keyed.

@@ -116,6 +116,11 @@ request with `display_rows > 0`. `RunResult.sample: SampleMarker | None` (`rows`
 `scratch`) is optional under `decoy-run-result/v1`; it is left out of the written payload when unset, so an old
 record reads unchanged. A sample stamps `quality_metrics["subset"]["sample"]`. `run_pipeline` is unchanged.
 
+**Pre-GA additive field with NATIVE-MISSING-WARN (2026-11-21).** `ExecutionResult.native_fallback_code: str | None`
+(default `None`, hidden from `repr`, not compared) is `native_companion_missing` when the plan needs a compiled kernel
+and none that it needs is available. It is never written to a document. The reason `warning/native_companion_missing`
+ships in 0.28.3 (registry 1.33.0).
+
 **Pre-GA correction (main health, 2026-10-31).** `RESERVED_NAMES` of the `when` closed grammar gains `type`
 (additive to the list, breaking for a config whose `when:` references a column named `type`, which now fails
 with `when_outside_closed_grammar`). It is listed on every interpreter rather than derived from
@@ -260,6 +265,8 @@ list and points here for the pairs. A rename takes a new row in the release that
 | `CUSTOM_PROVIDERS_DIR` | `DECOY_CUSTOM_PROVIDERS_DIR` | config key | 0.24.0 | Environment variable, no alias. |
 <!-- renames-table:end -->
 
+F22 (atomic and idempotent publication, row 59) adds no public renames. The owner did not approve its four names (`CommitUncertain`, `LockUnavailable`, `LockTimeout`, `LeafTooLarge`) on 2026-11-12, so they stay internal `decoy_engine.fileaccess` classes, and a consumer sees them only as the reason codes `decoy/publication_commit_uncertain`, `decoy/publication_lock_unavailable`, `decoy/publication_lock_timeout` and `decoy/publication_failed`.
+
 **Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
 without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both
 compile entry points and before any source read. The engine no longer detects the format from a sample. A top-level
@@ -271,6 +278,36 @@ review write the detected variant only when every detector hit parses with it (`
 disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templates/upload_csv_mask_to_s3.yaml`, the
 platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
 (DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
+
+**Pre-GA correction (COLUMN-SHAPE E1a, 2026-11-21).** Breaking for stored artifacts, no shim. A profile
+column now carries `shape` (`text`, `date`, `timestamp_tz`, `timestamp_naive`, `integer`, `float`, `decimal`,
+`decimal_wide`, `boolean`, `other`, `unknown`). Profile JSON gains the field and `schema_version` stays 1: a
+profile written before it loads as `unknown`, which fails closed, and a token the engine does not know is refused
+with a `ValueError` that names the field. `shape` is in `profile_hash`, so every `profile_hash` moves once (the
+pinned digest in `tests/unit/profile/test_hash_regression.py`), and the physical `plan_hash` moves with it.
+`PLAN_VERSION` goes from 4 to 5 and `Plan.column_shapes` (the shape of each column under a shape-reading
+strategy, omitted from the YAML when empty) joins the physical `plan_hash`; `pipeline_config_hash` does not move.
+A stored plan is checked for its `plan_version` before any other field: a version-4 plan is refused with
+`plan/plan_recompile_required` (compile it again from its config), a newer, missing or non-integer version with
+`plan/plan_version_unsupported`, and a stored shape token the engine does not know with `plan/stored_shape_unknown`.
+The three codes are registered unreleased. `compile_plan(..., source_schemas=None)` and
+`capture_physical_plan_inputs(..., source_loader_schemas=None)` are additive keywords. No masking behaviour
+moves in this slice: `date_shift` still needs `date_format` on every shape. A code rollback is safe: an engine
+from before this slice ignores `column_shapes` and the profile's `shape`.
+
+**Pre-GA correction (COLUMN-SHAPE E1b, 2026-11-21).** `date_shift` reads a source column that is natively a
+date (`date`) or a zoned timestamp (`timestamp_tz`) with no `date_format`, and writes the same Arrow type back
+(a zoned timestamp keeps its unit and zone and moves by whole calendar days in its own zone, so its
+wall-clock time holds across a DST change; a typed date shifts as a calendar date with no pandas date range
+limit, and a `date64` source stays `date64`). A typed date was text before.
+A `date_format` on such a column is accepted and not used (compile warning `plan/column_shape_format_unused`),
+and `preserve_values` needs no format there. A `timestamp_naive`, integer, float, decimal, boolean or other
+column is refused at compile with `plan/column_shape_mismatch` (a naive timestamp failed at run time with
+`timezone_naive_datetime` before, and an integer column such as `20240115` with a `date_format` was parsed as a date). The digest input of a typed date is its ISO text, so one namespace gives one
+offset across a CSV table and a Parquet table. A text column keeps `date_shift_requires_date_format`. The config-only
+pass (`decoy validate`) defers a column whose type it cannot see, so a missing `date_format` on a Parquet
+pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
+date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
 
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
@@ -784,6 +821,12 @@ only this site moves.
   -> tuple[Relationship, ...]` (CLI-QA1 E-b): the config's `relationships:` block as one
   `Relationship` per child, skipping malformed entries; an unequal composite column count, or an
   empty column list, raises `ValueError`. It replaces the private `_build_relationships`.
+  It also includes `decoy_engine.plan.NO_SOURCES` (SIGNATURE-SENTRY, 2026-11): the value a caller passes
+  as the required `sources` argument of `compile_plan` when it holds no tables. `decoy_engine.plan.SourceFacts`,
+  the type of that argument, is experimental (3.6) while COLUMN-SHAPE still moves its fields.
+  The signatures of every frozen and experimental name are checked against the last release tag by the
+  signature sentry (`tests/sentry/release/test_public_signatures.py`). A break needs one `Breaking:`
+  line in a `changelog.d` fragment that names the object and, for a parameter, the parameter, both in backticks.
   It also includes `read_csv_source`, `CsvDialect` and `resolve_csv_dialect`
   (CLI-DIALECT, 2026-11): `read_csv_source(path, dialect, *, table, dtype=None,
   nrows=None, chunksize=None, file_access=None, field_key="source.path")` reads
@@ -1428,6 +1471,10 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
 
 ## 6. How the freeze is enforced (the machinery)
 
+- **Signature sentry** (`tests/sentry/release/test_public_signatures.py`). Griffe compares the HEAD tree with
+  the newest release tag. Every parameter, kind, default, removal and base-class break on a frozen or
+  experimental name needs a pending `Breaking:` line that names it in backticks. Types and constant values
+  are out of scope; golden tests own the values. A reviewed false break goes in `SIGNATURE_EXEMPTIONS`.
 - **Golden / determinism snapshots** (the `tests/snapshots/golden` baselines a test
   reads, `tests/unit/determinism/test_derive_vectors.py`,
   `tests/native/test_draw_site_providers_golden.py` with

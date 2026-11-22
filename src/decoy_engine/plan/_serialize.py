@@ -41,6 +41,9 @@ from decoy_engine.plan._generation import (
     verified_pinned_bytes,
 )
 from decoy_engine.plan._serialize_declared import (
+    check_plan_version,
+    column_shapes_from_list,
+    column_shapes_to_list,
     declared_casting_from_dict,
     declared_casting_to_dict,
 )
@@ -114,6 +117,9 @@ def _plan_to_dict(plan: Plan) -> dict[str, Any]:
     # its version-2 form only by the version line.
     if plan.declared_casting is not None:
         out["declared_casting"] = declared_casting_to_dict(plan.declared_casting)
+    # COLUMN-SHAPE (plan_version 5): omitted when empty, like `declared_casting`.
+    if plan.column_shapes:
+        out["column_shapes"] = column_shapes_to_list(plan.column_shapes)
     return out
 
 
@@ -273,6 +279,7 @@ def _generation_plan_to_dict(gp: GenerationPlan) -> dict[str, Any]:
 
 
 def _plan_from_dict(data: dict[str, Any]) -> Plan:
+    check_plan_version(data)
     generation_raw = data.get("generation")
     seed_envelope = _seed_envelope_from_dict(data["seed_envelope"])
     # A stored plan is untrusted input: reject a `when` outside the closed grammar at load,
@@ -300,6 +307,7 @@ def _plan_from_dict(data: dict[str, Any]) -> Plan:
             if data.get("declared_casting") is not None
             else None
         ),
+        column_shapes=column_shapes_from_list(data.get("column_shapes")),
     )
 
 

@@ -34,6 +34,7 @@ human-readable message. Determinism contract mirrors PERF.BASE.2.
 
 from __future__ import annotations
 
+from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts
 from decoy_engine.plan._compile import _hash_config as pipeline_config_hash
 from decoy_engine.plan._compile import compile_plan, run_config_only_checks
 from decoy_engine.plan._errors import PlanCompileError
@@ -54,6 +55,7 @@ from decoy_engine.plan._types import (
 from decoy_engine.plan.checks._ner_models import run_ner_models
 
 __all__ = [
+    "NO_SOURCES",
     "ColumnSeed",
     "GroupSeed",
     "NamespaceBinding",
@@ -64,6 +66,7 @@ __all__ = [
     "PlanRelationship",
     "PlanRelationshipEnd",
     "SeedEnvelope",
+    "SourceFacts",
     "TableSeed",
     "compile_plan",
     "job_seed_for_config",

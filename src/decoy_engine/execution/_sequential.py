@@ -139,7 +139,11 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine.declared_casting._boundary import declared_date_shift_columns, seal_evidence
+from decoy_engine.declared_casting._boundary import (
+    declared_date_shift_columns,
+    native_date_columns,
+    seal_evidence,
+)
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
@@ -147,7 +151,7 @@ from decoy_engine.execution._chunked_carry import untouched_columns
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
 from decoy_engine.execution._fk_keys import (
     lossless_int_columns,
-    table_from_pandas_keeping_maps,
+    table_from_pandas_keeping_source_types,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._guards import run_chunk_ingest_guards
@@ -345,6 +349,7 @@ def run_sequential(
         mask_key=require_mask_key(plan, key_provider),
         seq_native=native_run,
         declared_date_columns=declared_date_shift_columns(plan),
+        native_date_columns=native_date_columns(plan),
     )
 
     parent_map_cache: dict[_NodeKey, dict[_KeyTuple, _KeyTuple]] = {}
@@ -518,12 +523,13 @@ def run_sequential(
                 from decoy_engine.execution._faker_degenerate_pin import pin_degenerate_to_string
 
                 out = pin_degenerate_to_string(
-                    table_from_pandas_keeping_maps(
+                    table_from_pandas_keeping_source_types(
                         frames[table],
                         src_schema,
                         untouched_columns(
                             nodes_by_table.get(table, ()), src_schema.names, registry
                         ),
+                        [c for (t, c) in ctx.native_date_columns if t == table],
                     ),
                     faker_pin,
                 )

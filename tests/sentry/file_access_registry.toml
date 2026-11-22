@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 201 (asserted by the sentry).
+# Count: 202 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -892,6 +892,15 @@ dir_test = "tests/fileaccess/test_char_sink_publish.py::test_publish_into_absent
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
 owner = "cam"
 reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_local.py"
+function = "LocalOutputTxn._publish_durable.rename"
+sink = "os.replace"
+ordinal = 0
+rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
+owner = "cam"
+reason = "ambient CLI semantics: the pointer label's durable replace renames its fsynced stage onto the leaf, as LocalOutputTxn.publish does for other labels; never installed after forbid_ambient()"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"

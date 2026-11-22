@@ -44,6 +44,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import is_nested_type
 from decoy_engine.errors import DecoyError
 
 if TYPE_CHECKING:
@@ -280,7 +281,7 @@ def require_roundtrip_stable_generate_outputs(generate_outputs: dict[str, pa.Tab
         for column_name in table.column_names:
             column = table.column(column_name)
             field_type = column.type
-            if _is_nested_arrow_type(field_type):
+            if is_nested_type(field_type):
                 raise MixedDeclineError(
                     GENERATION_SHAPE_UNSUPPORTED,
                     f"table={table_name!r} column={column_name!r}: nested generate output "
@@ -301,17 +302,6 @@ def require_roundtrip_stable_generate_outputs(generate_outputs: dict[str, pa.Tab
                     "carries NaN, which the oracle's pandas echo folds to null (not "
                     "round-trip-stable in a mixed job; deferred)",
                 )
-
-
-def _is_nested_arrow_type(field_type: pa.DataType) -> bool:
-    return (
-        pa.types.is_list(field_type)
-        or pa.types.is_large_list(field_type)
-        or pa.types.is_fixed_size_list(field_type)
-        or pa.types.is_struct(field_type)
-        or pa.types.is_map(field_type)
-        or pa.types.is_union(field_type)
-    )
 
 
 def _float_column_has_nan(column: pa.ChunkedArray) -> bool:

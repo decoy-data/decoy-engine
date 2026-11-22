@@ -10,6 +10,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked_oracle
 from decoy_engine.execution._chunked_profile import first_chunk_profile
 from decoy_engine.execution._errors import ExecutionError
@@ -62,7 +63,9 @@ def _placeholder_profile(first: pa.Table, xname: str) -> Any:
 
 
 def _compiled(config: dict[str, Any], profile: Any) -> tuple[str, tuple[str, ...]]:
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     yaml = "\n".join(line for line in plan_to_yaml(plan).splitlines() if "profile_hash" not in line)
     return yaml, tuple(plan.plan_compile.warnings)
 

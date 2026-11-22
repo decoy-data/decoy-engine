@@ -31,6 +31,7 @@ from pydantic import (
     field_serializer,
 )
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan, pipeline_config_hash
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
 from decoy_engine.reasons import ReasonRecord, _registry, decoy
@@ -768,7 +769,7 @@ def _config(**edits: Any) -> dict[str, Any]:
 
 def test_semantic_hash_is_plan_hash() -> None:
     config = _config()
-    plan = compile_plan(config, _profile(), decoy_engine_version="0.1.0")
+    plan = compile_plan(config, _profile(), decoy_engine_version="0.1.0", sources=NO_SOURCES)
     assert pipeline_config_hash(config) == plan.pipeline_config_hash
 
     moved_source = _config(sources={"customers": {"path": "elsewhere.csv"}})

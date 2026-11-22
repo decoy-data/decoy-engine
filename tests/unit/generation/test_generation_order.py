@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation import generation_order
 from decoy_engine.generation._plan_entry import generate_tables_streamed
 from decoy_engine.generation.synthesize import (
@@ -35,13 +36,14 @@ _CHILD = """
 import json, sys
 from decoy_engine.generation import generation_order
 from decoy_engine.generation._plan_entry import generate_tables_streamed
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
 from tests.unit._dps_helpers import empty_profile
 from tests.unit._gen_cli_golden import digests, graph_config
 
 config = graph_config()
-plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+plan = compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 resident = generate_tables(plan)
 streamed = generate_tables_streamed(plan, sink=None).tables
 print(json.dumps({
@@ -144,7 +146,7 @@ def test_generation_order_raises_for_a_reference_to_a_non_generate_table() -> No
 
 def test_every_entry_raises_the_same_error_for_a_forged_plan() -> None:
     config = graph_config()
-    plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     assert plan.generation is not None
     forged_config = _mask_parent_config()
     forged_generation = dataclasses.replace(

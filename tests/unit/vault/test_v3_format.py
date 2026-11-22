@@ -227,10 +227,10 @@ def test_open_vault_refuses_a_non_prepared_key(tmp_path: Path) -> None:
 # ---- reason codes (AT-R1) ----------------------------------------------------------------------
 
 
-def test_new_reasons_are_registered_unreleased() -> None:
+def test_new_reasons_are_registered_in_the_release() -> None:
     for name in ("VAULT_TAMPERED", "VAULT_ENTRY_TOO_LARGE"):
         code = getattr(reasons.runtime, name)
-        assert reasons.get("runtime", code).since == reasons.UNRELEASED
+        assert reasons.get("runtime", code).since == "1.33.0"
 
 
 def test_refusal_codes_match_what_the_package_raises() -> None:

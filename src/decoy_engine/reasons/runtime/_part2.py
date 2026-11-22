@@ -135,17 +135,17 @@ _d = _catalog.runtime("ExecutionError")
 BUCKET_PERTURB_REQUIRES_DATE_FORMAT = _d(
     "bucket_perturb_requires_date_format",
     "Bucket perturb requires date format.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL = _d(
     "bucket_perturb_unparseable_no_row_channel",
     "Bucket perturb found unparseable values on a route with no row error channel.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 HANDLER_ROW_COUNT_CHANGED = _d(
     "handler_row_count_changed",
     "A mask handler returned a different number of rows, or a different index, than it was given.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 OUT_OF_CORE_REORDER_THRESHOLD_INVALID = _d(
     "out_of_core_reorder_threshold_invalid", "Out of core reorder threshold invalid."

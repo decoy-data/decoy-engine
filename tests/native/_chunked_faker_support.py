@@ -18,6 +18,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import kernel
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import derive_index
 from decoy_engine.generation.pool import PoolBuilder, ValuePool
 from decoy_engine.generation.pool._identity import resolve_faker_pool_identity
@@ -138,7 +139,9 @@ def _with_source_file(config: dict[str, Any]) -> dict[str, Any]:
 
 def job_seed_of(config: dict[str, Any]) -> bytes:
     cfg = _with_source_file(config)
-    plan = compile_plan(cfg, profile_source(cfg, seed=42), decoy_engine_version="c5b-ii-test")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=42), decoy_engine_version="c5b-ii-test", sources=NO_SOURCES
+    )
     return plan.seed_envelope.job_seed
 
 

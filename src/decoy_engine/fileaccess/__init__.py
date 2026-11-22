@@ -32,7 +32,12 @@ from decoy_engine.fileaccess._entry import (
     scope,
 )
 from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
-from decoy_engine.fileaccess._fdtree import STAGE_MARKER, stage_entries
+from decoy_engine.fileaccess._fdtree import (
+    DESCRIPTOR_NAME,
+    RESERVED_MEMBER_NAMES,
+    STAGE_MARKER,
+    stage_entries,
+)
 from decoy_engine.fileaccess._local import (
     LocalFileAccess,
     engine_dir_handle,
@@ -138,8 +143,10 @@ ENTRY_POINTS: tuple[str, ...] = (
 
 __all__ = [
     "CONTRACT_VERSION",
+    "DESCRIPTOR_NAME",
     "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
+    "RESERVED_MEMBER_NAMES",
     "STAGE_MARKER",
     "CleanupReport",
     "CommitUncertain",

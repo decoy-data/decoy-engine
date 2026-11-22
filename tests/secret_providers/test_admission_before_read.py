@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked, run_pipeline
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.keyprovider import (
     KeyedStrategyRequiresSecret,
     MaskSecretError,
@@ -288,7 +289,9 @@ def _date_plan_and_inputs():
         ],
     }
     profile = first_chunk_profile(table, table="t", engine_version=ENGINE_VERSION)
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     return (
         plan,
         table,

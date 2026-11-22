@@ -459,6 +459,7 @@ def _run_chunked(
         pool_cache=pool_cache,
         warm_pools=False,
         carry_passthrough=enforce_schema_rule,
+        source_schema=captured_schema,
     )
     if state.first is None:
         state.close_secret()

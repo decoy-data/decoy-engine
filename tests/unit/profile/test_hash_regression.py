@@ -41,7 +41,9 @@ from decoy_engine.profile import (
 # - Full-scan column (sampled=False, candidate_key=True)
 # - fk_target tuple
 # - null_count > 0 on one column
-PINNED_HASH = "eb129188e301c4a2ddea96438c8aa42a40da99af4a9286362f3d01164dfc7ddf"
+# Moved once by COLUMN-SHAPE E1a: `shape` is now in each column's hashed dict (the regression
+# profile's columns carry the default `unknown`), because the shape changes masking.
+PINNED_HASH = "7eefa52a304bb7ef2afbb7c469f365bca62c7d02713ffe795d139a0ab4021cf4"
 
 
 def build_regression_profile() -> Profile:

@@ -127,7 +127,6 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.errors", "UnknownFKColumnError", reasons.config.FK_UNKNOWN_COLUMN),
     ("decoy_engine.errors", "ConfigError", reasons.config.UNTAGGED),
     ("decoy_engine.config._errors", "PipelineConfigError", reasons.config.UNTAGGED),
-    ("decoy_engine.errors", "FlagPauseSignal", reasons.decoy.RUN_PAUSED),
     ("decoy_engine.errors", "RowErrorsFailedError", reasons.decoy.ROW_ERRORS_FAILED),
     ("decoy_engine.errors", "ValidatorFailedError", reasons.decoy.VERIFICATION_FAILED),
     ("decoy_engine.execution._isolated_commit", "CommitError", reasons.decoy.PUBLICATION_FAILED),
@@ -150,6 +149,7 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.fileaccess._types", "LockTimeout", reasons.decoy.PUBLICATION_LOCK_TIMEOUT),
     # A bounded read over its cap; the publisher maps its own reads to a refusal first.
     ("decoy_engine.fileaccess._types", "LeafTooLarge", reasons.decoy.PUBLICATION_FAILED),
+    ("decoy_engine.publication._current", "PointerUnreadable", reasons.decoy.PUBLICATION_FAILED),
     (
         "decoy_engine.verification.postmask._route_guard",
         "PostScanRouteError",

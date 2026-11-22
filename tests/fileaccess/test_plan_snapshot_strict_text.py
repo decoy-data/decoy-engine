@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._serialize import plan_from_yaml, plan_to_yaml
@@ -73,7 +74,9 @@ def _manifest(payload: bytes, sha256: str, *, statistical: bool = False) -> str:
             }
         ],
     }
-    data = yaml.safe_load(plan_to_yaml(compile_plan(cfg, profile, decoy_engine_version="test")))
+    data = yaml.safe_load(
+        plan_to_yaml(compile_plan(cfg, profile, decoy_engine_version="test", sources=NO_SOURCES))
+    )
     data["generation"]["snapshots"] = [
         {
             "source_path": CANARY_PATH,

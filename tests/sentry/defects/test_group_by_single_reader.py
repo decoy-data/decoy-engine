@@ -13,6 +13,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
+
 ROOT = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
 KEY = "group_by"
 HELPER = ("execution/_runner.py", "group_by_sibling")
@@ -105,5 +107,7 @@ def test_the_plan_side_set_names_the_sibling(tmp_path: Path) -> None:
 
     cfg, tables = build_case("group_key", tmp_path, "id == 5")
     profile = first_chunk_profile(tables["t"], table="t", engine_version="o1")
-    plan = compile_plan(cfg, profile, decoy_engine_version="o1", no_profile=True)
+    plan = compile_plan(
+        cfg, profile, decoy_engine_version="o1", no_profile=True, sources=NO_SOURCES
+    )
     assert group_key_group_by_columns(plan, get_default_registry()) == {"t": {"v"}}

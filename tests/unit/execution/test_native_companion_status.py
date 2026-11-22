@@ -459,6 +459,26 @@ def test_kernel_availability_all_false_on_abi_mismatch(monkeypatch: pytest.Monke
     assert (avail.crypto, avail.index, avail.raw_hex) == (False, False, False)
 
 
+def test_kernel_availability_survives_a_malformed_fpe_self_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A companion that is ABI-compatible but returns `errors=None` from its FPE self-check
+    must mark FPE unavailable and leave the other kernels alone; the probe never raises."""
+    from decoy_engine.execution.native._companion_status import native_kernel_availability
+
+    good = _good_fpe_transform_batch()
+
+    def _no_errors(*args: object, **kwargs: object) -> object:
+        out, _errors = good(*args, **kwargs)  # type: ignore[misc]
+        return out, None
+
+    _install_fake_kernel(monkeypatch, fpe_transform_batch=_no_errors)
+    avail = native_kernel_availability()
+    assert avail.fpe is False
+    assert (avail.crypto, avail.index, avail.raw_hex) == (True, True, True)
+    assert native_companion_status().ok is False
+
+
 # ---------------------------------------------------------------------------
 # present-ok
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import kernel
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import derive_index
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution._adapter import StrategyContext, provider_config_to_dict
@@ -628,7 +629,10 @@ class TestRoutingConstant:
 
         cfg, src = _route_config(tmp_path, mode, namespace)
         plan = compile_plan(
-            cfg, profile_source(cfg, seed=42), decoy_engine_version="c5b-i-route-test"
+            cfg,
+            profile_source(cfg, seed=42),
+            decoy_engine_version="c5b-i-route-test",
+            sources=NO_SOURCES,
         )
         decision = classify_job(
             cfg,
@@ -663,7 +667,10 @@ class TestRoutingConstant:
 
         cfg, src = _route_config(tmp_path, "reuse", namespace, pool_size=None)
         plan = compile_plan(
-            cfg, profile_source(cfg, seed=42), decoy_engine_version="c5b-ii-route-test"
+            cfg,
+            profile_source(cfg, seed=42),
+            decoy_engine_version="c5b-ii-route-test",
+            sources=NO_SOURCES,
         )
         decision = classify_job(
             cfg,
@@ -1058,5 +1065,7 @@ def _job_seed_of(cfg: dict[str, Any]) -> bytes:
     from decoy_engine.plan import compile_plan
     from decoy_engine.profile import profile_source
 
-    plan = compile_plan(cfg, profile_source(cfg, seed=42), decoy_engine_version="c5b-i-test")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=42), decoy_engine_version="c5b-i-test", sources=NO_SOURCES
+    )
     return plan.seed_envelope.job_seed

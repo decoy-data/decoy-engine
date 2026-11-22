@@ -1,6 +1,6 @@
 """TQ mutation-kill oracles for `PandasExecutionAdapter`'s SMALL surfaces:
 `__init__` (handler table), `run_single` (the single-table convenience guard),
-the `_fk_key_value` compat wrapper, and the `get_default_executor` singleton.
+the `_fk_key_value` compat wrapper.
 The big `run` / `_dispatch_mask_node` / `_resolve_fk_node` / `_parent_map`
 methods are graded by their own kill files. These drive the leaf surfaces
 directly and assert the machine fields each owns.
@@ -15,8 +15,6 @@ from decoy_engine.execution._fk_key_compat import _fk_key_value
 from decoy_engine.execution._fk_keys import fk_key_value
 from decoy_engine.execution._pandas_adapter import (
     PandasExecutionAdapter,
-    _reset_default_executor_for_tests,
-    get_default_executor,
 )
 from decoy_engine.keyprovider import SecretKeyProvider
 from decoy_engine.relationships._graph import OrphanPolicy
@@ -45,20 +43,6 @@ class TestFkKeyValueWrapper:
         assert _fk_key_value(5) == fk_key_value(5)
         assert _fk_key_value(5) != fk_key_value(None)
         assert _fk_key_value("abc") == fk_key_value("abc")
-
-
-class TestGetDefaultExecutor:
-    def test_returns_a_real_adapter_not_none(self) -> None:
-        # `cached = select_execution_adapter()` mutated to `cached = None` makes
-        # the singleton hand back None (and poison the cache). Reset first so the
-        # assertion sees this call's result, not a prior cached instance.
-        _reset_default_executor_for_tests()
-        try:
-            executor = get_default_executor()
-            assert executor is not None
-            assert hasattr(executor, "run")
-        finally:
-            _reset_default_executor_for_tests()
 
 
 class TestRunSingleTableGuard:

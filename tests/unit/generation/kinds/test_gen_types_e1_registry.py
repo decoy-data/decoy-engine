@@ -17,6 +17,7 @@ from decoy_engine.config import PipelineConfig
 from decoy_engine.config import _generate_option_catalog as catalog
 from decoy_engine.config import _generate_options as opts
 from decoy_engine.config._tables import GENERATE_TYPES
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution.native import _determinism_protocol as protocol
 from decoy_engine.execution.native._capabilities import _GEN_ONLY
 from decoy_engine.generation._admission import ADMISSION_MATRIX
@@ -301,7 +302,7 @@ def test_compile_plan_refuses_each_deferred_family(family: str) -> None:
     from tests.unit._dps_helpers import empty_profile
 
     with pytest.raises(PipelineValidationError) as info:
-        compile_plan(_raw(family), empty_profile(), decoy_engine_version="test")
+        compile_plan(_raw(family), empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     err = info.value
     assert err.code == VALUE
     assert err.path == "tables.t.generate_columns.x.family"

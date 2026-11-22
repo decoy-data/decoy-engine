@@ -29,6 +29,7 @@ import pytest
 
 from decoy_engine import GenerationError, PoolCapacityError, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan, plan_from_yaml, plan_to_yaml
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
 
@@ -113,7 +114,7 @@ class TestPoolSizeReachesRuntime:
             profiled_at=datetime(1970, 1, 1),
             decoy_engine_version=_ENGINE_VERSION,
         )
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         col_seed = dict(dict(plan.seed_envelope.per_table)["people"].per_column)["email"]
         assert col_seed.pool_size == 250_000
 
@@ -203,7 +204,7 @@ class TestPoolSizeLocationConflict:
             decoy_engine_version=_ENGINE_VERSION,
         )
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         assert exc.value.code == "pool_size_location_conflict"
 
     def test_equal_locations_are_legal(self, tmp_path) -> None:
@@ -228,7 +229,7 @@ class TestPoolSizeLocationConflict:
             profiled_at=datetime(1970, 1, 1),
             decoy_engine_version=_ENGINE_VERSION,
         )
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         col_seed = dict(dict(plan.seed_envelope.per_table)["people"].per_column)["email"]
         assert col_seed.pool_size == 150
 
@@ -258,7 +259,7 @@ class TestPlanRoundTrip:
             profiled_at=datetime(1970, 1, 1),
             decoy_engine_version=_ENGINE_VERSION,
         )
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         col_seed = dict(dict(plan.seed_envelope.per_table)["people"].per_column)["email"]
         assert col_seed.pool_size == 4242
         assert col_seed.scale == 3.5
@@ -327,7 +328,12 @@ class TestProviderOnlyPoolSizeCapacity:
             ],
         )
         with pytest.raises(PoolCapacityError) as exc:
-            compile_plan(cfg, _people_profile(row_count=10), decoy_engine_version=_ENGINE_VERSION)
+            compile_plan(
+                cfg,
+                _people_profile(row_count=10),
+                decoy_engine_version=_ENGINE_VERSION,
+                sources=NO_SOURCES,
+            )
         assert exc.value.code == "pool_too_small_for_source"
 
     def test_provider_only_sufficient_capacity_compiles(self, tmp_path) -> None:
@@ -343,7 +349,12 @@ class TestProviderOnlyPoolSizeCapacity:
                 }
             ],
         )
-        compile_plan(cfg, _people_profile(row_count=10), decoy_engine_version=_ENGINE_VERSION)
+        compile_plan(
+            cfg,
+            _people_profile(row_count=10),
+            decoy_engine_version=_ENGINE_VERSION,
+            sources=NO_SOURCES,
+        )
 
     def test_no_pool_size_unique_uses_default_not_none(self, tmp_path) -> None:
         # No pool_size at either site: the 10_000 default must apply (the
@@ -361,7 +372,10 @@ class TestProviderOnlyPoolSizeCapacity:
             ],
         )
         plan = compile_plan(
-            cfg, _people_profile(row_count=10), decoy_engine_version=_ENGINE_VERSION
+            cfg,
+            _people_profile(row_count=10),
+            decoy_engine_version=_ENGINE_VERSION,
+            sources=NO_SOURCES,
         )
         # "Compiles clean" means no deferred-capacity warning either: 10 rows
         # is well under the 10_000 default, so nothing needed deferring.
@@ -385,7 +399,12 @@ class TestProviderOnlyPoolSizeCapacity:
             ],
         )
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, _people_profile(row_count=10), decoy_engine_version=_ENGINE_VERSION)
+            compile_plan(
+                cfg,
+                _people_profile(row_count=10),
+                decoy_engine_version=_ENGINE_VERSION,
+                sources=NO_SOURCES,
+            )
         assert exc.value.code == "pool_size_location_conflict"
 
 
@@ -419,6 +438,7 @@ class TestScaleModeCapacity:
             cfg,
             _people_profile(row_count=100, distinct_count=2),
             decoy_engine_version=_ENGINE_VERSION,
+            sources=NO_SOURCES,
         )
 
 
@@ -525,6 +545,7 @@ class TestDeterministicSoftModeCapacityBypass:
             cfg,
             _people_profile(row_count=10, distinct_count=2),
             decoy_engine_version=_ENGINE_VERSION,
+            sources=NO_SOURCES,
         )
         assert plan is not None
 
@@ -573,5 +594,6 @@ class TestDeterministicSoftModeCapacityBypass:
                 cfg,
                 _people_profile(row_count=10, distinct_count=2),
                 decoy_engine_version=_ENGINE_VERSION,
+                sources=NO_SOURCES,
             )
         assert exc.value.code == "pool_too_small_for_source"

@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._throughput_calibration import (
     RuntimeBand,
     estimate_generation_runtime_band,
@@ -149,7 +150,11 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
     profile = profile_source(config, seed=_normalize_job_seed_int(config), declared=prepared)
     registry = get_default_registry()
     plan = compile_plan(
-        config, profile, decoy_engine_version=engine_version, base_dir=Path(base_dir)
+        config,
+        profile,
+        decoy_engine_version=engine_version,
+        base_dir=Path(base_dir),
+        sources=NO_SOURCES,
     )
     ns_registry = build_namespace_registry(config, profile)
     orphan_lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

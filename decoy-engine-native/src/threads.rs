@@ -1,13 +1,12 @@
 //! One native thread budget and the single long-lived Rayon pool built from it.
 //!
-//! This is the plumbing for Phase 1 Task 1.3 of the execution-consolidation plan
-//! (`docs/plans/2026-09-09-execution-consolidation-and-native-throughput.md`). Its purpose is
-//! to bound how many Rust worker threads a native masking job may spin up, so the kernel never
-//! creates more threads than its approved budget and cannot contend unbounded with the rest of
-//! the process (including later DuckDB work). Task 1.5 is what actually flips `derive_array`'s
-//! per-row loop onto the pool built here; in Task 1.3 the budget is resolved and threaded
-//! through the PyO3 boundary, and the pool is built and owned, but execution stays sequential
-//! and byte-identical.
+//! Its purpose is to bound how many Rust worker threads a native masking job may spin up, so the
+//! kernel never creates more threads than the process capacity and cannot contend unbounded with
+//! the rest of the process (including later DuckDB work). The shared pool is built once, sized to
+//! the host's available parallelism (see `shared_native_pool`); the per-call `native_threads`
+//! budget, resolved by `NativeThreadBudget::resolve`, limits how many work ranges a call splits
+//! into, not the pool size. The batch loops (`batch/ranges.rs`, `fpe.rs`) run two or more ranges on
+//! the shared pool; a call with zero or one range runs serially and never builds it.
 //!
 //! Ownership + lifetime (Phase-0 Codex requirement): a `NativeThreadPool` owns exactly ONE
 //! long-lived `rayon::ThreadPool`, constructed once from a `NativeThreadBudget` and reused for
@@ -15,8 +14,7 @@
 //! run concurrently they MUST share one pool (or otherwise bound their aggregate thread count
 //! against a single budget) rather than each building their own; a per-job pool would multiply
 //! the approved thread count by the number of in-flight jobs and defeat the bound. This module
-//! owns the type; wiring a single shared instance into the PyO3 entry point (and deciding where
-//! that instance lives) is Task 1.5's job.
+//! owns the type and the single shared instance, `shared_native_pool`.
 //!
 //! Platform lane (OUT OF SCOPE here): precedence between the platform's per-worker thread
 //! budget and this engine-level argument, and recording the resolved value in the job report,
@@ -257,9 +255,8 @@ impl NativeThreadBudget {
 /// Owns the single long-lived Rayon thread pool built from a [`NativeThreadBudget`].
 ///
 /// Built ONCE (see the module doc on ownership + lifetime) and reused; never rebuilt per batch.
-/// In Task 1.3 the pool is constructed and owned but not yet driving `derive_array` — Task 1.5
-/// wires the row loop onto it. `install` is provided as the entry point Task 1.5 will use to
-/// run a closure on the pool; it doubles as a smoke path here so the owned pool is exercised.
+/// The batch loops run two or more work ranges on it through `install`; zero or one range runs
+/// serially without building it.
 pub struct NativeThreadPool {
     pool: rayon::ThreadPool,
 }
@@ -269,7 +266,7 @@ impl NativeThreadPool {
     ///
     /// `pub(crate)` on purpose: the ONLY production path to a pool is [`shared_native_pool`],
     /// which builds one shared instance. Keeping the constructor crate-internal makes it
-    /// structurally impossible for a caller (or Task 1.5) to build a per-batch or per-job pool
+    /// structurally impossible for a caller to build a per-batch or per-job pool
     /// that would multiply the native-thread count across concurrent jobs.
     ///
     /// Returns a coded `native_thread_pool_build` [`DeriveError`] if Rayon cannot build the pool
@@ -293,8 +290,7 @@ impl NativeThreadPool {
         self.pool.current_num_threads()
     }
 
-    /// Run `op` inside the owned pool. Task 1.5 uses this to drive the parallel row loop; in
-    /// Task 1.3 it is the smoke path proving the owned pool executes work.
+    /// Run `op` inside the owned pool. The batch loops use this to run their parallel work ranges.
     pub fn install<Op, R>(&self, op: Op) -> R
     where
         Op: FnOnce() -> R + Send,
@@ -312,8 +308,8 @@ static SHARED_POOL: OnceLock<Result<NativeThreadPool, DeriveError>> = OnceLock::
 /// This is the ONLY production path to a `NativeThreadPool` (its constructor is crate-internal),
 /// so the aggregate native-thread count is bounded across concurrent jobs by construction: there
 /// is exactly one pool, sized once to the host's available parallelism (the process capacity).
-/// Task 1.5 drives the parallel row loop by calling [`NativeThreadPool::install`] on this
-/// instance; a per-job `native_threads` budget caps the work WITHIN the shared pool, it never
+/// The batch loops drive two or more parallel ranges by calling [`NativeThreadPool::install`] on
+/// this instance (zero or one range runs serially without building it); a per-job `native_threads` budget caps the work WITHIN the shared pool, it never
 /// sizes a separate pool.
 ///
 /// Sizing note: rayon pools are fixed-size at build, so the first call fixes the size for the

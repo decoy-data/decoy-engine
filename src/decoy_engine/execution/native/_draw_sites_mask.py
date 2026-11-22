@@ -131,7 +131,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.date_shift",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_date_shift.py::_shift_rows",
+        call_site="execution/_strategies/_date_shift.py::_offsets",
         entropy_root="mask_key",
         seed_derivation=(
             "min_days + (int.from_bytes(derive(mask_key, namespace, value)[:8], "
@@ -147,7 +147,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
         provider_version=_V6,
         notes=(
             "Execution handler derives the offset via derive(mask_key, namespace, "
-            "value) (execution/_strategies/_date_shift.py:303). The mask key is the "
+            "value) (execution/_strategies/_date_shift.py::_offsets). The mask key is the "
             "admitted secret; there is no key-free path."
         ),
         mirror_call_sites=("execution/_strategies/_date_shift.py::DateShiftStrategyHandler.run",),

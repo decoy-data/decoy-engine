@@ -13,6 +13,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.config import PostScanConfig, PreScanConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection import ner
 from decoy_engine.execution._strategies import _ner_config, _text_mask, _text_redact
 from decoy_engine.execution.out_of_core import _mask_group_b, _mask_group_c
@@ -231,7 +232,7 @@ def test_seed_envelope(
         table="t",
         engine_version="x",
     )
-    plan = compile_plan(cfg, profile, decoy_engine_version="x", no_profile=True)
+    plan = compile_plan(cfg, profile, decoy_engine_version="x", no_profile=True, sources=NO_SOURCES)
     column = dict(plan.seed_envelope.per_table[0][1].per_column)["c"]
     assert column.ner_model_version == "9.9.9"
     assert seen == [expected]

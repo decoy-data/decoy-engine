@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan, pipeline_config_hash
 from decoy_engine.profile import Profile
 
@@ -50,7 +51,12 @@ def test_compile_plan_refuses_the_same_values_before_anything_else(
     simple_config: dict[str, Any], simple_profile: Profile, bad: Any
 ) -> None:
     with pytest.raises(PlanCompileError) as caught:
-        compile_plan(_with(simple_config, bad), simple_profile, decoy_engine_version="0.1.0")
+        compile_plan(
+            _with(simple_config, bad),
+            simple_profile,
+            decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
+        )
     assert caught.value.code == reasons.config.CONFIG_VALUE_NOT_JSON
 
 

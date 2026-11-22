@@ -32,6 +32,39 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.3", "A `date_format` that is not text is refused on every column."): (
+        "the Breaking bullet on `date_shift` for a number, boolean or decimal column covers it"
+    ),
+    ("0.28.3", "`decoy validate` (the config-only check) no longer refuses a"): (
+        "a relaxation: validate stops refusing a case it could not judge; compile and run still refuse it"
+    ),
+    ("0.28.3", "`publish_unit` and `publish_tables` now refuse a table named"): (
+        "a table named like the stage marker could not publish correctly before; no valid config used the name"
+    ),
+    ("0.28.3", "Each profile column now carries a `shape` (`text`, `date`, `"): (
+        "the Breaking bullet on stored plans and changed profile hashes covers it"
+    ),
+    ("0.28.3", "`PLAN_VERSION` is now 5 and a plan records `column_shapes` f"): (
+        "the Breaking bullet on stored plans from an older engine covers it"
+    ),
+    ("0.28.3", "Both the pandas transform and the native route (full-frame, "): (
+        "the Breaking bullet on `bucket_perturb` covers it"
+    ),
+    ("0.28.3", "`open_vault(path, prepared, *, vault=None, file_access=None)"): (
+        "new API; the vault v3 Breaking bullet covers what an older engine cannot open"
+    ),
+    ("0.28.3", "The pandas mask paths now refuse a handler that returns a di"): (
+        "a guard: no built-in handler changes the row count, so no shipped config meets it"
+    ),
+    ("0.28.3", "Global row numbers must now be below 2^62 (before: below 2^6"): (
+        "a guard for row numbers above 2^62, which no real table reaches"
+    ),
+    ("0.28.3", "A `windowed_date` window with `min_days` or `max_days` more "): (
+        "the same config already failed on the first row; only the code and the stage (parse) change"
+    ),
+    ("0.28.3", "The post-scan relationship check no longer fails on DuckDB 2"): (
+        "a fix: the check failed on DuckDB 2.x before and now runs"
+    ),
     ("0.28.2", "A numeric column whose range reaches a subnormal float (for "): (
         "a fix: the profiler charted these columns with an error before, and now returns bins"
     ),
