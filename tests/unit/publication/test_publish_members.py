@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
+from tests.fileaccess.publication._dirmode_support import POLICIES
 from tests.unit.publication._publish_support import (
-    POLICIES,
     close_root,
     descriptor,
     make_out,
