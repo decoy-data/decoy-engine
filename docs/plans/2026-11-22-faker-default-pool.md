@@ -1,4 +1,4 @@
-Status: plan (revision 1, 2026-11-22)
+Status: plan (revision 2, 2026-11-22; Dennis R1 items closed)
 
 # FAKER-DEFAULT-POOL: a `faker` column with no `pool_size` runs native and chunked, as if it declared 10,000
 
@@ -66,6 +66,7 @@ Non-goals: new providers on the native allowlist (FAKER-NATIVE-WIDEN); `unique`,
 - Custom provider returns non-strings: `faker_provider_output_not_string` before the first chunk (F5).
 - `deterministic` with no namespace: the oracle's existing coded error (`execution/_strategies/_faker.py`).
 - `pool_size_location_conflict` at compile (`plan/_pool_size.py`): unchanged.
+- Out-of-core pool budget: each distinct pool reserves `pool_size * 4096` bytes (`execution/out_of_core/_faker_pool.py:56`, `:185`) against `min(run budget, 256 MiB)` (`execution/out_of_core/_runner.py:217-221`). A default column reserves about 40 MiB, so a job with several default columns of distinct pool identities could raise `out_of_core_faker_pool_budget_exceeded` mid-run, at the first table that needs the pool, where the column used to decline. This plan moves the check before the run (section 5, F6b): the runner sums the reservations of every distinct pool identity the plan admits, before the scratch arena opens and before any batch, and raises the same code there. The run then fails clean with no partial work. The pre-run sum applies to explicit `pool_size` columns too; the per-pool check at `:186` stays as the backstop.
 
 ### Routes
 
@@ -119,6 +120,7 @@ One slice.
 | `execution/physical/_plan.py` (238) | `PoolBinding.plan_pool_size: int \| None`, docstring | +2 |
 | `execution/physical/_shadow_bindings.py` (441) | drop `pool_size is None` from the faker guard; docstring line 224 | -1, +1 |
 | `execution/out_of_core/_compat.py` (586), `execution/out_of_core/_faker_native.py` (306), `execution/native/_chunked_schema_rule.py` | refusal message and docstrings stop naming an explicit `pool_size` | text only |
+| `execution/out_of_core/_runner.py` (368), `execution/out_of_core/_faker_pool.py` (239) | `OocFakerPoolContext.check_plan_reservations(identities)`: sum distinct reservations, raise `out_of_core_faker_pool_budget_exceeded` before the arena opens; the runner calls it once after building the context | +20 |
 | `generation/pool/_validate.py` (220) | `effective_pool_size(resolved_pool_size, {})` in place of the literal | 1 |
 | `docs/compatibility-contract.md` | the non-deterministic REUSE paragraph (about line 997), the deterministic Faker paragraph, the ROUTE-OUTPUT-CONTRACT line for newly admitted columns | about 8 |
 | `changelog.d/faker-default-pool.md` | `Breaking:` line plus `### Changed` | new fragment |
@@ -152,7 +154,13 @@ No new source module. `execution/` (cap 103) and `execution/native/` (cap 55) ge
 
 No new structure. One fact moves to one place: "how big is this column's pool" is answered only by `effective_pool_size`, reached through `resolve_faker_pool_identity`. Admission answers only "is this column's shape one the route can reproduce", and pool size is no longer part of that answer, because every size, the default included, reproduces.
 
-Choke point: `resolve_faker_pool_identity` is already the only pool builder entry on every route. The guard is the sentry `test_faker_pool_size_one_resolver.py`: it parses every module under `src/decoy_engine/execution/` (an AST walk, not a grep) and fails on any read of a `pool_size` attribute or a `"pool_size"` key (`.get`, subscript, `in`) that is not an argument of a call to `resolve_faker_pool_identity` or `FakerPoolCache.prepare`. The allowlist starts empty. Seeded cases in the sentry's own test: `seed.pool_size is None`, `cfg.get("pool_size") is None`, `"pool_size" in cfg`; each must fail. The mutation that must turn it red: restore R2's `col_entry.get("pool_size") is None` clause.
+Choke point: `resolve_faker_pool_identity` is already the only pool builder entry on every route. The guard is the sentry `test_faker_pool_size_one_resolver.py`, scoped to admission code so legitimate reads elsewhere (`measurement.pool_size` at `execution/native/_pool_quality.py:411`, `prepared.pool_size` at `execution/out_of_core/_faker_pool.py:185`, `INDEX_KAT.pool_size`) are out of its reach by construction:
+
+- Modules walked (AST): `execution/native/_requirements.py`, `execution/native/_faker_positional_admission.py`, `execution/_chunked.py`, `execution/physical/_shadow_bindings.py`, `execution/out_of_core/_compat.py`, `execution/out_of_core/_faker_native.py`, `execution/_sequential_native_ops.py`.
+- Rule: inside those modules, a `.pool_size` attribute or a `"pool_size"` key (`.get`, subscript) may not appear as an operand of a comparison (`is`, `is not`, `==`, `!=`), of `in` / `not in`, or as the test of an `if`, `while`, `and`, `or`, `not` or ternary. Passing the value on (an argument or a keyword value) is allowed, so `PoolBinding(provider, plan_pool_size=plan_slice.pool_size)` at `_shadow_bindings.py:328` passes without an allowlist entry.
+- Named allowlist (module, function, reason): starts empty. A new entry needs a reason in the sentry file.
+- Seeded cases in the sentry's own test: `seed.pool_size is None`, `if cfg.get("pool_size"):`, `"pool_size" in cfg`; each must fail. A seeded `f(x.pool_size)` must pass.
+- The mutation that must turn it red: restore R2's `col_entry.get("pool_size") is None` clause.
 
 F2 is the behavior proof beside it: each admission entry point decides the same for a column with no `pool_size` and for the same column with `pool_size: 10000`.
 
@@ -161,7 +169,7 @@ F2 is the behavior proof beside it: each admission entry point decides the same 
 | # | Class | Where it applies | Structure that closes it | Proof | Mutation that must turn it red |
 |---|---|---|---|---|---|
 | 1 | Value-bearing output | refusal and evidence text | wording changes only; no value or path added | existing value-free sentries | n/a |
-| 2 | Cleanup missing on an exit path | none | N/A: no file or stage is opened | n/a | n/a |
+| 2 | Cleanup missing on an exit path | out-of-core budget failure | the pre-run reservation sum raises before the scratch arena opens, so nothing needs cleanup | F6b | move the check after `ScratchArena.fresh` (F6b red on the leftover scratch check) |
 | 3 | State and concurrency | the pool cache across chunks | the pre-warmed pool and every chunk use one identity from `resolve_faker_pool_identity` | F1 at 120k (several chunks) | resolve the pre-warm size from the literal 10,000 (F1 variant with `provider_config.pool_size: 500` red) |
 | 4 | Route parity and silent fallback | five routes | one resolver; sentry plus F2 | F1, F2, F6, sentry | restore the R2 clause only (sentry and F2 red) |
 | 5 | Referential integrity | none | N/A: faker is not an FK key on native routes | n/a | n/a |
@@ -174,15 +182,16 @@ F2 is the behavior proof beside it: each admission entry point decides the same 
 ## 9. Acceptance tests (each fails before the change unless marked)
 
 - **F1 output equality.** For each of `faker(person_first_name)`, `faker(person_last_name)`, `faker(person_first_name) in ns deterministic`: run 2,000 rows and 120,000 rows (string source) with no `pool_size`, with `pool_size: 10000`, and on the forced pandas full-frame route (auto-chunk off, native off). All three outputs are equal as Arrow tables (`equals`, schema included) and their output hashes are equal. Values already agree before the change, so the fail-before half is the route assertion: the no-`pool_size` run reports `rust_pool_select` at 2k and a chunked route with `rust_pool_select` per chunk at 120k. Before the change it reports `pandas_oracle` full frame. A variant with `provider_config.pool_size: 500` checks that a declared size still wins.
-- **F2 equal admission.** Each admission entry point (R1 through `faker_pool_precondition_met` and `_seed`, R2, R3, `positional_faker_bindable`, `out_of_core._compat._faker_conditional_rejection`, `out_of_core._faker_native.decline_reason`, `_sequential_native_ops` faker admission) decides the same for the column shapes of section 4 with no `pool_size` and with `pool_size: 10000`. The entry points come from an import walk of the callers of these predicates, not a hand list. Fail-before: R1, R2 and R3 refuse the no-`pool_size` column.
+- **F2 equal admission.** Each admission entry point (R1 through `faker_pool_precondition_met` and `_seed`, R2, R3, `positional_faker_bindable`, `out_of_core._compat._faker_conditional_rejection`, `out_of_core._faker_native.decline_reason`, `_sequential_native_ops` faker admission) decides the same for the column shapes of section 4 with no `pool_size` and with `pool_size: 10000`. The entry points are this fixed list; the sentry covers a new admission site added to the walked modules. Fail-before: R1, R2 and R3 refuse the no-`pool_size` column.
 - **F3 non-allowlisted deterministic providers.** `faker(person_email) in ns deterministic`, no `pool_size`, 120,000 rows: runs on the chunked oracle leg, output equal to the forced full-frame run. Then every provider the live registry classifies `pool_native` (`execution/native/_provider_class.classify_provider`), deterministic with a namespace and no `pool_size`, at a chunk size that forces three or more chunks: each output equals its full-frame output, or the job fails before the first chunk with an existing coded refusal. Fail-before: the job runs full frame. If a provider gives different output or `chunked_schema_mismatch`, the builder stops and reports: that is a defect of the explicit-`pool_size` path too, and the owner decides.
 - **F4 degenerate type (marked byte change).** An empty table, and an all-null source column, with default `faker(person_first_name)`: the output column is Arrow `string` on the unified slice and chunked routes, as it already is with `pool_size: 10000`. Fail-before: pandas inferred `double` (empty) and `null` (all-null).
 - **F5 custom provider.** A custom provider registered as `person_first_name` that returns integers, no `pool_size`: fails with `faker_provider_output_not_string` before any chunk is written. Fail-before: it ran full frame and succeeded. Named in the changelog as a new failure.
 - **F6 sequential and out-of-core.** A two-table FK job whose child has default deterministic `faker(person_last_name) in ns` over a string column: the sequential route reports a native faker column, and the output equals the forced full-frame run; the out-of-core route admits the column with the same output. Fail-before: `faker_not_deterministic_reuse_variant` and `out_of_core_faker_pool_unsupported`.
+- **F6b out-of-core budget.** An out-of-core job with a run budget of 100 MiB and three default faker columns with distinct pool identities (first name, last name, first name in a second namespace): the job fails with `out_of_core_faker_pool_budget_exceeded` before the arena opens and before any batch, the message names no source value, and no output or scratch file is left. The same job with two such columns runs. Fail-before: the columns declined with `out_of_core_faker_pool_unsupported`; with explicit `pool_size: 10000` the budget error came mid-run, when the third pool was prepared.
 - **F7 explicit null.** `pool_size: null` at top level and in `provider_config` behaves as absent on every route (extends `tests/native/test_dispatch_faker.py::test_explicit_null_pool_size_falls_back_to_provider_config_or_default`). The pool half is an unchanged-behavior control; admission fails before.
 - **S1 sentry.** `test_faker_pool_size_one_resolver.py` passes on the change and fails on each seeded case.
 
-Mutations (record the head they ran on): restore the R2 clause (sentry and F2 red); restore the R1 clause (F2 and F6 red); hard-code `plan_pool_size=10000` in `_shadow_bindings` (F1 `pool_size: 500` variant red).
+Mutations (record the head they ran on): restore the R2 clause (sentry and F2 red); restore the R1 clause (F2 and F6 red); drop the pre-run sum (F6b red); hard-code `plan_pool_size=10000` in `_shadow_bindings` (F1 `pool_size: 500` variant red).
 
 Performance evidence (performance.md): the audit's 2k and 120k probe on the Dell node through `vm-run`, before and after, three runs each, wall time and peak RSS for default first name. Expected: the 120k case moves from full frame to chunked. The numbers go in the PR body.
 
@@ -190,7 +199,7 @@ Performance evidence (performance.md): the audit's 2k and 120k probe on the Dell
 
 - Output values: unchanged (F1).
 - **Byte change, marked:** a newly admitted default faker column whose output is empty or entirely null is typed Arrow `string` on the unified slice and chunked routes, where pandas inferred `double` (empty) or `null` (all-null) before. It is the ROUTE-OUTPUT-CONTRACT entry that already applies to `pool_size: 10000` (`docs/compatibility-contract.md`, about lines 1007 and 1032).
-- Fragment first line: `Breaking: a faker column with no pool_size now runs on the native and chunked routes; an empty or all-null output column is typed string, and a custom provider registered as person_first_name or person_last_name must return strings.`
+- Fragment first line: `Breaking: a faker column with no pool_size now runs on the native and chunked routes; an empty or all-null output column is typed string, and a custom provider registered as person_first_name or person_last_name must return strings; an out-of-core job whose faker pools pass the pool budget now fails before the run starts.`
 - `chunked_strategy_conditions_unmet` no longer fires for a missing `pool_size`; the code stays registered for its other conditions.
 - Plan serialization and digest: unchanged. `ColumnSeed.pool_size` stays `None` when the config omits it (`plan/_serialize.py:174`).
 - `SEED_PROTOCOL_VERSION` is not touched.
@@ -198,10 +207,11 @@ Performance evidence (performance.md): the audit's 2k and 120k probe on the Dell
 ## 11. Pre-mortem
 
 - A pre-warm or chunk path still assumes `plan_pool_size` is an `int` and raises `TypeError` on `None`. F1 at 120k and F6 cover it; mypy flags it once `PoolBinding` is `int | None`.
+- Out-of-core jobs with many default faker columns now hit the pool budget where the columns used to decline. F6b makes that a clean pre-run failure; the message tells the user to set a smaller `pool_size` or raise the budget.
 - A non-allowlisted deterministic provider fails on the chunked oracle leg with `chunked_schema_mismatch` for a job that ran full frame before. F3 walks the registry to find this before merge; the stop rule is in F3.
 - The pool-quality frozen tier (`execution/native/_pool_quality.py:111`) is calibrated at 10,000 and now sees more columns at the same size. No change.
 - The CLI run card still says pandas for some chunked runs until ROUTE-LABEL-TRUTH lands. Not this row.
 
 ## 12. Open questions for the owner
 
-None. The byte change in section 10 follows the owner direction of 2026-11-22 and is already the recorded behavior for an explicit `pool_size`.
+None. The byte change and the earlier out-of-core budget failure in section 10 follow the owner direction of 2026-11-22 and is already the recorded behavior for an explicit `pool_size`.
