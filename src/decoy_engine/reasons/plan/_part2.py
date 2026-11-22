@@ -322,7 +322,7 @@ WINDOWED_DATE_MISSING_ANCHOR_REF = _d(
 WINDOWED_DATE_WINDOW_OUT_OF_RANGE = _d(
     "windowed_date_window_out_of_range",
     "A windowed_date min_days or max_days is beyond the supported date range.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 
 _d = _catalog.plan("StatisticalSpecError")

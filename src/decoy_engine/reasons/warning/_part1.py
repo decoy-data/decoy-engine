@@ -49,7 +49,7 @@ DRIFT_NOT_CHECKED = _d(
     "drift_not_checked",
     "scan_baseline.on_drift is not checked by decoy run yet; the run continues without a drift "
     "check.",
-    since=UNRELEASED,
+    since="1.33.0",
 )
 FIT_JOINT_CELLS_TRUNCATED = _d(
     "fit_joint_cells_truncated", "Fit joint cells truncated.", since="1.22.0"

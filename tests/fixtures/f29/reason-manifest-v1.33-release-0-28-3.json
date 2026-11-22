@@ -1,0 +1,427 @@
+{
+  "entries": [
+    {
+      "code": "column_shape_format_unused",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A date_format is set on a column that is already a date, so it is not used.",
+      "symbol": "COLUMN_SHAPE_FORMAT_UNUSED"
+    },
+    {
+      "code": "column_shape_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A strategy cannot read the shape of the column it is set on.",
+      "symbol": "COLUMN_SHAPE_MISMATCH"
+    },
+    {
+      "code": "plan_recompile_required",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A stored plan was written by an older engine; compile it again from its config.",
+      "symbol": "PLAN_RECOMPILE_REQUIRED"
+    },
+    {
+      "code": "plan_version_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A stored plan has a plan_version this engine does not support.",
+      "symbol": "PLAN_VERSION_UNSUPPORTED"
+    },
+    {
+      "code": "stored_shape_unknown",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A stored plan names a column shape this engine does not know; compile the plan again.",
+      "symbol": "STORED_SHAPE_UNKNOWN"
+    },
+    {
+      "code": "windowed_date_window_out_of_range",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A windowed_date min_days or max_days is beyond the supported date range.",
+      "symbol": "WINDOWED_DATE_WINDOW_OUT_OF_RANGE"
+    },
+    {
+      "code": "uncovered_pii",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "The pre-scan flagged source columns that the pipeline leaves unmasked; the run continues under on_findings: warn.",
+      "symbol": "UNCOVERED_PII"
+    },
+    {
+      "code": "uncovered_pii_blocked",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "finding",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "The pre-scan flagged source columns that the pipeline leaves unmasked, so the run stopped under on_findings: fail.",
+      "symbol": "UNCOVERED_PII_BLOCKED"
+    },
+    {
+      "code": "bucket_perturb_requires_date_format",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "Bucket perturb requires date format.",
+      "symbol": "BUCKET_PERTURB_REQUIRES_DATE_FORMAT"
+    },
+    {
+      "code": "bucket_perturb_unparseable_no_row_channel",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "Bucket perturb found unparseable values on a route with no row error channel.",
+      "symbol": "BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL"
+    },
+    {
+      "code": "handler_row_count_changed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A mask handler returned a different number of rows, or a different index, than it was given.",
+      "symbol": "HANDLER_ROW_COUNT_CHANGED"
+    },
+    {
+      "code": "vault_entry_too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "VaultError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "mask",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "finalize",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "One vault entry is larger than a vault segment can hold.",
+      "symbol": "VAULT_ENTRY_TOO_LARGE"
+    },
+    {
+      "code": "vault_tampered",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "VaultError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "mask",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "finalize",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "The vault file was changed or cut short after it was written.",
+      "symbol": "VAULT_TAMPERED"
+    },
+    {
+      "code": "windowed_date_row_number_out_of_range",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "WindowedDateRowNumberError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "A windowed_date global row number is below 0 or at or above 2**62.",
+      "symbol": "WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE"
+    },
+    {
+      "code": "drift_not_checked",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.33.0",
+      "summary": "scan_baseline.on_drift is not checked by decoy run yet; the run continues without a drift check.",
+      "symbol": "DRIFT_NOT_CHECKED"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.33.0"
+}
