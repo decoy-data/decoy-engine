@@ -271,10 +271,9 @@ CERTIFIED_PLATFORM = PlatformTriple(
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
     (CERTIFIED_PLATFORM, "3.10.20.final"): frozenset(
         {
-            # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
-            # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
-            # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
-            # release stamp moves only the hashed engine version; rows since 0.18.0 stay so old snapshots compile (0.4.0: 6c0b2bbd...).
+            # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault --extra cloud`
+            # on Python 3.10.20 (the dps-dependency-matrix install). Re-pin after a fresh sync; a release stamp moves
+            # only the hashed engine version; rows since 0.18.0 stay so old snapshots compile (0.4.0: 6c0b2bbd...).
             "bd14c8a5cc2d3896547f743150fdf35d340c1f2e95e923dcba6c00065bb53cfd",
             "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
             "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
