@@ -16,7 +16,8 @@ from typing import Any
 import pytest
 
 from decoy_engine.fileaccess import FileAccessDenied, FileAccessUnavailable
-from tests.unit.publication._publish_support import POLICIES, close_root, make_out
+from tests.fileaccess.publication._dirmode_support import POLICIES
+from tests.unit.publication._publish_support import close_root, make_out
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX stage traversal")
 
