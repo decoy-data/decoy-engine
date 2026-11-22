@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine.errors import FlagPauseSignal, ValidatorFailedError
+from decoy_engine.errors import ValidatorFailedError
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._isolated_commit import CommitError
@@ -87,13 +87,7 @@ def test_findings_verification_and_publication_are_distinct(tmp_path: Path) -> N
     commit = reason_from_exception(CommitError("could not commit"))
     assert commit.code == "publication_failed" and commit.outcome is Outcome.PUBLICATION
 
-    # Pause is a control outcome, not an unexpected failure; a cancel is too.
-    pause = reason_from_exception(FlagPauseSignal([{"message": "m"}], "gate"))
-    assert (pause.code, pause.outcome, pause.kind) == (
-        "run_paused",
-        Outcome.CANCELLED,
-        reasons.Kind.CONTROL,
-    )
+    # A cancel is a control outcome, not an unexpected failure.
     assert reason_from_exception(KeyboardInterrupt()).outcome is Outcome.CANCELLED
 
 

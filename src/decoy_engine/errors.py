@@ -132,30 +132,6 @@ class ConnectorAuthError(ConnectorError):
     """Raised when a connector cannot authenticate to its source or destination."""
 
 
-class LicenseError(DecoyError):
-    """Base class for license-related errors."""
-
-
-class LicenseExpiredError(LicenseError):
-    """Raised when a license has expired."""
-
-
-class FlagPauseSignal(DecoyError):  # noqa: N818 -- control-flow Signal, not a runtime Error.
-    """Raised by flag_gate op when review conditions fail.
-
-    Not a crash: the platform runner catches this and transitions the
-    job to `review_pending` rather than `failed`. The conditions_failed
-    list is stored in the `job_reviews` table for the approver.
-    """
-
-    def __init__(self, conditions_failed: list[dict[str, Any]], gate_id: str = "") -> None:
-        self.conditions_failed = conditions_failed
-        self.gate_id = gate_id
-        detail = "; ".join(c.get("message", str(c)) for c in conditions_failed)
-        prefix = f"flag gate {gate_id!r}: " if gate_id else "flag gate: "
-        super().__init__(f"{prefix}conditions failed: {detail}")
-
-
 # ── FK preservation ──────────────────────────────────────────────────
 # Raised when a declared FK in `column_relationships` cannot be resolved at runtime; the stable
 # fk.* codes live in validation_result.CODES. Strict mode aborts the run, lenient mode drops the
@@ -584,11 +560,8 @@ __all__ = [
     "FixedWidthParseError",
     "FixedWidthRecordOverlongError",
     "FixedWidthWriteError",
-    "FlagPauseSignal",
     "FpeChecksumError",
     "FpeUnencryptableError",
-    "LicenseError",
-    "LicenseExpiredError",
     "MaskKeyDerivationError",
     "MaskKeyRequiredError",
     "PKDuplicatesError",

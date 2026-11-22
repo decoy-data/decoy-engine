@@ -42,7 +42,6 @@ from decoy_engine.declared_casting._boundary import (
     plan_column_shapes,
 )
 from decoy_engine.execution._adapter import (
-    ExecutionAdapter,
     ExecutionResult,
     StrategyContext,
     StrategyHandler,
@@ -58,7 +57,7 @@ from decoy_engine.execution._fk_keys import (
     fk_nullable_int_array,
     lossless_fk_int_values,
     lossless_int_columns,
-    table_from_pandas_keeping_maps,
+    table_from_pandas_keeping_source_types,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._fk_resolve import (
@@ -320,7 +319,7 @@ class PandasExecutionAdapter:
         t1 = time.perf_counter()
         outputs = apply_degenerate_faker_pin(
             {
-                t: table_from_pandas_keeping_maps(
+                t: table_from_pandas_keeping_source_types(
                     f,
                     sources[t].schema,
                     untouched_columns((n for n in ordered if n.table == t), f.columns, registry),
@@ -667,28 +666,3 @@ class PandasExecutionAdapter:
         if errored_keys_cache is not None:
             errored_keys_cache[cache_key] = errored
         return out
-
-
-_DEFAULT_EXECUTORS: dict[str, ExecutionAdapter] = {}
-
-
-def get_default_executor() -> ExecutionAdapter:
-    """Return the cached default execution adapter for the current substrate.
-
-    The engine constructs the adapter via `select_execution_adapter`, so a
-    caller routes a full job through it by calling this rather than
-    re-implementing adapter construction (best-practices section 3.3). One
-    cached instance per adapter label.
-    """
-    from decoy_engine.execution._substrate import SUBSTRATE, select_execution_adapter
-
-    substrate = SUBSTRATE
-    cached = _DEFAULT_EXECUTORS.get(substrate)
-    if cached is None:
-        cached = select_execution_adapter()
-        _DEFAULT_EXECUTORS[substrate] = cached
-    return cached
-
-
-def _reset_default_executor_for_tests() -> None:
-    _DEFAULT_EXECUTORS.clear()

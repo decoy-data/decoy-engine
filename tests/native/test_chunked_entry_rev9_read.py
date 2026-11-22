@@ -774,67 +774,59 @@ def test_stock_adapter_subclass_is_not_wrapped_either() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (h) nested columns fail in the profile walk
+# (h) nested columns pass the profile walk (CHUNKED-STRUCT S1)
 # ---------------------------------------------------------------------------
+# Plan 2026-11-21-chunked-struct.md section 4: "`decoy run --chunked` on a Parquet source whose
+# nested columns ... are passthrough runs"; section 4 non-goals: "Nothing is refused". These
+# cases used to pin the profile-walk `TypeError` that the plan removes.
 
 
-@pytest.mark.parametrize("name", ["list_int", "struct", "map"])
-def test_read_nested_passthrough_is_coded_at_chunk_zero(name: str) -> None:
-    shape = BY_NAME[name]
-    config = make_config([_when("s", "tags != 'q'"), passthrough("tags")])
-    chunks = [_chunk(tags=shape.good) for _ in range(2)]
-    oracle_exc = _public_error(config, chunks)
-    assert isinstance(oracle_exc, TypeError)
-    with pytest.raises(ExecutionError) as info:
+def _run_native(config: dict[str, Any], chunks: list[pa.Table]) -> list[pa.Table]:
+    return list(
         run_mask_chunked(
             config, chunks, table=TABLE, engine_version=ENGINE_VERSION, key_provider=key_provider()
         )
-    _expect_coded(info, "tags", 0)
-    _same_exc(info.value.__cause__, oracle_exc)
+    )
+
+
+@pytest.mark.parametrize("name", ["list_int", "struct", "map"])
+def test_read_nested_passthrough_runs_and_is_returned_exactly(name: str) -> None:
+    shape = BY_NAME[name]
+    config = make_config([_when("s", "tags != 'q'"), passthrough("tags")])
+    chunks = [_chunk(tags=shape.good) for _ in range(2)]
+    public = run_public(config, chunks)
+    native = _run_native(config, chunks)
+    assert len(public) == len(native) == 2
+    for pub, nat, src in zip(public, native, chunks, strict=True):
+        assert same_column(pub.column("tags"), src.column("tags"))
+        assert same_column(nat.column("tags"), src.column("tags"))
 
 
 # ---------------------------------------------------------------------------
-# (i) profile-failure attribution follows source order
+# (i) a masked column next to a nested passthrough converts as it always did
 # ---------------------------------------------------------------------------
 
 _LIST = BY_NAME["list_int"].good
 
 
-def test_masked_profile_failure_next_to_a_valid_read_column_is_not_wrapped() -> None:
+def test_masked_list_column_next_to_a_valid_read_column_runs_on_both_entries() -> None:
     config = make_config([redact("m"), _when("s", "x > 1"), passthrough("x")])
     chunks = [_chunk(m=_LIST, x=pa.array([1, 2, 3]))]
-    oracle_exc = _public_error(config, chunks)
-    with pytest.raises(TypeError) as info:
-        run_mask_chunked(
-            config, chunks, table=TABLE, engine_version=ENGINE_VERSION, key_provider=key_provider()
-        )
-    assert not isinstance(info.value, ExecutionError)
-    _same_exc(info.value, oracle_exc)
+    public = run_public(config, chunks)
+    native = _run_native(config, chunks)
+    assert native[0].to_pydict() == public[0].to_pydict()
+    assert native[0].column("m").to_pylist() == ["REDACTED", None, "REDACTED"]
+    assert native[0].column("x").to_pylist() == [1, 2, 3]
 
 
-def test_identical_profile_failures_are_attributed_in_source_order() -> None:
-    # masked `m` and read passthrough `t` both fail the same way in the profile walk.
+@pytest.mark.parametrize("order", [("m", "t"), ("t", "m")])
+def test_masked_and_read_nested_columns_run_in_either_source_order(order: tuple[str, str]) -> None:
     config = make_config([redact("m"), _when("s", "t != 'q'"), passthrough("t")])
-    masked_first = [pa.table({"s": _S, "m": _LIST, "t": _LIST})]
-    with pytest.raises(TypeError) as info:
-        run_mask_chunked(
-            config,
-            masked_first,
-            table=TABLE,
-            engine_version=ENGINE_VERSION,
-            key_provider=key_provider(),
-        )
-    assert not isinstance(info.value, ExecutionError)
-    read_first = [pa.table({"s": _S, "t": _LIST, "m": _LIST})]
-    with pytest.raises(ExecutionError) as coded:
-        run_mask_chunked(
-            config,
-            read_first,
-            table=TABLE,
-            engine_version=ENGINE_VERSION,
-            key_provider=key_provider(),
-        )
-    _expect_coded(coded, "t", 0)
+    chunks = [pa.table({"s": _S, order[0]: _LIST, order[1]: _LIST})]
+    public = run_public(config, chunks)
+    native = _run_native(config, chunks)
+    assert native[0].to_pydict() == public[0].to_pydict()
+    assert same_column(native[0].column("t"), chunks[0].column("t"))
 
 
 @pytest.mark.parametrize(
