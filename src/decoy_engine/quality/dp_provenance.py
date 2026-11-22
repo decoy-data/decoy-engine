@@ -273,7 +273,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
         {
             # decoy-engine dev/CI profile (`uv sync --frozen --extra dev --extra lint --extra vault
             # --extra cloud`, Python 3.10.20). Re-pin from a fresh sync (installed_distribution_set,
-            # compute_lock_fingerprint). A release stamp moves only the engine version; rows stay.
+            # compute_lock_fingerprint). A stamp moves only the engine version; old snapshots stay.
             "bd14c8a5cc2d3896547f743150fdf35d340c1f2e95e923dcba6c00065bb53cfd",
             "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
             "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
