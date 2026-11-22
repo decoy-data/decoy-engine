@@ -5,9 +5,12 @@ from __future__ import annotations
 import ast
 import subprocess
 import sys
+from dataclasses import fields
 from pathlib import Path
+from typing import get_args
 
-from decoy_engine.execution._operator_registry import OPERATORS
+from decoy_engine.execution._operator_registry import OPERATORS, RequiredKernel
+from decoy_engine.execution.native._companion_status import KernelAvailability
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXEC_ROOT = REPO_ROOT / "src" / "decoy_engine" / "execution"
@@ -125,3 +128,10 @@ def test_native_route_eligibility_is_still_importable() -> None:
     from decoy_engine.execution.native._plan import native_route_eligibility
 
     assert callable(native_route_eligibility)
+
+
+def test_every_required_kernel_has_an_availability_field() -> None:
+    """`native_fallback_code` reads `getattr(availability, kernel)` for each kernel a plan needs.
+    A kernel added to `RequiredKernel` without a `KernelAvailability` field would raise there
+    after the sink was written, so the two sets must match."""
+    assert set(get_args(RequiredKernel)) == {f.name for f in fields(KernelAvailability)}

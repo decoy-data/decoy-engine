@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
@@ -245,12 +246,17 @@ def _probe_fpe_kat(kernel: object, abi_actual: str) -> tuple[Reason, BaseExcepti
         )
     except Exception as exc:
         return "load-error", exc
-    reproduces = (
-        isinstance(out, pa.Array)
-        and out.type == pa.string()
-        and out.to_pylist() == [probe.ciphertext]
-        and len(errors) == 0
-    )
+    # A malformed companion can return `errors=None` or a non-array `out`; judging the result
+    # inside the guard keeps a bad self-check a failed probe, never an exception.
+    try:
+        reproduces = (
+            isinstance(out, pa.Array)
+            and out.type == pa.string()
+            and out.to_pylist() == [probe.ciphertext]
+            and len(errors) == 0
+        )
+    except Exception as exc:
+        return "load-error", exc
     if reproduces:
         return None
     return "kat-corrupt", NativeCompanionCheckError(
@@ -406,6 +412,16 @@ class KernelAvailability:
     fpe: bool
 
 
+def _kat_passes(
+    probe: Callable[[object, str], tuple[Reason, BaseException] | None], kernel: object, abi: str
+) -> bool:
+    """One kernel's self-check as a bool: any exception from the check means unavailable."""
+    try:
+        return probe(kernel, abi) is None
+    except Exception:
+        return False
+
+
 def native_kernel_availability() -> KernelAvailability:
     """Per-kernel availability of the companion; never raises.
 
@@ -427,10 +443,10 @@ def native_kernel_availability() -> KernelAvailability:
     if reported_abi != _EXPECTED_ABI_VERSION:
         return KernelAvailability(crypto=False, index=False, raw_hex=False, fpe=False)
     return KernelAvailability(
-        crypto=_probe_hash_kat(kernel, reported_abi) is None,
-        index=_probe_index_kat(kernel, reported_abi) is None,
-        raw_hex=_probe_raw_hex_kat(kernel, reported_abi) is None,
-        fpe=_probe_fpe_kat(kernel, reported_abi) is None,
+        crypto=_kat_passes(_probe_hash_kat, kernel, reported_abi),
+        index=_kat_passes(_probe_index_kat, kernel, reported_abi),
+        raw_hex=_kat_passes(_probe_raw_hex_kat, kernel, reported_abi),
+        fpe=_kat_passes(_probe_fpe_kat, kernel, reported_abi),
     )
 
 
