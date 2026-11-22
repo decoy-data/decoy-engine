@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import contextlib
 import errno
-import functools
 import logging
 import logging.handlers
 import os
@@ -47,7 +46,6 @@ from decoy_engine.fileaccess._local_chain import (
 from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
     DIRECTORY_PUBLISH_LABELS,
-    DURABLE_REPLACE_LABELS,
     PRIVATE_LABELS,
     STAGE_PREFIX,
     STAGE_SUFFIX,
@@ -303,7 +301,7 @@ class LocalOutputTxn(_LocalStageDir):
         self._staged_file: Path | None = None
         self._direct = False
         if (label == "publication" and kind != "dir") or (
-            label in DURABLE_REPLACE_LABELS and mode != "replace"
+            label in _durable.DURABLE_REPLACE_LABELS and mode != "replace"
         ):
             raise FileAccessUnavailable("the label does not fit this stage kind or mode")
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS and sys.platform != "win32"
@@ -408,10 +406,12 @@ class LocalOutputTxn(_LocalStageDir):
             raise FileAccessUnavailable("nothing was staged")
         self._finished = True
         try:
-            rename = functools.partial(os.replace, staged, self._target)
-            _durable._publish_labelled(
-                self._label, self._parent_fd, staged.name, self._target.name, rename
-            )
+
+            def rename() -> None:
+                os.replace(staged, self._target)
+
+            fd, name = self._parent_fd, staged.name
+            _durable._publish_labelled(self._label, fd, name, self._target.name, rename)
         finally:
             self._close_parent()
 

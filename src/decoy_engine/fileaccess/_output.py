@@ -393,8 +393,8 @@ class RootedOutputTxn(_StageDir):
         return super().create_file(component)
 
     def _rename_stage(self) -> None:
-        s = self._state
-        _call(os.replace, s.stage_name, self._leaf, src_dir_fd=s.parent_fd, dst_dir_fd=s.parent_fd)
+        parent = self._state.parent_fd
+        _call(os.replace, self._state.stage_name, self._leaf, src_dir_fd=parent, dst_dir_fd=parent)
 
     def publish(self) -> None:
         from decoy_engine.fileaccess import _durable
