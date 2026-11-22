@@ -154,11 +154,11 @@ def _reserved_cases() -> list[str]:
 
 @pytest.mark.parametrize("name", _reserved_cases())
 def test_check_request_refuses_every_reserved_name(name: str) -> None:
-    from decoy_engine.publication import PublicationRequest
-    from decoy_engine.publication._publish import check_request
+    from decoy_engine.publication import PublicationRequest, check_request
 
-    with pytest.raises(ValueError, match="^invalid tables$"):
+    with pytest.raises(ValueError, match="invalid tables") as exc:
         check_request(PublicationRequest("op-1"), ["ok", name])
+    assert str(exc.value) == "invalid tables"
 
 
 def test_the_reserved_set_holds_the_stage_marker_and_the_descriptor() -> None:
@@ -170,15 +170,57 @@ def test_the_reserved_set_holds_the_stage_marker_and_the_descriptor() -> None:
 
 @pytest.mark.parametrize("tables", [["a", "a"], ["a", 1], [b"a"], [None]])
 def test_check_request_still_refuses_duplicates_and_non_str(tables: list[object]) -> None:
-    from decoy_engine.publication import PublicationRequest
-    from decoy_engine.publication._publish import check_request
+    from decoy_engine.publication import PublicationRequest, check_request
 
-    with pytest.raises(ValueError, match="^invalid tables$"):
+    with pytest.raises(ValueError, match="invalid tables") as exc:
         check_request(PublicationRequest("op-1"), tables)  # type: ignore[arg-type]
+    assert str(exc.value) == "invalid tables"
 
 
 def test_check_request_accepts_ordinary_names() -> None:
-    from decoy_engine.publication import PublicationRequest
-    from decoy_engine.publication._publish import check_request
+    from decoy_engine.publication import PublicationRequest, check_request
 
     assert check_request(PublicationRequest("op-1"), ["a", "B"]) == ["a", "B"]
+
+
+class _SpyOut:
+    """An OutputDir stand-in: `publish_tables` must refuse before it calls `begin`."""
+
+    def __init__(self) -> None:
+        self.begun = 0
+
+    def begin(self, *args: object, **kwargs: object) -> object:
+        self.begun += 1
+        raise AssertionError("begin called")
+
+
+@pytest.mark.parametrize(
+    ("name", "suffix"),
+    [
+        ("_decoy_publication", ".json"),
+        (".decoy-publication", "-stage"),
+        ("_DECOY_publication", ".JSON"),
+    ],
+)
+def test_publish_tables_refuses_a_suffix_that_completes_a_reserved_name(
+    name: str, suffix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pyarrow as pa
+
+    from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+    from decoy_engine.publication import PublicationRequest, publish_tables
+
+    writes: list[object] = []
+    staged: list[str] = []
+    monkeypatch.setattr(arrow_adapter, "write_output_table", lambda *a, **k: writes.append(a))
+    out = _SpyOut()
+    with pytest.raises(ValueError) as exc:
+        publish_tables(
+            out,  # type: ignore[arg-type]
+            {name: pa.table({"id": [1]})},
+            PublicationRequest("op-1"),
+            suffix=suffix,
+            on_stage=staged.append,
+        )
+    assert str(exc.value) == "invalid tables"
+    assert (out.begun, writes, staged) == (0, [], [])

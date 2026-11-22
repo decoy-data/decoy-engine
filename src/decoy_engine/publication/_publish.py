@@ -437,7 +437,9 @@ def publish_tables(
     from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 
     names = check_request(request, list(tables))
-    components = [f"{name}{suffix}" for name in names]
+    # The caller's suffix can complete a reserved name from a harmless key, so the derived
+    # components pass the same check, before any I/O.
+    components = check_request(request, [f"{name}{suffix}" for name in names])
     if not all(map(is_valid_component, components)) or len(set(components)) != len(components):
         raise ValueError("invalid tables")
     failure: str | None = None
