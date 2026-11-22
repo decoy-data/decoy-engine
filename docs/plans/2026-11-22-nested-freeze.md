@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-22; Dennis round 1 applied, owner decision Q1 recorded)
+Status: plan (revision 3, 2026-11-22; Codex round 2 applied: guard placed in an existing module, static site moved before the read, full size inventory; revision 2: Dennis round 1 applied, owner decision Q1 recorded)
 
 # NESTED-FREEZE: a closed JSONPath subset for `nested`, and a refusal for native nested columns
 
@@ -79,12 +79,12 @@ Search run: RFC 9535 (JSONPath, February 2024) and the JSONPath Compliance Test 
 5. The handler gets its expression from the one grammar function. Nothing in `src/` calls `jsonpath_ng.parse`.
 6. An index selector on an object cell fails closed with `nested_target_unwritable_container`, like `[*]` does today.
 
-**(b)** After this slice, a mask table column whose Arrow type is nested (`is_nested_type`) is refused with `runtime.native_nested_column_unsupported` when any rule other than `passthrough` touches it. One code, two raise sites, one rule module (`execution/_native_nested_guard.py`):
+**(b)** After this slice, a mask table column whose Arrow type is nested (`is_nested_type`) is refused with `runtime.native_nested_column_unsupported` when any rule other than `passthrough` touches it. One code, two raise sites, one rule. Both functions and the allow set go into the existing `src/decoy_engine/execution/_gated_string_guard.py`, the module that already holds the dispatch choke-point guard `require_same_rows`; no new module is added under `execution/`:
 
 1. **Touches** means the column is in the entry's own target, or in what `execution/_column_access.column_access(entry, registry)` (`src/decoy_engine/execution/_column_access.py:362`) says the entry reads or writes. That registry already covers `joint_mask` `columns` and `key_by` (`_column_access.py:173`, `_strategies/_joint_mask.py:58`), `derived` and `formula` references (`:154`), the sibling keys `group_by`, `order_by`, `anchor` and `reference_column` (`:43`) and `when:` predicate names (`:196`). No second reader of those keys is written. An entry with `reads_unknown` or `writes_unknown` in a table that has a nested column is refused (fail closed: the guard cannot prove the entry leaves the column alone).
-2. **Static site.** `refuse_native_nested_columns(config, schemas, registry)` runs in `build_run_context` (`src/decoy_engine/execution/_pipeline_context.py:176`), beside `_guards.refuse_dropped_declared_tables` (`:380`), after the compiled plan exists and before any source row is read. It reads the Arrow type from `SourceFacts.schemas` and the loader schemas (`:300`).
+2. **Static site.** `refuse_native_nested_columns(config, schemas, registry)` runs in `build_run_context` (`src/decoy_engine/execution/_pipeline_context.py:176`) directly after `check_required_strategy_settings` (`:297` to `:300`), with the same `source_facts_of(sources, source_loader_schemas)`. The code comment there says that point is before the source is read, and it is before `build_routing_facts`, which reads source rows through `profile_source`. So the static refusal reads no source row. It needs only the config, the schemas and the registry, which are all known there.
 3. **Unknown schema.** A table whose Arrow schema is not known before the read (a lazy or descriptor source with no schema at `_pipeline_context.py:300` and `:380`, or a direct `PandasAdapter` call with a hand-built, uncompiled `Plan`) is not let through. The runtime site refuses it.
-4. **Runtime site (backstop).** `refuse_native_nested_cells(df, seed, registry, table)` runs before `handler.run` at every pandas dispatch: `run_with_when_gate` (`src/decoy_engine/execution/_when_gate.py:434`, both the plain and the gated branch, before `preflight`), the composite branch of `_pandas_adapter._dispatch_mask_node`, and the orphan REMAP closure (`src/decoy_engine/execution/_strategies/_orphan.py:151`). It builds the touched set with the same `column_access` from the seed's strategy, `provider_config` and `when`. For each touched column of object dtype it refuses on the first non-null cell that is a `dict`, `list`, `tuple` or `numpy.ndarray` (the pandas forms of Arrow struct, list and map). It checks types only and never puts a value in the message.
+4. **Runtime site (backstop).** `refuse_native_nested_cells(df, seed, registry, table)` runs before `handler.run` at every pandas dispatch: `run_with_when_gate` (`src/decoy_engine/execution/_when_gate.py:434`, both the plain and the gated branch, before `preflight`), the composite branch of `_pandas_adapter._dispatch_mask_node`, and the orphan REMAP closure (`src/decoy_engine/execution/_strategies/_orphan.py:151`). `tests/sentry/test_handler_row_guard_call_sites.py`, which already proves every `handler.run` call site calls `require_same_rows`, is extended to require `refuse_native_nested_cells` at each call site too, the orphan closure included. It builds the touched set with the same `column_access` from the seed's strategy, `provider_config` and `when`. For each touched column of object dtype it refuses on the first non-null cell that is a `dict`, `list`, `tuple` or `numpy.ndarray` (the pandas forms of Arrow struct, list and map). It checks types only and never puts a value in the message.
 5. The estimate route (`src/decoy_engine/execution/_job_estimate.py:157`, `NO_SOURCES`) masks nothing and reads no rows, so it does not refuse. Its estimate is not a promise that the run compiles.
 6. Every strategy name is refused except `passthrough` (`ALLOWED_ON_NATIVE_NESTED = frozenset({"passthrough"})`), so a strategy added later is refused by default. An untargeted or `passthrough` nested column that no other entry touches keeps the behavior engine #754 gave it.
 
@@ -110,14 +110,14 @@ Non-goals: masking inside native nested columns (NESTED-NATIVE, 1.x); JSON and J
 - Grammar refusal: `PlanCompileError` from the new check, before any read.
 - Handler backstop: `StrategyError(nested_jsonpath_parse_error)` at `src/decoy_engine/execution/_strategies/nested/_handler.py:283`, reached only when the handler runs without a compiled plan.
 - Index on object: `StrategyError(nested_target_unwritable_container)` from `find_matches` (`src/decoy_engine/execution/_strategies/nested/_leaves.py:42`).
-- Native nested refusal, static: `ExecutionError(native_nested_column_unsupported)` from `build_run_context`, before any read.
+- Native nested refusal, static: `ExecutionError(native_nested_column_unsupported)` from `build_run_context`, before `build_routing_facts` and so before any source row is read.
 - Native nested refusal, runtime: the same code from the dispatch backstop, before the handler writes. On a chunked route this can be after earlier tables or chunks were staged; the existing failure path removes staged output (B6 asserts no final output).
 
 ### Routes
 
 - `compile_plan` (`src/decoy_engine/plan/_compile.py:123`): grammar check; every run route compiles here first (plain, auto-chunked, `run_mask_pipeline_chunked`, multi-table, native companion).
 - `run_config_only_checks` (`src/decoy_engine/plan/_compile.py:486`): grammar check only; it has no source schema.
-- `build_run_context` (`src/decoy_engine/execution/_pipeline_context.py:176`): native nested static check, for tables with a known schema.
+- `build_run_context` (`src/decoy_engine/execution/_pipeline_context.py:176`): native nested static check beside `check_required_strategy_settings` (`:300`), before the read, for tables with a known schema.
 - Pandas dispatch (`_when_gate.py:434`, `_dispatch_mask_node` composite branch, `_orphan.py:151`): native nested runtime backstop, for every table, schema known or not.
 - Job estimate (`_job_estimate.py:157`): no check; it reads no rows.
 
@@ -139,15 +139,43 @@ Non-goals: masking inside native nested columns (NESTED-NATIVE, 1.x); JSON and J
 
 ## 5. Slices and size
 
-(a): 1 new foundation module (about 120 lines), 1 new plan check (about 50), edits to `_nested_json/__init__.py`, `plan/checks/__init__.py`, `plan/_compile.py` (2 call lines, net zero lines; see below), `_handler.py` (net shrink), `_leaves.py` (about 5 lines), the plan reason catalog, 1 sentry, tests, a changelog fragment, `docs/compatibility-contract.md`. New public names: none. New reason code: `nested_target_unsupported`.
+Size inventory, every touched file (lines are added unless marked):
 
-(b): 1 new execution module (about 90 lines), 1 call line each in `_pipeline_context.py`, `_when_gate.py` (2), `_pandas_adapter.py` and `_orphan.py`, the runtime reason catalog, tests, a changelog fragment, `docs/compatibility-contract.md`. New public names: none. New reason code: `runtime.native_nested_column_unsupported`. `plan/_compile.py` is not touched by (b).
+| Slice | File | Change |
+|---|---|---|
+| (a) | `src/decoy_engine/_nested_json/_target.py` | new, about 120 |
+| (a) | `src/decoy_engine/_nested_json/__init__.py` | 2 export lines |
+| (a) | `src/decoy_engine/plan/checks/_nested_target.py` | new, about 50 |
+| (a) | `src/decoy_engine/plan/checks/__init__.py` | 1 export line |
+| (a) | `src/decoy_engine/plan/_compile.py` | 2 call lines, net zero (see below) |
+| (a) | `src/decoy_engine/execution/_strategies/nested/_handler.py` | net shrink: `jsonpath_ng.parse` replaced by `parse_target`; `_has_prefix_overlap` and its call deleted |
+| (a) | `src/decoy_engine/execution/_strategies/nested/_leaves.py` | about 5 (index on object fails closed) |
+| (a) | `src/decoy_engine/reasons/plan/_part2.py` | 1 code entry, `nested_target_unsupported` |
+| (a) | `pyproject.toml` | 1 line changed (`jsonpath-ng>=1.8.0,<2`) |
+| (a) | `uv.lock` | regenerated; only the `jsonpath-ng` specifier line changes |
+| (a) | `tests/sentry/defects/test_nested_target_choke_point.py` | new, about 120 |
+| (a) | `tests/unit/nested_json/test_target_grammar.py`, `tests/unit/nested_json/cts_subset.json` | new |
+| (a) | `tests/unit/plan/checks/test_nested_target_check.py` | new |
+| (a) | `tests/unit/execution/test_nested_strategy.py`, `tests/unit/execution/test_nested_strategy_strict_json.py` | A5 rewrites |
+| (a) | `changelog.d/<fragment>.md`, `docs/compatibility-contract.md` | new fragment; grammar and code entry |
+| (b) | `src/decoy_engine/execution/_gated_string_guard.py` | about 90 (126 to about 216), docstring widened to name both guards |
+| (b) | `src/decoy_engine/execution/_pipeline_context.py` | 1 call line, net zero: the file is at 600, the size goal, so one stale comment line in `build_run_context` goes |
+| (b) | `src/decoy_engine/execution/_when_gate.py` | 2 call lines (plain and gated branch), 541 to 543 |
+| (b) | `src/decoy_engine/execution/_pandas_adapter.py` | 1 call line (composite branch), 665 to 666, ceiling 700 |
+| (b) | `src/decoy_engine/execution/_strategies/_orphan.py` | 1 call line, 157 to 158 |
+| (b) | `src/decoy_engine/reasons/runtime/_part3.py` | 1 code entry, `native_nested_column_unsupported` |
+| (b) | `tests/sentry/test_handler_row_guard_call_sites.py` | extended: every function that calls `handler.run` must also call `refuse_native_nested_cells`; its `_ALLOWED` exemption for `_orphan.py` does not apply to the new guard |
+| (b) | `tests/unit/execution/test_native_nested_guard.py`, `tests/native/test_native_nested_routes.py` | new |
+| (b) | `tests/native/test_unconfigured_passthrough_types.py` | 1 added case (B4) |
+| (b) | `changelog.d/<fragment>.md`, `docs/compatibility-contract.md` | new fragment; code entry |
+
+New public names: none. `plan/_compile.py` is not touched by (b).
 
 The runtime backstop costs one type check per non-null cell of each touched object-dtype column per dispatch, and stops at the first nested cell. Strings are the common case. The builder measures it on the 1M-row prodsim table; if it adds more than 2% to the run, it checks the first non-null cell plus `Series.map(type).nunique()` instead, and records the number.
 
 `plan/_compile.py` is at its exact size ceiling (674, `tests/sentry/test_module_size.py:110`) and may only shrink. Each new (a) call line pays for itself by removing a stale narrative comment line in the same function.
 
-(a) also touches the dependency spec: `pyproject.toml:100` changes from `jsonpath-ng>=1.6` to `jsonpath-ng>=1.8.0,<2` (the built-AST code uses the 1.8.0 `Index(*indices)`, `Slice(start, end, step)` and `Fields(*fields)` signatures, the version the lock and the CTS run use), and `uv.lock` is regenerated (its resolved version stays 1.8.0; only the specifier line changes). A dependency lock change is a full-suite trigger (testing.md escalation list), so the (a) merge head runs the full suite against the saved main baseline.
+The dependency rows in detail: `pyproject.toml:100` changes from `jsonpath-ng>=1.6` to `jsonpath-ng>=1.8.0,<2` (the built-AST code uses the 1.8.0 `Index(*indices)`, `Slice(start, end, step)` and `Fields(*fields)` signatures, the version the lock and the CTS run use), and `uv.lock` is regenerated (its resolved version stays 1.8.0; only the specifier line changes). A dependency lock change is a full-suite trigger (testing.md escalation list), so the (a) merge head runs the full suite against the saved main baseline.
 
 ## 6. Placement
 
@@ -155,19 +183,18 @@ The runtime backstop costs one type check per non-null cell of each touched obje
 |---|---|---|---|
 | `_target.py` (`parse_target`, `TargetPath`, `to_jsonpath`) | `src/decoy_engine/_nested_json/` | "Nested JSON cell foundation" | `_rules.py` (`nested_children`) |
 | `_nested_target.py` | `src/decoy_engine/plan/checks/` | "Plan compile and checks": new checks in `plan/checks/_<topic>.py` | `_text_mask_strategy.py` |
-| `_native_nested_guard.py` | `src/decoy_engine/execution/` | "Execution guards" at the dispatch choke point | `_gated_string_guard.py` (`require_same_rows`) |
 | `test_nested_target_choke_point.py` | `tests/sentry/defects/` | "Sentry test": recurring-defect class rules | `test_nested_child_choke_point.py` |
 | `test_target_grammar.py`, `cts_subset.json` | `tests/unit/nested_json/` | "Unit tests" mirroring `src/` | existing `tests/unit/nested_json/` |
 | `test_nested_target_check.py` | `tests/unit/plan/checks/` | "Unit tests" mirroring `src/` | the existing tests in that folder |
 | `test_native_nested_guard.py` | `tests/unit/execution/` | "Unit tests" mirroring `src/` | `test_nested_strategy.py` |
 | `test_native_nested_routes.py` | `tests/native/` | route parity tests | `test_unconfigured_passthrough_types.py` |
 
-`plan/checks/` has 11 modules, under its fan-out limit. `src/decoy_engine/execution` is at 103 against its fan-out limit (`tests/sentry/layout/test_package_fanout.py:32`); if the new module crosses it, the two functions go into `_gated_string_guard.py` (126 lines) instead, with no new module. The guard must sit in `execution`, not `plan/checks`: it reuses `execution/_column_access.column_access`, and `plan` is below `execution` in `.importlinter`. `_nested_json` stays in the bottom layer: it imports jsonpath-ng and the standard library, not `reasons`; it raises its own `TargetSyntaxError(position, form)` and the callers map it to a code.
+`plan/checks/` has 11 modules, under its fan-out limit. `src/decoy_engine/execution` has 103 direct modules, frozen by its fan-out sentry (`tests/sentry/layout/test_package_fanout.py:32`), which requires it to shrink, so (b) adds no module there: its two functions and `ALLOWED_ON_NATIVE_NESTED` go into the existing `execution/_gated_string_guard.py` (126 lines, about 216 after), which already holds the dispatch choke-point guard and is imported by `_when_gate.py` and `_pandas_adapter.py`. The guard must sit in `execution`, not `plan/checks`: it reuses `execution/_column_access.column_access`, and `plan` is below `execution` in `.importlinter`. No source file in (b) is new; the placement rows below are tests only.
 
 ## 7. Choke points
 
 - (a) One grammar: `_nested_json.parse_target`. The plan check and the handler both call it. Guard: `tests/sentry/defects/test_nested_target_choke_point.py` walks the AST of every module under `src/`. It fails on any import of `jsonpath_ng.parser`, `jsonpath_ng.lexer` or `jsonpath_ng.ext` (or anything under it), on any import of the names `parse`, `JsonPathParser` or `JsonPathLexer` from `jsonpath_ng` (with or without `as`), and on any attribute access `.parse` or `.JsonPathParser` on a name bound to the `jsonpath_ng` module (alias-aware: it tracks `import jsonpath_ng as jp`). The one allowed importer of `jsonpath_ng.jsonpath` AST classes is `_nested_json/_target.py`. Mutations that must turn it red: put `jsonpath_ng.parse(target_path)` back in `_handler.py`; add `import jsonpath_ng as jp; jp.parse(...)`; add `from jsonpath_ng.ext import parse as p`.
-- (b) One rule: `_native_nested_guard.ALLOWED_ON_NATIVE_NESTED = frozenset({"passthrough"})`, applied by both raise sites to every column an entry touches. Guard: a test parametrized over every mask strategy name, read from `support/_shape.StrategyKind` (`src/decoy_engine/support/_shape.py:129`, mask strategies plus `from_parent`, `:144`) minus the generate-only kinds and minus the allow set. It also asserts `set(SCALAR_HANDLERS) | {"from_parent"}` is inside the walked set, so a new handler or a new dispatch branch cannot be skipped. Each name is refused on a struct, a list and a map. Mutation: add `"redact"` to the allow set; the guard must go red.
+- (b) One rule: `_gated_string_guard.ALLOWED_ON_NATIVE_NESTED = frozenset({"passthrough"})`, applied by both raise sites to every column an entry touches. Guard: a test parametrized over every mask strategy name, read from `support/_shape.StrategyKind` (`src/decoy_engine/support/_shape.py:129`, mask strategies plus `from_parent`, `:144`) minus the generate-only kinds and minus the allow set. It also asserts `set(SCALAR_HANDLERS) | {"from_parent"}` is inside the walked set, so a new handler or a new dispatch branch cannot be skipped. Each name is refused on a struct, a list and a map. Mutation: add `"redact"` to the allow set; the guard must go red.
 
 ## 8. Acceptance tests (each fails before the change)
 
