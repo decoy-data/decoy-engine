@@ -357,3 +357,32 @@ def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> Non
         raise FileExistsError(errno.EEXIST, "output exists")
     if code:
         raise OSError(code, os.strerror(code))
+
+
+def publish_replace_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
+    """The one durable replace publish: fsync the stage, `renameat(2)` it over `leaf` (a link
+    at the leaf is replaced, never written through), then fsync the directory inside
+    `_sync_bound`, so a failure after the rename is `CommitUncertain`: the new bytes are
+    visible, not confirmed durable. A failure before the rename removes only the stage and
+    leaves the old leaf; the error keeps its errno and nothing else."""
+    validate_component(stage_name, _CREATOR_KEY)
+    validate_component(leaf, _CREATOR_KEY)
+    code = 0
+    try:
+        _sync_leaf_at(parent_fd, stage_name)
+        _call(os.replace, stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    if code:
+        discard_stage_at(parent_fd, stage_name)
+        raise OSError(code, os.strerror(code))
+    _sync_bound(lambda: _fsync_dir(parent_fd))
+
+
+def _link_exclusive(parent_fd: int, stage_name: str, leaf: str) -> None:
+    """Link the stage to `leaf` (`FileExistsError` when occupied) and drop the stage name; a
+    failed drop leaves only the stage. The non-durable exclusive publish."""
+    _call(
+        os.link, stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False
+    )
+    discard_stage_at(parent_fd, stage_name)

@@ -47,6 +47,7 @@ from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
     DIRECTORY_PUBLISH_LABELS,
     DURABLE_LABELS,
+    DURABLE_REPLACE_LABELS,
     PRIVATE_LABELS,
     STAGE_PREFIX,
     STAGE_SUFFIX,
@@ -64,6 +65,7 @@ from decoy_engine.fileaccess._types import (
     StageLabel,
 )
 
+_FD_STAGED = DURABLE_LABELS | DURABLE_REPLACE_LABELS  # staged through a held parent fd
 _logger = logging.getLogger("decoy_engine.quarantine")
 
 _CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _osflags.CLOEXEC
@@ -336,13 +338,13 @@ class LocalOutputTxn(_LocalStageDir):
             self._check(component)
             if self._staged_file is not None:
                 raise FileAccessUnavailable("a file stage holds exactly one file")
-            if self._label in DURABLE_LABELS:
-                return self._create_durable_stage()
             if self._label in CREATES_PARENTS:
                 if sys.platform == "win32":
                     self._target.parent.mkdir(parents=True, exist_ok=True)
                 else:
                     _ensure_dirs(self._target.parent)
+            if self._label in _FD_STAGED:
+                return self._create_durable_stage()
             private = self._label in PRIVATE_LABELS
             # A private stage never writes through: publish replaces a symlink, not its target.
             if self._mode == "replace" and not private and self._writes_through():
@@ -405,7 +407,11 @@ class LocalOutputTxn(_LocalStageDir):
             raise FileAccessUnavailable("nothing was staged")
         self._finished = True
         try:
-            _durable.publish_exclusive_durable(self._parent_fd, staged.name, self._target.name)
+            replace = self._label in DURABLE_REPLACE_LABELS
+            publish = (
+                _durable.publish_replace_durable if replace else _durable.publish_exclusive_durable
+            )
+            publish(self._parent_fd, staged.name, self._target.name)
         finally:
             self._close_parent()
 
@@ -443,7 +449,7 @@ class LocalOutputTxn(_LocalStageDir):
         staged = self._staged_file
         if staged is None:
             raise FileAccessUnavailable("nothing was staged")
-        if self._label in DURABLE_LABELS:
+        if self._label in _FD_STAGED:
             self._publish_durable()
             return
         if self._direct:
@@ -482,7 +488,7 @@ class LocalOutputTxn(_LocalStageDir):
             shutil.rmtree(self._stage, ignore_errors=True)
             self._stage = None
         self._held.close()  # after the stage is gone: the lock outlives the name
-        if self._label in DURABLE_LABELS:
+        if self._label in _FD_STAGED:
             self._unlink_stage()
             self._close_parent()
             return

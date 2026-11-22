@@ -147,6 +147,7 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.fileaccess._types", "LockTimeout", reasons.decoy.PUBLICATION_LOCK_TIMEOUT),
     # A bounded read over its cap; the publisher maps its own reads to a refusal first.
     ("decoy_engine.fileaccess._types", "LeafTooLarge", reasons.decoy.PUBLICATION_FAILED),
+    ("decoy_engine.publication._current", "PointerUnreadable", reasons.decoy.PUBLICATION_FAILED),
     (
         "decoy_engine.verification.postmask._route_guard",
         "PostScanRouteError",

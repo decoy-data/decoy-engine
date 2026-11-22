@@ -53,15 +53,21 @@ STAGE_PREFIX: dict[str, str] = {
     "vault": "_decoy_vault_stage_",
     "pack": "_decoy_pack_stage_",
     "publication": "._decoy_publication_pending_",
+    "pointer": "._decoy_pointer_stage_",
 }
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
 # Labels whose stage holds secrets or real data, so the stage file is 0600 at creation.
-PRIVATE_LABELS: frozenset[str] = frozenset({"quarantine", "isolated", "vault", "publication"})
+PRIVATE_LABELS: frozenset[str] = frozenset(
+    {"quarantine", "isolated", "vault", "publication", "pointer"}
+)
 # Labels published durably and exclusively: the stage is fsynced by its writer
 # (`serial.write_durable`), linked to the leaf, then the parent is fsynced; that fsync is the
 # commit point and its failure is raised. A failure path removes only the unpublished stage,
 # never the leaf.
 DURABLE_LABELS: frozenset[str] = frozenset({"vault"})
+# Labels published by a durable replace: fsync the stage, rename over the leaf, then fsync the
+# parent, whose failure is raised as `CommitUncertain` (the managed pointer).
+DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})
 # Labels whose directory publish is durable (F22 5.1): the walk, the rename, then the chain.
 DIRECTORY_PUBLISH_LABELS: frozenset[str] = frozenset({"publication"})
 # Every output but a vault leaf may create missing parent directories; a vault leaf sits
@@ -362,6 +368,7 @@ class RootedOutputTxn(_StageDir):
             raise FileAccessUnavailable("a publication stage is a directory")
         self._durable = label in DURABLE_LABELS
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS
+        self._durable_replace = label in DURABLE_REPLACE_LABELS
         self.label, self.owner = label, owner  # read by `publish_unit`
         self._leaf = leaf
         self._publish_mode = mode
@@ -410,21 +417,16 @@ class RootedOutputTxn(_StageDir):
                     raise
             else:
                 try:
-                    _call(
-                        os.link,
-                        state.stage_name,
-                        self._leaf,
-                        src_dir_fd=parent,
-                        dst_dir_fd=parent,
-                        follow_symlinks=False,
-                    )
+                    _durable._link_exclusive(parent, state.stage_name, self._leaf)
                 except FileExistsError:
                     _discard(state)
                     raise
-                try:
-                    os.unlink(state.stage_name, dir_fd=parent)
-                except OSError:
-                    pass
+        elif self._durable_replace:
+            try:
+                _durable.publish_replace_durable(parent, state.stage_name, self._leaf)
+            except OSError:
+                _discard(state)  # fds and any stage left; a renamed leaf is never removed
+                raise
         else:
             if self._durable_dir:  # a failure here leaves the stage for abort()
                 _durable._sync_tree(state.stage_fd)
