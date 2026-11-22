@@ -31,7 +31,7 @@ import secrets
 import stat
 import sys
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from typing import Any, Literal, TypeVar
 
@@ -39,7 +39,13 @@ from decoy_engine.fileaccess import _fdtree, _openat2, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
-from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
+from decoy_engine.fileaccess._types import (
+    FileAccessUnavailable,
+    FileRequest,
+    StageDir,
+    StageEntry,
+    StageLabel,
+)
 
 # The only names a caller can influence: a closed label picks a prefix, never a path.
 STAGE_PREFIX: dict[str, str] = {
@@ -249,6 +255,7 @@ class _State:
         self.file_created = False
         self.child_fds: list[int] = []
         self.chain_fds: list[int] = []  # root down to the parent's parent, for a durable publish
+        self.views: list[Callable[[], None]] = []  # closes of the read-only views opened on it
 
 
 def _close_all(fds: list[int]) -> None:
@@ -256,10 +263,16 @@ def _close_all(fds: list[int]) -> None:
         _close(fds.pop())
 
 
+def _close_views(state: _State) -> None:
+    while state.views:
+        state.views.pop()()
+
+
 def _discard(state: _State) -> None:
     if state.finished:
         return
     state.finished = True
+    _close_views(state)
     try:
         if state.kind == "dir":
             if state.stage_fd >= 0:
@@ -325,6 +338,26 @@ class _StageDir:
 
     def local_stage_path(self) -> str:
         raise FileAccessUnavailable("a strict policy has no stage path to hand to a subprocess")
+
+    def _held(self) -> int:
+        if self._live.finished or self._fd < 0:
+            raise FileAccessUnavailable("output transaction is finished")
+        return self._fd
+
+    def _alive(self) -> bool:
+        return not self._live.finished
+
+    def open_subdir(self, component: str) -> StageDir:
+        from decoy_engine.fileaccess import _durable
+
+        return _durable.open_subdir_at(
+            self._held(), component, self._alive, self._live.views.append, self._display, True
+        )
+
+    def entries(self) -> Iterator[StageEntry]:
+        from decoy_engine.fileaccess import _durable
+
+        return iter(list(_durable.entries_at(self._held())))
 
     def __reduce__(self) -> tuple[object, ...]:
         raise TypeError(
@@ -435,6 +468,7 @@ class RootedOutputTxn(_StageDir):
             if state.kind == "file":
                 _durable._sync(parent)
         state.finished = True
+        _close_views(state)
         if state.stage_fd >= 0:
             _close(state.stage_fd)
             state.stage_fd = -1

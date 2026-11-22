@@ -15,7 +15,7 @@ a spec needs (the component validator, the count limit) are handed in by the dec
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from typing import Any, Literal, NoReturn, Protocol
 
@@ -35,6 +35,8 @@ __all__ = [
     "SpecRefusedError",
     "VersionSpec",
     "attempt",
+    "check_unit_path",
+    "check_unit_paths",
     "parse_or_token",
 ]
 
@@ -164,19 +166,56 @@ class CountSpec:
         return "count"
 
 
+UNIT_PATH_MAX_DEPTH = 8
+
+
+def check_unit_path(
+    path: object,
+    *,
+    component_test: Callable[[str], bool],
+    reserved: Collection[str] = (),
+    max_depth: int = UNIT_PATH_MAX_DEPTH,
+) -> None:
+    """Refuse one member path of a unit that is not an exact built-in string of at most
+    ``max_depth`` components, each passing ``component_test`` (no empty, ``.``, ``..`` or NUL
+    part, so no absolute path and no escape from the unit root), or that is a whole reserved name
+    (compared casefolded: macOS and Windows file systems fold case). Writer and reader share this
+    one rule."""
+    if type(path) is not str:
+        _refuse("wrong_type")
+    parts = path.split("/")
+    if (
+        len(parts) > max_depth
+        or not all(component_test(p) for p in parts)
+        or path.casefold() in {name.casefold() for name in reserved}
+    ):
+        _refuse("bad_path")
+
+
+def check_unit_paths(paths: Iterable[str]) -> None:
+    """Refuse the facts only a whole unit shows: a duplicate path, or one path that is a folder
+    prefix of another (``a`` beside ``a/b``). Each path already passed ``check_unit_path``."""
+    seen: set[str] = set()
+    for path in paths:
+        if path in seen:
+            _refuse("bad_path")
+        seen.add(path)
+    for path in seen:
+        head, sep, _ = path.rpartition("/")
+        while sep:
+            if head in seen:
+                _refuse("bad_path")
+            head, sep, _ = head.rpartition("/")
+
+
 @dataclass(frozen=True)
 class RelPathSpec:
     component_test: Any  # (object) -> bool, the engine's one path component validator
-    reserved: str | None = None  # a whole path this record may not name
+    reserved: Collection[str] = ()  # whole paths this record may not name
 
     def load(self, raw: Any) -> str:
-        if type(raw) is not str:
-            _refuse("wrong_type")
-        # Each component through the one validator: no empty, `.`, `..` or NUL part, so no
-        # absolute path and no escape from the root the path is relative to.
-        if raw == self.reserved or not all(self.component_test(p) for p in raw.split("/")):
-            _refuse("bad_path")
-        return raw
+        check_unit_path(raw, component_test=self.component_test, reserved=self.reserved)
+        return str(raw)
 
     def dump(self, value: Any) -> Any:
         return value

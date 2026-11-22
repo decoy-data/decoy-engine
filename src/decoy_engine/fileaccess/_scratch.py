@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from typing import Any, TypeVar
 
-from decoy_engine.fileaccess import _osflags
+from decoy_engine.fileaccess import _durable, _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._entry import is_ambient, require_ambient
 from decoy_engine.fileaccess._errors import deny, guarded, guarded_iter
@@ -43,7 +43,13 @@ from decoy_engine.fileaccess._protected_dir import (
 )
 from decoy_engine.fileaccess._rooted import Root, RootedFileAccess, lexical_ok
 from decoy_engine.fileaccess._scratch_reports import CleanupReport, Disposition
-from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, FileRole
+from decoy_engine.fileaccess._types import (
+    FileAccessUnavailable,
+    FileRequest,
+    FileRole,
+    StageDir,
+    StageEntry,
+)
 
 if sys.platform != "win32":
     import fcntl
@@ -115,6 +121,7 @@ class _Root:  # what an arena tree shares, held apart from the arenas so collect
         self.releases, self.finished = True, False
         self.report: CleanupReport | None = None
         self.children: list[_Fd] = []
+        self.views: list[Callable[[], None]] = []  # closes of the read-only views opened on it
 
 
 def _reclaim(root: _Root) -> CleanupReport:
@@ -139,6 +146,8 @@ def _reclaim(root: _Root) -> CleanupReport:
 def _release(root: _Root, *, keep_base: bool = False) -> None:
     """Close every descriptor of the tree; an arena that owns nothing leaves the disk as is."""
     root.finished = True
+    while root.views:
+        root.views.pop()()
     for held in (*root.children, root.fd, *(() if keep_base else (root.base_fd,))):
         held.close()
 
@@ -294,6 +303,19 @@ class ScratchArena:
         self._root.children.append(child)
         opener = self._opener or self
         return ScratchArena(_ISSUER, self._root, child, (*self._rel, component), opener)
+
+    def _alive(self) -> bool:
+        return not self._root.finished
+
+    def open_subdir(self, component: str) -> StageDir:
+        self._check()
+        return _durable.open_subdir_at(
+            self._fd.fd, component, self._alive, self._root.views.append, _DISPLAY, True
+        )
+
+    def entries(self) -> Iterator[StageEntry]:
+        self._check()
+        return iter(list(_durable.entries_at(self._fd.fd)))
 
     def remove(self, component: str) -> None:
         self._check(component, writes=True)

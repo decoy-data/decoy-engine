@@ -60,6 +60,7 @@ from decoy_engine.fileaccess._types import (
     FileRequest,
     LockUnavailable,
     StageDir,
+    StageEntry,
     StageLabel,
 )
 
@@ -158,17 +159,43 @@ class LocalDirHandle:
         self.close()
 
 
+class _Life:
+    """What one stage tree shares: whether it ended, and the closes of its read-only views."""
+
+    def __init__(self) -> None:
+        self.finished = False
+        self.views: list[Callable[[], None]] = []
+
+    def end(self) -> None:
+        self.finished = True
+        while self.views:
+            self.views.pop()()
+
+
 class _LocalStageDir:
     """Name-taking operations over one stage directory, by path."""
 
     strict = False
 
-    def __init__(self, path: Path, display: str, *, private: bool = False) -> None:
+    def __init__(
+        self, path: Path, display: str, *, private: bool = False, life: _Life | None = None
+    ) -> None:
         self._dir = path
         self.display = display
         self._display = display
-        self._finished = False
+        self._life = life or _Life()
         self._private = private  # files 0600 with the owner bits restored (F22 Q8)
+
+    @property
+    def _finished(self) -> bool:
+        return self._life.finished
+
+    @_finished.setter
+    def _finished(self, ended: bool) -> None:
+        if ended:
+            self._life.end()
+        else:
+            self._life.finished = False
 
     def _check(self, *components: str) -> None:
         """Refuse a name that would leave the stage. Length and NUL are left to the operating
@@ -203,7 +230,9 @@ class _LocalStageDir:
                 _close(make_stage_dir_at(parent, component))
             finally:
                 _close(parent)
-        return _LocalStageDir(self._dir / component, self._display, private=self._private)
+        return _LocalStageDir(
+            self._dir / component, self._display, private=self._private, life=self._life
+        )
 
     def remove(self, component: str) -> None:
         self._check(component)
@@ -219,6 +248,34 @@ class _LocalStageDir:
 
     def local_stage_path(self) -> str:
         return str(self._dir)
+
+    def _walk_dir(self) -> Path:
+        return self._dir
+
+    def _walk_fd(self) -> int:
+        """The stage directory opened for one traversal call; the caller closes it."""
+        if self._finished:
+            raise FileAccessUnavailable("output transaction is finished")
+        return _open_dir(self._walk_dir())
+
+    def _alive(self) -> bool:
+        return not self._life.finished
+
+    def open_subdir(self, component: str) -> StageDir:
+        fd = self._walk_fd()
+        try:
+            return _durable.open_subdir_at(
+                fd, component, self._alive, self._life.views.append, self._display, False
+            )
+        finally:
+            _close(fd)
+
+    def entries(self) -> Iterator[StageEntry]:
+        fd = self._walk_fd()
+        try:
+            return iter(list(_durable.entries_at(fd)))
+        finally:
+            _close(fd)
 
 
 def _sync_dir(directory: Path) -> None:
@@ -425,6 +482,11 @@ class LocalOutputTxn(_LocalStageDir):
         if self._stage is None:
             raise FileAccessUnavailable("a file stage has no directory path")
         return str(self._stage)
+
+    def _walk_dir(self) -> Path:
+        if self._stage is None:
+            raise FileAccessUnavailable("a file stage has no entries")
+        return self._stage
 
     def publish(self) -> None:
         if self._finished:

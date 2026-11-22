@@ -89,6 +89,10 @@ def ceiling_for(loc: int) -> int:
 # One-line rationale per entry; the per-file growth history lives in
 # docs/decisions/module-size-census-history.md.
 ALLOWLIST: dict[str, int] = {
+    # DELIV E2f: read-only stage traversal (open_subdir, entries) on the strict and ambient stage
+    # implementors; the shared view lives in _durable.py, so each stays a thin bridge.
+    "src/decoy_engine/fileaccess/_output.py": 654,
+    "src/decoy_engine/fileaccess/_local.py": 684,
     # F06: one declared-casting route guard per route owner (the sentry in test_f06_declared_casting
     # inventories them) and the cast_run threaded through the sequential and out-of-core executors;
     # no casting logic of its own lives in these routers.

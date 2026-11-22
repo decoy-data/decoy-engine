@@ -197,8 +197,8 @@ def test_exit_matrix_publish(
         assert receipt.os_error == "EIO"
     if case == "E1_lock_unavailable":
         assert receipt.os_error == "ENOLCK"
-    if case == "E10_descriptor_write_fails":
-        assert receipt.os_error == errno.errorcode[errno.EEXIST]
+    if case == "E10_descriptor_write_fails":  # the closed stage refuses the planted name first
+        assert receipt.os_error is None
     if binding == "bound":
         assert descriptor(run.leaf)["result_id"] == receipt.result_id
 
