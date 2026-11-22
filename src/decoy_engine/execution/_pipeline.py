@@ -70,6 +70,7 @@ docstring describes.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -93,6 +94,8 @@ from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.progress import ProgressSink, use_progress
 from decoy_engine.secret_providers import AdmissionScope
+
+_LOG = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -361,5 +364,11 @@ def run_pipeline(
             result = _dispatch.execute_route(ctx, decision, refusals)
         # Set here, after the one `execute_route` call, so every route reports the same way and
         # a run refused before it starts never claims a fallback.
-        result = dataclasses.replace(result, native_fallback_code=native_fallback_code(ctx.plan))
+        # The notice is advisory and the job is done by now, so nothing it raises may fail the run.
+        try:
+            code = native_fallback_code(ctx.plan)
+        except Exception as exc:
+            _LOG.debug("native fallback notice skipped (%s)", type(exc).__name__)
+        else:
+            result = dataclasses.replace(result, native_fallback_code=code)
         return stage.stamp(result)

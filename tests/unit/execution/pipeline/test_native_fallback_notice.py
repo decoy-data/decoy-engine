@@ -182,6 +182,18 @@ def test_every_route_stays_silent_when_a_kernel_is_available(
     assert _ROUTES[route](tmp_path).native_fallback_code is None
 
 
+def test_a_failing_probe_cannot_fail_a_finished_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom() -> KernelAvailability:
+        raise RuntimeError("simulated probe failure")
+
+    monkeypatch.setattr(_native_notice, "native_kernel_availability", boom)
+    result = _run_unified(tmp_path)
+    assert result.native_fallback_code is None
+    assert result.outputs
+
+
 # AT-3
 
 
