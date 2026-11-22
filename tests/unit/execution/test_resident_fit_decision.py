@@ -239,6 +239,19 @@ def test_at_c4_probe_thresholds(monkeypatch: pytest.MonkeyPatch, probe: _Probe) 
     assert _refusal(table).code == CODE_REFUSED
 
 
+def test_at_c2_a_probe_never_admits_a_job_whose_lower_bound_is_at_or_above_a(
+    monkeypatch: pytest.MonkeyPatch, probe: _Probe
+) -> None:
+    table = _table()
+    lb = _lb(table)
+    _ceiling(monkeypatch, _kill_for_admission(lb))
+    _static(monkeypatch, 1)
+    probe.measures(1)
+    block = _fit(_run(table))
+    assert (block["verdict"], block["code"]) == ("UNKNOWN", CODE_UNVERIFIED)
+    assert len(probe.calls) == 1
+
+
 def test_at_c5_only_the_full_frame_table_is_priced(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -401,8 +414,9 @@ def test_at_c11_a_job_with_a_foreign_key_is_not_priced(
     cfg, data, _lazy = sub.job(tmp_path)
     cfg.pop("subset", None)
     _ceiling(monkeypatch, 1)
-    run_pipeline(cfg, sources=data, **support.run_kwargs())
+    run_pipeline(cfg, sources=data, **support.run_kwargs(fidelity_report=True))
     assert calls == []
+    assert _DECISIONS, "the FK job never reached the full-frame route"
     assert all(d.resident_fit is None for d in _DECISIONS)
 
 
