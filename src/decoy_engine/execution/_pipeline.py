@@ -69,8 +69,6 @@ docstring describes.
 
 from __future__ import annotations
 
-import dataclasses
-import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -88,14 +86,12 @@ from decoy_engine.execution._planner import (
 )
 from decoy_engine.execution._substrate import require_optional_nonempty_str
 from decoy_engine.execution._transforms_prepare import prepare_transform_sources
-from decoy_engine.execution.pipeline._native_notice import native_fallback_code
+from decoy_engine.execution.pipeline._native_notice import with_native_notice
 from decoy_engine.execution.pipeline._subset_stage import resolve_subset
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.progress import ProgressSink, use_progress
 from decoy_engine.secret_providers import AdmissionScope
-
-_LOG = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -362,13 +358,4 @@ def run_pipeline(
             decision = _ctx.decide_route(ctx)
             _dispatch.emit_route(_progress, decision)
             result = _dispatch.execute_route(ctx, decision, refusals)
-        # Set here, after the one `execute_route` call, so every route reports the same way and
-        # a run refused before it starts never claims a fallback.
-        # The notice is advisory and the job is done by now, so nothing it raises may fail the run.
-        try:
-            code = native_fallback_code(ctx.plan)
-        except Exception as exc:
-            _LOG.debug("native fallback notice skipped (%s)", type(exc).__name__)
-        else:
-            result = dataclasses.replace(result, native_fallback_code=code)
-        return stage.stamp(result)
+        return stage.stamp(with_native_notice(result, ctx.plan))
