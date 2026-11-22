@@ -10,7 +10,7 @@ callable predicate, so a refusal cannot echo config data. This module imports ``
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
@@ -130,7 +130,7 @@ class ShapeRequirement:
     cast_declared: bool = False
     admitted: frozenset[ColumnShape] = frozenset(ColumnShape)
     default_hint: str = ""
-    hints: Mapping[ColumnShape, str] = MappingProxyType({})
+    hints: Mapping[ColumnShape, str] = field(default_factory=lambda: MappingProxyType({}))
     exact_decimal_width: bool = False
 
 

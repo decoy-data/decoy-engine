@@ -56,6 +56,7 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for GEN-UNIQUE E2: four unique-draw sites, the moved synthesize.py call sites, and the shared attempt limit.
 # Re-pinned for GEN-TYPES E1: gen.distribution appended at the end of the catalogue.
 # Re-pinned for GEN-TYPES E3: gen.lookup appended after gen.distribution.
+# Re-pinned for COLUMN-SHAPE E1b: mask.date_shift call site moved to _date_shift.py::_offsets.
 # Re-pinned for B-6: mask.tokenize derives under the vault-scoped subkey (call site moved).
 # Re-pinned for DUP-FREEZE E2: two joint_mask stream sites after mask.joint_mask_keyed_row, and the
 # gen.composite_build_pool seed text names resolve_seed. MASK_STRATEGY_TO_SITE maps each strategy to
@@ -74,7 +75,7 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned at the GEN-REL E2 main merge: both changes together.
 # Re-pinned at the GEN-INHERIT E2 main merge: the E-F0 date-shift entry joins the GEN-REL sites.
 # Re-pinned for GEN-WINDOWED-BATCH S2 at the main merge: the windowed_date draw sites moved too.
-_CATALOGUE_DIGEST = "4cc3254a9c2ebce984ea0aed98259bba482b356a8ede94d421c1bf98efc18469"
+_CATALOGUE_DIGEST = "ff53846b4c0d6e289d8ad8d695e43a0caea80a18533619d5e7f524c564590ff7"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -127,7 +128,7 @@ _ENTRY_DIGESTS = [
     "bd06bcb22c55f7423682660accf32079fce98bc13403eb3f1111aeabcc764b70",  # mask.categorical_deterministic
     "9aa436b5ecf26021ee8649c0ea47eec71f92064699828e183046db70d0f66412",  # mask.categorical_nondeterministic
     "1250c6e03f61cdc000a73f7f8f76088402fb6f5407e40d8a31e58052130bc571",  # mask.fpe
-    "28a6b8a9a742bab28c5bbcea40da447b80719c66f8961a1a24735b955559d0fc",  # mask.date_shift
+    "1de10f2dd7909f45a159bd3ba984bf69b7a1d62467d7dc9b7cf259af6498aba5",  # mask.date_shift
     "cf19b2a7dc1493488a94dbedc1b93847dfabd350632c42e444ca53da16a02292",  # mask.bucket_perturb
     "be0d33334a0efdd646507ec6e9f691a8c268785af8764f079e1a84c6377c75de",  # mask.group_key
     "33bb9e2c0f66453881e672d9e2923c811b778adc597d1974fbb10bee4263cd2d",  # mask.code_set

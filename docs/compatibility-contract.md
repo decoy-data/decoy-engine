@@ -116,6 +116,11 @@ request with `display_rows > 0`. `RunResult.sample: SampleMarker | None` (`rows`
 `scratch`) is optional under `decoy-run-result/v1`; it is left out of the written payload when unset, so an old
 record reads unchanged. A sample stamps `quality_metrics["subset"]["sample"]`. `run_pipeline` is unchanged.
 
+**Pre-GA additive field with NATIVE-MISSING-WARN (2026-11-21).** `ExecutionResult.native_fallback_code: str | None`
+(default `None`, hidden from `repr`, not compared) is `native_companion_missing` when the plan needs a compiled kernel
+and none that it needs is available. It is never written to a document. The reason `warning/native_companion_missing`
+is registered unreleased.
+
 **Pre-GA correction (main health, 2026-10-31).** `RESERVED_NAMES` of the `when` closed grammar gains `type`
 (additive to the list, breaking for a config whose `when:` references a column named `type`, which now fails
 with `when_outside_closed_grammar`). It is listed on every interpreter rather than derived from
