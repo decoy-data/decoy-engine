@@ -18,6 +18,8 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - `bucket_perturb` no longer passes source values through. When no `date_format` is set and the engine cannot detect one from the cells, the run now stops with `bucket_perturb_requires_date_format` instead of writing the column unchanged. A non-null cell that does not parse under the format is now a `format_error` row error, as it is for `date_shift`, so the run fails or quarantines the row instead of keeping the source text. A date outside pandas' range (before 1677 or after 2262, such as the sentinel 9999-12-31) is now a row error too; `preserve_values` keeps such a sentinel unchanged. Set `provider_config.date_format` (for example `%Y-%m-%d`) and fix or quarantine bad cells.
 - a vault written by this engine is `decoy-vault/v3`, which an older engine cannot open; keep the older engine's vaults for it or re-run the mask.
 - windowed_date produces different dates for the same seed (output-changing, pre-GA).
+- `compile_plan` now requires the keyword `sources`; pass `NO_SOURCES` when you hold no tables.
+- `VaultWriter` takes `prepared` in place of `mask_key`.
 
 ### Added (native companion missing notice, NATIVE-MISSING-WARN E1, 2026-11-21)
 
@@ -49,7 +51,7 @@ The route docs and the native thread comments now match how a run picks its rout
 
 Each profile column now carries a `shape` (`text`, `date`, `timestamp_tz`, `timestamp_naive`, `integer`, `float`, `decimal`, `decimal_wide`, `boolean`, `other` or `unknown`), read from the source format and the Arrow schema. A csv or fixed-width column is always `text`. The shape is part of `profile_hash`, so profile hashes and the physical `plan_hash` change once. A profile saved before this loads with `shape: unknown`. A shape token the engine does not know is refused when the profile is loaded.
 
-`PLAN_VERSION` is now 5 and a plan records `column_shapes` for each column under a strategy that reads the value (today `date_shift`). A stored plan is checked for its version before any other field. A version-4 plan is refused with `plan/plan_recompile_required`; compile it again from its config. A missing, non-integer or newer version is refused with `plan/plan_version_unsupported`, and a stored shape the engine does not know with `plan/stored_shape_unknown`. All three reasons are pending. `compile_plan` gains `source_schemas` and `capture_physical_plan_inputs` gains `source_loader_schemas`, so a source-loader table and a zero-chunk typed input get their shapes too.
+`PLAN_VERSION` is now 5 and a plan records `column_shapes` for each column under a strategy that reads the value (today `date_shift`). A stored plan is checked for its version before any other field. A version-4 plan is refused with `plan/plan_recompile_required`; compile it again from its config. A missing, non-integer or newer version is refused with `plan/plan_version_unsupported`, and a stored shape the engine does not know with `plan/stored_shape_unknown`. All three reasons are pending. `compile_plan` requires `sources` and `capture_physical_plan_inputs` gains `source_loader_schemas`, so a source-loader table and a zero-chunk typed input get their shapes too.
 
 No masking output changes: `date_shift` still needs `date_format` on every shape. The shape rule for typed sources lands in later slices.
 

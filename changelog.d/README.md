@@ -16,6 +16,12 @@ Body text.
 
 - The `Breaking:` first line is optional. It becomes a bullet in the release's
   "Breaking for consumers" list.
+- A `Breaking:` line names each broken public name in backticks and, for a parameter change, the
+  parameter too (`compile_plan` requires `sources`). The signature sentry
+  (`tests/sentry/release/test_public_signatures.py`) reads one line at a time, so one line carries
+  both names. A false break (for example a default constant renamed with the same value) gets a
+  reviewed `SIGNATURE_EXEMPTIONS` row in `tests/sentry/release/_signatures.py`, keyed to the current
+  base tag, instead of a misleading Breaking line. Remove the row in the first PR after the next tag.
 - One `### <Type> (<title>, <slice>, <date>)` heading, with `<Type>` one of Added, Changed,
   Fixed, Deprecated, Removed or Security. Use `####` for any sub-headings.
 - The file name is lowercase letters, digits and hyphens, ending in `.md`.
