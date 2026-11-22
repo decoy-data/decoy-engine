@@ -57,11 +57,10 @@ STAGE_PREFIX: dict[str, str] = {
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
 # Labels whose stage holds secrets or real data, so the stage file is 0600 at creation.
 PRIVATE_LABELS: frozenset[str] = frozenset({"quarantine", "isolated", "vault", "publication"})
-# `DURABLE_LABELS` publish exclusively: the stage is fsynced by its writer, linked to the leaf, then
-# the parent is fsynced (the commit point; its failure is raised). A failure removes only the stage.
+# `DURABLE_LABELS` publish exclusively: the writer fsyncs the stage, it is linked, then the parent is
+# fsynced (the commit point; its failure is raised). A failure removes only the stage.
 DURABLE_LABELS: frozenset[str] = frozenset({"vault"})
-# `DURABLE_REPLACE_LABELS` fsync the stage, rename it over the leaf, then fsync the parent (pointer).
-DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})
+DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})  # stage fsync, rename, parent fsync
 # Labels whose directory publish is durable (F22 5.1): the walk, the rename, then the chain.
 DIRECTORY_PUBLISH_LABELS: frozenset[str] = frozenset({"publication"})
 # Every output but a vault leaf may create missing parent directories; a vault leaf sits
@@ -360,7 +359,8 @@ class RootedOutputTxn(_StageDir):
             raise deny(display)  # an in-place label exists only for the ambient policy
         if label == "publication" and kind != "dir":
             raise FileAccessUnavailable("a publication stage is a directory")
-        self._durable = label in DURABLE_LABELS | DURABLE_REPLACE_LABELS
+        self._durable = label in DURABLE_LABELS
+        self._durable_replace = label in DURABLE_REPLACE_LABELS
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS
         self.label, self.owner = label, owner  # read by `publish_unit`
         self._leaf = leaf
@@ -405,8 +405,8 @@ class RootedOutputTxn(_StageDir):
         if state.kind == "file" and not state.file_created:
             raise FileAccessUnavailable("nothing was staged")
         parent = state.parent_fd
-        if state.kind == "file" and (self._publish_mode == "exclusive" or self._durable):
-            if self._durable:
+        if state.kind == "file" and (self._publish_mode == "exclusive" or self._durable_replace):
+            if self._durable or self._durable_replace:
                 try:
                     _durable._publish_labelled(
                         self.label, parent, state.stage_name, self._leaf, self._rename_stage
