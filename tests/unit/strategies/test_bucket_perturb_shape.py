@@ -27,6 +27,9 @@ from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.execution._strategies._bucket_perturb import BucketPerturbStrategyHandler
+from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
+from decoy_engine.execution.native._companion_status import native_companion_status
+from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.plan import PlanCompileError, compile_plan, run_config_only_checks
 from decoy_engine.plan._types import ColumnSeed
@@ -181,11 +184,31 @@ def test_transform_does_not_detect() -> None:
         assert "2024" not in str(exc.value)
 
 
-def test_explicit_format_output_is_pinned() -> None:
-    """Valid text input gives the bytes it gave before detection was removed (taken from main)."""
-    series = pd.Series(["2024-06-15", None, "2024-08-20", "2024-11-30"])
-    out = apply_bucket_perturb(series, "month", SEED, "d", "%Y-%m-%d")
-    assert out.tolist() == ["2024-06-23", None, "2024-08-09", "2024-11-27"]
+_PINNED_INPUT = ["2024-06-15", None, "2024-08-20", "2024-11-30"]
+_PINNED_MONTH = ["2024-06-23", None, "2024-08-09", "2024-11-27"]  # taken from main
+_NEEDS_COMPANION = pytest.mark.skipif(
+    not native_companion_status().ok, reason="compiled decoy-engine-native companion unavailable"
+)
+
+
+def test_native_parity_unchanged_for_explicit_format() -> None:
+    """Valid text input gives the bytes it gave before detection was removed."""
+    out = apply_bucket_perturb(pd.Series(_PINNED_INPUT), "month", SEED, "d", "%Y-%m-%d")
+    assert out.tolist() == _PINNED_MONTH
+
+
+@_NEEDS_COMPANION
+def test_native_parity_unchanged_for_explicit_format_on_the_native_kernel() -> None:
+    out, positions = native_bucket_perturb(
+        pa.array(_PINNED_INPUT, type=pa.string()),
+        bucket="month",
+        date_format="%Y-%m-%d",
+        mask_key=SEED,
+        namespace="d",
+        index_kernel=load_compiled_index_kernel(),
+    )
+    assert positions == ()
+    assert out.to_pylist() == _PINNED_MONTH
 
 
 # -- typed dates run bare and keep their type --------------------------------------------

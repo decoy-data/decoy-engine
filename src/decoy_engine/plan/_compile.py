@@ -541,8 +541,7 @@ def run_config_only_checks(
     check_fpe_checksum_scheme(config)
     # Rows 16-20 column refs plus GEN-STRICT E2 generate column checks (one wrapper, as above).
     check_generate_columns(config, default_locale=instance_default_locale)
-    # Row 27 (HC-3a): reject date_shift columns with a missing group_by
-    # (entity-anchor) column ref. Config-only.
+    # Row 27 (HC-3a): reject date_shift columns with a missing group_by column ref.
     check_date_shift_group_by_refs(config)
     config_shapes = build_column_shapes(config, sources=NO_SOURCES)
     check_date_preserve_values(config, config_shapes)

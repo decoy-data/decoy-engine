@@ -173,7 +173,7 @@ def _manual(config: dict[str, Any], chunks: list[pa.Table]) -> list[pa.Table]:
     )
 
 
-def test_non_string_source_on_the_manual_route_raises_the_source_dtype_code() -> None:
+def test_integer_source_on_the_manual_route_is_a_column_shape_mismatch() -> None:
     table = pa.table({"d": pa.array([20240101, None], pa.int64()), "p": pa.array([1, 2])})
     with pytest.raises(PlanCompileError) as info:
         _manual(make_config([bp_col(), passthrough("p")]), split(table, 1))
@@ -182,7 +182,7 @@ def test_non_string_source_on_the_manual_route_raises_the_source_dtype_code() ->
     assert info.value.code == "column_shape_mismatch"
 
 
-def test_non_string_source_on_the_auto_route_falls_back_to_full_frame(tmp_path: Any) -> None:
+def test_integer_source_on_the_auto_route_is_a_column_shape_mismatch(tmp_path: Any) -> None:
     import pandas as pd
 
     from decoy_engine import run_pipeline

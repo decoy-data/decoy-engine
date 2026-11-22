@@ -122,6 +122,12 @@ class BucketPerturbStrategyHandler:
         bucket, date_format, preserve = _validated_config(plan, shape)
         # A column the plan lists as a date is read as it is and a set date_format is not used.
         # Any other column is text: never guess its format.
+        if shape not in (None, ColumnShape.DATE):
+            raise StrategyError(
+                code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
+                strategy="bucket_perturb",
+                message=f"column {column!r}: bucket_perturb cannot read a {shape.value} column.",
+            )
         text_format = require_date_format(date_format) if shape is None else None
 
         # Native on the sequential route; None (declined, or no companion) falls through to the

@@ -100,17 +100,32 @@ def config_proves_text(config: dict[str, Any], *, table: str, column: str) -> bo
     Any column that may turn out to be a native date is left to plan compile.
     """
     from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape
-    from decoy_engine.plan.checks._column_shapes import build_column_shapes
+    from decoy_engine.plan.checks import build_column_shapes
 
     shapes = build_column_shapes(config, sources=NO_SOURCES)
     return shapes.get((table, column)) is ColumnShape.TEXT
 
 
-def _bucket_perturb_node_columns(ordered_work: list[WorkNode], table: str) -> list[str]:
+def typed_date_columns(plan: Plan, *, table: str) -> frozenset[str]:
+    """The columns of `table` the plan lists as native dates, from the plan field every route reads."""
+    from decoy_engine.declared_casting._boundary import native_date_columns
+
+    return frozenset(column for (t, column) in native_date_columns(plan) if t == table)
+
+
+def _text_bucket_perturb_columns(
+    ordered_work: list[WorkNode], table: str, typed_dates: frozenset[str]
+) -> list[str]:
+    """The bucket_perturb columns the string-source gate applies to: every one on `table`
+    except those the plan lists as native dates. A date is read as a date object, which does
+    not depend on the chunk, so only text columns need a chunk-stable string source."""
     return [
         node.columns[0]
         for node in ordered_work
-        if node.table == table and node.kind == "scalar" and node.strategy == "bucket_perturb"
+        if node.table == table
+        and node.kind == "scalar"
+        and node.strategy == "bucket_perturb"
+        and node.columns[0] not in typed_dates
     ]
 
 
@@ -128,34 +143,35 @@ def _unsafe_cols_in_schema(bucket_perturb_cols: list[str], schema: pa.Schema) ->
 
 
 def unsafe_bucket_perturb_source_columns(
-    ordered_work: list[WorkNode], source_schema: pa.Schema, *, table: str
+    ordered_work: list[WorkNode],
+    source_schema: pa.Schema,
+    *,
+    table: str,
+    typed_dates: frozenset[str] = frozenset(),
 ) -> list[str]:
     """bucket_perturb column names on `table` whose SOURCE Arrow type is not
-    a chunk-stable string type. Empty when every bucket_perturb column has a
-    string / large_string source. The auto route's collector
-    (`_planner._runtime_source_rejections`); the manual entry validates PER
-    CHUNK instead (`bucket_perturb_source_columns` + `reject_unsafe_bucket_
+    a chunk-stable string type. Empty when every text bucket_perturb column has a
+    string / large_string source; `typed_dates` (from `typed_date_columns`) are left out.
+    The auto route's collector (`_planner._runtime_source_rejections`); the manual entry
+    validates PER CHUNK instead (`bucket_perturb_source_columns` + `reject_unsafe_bucket_
     perturb_chunk_schema`), because it takes an arbitrary chunk iterable
     whose dtype could drift across chunks.
     """
-    return _unsafe_cols_in_schema(_bucket_perturb_node_columns(ordered_work, table), source_schema)
+    return _unsafe_cols_in_schema(
+        _text_bucket_perturb_columns(ordered_work, table, typed_dates), source_schema
+    )
 
 
 def bucket_perturb_source_columns(
     plan: Plan, registry: ProviderRegistry, relationship_graph: RelationshipGraph, *, table: str
 ) -> list[str]:
-    """The bucket_perturb column names on `table`, resolved once from the
+    """The text bucket_perturb column names on `table`, resolved once from the
     plan's work list, so the manual entry can validate every chunk's schema
-    against them without rebuilding the work list per chunk.
-
-    A column the plan lists as a native date is left out: it is read as a date object, which is
-    stable across chunk boundaries, so only the text columns need the string-source gate."""
-    from decoy_engine.declared_casting._boundary import native_date_columns
+    against them without rebuilding the work list per chunk."""
     from decoy_engine.execution._runner import build_work_list, order_work
 
     ordered_work = order_work(build_work_list(plan, registry), relationship_graph)
-    typed = {column for (t, column) in native_date_columns(plan) if t == table}
-    return [c for c in _bucket_perturb_node_columns(ordered_work, table) if c not in typed]
+    return _text_bucket_perturb_columns(ordered_work, table, typed_date_columns(plan, table=table))
 
 
 def reject_bucket_perturb_missing_namespace(

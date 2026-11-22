@@ -254,6 +254,7 @@ def classify_job(
         source_facts=facts,
         ignore_size_threshold=ignore_size_threshold,
         carry_exempt=not has_fk and dispatcher_lane,
+        plan=plan,
     ) or declared_rejection("chunked", plan=plan)  # F06: declared casting is full-frame only
     if chunked_rejection is None:
         reason = (
@@ -304,6 +305,7 @@ def _chunked_rejection(
     source_facts: dict[str, _ci.SourceFacts],
     ignore_size_threshold: bool = False,
     carry_exempt: bool = False,
+    plan: Plan | None = None,
 ) -> str | None:
     """None when the job is admissible for chunked streaming; else why not.
 
@@ -383,6 +385,8 @@ def _chunked_rejection(
         relaxed = planner_relaxed_when_columns(config, registry, table, source_tables, source_facts)
         reasons.extend(_whole_column_state_rejections(config, table=table, relaxed_when=relaxed))
         if source_tables is not None and not transforms_reject:
+            from decoy_engine.execution._chunked_bucket_perturb import typed_date_columns
+
             reasons.extend(
                 _runtime_source_rejections(
                     source_tables,
@@ -394,6 +398,7 @@ def _chunked_rejection(
                     declared=chunk_stability(config, table),
                     ignore_size_threshold=ignore_size_threshold,
                     carry_inputs=(config, registry) if carry_exempt else None,
+                    typed_dates=typed_date_columns(plan, table=table) if plan else frozenset(),
                 )
             )
     return "; ".join(reasons) if reasons else None
@@ -445,6 +450,7 @@ def _runtime_source_rejections(
     declared: tuple[frozenset[str], frozenset[str]] = (frozenset(), frozenset()),
     ignore_size_threshold: bool = False,
     carry_inputs: tuple[Mapping[str, Any], ProviderRegistry] | None = None,
+    typed_dates: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Runtime (loaded-source) gates: presence, size threshold, dtypes,
     and the bucketize source shape.
@@ -562,7 +568,7 @@ def _runtime_source_rejections(
     from decoy_engine.execution._chunked_bucket_perturb import unsafe_bucket_perturb_source_columns
 
     offending_bucket_perturb = unsafe_bucket_perturb_source_columns(
-        ordered_work or [], schema, table=table
+        ordered_work or [], schema, table=table, typed_dates=typed_dates
     )
     if offending_bucket_perturb:
         reasons.append(

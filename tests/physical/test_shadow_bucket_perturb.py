@@ -475,7 +475,7 @@ def _compile_plan_for(config: dict, source: pa.Table):
     return compile_physical_plan(inputs)
 
 
-def test_no_date_format_leaves_node_unbound_on_full_frame(tmp_path: Path) -> None:
+def test_no_date_format_is_refused_at_compile(tmp_path: Path) -> None:
     """COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on text:
     `date_format` required, else `column_shape_required`): a no-date_format node no longer
     reaches binding, because plan compile refuses it before any physical plan exists."""
@@ -621,7 +621,7 @@ def test_unified_slice_parquet_round_trip(tmp_path: Path) -> None:
     assert off_back.column("c").to_pylist() == on_back.column("c").to_pylist()
 
 
-def test_non_string_source_declines_to_oracle(tmp_path: Path) -> None:
+def test_integer_source_is_refused_at_compile(tmp_path: Path) -> None:
     """A non-string bucket_perturb SOURCE is outside the native operator's admitted resident
     type. COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
     integer column: refused `column_shape_mismatch`): plan compile refuses it before either arm

@@ -196,7 +196,7 @@ class TestNullablePredicateAndBucketPerturb:
                 strategy="faker",
             )
 
-    def test_bucket_perturb_without_a_format_refuses_instead_of_passing_numbers_through(
+    def test_bucket_perturb_on_an_integer_column_is_refused_at_compile(
         self, tmp_path: Path
     ) -> None:
         nums = pa.table({"c": pa.array([1, 2, 3, 4], pa.int64())})
@@ -210,7 +210,7 @@ class TestNullablePredicateAndBucketPerturb:
             _run(tmp_path, nums, col)
         assert exc.value.code == "column_shape_mismatch"
 
-    def test_bucket_perturb_that_emits_strings_is_caught_by_execution_guard(
+    def test_bucket_perturb_with_a_format_on_an_integer_column_is_refused_at_compile(
         self, tmp_path: Path
     ) -> None:
         dates = pa.table({"c": pa.array([20240115, 20240216, 20240317, 20240418], pa.int64())})
@@ -229,7 +229,7 @@ class TestNullablePredicateAndBucketPerturb:
 
 
 class TestMixedOutput:
-    def test_codex_mixed_repro_bucket_perturb_raises(self, tmp_path: Path) -> None:
+    def test_codex_mixed_repro_bucket_perturb_is_refused_at_compile(self, tmp_path: Path) -> None:
         # Selected rows: 20240317 -> a date string, 4 -> kept integer. `produced` is mixed.
         mixed = pa.table({"c": pa.array([1, 2, 20240317, 4], pa.int64())})
         col = _gate_col(

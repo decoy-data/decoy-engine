@@ -287,8 +287,9 @@ out as if it were masked. A caller that reaches the strategy with no `date_forma
 column the plan does not list as a date (a run that skipped plan compile) stops with
 `bucket_perturb_requires_date_format`. The out-of-core
 route has no row-error channel, so on that route a value that does not parse stops
-the run with `bucket_perturb_unparseable_no_row_channel`. A date outside pandas' range (before 1677 or after 2262, such as 9999-12-31) is
-also a row error. To keep a known sentinel as it is, list it in `preserve_values`:
+the run with `bucket_perturb_unparseable_no_row_channel`. On a text column, a date outside pandas' range (before 1677 or after 2262, such as
+9999-12-31) is also a row error; a date column has no such limit, and only a bucket position outside the years 1
+to 9999 is a row error. To keep a known sentinel as it is, list it in `preserve_values`:
 it is kept unchanged even when it is out of that range.
 
 ```yaml

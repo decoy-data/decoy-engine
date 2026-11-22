@@ -157,16 +157,24 @@ def require_date_format(date_format: Any) -> str:
     )
 
 
-def _report_failed(failed: list[int], format_errors: list[int] | None) -> None:
-    """Record unparseable positions, or refuse when the caller has nowhere to report them."""
+def _report_failed(
+    failed: list[int],
+    format_errors: list[int] | None,
+    *,
+    cause: str = "do not parse under date_format",
+) -> None:
+    """Record failed positions, or refuse when the caller has nowhere to report them.
+
+    ``cause`` finishes the count in the refusal text; it never carries a value.
+    """
     if not failed:
         return
     if format_errors is None:
         raise ExecutionError(
             code=reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL,
             message=(
-                f"bucket_perturb: {len(failed)} non-null value(s) do not parse under "
-                "date_format and this route has no row error channel."
+                f"bucket_perturb: {len(failed)} non-null value(s) {cause} "
+                "and this route has no row error channel."
             ),
         )
     format_errors.extend(failed)
@@ -269,7 +277,7 @@ def apply_bucket_perturb_dates(
                 cells[i] = _perturb_date(cell, bucket, job_seed, namespace, cell.isoformat())
             except OverflowError:
                 failed.append(i)
-        _report_failed(failed, format_errors)
+        _report_failed(failed, format_errors, cause="are not dates, or leave the years 1 to 9999")
         return pd.Series(cells, index=series.index, dtype=object)
     except BaseException:
         del job_seed

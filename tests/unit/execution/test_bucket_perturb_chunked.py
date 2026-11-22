@@ -566,7 +566,7 @@ class TestAdmissionBoundary:
         )
         assert result.quality_metrics["auto_chunk"]["mode"] == "full_frame"
 
-    def test_non_string_source_manual_entry_raises(self, tmp_path) -> None:
+    def test_integer_source_manual_entry_is_a_column_shape_mismatch(self, tmp_path) -> None:
         columns = [_bucket_perturb_col("d")]
         cfg = _config(tmp_path, columns)
         table = pa.table({"d": pa.array([20240101, None], type=pa.int64())})
@@ -602,7 +602,7 @@ class TestAdmissionBoundary:
             )
         assert exc.value.code == "chunked_bucket_perturb_source_dtype_unsupported"
 
-    def test_non_string_source_auto_route_falls_back_to_oracle(self, tmp_path) -> None:
+    def test_integer_source_auto_route_is_a_column_shape_mismatch(self, tmp_path) -> None:
         table = pa.table({"d": pa.array([1, 2, 3, 4, 5, 6], type=pa.int64())})
         columns = [_bucket_perturb_col("d")]
         cfg = _config(tmp_path, columns)
@@ -633,6 +633,23 @@ class TestAdmissionBoundary:
         assert (
             unsafe_bucket_perturb_source_columns(
                 nodes, pa.schema([("d", pa.large_string())]), table="records"
+            )
+            == []
+        )
+
+    def test_source_dtype_collector_leaves_out_the_plans_typed_dates(self) -> None:
+        from types import SimpleNamespace
+
+        nodes = [
+            SimpleNamespace(
+                table="records", kind="scalar", strategy="bucket_perturb", columns=("d",)
+            )
+        ]
+        date_schema = pa.schema([("d", pa.date32())])
+        assert unsafe_bucket_perturb_source_columns(nodes, date_schema, table="records") == ["d"]
+        assert (
+            unsafe_bucket_perturb_source_columns(
+                nodes, date_schema, table="records", typed_dates=frozenset({"d"})
             )
             == []
         )
