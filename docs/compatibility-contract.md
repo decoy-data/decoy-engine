@@ -834,6 +834,12 @@ only this site moves.
   -> tuple[Relationship, ...]` (CLI-QA1 E-b): the config's `relationships:` block as one
   `Relationship` per child, skipping malformed entries; an unequal composite column count, or an
   empty column list, raises `ValueError`. It replaces the private `_build_relationships`.
+  It also includes `decoy_engine.plan.NO_SOURCES` (SIGNATURE-SENTRY, 2026-11): the value a caller passes
+  as the required `sources` argument of `compile_plan` when it holds no tables. `decoy_engine.plan.SourceFacts`,
+  the type of that argument, is experimental (3.6) while COLUMN-SHAPE still moves its fields.
+  The signatures of every frozen and experimental name are checked against the last release tag by the
+  signature sentry (`tests/sentry/release/test_public_signatures.py`). A break needs one `Breaking:`
+  line in a `changelog.d` fragment that names the object and, for a parameter, the parameter, both in backticks.
   It also includes `read_csv_source`, `CsvDialect` and `resolve_csv_dialect`
   (CLI-DIALECT, 2026-11): `read_csv_source(path, dialect, *, table, dtype=None,
   nrows=None, chunksize=None, file_access=None, field_key="source.path")` reads
@@ -1478,6 +1484,10 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
 
 ## 6. How the freeze is enforced (the machinery)
 
+- **Signature sentry** (`tests/sentry/release/test_public_signatures.py`). Griffe compares the HEAD tree with
+  the newest release tag. Every parameter, kind, default, removal and base-class break on a frozen or
+  experimental name needs a pending `Breaking:` line that names it in backticks. Types and constant values
+  are out of scope; golden tests own the values. A reviewed false break goes in `SIGNATURE_EXEMPTIONS`.
 - **Golden / determinism snapshots** (the `tests/snapshots/golden` baselines a test
   reads, `tests/unit/determinism/test_derive_vectors.py`,
   `tests/native/test_draw_site_providers_golden.py` with

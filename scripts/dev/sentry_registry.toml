@@ -259,3 +259,7 @@ baseline = "tests/sentry/baselines/column-shape-classifier.json"
 [[sentry]]
 id = "bucketize-width-contract"
 baseline = "tests/sentry/baselines/bucketize-width-contract.json"
+
+[[sentry]]
+id = "signature-exemptions"
+baseline = "tests/sentry/baselines/signature-exemptions.json"

@@ -65,7 +65,7 @@ def source_format_for(
 
 @dataclass(frozen=True)
 class SourceFacts:
-    """What the caller holds for each table it supplied: its Arrow schema (when known) and
+    """Experimental: what the caller holds for each table it supplied: its Arrow schema (when known) and
     whether it is resident. A resident table is shaped by its own schema, never by the file
     format of a config descriptor. Every compile route builds this with `build_source_facts`
     and `compile_plan` requires it, so no route can forget either half."""
