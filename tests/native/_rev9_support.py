@@ -188,19 +188,19 @@ def _build_shapes() -> list[Shape]:
             "list_int",
             pa.array([[1], None, [2, 3]], pa.list_(pa.int64())),
             pa.array([[4], None, [5]], pa.list_(pa.int64())),
-            "TypeError",
+            "exact",
         ),
         Shape(
             "struct",
             pa.array([{"a": 1}, None, {"a": 2}], pa.struct([("a", pa.int64())])),
             pa.array([{"a": 3}, None, {"a": 4}], pa.struct([("a", pa.int64())])),
-            "TypeError",
+            "exact",
         ),
         Shape(
             "map",
             pa.array([[("k", 1)], None, [("j", 2)]], pa.map_(pa.string(), pa.int64())),
             pa.array([[("m", 3)], None, [("n", 4)]], pa.map_(pa.string(), pa.int64())),
-            "TypeError",
+            "exact",
         ),
     ]
     return shapes
