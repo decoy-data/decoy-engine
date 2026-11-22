@@ -31,7 +31,6 @@ Method notes:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
@@ -145,19 +144,13 @@ def _resolution(non_null: pd.Series) -> str:
 
 
 # ASCII 0-9 only, whole cell: `\d` and `str.isdigit()` accept Unicode digits, and `$` a trailing newline.
-_DIGITS: Final = re.compile("[0-9]+")
+_DIGITS_PATTERN: Final = "[0-9]+"
 
 
 def _all_digits(cells: pd.Series) -> bool:
     """True when there is a non-blank cell and every non-blank cell is ASCII digits only."""
-    seen = False
-    for cell in cells:
-        if cell == "":
-            continue
-        if _DIGITS.fullmatch(cell) is None:
-            return False
-        seen = True
-    return seen
+    filled = cells[cells != ""]
+    return len(filled) > 0 and bool(filled.str.fullmatch(_DIGITS_PATTERN).all())
 
 
 def learn_cell_format(non_null: pd.Series, kind: str) -> dict[str, Any]:

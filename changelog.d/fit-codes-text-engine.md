@@ -1,4 +1,4 @@
-Breaking: an engine older than this release refuses a `distribution-snapshot/v1` or `/v2` snapshot that holds `cell_format.char_class`, with `statistical_cell_format_invalid`; upgrade the engine or refit with the old one
+Breaking: an engine older than this release refuses a `distribution-snapshot/v1` or `/v2` snapshot that holds `cell_format.char_class`, and refuses a pinned plan whose stored `cell_format` holds it, with `statistical_cell_format_invalid`; upgrade the engine or refit with the old one
 
 ### Added (digit-only text columns generate digit strings, FIT-CODES-TEXT, 2026-11-22)
 

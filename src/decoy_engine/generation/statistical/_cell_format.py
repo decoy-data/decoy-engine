@@ -166,7 +166,10 @@ _OPTIONAL_FIELDS: Final = frozenset({"char_class"})
 
 
 def cell_format_from_dict(column: object, kind: str, data: object) -> CellFormat | None:
-    """Rebuild a `CellFormat` from its stored six-field form with the same rules as the snapshot reader."""
+    """Rebuild a `CellFormat` from its stored form: six required members plus an optional `char_class`.
+
+    Same rules as the snapshot reader.
+    """
     if data is None:
         return None
     if not isinstance(data, Mapping) or not _FIELDS - _OPTIONAL_FIELDS <= set(data) <= _FIELDS:

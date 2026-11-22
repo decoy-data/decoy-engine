@@ -47,7 +47,7 @@ import random
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, Final, NamedTuple, TypeVar
 
 from decoy_engine import reasons
 from decoy_engine.generation.statistical._cell_format import (
@@ -158,12 +158,13 @@ def _lorem_text(rng: random.Random, length: int) -> str:
     return " ".join(parts)[:length]
 
 
+_DIGIT_CHARS: Final = "0123456789"
+_CHAR_CLASS_DIGITS: Final = "digits"
+
+
 def _digit_text(rng: random.Random, length: int) -> str:
     """Deterministic string of EXACTLY `length` ASCII digits; a leading zero is allowed."""
-    return "".join(_DIGITS[rng.randrange(10)] for _ in range(length))
-
-
-_DIGITS = "0123456789"
+    return "".join(_DIGIT_CHARS[rng.randrange(10)] for _ in range(length))
 
 
 def _cumulative(counts: list[float]) -> list[float]:
@@ -515,7 +516,7 @@ def sample_column(
                 target = int(min(max(round(_numeric_row(rng, edges, length_cum)), min_len), hi_len))
                 value = (
                     _digit_text(rng, target)
-                    if fmt and fmt.char_class == "digits"
+                    if fmt and fmt.char_class == _CHAR_CLASS_DIGITS
                     else _lorem_text(rng, target)
                 )
             out.append(None if null_rate and rng.random() < null_rate else value)

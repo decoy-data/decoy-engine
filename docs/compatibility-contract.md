@@ -488,7 +488,8 @@ at the fitted lengths. It is one enum token with no source value, so `scrub_cell
 and nulls any other value. This engine reads it under both tags, and a snapshot without it generates as
 before. This is a recorded exception to the additive-field rule below: an engine older than this
 change does not ignore the member. Its strict decoder refuses it with `statistical_cell_format_invalid`
-and never misreads it. A new tag was not minted: the old reader fails closed with a coded refusal,
+and never misreads it. The same holds for a pinned plan: an older engine that reads a plan whose stored
+`cell_format` holds `char_class` requires exactly six members and refuses it with the same code. A new tag was not minted: the old reader fails closed with a coded refusal,
 and one member does not justify a v3. After 1.0 the member and its single value are frozen; a new value
 is additive in 1.x and needs the same old-reader note.
 
