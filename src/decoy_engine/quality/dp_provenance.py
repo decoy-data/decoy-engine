@@ -299,6 +299,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
             "502037cad62e1e645a666eb088b0bc9f69fec82d2ac980b0c2d52a2cc707a7f1",
+            "f9708482fe4f95139ce9a1272f0110b38b8de83e8d2a567cca5b5f7c1f1ad2bf",
             # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
             # tooling, pinned in the CLI repo's requirements-certified.txt (reproduce: `--no-dev` install on
             # 3.10.20, then cert_smoke.py). All stay, newest first; 0.28.0 lacks joserfc.

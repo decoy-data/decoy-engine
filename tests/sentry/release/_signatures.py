@@ -75,8 +75,17 @@ class Exemption:
     reason: str
 
 
-# Starts empty. Each row is a reviewed diff in the PR that adds it, removed after the next tag.
-SIGNATURE_EXEMPTIONS: tuple[Exemption, ...] = ()
+# Starts empty. `base_tag::path::kind::parameter` -> reason. Each row is a reviewed diff in the PR
+# that adds it, registered in `scripts/dev/sentry_registry.toml`, and removed after the next tag.
+SIGNATURE_EXEMPTIONS: dict[str, str] = {}
+
+
+def exemptions_from(table: dict[str, str]) -> tuple[Exemption, ...]:
+    rows = []
+    for key, reason in table.items():
+        tag, path, kind, parameter = key.split("::")
+        rows.append(Exemption(tag, path, kind, parameter, reason))
+    return tuple(rows)
 
 
 @dataclass

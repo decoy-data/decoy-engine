@@ -336,7 +336,10 @@ def test_head_breaks_are_announced(live) -> None:
     assert sc.mapped >= MAPPED_FLOOR, f"only {sc.mapped} in-scope names mapped"
     lines = sig.pending_breaking_lines(ROOT, tag.removeprefix("v"))
     left = sig.unannounced(
-        sig.signature_breaks(base, head, sc), lines, sig.SIGNATURE_EXEMPTIONS, tag
+        sig.signature_breaks(base, head, sc),
+        lines,
+        sig.exemptions_from(sig.SIGNATURE_EXEMPTIONS),
+        tag,
     )
     assert not left, (
         "\n".join(sorted({b.line() for b in left}))

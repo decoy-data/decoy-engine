@@ -1390,7 +1390,6 @@ FileSink
 FileSource
 PermanentError
 SDK_VERSION
-SourceFacts
 TransientError
 WriteResult
 atomic_swap_db_providers
