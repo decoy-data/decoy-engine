@@ -2,11 +2,22 @@
 //!
 //! `_kernel` is the canonical compiled module this companion package ships (installed directly;
 //! the core has no `native` extra yet, see `decoy-engine/pyproject.toml`) and the
-//! `load_compiled_crypto_kernel` / `load_compiled_index_kernel` loaders target. It exports
-//! `abi_version()` (the build-system stub from the companion scaffold), `derive_batch` (the
-//! security-sensitive `KeyedDerivationKernel`, see `arrow_ffi::derive_batch`), and
-//! `derive_index_batch` (the deterministic-faker pool-index kernel, see
-//! `arrow_ffi::derive_index_batch`). Everything else the engine does stays pure Python.
+//! `load_compiled_crypto_kernel` / `load_compiled_index_kernel` loaders target. Its exports, by
+//! group:
+//!
+//! - ABI tag: `abi_version()`.
+//! - Thread budget: `resolve_native_threads` (see `threads`).
+//! - Keyed derivation (hash): `derive_batch`, the security-sensitive `KeyedDerivationKernel`
+//!   (`arrow_ffi::derive_batch`).
+//! - Pool index: `derive_index_batch`, the deterministic-faker pool-index kernel
+//!   (`arrow_ffi::derive_index_batch`).
+//! - Raw hex: `derive_hex_raw_batch` (`arrow_ffi`).
+//! - FF1 format-preserving encryption: `fpe_transform_batch` (`arrow_ffi`).
+//! - Text redact spans: the eight `text_redact_*` functions (`text_redact::pyboundary`).
+//! - Text mask splice: `text_mask_splice_spans` and `text_mask_detect_splice` (`text_mask`).
+//!
+//! The engine keeps a pure-Python oracle for every kernel, and a missing or mismatched companion
+//! reroutes to it.
 //!
 //! `batch`/`canonicalize`/`derive`/`ffi_import` have no PyO3 dependency and stay `pub`
 //! unconditionally, so a standalone binary (a fuzz target, an ASan/TSan test build) can link
