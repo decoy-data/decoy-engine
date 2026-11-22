@@ -46,7 +46,6 @@ from decoy_engine.fileaccess._local_chain import (
 from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
     DIRECTORY_PUBLISH_LABELS,
-    DURABLE_LABELS,
     DURABLE_REPLACE_LABELS,
     PRIVATE_LABELS,
     STAGE_PREFIX,
@@ -65,7 +64,6 @@ from decoy_engine.fileaccess._types import (
     StageLabel,
 )
 
-_FD_STAGED = DURABLE_LABELS | DURABLE_REPLACE_LABELS  # staged through a held parent fd
 _logger = logging.getLogger("decoy_engine.quarantine")
 
 _CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _osflags.CLOEXEC
@@ -303,8 +301,10 @@ class LocalOutputTxn(_LocalStageDir):
         self._label = self.label = label
         self._staged_file: Path | None = None
         self._direct = False
-        if label == "publication" and kind != "dir":
-            raise FileAccessUnavailable("a publication stage is a directory")
+        if (label == "publication" and kind != "dir") or (
+            label in DURABLE_REPLACE_LABELS and mode != "replace"
+        ):
+            raise FileAccessUnavailable("the label does not fit this stage kind or mode")
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS and sys.platform != "win32"
         self._created: list[str] = []
         # A durable stage is created and published through its parent's descriptor, opened
@@ -343,7 +343,7 @@ class LocalOutputTxn(_LocalStageDir):
                     self._target.parent.mkdir(parents=True, exist_ok=True)
                 else:
                     _ensure_dirs(self._target.parent)
-            if self._label in _FD_STAGED:
+            if self._label in _durable.FD_STAGED_LABELS:
                 return self._create_durable_stage()
             private = self._label in PRIVATE_LABELS
             # A private stage never writes through: publish replaces a symlink, not its target.
@@ -449,7 +449,7 @@ class LocalOutputTxn(_LocalStageDir):
         staged = self._staged_file
         if staged is None:
             raise FileAccessUnavailable("nothing was staged")
-        if self._label in _FD_STAGED:
+        if self._label in _durable.FD_STAGED_LABELS:
             self._publish_durable()
             return
         if self._direct:
@@ -488,7 +488,7 @@ class LocalOutputTxn(_LocalStageDir):
             shutil.rmtree(self._stage, ignore_errors=True)
             self._stage = None
         self._held.close()  # after the stage is gone: the lock outlives the name
-        if self._label in _FD_STAGED:
+        if self._label in _durable.FD_STAGED_LABELS:
             self._unlink_stage()
             self._close_parent()
             return

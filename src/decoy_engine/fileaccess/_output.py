@@ -65,8 +65,7 @@ PRIVATE_LABELS: frozenset[str] = frozenset(
 # commit point and its failure is raised. A failure path removes only the unpublished stage,
 # never the leaf.
 DURABLE_LABELS: frozenset[str] = frozenset({"vault"})
-# Labels published by a durable replace: fsync the stage, rename over the leaf, then fsync the
-# parent, whose failure is raised as `CommitUncertain` (the managed pointer).
+# Labels published by a durable replace: fsync the stage, rename, then fsync the parent (pointer).
 DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})
 # Labels whose directory publish is durable (F22 5.1): the walk, the rename, then the chain.
 DIRECTORY_PUBLISH_LABELS: frozenset[str] = frozenset({"publication"})
@@ -362,13 +361,13 @@ class RootedOutputTxn(_StageDir):
         if issuer is not _ISSUER:
             raise FileAccessUnavailable("an output transaction is issued by an OutputDir")
         validate_component(leaf, display)
-        if label not in STAGE_PREFIX:
+        self._durable_replace = label in DURABLE_REPLACE_LABELS
+        if label not in STAGE_PREFIX or (self._durable_replace and mode != "replace"):
             raise deny(display)  # an in-place label exists only for the ambient policy
         if label == "publication" and kind != "dir":
             raise FileAccessUnavailable("a publication stage is a directory")
         self._durable = label in DURABLE_LABELS
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS
-        self._durable_replace = label in DURABLE_REPLACE_LABELS
         self.label, self.owner = label, owner  # read by `publish_unit`
         self._leaf = leaf
         self._publish_mode = mode
@@ -408,25 +407,27 @@ class RootedOutputTxn(_StageDir):
         if state.kind == "file" and not state.file_created:
             raise FileAccessUnavailable("nothing was staged")
         parent = state.parent_fd
-        if state.kind == "file" and self._publish_mode == "exclusive":
-            if self._durable:
+        if self._durable_replace or (state.kind == "file" and self._publish_mode == "exclusive"):
+            if self._durable or self._durable_replace:
                 try:
-                    _durable.publish_exclusive_durable(parent, state.stage_name, self._leaf)
+                    _durable._publish_labelled(self.label, parent, state.stage_name, self._leaf)
                 except OSError:
-                    _discard(state)  # the stage only; a linked leaf is never removed
+                    _discard(state)  # the stage only; a bound leaf is never removed
                     raise
             else:
                 try:
-                    _durable._link_exclusive(parent, state.stage_name, self._leaf)
+                    _call(
+                        os.link,
+                        state.stage_name,
+                        self._leaf,
+                        src_dir_fd=parent,
+                        dst_dir_fd=parent,
+                        follow_symlinks=False,
+                    )
                 except FileExistsError:
                     _discard(state)
                     raise
-        elif self._durable_replace:
-            try:
-                _durable.publish_replace_durable(parent, state.stage_name, self._leaf)
-            except OSError:
-                _discard(state)  # fds and any stage left; a renamed leaf is never removed
-                raise
+                _durable.discard_stage_at(parent, state.stage_name)
         else:
             if self._durable_dir:  # a failure here leaves the stage for abort()
                 _durable._sync_tree(state.stage_fd)

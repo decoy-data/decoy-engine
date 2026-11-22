@@ -9,6 +9,7 @@ site: path, enclosing definition or assignment, and AST role. No module is allow
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -71,13 +72,16 @@ def pointer_sites(root: Path) -> list[Site]:
 
 
 def violations(root: Path) -> list[Site]:
-    return [site for site in pointer_sites(root) if site not in ALLOWED]
+    """Sites outside the allowlist, and every repeat of an allowed site (each is named once)."""
+    found: list[Site] = []
+    for site, count in Counter(pointer_sites(root)).items():
+        found += [site] * (count if site not in ALLOWED else count - 1)
+    return found
 
 
 def test_real_tree_names_the_label_only_at_allowed_sites() -> None:
-    sites = pointer_sites(SRC)
-    assert not [s for s in sites if s not in ALLOWED]
-    assert set(sites) == ALLOWED  # non-vacuity: every allowed site is real
+    assert violations(SRC) == []
+    assert Counter(pointer_sites(SRC)) == Counter(ALLOWED)  # non-vacuity: each allowed site, once
 
 
 def _scratch(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -94,6 +98,16 @@ SEEDS = {
             "publication/_publish.py": 'def f(out):\n    out.begin("file", "replace", label="pointer")\n'
         },
         ("publication/_publish.py", "f", "keyword:label"),
+    ),
+    "duplicate call in the allowed function": (
+        {
+            "publication/_current.py": (
+                "class LocalPointerStore:\n    def _publish(self, leaf):\n"
+                '        leaf.begin("file", "replace", label="pointer")\n'
+                '        leaf.begin("file", "replace", label="pointer")\n'
+            )
+        },
+        ("publication/_current.py", "LocalPointerStore._publish", "keyword:label"),
     ),
     "aliased constant": (
         {

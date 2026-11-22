@@ -25,12 +25,15 @@ from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validat
 from decoy_engine.fileaccess._output import (
     _CREATOR_KEY,
     _DIR_FLAGS,
+    DURABLE_LABELS,
+    DURABLE_REPLACE_LABELS,
     _call,
     _close,
     _restore_missing_owner_bits,
 )
 from decoy_engine.fileaccess._types import (
     CommitUncertain,
+    FileAccessUnavailable,
     LeafTooLarge,
     LockTimeout,
     LockUnavailable,
@@ -46,6 +49,7 @@ T = TypeVar("T")
 # that the entry is lost (PostgreSQL `fsync_fname_ext` tolerates EBADF and EINVAL; ENOTSUP is added
 # because FUSE and Darwin report it for a directory fsync). Any other errno is fatal.
 _DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
+FD_STAGED_LABELS = DURABLE_LABELS | DURABLE_REPLACE_LABELS  # staged through a held parent fd
 _POLL_S = 0.05
 _CHUNK = 1 << 16
 
@@ -367,10 +371,13 @@ def publish_replace_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
     leaves the old leaf; the error keeps its errno and nothing else."""
     validate_component(stage_name, _CREATOR_KEY)
     validate_component(leaf, _CREATOR_KEY)
+    if _osflags.WINDOWS:  # the dir_fd rename and directory fsync come with the Windows arm
+        raise FileAccessUnavailable("the durable replace comes with the Windows arm")
     code = 0
     try:
         _sync_leaf_at(parent_fd, stage_name)
-        _call(os.replace, stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        if not _osflags.WINDOWS:
+            _call(os.replace, stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
     except OSError as exc:
         code = exc.errno or errno.EIO
     if code:
@@ -379,10 +386,9 @@ def publish_replace_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
     _sync_bound(lambda: _fsync_dir(parent_fd))
 
 
-def _link_exclusive(parent_fd: int, stage_name: str, leaf: str) -> None:
-    """Link the stage to `leaf` (`FileExistsError` when occupied) and drop the stage name; a
-    failed drop leaves only the stage. The non-durable exclusive publish."""
-    _call(
-        os.link, stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False
+def _publish_labelled(label: str, parent_fd: int, stage_name: str, leaf: str) -> None:
+    """The durable publish a label selects: replace for `DURABLE_REPLACE_LABELS`, else exclusive."""
+    publish = (
+        publish_replace_durable if label in DURABLE_REPLACE_LABELS else publish_exclusive_durable
     )
-    discard_stage_at(parent_fd, stage_name)
+    publish(parent_fd, stage_name, leaf)

@@ -257,3 +257,27 @@ def test_parent_fsync_failing_after_the_replace_is_uncertain(
     assert LocalPointerStore(out).replace_if(PointerState(OLD, OLD), NEW) == "uncertain"
     assert leaf.read_bytes() == NEW
     assert _stages(folder) == []
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_a_missing_folder_is_created_for_the_pointer(
+    tmp_path: Path, policy: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if policy == "ambient":
+        anchor_at(monkeypatch, tmp_path)
+    out, _fd = _output_dir(policy, tmp_path, "out/new/LATEST")
+    assert not (tmp_path / "out").exists()
+    _publish(out, NEW)
+    assert (tmp_path / "out" / "new" / "LATEST").read_bytes() == NEW
+
+
+@pytest.mark.parametrize("mode", ["exclusive"])
+@pytest.mark.parametrize("policy", POLICIES)
+def test_the_pointer_label_refuses_any_mode_but_replace(
+    tmp_path: Path, policy: str, mode: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, folder, leaf = _leaf(policy, tmp_path, monkeypatch)
+    with pytest.raises(Exception) as caught:
+        out.begin("file", mode, label="pointer")
+    assert type(caught.value).__name__ in ("FileAccessDenied", "FileAccessUnavailable")
+    assert not leaf.exists() and _stages(folder) == []

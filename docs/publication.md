@@ -153,9 +153,11 @@ is the local one, and `lock` is the same leaf `OutputDir`, so `lock.lock(timeout
 The write goes through the private file-access label `pointer`: a `0600` stage, fsync of the
 stage, rename over the leaf (a link at the leaf is replaced, never written through), then fsync of
 the parent. A parent fsync failure after the rename raises `CommitUncertain`, which the store maps
-to `uncertain`. A crash can leave a private pointer stage beside `LATEST`; sweeping it is a named
-limit (V2-LOG). Only `publication/_current.py` may name the label
-(`tests/sentry/test_pointer_label_caller.py`).
+to `uncertain`. `publish_replace_durable` fsyncs the file and its immediate parent only. The first
+pointer in a folder that did not exist before is therefore not crash-durable until the unit's chain
+sync (`sync_chain`) runs; the pointer's folder is created by the same call that writes it. A crash
+can leave a private pointer stage beside `LATEST`; sweeping it is a named limit (V2-LOG). Only
+`publication/_current.py` may name the label (`tests/sentry/test_pointer_label_caller.py`).
 
 ## The vault commit
 

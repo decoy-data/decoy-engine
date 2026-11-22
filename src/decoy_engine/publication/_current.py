@@ -130,7 +130,9 @@ class HeldPointer:
         store = self._store
         if store is None:
             raise RuntimeError("the pointer lock is no longer held")
-        payload = f"{new}\n".encode("ascii")
+        payload = _encode(new)
+        if payload is None:  # raised outside any handler: neither the value nor a cause rides
+            raise ValueError("the pointer value is not one the reader accepts")
         result = store.replace_if(expected, payload)
         if result != "unknown":
             return result
@@ -174,6 +176,15 @@ def read_value(raw: bytes | None, accept: Callable[[str], bool]) -> str | None:
         _logger.warning("the pointer file holds no valid value; it is ignored")
         return None
     return value
+
+
+def _encode(value: str) -> bytes | None:
+    """The bytes `swap` writes, or `None` when the reader (`_decode`) would refuse them."""
+    try:
+        payload = f"{value}\n".encode("ascii")
+    except UnicodeEncodeError:
+        return None
+    return payload if _decode(payload) is not None else None
 
 
 def _decode(raw: bytes) -> str | None:

@@ -13,6 +13,8 @@ import errno
 
 import pytest
 
+from decoy_engine.publication import PointerUnreadable
+
 PUBLICATION_CODES = (
     "publication_lock_unavailable",
     "publication_lock_timeout",
@@ -74,6 +76,7 @@ def test_the_publication_codes_are_registered_decoy_publication_reasons() -> Non
         (lambda m: m.LockTimeout(errno.EWOULDBLOCK), "publication_lock_timeout"),
         (lambda m: m.CommitUncertain(errno.EIO), "publication_commit_uncertain"),
         (lambda m: m.LeafTooLarge(errno.EFBIG), "publication_failed"),
+        (lambda m: PointerUnreadable(), "publication_failed"),
     ],
 )
 def test_file_access_publication_errors_have_fixed_reasons(make: object, code: str) -> None:

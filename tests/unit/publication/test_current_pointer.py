@@ -107,11 +107,20 @@ def test_the_constructor_refuses_a_store_and_lock_on_different_leaves() -> None:
         CurrentPointer(FakeStore(None, [], None), other)  # type: ignore[arg-type]
 
 
-def test_a_non_ascii_value_is_refused_before_the_store() -> None:
+@pytest.mark.parametrize("value", ["a\nb", "x" * 4096, "r\u00e9", "\n"])
+def test_a_value_the_reader_would_refuse_is_refused_before_the_store(value: str) -> None:
     store = FakeStore(b"r1\n", ["replaced"], b"r2\n")
-    with pytest.raises(UnicodeEncodeError):
-        _swap(store, R1, "ré")
+    with pytest.raises(ValueError) as caught:
+        _swap(store, R1, value)
     assert store.calls == []
+    assert value not in str(caught.value) and "\u00e9" not in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def test_the_longest_readable_value_is_written() -> None:
+    store = FakeStore(b"r1\n", ["replaced"], b"x")
+    assert _swap(store, R1, "x" * 4095) == "replaced"
+    assert store.calls[0][1] == b"x" * 4095 + b"\n"
 
 
 def _local(policy: str, base: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[CurrentPointer, Path]:
