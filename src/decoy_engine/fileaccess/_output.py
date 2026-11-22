@@ -55,12 +55,12 @@ STAGE_PREFIX: dict[str, str] = {
     "pointer": "._decoy_pointer_stage_",
 }
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
-# Labels whose stage holds secrets or real data, so the stage file is 0600 at creation.
-PRIVATE_LABELS: frozenset[str] = frozenset({"quarantine", "isolated", "vault", "publication"})
+DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})  # stage fsync, rename, parent fsync
+# Labels whose stage holds secrets or real data (0600 at creation); durable-replace ones included.
+PRIVATE_LABELS = DURABLE_REPLACE_LABELS | {"quarantine", "isolated", "vault", "publication"}
 # `DURABLE_LABELS` publish exclusively: the writer fsyncs the stage, it is linked, then the parent is
 # fsynced (the commit point; its failure is raised). A failure removes only the stage.
 DURABLE_LABELS: frozenset[str] = frozenset({"vault"})
-DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})  # stage fsync, rename, parent fsync
 # Labels whose directory publish is durable (F22 5.1): the walk, the rename, then the chain.
 DIRECTORY_PUBLISH_LABELS: frozenset[str] = frozenset({"publication"})
 # Every output but a vault leaf may create missing parent directories; a vault leaf sits
@@ -377,7 +377,7 @@ class RootedOutputTxn(_StageDir):
         except BaseException:
             _close_all([*state.chain_fds, state.stage_fd, state.parent_fd])
             raise
-        self._private = label in PRIVATE_LABELS | DURABLE_REPLACE_LABELS
+        self._private = label in PRIVATE_LABELS
         super().__init__(state.stage_fd, display, state, 0o600 if self._private else 0o666)
         self._finalizer = weakref.finalize(self, _discard, state)
 
