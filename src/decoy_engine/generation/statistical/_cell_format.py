@@ -68,6 +68,7 @@ class CellFormat:
     decimal_places: int | None = None
     resolution: str | None = None
     blank_count: int = 0
+    char_class: str | None = None
 
     @property
     def non_null_cells(self) -> int:
@@ -155,26 +156,37 @@ def decode_cell_format(
         # A hand-written datetime block without a resolution means "no flooring".
         resolution=block.get("resolution", "microsecond" if kind == "datetime" else None),
         blank_count=blank_count,
+        char_class=block.get("char_class"),
     )
 
 
 _FIELDS: Final = frozenset(CellFormat.__dataclass_fields__)
+# Absent from a pinned plan written before the member existed, and omitted again when unset.
+_OPTIONAL_FIELDS: Final = frozenset({"char_class"})
 
 
 def cell_format_from_dict(column: object, kind: str, data: object) -> CellFormat | None:
     """Rebuild a `CellFormat` from its stored six-field form with the same rules as the snapshot reader."""
     if data is None:
         return None
-    if not isinstance(data, Mapping) or set(data) != _FIELDS:
+    if not isinstance(data, Mapping) or not _FIELDS - _OPTIONAL_FIELDS <= set(data) <= _FIELDS:
         _invalid(column, "block", "must be an object with exactly the stored members")
     _check_counts(column, data["null_count"], data["row_count"])
     if type(data["apply_nulls"]) is not bool:
         _invalid(column, "apply_nulls", "must be a boolean")
     places, resolution, blanks = data["decimal_places"], data["resolution"], data["blank_count"]
-    stored = {"decimal_places": places, "resolution": resolution, "blank_count": blanks}
+    char_class = data.get("char_class")
+    stored = {
+        "decimal_places": places,
+        "resolution": resolution,
+        "blank_count": blanks,
+        "char_class": char_class,
+    }
     for member, value in stored.items():
         allowed = member in CELL_FORMAT_MEMBERS.get(kind, {})
-        unused = value is None if member != "blank_count" else value == 0
+        unused = value == 0 if member == "blank_count" else value is None
+        if member == "char_class" and unused:
+            continue  # unset is the stored form of "no class", on every kind
         if not (cell_format_member_ok(kind, member, value) if allowed else unused):
             _invalid(column, member, "unsupported member or type")
     if blanks > data["row_count"] - data["null_count"]:
@@ -186,6 +198,7 @@ def cell_format_from_dict(column: object, kind: str, data: object) -> CellFormat
         decimal_places=places,
         resolution=resolution,
         blank_count=blanks,
+        char_class=char_class,
     )
 
 

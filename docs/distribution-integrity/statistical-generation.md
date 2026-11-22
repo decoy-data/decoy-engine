@@ -83,6 +83,10 @@ When a column entry carries `cell_format` (`statistical/_cell_format.py`, engine
 `null_count / row_count` and, for freetext, a blank with the fitted
 `blank_count` share. A column that sets `null_probability` skips the fitted
 null draw (`apply_nulls` is false), so one null mechanism acts on a column.
+A freetext column whose non-blank cells are all ASCII digits carries
+`cell_format.char_class: "digits"` and generates digit strings at the fitted
+lengths, leading zeros included, in place of lorem words. The member is one
+fixed token, never a source value, and both snapshot tags carry it.
 Snapshots without the block, every DP snapshot included, generate the same
 bytes as before. `compute_distribution_snapshot(..., cell_format=True)` and
 `profiling._snapshot_values.distribution_snapshot_document` write the block;

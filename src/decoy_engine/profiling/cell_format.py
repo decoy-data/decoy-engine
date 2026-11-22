@@ -2,7 +2,8 @@
 
 A snapshot column entry can carry a `cell_format` block that records how the source cells
 were written, so generation can reproduce it: the decimal places of a numeric column, the
-calendar resolution of a datetime column and the blank count of a freetext column. This module
+calendar resolution of a datetime column, and the blank count and digit-only character class of
+a freetext column. This module
 holds the fit-side half (`learn_cell_format`, `add_cell_format`), the one descriptor of which
 members each kind may carry (`CELL_FORMAT_MEMBERS`) and the default-deny `scrub_cell_format`.
 The snapshot redactor reuses that descriptor, so a block can never carry a member the reader
@@ -30,6 +31,7 @@ Method notes:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
@@ -64,11 +66,19 @@ def _is_count(value: object) -> bool:
     return type(value) is int and value >= 0
 
 
+# One enum token. A new value is additive and needs the old-reader note in the compatibility contract.
+CHAR_CLASSES: Final = frozenset({"digits"})
+
+
+def _is_char_class(value: object) -> bool:
+    return type(value) is str and value in CHAR_CLASSES
+
+
 # The one descriptor: kind -> member -> exact-type check. Categorical and empty carry `{}`.
 CELL_FORMAT_MEMBERS: Final[Mapping[str, Mapping[str, Callable[[object], bool]]]] = {
     "numeric": {"decimal_places": _is_places},
     "datetime": {"resolution": _is_resolution},
-    "freetext": {"blank_count": _is_count},
+    "freetext": {"blank_count": _is_count, "char_class": _is_char_class},
     "categorical": {},
     "empty": {},
 }
@@ -134,6 +144,22 @@ def _resolution(non_null: pd.Series) -> str:
     return "microsecond"
 
 
+# ASCII 0-9 only, whole cell: `\d` and `str.isdigit()` accept Unicode digits, and `$` a trailing newline.
+_DIGITS: Final = re.compile("[0-9]+")
+
+
+def _all_digits(cells: pd.Series) -> bool:
+    """True when there is a non-blank cell and every non-blank cell is ASCII digits only."""
+    seen = False
+    for cell in cells:
+        if cell == "":
+            continue
+        if _DIGITS.fullmatch(cell) is None:
+            return False
+        seen = True
+    return seen
+
+
 def learn_cell_format(non_null: pd.Series, kind: str) -> dict[str, Any]:
     """The `cell_format` block for one column's non-null cells, by snapshot kind."""
     if kind == "numeric":
@@ -141,7 +167,11 @@ def learn_cell_format(non_null: pd.Series, kind: str) -> dict[str, Any]:
     if kind == "datetime":
         return {"resolution": _resolution(non_null)}
     if kind == "freetext":
-        return {"blank_count": int((non_null.astype(str) == "").sum())}
+        text = non_null.astype(str)
+        block: dict[str, Any] = {"blank_count": int((text == "").sum())}
+        if _all_digits(text):
+            block["char_class"] = "digits"
+        return block
     return {}
 
 
