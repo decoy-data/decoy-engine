@@ -10,6 +10,7 @@ run writes nothing into the shared `.git`.
 from __future__ import annotations
 
 import ast
+import logging
 import re
 import subprocess
 from collections import defaultdict
@@ -75,8 +76,9 @@ class Exemption:
     reason: str
 
 
-# Starts empty. `base_tag::path::kind::parameter` -> reason. Each row is a reviewed diff in the PR
-# that adds it, registered in `scripts/dev/sentry_registry.toml`, and removed after the next tag.
+# Starts empty. `base_tag::path::kind::parameter` -> reason. A new row needs a dated owner
+# `approved_growth` row for `signature-exemptions` in `scripts/dev/sentry_registry.toml` (the ratchet
+# refuses growth otherwise), and is removed in the first PR after the next tag.
 SIGNATURE_EXEMPTIONS: dict[str, str] = {}
 
 
@@ -84,6 +86,8 @@ def exemptions_from(table: dict[str, str]) -> tuple[Exemption, ...]:
     rows = []
     for key, reason in table.items():
         tag, path, kind, parameter = key.split("::")
+        if kind.startswith("PARAMETER_") and not parameter:
+            raise ValueError(f"exemption {key!r}: a parameter kind must name the parameter")
         rows.append(Exemption(tag, path, kind, parameter, reason))
     return tuple(rows)
 
@@ -92,7 +96,7 @@ def exemptions_from(table: dict[str, str]) -> tuple[Exemption, ...]:
 class Scope:
     paths: dict[str, set[str]] = field(default_factory=dict)  # griffe path -> bare public names
     unresolved: list[str] = field(default_factory=list)
-    mapped: int = 0  # in-scope census names that resolved
+    head_mapped: int = 0  # in-scope HEAD census names that resolved (guards an empty walk)
 
 
 def _git(repo: Path, *args: str) -> bytes:
@@ -120,14 +124,47 @@ def extract_base(repo: Path, tag: str, dest: Path) -> Path:
     return dest
 
 
+class _Capture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
 def load_tree(src_root: Path, package: str) -> Any:
-    return griffe.load(
-        package,
-        search_paths=[src_root],
-        resolve_aliases=True,
-        resolve_external=False,
-        allow_inspection=False,
-    )
+    """Load a package statically. A griffe warning (a module it could not parse) fails the load."""
+    logger = logging.getLogger("griffe")
+    capture = _Capture()
+    logger.addHandler(capture)
+    try:
+        tree = griffe.load(
+            package,
+            search_paths=[src_root],
+            resolve_aliases=True,
+            resolve_external=False,
+            allow_inspection=False,
+        )
+    finally:
+        logger.removeHandler(capture)
+    assert not capture.messages, f"griffe could not read part of {package}: {capture.messages[:3]}"
+    missing = _unloaded_modules(tree, src_root / package)
+    assert not missing, f"griffe dropped modules of {package} (syntax error?): {missing[:5]}"
+    return tree
+
+
+def _unloaded_modules(tree: Any, pkg_dir: Path) -> list[str]:
+    """Source files with no module in the tree: griffe logs a syntax error at debug and moves on."""
+    missing = []
+    for f in sorted(pkg_dir.rglob("*.py")):
+        parts = f.relative_to(pkg_dir).with_suffix("").parts
+        parts = parts[:-1] if parts and parts[-1] == "__init__" else parts
+        try:
+            tree[".".join(parts)] if parts else tree
+        except KeyError:
+            missing.append(".".join((tree.path, *parts)))
+    return missing
 
 
 # --- tiers read from a stability.py without importing it ---------------------------------------
@@ -200,15 +237,26 @@ def _public_modules(tree: Any) -> list[Any]:
     return out
 
 
-def _target_path(obj: Any) -> str:
-    try:
-        return obj.final_target.path if obj.is_alias else obj.path
-    except Exception:
+def _target_path(obj: Any) -> str | None:
+    """Defining path of an object, or None for an alias griffe cannot follow."""
+    if not obj.is_alias:
         return obj.path
+    try:
+        return obj.final_target.path
+    except (griffe.AliasResolutionError, griffe.CyclicAliasError):
+        return None
+
+
+def _is_external(obj: Any, package: str) -> bool:
+    """An alias whose target lies outside the package: nothing of ours to compare."""
+    return not obj.target_path.startswith(package + ".")
 
 
 def tiers_from_tree(tree: Any, stability_source: str) -> Tiers:
-    """`(module, name) -> tier` for a tree that cannot be imported: the census rules, statically."""
+    """`(module, name) -> tier` for a tree that cannot be imported: the census rules, statically.
+
+    Twin of `_census.classify`; `test_the_static_tiers_equal_the_census` keeps them equal.
+    """
     reg = parse_stability(stability_source)
     pkg = tree.path
     always = (pkg, f"{pkg}.sdk", f"{pkg}.providers")
@@ -219,9 +267,8 @@ def tiers_from_tree(tree: Any, stability_source: str) -> Tiers:
         for raw in mod.exports or ():
             name = str(raw)
             member = mod.members.get(name)
-            exports.append(
-                (mod.path, name, _target_path(member) if member else f"{mod.path}.{name}")
-            )
+            target = _target_path(member) if member else None
+            exports.append((mod.path, name, target or f"{mod.path}.{name}"))
 
     def experimental(target: str) -> bool:
         return target.rsplit(".", 1)[0] == reg.experimental_module or any(
@@ -266,19 +313,29 @@ def scope(base_tree: Any, head_tree: Any, base_tiers: Tiers, head_tiers: Tiers) 
     union = {k for _, tiers in sides for k, t in tiers.items() if t in IN_SCOPE_TIERS}
     for module, name in sorted(union):
         spelling = f"{module}.{name}"
-        resolved = False
         for tree, tiers in sides:
             in_scope = tiers.get((module, name)) in IN_SCOPE_TIERS
             try:
-                paths = {spelling, _target_path(_lookup(tree, spelling))}
-            except Exception:
+                obj = _lookup(tree, spelling)
+            except (KeyError, griffe.AliasResolutionError, griffe.CyclicAliasError):
+                obj = None
+            paths = {spelling}
+            if obj is not None:
+                target = _target_path(obj)
+                if target is not None:
+                    paths.add(target)
+                elif _is_external(obj, tree.path):
+                    pass  # a re-export of another package: no signature of ours to diff
+                else:
+                    obj = None  # an in-package alias that goes nowhere: never a silent skip
+            if obj is None:
                 if in_scope:  # a name in scope on this side must resolve on this side
                     out.unresolved.append(f"{spelling} ({'base' if tree is base_tree else 'head'})")
                 continue
-            resolved = resolved or in_scope
+            if in_scope and tree is head_tree:
+                out.head_mapped += 1
             for path in paths:
                 out.paths.setdefault(path, set()).add(name)
-        out.mapped += resolved
     return out
 
 
@@ -381,6 +438,8 @@ def pending_breaking_lines(root: Path, base_version: str) -> list[str]:
                 break
             for block in sr.breaking_lists(section)[1]:
                 lines += _bullets(block)
+        else:
+            raise AssertionError(f"CHANGELOG.md has no section for the base release {base_version}")
     return lines
 
 
@@ -398,7 +457,7 @@ def _exempt(b: Break, exemptions: tuple[Exemption, ...], tag: str) -> bool:
         e.base_tag == tag
         and e.path == b.path
         and e.kind == b.kind.name
-        and (e.parameter == "" or e.parameter in b.parameters)
+        and (e.parameter in b.parameters or (e.parameter == "" and not b.parameters))
         for e in exemptions
     )
 

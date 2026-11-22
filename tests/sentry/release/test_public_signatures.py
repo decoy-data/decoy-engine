@@ -27,8 +27,9 @@ STABILITY = ROOT / "src" / "decoy_engine" / "contracts" / "stability.py"
 CONTRACT = (ROOT / "docs" / "compatibility-contract.md").read_text(encoding="utf-8")
 F, INT = sig.FROZEN, sig.INTERNAL
 
-# Measured on 2026-11-22 against `v0.28.3` and main: in-scope census names that map to a griffe path.
-MAPPED_FLOOR = 449
+# In-scope HEAD census names that map to a griffe path (410 on 2026-11-22). It only guards an
+# empty walk, so it keeps headroom: a removal after the next tag must not turn main red.
+HEAD_FLOOR = 350
 
 BASE_FILES = {
     "src/pkg/__init__.py": (
@@ -233,6 +234,7 @@ def test_at12_a_class_whose_runtime_module_is_rewritten_is_still_in_scope(
     }
     repo = make_repo(tmp_path, files)
     sub(repo, "src/pkg/_base.py", "(self, a)", "(self, a, new)")
+    # The package must import for the M5 mutant (scope from runtime `__module__`) to be meaningful.
     monkeypatch.syspath_prepend(str(repo / "src"))
     for name in [n for n in sys.modules if n == "pkg" or n.startswith("pkg.")]:
         monkeypatch.delitem(sys.modules, name)
@@ -315,6 +317,10 @@ def test_at8_the_0_28_3_break_the_gates_missed_is_found(tmp_path) -> None:
     assert "compile_plan: Parameter was added as required (sources)" in found
     assert "VaultWriter: Parameter was added as required (prepared)" in found
     assert "VaultWriter: Parameter was removed (mask_key)" in found
+    # pass-after: the corrected 0.28.3 notes announce every one of them
+    lines = sig.pending_breaking_lines(ROOT, "0.28.2")
+    breaks = sig.signature_breaks(base, head, sc)
+    assert sig.unannounced(breaks, lines, (), "v0.28.2") == []
 
 
 @pytest.fixture(scope="module")
@@ -326,14 +332,14 @@ def live(tmp_path_factory):
     exports, _ = census.load()
     head_tiers = census.classify(exports)
     base_tiers = _tiers(dest, base)
-    return tag, base, head, sig.scope(base, head, base_tiers, head_tiers)
+    return tag, base, head, sig.scope(base, head, base_tiers, head_tiers), head_tiers
 
 
 def test_head_breaks_are_announced(live) -> None:
     """The guard: every break since the last release tag has a Breaking line that names it."""
-    tag, base, head, sc = live
+    tag, base, head, sc, _ = live
     assert sc.unresolved == [], f"in-scope names griffe cannot map: {sc.unresolved}"
-    assert sc.mapped >= MAPPED_FLOOR, f"only {sc.mapped} in-scope names mapped"
+    assert sc.head_mapped >= HEAD_FLOOR, f"only {sc.head_mapped} in-scope HEAD names mapped"
     lines = sig.pending_breaking_lines(ROOT, tag.removeprefix("v"))
     left = sig.unannounced(
         sig.signature_breaks(base, head, sc),
@@ -371,3 +377,51 @@ def test_at11_plan_exports_the_compile_argument_with_a_tier() -> None:
     assert tiers[("decoy_engine.plan", "SourceFacts")] == st.EXPERIMENTAL
     assert "decoy_engine.plan.NO_SOURCES" in CONTRACT
     assert "SourceFacts" in CONTRACT
+
+
+def test_the_static_tiers_equal_the_census(live) -> None:
+    """The base tiers come from `tiers_from_tree`, a static twin of `census.classify`."""
+    _, _, head, _, head_tiers = live
+    static = sig.tiers_from_tree(head, STABILITY.read_text(encoding="utf-8"))
+    differ = {k: (static.get(k), v) for k, v in head_tiers.items() if static.get(k) != v}
+    assert not differ, f"static tiers differ from the census: {dict(list(differ.items())[:5])}"
+
+
+def test_a_reexport_that_goes_nowhere_is_unresolved_not_skipped(tmp_path) -> None:
+    files = {
+        "src/pkg/__init__.py": "from pkg._nowhere import X\n__all__ = ['X']\n",
+        "src/pkg/mod.py": "def f(a): ...\n",
+    }
+    repo = make_repo(tmp_path, files)
+    base = sig.load_tree(sig.extract_base(repo, "v0.0.1", tmp_path / "b") / "src", "pkg")
+    head = sig.load_tree(repo / "src", "pkg")
+    sc = sig.scope(base, head, {("pkg", "X"): F}, {("pkg", "X"): F})
+    assert sc.unresolved == ["pkg.X (base)", "pkg.X (head)"]
+
+
+def test_a_reexport_of_another_package_is_not_ours_to_diff(tmp_path) -> None:
+    files = {"src/pkg/__init__.py": "from json import dumps\n__all__ = ['dumps']\n"}
+    repo = make_repo(tmp_path, files)
+    head = sig.load_tree(repo / "src", "pkg")
+    assert sig.scope(head, head, {("pkg", "dumps"): F}, {("pkg", "dumps"): F}).unresolved == []
+
+
+def test_a_module_griffe_cannot_parse_fails_the_load(tmp_path) -> None:
+    files = {**BASE_FILES, "src/pkg/bad.py": "def (:\n"}
+    repo = make_repo(tmp_path, files)
+    with pytest.raises(AssertionError, match=r"dropped modules.*pkg\.bad"):
+        sig.load_tree(repo / "src", "pkg")
+
+
+def test_a_changelog_without_the_base_release_fails_closed(tmp_path) -> None:
+    repo = make_repo(tmp_path)
+    write(repo, {"CHANGELOG.md": "# C\n\n## [Unreleased]\n\n## [0.0.9] - 2026-11-01\n\nx\n"})
+    with pytest.raises(AssertionError, match="no section for the base release 0.0.1"):
+        sig.pending_breaking_lines(repo, "0.0.1")
+
+
+def test_an_exemption_for_a_parameter_kind_must_name_the_parameter() -> None:
+    with pytest.raises(ValueError, match="must name the parameter"):
+        sig.exemptions_from({"v0.0.1::pkg.mod.f::PARAMETER_CHANGED_DEFAULT::": "why"})
+    rows = sig.exemptions_from({"v0.0.1::pkg.f::OBJECT_REMOVED::": "why"})
+    assert rows[0].parameter == ""

@@ -139,7 +139,7 @@ All in `tests/sentry/release/test_public_signatures.py`. AT-1 to AT-7, AT-10 and
 
 Mutations the builder runs on the final head and records in the PR (each red, then restored):
 
-- M1 (the choke-point mutation): match the public name against all Breaking lines joined together and drop the parameter check. AT-1 and AT-8 go red.
+- M1 (the choke-point mutation): match the public name against all Breaking lines joined together and drop the parameter check. AT-1 goes red (and AT-4). AT-8 cannot: the released 0.28.3 list names neither `compile_plan` nor `VaultWriter`.
 - M2: drop the class-member prefix rule. AT-7 goes red.
 - M3: read Breaking text from `changelog.d/` only. AT-6 goes red.
 - M4: take the scope from griffe's own public walk instead of the census tiers. AT-5 goes red.
@@ -202,7 +202,7 @@ About 160 lines: map our census tiers (base and HEAD) onto griffe paths (griffe 
 
 - Choke point: every public signature break passes one comparison, the HEAD tree against the last release tag. It runs in the sentry step that `scripts/dev/gates.sh` runs on every gate (`SENTRY_PATHS=(tests/sentry ...)`) and in the `ci.yml` regression-gate. It also runs on the Dell and Mac test nodes through `vm-run` and `decoy-vm-t3` once they push tags (3.0). A contributor cannot route around it by editing some other file: the inputs are the code itself, the release tag and the tiers at both ends, and there is no snapshot to refresh.
 - Guard test: `test_public_signatures.py::test_head_breaks_are_announced` (AT-9), with AT-8 as the fail-before proof on real history.
-- The mutation that must turn it red: M1 (match the name against all Breaking lines joined, without the parameter). AT-1 and AT-8 go red. This is the exact bypass #750 took.
+- The mutation that must turn it red: M1 (match the name against all Breaking lines joined, without the parameter). AT-1 goes red. This is the exact bypass #750 took.
 
 ## 9a. Defect classes
 
@@ -300,7 +300,7 @@ Docs in the slice:
 
 - `docs/compatibility-contract.md` 3.4: name `decoy_engine.plan.NO_SOURCES` (FROZEN; the census test `test_every_frozen_package_and_exception_is_named_by_contract_3_4` requires it) and `SourceFacts` (EXPERIMENTAL, contract 3.6). State that the signatures of FROZEN and EXPERIMENTAL names are checked against the last release by the signature sentry, and that a break needs one `Breaking:` line that names the object and, for a parameter, the parameter, both in backticks.
 - Contract section 6 (machinery): one bullet for the sentry. Section 9 checklist: no new box. The sentry is mechanical; a box would be a second, weaker copy.
-- `docs/frozen-surfaces.md`: narrow `RGF1-KL-4` to "Field types, return types and constant values are not pinned"; add `plan.NO_SOURCES` to the row "Subpackage names section 3.4 lists" and `plan.SourceFacts` to the experimental surfaces table (the map sentry fails until they are there); add one known-limit row per N5 item, each naming its owning gate or "none".
+- `docs/frozen-surfaces.md`: narrow `RGF1-KL-4` to "Field types, return types and constant values are not pinned"; add `plan.NO_SOURCES` to the row "Subpackage names section 3.4 lists" (`plan.SourceFacts` gets no row: the experimental table lists root and `sdk` names only, and contract 3.4 names it); add one known-limit row per N5 item, each naming its owning gate or "none".
 - `changelog.d/README.md`: a `Breaking:` line names each broken public name and, for a parameter change, the parameter, in backticks; how to add a `SIGNATURE_EXEMPTIONS` row for a false break.
 - CLI follow-up (CLI repo, not this slice): the repin imports `NO_SOURCES` from `decoy_engine.plan` once it pins the engine release that carries this slice.
 

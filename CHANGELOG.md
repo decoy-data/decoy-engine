@@ -19,7 +19,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - a vault written by this engine is `decoy-vault/v3`, which an older engine cannot open; keep the older engine's vaults for it or re-run the mask.
 - windowed_date produces different dates for the same seed (output-changing, pre-GA).
 - `compile_plan` now requires the keyword `sources`; pass `NO_SOURCES` when you hold no tables.
-- `VaultWriter` takes `prepared` in place of `mask_key`.
+- `VaultWriter`: the first parameter is renamed `mask_key` to `prepared`; a positional key still works, a `mask_key=` keyword call fails.
 
 ### Added (native companion missing notice, NATIVE-MISSING-WARN E1, 2026-11-21)
 

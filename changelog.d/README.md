@@ -21,7 +21,9 @@ Body text.
   (`tests/sentry/release/test_public_signatures.py`) reads one line at a time, so one line carries
   both names. A false break (for example a default constant renamed with the same value) gets a
   reviewed `SIGNATURE_EXEMPTIONS` row in `tests/sentry/release/_signatures.py`, keyed to the current
-  base tag, instead of a misleading Breaking line. Remove the row in the first PR after the next tag.
+  base tag, instead of a misleading Breaking line. A new row also needs a dated `approved_growth` owner row
+  for `signature-exemptions` in `scripts/dev/sentry_registry.toml`, or the baseline ratchet refuses the
+  growth. Remove the row in the first PR after the next tag.
 - One `### <Type> (<title>, <slice>, <date>)` heading, with `<Type>` one of Added, Changed,
   Fixed, Deprecated, Removed or Security. Use `####` for any sub-headings.
 - The file name is lowercase letters, digits and hyphens, ending in `.md`.
