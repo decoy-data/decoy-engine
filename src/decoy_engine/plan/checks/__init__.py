@@ -10,6 +10,7 @@ from decoy_engine.plan.checks._required_settings import (
     REQUIREMENTS_BY_STRATEGY,
     StrategyRequirement,
     check_required_strategy_settings,
+    column_shape_warnings,
     requirements_for,
 )
 
@@ -21,6 +22,7 @@ __all__ = [
     "check_faker_default_locale",
     "check_generate_columns",
     "check_required_strategy_settings",
+    "column_shape_warnings",
     "lookup_columns",
     "requirements_for",
 ]
