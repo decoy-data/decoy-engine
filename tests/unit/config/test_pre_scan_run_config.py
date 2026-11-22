@@ -138,13 +138,13 @@ def test_e1_t10_the_facade_exports_pre_scan_requested() -> None:
     assert "pre_scan_requested" in config_pkg.__all__
 
 
-def test_e1_t7_the_two_codes_are_registered_pending_with_fixed_text() -> None:
+def test_e1_t7_the_two_codes_are_registered_with_fixed_text() -> None:
     for code, kind, severity in (
         ("uncovered_pii", "warning", "warning"),
         ("uncovered_pii_blocked", "finding", "error"),
     ):
         spec = reasons.get("pre_scan", code)
-        assert spec.since == "unreleased"
+        assert spec.since == "1.33.0"
         assert spec.kind.value == kind
         assert all(rule.severity.value == severity for rule in spec.rules)
         assert {r.outcome.value for r in spec.rules} == {"findings"}
@@ -156,7 +156,7 @@ def test_e1_t7_the_two_codes_are_registered_pending_with_fixed_text() -> None:
 
 def test_e1_t8_the_drift_not_checked_warning_is_registered() -> None:
     spec = reasons.get("warning", "drift_not_checked")
-    assert spec.since == "unreleased"
+    assert spec.since == "1.33.0"
     assert spec.kind.value == "warning"
     assert reasons.warning.DRIFT_NOT_CHECKED == "drift_not_checked"
 
