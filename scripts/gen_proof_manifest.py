@@ -480,7 +480,7 @@ CAPABILITY_PROOFS: list[CapabilityProof] = [
         ["2024-01-15", "2024-04-30", "2024-07-10"],
         {
             "namespace": "event_date",
-            "provider_config": {"bucket": "month"},
+            "provider_config": {"bucket": "month", "date_format": "%Y-%m-%d"},
         },
         (
             "Each date is snapped to a deterministic position within its calendar month. "

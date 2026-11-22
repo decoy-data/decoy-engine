@@ -8,6 +8,7 @@ from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 __all__ = [
     "COLUMN_SHAPE_FORMAT_UNUSED",
     "COLUMN_SHAPE_MISMATCH",
+    "COLUMN_SHAPE_REQUIRED",
     "CONFIG_VALUE_NOT_JSON",
     "DEDUPE_UNSUPPORTED_TYPE",
     "GENERATE_CATEGORIES_MIXED",
@@ -127,6 +128,11 @@ COLUMN_SHAPE_MISMATCH = _d(
     "column_shape_mismatch",
     "A strategy cannot read the shape of the column it is set on.",
     since="1.33.0",
+)
+COLUMN_SHAPE_REQUIRED = _d(
+    "column_shape_required",
+    "A strategy reads values from text and the column does not declare how to read them.",
+    since=UNRELEASED,
 )
 COLUMN_SHAPE_FORMAT_UNUSED = _d(
     "column_shape_format_unused",

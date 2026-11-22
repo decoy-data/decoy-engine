@@ -17,11 +17,11 @@ masking reproduces whole-column masking value-for-value, the chunk
 invariant. Three things this module enforces so that holds in practice:
 
 1. **Config-shape admission** (`bucket_perturb_conditional_failures`): an
-   explicit `date_format` only. Without one, `fmt = date_format or
-   _detect_format(series)` detects the format from the WHOLE series (a
-   cross-row reduction whose result can differ between a chunk and the full
-   column); the handler resolves an empty-string `date_format` the same as
-   absent (`cfg.get("date_format") or None`), so `""` is rejected here too.
+   explicit `date_format` only. The text transform refuses a missing
+   format (it never detects one from the cells); a native date column takes the
+   typed path, which is not chunk-admitted. The handler resolves an empty-string
+   `date_format` the same as absent (`cfg.get("date_format") or None`), so `""`
+   is rejected here too.
 
 2. **Runtime source-dtype gate** (the text_mask/code_set trio, renamed):
    `apply_bucket_perturb` operates on date STRINGS (`series.astype(str)`,
@@ -83,10 +83,8 @@ def bucket_perturb_conditional_failures(col_entry: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     if not cfg.get("date_format"):
         failures.append(
-            "requires an explicit date_format (autodetect resolves the format "
-            "from the whole column, a cross-row reduction that can differ "
-            "between a chunk and the full column; the handler treats an "
-            "empty string the same as absent)"
+            "requires an explicit date_format (the chunked route reads text dates only; "
+            "the handler treats an empty string the same as absent)"
         )
     return failures
 

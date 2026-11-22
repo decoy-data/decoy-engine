@@ -371,17 +371,8 @@ def test_unadmitted_group_bc_payload_does_not_route_ooc(
             ["a", "b", "c"],
             "out_of_core_code_set_shape_unsupported",
         ),
-        (
-            {
-                "strategy": "bucket_perturb",
-                "namespace": "bp",
-                "provider_config": {"bucket": "month"},  # no date_format -> autodetect
-            },
-            ["2021-03-15", "2020-11-02", "2019-07-28"],
-            "out_of_core_bucket_perturb_autodetect_unsupported",
-        ),
     ],
-    ids=["code_set_gen_mode", "bucket_perturb_no_date_format"],
+    ids=["code_set_gen_mode"],
 )
 def test_wrong_shape_group_bc_payload_does_not_route_ooc(
     tmp_path: Path,
@@ -398,6 +389,23 @@ def test_wrong_shape_group_bc_payload_does_not_route_ooc(
     plan = compile_physical_plan(inputs)
 
     _assert_ooc_rejected(plan, code)
+
+
+def test_bucket_perturb_without_a_date_format_never_reaches_the_ooc_route(tmp_path: Path) -> None:
+    """COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on text:
+    `date_format` required, else `column_shape_required`): the physical plan is never built for
+    a column that used to be declined as `out_of_core_bucket_perturb_autodetect_unsupported`."""
+    from decoy_engine.plan import PlanCompileError
+
+    sources = _payload_edge_sources(["2021-03-15", "2020-11-02", "2019-07-28"])
+    config = _payload_edge_config(
+        tmp_path,
+        sources,
+        {"strategy": "bucket_perturb", "namespace": "bp", "provider_config": {"bucket": "month"}},
+    )
+    with pytest.raises(PlanCompileError) as caught:
+        capture_physical_plan_inputs(config, sources, engine_version=ENGINE_VERSION, **_FORCE_OOC)
+    assert caught.value.code == "column_shape_required"
 
 
 @pytest.mark.parametrize(

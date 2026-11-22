@@ -13,7 +13,6 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked
-from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_output_sink import OutputEvidenceAccumulator
 from decoy_engine.execution._errors import StrategyError
@@ -178,7 +177,9 @@ def test_non_string_source_on_the_manual_route_raises_the_source_dtype_code() ->
     table = pa.table({"d": pa.array([20240101, None], pa.int64()), "p": pa.array([1, 2])})
     with pytest.raises(PlanCompileError) as info:
         _manual(make_config([bp_col(), passthrough("p")]), split(table, 1))
-    assert info.value.code == "chunked_bucket_perturb_source_dtype_unsupported"
+    # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an integer
+    # column: refused `column_shape_mismatch`): the compile refuses it before any chunk is read.
+    assert info.value.code == "column_shape_mismatch"
 
 
 def test_non_string_source_on_the_auto_route_falls_back_to_full_frame(tmp_path: Any) -> None:
@@ -190,9 +191,10 @@ def test_non_string_source_on_the_auto_route_falls_back_to_full_frame(tmp_path: 
     cfg = make_config([bp_col()])
     cfg["sources"][TABLE]["path"] = str(tmp_path / "t.csv")
     pd.DataFrame({"d": [1, 2, 3, 4, 5, 6]}).to_csv(tmp_path / "t.csv", index=False)
-    # The ints do not parse as dates, so the full-frame run ends in row errors. The single-table
-    # `summary` is set only by the chunked legs, so its absence shows the auto route fell back.
-    with pytest.raises(RowErrorsFailedError) as caught:
+    # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2: `bucket_perturb` on an
+    # integer column is refused `column_shape_mismatch` at compile, on the auto route as on any
+    # other, before any row is read.
+    with pytest.raises(PlanCompileError) as caught:
         run_pipeline(
             cfg,
             sources={TABLE: table},
@@ -201,8 +203,7 @@ def test_non_string_source_on_the_auto_route_falls_back_to_full_frame(tmp_path: 
             chunk_size_rows=2,
             key_provider=key_provider(),
         )
-    assert caught.value.summary is None
-    assert caught.value.summaries_by_table
+    assert caught.value.code == "column_shape_mismatch"
 
 
 @pytest.mark.parametrize("date_format", [None, ""], ids=["absent", "empty"])

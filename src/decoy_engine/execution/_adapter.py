@@ -304,6 +304,17 @@ class StrategyContext:
             return {}
         return {"code_set_corpora": list(self.code_set_corpora.values())}
 
+    def native_date_shape(self, column: str) -> ColumnShape | None:
+        """The date or zoned-timestamp shape the plan lists for this top-level column, else None.
+
+        It keys on where the column sits in the plan (the table and column in
+        ``native_date_columns``, and not running as a nested child), never on the data, so a typed
+        column holding date objects and a text column are told apart by the plan alone.
+        """
+        if self.nested_outer_column:
+            return None
+        return self.native_date_columns.get((self.current_table, column))
+
     def record_date_preserved(self, column: str, count: int) -> None:
         """Add ``count`` sentinel rows a date operator passed through for ``column``."""
         key = (self.current_table, self.nested_outer_column or column)

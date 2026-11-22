@@ -98,16 +98,39 @@ _FAMILIES: dict[str, list[dict[str, Any]]] = {
 }
 
 
+def _drop_key(node: Any, key: str) -> None:
+    if isinstance(node, dict):
+        node.pop(key, None)
+        for value in node.values():
+            _drop_key(value, key)
+    elif isinstance(node, list):
+        for value in node:
+            _drop_key(value, key)
+
+
 @pytest.mark.parametrize("family", sorted(_FAMILIES))
 def test_v4_plans_need_recompile(tmp_path: Path, family: str) -> None:
-    plan = _compile(tmp_path, _FAMILIES[family])
+    # A version-4 `bucket_perturb` plan with no format detected it at run time. The stored plan
+    # is written from the formatted config with the format removed.
+    stored = "bucket_perturb_format" if family == "bucket_perturb_no_format" else family
+    plan = _compile(tmp_path, _FAMILIES[stored])
     v4 = plan_to_yaml(plan).replace(f"plan_version: {PLAN_VERSION}", "plan_version: 4", 1)
     v4_data = yaml.safe_load(v4)
     v4_data.pop("column_shapes", None)
+    if family == "bucket_perturb_no_format":
+        _drop_key(v4_data, "date_format")
     with pytest.raises(PlanCompileError) as exc:
         plan_from_yaml(yaml.safe_dump(v4_data, sort_keys=False))
     assert exc.value.code == reasons.plan.PLAN_RECOMPILE_REQUIRED
     assert "compile it again" in exc.value.message and "4" not in exc.value.message
+    if family == "bucket_perturb_no_format":
+        # Plan 2026-11-21-column-shape-rule section 8 (E1a) and 12: a stored plan's config compiled
+        # again "gives a version-5 plan that runs, or is refused only by a freeze item of section
+        # 12". `bucket_perturb on text with no date_format` is the E2 freeze item.
+        with pytest.raises(PlanCompileError) as refused:
+            _compile(tmp_path, _FAMILIES[family])
+        assert refused.value.code == reasons.plan.COLUMN_SHAPE_REQUIRED
+        return
     # Compiling the unchanged config again on this engine gives a plan that loads.
     again = _compile(tmp_path, _FAMILIES[family])
     assert again.plan_version == PLAN_VERSION

@@ -23,6 +23,7 @@ from decoy_engine.execution._gated_string_guard import (
     reject_gated_string_on_numeric,
     widen_numeric_target_for_strings,
 )
+from decoy_engine.plan import PlanCompileError
 from decoy_engine.relationships._namespace import NamespaceRegistry
 from tests.unit.execution import _c8_iii_c_support as sup
 from tests.unit.execution import _multi_table_support as mt
@@ -202,9 +203,12 @@ class TestNullablePredicateAndBucketPerturb:
         col = _gate_col(
             "bucket_perturb", namespace="ns_bp", provider_config={"bucket": "month"}, when="c > 2"
         )
-        with pytest.raises(ExecutionError) as exc:
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
+        # integer column: refused `column_shape_mismatch`): the compile refuses the pairing before
+        # any row runs, so the run-time guard is exercised by the faker cases above.
+        with pytest.raises(PlanCompileError) as exc:
             _run(tmp_path, nums, col)
-        assert exc.value.code == "bucket_perturb_requires_date_format"
+        assert exc.value.code == "column_shape_mismatch"
 
     def test_bucket_perturb_that_emits_strings_is_caught_by_execution_guard(
         self, tmp_path: Path
@@ -216,9 +220,12 @@ class TestNullablePredicateAndBucketPerturb:
             provider_config={"bucket": "month", "date_format": "%Y%m%d"},
             when="c > 20240300",
         )
-        with pytest.raises(ExecutionError) as exc:
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
+        # integer column: refused `column_shape_mismatch`): the compile refuses the pairing before
+        # any row runs, so the run-time guard is exercised by the faker cases above.
+        with pytest.raises(PlanCompileError) as exc:
             _run(tmp_path, dates, col)
-        assert exc.value.code == _CODE
+        assert exc.value.code == "column_shape_mismatch"
 
 
 class TestMixedOutput:
@@ -231,9 +238,12 @@ class TestMixedOutput:
             provider_config={"bucket": "month", "date_format": "%Y%m%d"},
             when="c > 2",
         )
-        with pytest.raises(ExecutionError) as exc:
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
+        # integer column: refused `column_shape_mismatch`): the compile refuses the pairing before
+        # any row runs, so the run-time guard is exercised by the faker cases above.
+        with pytest.raises(PlanCompileError) as exc:
             _run(tmp_path, mixed, col)
-        assert exc.value.code == _CODE
+        assert exc.value.code == "column_shape_mismatch"
 
     def test_intrinsically_mixed_output_on_full_gate_raises(self) -> None:
         source = pd.Series([1, 2, 3], dtype="int64")

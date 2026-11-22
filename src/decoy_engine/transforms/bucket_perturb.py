@@ -42,6 +42,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine._execution_error import ExecutionError
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.determinism import derive
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.transforms.date_preserve import preserve_config_problem
@@ -140,12 +141,43 @@ def _perturb_date(
         raise
 
 
+def require_date_format(date_format: Any) -> str:
+    """The text format, or a refusal: the strategy never detects a format from the cells.
+
+    Every caller that parses text dates goes through here, so a missing, blank or non-text
+    format is refused the same way on every route. The message holds no value.
+    """
+    if isinstance(date_format, str) and date_format.strip():
+        return date_format
+    raise ExecutionError(
+        code=reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT,
+        message=(
+            "bucket_perturb needs provider_config.date_format, the strftime format of its dates."
+        ),
+    )
+
+
+def _report_failed(failed: list[int], format_errors: list[int] | None) -> None:
+    """Record unparseable positions, or refuse when the caller has nowhere to report them."""
+    if not failed:
+        return
+    if format_errors is None:
+        raise ExecutionError(
+            code=reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL,
+            message=(
+                f"bucket_perturb: {len(failed)} non-null value(s) do not parse under "
+                "date_format and this route has no row error channel."
+            ),
+        )
+    format_errors.extend(failed)
+
+
 def apply_bucket_perturb(
     series: pd.Series,
     bucket: str,
     job_seed: bytes,
     namespace: str,
-    date_format: str | None,
+    date_format: str,
     format_errors: list[int] | None = None,
 ) -> pd.Series:
     """Apply bucket_perturb to a pandas Series of date strings.
@@ -159,8 +191,8 @@ def apply_bucket_perturb(
         bucket: Time bucket name: ``"week"``, ``"month"``, or ``"quarter"``.
         job_seed: 32-byte job seed bytes (from the plan's SeedEnvelope).
         namespace: Column namespace for derive() isolation. Required.
-        date_format: strptime/strftime format string. Detected from data if None;
-            when detection finds none the call raises.
+        date_format: strptime/strftime format string. Required: the format is never detected
+            from the data.
         format_errors: Receives the 0-based positions of non-null values that did not
             parse. When None and any value fails to parse, the call raises, so a route
             with no row-error channel cannot lose them.
@@ -169,25 +201,15 @@ def apply_bucket_perturb(
         A new pandas Series with perturbed dates (same format as input).
 
     Raises:
-        ExecutionError: No format resolved (``bucket_perturb_requires_date_format``), or a
-            value failed to parse with nowhere to report it
-            (``bucket_perturb_unparseable_no_row_channel``). Neither message holds a value.
+        ExecutionError: ``date_format`` is not a non-blank string
+            (``bucket_perturb_requires_date_format``), or a value failed to parse with nowhere
+            to report it (``bucket_perturb_unparseable_no_row_channel``). Neither message
+            holds a value.
     """
     try:
-        from decoy_engine.transforms.date_shift import _detect_format
-
+        fmt = require_date_format(date_format)
         if pd.api.types.is_extension_array_dtype(series.dtype):
             series = series.astype(object)
-
-        fmt = date_format or _detect_format(series)
-        if fmt is None:
-            raise ExecutionError(
-                code=reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT,
-                message=(
-                    "bucket_perturb could not detect a date format from the column; "
-                    "set provider_config.date_format to the strftime format of its dates."
-                ),
-            )
 
         parsed = pd.to_datetime(series, format=fmt, errors="coerce")
         null_mask = series.isna()
@@ -196,17 +218,7 @@ def apply_bucket_perturb(
         str_values = series.astype(str)
         result = series.astype(object).copy()
 
-        failed = [int(i) for i in parse_failed.to_numpy().nonzero()[0]]
-        if failed:
-            if format_errors is None:
-                raise ExecutionError(
-                    code=reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL,
-                    message=(
-                        f"bucket_perturb: {len(failed)} non-null value(s) do not parse under "
-                        "date_format and this route has no row error channel."
-                    ),
-                )
-            format_errors.extend(failed)
+        _report_failed([int(i) for i in parse_failed.to_numpy().nonzero()[0]], format_errors)
 
         for i in range(len(series)):
             if null_mask.iloc[i] or parse_failed.iloc[i]:
@@ -222,13 +234,55 @@ def apply_bucket_perturb(
         raise
 
 
+def apply_bucket_perturb_dates(
+    series: pd.Series,
+    bucket: str,
+    job_seed: bytes,
+    namespace: str,
+    format_errors: list[int] | None = None,
+) -> pd.Series:
+    """Apply bucket_perturb to a column the plan proves is already a date.
+
+    The cells are ``datetime.date`` values, so nothing is parsed and no format is read. A
+    perturbed date is a ``datetime.date`` again, so the column keeps its type. The digest input
+    is the date's ISO text, the same bytes a text column holding that ISO date gives. Nulls stay
+    null. A non-null cell that is not a date, or whose bucket leaves the years 1 to 9999, has its
+    position appended to ``format_errors`` and keeps its source value.
+
+    Raises:
+        ExecutionError: a cell failed with nowhere to report it
+            (``bucket_perturb_unparseable_no_row_channel``).
+    """
+    try:
+        cells = list(series.astype(object))
+        null_mask = series.isna().to_numpy()
+        failed: list[int] = []
+        for i, cell in enumerate(cells):
+            if null_mask[i]:
+                continue
+            if isinstance(cell, datetime.datetime):
+                cell = cell.date()  # a naive timestamp has no ISO date text; its calendar date does
+            if not isinstance(cell, datetime.date):
+                failed.append(i)
+                continue
+            try:
+                cells[i] = _perturb_date(cell, bucket, job_seed, namespace, cell.isoformat())
+            except OverflowError:
+                failed.append(i)
+        _report_failed(failed, format_errors)
+        return pd.Series(cells, index=series.index, dtype=object)
+    except BaseException:
+        del job_seed
+        raise
+
+
 def bucket_perturb_date_format_problem(date_format: Any) -> str | None:
     """Why ``date_format`` cannot write a perturbed date back, or None if it can.
 
     The same format both parses a value and writes the perturbed date back with
     ``strftime``. With no date directive ``strftime`` returns the format text, so
-    every parsed date would be overwritten by it. None and "" mean autodetect and
-    are accepted here. The whole string is scanned with ``%%`` consumed as a
+    every parsed date would be overwritten by it. None and "" mean absent and are
+    accepted here; a missing format is refused by ``require_date_format``. The whole string is scanned with ``%%`` consumed as a
     literal percent. The reason never carries a data value.
     """
     if date_format is None or (isinstance(date_format, str) and date_format == ""):
@@ -257,11 +311,13 @@ def bucket_perturb_date_format_problem(date_format: Any) -> str | None:
     return None
 
 
-def validate_bucket_perturb_config(cfg: dict[str, Any]) -> None:
+def validate_bucket_perturb_config(cfg: dict[str, Any], shape: ColumnShape | None = None) -> None:
     """Validate bucket_perturb config dict; raise ValueError on any invalid field.
 
     Args:
         cfg: Raw config dict with keys ``bucket`` and optionally ``date_format``.
+        shape: The column's plan-proven shape, when the caller has it. A date column needs no
+            ``date_format`` for its ``preserve_values``.
 
     Raises:
         ValueError: ``bucket`` is missing or not a supported value,
@@ -281,6 +337,6 @@ def validate_bucket_perturb_config(cfg: dict[str, Any]) -> None:
         problem = bucket_perturb_date_format_problem(cfg["date_format"])
         if problem is not None:
             raise ValueError(f"bucket_perturb: {problem}")
-    problem = preserve_config_problem(cfg)
+    problem = preserve_config_problem(cfg, shape)
     if problem is not None:
         raise ValueError(f"bucket_perturb: {problem}")

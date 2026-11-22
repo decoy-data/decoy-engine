@@ -307,6 +307,20 @@ pass (`decoy validate`) defers a column whose type it cannot see, so a missing `
 pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
 date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
 
+**Pre-GA correction (COLUMN-SHAPE E2, 2026-11-22).** `bucket_perturb` no longer detects a date format from
+its cells. A text column (CSV, fixed width, a string column, a `nested` child) with no `provider_config.date_format`
+is refused at plan compile with `plan/column_shape_required` (new, registered unreleased); the config-only pass
+refuses it for CSV and fixed-width sources and defers a Parquet, database or Arrow column to compile, as for
+`date_shift`. A source column that is natively a date runs with no format, keeps its Arrow type, and shifts as a
+calendar date with no pandas date range limit; the digest input is its ISO text, so one namespace gives one
+position across a CSV table and a Parquet table. A `date_format` on such a column is accepted and not used
+(`plan/column_shape_format_unused`), and `preserve_values` needs no format there. A zoned or naive timestamp,
+integer, float, decimal, boolean or other column is refused with `plan/column_shape_mismatch`. A bucket position
+that falls outside years 1 to 9999 on a typed date is a `format_error` row error. `apply_bucket_perturb` takes
+`date_format` as a required `str`; a missing, blank or non-text value raises
+`runtime/bucket_perturb_requires_date_format`. Detection stays in `decoy scan`, the starter config and the free
+text strategies only (`tests/sentry/test_no_runtime_format_detection.py`). No stored format moves.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 

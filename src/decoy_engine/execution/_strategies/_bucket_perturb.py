@@ -6,8 +6,9 @@ transforms module for testability.
 
 Config keys accepted via ``plan.provider_config``:
   bucket           str   ``"week"``, ``"month"``, or ``"quarter"``.
-  date_format      str   Optional strptime/strftime format. Detected from data if absent.
-  preserve_values  list  Optional ISO dates emitted unchanged (requires ``date_format``).
+  date_format      str   strptime/strftime format of a text column. Required unless the plan lists
+                         the column as a native date, which is read as it is and needs none.
+  preserve_values  list  Optional ISO dates emitted unchanged (text columns need ``date_format``).
 
 Requires ``plan.namespace`` (same contract as date_shift): namespace is required for
 ``derive(job_seed, namespace, value)`` so the offset is isolated per column context.
@@ -19,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
@@ -33,6 +35,8 @@ from decoy_engine.transforms.bucket_perturb import (
     FORMAT_ERROR_REASON,
     VALID_BUCKETS,
     apply_bucket_perturb,
+    apply_bucket_perturb_dates,
+    require_date_format,
     validate_bucket_perturb_config,
 )
 from decoy_engine.transforms.date_preserve import (
@@ -42,17 +46,19 @@ from decoy_engine.transforms.date_preserve import (
 )
 
 
-def _validated_config(plan: ColumnSeed) -> tuple[str, str | None, PreserveSet | None]:
+def _validated_config(
+    plan: ColumnSeed, shape: ColumnShape | None = None
+) -> tuple[str, str | None, PreserveSet | None]:
     """Resolve ``(bucket, date_format, preserve)``, failing closed on an invalid config.
 
-    Validates before any data is touched, on the raw ``date_format`` so a falsy
-    non-string cannot slide into autodetect. ``bucket`` defaults to "month" and
-    the validator sees that default, not the possibly absent raw key.
+    Validates before any data is touched. ``bucket`` defaults to "month" and the validator sees
+    that default, not the possibly absent raw key. ``shape`` is the plan's proof that the column
+    is a native date, which needs no format for its ``preserve_values``.
     """
     cfg = provider_config_to_dict(plan.provider_config)
     bucket = str(cfg.get("bucket", "month"))
     try:
-        validate_bucket_perturb_config({**cfg, "bucket": bucket})
+        validate_bucket_perturb_config({**cfg, "bucket": bucket}, shape)
     except ValueError as exc:
         raise StrategyError(
             code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
@@ -60,7 +66,15 @@ def _validated_config(plan: ColumnSeed) -> tuple[str, str | None, PreserveSet | 
             message=str(exc),
         ) from exc
     date_format: str | None = cfg.get("date_format") or None
-    return bucket, date_format, preserve_set_from_config(cfg)
+    try:
+        preserve = preserve_set_from_config(cfg, shape=shape)
+    except ValueError as exc:  # unreachable after validation; keeps the failure coded
+        raise StrategyError(
+            code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
+            strategy="bucket_perturb",
+            message=str(exc),
+        ) from exc
+    return bucket, date_format, preserve
 
 
 class BucketPerturbStrategyHandler:
@@ -77,7 +91,7 @@ class BucketPerturbStrategyHandler:
     join_safe: bool = False
     wizard_options: tuple[StrategyOption, ...] = (
         option("bucket", "str", "quarter", choices=tuple(sorted(VALID_BUCKETS))),
-        option("date_format", "str", "%Y-%m-%d"),
+        option("date_format", "str", "%Y-%m-%d", required=True),
     )
     offer_in_wizard: bool = True
 
@@ -85,9 +99,10 @@ class BucketPerturbStrategyHandler:
         """Validate the config even when a `when:` gate selects no row.
 
         The gate skips `run` on a zero-match predicate, which would let a
-        `date_format` that cannot write a date back pass unchecked.
+        `date_format` that cannot write a date back pass unchecked. The column's shape is not
+        known here, so a missing format waits for plan compile and the run.
         """
-        _validated_config(plan)
+        _validated_config(plan, ColumnShape.UNKNOWN)
 
     def run(
         self,
@@ -103,12 +118,17 @@ class BucketPerturbStrategyHandler:
                 message=f"column {column!r} uses bucket_perturb but has no namespace.",
             )
         namespace = plan.namespace
-        bucket, date_format, preserve = _validated_config(plan)
+        shape = ctx.native_date_shape(column)
+        bucket, date_format, preserve = _validated_config(plan, shape)
+        # A column the plan lists as a date is read as it is and a set date_format is not used.
+        # Any other column is text: never guess its format.
+        text_format = require_date_format(date_format) if shape is None else None
 
         # Native on the sequential route; None (declined, or no companion) falls through to the
         # Python path below, which then owns every count it records.
+        # A native date has no text format for the kernel, so it never reaches the seam.
         seq = getattr(ctx, "seq_native", None)
-        if seq is not None:
+        if seq is not None and shape is None:
             out = seq.bucket_column(
                 ctx,
                 df,
@@ -116,7 +136,7 @@ class BucketPerturbStrategyHandler:
                 namespace=namespace,
                 mask_key=ctx.mask_key,
                 bucket=bucket,
-                date_format=date_format,
+                date_format=text_format,
                 preserve=preserve,
             )
             if out is not None:
@@ -129,12 +149,20 @@ class BucketPerturbStrategyHandler:
         error_positions: list[int] = []
 
         def perturb(series: pd.Series) -> pd.Series:
+            if text_format is None:
+                return apply_bucket_perturb_dates(
+                    series,
+                    bucket=bucket,
+                    job_seed=ctx.mask_key,
+                    namespace=namespace,
+                    format_errors=error_positions,
+                )
             return apply_bucket_perturb(
                 series,
                 bucket=bucket,
                 job_seed=ctx.mask_key,
                 namespace=namespace,
-                date_format=date_format,
+                date_format=text_format,
                 format_errors=error_positions,
             )
 

@@ -8,6 +8,7 @@ or loosen a call-order assertion without a new plan gate.
 
 from __future__ import annotations
 
+import datetime
 import decimal
 from pathlib import Path
 from typing import Any
@@ -108,7 +109,9 @@ GATE_CASES: dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], str | Non
                 provider_config={"bucket": "month", "date_format": "%Y-%m-%d"},
             )
         ],
-        {"val": pa.array(range(N), pa.int64())},
+        # A date column: an integer column is refused at compile (`column_shape_mismatch`), so the
+        # chunked dtype gate is reached with a typed date that has an explicit format.
+        {"val": pa.array([datetime.date(2024, 1, 1)] * N, pa.date32())},
         "chunked_bucket_perturb_source_dtype_unsupported",
     ),
 }
