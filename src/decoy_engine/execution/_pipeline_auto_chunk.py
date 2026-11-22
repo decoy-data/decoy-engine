@@ -35,6 +35,8 @@ from decoy_engine._arrow_types import (
     unify_text_widths,
     widen_text_columns,
 )
+from decoy_engine.contracts.column_shape import NO_SOURCES
+from decoy_engine.contracts.column_shape import SourceFacts as ShapeSourceFacts
 from decoy_engine.execution import _chunked_input
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import ExecutionResult
@@ -305,6 +307,7 @@ def _run_dispatcher(
     chunk_results: list[ExecutionResult],
     preresolved: PreResolvedColumn | None = None,
     cast_run: Any = None,
+    sibling_sources: ShapeSourceFacts = NO_SOURCES,
 ) -> pa.Table:
     # Looked up through the module so a spy on the core sees the call.
     from decoy_engine.execution.native.chunked import _core
@@ -329,6 +332,7 @@ def _run_dispatcher(
                 key_provider=key_provider,
                 base_row_offset=0,
                 native_threads=native_threads,
+                sibling_sources=sibling_sources,
             )
         )
     )
@@ -454,6 +458,7 @@ def run_auto_chunk(
     preresolved: PreResolvedColumn | None = None,
     cast_run: Any = None,
     align_row_groups: bool = False,
+    sibling_sources: ShapeSourceFacts = NO_SOURCES,
 ) -> tuple[dict[str, pa.Table], tuple[Any, ...], float, tuple[Any, ...], dict[str, Any]]:
     """Mask one eligible table in `chunk_size_rows`-row slices on the selected lane.
 
@@ -547,6 +552,7 @@ def run_auto_chunk(
                 source,
                 native_threads=native_threads,
                 chunk_results=chunk_results,
+                sibling_sources=sibling_sources,
                 **common,
             )
             evidence = _without_elapsed(aggregate_chunked_route_evidence(chunk_results))

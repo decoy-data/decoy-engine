@@ -22,7 +22,12 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from ..contracts.column_shape import build_source_facts, source_format_for
+from ..contracts.column_shape import (
+    NO_SOURCES,
+    SourceFacts,
+    source_format_for,
+    table_source_facts,
+)
 from . import _chunked as _chunked_mod
 from . import _chunked_bucket_perturb as bucket_perturb_gate
 from . import _chunked_code_set as code_set_gate
@@ -82,6 +87,8 @@ class OraclePreflightState:
     carry: Any = None
     # The admitted secret this stream owns; `close_secret` releases it when the stream ends.
     secret_owner: Any = None
+    # The job's other tables, which the route decision compiles beside this one.
+    sibling_sources: SourceFacts = NO_SOURCES
 
     def close_secret(self) -> None:
         if self.secret_owner is not None:
@@ -106,6 +113,7 @@ def _oracle_preflight(
     secret_registry: Any = None,
     secret_cache_policy: Any = None,
     source_schema: pa.Schema | None = None,
+    sibling_sources: SourceFacts = NO_SOURCES,
 ) -> OraclePreflightState:
     """Admit the keyed-mask secret, THEN run the eager half of the oracle.
 
@@ -144,6 +152,7 @@ def _oracle_preflight(
             warm_pools=warm_pools,
             carry_passthrough=carry_passthrough,
             source_schema=source_schema,
+            sibling_sources=sibling_sources,
         )
     except BaseException:
         admitted.close()
@@ -184,6 +193,7 @@ def _oracle_preflight_admitted(
     warm_pools: bool,
     carry_passthrough: bool,
     source_schema: pa.Schema | None = None,
+    sibling_sources: SourceFacts = NO_SOURCES,
 ) -> OraclePreflightState:
     """The eager half of the oracle: every check that runs before a chunk masks.
 
@@ -235,7 +245,9 @@ def _oracle_preflight_admitted(
     # A keyed job with zero rows and a bad mask secret must still fail the fail-closed gate, so
     # the profile/plan/gate sequence runs for an empty source too; its return comes after.
     carry = None
-    facts = build_source_facts(caller={table: first.schema if first is not None else source_schema})
+    facts = table_source_facts(
+        table, first.schema if first is not None else source_schema, sibling_sources
+    )
     fmt = source_format_for(config.get("sources"), table, resident=facts.resident)
     seen: dict[str, Any] = {"table": table, "engine_version": engine_version, "source_format": fmt}
     if first is None:
@@ -296,6 +308,7 @@ def _oracle_preflight_admitted(
             key_provider=key_provider,
             code_set_records=code_set_records,
             graph=graph,
+            sibling_sources=sibling_sources,
         )
     # Resolve the projection policy once; each per-chunk adapter.run() enforces
     # it (a chunk carries the same column set as the whole table). Single mask
@@ -381,6 +394,7 @@ def _oracle_preflight_admitted(
         declared_fk_dtypes=declared_fk_dtypes,
         hash_fk_key_columns=hash_fk_key_columns,
         carry=carry,
+        sibling_sources=sibling_sources,
     )
 
 

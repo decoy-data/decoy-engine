@@ -20,7 +20,11 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import build_source_facts
+from decoy_engine.contracts.column_shape import (
+    NO_SOURCES,
+    SourceFacts,
+    table_source_facts,
+)
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import (
     ARROW_PYTHON,
@@ -86,6 +90,7 @@ def plan_column_backends(
     engine_version: str,
     registry: Any,
     first_schema: pa.Schema | None = None,
+    sibling_sources: SourceFacts = NO_SOURCES,
 ) -> tuple[ColumnPlan, ...]:
     """The configured columns of `table` with their planned backends.
 
@@ -101,7 +106,7 @@ def plan_column_backends(
         profile,
         engine_version=engine_version,
         registry=registry,
-        sources=build_source_facts(caller={table: first_schema}),
+        sources=table_source_facts(table, first_schema, sibling_sources),
         resident_sources=sibling_resident_sources(config, table, first_schema),
     )
     out: list[ColumnPlan] = []

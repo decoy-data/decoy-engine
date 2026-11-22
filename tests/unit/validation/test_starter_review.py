@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 from decoy_engine import strategy_catalog
 from decoy_engine.config import PipelineConfig, parse_pipeline_config
 from decoy_engine.contracts.column_shape import NO_SOURCES
+from decoy_engine.contracts.strategy_requirements import SHAPE_REQUIREMENTS_BY_STRATEGY
 from decoy_engine.detection.ner import DEFAULT_NER_MODEL, model_installed, spacy_installed
 from decoy_engine.detection.types import ModelRef
 from decoy_engine.plan import compile_plan, run_config_only_checks
@@ -44,6 +45,7 @@ from decoy_engine.validation.starter_review import (
     apply_review,
     column_entry,
 )
+from tests._column_shapes import INT_DECL
 from tests._ner import needs_ner, ner_available
 
 CANARY = "CANARY-e1-7f3a"
@@ -377,6 +379,10 @@ def _example_entries() -> list[dict[str, Any]]:
     for info in strategy_catalog():
         if info.offer_in_wizard:
             entry = {"strategy": info.name, **info.example_options}
+            shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(info.name)
+            if shaped is not None and shaped.cast_declared:
+                # E3: a numeric strategy over a csv text column needs its F06 cast.
+                entry.update(INT_DECL)
             if not _uses_ner(entry) or _ner_runnable(entry):
                 rows.append(entry)
     return rows

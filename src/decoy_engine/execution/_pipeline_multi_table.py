@@ -32,6 +32,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons as reason_codes
 from decoy_engine._nested_json import nested_children
+from decoy_engine.contracts.column_shape import source_facts_of
 from decoy_engine.execution import _chunked_input, _pipeline_auto_chunk
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import provider_config_to_dict
@@ -384,6 +385,8 @@ def run_multi_table_split(
                 key_provider=key_provider,
                 native_threads=native_threads,
                 dispatcher_enabled=True,
+                # The dispatched table compiles the whole config, so it needs the siblings' schemas.
+                sibling_sources=source_facts_of(resident_sources),
                 **lane_extra,
             )
         )

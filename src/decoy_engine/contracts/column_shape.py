@@ -34,6 +34,7 @@ __all__ = [
     "is_nested_type",
     "source_facts_of",
     "source_format_for",
+    "table_source_facts",
 ]
 
 # IEEE 754 binary64 carries 15 significant decimal digits exactly (DBL_DIG).
@@ -87,6 +88,17 @@ def build_source_facts(
     known = {n: s for n, s in caller.items() if s is not None}
     return SourceFacts(
         schemas={**known, **(loader or {})}, resident=frozenset(caller) | frozenset(loader or ())
+    )
+
+
+def table_source_facts(
+    table: str, schema: pa.Schema | None, siblings: SourceFacts = NO_SOURCES
+) -> SourceFacts:
+    """The facts for one table a route is masking, beside ``siblings``: the tables the job
+    holds next to it. A compile reads the whole config, so it needs both."""
+    own = build_source_facts(caller={table: schema})
+    return SourceFacts(
+        schemas={**siblings.schemas, **own.schemas}, resident=siblings.resident | own.resident
     )
 
 
@@ -157,6 +169,9 @@ def classify_column(*, source_format: str | None, arrow_type: pa.DataType | None
     if arrow_type is None:
         return ColumnShape.UNKNOWN
     t = arrow_type
+    # A dictionary-encoded string holds text; the encoding is not a different shape.
+    if pa.types.is_dictionary(t) and is_text(t.value_type):
+        return ColumnShape.TEXT
     if is_text(t):
         return ColumnShape.TEXT
     if pa.types.is_date(t):
