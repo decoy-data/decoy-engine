@@ -39,7 +39,7 @@ def _call_names(path: Path) -> list[str]:
 
 
 def test_the_registry_holds_the_planned_number_of_entries() -> None:
-    assert len(REGISTRY) == 201
+    assert len(REGISTRY) == 202
 
 
 def test_the_ambient_guard_is_named_in_both_module_lists() -> None:

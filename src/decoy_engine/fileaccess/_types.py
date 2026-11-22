@@ -59,6 +59,7 @@ StageLabel = Literal[
     "vault",
     "pack",
     "publication",
+    "pointer",
 ]
 
 
