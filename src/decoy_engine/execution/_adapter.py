@@ -80,6 +80,10 @@ class ExecutionResult:
     # F22: the reference sink's commit receipt (outcome, digests, counts; no path or name).
     # None when the run published through no `ParquetTransactionalSink`.
     publication_receipt: CommitReceipt | None = None
+    # NATIVE-MISSING-WARN: `native_companion_missing` when the plan needs a compiled kernel and
+    # none it needs is available; a registered code only. Hidden from repr, not compared and
+    # never written to a document: the CLI prints it, the result document does not carry it.
+    native_fallback_code: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def output(self) -> pa.Table:

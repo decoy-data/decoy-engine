@@ -326,6 +326,9 @@ jobs:
         run: pytest tests/unit/execution/native_threads tests/parity/test_gap9_native_thread_grant.py -v --tb=short
       - name: Native ABI test (companion-present case)
         run: pytest tests/native/test_native_ext_abi.py -v --tb=short
+      # NATIVE-MISSING-WARN AT-8: the same equivalence holds with the built companion.
+      - name: Native fallback notice (companion-present case)
+        run: pytest tests/unit/execution/pipeline/test_native_fallback_notice.py -v --tb=short
       - name: Compiled-kernel-vs-live-reference parity harness
         run: pytest tests/native/test_keyed_derivation_kernel_parity.py -v --tb=short
       # The GIL-release proof (panic-safety, wall-clock parallel speedup, concurrent
@@ -492,3 +495,6 @@ jobs:
           extras: "dev"
       - name: Native ABI test (companion-absent case)
         run: pytest tests/native/test_native_ext_abi.py -v --tb=short
+      # NATIVE-MISSING-WARN AT-8: the fallback code and the route summary agree with no companion.
+      - name: Native fallback notice (companion-absent case)
+        run: pytest tests/unit/execution/pipeline/test_native_fallback_notice.py -v --tb=short

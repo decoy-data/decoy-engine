@@ -21,6 +21,7 @@ __all__ = [
     "LIBRARY_DELETE_SKIPPED",
     "LIBRARY_WRITE_FAILED",
     "MIMESIS_LOCALE_FALLBACK",
+    "NATIVE_COMPANION_MISSING",
     "NESTED_CELL_JSON_PARSE_ERROR",
     "NESTED_JSONPATH_PATH_OVERLAP",
     "ORPHAN_FK",
@@ -71,6 +72,12 @@ GENERATION_FIDELITY_BELOW_THRESHOLD = _d(
 )
 GEO_GENERALIZE_CASCADE = _d("geo_generalize_cascade", "Geo generalize cascade.")
 MIMESIS_LOCALE_FALLBACK = _d("mimesis_locale_fallback", "Mimesis locale fallback.")
+NATIVE_COMPANION_MISSING = _d(
+    "native_companion_missing",
+    "No compiled kernel ran: a native kernel this run needs is not available, so masking ran "
+    "in Python.",
+    since=UNRELEASED,
+)
 NESTED_CELL_JSON_PARSE_ERROR = _d("nested_cell_json_parse_error", "Nested cell JSON parse error.")
 NESTED_JSONPATH_PATH_OVERLAP = _d("nested_jsonpath_path_overlap", "Nested jsonpath path overlap.")
 ORPHAN_FK = _d("orphan_fk", "Orphan FK.")
