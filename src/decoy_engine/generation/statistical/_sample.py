@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import random
 from bisect import bisect_right
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import Any, Final, NamedTuple, TypeVar
 
@@ -159,12 +159,16 @@ def _lorem_text(rng: random.Random, length: int) -> str:
 
 
 _DIGIT_CHARS: Final = "0123456789"
-_CHAR_CLASS_DIGITS: Final = "digits"
 
 
 def _digit_text(rng: random.Random, length: int) -> str:
     """Deterministic string of EXACTLY `length` ASCII digits; a leading zero is allowed."""
     return "".join(_DIGIT_CHARS[rng.randrange(10)] for _ in range(length))
+
+
+# One registry: a fitted `cell_format.char_class` token to the draw for it. The guard test pins
+# its keys to `profiling.cell_format.CHAR_CLASSES`, so a new class cannot validate and then draw lorem.
+CHAR_CLASS_DRAWS: Final[dict[str, Callable[[random.Random, int], str]]] = {"digits": _digit_text}
 
 
 def _cumulative(counts: list[float]) -> list[float]:
@@ -514,11 +518,12 @@ def sample_column(
                 value = ""
             else:
                 target = int(min(max(round(_numeric_row(rng, edges, length_cum)), min_len), hi_len))
-                value = (
-                    _digit_text(rng, target)
-                    if fmt and fmt.char_class == _CHAR_CLASS_DIGITS
-                    else _lorem_text(rng, target)
+                draw = (
+                    CHAR_CLASS_DRAWS.get(fmt.char_class, _lorem_text)
+                    if fmt and fmt.char_class
+                    else _lorem_text
                 )
+                value = draw(rng, target)
             out.append(None if null_rate and rng.random() < null_rate else value)
         return out
 

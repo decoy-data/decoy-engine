@@ -123,7 +123,8 @@ def test_e4_redacted_document_carries_the_token_and_no_cell_value() -> None:
     block = doc["columns"]["zip"]["cell_format"]
     assert block == {"blank_count": 0, "char_class": "digits"}
     text = json.dumps(doc)
-    assert not any(f'"{c}"' in text for c in cells[:50])
+    assert "zip" in doc["redacted_columns"]
+    assert not any(f'"{c}"' in text for c in cells)
 
 
 def test_e4_scrub_nulls_any_value_but_the_token() -> None:
@@ -151,6 +152,8 @@ def test_e5_a_value_other_than_digits_is_refused_naming_the_member(bad: Any) -> 
     assert err.value.code == CODE
     assert "char_class" in str(err.value)
     assert "02134" not in str(err.value)
+    if isinstance(bad, str) and bad:
+        assert bad not in str(err.value)
 
 
 def test_e5_the_member_on_a_numeric_entry_is_refused() -> None:
@@ -194,7 +197,8 @@ def test_e7_both_writers_write_the_member_and_load_spec_accepts_each() -> None:
     frame = _frame(_zips())
     v1 = compute_distribution_snapshot(frame, cell_format=True)
     v2 = distribution_snapshot_document(frame, include_values=False)
-    assert v1["schema_version"] != v2["schema_version"]
+    assert v1["schema_version"] == "distribution-snapshot/v1"
+    assert v2["schema_version"] == "distribution-snapshot/v2"
     for snap in (v1, v2):
         snap = json.loads(json.dumps(snap))
         assert snap["columns"]["zip"]["cell_format"]["char_class"] == "digits"
@@ -204,4 +208,12 @@ def test_e7_both_writers_write_the_member_and_load_spec_accepts_each() -> None:
 
 def test_e7_include_values_keeps_the_v1_tag_and_the_member() -> None:
     doc = distribution_snapshot_document(_frame(_zips()), include_values=True)
+    assert doc["schema_version"] == "distribution-snapshot/v1"
     assert doc["columns"]["zip"]["cell_format"]["char_class"] == "digits"
+
+
+def test_char_class_draws_registry_matches_the_profiling_classes() -> None:
+    from decoy_engine.generation.statistical._sample import CHAR_CLASS_DRAWS
+    from decoy_engine.profiling.cell_format import CHAR_CLASSES
+
+    assert set(CHAR_CLASS_DRAWS) == CHAR_CLASSES
