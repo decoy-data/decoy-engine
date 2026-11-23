@@ -360,21 +360,26 @@ def validate_envelope_when(envelope: Any) -> None:
                     parse_when(when)
                 continue
             except ValidationError as exc:
-                codes = when_refusal_codes(exc)
-            path = f"tables.{table}.columns.{column}.when"
-            if codes.masked:
-                raise ValidationError(
-                    f"the when predicate of table {table!r} column {column!r} reads a `masked.` "
-                    "value; V1 reads original values only",
-                    path=path,
-                    code=codes.config,
-                )
-            raise ValidationError(
-                f"the when predicate of table {table!r} column {column!r} is outside the "
-                "closed grammar",
-                path=path,
-                code=codes.config,
-            )
+                refusal = exc
+            raise _envelope_refusal(refusal, table, column)
+
+
+def _envelope_refusal(refusal: ValidationError, table: object, column: object) -> ValidationError:
+    """The envelope error for a parser refusal; the code is the refusal's row in `WHEN_REFUSALS`."""
+    codes = when_refusal_codes(refusal)
+    path = f"tables.{table}.columns.{column}.when"
+    if codes.masked:
+        return ValidationError(
+            f"the when predicate of table {table!r} column {column!r} reads a `masked.` "
+            "value; V1 reads original values only",
+            path=path,
+            code=codes.config,
+        )
+    return ValidationError(
+        f"the when predicate of table {table!r} column {column!r} is outside the closed grammar",
+        path=path,
+        code=codes.config,
+    )
 
 
 def validate_plan_when(plan: Any) -> None:

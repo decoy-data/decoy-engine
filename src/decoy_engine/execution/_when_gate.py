@@ -119,15 +119,23 @@ def _require_closed_grammar(expression: object, strategy: str, column: str | Non
             parse_when(expression)  # type: ignore[arg-type]
         return
     except ValidationError as exc:
-        codes = when_refusal_codes(exc)
+        refusal = exc
     # Raised outside the handler so `__context__` stays empty.
+    raise _closed_grammar_error(refusal, strategy, column)
+
+
+def _closed_grammar_error(
+    refusal: ValidationError, strategy: str, column: str | None
+) -> StrategyError:
+    """The runtime error for a parser refusal; the code is the refusal's row in `WHEN_REFUSALS`."""
+    codes = when_refusal_codes(refusal)
     if codes.masked:
-        raise StrategyError(
+        return StrategyError(
             code=codes.runtime,
             strategy=strategy,
             message=f"when expression on column {column!r} reads a `masked.` value; V1 reads originals",
         )
-    raise StrategyError(
+    return StrategyError(
         code=codes.runtime,
         strategy=strategy,
         message=f"when expression on column {column!r} is outside the closed grammar",
