@@ -488,8 +488,8 @@ run_steps() {  # $1 label, $2 tree
       sentry)
         # strict: the gate venv is the certified profile, so a registry entry that cannot be
         # verified is a failure. ratchet_check runs first, serial, inside the main pass.
-        sentry_pre='if [ -f scripts/dev/ratchet_check.py ]; then "$0" scripts/dev/ratchet_check.py || exit 1; fi; exec "$0" -m pytest "$@"'
-        PRE_PAR=(env DECOY_GATE_VENV_STRICT=1 bash -c "$sentry_pre" "$BIN/python")
+        sentry_pre='if [ -f scripts/dev/ratchet_check.py ]; then "$0" scripts/dev/ratchet_check.py || exit 1; fi; exec "$0" "$@"'
+        PRE_PAR=(env DECOY_GATE_VENV_STRICT=1 bash -c "$sentry_pre" "$BIN/python" -m pytest)
         PRE_SER=(env DECOY_GATE_VENV_STRICT=1 "$BIN/python" -m pytest)
         SPLIT_PATHS=(${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
         split_pytest_cmds sentry ;;
