@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import (
     _chunked_input,
     _pipeline_auto_chunk,
@@ -279,6 +280,7 @@ def run_generate_and_mask_steps(
                     native_threads=native_threads,
                     dispatcher_enabled=chunked_dispatcher_enabled,
                     cast_run=cast_run,
+                    sources=NO_SOURCES,
                     **(
                         {
                             "sink": publish.active_sink,

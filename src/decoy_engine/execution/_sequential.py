@@ -141,7 +141,7 @@ import pyarrow as pa
 
 from decoy_engine.declared_casting._boundary import (
     declared_date_shift_columns,
-    native_date_columns,
+    plan_column_shapes,
     seal_evidence,
 )
 from decoy_engine.declared_casting._eligibility import declared_route_guard
@@ -349,7 +349,7 @@ def run_sequential(
         mask_key=require_mask_key(plan, key_provider),
         seq_native=native_run,
         declared_date_columns=declared_date_shift_columns(plan),
-        native_date_columns=native_date_columns(plan),
+        column_shapes=plan_column_shapes(plan),
     )
 
     parent_map_cache: dict[_NodeKey, dict[_KeyTuple, _KeyTuple]] = {}

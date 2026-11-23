@@ -15,6 +15,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution.native import _chunked_entry, _dispatch
 from decoy_engine.execution.native._chunked_entry import aggregate_chunked_route_evidence
 from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
@@ -91,6 +92,7 @@ def _plan(config: dict[str, Any], source: pa.Table, **kw: Any) -> _dispatch.Nati
         first_schema=source.schema,
         registry=get_default_registry(),
         **kw,
+        siblings=NO_SOURCES,
     ).evidence
 
 
@@ -197,6 +199,7 @@ def test_no_mask_nodes_is_table_wide() -> None:
         table="ghost",
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     ).evidence
     assert ev.reroute_reason == "no_mask_nodes"
     assert ev.decline_records == (table_decline(C.NO_MASK_NODES, "ghost"),)
