@@ -431,3 +431,13 @@ def test_generate_column_reads_the_table_cache_it_is_given() -> None:
     col = member("composite_person", "first_name")
     synthesize._generate_column(col, 10, SEED, table_name="t", bundles=cache)
     assert ("composite_person", "composite_person") in cache
+
+
+def test_a_group_member_drawn_without_a_table_cache_is_a_programming_error() -> None:
+    """A fresh group draws an OS-entropy root per bundle, so a missing cache would make each member
+    its own person without any error."""
+    col = with_table(member("composite_person", "first_name", "a", determinism="fresh"), "t")
+    with pytest.raises(RuntimeError):
+        provider_column_values(col, 5, SEED, None, None, None)
+    with pytest.raises(RuntimeError):
+        synthesize._generate_column(col, 5, SEED, table_name="t")

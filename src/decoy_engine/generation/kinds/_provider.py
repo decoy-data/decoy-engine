@@ -62,7 +62,7 @@ def provider_column_values(
     seed: int,
     derive_key: Any,
     instance_default_locale: str | None,
-    bundle_cache: BundleCache | None = None,
+    bundle_cache: BundleCache | None,
 ) -> list[Any]:
     """``n`` values for a ``provider`` generate column, in its locale or the instance default.
 

@@ -50,14 +50,17 @@ def provider_group_values(
     bundle_cache: BundleCache | None,
 ) -> list[Any]:
     """``n`` values of the composite field ``col`` names, from its group's bundle."""
+    if bundle_cache is None:
+        # Without the table's cache each member would draw its own bundle, and a fresh group
+        # (an OS-entropy root per draw) would be silently incoherent.
+        raise RuntimeError("a composite provider column needs its table's bundle cache")
     key = (str(col["provider"]), group_of(col))
-    cached = bundle_cache.get(key) if bundle_cache is not None else None
+    cached = bundle_cache.get(key)
     if cached is None:
         cached = guarded_values(
             col, lambda: _draw_bundle(col, key, n, seed, derive_key, registry, locale)
         )
-        if bundle_cache is not None:
-            bundle_cache[key] = cached
+        bundle_cache[key] = cached
     bundle = cached
     field = str(col["field"])
     return guarded_values(col, lambda: list(bundle[field]))
