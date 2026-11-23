@@ -174,6 +174,15 @@ class _WholeTableFold:
         return FoldResult(self._fn(self._tables, self._entry, self._config, sources=self._sources))
 
 
+def validator_function(name: str) -> _ValidatorFn:
+    """The registered whole-table function for ``name``, looked up at call time.
+
+    Raises:
+        KeyError: ``name`` is not a registered validator.
+    """
+    return _REGISTRY[name]
+
+
 def build_fold(
     entry: Any,
     config: dict[str, Any],

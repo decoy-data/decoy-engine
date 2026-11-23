@@ -145,10 +145,12 @@ def _child_fk_values(
 # Folds
 # ---------------------------------------------------------------------------
 
-# Fixed overhead of one retained key (tuple, set or dict entry) and the pointer cost of each
-# value in it; the values themselves are charged by `sys.getsizeof`. The budget is a ceiling on
-# retained state, so the estimate leans high.
-_KEY_BASE_BYTES = 150
+# Fixed overhead of one retained key: the tuple header (40), its slot in a set or dict (up to
+# 32 bytes once the table has grown, with its resize headroom) and the value record kept beside
+# it. Each value in the key adds a pointer, and the values themselves are charged by
+# `sys.getsizeof`. The budget is a ceiling on retained state, so the estimate leans high and a
+# test compares it with `tracemalloc` for long string and composite keys.
+_KEY_BASE_BYTES = 230
 _KEY_COLUMN_BYTES = 16
 _INDEX_BYTES = 60
 

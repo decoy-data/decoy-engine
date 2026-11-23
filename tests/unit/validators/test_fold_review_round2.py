@@ -186,4 +186,5 @@ def test_the_out_of_core_collector_uses_the_public_builder() -> None:
 
     source = inspect.getsource(_validate_batch)
     assert "validators._types" not in source
+    assert "validators._registry" not in source
     assert "assemble_report" in source

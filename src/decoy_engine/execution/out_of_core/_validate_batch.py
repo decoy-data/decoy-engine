@@ -5,7 +5,7 @@ this module follows the same shape, with the D3b vault collector (`_vault_collec
 structural twin: a cheap admission allowlist at routing time, a per-batch hook at each
 driver's mask step, one assembly step at run end. The per-cell verdicts are NOT
 re-implemented: each batch is checked by calling the registered validator function itself
-(`validators._registry._REGISTRY`) on one column occurrence, so a verdict cannot drift from
+(`decoy_engine.validators.validator_function`) on one column occurrence, so a verdict cannot drift from
 the full-frame oracle's. Only the report bookkeeping lives here.
 
 Report parity. `_registry.validate` emits one finding per failing configured
@@ -53,8 +53,8 @@ from decoy_engine.validators import (
     ValidatorFinding,
     assemble_report,
     finding_index_cap,
+    validator_function,
 )
-from decoy_engine.validators._registry import _REGISTRY
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -210,7 +210,7 @@ class ValidatorCollector:
         self._ordered: list[_Occurrence] = []
         self._by_table: dict[str, list[_Occurrence]] = {}
         for ordinal, entry in enumerate(entries):
-            fn = _REGISTRY[entry["name"]]
+            fn = validator_function(entry["name"])
             # Parameter validation (bad regex, missing allowed_values) raises before any
             # table is read, exactly as the oracle does even for empty output.
             fn({}, entry, self._config)

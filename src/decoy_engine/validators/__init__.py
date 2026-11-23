@@ -67,7 +67,7 @@ from __future__ import annotations
 
 from decoy_engine.errors import ValidatorFailedError
 from decoy_engine.validators._fold import FoldResult, assemble_report, finding_index_cap
-from decoy_engine.validators._registry import validate
+from decoy_engine.validators._registry import validate, validator_function
 from decoy_engine.validators._scope import plan_scope, unchecked_named_columns
 from decoy_engine.validators._session import ValidationSession
 from decoy_engine.validators._types import (
@@ -94,4 +94,5 @@ __all__ = [
     "plan_scope",
     "unchecked_named_columns",
     "validate",
+    "validator_function",
 ]
