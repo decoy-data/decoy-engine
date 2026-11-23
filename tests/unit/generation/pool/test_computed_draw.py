@@ -77,6 +77,11 @@ class TestUuidFromHex:
         with pytest.raises(ValueError):
             uuid_from_hex(pa.array(["ab" * 15], pa.string()))
 
+    def test_lengths_that_cancel_out_are_still_a_kernel_fault(self) -> None:
+        # 31 + 33 chars decode to the same bytes as two good tokens; only the per-token check sees it
+        with pytest.raises(ValueError):
+            uuid_from_hex(pa.array(["a" * 31, "b" * 33], pa.string()))
+
     def test_a_long_token_is_a_kernel_fault(self) -> None:
         with pytest.raises(ValueError):
             uuid_from_hex(pa.array(["ab" * 17], pa.string()))
