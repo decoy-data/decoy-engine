@@ -2,7 +2,7 @@
 
 The out-of-core route declined faker entirely before this slice. It now runs the
 ONE parity-provable variant: deterministic REUSE, an exact-`string` source, a
-person-name provider on the native allowlist, and a namespace. An absent
+provider on the native faker allowlist, and a namespace. An absent
 pool_size resolves to the default. Selection reuses the SAME compiled index kernel
 (`sample_faker_array`) the sequential and native-chunked routes call, drawing
 from a pool the run-scoped `OocFakerPoolContext` (B3) builds once and reuses

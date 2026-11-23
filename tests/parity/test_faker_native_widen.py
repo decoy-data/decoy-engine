@@ -167,6 +167,7 @@ def test_p4_a_non_key_faker_column_in_an_fk_job_runs_native(
     ref = _run(cfg, src, execution_mode="full_frame")
     [entry] = got.quality_metrics[key]
     assert entry["executed_backend"] in _NATIVE
+    assert _backend(ref, "f") == "pandas_oracle"
     for table in ("P", "C"):
         assert got.outputs[table].equals(ref.outputs[table])
 
@@ -275,6 +276,21 @@ def test_p6_a_degenerate_chunked_column_is_typed_string(tmp_path: Path, provider
     cfg, src = _job(tmp_path, [_column(provider)], _DEGENERATE[0])
     got = _run(cfg, src, **kw)
     assert got.outputs["t"].schema.field("f").type == pa.string()
+
+
+@NEEDS_COMPANION
+@pytest.mark.parametrize("provider", _CASES)
+def test_p6_an_empty_column_under_chunk_settings_is_typed_like_first_name(
+    tmp_path: Path, provider: str
+) -> None:
+    # An empty table never reaches the chunked threshold, so it takes the same route and type
+    # as `person_first_name` does with the same settings.
+    kw = {"auto_chunk_threshold_rows": 3, "chunk_size_rows": 4}
+    types = {}
+    for name in (provider, "person_first_name"):
+        cfg, src = _job(tmp_path / name, [_column(name)], _DEGENERATE[1])
+        types[name] = _run(cfg, src, **kw).outputs["t"].schema.field("f").type
+    assert types[provider] == types["person_first_name"]
 
 
 @pytest.mark.parametrize("provider", _CASES)
@@ -457,7 +473,9 @@ def test_p9b_a_deterministic_hipaa_copy_is_admitted_on_out_of_core(tmp_path: Pat
     cfg, src = _fk_job(tmp_path, columns)
     got = _run(cfg, src, execution_mode="out_of_core")
     assert len(got.quality_metrics["out_of_core_faker"]) == len(columns)
-    assert got.outputs["P"].equals(_run(cfg, src, execution_mode="full_frame").outputs["P"])
+    ref = _run(cfg, src, execution_mode="full_frame")
+    assert _backend(ref, columns[0]["name"]) == "pandas_oracle"
+    assert got.outputs["P"].equals(ref.outputs["P"])
 
 
 # ---------------------------------------------------------------------------

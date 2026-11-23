@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from decoy_engine.execution._operator_registry import OPERATORS
+from decoy_engine.execution.native._chunked_pools import pool_values_are_strings
 from decoy_engine.execution.native._provider_class import classify_provider
 from decoy_engine.execution.native._real_type_admission import C1_PROVIDER_ALLOWLIST
 from decoy_engine.generation.pool._builder import PoolBuilder
@@ -70,7 +71,7 @@ def _pool_native(registry: ProviderRegistry) -> set[str]:
 
 def _builds_only_strings(registry: ProviderRegistry, provider: str) -> bool:
     pool = PoolBuilder(registry).build(provider, size=50, job_seed=b"\x03" * 8)
-    return all(isinstance(v, str) for v in pool.values.tolist())
+    return pool_values_are_strings(pool)
 
 
 def audit(
@@ -110,24 +111,55 @@ def test_the_excluded_map_does_not_grow() -> None:
     assert len(EXCLUDED) == 10
 
 
+MIN_COPY = 3
+
+
+def _registry_literal(tree: ast.AST) -> ast.AST | None:
+    """The set literal passed to `provider_allowlist=frozenset({...})`, the one allowed home."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "provider_allowlist":
+            call = node.value
+            if isinstance(call, ast.Call) and call.args:
+                return call.args[0]
+    return None
+
+
+def second_copies(source: str, rel: str, allowed: frozenset[str]) -> list[str]:
+    """Set, list or tuple literals in `source` holding `MIN_COPY` or more allowlisted names."""
+    if rel in OTHER_PROVIDER_SETS:
+        return []
+    tree = ast.parse(source)
+    home = _registry_literal(tree) if rel == REGISTRY_FILE else None
+    found = []
+    for node in ast.walk(tree):
+        if node is home or not isinstance(node, ast.Set | ast.List | ast.Tuple):
+            continue
+        names = {e.value for e in node.elts if isinstance(e, ast.Constant) and e.value in allowed}
+        if len(names) >= MIN_COPY:
+            found.append(f"{rel}:{node.lineno}")
+    return found
+
+
 def test_the_allowlist_has_one_source() -> None:
     assert C1_PROVIDER_ALLOWLIST is OPERATORS["faker"].provider_allowlist
-    names = {"person_first_name", "person_last_name"}
-    offenders = []
+    allowed = _allowlist()
+    offenders: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
         rel = path.relative_to(SRC).as_posix()
-        if rel == REGISTRY_FILE or rel in OTHER_PROVIDER_SETS:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Set | ast.List | ast.Tuple):
-                found = {
-                    e.value
-                    for e in node.elts
-                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                }
-                if names <= found:
-                    offenders.append(f"{rel}:{node.lineno}")
+        offenders += second_copies(path.read_text(encoding="utf-8"), rel, allowed)
     assert offenders == []
+
+
+def test_a_second_literal_is_reported_outside_and_inside_the_registry_file() -> None:
+    allowed = _allowlist()
+    copy = 'X = frozenset({"person_email", "person_name", "person_phone"})\n'
+    assert second_copies(copy, "execution/other.py", allowed) == ["execution/other.py:1"]
+    as_tuple = 'X = ("person_email", "person_name", "person_phone")\n'
+    assert second_copies(as_tuple, "x.py", allowed) == ["x.py:1"]
+    registry = (SRC / REGISTRY_FILE).read_text(encoding="utf-8")
+    assert second_copies(registry, REGISTRY_FILE, allowed) == []
+    assert len(second_copies(registry + copy, REGISTRY_FILE, allowed)) == 1
+    assert second_copies(copy, "providers_v2/mimesis/_adoption_matrix.py", allowed) == []
 
 
 # Seeded cases: the audit itself must go red on each shape, so the live walk cannot rot.
@@ -143,7 +175,7 @@ class _Stub:
     def generate_batch(self, provider: str, *, spec: object, count: int) -> list[object]:
         return [1] * count
 
-    def capability_matrix(self, provider: str):  # type: ignore[no-untyped-def]
+    def capability_matrix(self, provider: str):
         return get_default_registry().get_capabilities("person_email")
 
 
