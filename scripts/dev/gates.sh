@@ -464,8 +464,19 @@ run_steps() {  # $1 label, $2 tree
       mypy) cmd=("$BIN/mypy" ${MYPY_ARGS[@]+"${MYPY_ARGS[@]}"}) ;;
       # ratchet_check first (baselines never grow); skipped in trees that predate it (the baseline worktree)
       sentry)
-        # strict: the gate venv is the certified profile, so a registry entry that cannot be verified is a failure
-        cmd=(env DECOY_GATE_VENV_STRICT=1 bash -c 'if [ -f scripts/dev/ratchet_check.py ]; then "$0" scripts/dev/ratchet_check.py || exit 1; fi; exec "$0" -m pytest "$@"' "$BIN/python" ${junit[@]+"${junit[@]}"} ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"}) ;;
+        # Same worker rule as the tests step. strict: the gate venv is the certified profile, so a
+        # registry entry that cannot be verified is a failure. ratchet_check runs first, serial.
+        w=$WORKERS
+        if [ "$w" -gt 1 ] && [ ! -f "$tree/tests/_xdist_safe_reports.py" ]; then
+          w=1; note=" (serial: this tree has no tests/_xdist_safe_reports.py)"
+        fi
+        sentry_pre='if [ -f scripts/dev/ratchet_check.py ]; then "$0" scripts/dev/ratchet_check.py || exit 1; fi; exec "$0" -m pytest "$@"'
+        if [ "$w" -gt 1 ]; then
+          cmd=(env DECOY_GATE_VENV_STRICT=1 bash -c "$sentry_pre" "$BIN/python" ${jbase[@]+"${jbase[@]}"} -m "($PYTEST_MARK) and not serial" -n "$w" --dist loadfile ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
+          cmd2=(env DECOY_GATE_VENV_STRICT=1 "$BIN/python" -m pytest -p no:cacheprovider -q -rfE -o junit_family=xunit1 "--junitxml=$OUT/$label-sentry-serial.xml" "--basetemp=$TMP_ROOT/$label-sentry-serial" ${tmpargs[@]+"${tmpargs[@]}"} -m "($PYTEST_MARK) and serial" ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
+        else
+          cmd=(env DECOY_GATE_VENV_STRICT=1 bash -c "$sentry_pre" "$BIN/python" ${junit[@]+"${junit[@]}"} ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
+        fi ;;
       layers) cmd=(layer_step ${junit[@]+"${junit[@]}"}) ;;
       # strict: a venv that drifted from uv.lock fails instead of skipping the metadata check
       licenses)
