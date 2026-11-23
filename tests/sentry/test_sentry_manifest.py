@@ -101,8 +101,12 @@ def route_findings(text: str) -> list[str]:
     )
     if not (step and runs):
         found.append("no layers step runs exactly $LAYER_TEST")
-    if not re.search(r'\$\{LAYER_IGNORE\[@\]\+"\$\{LAYER_IGNORE\[@\]\}"\} \$\{SENTRY_PATHS', text):
-        found.append("the sentry step does not apply LAYER_IGNORE")
+    # The sentry step builds its command in split_pytest_cmds, which puts LAYER_IGNORE before the
+    # paths in every pass; the step must hand that builder SENTRY_PATHS.
+    if not re.search(r'\$\{LAYER_IGNORE\[@\]\+"\$\{LAYER_IGNORE\[@\]\}"\} \$\{SPLIT_PATHS', text):
+        found.append("the shared split builder does not apply LAYER_IGNORE")
+    if not re.search(r"^\s+SPLIT_PATHS=\(\$\{SENTRY_PATHS\[@\]\+", text, re.MULTILINE):
+        found.append("the sentry step does not run SENTRY_PATHS")
     return found
 
 
