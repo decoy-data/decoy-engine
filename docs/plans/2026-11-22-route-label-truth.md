@@ -1,4 +1,4 @@
-Status: plan (revision 3, 2026-11-22; Codex R1 items closed)
+Status: plan (revision 3.1, 2026-11-23; amendment A1, compiler route inputs, owner go-recommended; revision 3, 2026-11-22: Codex R1 items closed)
 
 # ROUTE-LABEL-TRUTH: the run card names the route that ran and the first column that declined (with a slim SEAM-REASONS)
 
@@ -273,3 +273,17 @@ Both answered at plan gate R1 (2026-11-22):
 2. **Label words.** Agreed: `native lane (Arrow, no compiled kernel)` and `mixed (native and Python columns)`, with `decoy explain native` updated to match.
 
 No open questions remain.
+
+## Amendment A1 (2026-11-23): the compiler's layer-1 inputs
+
+Owner decision 2026-11-23 (go with recommended): the ROUTE-RULES refactor (`plan claude/route-rules-plan` `8ccaea6`, `docs/plans/route-rules.md`) is 1.x, but its slice 1 check belongs here, because this row promises that the route named on the run card is the route that ran.
+
+**Suspected defect.** `layer1_route` (`execution/physical/_compiler.py:79`) calls `decide_execution_route` (`execution/_pipeline_routing.py`) without `mixed_admitted`, `vault_ooc_safe` and `validators_ooc_safe`, so all three default to `False` there, while `_pipeline_context.decide_route` passes the real values. If any of the three changes the layer-1 result for some job, the physical plan (and every surface that reads its route) can name a route the run did not take.
+
+**AT-A1 (red-first check, slice 1).** For each of the three flags, build the smallest job where the production `decide_route` passes it `True` (a generate-plus-mask job the mixed lane admits; a vault job whose vault is out-of-core safe; a validator job whose validators are out-of-core safe) and assert `layer1_route(inputs)` returns the same route and reason as the layer-1 call inside `decide_route` for that job. Record the result in the PR body.
+- If AT-A1 is green on main for all three: no code change; keep AT-A1 as a pin and add one sentence to `docs/execution-backends.md` saying why the compiler may omit them.
+- If it is red for any flag: fix at the source. `layer1_route` takes the three values from the same producer `decide_route` uses (one function that both call; no second derivation), and AT-A1 turns green. Mutation A1-M1: drop one passed flag and AT-A1 goes red.
+
+**Also folded in (doc truth, no behavior change).** The `_pipeline_routing.py` comment that says `use_byte_estimate_routing` "defaults False" (the signature defaults it to `True`) is corrected, and the `docs/execution-backends.md` sentence saying layer 2 runs only when layer 1 did not return sequential is corrected to "`decide_route` calls it on every route". Size: under 40 lines outside tests.
+
+Nothing else from ROUTE-RULES enters this row.
