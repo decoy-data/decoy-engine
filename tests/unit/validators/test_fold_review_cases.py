@@ -80,6 +80,13 @@ def test_a_table_whose_columns_are_all_skipped_needs_no_pairing() -> None:
     assert session.finish().passed is True
 
 
+def test_a_shorter_source_is_fine_when_every_column_is_skipped() -> None:
+    case = build_extra_cases()["leak_check_skipped_columns_do_not_pair"]
+    session = ValidationSession(case.config, sources={"t": case.sources["t"].slice(0, 1)})
+    session.observe_published("t", case.outputs["t"])
+    assert session.finish().passed is True
+
+
 def test_a_table_with_a_checked_column_still_must_pair() -> None:
     case = build_cases()["leak_check"]
     session = ValidationSession(case.config, sources={"t": case.sources["t"].slice(0, 4)})
