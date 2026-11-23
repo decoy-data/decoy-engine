@@ -1377,6 +1377,14 @@ same error code and is never silently dropped. The accepted forms are:
 - Membership in a non-empty literal list: `status in ['a', 'b']`,
   `status not in ['x']`.
 - `and`, `or`, `not` and parentheses.
+- A column is a bare name or `source.<name>`: the two mean the same, the column's value
+  as the source held it. `masked.<name>` is parsed and refused with the error code
+  `when_masked_reference_unsupported` (planned for 1.x; V1 reads original values only).
+  A column name that holds a dot or another character outside ASCII letters, digits and `_`
+  is written in backticks, with or without the prefix: `` `a.b` == 'x' ``,
+  ``source.`first name` == 'x' ``. A quoted name holds no backtick, backslash or control
+  character, and the reserved-name rule below applies to it too. `source` and `masked` are
+  prefixes only before a dot: a column named `source` is still read as `source == 'web'`.
 - Literals are integers in the int64 range, finite floats, `True`, `False` and
   strings in single or double quotes. A string holds no backslash, no quote
   character and no control character.
@@ -1385,8 +1393,9 @@ Everything else is refused with the error code `when_outside_closed_grammar`. Er
 name the position and the construct, never the predicate text, because a predicate can embed
 data values. What is refused: arithmetic, function and method calls, attributes,
 subscripts, `@` references, comparing two columns, chained comparisons, `None`, empty
-lists, bare references, bytes and f-string literals, backtick-quoted names and
-names with characters other than ASCII letters, digits and `_`. There is no null
+lists, bare references, bytes and f-string literals, a dotted name with no quote and
+names with characters other than ASCII letters, digits and `_` unless they are quoted
+with backticks (see the next paragraph). There is no null
 check in the grammar. `x >= ''` (string) and `x < 0 or x >= 0` (numeric) select the
 non-null rows. Their negations select the null rows only on numpy-backed columns; on a
 pandas nullable dtype (`string`, `Float64`, including Parquet written by pandas)

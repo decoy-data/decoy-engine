@@ -104,6 +104,7 @@ __all__ = [
     "VAULT_REQUIRES_NAMESPACE",
     "VAULT_STRATEGY_REVERSIBLE",
     "VAULT_STRATEGY_UNMASKED",
+    "WHEN_MASKED_REFERENCE_UNSUPPORTED",
     "WHEN_OUTSIDE_CLOSED_GRAMMAR",
     "WHEN_STRING_OUTPUT_ON_NUMERIC_UNSUPPORTED",
     "WHEN_WITH_COHERENT_WITH_UNSUPPORTED",
@@ -299,6 +300,11 @@ VAULT_REQUIRES_CRYPTOGRAPHY = _d("vault_requires_cryptography", "Vault requires 
 VAULT_REQUIRES_NAMESPACE = _d("vault_requires_namespace", "Vault requires namespace.")
 VAULT_STRATEGY_REVERSIBLE = _d("vault_strategy_reversible", "Vault strategy reversible.")
 VAULT_STRATEGY_UNMASKED = _d("vault_strategy_unmasked", "Vault strategy unmasked.")
+WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
+    "when_masked_reference_unsupported",
+    "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
+    since=UNRELEASED,
+)
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
 WHEN_STRING_OUTPUT_ON_NUMERIC_UNSUPPORTED = _d(
     "when_string_output_on_numeric_unsupported", "When string output on numeric unsupported."

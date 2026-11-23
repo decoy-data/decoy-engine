@@ -13,7 +13,7 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.errors import ValidationError
-from decoy_engine.expressions._when_parser import parse_when
+from decoy_engine.expressions._when_parser import WHEN_MASKED_REFERENCE_CODE, parse_when
 from decoy_engine.plan._errors import PlanCompileError
 
 
@@ -93,7 +93,14 @@ def check_when_grammar(config: dict[str, Any]) -> None:
                 continue
             except ValidationError as exc:
                 reason = exc.raw_message
+                masked = exc.code == WHEN_MASKED_REFERENCE_CODE
             # Raised outside the handler so `__context__` stays empty.
+            if masked:
+                raise PlanCompileError(
+                    code=reasons.plan.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+                    path=path,
+                    message=f"Column {table_name}.{col_name}: {reason}.",
+                )
             raise PlanCompileError(
                 code=reasons.plan.WHEN_OUTSIDE_CLOSED_GRAMMAR,
                 path=path,

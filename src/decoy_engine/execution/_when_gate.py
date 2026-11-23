@@ -46,13 +46,18 @@ from decoy_engine.execution._gated_string_guard import (
 )
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.expressions._when_parser import (
+    WHEN_MASKED_REFERENCE_CODE,
     Compare,
     InList,
     Not,
     Scalar,
     WhenExpr,
+    WhenRead,
+    alias_reads,
     parse_when,
     parse_when_cached,
+    render_leaf,
+    render_when,
     when_column_refs,
     when_literals_by_ref,
 )
@@ -113,9 +118,15 @@ def _require_closed_grammar(expression: object, strategy: str, column: str | Non
         else:
             parse_when(expression)  # type: ignore[arg-type]
         return
-    except ValidationError:
-        pass
+    except ValidationError as exc:
+        masked = exc.code == WHEN_MASKED_REFERENCE_CODE
     # Raised outside the handler so `__context__` stays empty.
+    if masked:
+        raise StrategyError(
+            code=reasons.runtime.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+            strategy=strategy,
+            message=f"when expression on column {column!r} reads a `masked.` value; V1 reads originals",
+        )
     raise StrategyError(
         code=reasons.runtime.WHEN_OUTSIDE_CLOSED_GRAMMAR,
         strategy=strategy,
@@ -287,7 +298,7 @@ def _exact_int_mask(pdf: pd.DataFrame, ast: WhenExpr, strategy_leaf: Any) -> pd.
     None means "use the pandas evaluator on the whole predicate": no integer column is read, a
     column label repeats, or an integer column meets a string or bool literal.
     """
-    refs = when_column_refs(ast)
+    refs = [r.column for r in when_column_refs(ast)]
     ints = {
         c
         for c in refs
@@ -317,12 +328,15 @@ def _exact_int_mask(pdf: pd.DataFrame, ast: WhenExpr, strategy_leaf: Any) -> pd.
     return walk(ast)
 
 
-def _leaf_text(node: Compare | InList) -> str:
-    if isinstance(node, InList):
-        return f"{node.ref} {'not in' if node.negated else 'in'} {list(node.values)!r}"
-    if node.literal_first:
-        return f"{node.value!r} {node.op} {node.ref}"
-    return f"{node.ref} {node.op} {node.value!r}"
+def _aliased_frame(pdf: pd.DataFrame, aliases: Mapping[str, WhenRead]) -> pd.DataFrame:
+    """`pdf`'s read columns, relabelled to the positional aliases of `alias_reads`.
+
+    Only the read columns are kept. A label the frame does not hold stays absent, so pandas
+    raises its own undefined-name error for it, exactly as it did on the unaliased frame.
+    """
+    alias_of = {read.column: alias for alias, read in aliases.items()}
+    sub = pdf.loc[:, pdf.columns.isin(list(alias_of))]
+    return sub.set_axis([alias_of[c] for c in sub.columns], axis=1)
 
 
 def _eval_predicate(
@@ -357,24 +371,26 @@ def _eval_predicate(
         # unmonitored RuntimeWarning.
         with warnings.catch_warnings(record=True) as _caught:
             warnings.simplefilter("always", RuntimeWarning)
-            ast = parse_when_cached(expression)
-            source = pdf
+            # pandas eval cannot read `source.x` or a quoted name, so it runs on the aliased
+            # predicate over a frame built under the aliases (`alias_reads`).
+            ast, aliases = alias_reads(parse_when_cached(expression))
+            source = _aliased_frame(pdf, aliases)
             # A column that is not an integer is read by the pandas evaluator, one comparison at
             # a time, under the same empty scopes and the same closed grammar.
             mask = _exact_int_mask(
                 source,
                 ast,
-                lambda leaf: _pandas_eval(source, _leaf_text(leaf), "numexpr"),
+                lambda leaf: _pandas_eval(source, render_leaf(leaf), "numexpr"),
             )
             if mask is None:
-                pdf = when_eval_frame(source, when_column_refs(ast), when_literals_by_ref(ast))
+                pdf = when_eval_frame(source, list(aliases), when_literals_by_ref(ast))
                 # numexpr has no object arithmetic: exact integers use pandas' own Python engine.
                 exact = any(
                     pdf[c].dtype == object and pd.api.types.is_integer_dtype(source[c].dtype)
                     for c in pdf.columns
                     if c in source.columns and isinstance(pdf[c], pd.Series)
                 )
-                mask = _pandas_eval(pdf, expression, "python" if exact else "numexpr")
+                mask = _pandas_eval(pdf, render_when(ast), "python" if exact else "numexpr")
         for _w in _caught:
             if issubclass(_w.category, RuntimeWarning):
                 _log.warning(

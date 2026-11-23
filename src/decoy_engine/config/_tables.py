@@ -216,8 +216,9 @@ class ColumnConfig(BaseModel):
         try:
             parse_when(stripped)
         except EngineValidationError as exc:
+            # The parser's own code: a `masked.` reference carries its own, not the grammar's.
             raise PydanticCustomError(
-                WHEN_OUTSIDE_GRAMMAR_CODE, "{reason}", {"reason": exc.raw_message}
+                exc.code or WHEN_OUTSIDE_GRAMMAR_CODE, "{reason}", {"reason": exc.raw_message}
             ) from exc
         return stripped
 
