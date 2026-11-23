@@ -1358,7 +1358,7 @@ output of `NaN` or a pandas null is written as JSON `null`; an infinite output f
 **Nested target grammar (NESTED-FREEZE, 2026-11-23).** Recorded pre-GA change. `provider_config.target` of a
 `nested` column is a closed subset of RFC 9535 JSONPath. It is `$` followed by segments: `.name`, `.*`,
 `['name']` or `["name"]` (RFC escapes), `[*]`, `[index]` and `[start:end:step]`. An index is an integer with no
-leading zero, not `-0`, within plus or minus 2^53 - 1. A step is 1 or more. Nothing else is accepted: no `..`,
+leading zero, not `-0`, within plus or minus 2^53 - 1; a slice start, end and step follow the same integer rules. A step is 1 or more. A quoted name allows only the RFC escapes and no raw control character or unpaired surrogate. Nothing else is accepted: no `..`,
 filter, function, union or blank space outside a quoted name, no missing `$`, no dot-quoted name, no quoted name
 `*`, and none of the jsonpath-ng extensions (`|`, `&`, `where`, backticks). A target outside the grammar is refused by
 `compile_plan` and `run_config_only_checks` with the new plan reason `plan.nested_target_unsupported`. The
