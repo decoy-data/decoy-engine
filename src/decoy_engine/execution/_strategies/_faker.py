@@ -104,20 +104,18 @@ class FakerStrategyHandler:
         """A computed provider: no pool, the value is drawn from the key (see `computed_mask_draw`)."""
         if mode is not CardinalityMode.REUSE:
             raise ValueError(f"computed draw on column {column!r} needs cardinality_mode reuse")
-        if plan.deterministic:
-            seed, namespace, draw_mode = ctx.mask_key, plan.namespace, "deterministic"
-            if namespace is None:
-                raise ValueError(
-                    f"deterministic computed draw on column {column!r} has no namespace"
-                )
-        else:
-            seed, draw_mode = ctx.job_seed, "positional"
-            namespace = resolve_selection_namespace(ctx, column, plan.namespace)
+        if plan.deterministic and plan.namespace is None:
+            raise ValueError(f"deterministic computed draw on column {column!r} has no namespace")
+        namespace = (
+            plan.namespace
+            if plan.deterministic and plan.namespace is not None
+            else resolve_selection_namespace(ctx, column, plan.namespace)
+        )
         drawn = computed_mask_draw(
             sampling_source(ctx, column, df[column], deterministic=plan.deterministic),
             spec=spec,
-            mode=draw_mode,  # type: ignore[arg-type]
-            seed=seed,
+            mode="deterministic" if plan.deterministic else "positional",
+            seed=ctx.mask_key if plan.deterministic else ctx.job_seed,
             namespace=namespace,
             row_offset=ctx.row_offset,
             gate_positions=getattr(ctx, "gate_positions", None),

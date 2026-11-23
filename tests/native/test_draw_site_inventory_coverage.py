@@ -245,7 +245,6 @@ _ALLOWLIST = frozenset(
         # _determinism_protocol.py's own recorded LOC ceiling (test_module_size.py).
         # Same reason as that module's own entry: these are DrawSite literals whose
         # seed_derivation/notes strings quote the call shapes the scan looks for.
-        "execution/native/_draw_sites_computed.py",
         "execution/native/_draw_sites_gen_pool.py",
         # MG-5 (vault V0): the mask.tokenize DrawSite + provider-primitive data
         # siblings split out of _determinism_protocol.py / _draw_site_providers.py's

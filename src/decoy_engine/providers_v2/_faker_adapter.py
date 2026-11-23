@@ -44,7 +44,7 @@ from decoy_engine.providers_v2._faker_draw_contracts import (
 # registry; FakerAdapter no longer routes them. The 3 remaining
 # synthetic identifiers (account_number, member_id, plan_id) stay
 # Faker-bound.
-_FAKER_METHOD_MAP: dict[str, str] = {
+_STATIC_METHOD_MAP: dict[str, str] = {
     # Identifiers (3 Faker-bound; 5 swapped to DecoyNative per S6)
     "synthetic_account_number": "bban",
     "synthetic_member_id": "numerify",
@@ -67,7 +67,7 @@ _FAKER_METHOD_MAP: dict[str, str] = {
     "lorem_text": "text",
 }
 # The computed draws (uuid, random_int_range, random_choice) come from one contract.
-_FAKER_METHOD_MAP.update(faker_draw_method_view())
+_FAKER_METHOD_MAP: dict[str, str] = {**_STATIC_METHOD_MAP, **faker_draw_method_view()}
 
 
 # Per-provider kwargs for Faker methods that need shape hints. Post-S6:
@@ -76,8 +76,8 @@ _FAKER_METHOD_MAP.update(faker_draw_method_view())
 _FAKER_DEFAULT_KWARGS: dict[str, dict[str, Any]] = {
     "synthetic_member_id": {"text": "MBR########"},
     "synthetic_plan_id": {"text": "PLN######"},
+    **{alias: dict(kwargs) for alias, kwargs in faker_draw_adapter_defaults().items()},
 }
-_FAKER_DEFAULT_KWARGS.update({k: dict(v) for k, v in faker_draw_adapter_defaults().items()})
 
 
 # V2-native custom providers registered via register_faker_provider_v2.
