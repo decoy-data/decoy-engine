@@ -275,6 +275,22 @@ def expand_steps(
     return out
 
 
+def missing_local_actions(steps: list[dict[str, Any]], actions_dir: Path = ACTIONS) -> list[str]:
+    """Local `uses` references that name no action.yml, so a typo cannot hide a step from the scan."""
+    return sorted(
+        {
+            str(st["uses"])
+            for st in steps
+            if str(st.get("uses", "")).startswith(LOCAL_ACTION_PREFIX)
+            and next(
+                (actions_dir / str(st["uses"])[len(LOCAL_ACTION_PREFIX) :]).glob("action.y*ml"),
+                None,
+            )
+            is None
+        }
+    )
+
+
 def has_build_constraint(steps: list[dict[str, Any]], actions_dir: Path = ACTIONS) -> bool:
     return any(
         "--build-constraint .github/build-constraints.txt" in _step_text(s)
@@ -299,6 +315,10 @@ def scan_workflow(wf: dict[str, Any], *, role: str = "workflow", name: str = "")
     for job_name, job in (wf.get("jobs") or {}).items():
         steps = job.get("steps") or []
         frozen_env = _frozen_env(wf, job)
+        findings += [
+            f"{job_name}: local action {u} has no action.yml"
+            for u in missing_local_actions(expand_steps(steps))
+        ]
         texts = [_step_text(s) for s in steps]
         commands = [shell_commands(t) for t in texts]
         locked_at: int | None = None

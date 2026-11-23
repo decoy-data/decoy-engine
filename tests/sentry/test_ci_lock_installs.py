@@ -122,6 +122,13 @@ def test_a_composite_action_that_drops_the_build_constraint_is_a_finding(tmp_pat
     assert not has_build_constraint(steps, tmp_path)
 
 
+def test_a_reference_to_a_missing_local_action_is_a_finding() -> None:
+    wf = {"jobs": {"j": {"steps": [{"uses": "./.github/actions/missing"}]}}}
+    assert any("missing has no action.yml" in f for f in scan_workflow(wf))
+    ok = {"jobs": {"j": {"steps": [{"uses": "./.github/actions/lock-env"}]}}}
+    assert not any("no action.yml" in f for f in scan_workflow(ok))
+
+
 def test_pip_audit_reads_the_lock() -> None:
     job = _real_workflows()["security.yml"]["jobs"]["pip-audit"]
     findings = audit_findings(job)
