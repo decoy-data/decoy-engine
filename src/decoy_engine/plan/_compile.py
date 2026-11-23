@@ -105,6 +105,7 @@ from decoy_engine.plan._types import (
 )
 from decoy_engine.plan.checks import (
     DEFERRED,
+    check_computed_draws,
     check_generate_columns,
     check_nested_targets,
     check_required_strategy_settings,
@@ -196,6 +197,7 @@ def compile_plan(
     # runs in both branches right after unknown_provider so a missing
     # provider still surfaces as row 2 first.
     check_non_poolable_provider_with_pool_backend(config)
+    check_computed_draws(config)  # GEN-NONFAKER-DRAWS: uuid/int/choice arguments, mode, namespace
     # DPS Scope B (guide 4.7/5): read-and-pin once so every check below sees the same bytes;
     # DP verification runs first, as check_statistical_columns needs its dp_verified verdicts.
     check_dp_generate_contract(config)  # Row 31 (DPS-3): config-only, so before any snapshot read
@@ -525,6 +527,7 @@ def run_config_only_checks(
     check_when_grammar(config)
     deterministic_namespace_completeness(config)
     check_non_poolable_provider_with_pool_backend(config)
+    check_computed_draws(config)  # GEN-NONFAKER-DRAWS: same refusal as compile_plan
     # DPS Scope B (guide 4.7/5): same read-verify-validate order as above.
     check_dp_generate_contract(config)  # Row 31 (DPS-3), before any snapshot read
     # Row 12 (WS3): config plus its snapshot artifacts, so config-only callers catch a bad one.

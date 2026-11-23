@@ -191,6 +191,12 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
     "mask.faker_nondeterministic": lambda: provider_for("mask.faker_nondeterministic").draw(
         _JOB, _NS, b"\x00\x02", pool_size=19
     ),
+    "mask.faker_computed_value": lambda: provider_for("mask.faker_computed_value").draw(
+        _MK, _NS + "/computed:random_int_range", b"alice", pool_size=19
+    ),
+    "mask.faker_computed_position": lambda: provider_for("mask.faker_computed_position").draw(
+        _JOB, _NS + "/computed:random_choice", b"\x00\x02", pool_size=23
+    ),
     "mask.tokenize": lambda: provider_for("mask.tokenize").draw(_MK, _NS, b"alice").hex(),
 }
 
@@ -259,6 +265,8 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "mask.code_set": "39a5ea421300c982f5be9f92e7d0116858035a23de91be98ac64d9ab5a45afd3",
     "mask.date_shift": "6d09a52becbc2be47b141fbaef6417e684f1d543def38adbb356d9d1af1d78dc",
     "mask.faker": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+    "mask.faker_computed_position": "e629fa6598d732768f7c726b4b621285f9c3b85303900aa912017db7617d8bdb",
+    "mask.faker_computed_value": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918",
     "mask.faker_nondeterministic": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
     "mask.formula": "8a2485547325a73e8b0837a111c526674f9fc24c8d416534b866d5d9c9513fc8",
     "mask.fpe": "aefa0682ed1d2c6c5805b325fa89461786fcbee38277f00d544a1b201fbd07e6",
@@ -276,4 +284,5 @@ _GOLDEN_OUTPUT: dict[str, str] = {
 }
 
 # Re-captured for DUP-FREEZE E2: the two joint_mask stream providers join the registry.
-_GOLDEN_REGISTRY = "652033b853c8036c64a4cb96e081cc692f153ad7c7152616349b74c27c284317"
+# Re-captured for GEN-NONFAKER-DRAWS S1: the two computed-draw providers join the registry.
+_GOLDEN_REGISTRY = "865454397a63dbded3a7d3b6d654f7199f7142e4779811cf6ea3188c4014f270"

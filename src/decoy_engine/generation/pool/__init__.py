@@ -46,6 +46,19 @@ from decoy_engine.generation.pool._cache import (
 )
 from decoy_engine.generation.pool._capacity import unique_capacity_ok
 from decoy_engine.generation.pool._cardinality import CardinalityMode
+from decoy_engine.generation.pool._computed_draw import (
+    COMPUTED_NAMESPACE_MARKER,
+    ComputedDrawSpec,
+    DrawRefusal,
+    choice_from_index,
+    computed_draw_spec,
+    computed_selection_namespace,
+    draw_kwargs,
+    int_from_index,
+    parse_computed_draw,
+    uuid_from_bits,
+    uuid_from_hex,
+)
 from decoy_engine.generation.pool._errors import (
     GenerationError,
     PoolCapacityError,
@@ -59,15 +72,22 @@ from decoy_engine.generation.pool._events import (
 from decoy_engine.generation.pool._identity import effective_pool_size
 from decoy_engine.generation.pool._pool_adapter import PoolAdapter
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
-from decoy_engine.generation.pool._sampler import PoolSampler, derive_validated_indices
+from decoy_engine.generation.pool._sampler import (
+    PoolSampler,
+    derive_pool_indices,
+    derive_validated_indices,
+)
 from decoy_engine.generation.pool._validate import check_pool_capacity_pre_flight
 from decoy_engine.generation.pool._value_pool import ValuePool
 
 __all__ = [
+    "COMPUTED_NAMESPACE_MARKER",
     "DEFAULT_POOL_SIZE",
     "CacheStats",
     "CardinalityMode",
+    "ComputedDrawSpec",
     "DetailValue",
+    "DrawRefusal",
     "GenerationError",
     "PoolAdapter",
     "PoolBuilder",
@@ -77,10 +97,19 @@ __all__ = [
     "QualityWarning",
     "ValuePool",
     "check_pool_capacity_pre_flight",
+    "choice_from_index",
+    "computed_draw_spec",
+    "computed_selection_namespace",
+    "derive_pool_indices",
     "derive_validated_indices",
+    "draw_kwargs",
     "effective_pool_size",
     "emit_generation_warning",
     "get_default_pool_cache",
+    "int_from_index",
+    "parse_computed_draw",
     "raise_uniqueness_impossible",
     "unique_capacity_ok",
+    "uuid_from_bits",
+    "uuid_from_hex",
 ]

@@ -17,6 +17,7 @@ __all__ = [
     "CHECKSUM_INVALID",
     "CODE_SET_GEN_REQUIRES_NAMESPACE",
     "COLUMN_SHAPE_REQUIRED",
+    "COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN",
     "CONFIG_REFERENCES_STORED_INDEX",
     "DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED",
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED",
@@ -358,6 +359,11 @@ CATEGORICAL_POSITION_OUT_OF_DOMAIN = _d(
 
 _d = _catalog.runtime("decoy_engine.execution._strategies._faker_positional")
 
+COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN = _d(
+    "computed_draw_position_out_of_domain",
+    "Computed draw position out of domain.",
+    since=UNRELEASED,
+)
 FAKER_POSITION_OUT_OF_DOMAIN = _d("faker_position_out_of_domain", "Faker position out of domain.")
 
 _d = _catalog.runtime("decoy_engine.execution._strategies._fpe")

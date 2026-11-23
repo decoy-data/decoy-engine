@@ -82,7 +82,7 @@ GEN_POOL_DRAW_SITES: tuple[DrawSite, ...] = (
             "job_seed directly, so two pooled columns with different config never "
             "collapse onto one selection stream."
         ),
-        mirror_call_sites=("generation/pool/_sampler.py::_derive_pool_indices#2",),
+        mirror_call_sites=("generation/pool/_sampler.py::derive_pool_indices#2",),
     ),
     # -- Masking: non-deterministic reuse Faker selection (position-keyed) ----
     # Not a generation site; it sits beside the pool sites because it is the same pool-backed

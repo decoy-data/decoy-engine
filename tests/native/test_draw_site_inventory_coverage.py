@@ -245,6 +245,7 @@ _ALLOWLIST = frozenset(
         # _determinism_protocol.py's own recorded LOC ceiling (test_module_size.py).
         # Same reason as that module's own entry: these are DrawSite literals whose
         # seed_derivation/notes strings quote the call shapes the scan looks for.
+        "execution/native/_draw_sites_computed.py",
         "execution/native/_draw_sites_gen_pool.py",
         # MG-5 (vault V0): the mask.tokenize DrawSite + provider-primitive data
         # siblings split out of _determinism_protocol.py / _draw_site_providers.py's
@@ -359,7 +360,8 @@ def test_catalogued_call_sites_point_at_real_files() -> None:
 ENTRY_DRAW_TOKEN = re.compile(
     _DRAW_TOKEN.pattern
     + r"|\bderive_sources?\(|\bderive_func\(|\bhmac_hex\(|\w*hmac\w*\.new\(|"
-    + r"derive_index_batch\(|\bpositional_pool_indices\(|\bderive_validated_indices\(|\.sample\(|\.integers\(|\.random\("
+    + r"derive_index_batch\(|\bpositional_pool_indices\(|\bderive_validated_indices\(|\.sample\(|\.integers\(|\.random\(|"
+    + r"\bderive_pool_indices\(|\bhash_array\("
 )
 
 _CALL_SITE = re.compile(r"(?P<path>[\w/]+\.py)::(?P<qual>\w+(?:\.\w+)*)(?:#(?P<n>[1-9]\d*))?\Z")

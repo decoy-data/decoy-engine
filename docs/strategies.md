@@ -59,6 +59,27 @@ reported, because its unmasked rows keep their source values.
 Use it for names, emails, phone numbers, addresses, and other fields where you
 want realistic-looking replacements rather than a redaction.
 
+Three providers draw their value from the key instead of a pool: `uuid`,
+`random_int_range` and `random_choice`. They build no pool, so `pool_size` has no
+effect on them, and they take only the `reuse` cardinality mode (`unique`,
+`match_source_cardinality` and `scale_source_cardinality` are refused at compile).
+Deterministic mode keys the draw on the source value and the namespace, so equal
+sources give equal outputs on both sides of a key. Non-deterministic mode keys it
+on the row number, never on the source value. In both modes a null source stays null.
+
+- `uuid` writes an RFC 9562 version 4 string. It takes no arguments.
+- `random_int_range` writes an integer from `provider_config` `min`, `max` and
+  `step` (defaults 0, 9999 and 1; whole numbers only, `max` not below `min`,
+  `step` at least 1, at most 2^56 values, all inside the signed 64-bit range).
+- `random_choice` writes one of `provider_config.elements`, a non-empty list of
+  strings, whole numbers, floats or booleans of one type (default `a`, `b`, `c`).
+  The output column has that type.
+
+A namespace may not contain `/computed:`; the engine adds that suffix to keep
+these draws apart from pool draws in the same namespace. Computed providers run
+the whole frame: they are outside the chunked and out-of-core faker allowlists, so
+a forced out-of-core run refuses them and an auto-routed job runs the whole frame.
+
 ### hash
 
 Produces a deterministic, joinability-preserving token:

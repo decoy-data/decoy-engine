@@ -1,6 +1,7 @@
 """Plan-time checks grouped by the config they read (CODEMAP: new plan checks land here)."""
 
 from decoy_engine.plan.checks._column_shapes import build_column_shapes
+from decoy_engine.plan.checks._computed_draw import check_computed_draws
 from decoy_engine.plan.checks._generate_columns import (
     DEFERRED,
     check_faker_default_locale,
@@ -22,6 +23,7 @@ __all__ = [
     "ReadLookup",
     "StrategyRequirement",
     "build_column_shapes",
+    "check_computed_draws",
     "check_faker_default_locale",
     "check_generate_columns",
     "check_nested_targets",

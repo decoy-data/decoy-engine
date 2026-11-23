@@ -22,7 +22,11 @@ build). Source nulls are preserved in all of them.
 
 from __future__ import annotations
 
+from typing import Any
+
+import numpy as np
 import pandas as pd
+import pyarrow as pa
 
 from decoy_engine.execution._adapter import (
     StrategyContext,
@@ -32,13 +36,48 @@ from decoy_engine.execution._adapter import (
 )
 from decoy_engine.execution._exact_int_sources import sampling_source
 from decoy_engine.execution._strategies._faker_positional import (
+    computed_mask_draw,
     positional_pool_indices,
     resolve_selection_namespace,
 )
-from decoy_engine.generation.pool import CardinalityMode, PoolBuilder, PoolSampler, ValuePool
+from decoy_engine.generation.pool import (
+    CardinalityMode,
+    ComputedDrawSpec,
+    DrawRefusal,
+    PoolBuilder,
+    PoolSampler,
+    ValuePool,
+    draw_kwargs,
+    parse_computed_draw,
+)
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.generation.pool._identity import DEFAULT_POOL_SCALE, resolve_faker_pool_identity
 from decoy_engine.plan._types import ColumnSeed
+
+
+def _computed_spec(
+    ctx: StrategyContext, plan: ColumnSeed, cfg: dict[str, Any]
+) -> ComputedDrawSpec | None:
+    """The computed draw for this column, or None when its provider draws from a pool.
+
+    Compile refuses out-of-contract arguments, so a refusal here is a hand-built plan."""
+    if plan.provider is None:
+        return None
+    if ctx.registry.get_capabilities(plan.provider).draw != "computed":
+        return None
+    found = parse_computed_draw("mask", plan.provider, draw_kwargs(cfg))
+    if not isinstance(found, ComputedDrawSpec):
+        reason = found.kind if isinstance(found, DrawRefusal) else "unknown"
+        raise ValueError(f"computed draw arguments are outside the contract ({reason})")
+    return found
+
+
+def _arrow_to_column(drawn: pa.Array) -> np.ndarray[Any, Any]:
+    """The drawn Arrow values as a column array that keeps their type: ints with nulls stay
+    objects (a numpy int column cannot hold None)."""
+    if drawn.null_count and not (pa.types.is_string(drawn.type)):
+        return np.array(drawn.to_pylist(), dtype=object)
+    return np.asarray(drawn.to_numpy(zero_copy_only=False))
 
 
 class FakerStrategyHandler:
@@ -52,6 +91,39 @@ class FakerStrategyHandler:
         option("deterministic", "bool", True, location="column"),
     )
     offer_in_wizard: bool = True
+
+    def _run_computed(
+        self,
+        df: pd.DataFrame,
+        column: str,
+        plan: ColumnSeed,
+        ctx: StrategyContext,
+        spec: ComputedDrawSpec,
+        mode: CardinalityMode,
+    ) -> pd.DataFrame:
+        """A computed provider: no pool, the value is drawn from the key (see `computed_mask_draw`)."""
+        if mode is not CardinalityMode.REUSE:
+            raise ValueError(f"computed draw on column {column!r} needs cardinality_mode reuse")
+        if plan.deterministic:
+            seed, namespace, draw_mode = ctx.mask_key, plan.namespace, "deterministic"
+            if namespace is None:
+                raise ValueError(
+                    f"deterministic computed draw on column {column!r} has no namespace"
+                )
+        else:
+            seed, draw_mode = ctx.job_seed, "positional"
+            namespace = resolve_selection_namespace(ctx, column, plan.namespace)
+        drawn = computed_mask_draw(
+            sampling_source(ctx, column, df[column], deterministic=plan.deterministic),
+            spec=spec,
+            mode=draw_mode,  # type: ignore[arg-type]
+            seed=seed,
+            namespace=namespace,
+            row_offset=ctx.row_offset,
+            gate_positions=getattr(ctx, "gate_positions", None),
+        )
+        df[column] = _arrow_to_column(drawn)
+        return df
 
     def run(
         self,
@@ -71,6 +143,9 @@ class FakerStrategyHandler:
         scale = plan.scale if plan.scale is not None else DEFAULT_POOL_SCALE
         mode = CardinalityMode(plan.cardinality_mode)
         positional = not plan.deterministic and mode is CardinalityMode.REUSE
+        computed = _computed_spec(ctx, plan, cfg)
+        if computed is not None:
+            return self._run_computed(df, column, plan, ctx, computed, mode), []
         # Fail before the pool build when the draw cannot be keyed.
         selection_namespace = (
             resolve_selection_namespace(ctx, column, plan.namespace) if positional else ""

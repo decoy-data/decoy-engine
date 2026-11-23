@@ -1421,7 +1421,7 @@
   {"expr": "decline.code", "file": "execution/physical/_shadow_mixed.py", "function": "_as_shadow_difference", "line": 244},
   {"expr": "exc.code", "file": "execution/physical/_shadow_operators.py", "function": "operator_invariant_violation", "line": 117},
   {"expr": "exc.code", "file": "execution/physical/_shadow_operators.py", "function": "operator_invariant_violation", "line": 120},
-  {"expr": "exc.code", "file": "generation/pool/_sampler.py", "function": "_derive_pool_indices", "line": 155},
+  {"expr": "exc.code", "file": "generation/pool/_sampler.py", "function": "derive_pool_indices", "line": 155},
   {"expr": "self.code", "file": "io/bounded_reader.py", "function": "BoundedReadError.__init__", "line": 84},
   {"expr": "self.code", "file": "io/bounded_reader.py", "function": "BoundedReadError.__init__", "line": 84},
   {"expr": "exc.code", "file": "plan/_checks.py", "function": "check_statistical_columns", "line": 386},
