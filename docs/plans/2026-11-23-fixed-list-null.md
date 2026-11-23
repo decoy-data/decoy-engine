@@ -2,11 +2,20 @@ Status: plan
 
 # FIXED-LIST-NULL: an in-memory source that Parquet cannot store no longer breaks the run, and Parquet output never holds an unreadable fixed-size list
 
-Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 2 (Dennis R1: GO-WITH-FIXES, one HIGH). Roadmap row: FIXED-LIST-NULL (CLI `docs/roadmap/groups/run.md`, 1.0, function break). Anchors are in this repository (decoy-engine) at `origin/main` `26091c834` unless marked `#770:` (engine PR #770, UF-DOMAIN S1, head `3ad186c50`).
+Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 3 (Dennis R1 and R2: GO-WITH-FIXES). Roadmap row: FIXED-LIST-NULL (CLI `docs/roadmap/groups/run.md`, 1.0, function break). Anchors are in this repository (decoy-engine) at `origin/main` `26091c834` unless marked `#770:` (engine PR #770, UF-DOMAIN S1, head `3ad186c50`).
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN: guarantee, size, design notes, choke point, placement, established solutions), `bugfix.md`, `api-and-compatibility.md` (one appended reason code; internal payload), `catalogs/recurring-defects.md` (11 classes). Engine `CLAUDE.md` file-size rule; engine `CONTRIBUTING.md` reason rule (`since=UNRELEASED`).
 
 Risk: R2. It changes the payload format of the isolated child (internal serialization), what the routing probe can measure, and adds a refusal to the one Parquet output adapter (data loss closed). Plan review: Dennis, then Codex. Code gate: Codex, then Dennis. Full suite before merge: yes (serialization and reason-registry triggers).
+
+## Rev 3 changes
+
+| Finding (Dennis R2) | Change | Where |
+|---|---|---|
+| H1: the walk skips extension types; `fixed_shape_tensor` with a null at row 0 writes an unreadable file today | The shared type walk unwraps `pa.ExtensionType` to `storage_type`, and the array walk uses `ExtensionArray.storage`. Probe G added (re-run on the Mac). New AT-F9 cells: `fixed_shape_tensor` with a null at row 0, and a user extension type over `struct<f: fixed_size_list>`. New M-13. Pre-mortem corrected. G-6 now records, with probe evidence, that the dictionary, run-end-encoded, view and union forms raise loudly | 1.2, 4.2, 4.6 G-6, 6, 7, 12 |
+| M1: `_FileBacked.write` is unguarded | `output_parquet_writer` returns `_CheckedParquetWriter`, a narrower type with only `write_batch`, `write_table`, `close` and the context methods; both write methods run the check. No `write`. New AT-F9 cell asserts `write` is absent | 4.2, 6 |
+| L1: more nesting cells | AT-F9 cells for `fixed_size_list<fixed_size_list>` (inner null under a valid outer cell) and `large_list<fixed_size_list>` (null at row 0). M-2 extended to the `fixed_size_list` and `large_list` children | 6, 7 |
+| L2: floor wording | "Proven on CI pyarrow; the remaining leaves are stable round-trips" | 4.2, 12 |
 
 ## Rev 2 changes
 
@@ -90,6 +99,20 @@ Probe D, the whole type catalogue (`tests/native/_rev9_type_catalogue.py`, each 
 
 Probe E, empty structs (rev 2). `pq.write_table` raises `ArrowNotImplementedError` for `struct<>` and for `struct<g: struct<>>`. The IPC round trip of `struct<>` is exact.
 
+Probe G, more wrappers (rev 3, Dennis R2 `walk.py` re-run on the Mac, pyarrow 24.0.0), each with a null fixed-size list cell:
+
+| Form | `pq.write_table` | read back |
+|---|---|---|
+| `fixed_shape_tensor` (extension over `fixed_size_list`), null at row 0 | writes | raises `ArrowInvalid` |
+| `fixed_size_list<fixed_size_list>`, inner null under a valid outer cell | writes | raises `ArrowInvalid` |
+| `large_list<fixed_size_list>`, null at row 0 | writes | raises `ArrowInvalid` |
+| `dictionary<int32, fixed_size_list>`, null index at row 0 or a null dictionary value | raises `ArrowNotImplementedError` | n/a |
+| run-end-encoded over `fixed_size_list`, null at row 0 | raises `ArrowNotImplementedError` | n/a |
+| `list_view<fixed_size_list>`, null at row 0 | raises `ArrowNotImplementedError` | n/a |
+| `dense_union` with a `fixed_size_list` child | raises `ArrowNotImplementedError` | n/a |
+
+The first three are silent data loss and need the walk; the last four raise loudly at write.
+
 Probe F, a throwaway prototype (reverted): `stage_sources` writes Arrow IPC and the worker reads it. Every failing cell of probe A passed, with the exact source type and values. The probe child then failed when it staged its own output as Parquet, so the probe came back inconclusive (`outcome='crashed'`) and the parent run went on. `run_pipeline_isolated` on the same table returned an `IsolatedRunResult` with outcome `crashed` instead of raising in the parent.
 
 ### 1.3 Impact under the V1 bar
@@ -141,17 +164,17 @@ Non-goals (recorded, not blockers):
 - G-3. The probe D failures that happen before staging (`time64[ns]`, `fixed_shape_tensor` without null, `dictionary_float16`): known issues in `tests/integration/test_byte_estimate_arrow_types_e2e.py:305-321`; not this row.
 - G-4. Whether the union, view, run-end-encoded and interval types then run end to end. This plan makes their handoff exact; the builder records their plain-run result. A new failure past staging is a follow-up.
 - G-5. The catch-all in `_resident_fit._run_probe` stays. It covers child start failures outside this scope.
-- G-6. Other types Parquet cannot write at output (unions, views and so on) keep raising pyarrow's own error at the output write. They raise; they do not write a bad file, so they are not data loss. A coded reason for them is a follow-up.
+- G-6. Other types Parquet cannot write at output keep raising pyarrow's own error at the output write: unions, views, run-end-encoded, and dictionary, run-end-encoded, `list_view` and union wrappers over a null fixed-size list (probe G rows 4 to 7). They raise; they do not write a bad file, so they are not data loss. A coded reason for them is a follow-up.
 - G-7. Engine-internal Parquet scratch writers that never see a caller's fixed-size list (`vault/_format.py:260`, `native/_pool_quality.py:248`, `out_of_core/_stage.py:90` key stage, `declared_casting/_stream.py:168-183` typed CSV staging). Section 10.2 lists why each is out of reach.
 
 ### 4.2 Design
 
 All in `src/decoy_engine/fileaccess/adapters/arrow.py` (156 lines today), beside the writers:
 
-- One private recursive walk over a type's children (`list`, `large_list`, `fixed_size_list`, `struct`, `map`). It is the only place that knows how to reach nested types. Two callers use it.
-- `parquet_holds_type(t: pa.DataType) -> bool`, package-internal (no export from `decoy_engine`). True when `t` and every nested type pass. Leaf set, each proven on the `pyarrow>=14` floor and pinned by AT-F3: `null`, `bool`, signed and unsigned integers, `float32`, `float64`, `decimal128`, `decimal256`, `string`, `large_string`, `binary`, `large_binary`, `fixed_size_binary`, `date32`, `time32[ms]`, `time64[us]`, `time64[ns]`, `timestamp` with unit `ms`, `us` or `ns` (any zone), `duration`, and `dictionary<int32, string | binary>`. Nested: `list`, `large_list`, `map`, and `struct` with at least one field. False for everything else, including every `fixed_size_list` (the null limit depends on the data), `struct<>`, every extension type, `string_view`, `binary_view`, `decimal32`, `decimal64`, `float16`, `date64`, `time32[s]` and `timestamp[s]`. A type the set does not name is false, so a new Arrow type goes to IPC until a test proves Parquet holds it.
-- `_refuse_fixed_list_null(data: pa.Table | pa.RecordBatch)`. For each column whose type contains a `fixed_size_list` (found by the walk), walk the array with parent validity merged (`StructArray.flatten`, `ListArray.flatten`, the map's keys and items) and raise `ParquetFixedListNullError` if any fixed-size list array on the path has `null_count > 0`. Columns with no fixed-size list cost one type check. The raise happens after the loop, outside any `except`, with only the column name (class 3).
-- `write_output_table` calls the check before `write_table`. `output_parquet_writer` returns a writer whose `write_batch` and `write_table` call the check first. Both run before any byte of that data reaches the file.
+- One private recursive walk over a type's children (`list`, `large_list`, `fixed_size_list`, `struct`, `map`). An extension type is unwrapped to its `storage_type` first, at every depth. It is the only place that knows how to reach nested types. Two callers use it.
+- `parquet_holds_type(t: pa.DataType) -> bool`, package-internal (no export from `decoy_engine`). True when `t` and every nested type pass. Leaf set, proven on CI pyarrow and pinned by AT-F3; the remaining leaves are stable round-trips across the `pyarrow>=14` range: `null`, `bool`, signed and unsigned integers, `float32`, `float64`, `decimal128`, `decimal256`, `string`, `large_string`, `binary`, `large_binary`, `fixed_size_binary`, `date32`, `time32[ms]`, `time64[us]`, `time64[ns]`, `timestamp` with unit `ms`, `us` or `ns` (any zone), `duration`, and `dictionary<int32, string | binary>`. Nested: `list`, `large_list`, `map`, and `struct` with at least one field. False for everything else, including every `fixed_size_list` (the null limit depends on the data), `struct<>`, every extension type (the predicate does not unwrap them: Parquet does not keep every extension type), `string_view`, `binary_view`, `decimal32`, `decimal64`, `float16`, `date64`, `time32[s]` and `timestamp[s]`. A type the set does not name is false, so a new Arrow type goes to IPC until a test proves Parquet holds it.
+- `_refuse_fixed_list_null(data: pa.Table | pa.RecordBatch)`. For each column whose type contains a `fixed_size_list` (found by the walk), walk the array with parent validity merged (`ExtensionArray.storage`, `StructArray.flatten`, `ListArray.flatten` and `LargeListArray.flatten`, `FixedSizeListArray.flatten`, the map's keys and items) and raise `ParquetFixedListNullError` if any fixed-size list array on the path has `null_count > 0`. Columns with no fixed-size list cost one type check. The raise happens after the loop, outside any `except`, with only the column name (class 3).
+- `write_output_table` calls the check before `write_table`. `output_parquet_writer` returns `_CheckedParquetWriter`, a narrower wrapper with only `write_batch`, `write_table`, `close`, `__enter__` and `__exit__`; both write methods run the check first. It has no `write`, so no raw byte path reaches the output file. Callers today use only `write_batch` and `close` (`_transactional_sink.py:271-283`). The check runs before any byte of that data reaches the file.
 - `ParquetFixedListNullError(DecoyError)` in `src/decoy_engine/errors.py`, beside `FixedWidthWriteError`, with `code = reasons.runtime.PARQUET_FIXED_LIST_NULL` (`"parquet_fixed_list_null"`, appended with `since=UNRELEASED` per `CONTRIBUTING.md:57`). Exported from `decoy_engine.errors` like its siblings.
 - IPC read: `ipc_read_path(path: Path) -> pa.Table` beside `read_table`: `pa.ipc.open_file(pa.memory_map(str(path), "r")).read_all()` inside `guarded`, so file errors stay coded as today.
 - `src/decoy_engine/execution/_isolated_commit.py`, `stage_sources`: writes a table as `s{index:04d}.parquet` with `arrow_adapter.write_table` when every field passes `parquet_holds_type`, else as `s{index:04d}.arrow` with `arrow_adapter.ipc_new_file`. The manifest value changes from a path string to `{"path": str, "format": "parquet" | "ipc"}`.
@@ -159,7 +182,7 @@ All in `src/decoy_engine/fileaccess/adapters/arrow.py` (156 lines today), beside
 - Sentries: `tests/sentry/file_access_registry.toml` gets a row for `ipc_read_path` in `_load_sources` (rule and reason as the Parquet row at `:136-143`). `tests/sentry/baselines/parquet-intermediate-writers.json` keeps `stage_sources` at `max: 1`. If an IPC writer registry exists, `stage_sources` gets a row with the same reason. No cap is raised (class 11).
 - Known-issue list: `_REFUSED_WITH_ESTIMATE_OFF` (`tests/integration/test_byte_estimate_arrow_types_e2e.py:305-321`) loses each entry that now passes. The builder reports which.
 - Tests that pass a bare string manifest (`tests/unit/execution/test_isolated_worker_streaming.py:107`, `:127`; `tests/unit/execution/test_b6b_modes.py:431-433`) move to the new entry shape.
-- Size: about 70 source lines in `fileaccess/adapters/arrow.py` (156 to about 226), about 25 across `_isolated_commit.py` (307) and `_isolated_worker.py` (233), about 15 in `errors.py` and the reason module. New names: `ParquetFixedListNullError` (public), `reasons.runtime.PARQUET_FIXED_LIST_NULL` (public), `parquet_holds_type` and `ipc_read_path` (adapter-internal). No new file in `src/`.
+- Size: about 85 source lines in `fileaccess/adapters/arrow.py` (156 to about 241), about 25 across `_isolated_commit.py` (307) and `_isolated_worker.py` (233), about 15 in `errors.py` and the reason module. New names: `ParquetFixedListNullError` (public), `reasons.runtime.PARQUET_FIXED_LIST_NULL` (public), `parquet_holds_type` and `ipc_read_path` (adapter-internal). No new file in `src/`.
 
 ### 4.3 Choke points
 
@@ -219,7 +242,7 @@ Fixture L: `pa.table({"x": pa.array([[0, 0], None, [2, 2]], pa.list_(pa.int32(),
 - AT-F6. `run_pipeline_isolated(config, {"t": L})` returns an `IsolatedRunResult` and does not raise; the outcome is not `completed`; the result text holds no cell value. Red on base (raises in the parent).
 - AT-F7. `probe_peak_bytes` on fixture L returns an inconclusive result and does not raise. Red on base.
 - AT-F8. Fixture L0 written through `TransactionalSink.write` and through `write_batches`, then committed: both raise `ParquetFixedListNullError` with code `parquet_fixed_list_null`; the target directory holds no file for the table; the message holds the column name and no cell value; `__cause__` and `__context__` are None. Red on base (`write` succeeds and the published file fails `pq.read_table`; `write_batches` the same).
-- AT-F9. Adapter cells, `write_output_table` and `output_parquet_writer`: null at row 0, last row, all rows, middle row; the same inside `struct`, `list` and `map`; a null struct row over a non-null fixed-size list; a slice whose window holds no null of a column that has nulls outside it (written, read back equal). Every null cell refuses; the slice and the no-null cases write and read back equal. Red on base for each null cell (unreadable file or raw raise). Green on base on purpose for the no-null and slice cells.
+- AT-F9. Adapter cells, `write_output_table` and `output_parquet_writer`: null at row 0, last row, all rows, middle row; the same inside `struct`, `list` and `map`; a null struct row over a non-null fixed-size list; a slice whose window holds no null of a column that has nulls outside it (written, read back equal); `fixed_shape_tensor` with a null at row 0; a user `pa.ExtensionType` over `struct<f: fixed_size_list>` with `f` null at row 0; `fixed_size_list<fixed_size_list>` with an inner null under a valid outer cell; `large_list<fixed_size_list>` with a null at row 0; and through `output_parquet_writer`, `hasattr(writer, "write")` is False. Every null cell refuses; the slice and the no-null cases write and read back equal. Red on base for each null cell (unreadable file or raw raise). Green on base on purpose for the no-null and slice cells.
 - AT-F10. A child loads an `ipc` entry under `rlimit_kind="as"` with a cap of the baseline plus three times the file size and completes. Green on base is impossible (no `ipc` entry on base); this cell pins the memory note.
 
 The builder report also lists, for G-4, the plain-run result of each probe D staging-failure type after the fix, and the `rlimit_kind="data"` observation.
@@ -231,7 +254,7 @@ Each alone on the final head; each must turn the named test red. Record the head
 | ID | Mutation | Red |
 |---|---|---|
 | M-1 | `parquet_holds_type` returns True for every type | AT-F1, AT-F3, AT-F4 |
-| M-2 | the shared walk does not enter `struct`, `list` or `map` children | AT-F3 nested cells, AT-F9 nested cells |
+| M-2 | the shared walk does not enter `struct`, `list`, `large_list`, `fixed_size_list` or `map` children (one mutation per kind) | AT-F3 nested cells, AT-F9 nested cells, the `fixed_size_list<fixed_size_list>` and `large_list<fixed_size_list>` cells |
 | M-3 | `fixed_size_list` added to the leaf set | AT-F1, AT-F3 |
 | M-4 | `date64` added to the leaf set | AT-F3 `date64` cells |
 | M-5 | `parquet_holds_type` returns False for every type | AT-F4 lazy half |
@@ -242,6 +265,8 @@ Each alone on the final head; each must turn the named test red. Record the head
 | M-10 | the null walk reads child arrays without merging parent validity | AT-F9 null-parent cell |
 | M-11 | `struct<>` treated as Parquet-exact | AT-F3 empty-struct cells |
 | M-12 | the worker checks entries one by one as it reads | AT-F5 (the spy sees a read) |
+| M-13 | the walk does not unwrap extension types (type and array) | AT-F9 `fixed_shape_tensor` and user-extension cells |
+| M-14 | `_CheckedParquetWriter` gains a `write` that forwards unchecked | AT-F9 `write` cell |
 
 ## 8. Frozen contracts and byte changes
 
@@ -367,8 +392,8 @@ Parquet writers:
 
 ## 12. Pre-mortem
 
-- The allowlist names a type that Parquet does not round-trip exactly on some pyarrow version in range. The leaf set is limited to types that exist and round-trip on the `pyarrow>=14` floor; AT-F3 runs on the CI pyarrow; a failing leaf leaves the set.
-- The null walk misses a nesting form (for example a fixed-size list inside a fixed-size list, or a dictionary of structs). The walk enters every nested type the shared walk knows; AT-F9 covers struct, list, map and null parents. An unknown nesting form is a pre-mortem follow-up, not silent: pyarrow still raises for the middle-row case.
+- The allowlist names a type that Parquet does not round-trip exactly on some pyarrow version in range. The leaf set is proven on CI pyarrow by AT-F3; the remaining leaves are stable round-trips across the `pyarrow>=14` range; a leaf that fails on a later pin leaves the set.
+- The null walk misses a wrapper. Rev 2 missed extension types, and `fixed_shape_tensor` with a null at row 0 would have written an unreadable file (probe G). Rev 3 unwraps extension types and covers `struct`, `list`, `large_list`, `fixed_size_list`, `map` and null parents in AT-F9. The wrappers it does not enter (dictionary, run-end-encoded, view, union) raise loudly at write (probe G, G-6), so they are not silent. A new Arrow wrapper type is the remaining risk; the follow-up is a catalogue cell per new type.
 - The walk costs time on wide tables. Columns with no fixed-size list skip after one type check; `null_count` is cached by Arrow.
 - A memory-mapped IPC table outlives its work root. The child process ends before the parent removes the work root, so the mapping is gone first.
 - A test or helper builds a bare-string manifest. AT-F5 makes it fail loudly; section 4.2 lists the known callers.
@@ -378,7 +403,7 @@ Parquet writers:
 
 | Slice | Repo | Content | Depends on | Risk | Test depth |
 |---|---|---|---|---|---|
-| S1 | engine | adapter walk, `parquet_holds_type`, output refusal and error, reason code, IPC read, two-format handoff, worker check and loader, sentry rows, known-issue list, AT-F1 to AT-F10, changelog fragment; about 110 source lines | nothing; rebases over #770 with no overlap | R2 | T1 plus the full engine suite (serialization and reason-registry triggers) |
+| S1 | engine | adapter walk, `parquet_holds_type`, output refusal and error, reason code, IPC read, two-format handoff, worker check and loader, sentry rows, known-issue list, AT-F1 to AT-F10, changelog fragment; about 125 source lines | nothing; rebases over #770 with no overlap | R2 | T1 plus the full engine suite (serialization and reason-registry triggers) |
 
 One slice. The handoff and the output refusal share the walk and the predicate, so splitting them would ship the walk twice. No CLI slice: the CLI cannot reach the case.
 
