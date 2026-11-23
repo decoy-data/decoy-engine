@@ -464,6 +464,12 @@ class FixedWidthRecordOverlongError(FixedWidthParseError):
     code: str = reasons.runtime.FIXED_WIDTH_RECORD_OVERLONG
 
 
+class ParquetFixedListNullError(DecoyError):
+    """Parquet cannot round-trip a null fixed-size list cell."""
+
+    code: str = reasons.runtime.PARQUET_FIXED_LIST_NULL
+
+
 class FixedWidthWriteError(DecoyError):
     """Raised when a value cannot be written to a fixed-width file such that
     it reads back unchanged against its `FixedWidthLayout` column-spec
@@ -566,6 +572,7 @@ __all__ = [
     "MaskKeyDerivationError",
     "MaskKeyRequiredError",
     "PKDuplicatesError",
+    "ParquetFixedListNullError",
     "PipelineValidationError",
     "RowErrorsFailedError",
     "UnknownFKColumnError",
