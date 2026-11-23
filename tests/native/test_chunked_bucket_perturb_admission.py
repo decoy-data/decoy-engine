@@ -14,7 +14,6 @@ import pytest
 
 from decoy_engine import run_mask_chunked
 from decoy_engine.contracts.column_shape import NO_SOURCES
-from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_output_sink import OutputEvidenceAccumulator
 from decoy_engine.execution._errors import StrategyError
