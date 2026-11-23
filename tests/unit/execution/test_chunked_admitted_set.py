@@ -171,9 +171,16 @@ class TestFailClosedUnchangedWithOffset:
         to a chunk that failed closed."""
         cfg = _config(
             tmp_path,
-            [{"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}],
+            [
+                {
+                    "name": "age",
+                    "strategy": "date_shift",
+                    "namespace": "age_ns",
+                    "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+                }
+            ],
         )
-        chunk = pa.table({"age": pa.array(["23", "not-a-number"], type=pa.string())})
+        chunk = pa.table({"age": pa.array(["2020-01-01", "not-a-number"], type=pa.string())})
 
         advance_calls: list[int] = []
         real_advance = _chunked_dgrn.advance_row_offset

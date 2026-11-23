@@ -189,6 +189,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_column_shape_classifier.py", "ALLOWED_CALLERS", nested=True),
     ),
     Source(
+        "bucketize-width-contract",
+        "test_bucketize_width_contract.py",
+        in_code("test_bucketize_width_contract.py", "ALLOWED_CALLERS"),
+    ),
+    Source(
         "package-fanout",
         "layout/test_package_fanout.py",
         in_code("layout/test_package_fanout.py", "FANOUT_ALLOWLIST"),
@@ -241,6 +246,11 @@ SOURCES: tuple[Source, ...] = (
         "group-by-single-reader",
         "defects/test_group_by_single_reader.py",
         in_code("defects/test_group_by_single_reader.py", "ALLOWED"),
+    ),
+    Source(
+        "faker-pool-size-one-resolver",
+        "defects/test_faker_pool_size_one_resolver.py",
+        in_code("defects/test_faker_pool_size_one_resolver.py", "ALLOWED"),
     ),
     Source(
         "lossless-int-columns",

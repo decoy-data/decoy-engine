@@ -8,6 +8,7 @@ or loosen a call-order assertion without a new plan gate.
 
 from __future__ import annotations
 
+import datetime
 import decimal
 from pathlib import Path
 from typing import Any
@@ -99,17 +100,21 @@ GATE_CASES: dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], str | Non
         {"val": pa.array(range(N), pa.int64())},
         "chunked_code_set_source_dtype_unsupported",
     ),
-    "bucket_perturb_on_int": (
+    # An integer column under bucket_perturb is refused at compile (`column_shape_mismatch`, plan
+    # 2026-11-21-column-shape-rule section 3.2), so classify_job never reaches the chunked dtype
+    # gate with one. The gate's own unit is pinned in test_bucket_perturb_chunked.py. A date
+    # column is not gated: it routes chunked like a string.
+    "bucket_perturb_on_date32": (
         [
             _col(
                 "val",
                 "bucket_perturb",
                 namespace="bp",
-                provider_config={"bucket": "month", "date_format": "%Y-%m-%d"},
+                provider_config={"bucket": "month"},
             )
         ],
-        {"val": pa.array(range(N), pa.int64())},
-        "chunked_bucket_perturb_source_dtype_unsupported",
+        {"val": pa.array([datetime.date(2024, 1, 1)] * N, pa.date32())},
+        None,
     ),
 }
 
@@ -130,7 +135,22 @@ def _job(
     return support.make_cfg(columns, path=path), b6b.lazy(path), pq.read_table(path)
 
 
-@pytest.mark.parametrize("name", sorted(GATE_CASES))
+def test_classify_job_refuses_bucketize_over_a_text_source_alike_for_both_sources(
+    tmp_path: Path,
+) -> None:
+    """The plan refuses the undeclared text column before any routing decision, for a lazy
+    source and its table alike, so `bucketize_non_numeric` has no routing outcome to compare."""
+    from decoy_engine.plan import PlanCompileError
+
+    columns, data, _fragment = GATE_CASES["bucketize_non_numeric"]
+    cfg, lazy_src, resident = _job(columns, data, tmp_path)
+    for source in (lazy_src, resident):
+        with pytest.raises(PlanCompileError) as refused:
+            _classify(cfg, {b6b.TABLE: source}, THRESHOLD)
+        assert refused.value.code == "column_shape_required"
+
+
+@pytest.mark.parametrize("name", sorted(set(GATE_CASES) - {"bucketize_non_numeric"}))
 def test_classify_job_gives_a_lazy_source_the_twins_decision(name: str, tmp_path: Path) -> None:
     columns, data, fragment = GATE_CASES[name]
     cfg, lazy_src, resident = _job(columns, data, tmp_path)
@@ -563,3 +583,12 @@ def test_the_footer_null_count_prose_translates_to_one_stable_code() -> None:
 def test_strategy_fixtures_are_still_the_matrix_source() -> None:
     """Guards the shared fixture import this module relies on for gate-case construction."""
     assert "text_mask" in strategies.STRATEGY_FIXTURES
+
+
+def test_a_date32_bucket_perturb_column_routes_chunked_on_both_source_kinds(
+    tmp_path: Path,
+) -> None:
+    columns, data, _fragment = GATE_CASES["bucket_perturb_on_date32"]
+    cfg, lazy_src, resident = _job(columns, data, tmp_path)
+    for source in (lazy_src, resident):
+        assert _classify(cfg, {b6b.TABLE: source}, THRESHOLD).mode == "chunked"

@@ -29,6 +29,7 @@ from decoy_engine.publication._descriptor import (
     descriptor_digest,
     encode_descriptor,
 )
+from decoy_engine.publication._members import Member
 from decoy_engine.publication._publish import (
     check_request,
     failed_receipt,
@@ -75,6 +76,7 @@ __all__ = [
     "DescriptorVault",
     "Exit",
     "LocalPointerStore",
+    "Member",
     "Outcome",
     "PointerResult",
     "PointerState",

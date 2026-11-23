@@ -96,6 +96,7 @@ def _canonical_config_json(config: Mapping[str, Any]) -> str:
 
 
 if TYPE_CHECKING:
+    from decoy_engine.execution.pipeline import ResidentFit
     from decoy_engine.plan._types import Plan
     from decoy_engine.profile._types import Profile
     from decoy_engine.providers_v2 import ProviderRegistry
@@ -223,6 +224,9 @@ class PhysicalPlanInputs:
     # The kill switch. Off, the chunked lane converts every column to pandas, so the planner
     # exempts no carried column; the compiler's classification must read the same flag.
     chunked_dispatcher_enabled: bool = True
+    # The stored verdict `store_resident_fit` put on the `RouteDecision`; the compiler only reads
+    # it. `None` for a job out of that check's scope.
+    resident_fit: ResidentFit | None = None
 
     @property
     def has_mask_table(self) -> bool:
@@ -354,6 +358,16 @@ def compute_plan_hash(inputs: PhysicalPlanInputs) -> str:
         *((facts.lazy_transform_bearing,) if facts.lazy_transform_bearing else ()),
         *(("fk_ooc_dtype_hazard",) if facts.fk_ooc_dtype_hazard else ()),
         *(() if inputs.chunked_dispatcher_enabled else ("chunked_dispatcher_off",)),
+        # The verdict and its code only. The byte figures depend on how the table was priced (a lazy
+        # source by its Parquet footer, a resident one by its Arrow size) and on the host ceiling, so
+        # hashing them would give a lazy and a resident input of one job different plan hashes on the
+        # same host. facts.budget_bytes above still comes from host RAM when no budget is set, so the
+        # hash is not host-independent.
+        *(
+            ()
+            if inputs.resident_fit is None
+            else (inputs.resident_fit.verdict, inputs.resident_fit.code)
+        ),
     )
     digest = hashlib.sha256()
     for part in parts:

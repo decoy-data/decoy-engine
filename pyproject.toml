@@ -91,19 +91,12 @@ dependencies = [
     # for user-supplied filter / derive expressions) cannot trip silently.
     # numexpr is a hard runtime dependency, not optional.
     "numexpr>=2.8",
-    # MG-3 / M2 (2026-05-31): the `nested` masking strategy walks each cell
-    # as JSON and applies a child strategy to leaf values located by
-    # JSONPath. jsonpath-ng (MIT) is the established, maintained
-    # implementation; matches our posture for numexpr / polars (do not roll
-    # our own parser). Required at import time of the nested strategy
-    # module; absent imports fall back to a typed runtime error.
-    "jsonpath-ng>=1.6",
     # SEC.1 / C1 (2026-06-03): user-supplied `formula` expressions evaluate
     # under simpleeval's restricted single-expression sandbox instead of
     # CPython eval() (which, even with empty __builtins__, was a known RCE via
     # ().__class__...__subclasses__). simpleeval (MIT) is the established,
     # maintained "safely evaluate one user expression" library; matches our
-    # posture for numexpr / jsonpath-ng (do not roll our own AST sandbox).
+    # posture for numexpr (do not roll our own AST sandbox).
     # Required at import time of decoy_engine.expressions. Floor at the
     # release that fixes GHSA-44vg-5wv2-h2hg / CVE-2026-32640 (patched in
     # 1.0.5); tests/sentry/dependencies/test_dependency_floors.py keeps lock >= floor.
@@ -917,9 +910,6 @@ module = [
     # simpleeval (MIT) ships no stubs / py.typed; imported by
     # decoy_engine.expressions for the formula sandbox.
     "simpleeval",
-    # jsonpath-ng ships no stubs; imported by the nested masking strategy.
-    "jsonpath_ng",
-    "jsonpath_ng.*",
     # Cloud SDKs ship no usable stubs for our call surface; imported
     # function-locally in decoy_engine.profile._source.
     "boto3",

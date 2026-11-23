@@ -3,7 +3,8 @@ masking.
 
 Wraps a child strategy. For each cell:
   1. Parse the cell as JSON (object or array).
-  2. Use jsonpath-ng to locate one or more leaf values at `target`.
+  2. Locate one or more leaf values at `target` with the one target grammar
+     (`_nested_json.parse_target`) and its evaluator (`TargetPath.find`).
   3. Collect the leaf values into a temporary Series.
   4. Run the child strategy against that Series (single batch call).
   5. Write the masked values back into the parsed JSON at the same
@@ -34,8 +35,8 @@ decimal). Operators relying on byte-stable input
 should mask upstream of any JSON normalization.
 
 Config (`provider_config`):
-    target          str             JSONPath expression locating the
-                                    leaves to mask. Required.
+    target          str             JSONPath in the closed subset of
+                                    `_nested_json.parse_target`. Required.
     strategy        str             Child strategy name (must be a key
                                     of SCALAR_HANDLERS and NOT
                                     "nested"). Required.
@@ -43,22 +44,21 @@ Config (`provider_config`):
                                     strategy. Optional, defaults to
                                     empty.
 
-Established methodology citation: jsonpath-ng is the maintained
-Python implementation of the JSONPath specification (RFC 9535 draft
-+ Stefan Goessner's reference syntax). MIT-licensed; matches our
-posture for numexpr / polars (we don't reinvent parsers).
+Established methodology citation: the target grammar is a closed subset of RFC 9535
+(JSONPath). `_nested_json._target` scans it and evaluates it with our own code, so the frozen
+behavior does not move with a jsonpath-ng release (1.8 and 1.16 disagree on an array selector
+applied to an object).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import jsonpath_ng
 import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine._canonical import StrictJsonError, strict_json_plain, strict_json_write
-from decoy_engine._nested_json import nested_children
+from decoy_engine._nested_json import TargetRefusal, nested_children, parse_target
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -75,31 +75,21 @@ from decoy_engine.plan._types import ColumnSeed
 
 
 def _writeback_would_corrupt(full_path: Any, root: Any) -> bool:
-    """True if `full_path.update(root, value)` would misplace the write.
+    """True if writing at `full_path` would not replace the selected value.
 
-    jsonpath-ng coerces an array selector (`[*]`, `[i]`, a slice) applied to a
-    dict into a synthetic singleton list, so the match's `full_path` ends in an
-    `Index` even though the real parent container is the dict. `.update()` then
-    writes an integer key onto the dict instead of replacing the object, leaving
-    the original value in place (a cleartext leak). The signature is a
-    segment-vs-parent-type mismatch: an `Index` whose parent is not a list, or a
-    `Fields` whose parent is not a dict. Reliable writes (Fields->dict,
-    Index->list) and root/`this` targets (handled by capturing the update
-    return) are not flagged.
+    `TargetPath.find` only selects through the right container (a name in an object, a position
+    in an array), so this re-walks the keys against the cell as a second check at the write: a
+    key whose container has the other type, or is gone, fails closed instead of writing a new key
+    next to the cleartext.
     """
-    if isinstance(full_path, jsonpath_ng.Child):
-        parent_path, last = full_path.left, full_path.right
-        found = parent_path.find(root)
-        if not found:
-            return True  # parent unresolvable -> cannot verify the write, fail closed
-        parent_val = found[0].value
-    else:
-        last = full_path
-        parent_val = root
-    if isinstance(last, jsonpath_ng.Index):
-        return not isinstance(parent_val, list)
-    if isinstance(last, jsonpath_ng.Fields):
-        return not isinstance(parent_val, dict)
+    node = root
+    for key in full_path.keys:
+        if isinstance(key, int):
+            if not isinstance(node, list) or not 0 <= key < len(node):
+                return True
+        elif not isinstance(node, dict) or key not in node:
+            return True
+        node = node[key]
     return False
 
 
@@ -269,7 +259,7 @@ class NestedStrategyHandler:
         # resolution (strategy-name validation, nested-of-nested rejection,
         # SCALAR_HANDLERS lookup, technique_class) now lives in
         # `_resolve_child`, shared with `preflight()`. Resolving it here --
-        # before the jsonpath parse below, same position the inline checks
+        # before the target parse below, same position the inline checks
         # occupied pre-refactor -- keeps every error code, message, and raise
         # order byte-identical to the pre-extraction behavior (passing
         # `column` preserves the "(column=...)" message suffix).
@@ -279,17 +269,16 @@ class NestedStrategyHandler:
         if child_seed.strategy == "bucket_perturb":
             child_handler.preflight(child_seed, ctx)
 
-        try:
-            jsonpath_expr = jsonpath_ng.parse(target_path)
-        except Exception as exc:
+        parsed_target = parse_target(target_path)
+        if isinstance(parsed_target, TargetRefusal):
             raise StrategyError(
                 code=reasons.runtime.NESTED_JSONPATH_PARSE_ERROR,
                 strategy="nested",
                 message=(
-                    f"nested target {target_path!r} is not a valid JSONPath "
-                    f"expression (column={column!r}): {exc}"
+                    f"nested target is outside the supported JSONPath subset "
+                    f"(column={column!r}): {parsed_target}"
                 ),
-            ) from exc
+            )
 
         col = df[column]
         if pd.api.types.is_extension_array_dtype(col.dtype):
@@ -324,7 +313,7 @@ class NestedStrategyHandler:
         # must fail closed rather than pass every cell through raw (TEST-3 P1-2).
         saw_parseable = False
         saw_matched_fault = False
-        # Per-position: (parsed_object, list[jsonpath_match]). Position
+        # Per-position: (parsed_object, list[match]). Position
         # is the row's 0-indexed offset in the column, not its label.
         per_position_state: dict[int, tuple[Any, list]] = {}
 
@@ -340,36 +329,11 @@ class NestedStrategyHandler:
                 record_fault(ctx, warnings, column, pos, exc.token)
                 continue
             saw_parseable = True
-            matches = find_matches(jsonpath_expr, parsed, column)
+            matches = find_matches(parsed_target, parsed, column)
             if not matches:
                 continue
-            # QA-3 F14 (2026-05-31, security): detect prefix-overlap
-            # among matches. Recursive (`$..ssn`) or wildcard (`$.*.name`)
-            # JSONPaths on structurally-nested matches can produce
-            # results where one match's path is a prefix of another's.
-            # If we then call `m.full_path.update(parsed, new_value)`
-            # in match-order, an earlier write into an outer container
-            # can erase a later write into its nested child (or vice
-            # versa) -- the leaf is silently NOT masked.
-            # Fix: sort matches deepest-first by path depth before
-            # writeback. This makes the ordering deterministic and the
-            # outer container's masked value always reflects the last
-            # write. We also emit a typed QualityWarning so operators
-            # auditing the Post-scan integrity report can see the path was ambiguous.
+            # A subset target has no descendant segment, so no match is a prefix of another.
             ordered_matches = _order_matches_deepest_first(matches)
-            if _has_prefix_overlap(ordered_matches):
-                warnings.append(
-                    QualityWarning(
-                        code=reasons.warning.NESTED_JSONPATH_PATH_OVERLAP,
-                        provider="nested",
-                        column=column,
-                        detail={
-                            "row_pos": str(pos),
-                            "target": target_path,
-                            "match_count": str(len(ordered_matches)),
-                        },
-                    )
-                )
             try:
                 cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
             except StrictJsonError as exc:
@@ -496,15 +460,10 @@ class NestedStrategyHandler:
             for m in matches:
                 new_value = new_leaf_values[cursor]
                 cursor += 1
-                # Fail closed if jsonpath_ng would misapply this writeback. When
-                # an array selector (`[*]`, `[i]`, a slice) targets a dict,
-                # jsonpath_ng coerces the dict into a synthetic singleton list, so
-                # `full_path` becomes an Index that `.update()` writes as a NEW
-                # integer key on the dict instead of replacing the object -- the
-                # original cleartext survives (Codex 2026-07-31 BLOCKER: `$[*]` on
-                # `{"ssn": ...}` added key "0" and republished the SSN). The
-                # segment-vs-parent-type mismatch is the coercion signature; a
-                # reliable write must not leak, so reject the whole run.
+                # `TargetPath.find` already refuses an array selector on an object. This is the
+                # second check at the write: a key whose container has the other type would add
+                # a new key next to the cleartext (Codex 2026-07-31 BLOCKER: `$[*]` on
+                # `{"ssn": ...}` added key "0" and republished the SSN), so reject the run.
                 if _writeback_would_corrupt(m.full_path, parsed):
                     raise StrategyError(
                         code=reasons.runtime.NESTED_TARGET_UNWRITABLE_CONTAINER,
@@ -513,16 +472,15 @@ class NestedStrategyHandler:
                             f"nested target resolved to a match whose masked value "
                             f"cannot be written back reliably for column {column!r} "
                             f"(an array/index selector applied to a JSON object; "
-                            f"jsonpath-ng coerces it and the write would not replace "
-                            f"the object). Failing closed to avoid leaking the source "
-                            f"value. Use an object-appropriate target (e.g. `$.*` or a "
-                            f"field path) instead of an array selector on an object."
+                            f"the write would not replace the object). Failing closed to "
+                            f"avoid leaking the source value. Use `$.*` or a member name "
+                            f"for an object, and `[*]` or an index only for an array."
                         ),
                     )
-                # Capture the return value. For a field/index path jsonpath_ng
+                # Capture the return value. For a field/index path `update`
                 # mutates `parsed` in place and returns it, but for a ROOT target
                 # (`$`, or the backtick-`this` selector) the root has no parent to
-                # write into, so `Root.update()` returns the replacement WITHOUT
+                # write into, so `MatchPath.update()` returns the replacement WITHOUT
                 # mutating `parsed`. Discarding it re-serialized the original
                 # cleartext -- a masked-root cell (e.g. target `$` + redact) would
                 # publish raw PII with no error or warning. Reassigning `parsed`
@@ -536,20 +494,11 @@ class NestedStrategyHandler:
 
 
 def _path_segments(match: Any) -> tuple[str, ...]:
-    """Return the dotted segments of a jsonpath_ng match's full_path.
+    """Return the dotted segments of a match's full_path (`user.email` -> ("user", "email")).
 
-    `match.full_path` is a chain of Fields / Index / Slice nodes; its
-    `str` representation yields a dotted expression like `user.name`
-    or `(user.email)` (recursive-descent compound paths wrap in
-    parens). We strip the wrapping parens before splitting on `.` so
-    that `(user.email)` -> ("user", "email") aligns with the bare
-    `user` segment from the recursive root match for prefix-overlap
-    detection.
+    A wrapping paren pair is stripped so a path written `(user.email)` splits the same way.
     """
     raw = str(match.full_path).strip()
-    # Strip a single outer paren wrapper if present (jsonpath_ng emits
-    # these for compound recursive paths). Inner parens, if any,
-    # remain inside the segment.
     if raw.startswith("(") and raw.endswith(")"):
         raw = raw[1:-1]
     return tuple(raw.split("."))
@@ -559,7 +508,7 @@ def _order_matches_deepest_first(matches: list) -> list:
     """Return matches sorted by path depth descending.
 
     QA-3 F14 (2026-05-31): when the JSONPath produces overlapping
-    matches (one path is a prefix of another), `jsonpath_ng.update`
+    matches (one path is a prefix of another), a write
     in original order can silently lose the inner write. Sorting
     deepest-first makes the outer container's masked value the LAST
     write, so the final cell reflects the parent's masking; this is
@@ -568,23 +517,3 @@ def _order_matches_deepest_first(matches: list) -> list:
     matters; the inner-leaf writes are discarded by the parent write).
     """
     return sorted(matches, key=lambda m: -len(_path_segments(m)))
-
-
-def _has_prefix_overlap(ordered_matches: list) -> bool:
-    """Return True if any match's path is a strict prefix of another.
-
-    The list is expected to be deepest-first; under that order a
-    prefix-overlap means some pair (deeper, shallower) where shallower
-    is a strict prefix of deeper. We do an O(n^2) scan; n is at most
-    the number of matches in a single cell (typically <50), and the
-    function only runs when matches are non-empty.
-    """
-    seg_lists = [_path_segments(m) for m in ordered_matches]
-    n = len(seg_lists)
-    for i in range(n):
-        deeper = seg_lists[i]
-        for j in range(i + 1, n):
-            shallower = seg_lists[j]
-            if len(shallower) < len(deeper) and deeper[: len(shallower)] == shallower:
-                return True
-    return False

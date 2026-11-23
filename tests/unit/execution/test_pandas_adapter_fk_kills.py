@@ -30,6 +30,7 @@ from decoy_engine.plan._types import ColumnSeed, GroupSeed, SeedEnvelope, TableS
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests._column_shapes import integer_shapes
 
 _REG = get_default_registry()
 _NS = NamespaceRegistry(bindings=())
@@ -59,7 +60,10 @@ def _hash(ns: str) -> ColumnSeed:
 
 
 def _plan(per_table: tuple[tuple[str, TableSeed], ...]) -> Any:
-    return SimpleNamespace(seed_envelope=SeedEnvelope(job_seed=_SEED, per_table=per_table))
+    return SimpleNamespace(
+        seed_envelope=SeedEnvelope(job_seed=_SEED, per_table=per_table),
+        column_shapes=integer_shapes("parent", "age"),
+    )
 
 
 def _run(plan: Any, sources: dict[str, pa.Table], graph: RelationshipGraph) -> Any:

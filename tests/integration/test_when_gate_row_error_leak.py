@@ -48,8 +48,9 @@ def _bucketize_when_config(
                 "columns": [
                     {
                         "name": "age",
-                        "strategy": "bucketize",
-                        "provider_config": {"width": 10},
+                        "strategy": "date_shift",
+                        "namespace": "age_ns",
+                        "provider_config": {"date_format": "%Y-%m-%d"},
                         "when": "keep == 1",
                     },
                     {"name": "keep", "strategy": "passthrough"},
@@ -101,10 +102,13 @@ def _date_shift_when_config(
 
 
 # dennis's exact reproduction: 6 rows, keep = [0,0,0,1,1,1], the bad cell
-# ("badX") is the last GATED row; the innocent row "30" is an UNMATCHED row.
+# ("badX") is the last GATED row; the innocent row "2020-01-30" is an UNMATCHED row.
 _BUCKETIZE_SRC = pa.table(
     {
-        "age": pa.array(["10", "20", "30", "40", "50", "badX"], type=pa.string()),
+        "age": pa.array(
+            ["2020-01-10", "2020-01-20", "2020-01-30", "2020-02-10", "2020-02-20", "badX"],
+            type=pa.string(),
+        ),
         "keep": [0, 0, 0, 1, 1, 1],
     }
 )
@@ -138,7 +142,7 @@ class TestB1WhenBucketize:
         assert "badX" not in out_age
         # The innocent unmatched row "30" (keep==0, passed through) must still
         # be present -- it must NOT have been deleted by a mis-indexed filter.
-        assert "30" in out_age
+        assert "2020-01-30" in out_age
         # Exactly one row removed.
         assert result.outputs["t"].num_rows == 5
         # The quarantine file carries the real bad value.

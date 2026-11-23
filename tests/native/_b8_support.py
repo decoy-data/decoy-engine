@@ -29,7 +29,6 @@ from decoy_engine.execution._column_access import created_columns
 from decoy_engine.execution.native import _chunked_entry, _dispatch
 from decoy_engine.execution.native._chunked_entry import run_mask_chunked
 from decoy_engine.execution.native._dispatch import run_native_or_oracle_chunked
-from decoy_engine.execution.native.chunked._core import mask_chunked as _run_mask_chunked
 from decoy_engine.profile import (
     DeclarationRequest,
     PreparedDeclaredSources,
@@ -46,6 +45,7 @@ from tests.native._chunked_entry_support import (
     make_config,
     vault_key,
 )
+from tests.native._chunked_entry_support import mask_chunked_in_job as _run_mask_chunked
 from tests.unit.vault._support import vault_writer
 
 FORCE = "cat_force"

@@ -173,7 +173,7 @@ EXCEPTIONS: dict[tuple[str, str], tuple[int, str, str]] = {
         "permanent",
         "openat2 is Linux only; its flags are the kernel's and are read at call time",
     ),
-    (_DURABLE, "dir-fd"): (9, "EW2", "directory-descriptor fsync walk, POSIX arm lands in EW2"),
+    (_DURABLE, "dir-fd"): (6, "EW2", "directory-descriptor fsync walk, POSIX arm lands in EW2"),
     (_DURABLE, "geteuid"): (1, "EW2", "the chain owner walk is skipped on win32 by EW2"),
     (_LOCAL, "fchmod"): (2, "EW4", "owner-only creation moves to create_owner_only_file in EW4"),
     (_OUTPUT, "dir-fd"): (

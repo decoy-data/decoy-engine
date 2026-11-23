@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._pipeline_route_exec import run_mask_chunked
 from decoy_engine.execution.native._chunked_entry import run_mask_chunked as run_chunked_masking
 from decoy_engine.execution.physical._capabilities import CAPABILITIES
@@ -177,4 +178,5 @@ class ResidentChunkedAggregatorAdapter:
             key_provider=key_provider,
             native_threads=native_threads,
             dispatcher_enabled=dispatcher_enabled,
+            sources=NO_SOURCES,
         )

@@ -1,7 +1,7 @@
 """S5 (Sprint 2 honesty pack) row-error integration tests: full run_pipeline.
 
 Mirrors tests/integration/test_quarantine_e2e.py's shape. Covers the D8
-behavior change (GATE-1 Q3): bucketize/date_shift jobs with unparseable
+behavior change (GATE-1 Q3): date_shift jobs with unparseable
 non-null cells now fail loud by default, or quarantine under the
 `format_error` trigger when opted in.
 """
@@ -17,7 +17,9 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.errors import RowErrorsFailedError
+from decoy_engine.execution._errors import DeclaredCastValueError
 from decoy_engine.execution._pipeline import run_pipeline
+from decoy_engine.plan import PlanCompileError
 
 
 def _write_source(tmp_path: Path, table: pa.Table, name: str = "t") -> str:
@@ -26,8 +28,15 @@ def _write_source(tmp_path: Path, table: pa.Table, name: str = "t") -> str:
     return str(p)
 
 
+_INT64 = {"id": "integer/ascii/v1", "signed": True, "bit_width": 64}
+
+
 def _bucketize_config(
-    src_path: str, target_path: str, *, quarantine: dict[str, Any] | None = None
+    src_path: str,
+    target_path: str,
+    *,
+    quarantine: dict[str, Any] | None = None,
+    declared: bool = False,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "version": 2,
@@ -38,7 +47,12 @@ def _bucketize_config(
             {
                 "name": "t",
                 "columns": [
-                    {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}
+                    {
+                        "name": "age",
+                        "strategy": "bucketize",
+                        "provider_config": {"width": 10},
+                        **({"logical_type": "integer", "parse_format": _INT64} if declared else {}),
+                    }
                 ],
             }
         ],
@@ -165,8 +179,8 @@ class TestNestedFailLoud:
         # cleartext leaks. Reproduced as a real leak before the fix.
         rows = [
             json.dumps({"other": 1}),  # no target match -> contributes no leaf (shifts positions)
-            json.dumps({"v": "LEAKVAL"}),  # bad leaf -> bucketize format_error
-            json.dumps({"v": 30}),  # good leaf
+            json.dumps({"v": "LEAKVAL"}),  # bad leaf -> date_shift format_error
+            json.dumps({"v": "2020-01-30"}),  # good leaf
         ]
         src = pa.table({"payload": pa.array(rows, type=pa.string())})
         src_path = _write_source(tmp_path, src)
@@ -185,10 +199,11 @@ class TestNestedFailLoud:
                         {
                             "name": "payload",
                             "strategy": "nested",
+                            "namespace": "payload_ns",
                             "provider_config": {
                                 "target": "$.v",
-                                "strategy": "bucketize",
-                                "strategy_config": {"width": 10},
+                                "strategy": "date_shift",
+                                "strategy_config": {"date_format": "%Y-%m-%d"},
                             },
                         }
                     ],
@@ -212,10 +227,10 @@ class TestNestedFailLoud:
         # shifts the leaf positions within the gated subset, so both remaps must
         # compose or the wrong full-table row is quarantined and the bad row leaks.
         payloads = [
-            json.dumps({"v": 1}),  # row 0, keep=0: gated out, untouched
+            json.dumps({"v": "2020-01-01"}),  # row 0, keep=0: gated out, untouched
             json.dumps({"other": 9}),  # row 1, keep=1: no target match (shifts leaves)
             json.dumps({"v": "BADLEAK"}),  # row 2, keep=1: bad leaf -> format_error
-            json.dumps({"v": 30}),  # row 3, keep=1: good leaf
+            json.dumps({"v": "2020-01-30"}),  # row 3, keep=1: good leaf
         ]
         src = pa.table({"payload": pa.array(payloads, type=pa.string()), "keep": [0, 1, 1, 1]})
         src_path = _write_source(tmp_path, src)
@@ -234,11 +249,12 @@ class TestNestedFailLoud:
                         {
                             "name": "payload",
                             "strategy": "nested",
+                            "namespace": "payload_ns",
                             "when": "keep == 1",
                             "provider_config": {
                                 "target": "$.v",
-                                "strategy": "bucketize",
-                                "strategy_config": {"width": 10},
+                                "strategy": "date_shift",
+                                "strategy_config": {"date_format": "%Y-%m-%d"},
                             },
                         },
                         {"name": "keep", "strategy": "passthrough"},
@@ -259,64 +275,42 @@ class TestNestedFailLoud:
         assert "BADLEAK" in records[0]["payload"]  # the RIGHT (full-table) row captured
 
 
-class TestBucketizeFailLoud:
-    def test_no_quarantine_raises_row_errors_failed(self, tmp_path: Path) -> None:
+class TestBucketizeNeedsADeclaration:
+    """`bucketize` reads numbers only from a typed column or an F06 declaration, so a text
+    column never reaches its per-cell parse: the refusal comes at compile, before any output."""
+
+    def test_text_column_is_refused_at_compile_and_writes_nothing(self, tmp_path: Path) -> None:
         src = pa.table(
             {"age": pa.array(["23", "bad1", "47", "bad2", "8", "bad3"], type=pa.string())}
         )
         src_path = _write_source(tmp_path, src)
         config = _bucketize_config(src_path, str(tmp_path / "t.out.parquet"))
-        sources = {"t": pq.read_table(src_path)}
-
-        with pytest.raises(RowErrorsFailedError) as exc_info:
-            run_pipeline(config, sources, engine_version="0.1.0")
-
-        assert len(exc_info.value.records) == 3
-        for rec in exc_info.value.records:
-            assert rec.trigger == "format_error"
-            assert rec.table == "t"
-            assert rec.column == "age"
-        # THE LEAK TEST: no cell values in the exception message.
+        with pytest.raises(PlanCompileError) as exc_info:
+            run_pipeline(config, {"t": pq.read_table(src_path)}, engine_version="0.1.0")
+        assert exc_info.value.code == "column_shape_required"
         assert "bad1" not in str(exc_info.value)
-        assert "bad2" not in str(exc_info.value)
         assert not (tmp_path / "t.out.parquet").exists()
 
-    def test_quarantine_enabled_removes_bad_rows_job_succeeds(self, tmp_path: Path) -> None:
+    def test_bad_cell_under_a_declared_integer_fails_at_the_cast(self, tmp_path: Path) -> None:
         src = pa.table(
             {"age": pa.array(["23", "bad1", "47", "bad2", "8", "bad3"], type=pa.string())}
         )
         src_path = _write_source(tmp_path, src)
-        qpath = str(tmp_path / "quarantine.jsonl")
-        config = _bucketize_config(
-            src_path,
-            str(tmp_path / "t.out.parquet"),
-            quarantine={"enabled": True, "output_path": qpath, "triggers": ["format_error"]},
-        )
-        sources = {"t": pq.read_table(src_path)}
+        config = _bucketize_config(src_path, str(tmp_path / "t.out.parquet"), declared=True)
+        with pytest.raises(DeclaredCastValueError) as exc_info:
+            run_pipeline(config, {"t": pq.read_table(src_path)}, engine_version="0.1.0")
+        assert exc_info.value.code == "declared_integer_invalid"
+        assert "bad1" not in str(exc_info.value)
+        assert not (tmp_path / "t.out.parquet").exists()
 
-        result = run_pipeline(config, sources, engine_version="0.1.0")
-
-        assert result.outputs["t"].num_rows == 3
-        assert Path(qpath).exists()
-        records = [json.loads(line) for line in Path(qpath).read_text().splitlines()]
-        assert len(records) == 3
-        assert {r["age"] for r in records} == {"bad1", "bad2", "bad3"}
-        for r in records:
-            assert r["_quarantine_trigger"] == "format_error"
-        assert result.quality_metrics["quarantine"]["counts_by_trigger"] == {"format_error": 3}
-
-    def test_source_null_cells_produce_no_row_errors_all_parseable_unchanged(
-        self, tmp_path: Path
-    ) -> None:
-        """Golden pin: source-null cells stay null; all-parseable data is
-        byte-identical to the pre-slice behavior."""
+    def test_source_null_cells_stay_null_under_a_declared_integer(self, tmp_path: Path) -> None:
+        """Golden pin: source-null cells stay null and parseable data is bucketed as before."""
         src = pa.table({"age": pa.array(["23", None, "47"], type=pa.string())})
         src_path = _write_source(tmp_path, src)
-        config = _bucketize_config(src_path, str(tmp_path / "t.out.parquet"))
-        sources = {"t": pq.read_table(src_path)}
-        result = run_pipeline(config, sources, engine_version="0.1.0")
+        config = _bucketize_config(src_path, str(tmp_path / "t.out.parquet"), declared=True)
+        result = run_pipeline(config, {"t": pq.read_table(src_path)}, engine_version="0.1.0")
         assert result.row_errors == ()
-        assert result.outputs["t"].column("age").to_pylist() == ["20", None, "40"]
+        assert result.outputs["t"].column("age").to_pylist() == [20, None, 40]
 
 
 class TestDateShiftFailLoud:
@@ -352,7 +346,7 @@ class TestMixedValidatorAndRowErrorRun:
     def test_one_combined_quarantine_file_correct_per_trigger_counts(self, tmp_path: Path) -> None:
         src = pa.table(
             {
-                "age": pa.array(["23", "bad-age", "47"], type=pa.string()),
+                "age": pa.array(["2020-01-23", "bad-age", "2020-01-27"], type=pa.string()),
                 "cc": [
                     "4111111111111111",
                     "4111111111111111",
@@ -373,7 +367,12 @@ class TestMixedValidatorAndRowErrorRun:
                 {
                     "name": "t",
                     "columns": [
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "date_shift",
+                            "namespace": "age_ns",
+                            "provider_config": {"date_format": "%Y-%m-%d"},
+                        },
                         {"name": "cc", "strategy": "passthrough"},
                     ],
                 }
@@ -480,7 +479,7 @@ class TestQuarantineWriteTimingParity:
     """LOW-1 (S2 remediation guide section 8): full-frame `run_pipeline` must
     raise BEFORE writing the quarantine JSONL, matching the sequential path
     (which already raises before its single post-loop write). A job with BOTH
-    a covered row-error (bucketize `format_error`, quarantine covers it) AND
+    a covered row-error (date_shift `format_error`, quarantine covers it) AND
     an uncovered row-error (code_set `mask_error`, NOT covered) must raise
     `RowErrorsFailedError` and publish NO quarantine JSONL at all -- not even
     a partial file for the covered remainder."""
@@ -500,7 +499,7 @@ class TestQuarantineWriteTimingParity:
         corpus_path = self._corpus(tmp_path)
         src = pa.table(
             {
-                "age": pa.array(["23", "bad-age", "47"], type=pa.string()),
+                "age": pa.array(["2020-01-23", "bad-age", "2020-01-27"], type=pa.string()),
                 "code": pa.array(["A01", "A02", "U07.1"], type=pa.string()),
             }
         )
@@ -517,7 +516,12 @@ class TestQuarantineWriteTimingParity:
                 {
                     "name": "t",
                     "columns": [
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "date_shift",
+                            "namespace": "age_ns",
+                            "provider_config": {"date_format": "%Y-%m-%d"},
+                        },
                         {
                             "name": "code",
                             "strategy": "code_set",
@@ -532,7 +536,7 @@ class TestQuarantineWriteTimingParity:
                 }
             ],
             "relationships": [],
-            # Covers format_error (bucketize) only; mask_error (code_set) is
+            # Covers format_error (date_shift) only; mask_error (code_set) is
             # deliberately left uncovered.
             "quarantine": {"enabled": True, "output_path": qpath, "triggers": ["format_error"]},
         }

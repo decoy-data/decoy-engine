@@ -177,6 +177,8 @@ def _drive(fn: Any, chunks: list[pa.Table]) -> list[Any]:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         key_provider=key_provider(),
+        # The schema the chunks were cut from; only `run_mask_pipeline_chunked` takes it (#750).
+        **({"source_schema": chunks[0].schema} if fn is run_mask_pipeline_chunked else {}),
     )
     return [v for t in out for v in t.column("c").to_pylist()]
 
