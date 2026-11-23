@@ -479,6 +479,20 @@ it has equal-width bins on a 1, 2, 5 grid and every non-empty bin is held by at 
 `numeric_bins` outside 1 to 1000 is refused with `quality.numeric_bins_invalid` (new, `since`
 unreleased) by every snapshot writer, and above 1000 by the DP fit (`dp_numeric_bins_invalid`).
 
+`cell_format.char_class` (FIT-CODES-TEXT, 2026-11) is one new optional member of the `cell_format` block
+of a `freetext` column entry. It carries on both `distribution-snapshot/v1` (the raw writer and
+`include_values=True`, through `compute_distribution_snapshot(..., cell_format=True)`) and
+`distribution-snapshot/v2` (the plain redacted writer). Its only value is `"digits"`: every non-blank
+cell of the column is ASCII `0` to `9` (`re.fullmatch("[0-9]+", cell)`), so the sampler draws digit strings
+at the fitted lengths. It is one enum token with no source value, so `scrub_cell_format` keeps `"digits"`
+and nulls any other value. This engine reads it under both tags, and a snapshot without it generates as
+before. This is a recorded exception to the additive-field rule below: an engine older than this
+change does not ignore the member. Its strict decoder refuses it with `statistical_cell_format_invalid`
+and never misreads it. The same holds for a pinned plan: an older engine that reads a plan whose stored
+`cell_format` holds `char_class` requires exactly six members and refuses it with the same code. A new tag was not minted: the old reader fails closed with a coded refusal,
+and one member does not justify a v3. After 1.0 the member and its single value are frozen; a new value
+is additive in 1.x and needs the same old-reader note.
+
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
 `match_rate` can now be `null`. The engine's verdict reader accepts v2 and v3. Each `residual_pii` finding gains `source` (`regex`, `classifier` or `ner`), `model`
