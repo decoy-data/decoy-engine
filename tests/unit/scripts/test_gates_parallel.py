@@ -246,6 +246,20 @@ def test_reporter_counts_are_identical_for_one_or_two_junit_files(tmp_path: Path
     assert gr.branch_only_steps(two) == gr.branch_only_steps(one) == ["tests"]
 
 
+def test_reporter_reads_the_serial_junit_of_a_sentry_step(tmp_path: Path) -> None:
+    """A serial-pass failure of any step with a `-serial.xml` shows in its counts and ids."""
+    gr = report_module()
+    out = tmp_path / "sentry"
+    out.mkdir()
+    (out / "branch.steps").write_text("sentry\t1\tpytest\n")
+    (out / "branch-sentry.xml").write_text(
+        _suite(_CASES.split('<testcase classname="tests.test_a" name="test_bad"')[0], 1, 0, 0)
+    )
+    (out / "branch-sentry-serial.xml").write_text(_suite(_SERIAL_CASES, 2, 1, 0))
+    assert gr.junit_failing_ids(out, "branch") == ["tests/test_s.py::TestS::test_timing"]
+    assert gr._counts(out, "branch", "sentry").startswith("passed=2 failed=1")
+
+
 def test_reporter_refuses_a_serial_log_without_a_totals_line(tmp_path: Path) -> None:
     two = _out_dir(tmp_path, "two", two_files=True)
     (two / "branch-tests-serial.log").write_text("Killed\n")

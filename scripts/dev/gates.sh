@@ -437,6 +437,28 @@ combine_rc() {  # $1 parallel-pass rc, $2 serial-pass rc
   if [ "$a" = 1 ] || [ "$b" = 1 ]; then echo 1; else echo 0; fi
 }
 
+# The one place that builds a pytest step's command(s): the worker rule, the serial fallback, the
+# `not serial` / `serial` split and the junit and basetemp names. Callers set PRE_PAR (command up
+# to the pytest arguments of the main pass), PRE_SER (the same for the serial pass) and
+# SPLIT_PATHS; this sets cmd, cmd2 (the serial pass, empty when the run is not parallel) and note.
+# $1 step name. Reads tree, label, OUT, TMP_ROOT, WORKERS, jbase, junit, tmpargs, LAYER_IGNORE.
+split_pytest_cmds() {
+  local name=$1 w=$WORKERS
+  note=''
+  cmd2=()
+  # A tree without the xdist report scrubber (origin/main before it lands) would abort a
+  # parallel run on the first lone surrogate in a captured log, so that tree runs serial.
+  if [ "$w" -gt 1 ] && [ ! -f "$tree/tests/_xdist_safe_reports.py" ]; then
+    w=1; note=" (serial: this tree has no tests/_xdist_safe_reports.py)"
+  fi
+  if [ "$w" -gt 1 ]; then
+    cmd=(${PRE_PAR[@]+"${PRE_PAR[@]}"} ${jbase[@]+"${jbase[@]}"} -m "($PYTEST_MARK) and not serial" -n "$w" --dist loadfile ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS[@]+"${SPLIT_PATHS[@]}"})
+    cmd2=(${PRE_SER[@]+"${PRE_SER[@]}"} -p no:cacheprovider -q -rfE -o junit_family=xunit1 "--junitxml=$OUT/$label-$name-serial.xml" "--basetemp=$TMP_ROOT/$label-$name-serial" ${tmpargs[@]+"${tmpargs[@]}"} -m "($PYTEST_MARK) and serial" ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS[@]+"${SPLIT_PATHS[@]}"})
+  else
+    cmd=(${PRE_PAR[@]+"${PRE_PAR[@]}"} ${junit[@]+"${junit[@]}"} ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS[@]+"${SPLIT_PATHS[@]}"})
+  fi
+}
+
 # The layers step: run only the layer test in the venv synced above (pytest args in $@).
 layer_step() {
   [ "$LAYER_SYNCED" = ok ] || { echo "gates: could not sync $LAYER_VENV"; return 2; }
@@ -464,19 +486,13 @@ run_steps() {  # $1 label, $2 tree
       mypy) cmd=("$BIN/mypy" ${MYPY_ARGS[@]+"${MYPY_ARGS[@]}"}) ;;
       # ratchet_check first (baselines never grow); skipped in trees that predate it (the baseline worktree)
       sentry)
-        # Same worker rule as the tests step. strict: the gate venv is the certified profile, so a
-        # registry entry that cannot be verified is a failure. ratchet_check runs first, serial.
-        w=$WORKERS
-        if [ "$w" -gt 1 ] && [ ! -f "$tree/tests/_xdist_safe_reports.py" ]; then
-          w=1; note=" (serial: this tree has no tests/_xdist_safe_reports.py)"
-        fi
+        # strict: the gate venv is the certified profile, so a registry entry that cannot be
+        # verified is a failure. ratchet_check runs first, serial, inside the main pass.
         sentry_pre='if [ -f scripts/dev/ratchet_check.py ]; then "$0" scripts/dev/ratchet_check.py || exit 1; fi; exec "$0" -m pytest "$@"'
-        if [ "$w" -gt 1 ]; then
-          cmd=(env DECOY_GATE_VENV_STRICT=1 bash -c "$sentry_pre" "$BIN/python" ${jbase[@]+"${jbase[@]}"} -m "($PYTEST_MARK) and not serial" -n "$w" --dist loadfile ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
-          cmd2=(env DECOY_GATE_VENV_STRICT=1 "$BIN/python" -m pytest -p no:cacheprovider -q -rfE -o junit_family=xunit1 "--junitxml=$OUT/$label-sentry-serial.xml" "--basetemp=$TMP_ROOT/$label-sentry-serial" ${tmpargs[@]+"${tmpargs[@]}"} -m "($PYTEST_MARK) and serial" ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
-        else
-          cmd=(env DECOY_GATE_VENV_STRICT=1 bash -c "$sentry_pre" "$BIN/python" ${junit[@]+"${junit[@]}"} ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
-        fi ;;
+        PRE_PAR=(env DECOY_GATE_VENV_STRICT=1 bash -c "$sentry_pre" "$BIN/python")
+        PRE_SER=(env DECOY_GATE_VENV_STRICT=1 "$BIN/python" -m pytest)
+        SPLIT_PATHS=(${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"})
+        split_pytest_cmds sentry ;;
       layers) cmd=(layer_step ${junit[@]+"${junit[@]}"}) ;;
       # strict: a venv that drifted from uv.lock fails instead of skipping the metadata check
       licenses)
@@ -493,19 +509,9 @@ run_steps() {  # $1 label, $2 tree
         if [ -n "$WRITEBASE$BASEFILE" ]; then
           pyt=(env -u PYTEST_ADDOPTS -u PYTEST_PLUGINS -u DECOY_TEST_ORDER_FILE PY_COLORS=0 NO_COLOR=1 ${ORDER_MAP:+"DECOY_TEST_ORDER_FILE=$ORDER_MAP"} "$BIN/python" -m pytest -o addopts= --color=no)
         fi
-        # A tree without the xdist report scrubber (origin/main before it lands) would abort a
-        # parallel run on the first lone surrogate in a captured log, so that tree runs serial.
-        w=$WORKERS
-        note=''
-        if [ "$w" -gt 1 ] && [ ! -f "$tree/tests/_xdist_safe_reports.py" ]; then
-          w=1; note=" (serial: this tree has no tests/_xdist_safe_reports.py)"
-        fi
-        if [ "$w" -gt 1 ]; then
-          cmd=(${pyt[@]+"${pyt[@]}"} ${jbase[@]+"${jbase[@]}"} -m "($PYTEST_MARK) and not serial" -n "$w" --dist loadfile ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${tests[@]+"${tests[@]}"})
-          cmd2=(${pyt[@]+"${pyt[@]}"} -p no:cacheprovider -q -rfE -o junit_family=xunit1 "--junitxml=$OUT/$label-tests-serial.xml" "--basetemp=$TMP_ROOT/$label-tests-serial" ${tmpargs[@]+"${tmpargs[@]}"} -m "($PYTEST_MARK) and serial" ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${tests[@]+"${tests[@]}"})
-        else
-          cmd=(${pyt[@]+"${pyt[@]}"} ${junit[@]+"${junit[@]}"} ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${tests[@]+"${tests[@]}"})
-        fi ;;
+        PRE_PAR=(${pyt[@]+"${pyt[@]}"}) PRE_SER=(${pyt[@]+"${pyt[@]}"})
+        SPLIT_PATHS=(${tests[@]+"${tests[@]}"})
+        split_pytest_cmds tests ;;
       *) echo "gates: unknown step $name" >&2; exit 2 ;;
     esac
     if [ "$label" = baseline ] && branch_step_ok "$name"; then rc=-1; cmd=("(passed on the branch; not rerun)")
