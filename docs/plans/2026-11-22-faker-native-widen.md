@@ -282,3 +282,21 @@ Contract: rewrite the allowlist sentence at `docs/compatibility-contract.md:997-
 
 - **V2-LOG:** `person_dob` native: needs a typed (date32) pool take and a typed output contract.
 - **V2-LOG:** a CI leg that installs the `mimesis` extra so P5b runs on every PR, not only at the gate.
+
+## Amendment A1 (2026-11-23, after FAKER-DEFAULT-POOL merged as engine #768)
+
+Author: Opus (orchestrator). Reason: the builder stopped before code because section 5 item 2a (S0) is written against the pre-#768 reservation model. Engine main at `104dfb442` already ships a measured reservation and a pre-build refusal:
+
+- `measured_pool_bytes` (`generation/pool/_value_pool.py`) is what `PoolCache.put` and `OocFakerPoolContext.get_pool` reserve. `_RESERVE_BYTES_PER_VALUE` is gone.
+- `get_pool` refuses before building through `construction_floor(size, strings=...)` (pointer copies plus a set slot per value, and a string floor when `_is_stock_string_provider` is true).
+- The motivating failure (seven default pools failing a job that succeeds today) no longer exists on main.
+
+A1.1 S0 is re-anchored on the shipped design. S0 shrinks to: confirm each provider S1 adds is a stock string provider for `construction_floor` (so the string floor applies to it), and add one W1 test per new provider family (name, email, phone, address) that a pool whose `construction_floor` exceeds the budget is refused before building, and one whose measured size fits is admitted. Build S0 together with S1+S2 as one atomic artifact; it is no longer a separate slice.
+
+A1.2 The streamed, batch-bounded `PoolBuilder`, the adapter batch-stream protocol, `POOL_CONSTRUCTION_PEAK_FACTOR`, the batch-size constant and W1a-W1d move to a 1.x hardening follow-up row (FAKER-POOL-STREAMED-BUILD). Reason: under the V1 bar only function breaks, data loss and non-admin leaks block V1. A pool that passes `construction_floor` but whose real build exceeds the budget is refused after one pool build (a bounded spike of one pool), with the same code and value-free message; that is neither a break nor a leak. `construction_floor` and its tests stay.
+
+A1.3 Re-anchor every reference to `_RESERVE_BYTES_PER_VALUE`, `_MIN_BYTES_PER_VALUE` and `pool_size * 4096` (sections 3.6, 5.2a, 9 W1, 10 B4) to the #768 names. B4 is already shipped by #768 and is not a byte change of this plan. The F6b flip and `test_ooc_faker_pool_context.py` lines named in section 9 are re-read at `104dfb442`; flip only what this plan's allowlist change makes wrong, and list each flip with its reason in the PR.
+
+A1.4 The single source of the allowlist is `OPERATORS["faker"].provider_allowlist`. If `_faker_pool.py` reads `C1_PROVIDER_ALLOWLIST` from `_real_type_admission` and that is a separate object, route it through the registry in S1 and extend the totality sentry to fail on a second allowlist.
+
+A1.5 Slices after A1: one atomic artifact S0+S1+S2 (allowlist edit, totality sentry, P1-P9, the two message texts, the contract paragraph, the changelog fragment, the named test flips, and the A1.1 W1 tests). S3 is unchanged (after FAKER-MIGRATE S2).
