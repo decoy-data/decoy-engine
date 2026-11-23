@@ -253,6 +253,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("defects/test_lossless_int_columns.py", "ALLOWED", nested=True),
     ),
     Source(
+        "output-assembly-one-path",
+        "defects/test_output_assembly_one_path.py",
+        in_code("defects/test_output_assembly_one_path.py", "ALLOWED"),
+    ),
+    Source(
         "validation-route-allowlist",
         "defects/test_validation_sites.py",
         in_code("defects/test_validation_sites.py", "ROUTE_ALLOWLIST"),

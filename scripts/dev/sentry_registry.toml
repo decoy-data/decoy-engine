@@ -263,3 +263,7 @@ baseline = "tests/sentry/baselines/bucketize-width-contract.json"
 [[sentry]]
 id = "signature-exemptions"
 baseline = "tests/sentry/baselines/signature-exemptions.json"
+
+[[sentry]]
+id = "output-assembly-one-path"
+baseline = "tests/sentry/baselines/output-assembly-one-path.json"
