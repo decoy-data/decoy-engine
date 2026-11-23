@@ -3,7 +3,8 @@ masking.
 
 Wraps a child strategy. For each cell:
   1. Parse the cell as JSON (object or array).
-  2. Use jsonpath-ng to locate one or more leaf values at `target`.
+  2. Use jsonpath-ng, fed by the one target grammar (`_nested_json.parse_target`), to locate
+     one or more leaf values at `target`.
   3. Collect the leaf values into a temporary Series.
   4. Run the child strategy against that Series (single batch call).
   5. Write the masked values back into the parsed JSON at the same
@@ -34,8 +35,8 @@ decimal). Operators relying on byte-stable input
 should mask upstream of any JSON normalization.
 
 Config (`provider_config`):
-    target          str             JSONPath expression locating the
-                                    leaves to mask. Required.
+    target          str             JSONPath in the closed subset of
+                                    `_nested_json.parse_target`. Required.
     strategy        str             Child strategy name (must be a key
                                     of SCALAR_HANDLERS and NOT
                                     "nested"). Required.
@@ -58,7 +59,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine._canonical import StrictJsonError, strict_json_plain, strict_json_write
-from decoy_engine._nested_json import nested_children
+from decoy_engine._nested_json import TargetRefusal, nested_children, parse_target, to_jsonpath
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -279,17 +280,17 @@ class NestedStrategyHandler:
         if child_seed.strategy == "bucket_perturb":
             child_handler.preflight(child_seed, ctx)
 
-        try:
-            jsonpath_expr = jsonpath_ng.parse(target_path)
-        except Exception as exc:
+        parsed_target = parse_target(target_path)
+        if isinstance(parsed_target, TargetRefusal):
             raise StrategyError(
                 code=reasons.runtime.NESTED_JSONPATH_PARSE_ERROR,
                 strategy="nested",
                 message=(
-                    f"nested target {target_path!r} is not a valid JSONPath "
-                    f"expression (column={column!r}): {exc}"
+                    f"nested target is outside the supported JSONPath subset "
+                    f"(column={column!r}): {parsed_target}"
                 ),
-            ) from exc
+            )
+        jsonpath_expr = to_jsonpath(parsed_target)
 
         col = df[column]
         if pd.api.types.is_extension_array_dtype(col.dtype):
@@ -343,33 +344,8 @@ class NestedStrategyHandler:
             matches = find_matches(jsonpath_expr, parsed, column)
             if not matches:
                 continue
-            # QA-3 F14 (2026-05-31, security): detect prefix-overlap
-            # among matches. Recursive (`$..ssn`) or wildcard (`$.*.name`)
-            # JSONPaths on structurally-nested matches can produce
-            # results where one match's path is a prefix of another's.
-            # If we then call `m.full_path.update(parsed, new_value)`
-            # in match-order, an earlier write into an outer container
-            # can erase a later write into its nested child (or vice
-            # versa) -- the leaf is silently NOT masked.
-            # Fix: sort matches deepest-first by path depth before
-            # writeback. This makes the ordering deterministic and the
-            # outer container's masked value always reflects the last
-            # write. We also emit a typed QualityWarning so operators
-            # auditing the Post-scan integrity report can see the path was ambiguous.
+            # A subset target has no descendant segment, so no match is a prefix of another.
             ordered_matches = _order_matches_deepest_first(matches)
-            if _has_prefix_overlap(ordered_matches):
-                warnings.append(
-                    QualityWarning(
-                        code=reasons.warning.NESTED_JSONPATH_PATH_OVERLAP,
-                        provider="nested",
-                        column=column,
-                        detail={
-                            "row_pos": str(pos),
-                            "target": target_path,
-                            "match_count": str(len(ordered_matches)),
-                        },
-                    )
-                )
             try:
                 cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
             except StrictJsonError as exc:
@@ -568,23 +544,3 @@ def _order_matches_deepest_first(matches: list) -> list:
     matters; the inner-leaf writes are discarded by the parent write).
     """
     return sorted(matches, key=lambda m: -len(_path_segments(m)))
-
-
-def _has_prefix_overlap(ordered_matches: list) -> bool:
-    """Return True if any match's path is a strict prefix of another.
-
-    The list is expected to be deepest-first; under that order a
-    prefix-overlap means some pair (deeper, shallower) where shallower
-    is a strict prefix of deeper. We do an O(n^2) scan; n is at most
-    the number of matches in a single cell (typically <50), and the
-    function only runs when matches are non-empty.
-    """
-    seg_lists = [_path_segments(m) for m in ordered_matches]
-    n = len(seg_lists)
-    for i in range(n):
-        deeper = seg_lists[i]
-        for j in range(i + 1, n):
-            shallower = seg_lists[j]
-            if len(shallower) < len(deeper) and deeper[: len(shallower)] == shallower:
-                return True
-    return False

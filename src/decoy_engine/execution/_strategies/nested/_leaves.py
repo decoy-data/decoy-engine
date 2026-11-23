@@ -45,13 +45,16 @@ def find_matches(expr: Any, parsed: Any, column: str) -> list[Any]:
     jsonpath-ng treats an array selector on a scalar as a one-item list, but it calls `len()` on a
     `JsonNumber` (a lossy number kept as read). That `TypeError` is the same fault as an array
     selector on a plain scalar, which the writeback check refuses with the unwritable-container
-    code, so it gets that code here. No match is returned, so nothing can be written back.
+    code, so it gets that code here. An index on an object raises `KeyError`: same fault, same
+    code. No match is returned, so nothing can be written back.
     """
     failed = False
     matches: list[Any] = []
     try:
         matches = expr.find(parsed)
-    except TypeError:
+    except IndexError:
+        pass  # an index past the end of an array selects nothing (RFC 9535 section 2.3.3)
+    except (TypeError, KeyError):
         failed = True
     if failed:
         raise StrategyError(

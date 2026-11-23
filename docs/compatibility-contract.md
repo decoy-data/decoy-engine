@@ -1340,6 +1340,21 @@ the child as integers and a null, not as `float64` with `NaN`, so `hash` and `to
 output of `NaN` or a pandas null is written as JSON `null`; an infinite output fails the row
 (`nested_child_non_finite`). A null-free leaf list and an all-float-exact cell give the bytes they gave before.
 
+**Nested target grammar (NESTED-FREEZE, 2026-11-23).** Recorded pre-GA change. `provider_config.target` of a
+`nested` column is a closed subset of RFC 9535 JSONPath. It is `$` followed by segments: `.name`, `.*`,
+`['name']` or `["name"]` (RFC escapes), `[*]`, `[index]` and `[start:end:step]`. An index is an integer with no
+leading zero, not `-0`, within plus or minus 2^53 - 1. A step is 1 or more. Nothing else is accepted: no `..`,
+filter, function, union or blank space outside a quoted name, no missing `$`, no dot-quoted name, no quoted name
+`*`, and none of the jsonpath-ng extensions (`|`, `&`, `where`, backticks). A target outside the grammar is refused by
+`compile_plan` and `run_config_only_checks` with the new plan reason `plan.nested_target_unsupported`. The
+message names table, column, config path, character position and form, and shows the target text up to 64
+characters (a longer one reads `first 64 of N characters`); it never shows a cell. `nested_jsonpath_parse_error`
+stays as the handler backstop when the handler runs without a compiled plan. An index selector on a JSON object
+cell fails closed with `nested_target_unwritable_container` (it was a bare `KeyError`), and an index past the end of
+an array selects nothing. `nested_jsonpath_path_overlap` stays registered and is no longer raised, because no
+subset target can match a path and its prefix. Known gap to RFC 9535: `$.*` on an array cell selects nothing
+under jsonpath-ng. Widening the grammar later is additive. The dependency is `jsonpath-ng>=1.8.0,<2`.
+
 ### 3.5 Disguises
 
 Disguises are dated/versioned specs (`disguises/`, `disguises/loader.py`,
