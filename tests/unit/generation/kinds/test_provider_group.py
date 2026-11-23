@@ -29,7 +29,7 @@ from decoy_engine.determinism import DeterminismError
 from decoy_engine.generation import synthesize
 from decoy_engine.generation._admission import classify_plan
 from decoy_engine.generation.composite import COMPOSITES, CompositeError, load_locality_table
-from decoy_engine.generation.kinds import provider_column_values
+from decoy_engine.generation.kinds._provider import provider_column_values
 from decoy_engine.generation.kinds._provider_group import provider_group_values
 from decoy_engine.generation.pool._errors import GenerationError, PoolCapacityError
 from decoy_engine.generators.derivation import with_table

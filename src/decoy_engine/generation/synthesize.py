@@ -59,9 +59,9 @@ from decoy_engine.generation.kinds import (
     conditional_tables,
     constant_values,
     parametric_values,
-    provider_column_values,
 )
 from decoy_engine.generation.kinds._lookup import lookup_column_values
+from decoy_engine.generation.kinds._provider import provider_column_values
 from decoy_engine.generation.relational import reference_draw_extras, reference_policies
 from decoy_engine.generation.relational._aggregate import aggregate_values, with_aggregates
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
