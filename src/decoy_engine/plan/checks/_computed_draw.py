@@ -18,9 +18,10 @@ from decoy_engine.generation.pool import (
     draw_kwargs,
     parse_computed_draw,
 )
+from decoy_engine.plan._checks import check_non_poolable_provider_with_pool_backend
 from decoy_engine.plan.checks._generate_columns import _located
 
-__all__ = ["check_computed_draws"]
+__all__ = ["check_computed_draws", "check_pool_routing"]
 
 
 def _faker_columns(config: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
@@ -77,3 +78,9 @@ def check_computed_draws(config: dict[str, Any]) -> None:
                 else reasons.plan.COMPUTED_DRAW_ELEMENTS_INVALID
             )
             raise _located(str(code), f"{base}.provider_config", where)
+
+
+def check_pool_routing(config: dict[str, Any]) -> None:
+    """The pool-routing refusals as one group, so both compile entry points run the same order."""
+    check_non_poolable_provider_with_pool_backend(config)
+    check_computed_draws(config)
