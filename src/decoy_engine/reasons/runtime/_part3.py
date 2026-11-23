@@ -89,6 +89,8 @@ __all__ = [
     "TRUNCATE_MASK_CHAR_INVALID",
     "UNIFIED_SLICE_INVARIANT_VIOLATION",
     "UNKNOWN_TRANSFORM_OP",
+    "VALIDATOR_KEY_STATE_OVER_BUDGET",
+    "VALIDATOR_SOURCE_PAIRING_MISMATCH",
     "VAULT_COMMIT_FAILED",
     "VAULT_CRYPTO_NOT_INSTALLED",
     "VAULT_ENTRY_TOO_LARGE",
@@ -476,4 +478,17 @@ GENERATION_PROVIDER_FAILED = _d(
     "generation_provider_failed",
     "A provider column could not be generated.",
     since="1.32.0",
+)
+
+_d = _catalog.runtime("ValidatorStateError")
+
+VALIDATOR_KEY_STATE_OVER_BUDGET = _d(
+    "validator_key_state_over_budget",
+    "A keyed validator would hold more state than its validation budget allows.",
+    since=UNRELEASED,
+)
+VALIDATOR_SOURCE_PAIRING_MISMATCH = _d(
+    "validator_source_pairing_mismatch",
+    "The source rows read for a leak check do not line up with the published rows.",
+    since=UNRELEASED,
 )

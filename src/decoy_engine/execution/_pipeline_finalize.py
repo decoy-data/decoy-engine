@@ -30,7 +30,9 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from decoy_engine import reasons
 from decoy_engine.execution._planner import AUTO_CHUNK_THRESHOLD_ROWS_DEFAULT
+from decoy_engine.generation.pool._events import QualityWarning
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
@@ -356,6 +358,24 @@ def compute_post_validation(
     qm["post_validation_enforce"] = post_validation_enforce
 
 
+def _unchecked_column_warnings(config: dict[str, Any], report: Any) -> list[QualityWarning]:
+    """One warning per column a `leak_check` entry names in `columns:` and then did not check.
+
+    Names and codes only: the run still passes, but the check says nothing about that column.
+    """
+    from decoy_engine.validators import unchecked_named_columns
+
+    return [
+        QualityWarning(
+            code=reasons.warning.LEAK_CHECK_COLUMN_NOT_CHECKED,
+            provider="leak_check",
+            column=skip.column,
+            detail={"table": skip.table, "reason": skip.code},
+        )
+        for skip in unchecked_named_columns(config, report)
+    ]
+
+
 def finalize_validators_and_quarantine(
     outputs: dict[str, pa.Table],
     *,
@@ -391,6 +411,9 @@ def finalize_validators_and_quarantine(
 
         v_report = _run_validators(outputs, config, sources=caller_sources)
         quality_metrics["validation"] = {"validators": dataclasses.asdict(v_report)}
+        unchecked = _unchecked_column_warnings(config, v_report)
+        if unchecked:
+            quality_metrics["validation"]["warnings"] = [dataclasses.asdict(w) for w in unchecked]
 
     if mask_row_errors:
         # Additive manifest key, counts only (no cell values -- trap T3).

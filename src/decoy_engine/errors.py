@@ -384,6 +384,21 @@ class ValidatorFailedError(DecoyError):
         )
 
 
+class ValidatorStateError(DecoyError):
+    """A job-level validator cannot hold the state its check needs.
+
+    Raised by the validation session when a keyed check would outgrow its key-state budget
+    (``validator_key_state_over_budget``) or when the source rows of a paired check do not line
+    up with the published rows (``validator_source_pairing_mismatch``). The message names the
+    table and column only, never a cell value.
+    """
+
+    def __init__(self, *, code: str, message: str = "") -> None:
+        self.code = code
+        self.message = message
+        super().__init__(f"[{code}] {message}" if message else f"[{code}]")
+
+
 class RowErrorsFailedError(DecoyError):
     """Raised when per-row strategy errors exist and quarantine does not
     cover their trigger (Sprint 2 honesty pack, D8).
@@ -571,4 +586,5 @@ __all__ = [
     "UnknownFKColumnError",
     "ValidationError",
     "ValidatorFailedError",
+    "ValidatorStateError",
 ]

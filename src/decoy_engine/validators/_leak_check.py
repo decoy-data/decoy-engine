@@ -27,21 +27,11 @@ Two tiers (D3):
    make the finding quarantinable row-by-row under the existing
    `validation_fail` trigger.
 
-Strategy classification is the false-positive control (trap T1). The three
-frozensets below are exhaustive over `SCALAR_HANDLERS`
-(`execution/_strategies/__init__.py`); `tests/unit/validators/
-test_leak_check.py::TestDriftSentry` is the ratchet that fails the build if a
-new strategy is added without a conscious classification decision.
-
-GATE decision beyond the locked defaults (flagged for Cam, not pre-decided by
-the guide): composite bundle output columns (identified by `provider` being
-one of the known composite-generator names, mirroring the explicit dispatch
-in `execution/_strategies/_composite.py`) are classified TRANSFORMATIVE. Every
-composite bundle regenerates a fresh coherent value per row (name/address/
-provider-identity bundles), the same semantic family as `faker`; there is no
-narrower per-member-column classification exposed by the composite generators
-today, and treating them as TRANSFORMATIVE (checked at both tiers, not
-excluded) is the conservative, honesty-preserving choice.
+Strategy classification (the false-positive control, trap T1) and the scope of an entry live in
+`_scope.py`; the names stay importable from here. The validator is a fold: it takes the output
+rows and their source rows span by span and keeps, per column, the compared count, an exact
+identical count and the first `FINDING_INDEX_CAP` identical positions. Every column or table it
+does not check is recorded with a registered `leak_check_skip_*` code.
 """
 
 from __future__ import annotations
@@ -50,56 +40,27 @@ from typing import Any
 
 import pyarrow as pa
 
-from decoy_engine.config import classify_table_kinds
-from decoy_engine.validators._types import ValidatorFinding
-
-# ---------------------------------------------------------------------------
-# Strategy classification (D3). Exhaustive over SCALAR_HANDLERS; the drift
-# sentry test asserts this.
-# ---------------------------------------------------------------------------
-
-TRANSFORMATIVE: frozenset[str] = frozenset(
-    {"hash", "fpe", "tokenize", "redact", "text_redact", "faker", "code_set"}
+from decoy_engine import reasons
+from decoy_engine.errors import ValidatorStateError
+from decoy_engine.validators._fold import CappedIndices, FoldResult, finding_index_cap, run_whole
+from decoy_engine.validators._scope import (
+    _COMPOSITE_PROVIDERS,
+    EXCLUDED,
+    SHAPE_PRESERVING,
+    TRANSFORMATIVE,
+    ScopedColumn,
+    plan_scope,
 )
+from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
-SHAPE_PRESERVING: frozenset[str] = frozenset(
-    {
-        "bucketize",
-        "bucket_perturb",
-        "categorical",
-        "date_shift",
-        "derived",
-        "derived_aggregate",
-        "formula",
-        "geo_generalize",
-        "group_key",
-        "grouped_series",
-        "joint_mask",
-        "nested",
-        "shuffle",
-        "text_mask",
-        "top_code",
-        "truncate",
-        "windowed_date",
-    }
-)
-
-EXCLUDED: frozenset[str] = frozenset({"passthrough"})
-
-# Composite bundle generators (execution/_strategies/_composite.py's explicit
-# provider dispatch, mirrored here rather than re-derived). A column whose
-# `provider` is one of these is a composite-bundle member; see the GATE note
-# in the module docstring for the TRANSFORMATIVE classification rationale.
-_COMPOSITE_PROVIDERS: frozenset[str] = frozenset(
-    {
-        "composite_name_email",
-        "composite_city_state_zip",
-        "composite_person",
-        "composite_address",
-        "composite_provider",
-        "composite_custom",
-    }
-)
+__all__ = [
+    "EXCLUDED",
+    "SHAPE_PRESERVING",
+    "TRANSFORMATIVE",
+    "_COMPOSITE_PROVIDERS",
+    "LeakCheckFold",
+    "validate_leak_check",
+]
 
 
 def _is_identical(src: Any, out: Any) -> bool:
@@ -114,37 +75,157 @@ def _is_identical(src: Any, out: Any) -> bool:
         return False
 
 
-def _fk_child_columns(config: dict[str, Any]) -> set[tuple[str, str]]:
-    """(table, column) pairs that are FK children: values come from the
-    parent's masked key map, not the declared strategy. A leaking parent is
-    caught on the parent column instead."""
-    out: set[tuple[str, str]] = set()
-    for rel in config.get("relationships") or []:
-        if not isinstance(rel, dict):
-            continue
-        for child in rel.get("children") or []:
-            if not isinstance(child, dict):
-                continue
-            table_name = child.get("table")
-            if not isinstance(table_name, str):
-                continue
-            for col in child.get("columns") or []:
-                if isinstance(col, str):
-                    out.add((table_name, col))
-    return out
+class _ColumnState:
+    """Counters for one scoped column: compared cells and the identical ones."""
+
+    __slots__ = ("compared", "identical", "present")
+
+    def __init__(self, cap: int | None) -> None:
+        self.compared = 0
+        self.identical = CappedIndices(cap)
+        self.present = False
 
 
-def _column_entries(config: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
-    """(table, column) -> column config entry, for every mask-kind table."""
-    out: dict[tuple[str, str], dict[str, Any]] = {}
-    for table in config.get("tables") or []:
-        if not isinstance(table, dict) or not isinstance(table.get("name"), str):
-            continue
-        table_name = table["name"]
-        for col in table.get("columns") or []:
-            if isinstance(col, dict) and isinstance(col.get("name"), str):
-                out[(table_name, col["name"])] = col
-    return out
+class LeakCheckFold:
+    """leak_check over output rows paired with their source rows.
+
+    Missing-source rule (D2, fail-loud): a table in scope that reaches the fold without source
+    rows raises, because a leak check that silently did not run is worse than none.
+
+    Raises:
+        ValueError: An explicit `columns:` entry names a generate-kind table (at construction),
+            a table in scope has no source, or a column's strategy is not classified.
+    """
+
+    def __init__(self, entry: dict[str, Any], config: dict[str, Any], *, cap: int | None) -> None:
+        params: dict[str, Any] = entry.get("params") or {}
+        self._max_ratio = float(params.get("max_identical_ratio", 0.02))
+        self._min_rows = int(params.get("min_rows", 1))
+        self._plan = plan_scope(config, entry)
+        self._by_table: dict[str, list[ScopedColumn]] = {}
+        for col in self._plan.columns:
+            self._by_table.setdefault(col.table, []).append(col)
+        self._state = {(c.table, c.column): _ColumnState(cap) for c in self._plan.columns}
+        self._observed: set[str] = set()
+
+    def paired_tables(self) -> frozenset[str]:
+        return frozenset(self._by_table)
+
+    def table_complete(self, table: str) -> None:
+        return None
+
+    def add(self, table: str, span: RowSpan) -> None:
+        columns = self._by_table.get(table)
+        if columns is None:
+            return
+        self._observed.add(table)
+        if span.source is None:
+            raise ValueError(
+                f"leak_check configured for table {table!r} but no source table was "
+                "provided; leak verification cannot run. Pass the source table via "
+                "run_pipeline(sources=...) or exclude this table from leak_check's scope."
+            )
+        if span.source.num_rows != span.output.num_rows:
+            raise ValidatorStateError(
+                code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
+                message=f"the source rows for table {table!r} do not line up with its output rows.",
+            )
+        out_names = set(span.output.schema.names)
+        src_names = set(span.source.schema.names)
+        for col in columns:
+            if col.column not in out_names or col.column not in src_names:
+                continue
+            state = self._state[(table, col.column)]
+            state.present = True
+            if col.skip is not None:
+                continue
+            if col.kind == "unclassified":
+                # Fail CLOSED (dennis review 2026-07-04): an unclassified strategy reaching here
+                # means the drift sentry was bypassed, and silently skipping the column would
+                # manufacture false confidence in a privacy product.
+                raise ValueError(
+                    f"leak_check: strategy {col.strategy!r} on {table}.{col.column} is not "
+                    "classified as TRANSFORMATIVE, SHAPE_PRESERVING, or EXCLUDED. leak_check "
+                    "cannot verify a strategy it does not know how to interpret; classify it "
+                    "in decoy_engine.validators._scope (and its drift sentry) before use."
+                )
+            src_vals = span.source.column(col.column).to_pylist()
+            out_vals = span.output.column(col.column).to_pylist()
+            for i, (src_val, out_val) in enumerate(zip(src_vals, out_vals, strict=True)):
+                if src_val is None:
+                    continue  # null source: not a leak either way
+                state.compared += 1
+                if _is_identical(src_val, out_val):
+                    state.identical.add(span.offset + i)
+
+    def finish(self) -> FoldResult:
+        findings: list[ValidatorFinding] = []
+        checked: list[tuple[str, str | None]] = []
+        skipped: list[SkippedColumn] = []
+        for table in self._plan.tables:
+            if table not in self._observed:
+                skipped.append(
+                    SkippedColumn(table, None, reasons.warning.LEAK_CHECK_SKIP_TABLE_NOT_PRODUCED)
+                )
+                continue
+            for col in self._by_table[table]:
+                state = self._state[(table, col.column)]
+                if not state.present:
+                    skipped.append(
+                        SkippedColumn(
+                            table, col.column, reasons.warning.LEAK_CHECK_SKIP_MISSING_COLUMN
+                        )
+                    )
+                elif col.skip is not None:
+                    skipped.append(SkippedColumn(table, col.column, col.skip))
+                elif state.compared < self._min_rows or state.compared == 0:
+                    skipped.append(
+                        SkippedColumn(
+                            table, col.column, reasons.warning.LEAK_CHECK_SKIP_BELOW_MIN_ROWS
+                        )
+                    )
+                else:
+                    checked.append((table, col.column))
+                    findings.extend(self._verdict(col, state))
+        return FoldResult(tuple(findings), tuple(checked), tuple(skipped))
+
+    def _verdict(self, col: ScopedColumn, state: _ColumnState) -> list[ValidatorFinding]:
+        identical = state.identical.count
+        compared = state.compared
+        ratio = identical / compared
+        indices = state.identical.indices()
+        found: list[ValidatorFinding] = []
+        if ratio == 1.0:
+            found.append(
+                ValidatorFinding(
+                    validator="leak_check",
+                    table=col.table,
+                    column=col.column,
+                    failing_row_indices=indices,
+                    detail=(
+                        f"{identical} of {compared} non-null cells identical to "
+                        f"source (ratio {ratio:.2f}); strategy {col.strategy!r} produced no "
+                        "change"
+                    ),
+                    failing_row_count=identical,
+                )
+            )
+        if col.kind == "transformative" and ratio > self._max_ratio:
+            found.append(
+                ValidatorFinding(
+                    validator="leak_check",
+                    table=col.table,
+                    column=col.column,
+                    failing_row_indices=indices,
+                    detail=(
+                        f"{identical} of {compared} non-null cells identical to "
+                        f"source (ratio {ratio:.2f} > max_identical_ratio "
+                        f"{self._max_ratio:.2f}) under strategy {col.strategy!r}"
+                    ),
+                    failing_row_count=identical,
+                )
+            )
+        return found
 
 
 def validate_leak_check(
@@ -154,164 +235,27 @@ def validate_leak_check(
     *,
     sources: dict[str, pa.Table] | None = None,
 ) -> tuple[ValidatorFinding, ...]:
-    """leak_check: flag residual source values surviving into masked output.
+    """leak_check over whole tables: one span per table (see `LeakCheckFold`).
 
-    Default scope (no `columns:` on the entry): every non-excluded column of
-    every mask-kind table. Exclusions (D3): `passthrough` strategy, FK-child
-    columns, and any column carrying a `when:` predicate (rows not matching
-    the predicate are legitimately identical by construction; there is no
-    way to distinguish them post-hoc). `params.exempt` is the documented
-    operator escape hatch on top of these.
-
-    Missing-source rule (D2, fail-loud): every mask-kind table in scope MUST
-    have a corresponding entry in `sources`; a leak check that silently
-    didn't run is worse than none. An EXPLICIT `columns:` entry naming a
-    generate-kind table is a config error (no source can ever exist for it),
-    raised rather than skipped.
+    Default scope (no `columns:` on the entry): every non-excluded column of every mask-kind
+    table. Exclusions (D3): `passthrough` strategy, FK-child columns, and any column carrying a
+    `when:` predicate; `params.exempt` is the documented operator escape hatch on top of these.
+    Every exclusion is recorded with a registered code on the session's result.
 
     Args:
         outputs: Read-only pipeline outputs (post-mask).
-        entry: Config block; optional `columns` (explicit scope) and
-            `params` (`exempt`, `max_identical_ratio` default 0.02,
-            `min_rows` default 1).
+        entry: Config block; optional `columns` (explicit scope) and `params` (`exempt`,
+            `max_identical_ratio` default 0.02, `min_rows` default 1).
         config: Full pipeline config dict (`tables`, `relationships`).
-        sources: Read-only pre-mask source tables (D2). Required for every
-            table in scope.
+        sources: Read-only pre-mask source tables (D2). Required for every table in scope that
+            the run produced.
 
     Returns:
         Tuple of ValidatorFinding (column-tier and/or cell-tier per column).
 
     Raises:
-        ValueError: A table in scope has no source table, or an explicit
-            `columns:` entry names a generate-kind table.
+        ValueError: A table in scope has no source table, or an explicit `columns:` entry names
+            a generate-kind table.
     """
-    params: dict[str, Any] = entry.get("params") or {}
-    max_identical_ratio = float(params.get("max_identical_ratio", 0.02))
-    min_rows = int(params.get("min_rows", 1))
-    exempt: dict[str, list[str]] = params.get("exempt") or {}
-    exempt_set: set[tuple[str, str]] = {
-        (table, col) for table, cols in exempt.items() for col in cols
-    }
-
-    table_kinds = classify_table_kinds(config)
-    fk_children = _fk_child_columns(config)
-    col_entries = _column_entries(config)
-    sources = sources or {}
-
-    explicit_columns: dict[str, list[str]] = entry.get("columns") or {}
-
-    if explicit_columns:
-        scope: dict[str, list[str]] = {}
-        for table_name, cols in explicit_columns.items():
-            if table_kinds.get(table_name) == "generate":
-                raise ValueError(
-                    f"leak_check: columns: explicitly names {table_name!r}, which is a "
-                    "generate-kind table (no source column exists to compare against). "
-                    "Remove it from leak_check's columns: scope."
-                )
-            scope[table_name] = list(cols)
-    else:
-        scope = {
-            table_name: [c["name"] for c in table.get("columns") or [] if isinstance(c, dict)]
-            for table in (config.get("tables") or [])
-            if isinstance(table, dict)
-            and isinstance(table.get("name"), str)
-            and (table_name := table["name"]) in table_kinds
-            and table_kinds[table_name] == "mask"
-        }
-
-    findings: list[ValidatorFinding] = []
-
-    for table_name, col_names in scope.items():
-        if table_name not in outputs:
-            continue  # table not produced this run; nothing to check
-        if table_name not in sources:
-            raise ValueError(
-                f"leak_check configured for table {table_name!r} but no source table was "
-                "provided; leak verification cannot run. Pass the source table via "
-                "run_pipeline(sources=...) or exclude this table from leak_check's scope."
-            )
-        out_table = outputs[table_name]
-        src_table = sources[table_name]
-
-        for col_name in col_names:
-            if col_name not in out_table.schema.names or col_name not in src_table.schema.names:
-                continue
-            if (table_name, col_name) in exempt_set:
-                continue
-            if (table_name, col_name) in fk_children:
-                continue
-
-            col_entry = col_entries.get((table_name, col_name), {})
-            strategy = col_entry.get("strategy")
-            provider = col_entry.get("provider")
-            when = col_entry.get("when")
-            if isinstance(when, str) and when.strip():
-                continue
-            if strategy in EXCLUDED:
-                continue
-
-            is_transformative = strategy in TRANSFORMATIVE or provider in _COMPOSITE_PROVIDERS
-            is_shape_preserving = strategy in SHAPE_PRESERVING
-            if not is_transformative and not is_shape_preserving:
-                # LOW L1 (dennis review 2026-07-04): fail CLOSED, not open.
-                # An unclassified strategy reaching here means the drift
-                # sentry (test_leak_check.py) was bypassed and this is a
-                # privacy product: silently skipping the column would
-                # manufacture false confidence that it was leak-checked. The
-                # sentry guarantees every strategy is classified, so this can
-                # only fire on a genuine gap -- raise so it is fixed, never
-                # shipped unchecked.
-                raise ValueError(
-                    f"leak_check: strategy {strategy!r} on {table_name}.{col_name} is not "
-                    "classified as TRANSFORMATIVE, SHAPE_PRESERVING, or EXCLUDED. leak_check "
-                    "cannot verify a strategy it does not know how to interpret; classify it "
-                    "in decoy_engine.validators._leak_check (and its drift sentry) before use."
-                )
-
-            src_vals = src_table.column(col_name).to_pylist()
-            out_vals = out_table.column(col_name).to_pylist()
-            compared = 0
-            identical: list[int] = []
-            for i, (src_val, out_val) in enumerate(zip(src_vals, out_vals, strict=True)):
-                if src_val is None:
-                    continue  # null source: not a leak either way
-                compared += 1
-                if _is_identical(src_val, out_val):
-                    identical.append(i)
-
-            if compared < min_rows or compared == 0:
-                continue
-            ratio = len(identical) / compared
-
-            if ratio == 1.0:
-                findings.append(
-                    ValidatorFinding(
-                        validator="leak_check",
-                        table=table_name,
-                        column=col_name,
-                        failing_row_indices=tuple(identical),
-                        detail=(
-                            f"{len(identical)} of {compared} non-null cells identical to "
-                            f"source (ratio {ratio:.2f}); strategy {strategy!r} produced no "
-                            "change"
-                        ),
-                    )
-                )
-
-            if is_transformative and ratio > max_identical_ratio:
-                findings.append(
-                    ValidatorFinding(
-                        validator="leak_check",
-                        table=table_name,
-                        column=col_name,
-                        failing_row_indices=tuple(identical),
-                        detail=(
-                            f"{len(identical)} of {compared} non-null cells identical to "
-                            f"source (ratio {ratio:.2f} > max_identical_ratio "
-                            f"{max_identical_ratio:.2f}) under strategy {strategy!r}"
-                        ),
-                    )
-                )
-
-    return tuple(findings)
+    fold = LeakCheckFold(entry, config, cap=finding_index_cap(config))
+    return run_whole(fold, outputs, sources).findings
