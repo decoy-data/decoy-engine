@@ -57,8 +57,9 @@ class TableBytesSpec:
     ranges: a buffer shared by several tables, or two slices of one allocation that overlap, is
     counted once. `charge_pandas` is false for a table the run holds but never converts to pandas
     (a generated table in a mixed job). `pandas_shared` names the columns whose pandas form is
-    the Arrow column itself (an Arrow-backed dtype), which add no bytes to the input union. `pandas_widened` are the shared 32-bit-offset string and
-    binary columns, whose frame still allocates 64-bit offsets.
+    the Arrow column itself (an Arrow-backed dtype), which add no bytes to the input union.
+    `pandas_widened` are the shared 32-bit-offset string columns, whose frame still allocates 64-bit offsets; `widened_chunks` is their total chunk
+    count, one terminal offset each. Binary is not widened: the frame reuses its offsets.
     """
 
     rows: int
@@ -68,11 +69,13 @@ class TableBytesSpec:
     buffer_ranges: tuple[tuple[int, int], ...] = dataclasses.field(default=(), compare=False)
     pandas_shared: frozenset[str] = frozenset()
     pandas_widened: frozenset[str] = frozenset()
+    widened_chunks: int = 0
 
 
 def resident_spec(table: pa.Table, *, charge_pandas: bool = True) -> TableBytesSpec:
     ranges = _buffer_ranges(table)
     shared = _arrow_backed_columns(table)
+    widened = frozenset(n for n in shared if _widens_offsets(table.schema.field(n).type))
     return TableBytesSpec(
         rows=table.num_rows,
         schema=table.schema,
@@ -80,7 +83,8 @@ def resident_spec(table: pa.Table, *, charge_pandas: bool = True) -> TableBytesS
         charge_pandas=charge_pandas,
         buffer_ranges=ranges,
         pandas_shared=shared,
-        pandas_widened=frozenset(n for n in shared if _widens_offsets(table.schema.field(n).type)),
+        pandas_widened=widened,
+        widened_chunks=sum(table.column(n).num_chunks for n in widened),
     )
 
 
@@ -147,8 +151,8 @@ def _arrow_backed_columns(table: pa.Table) -> frozenset[str]:
 
 
 def _widens_offsets(arrow_type: pa.DataType) -> bool:
-    """A 32-bit-offset string or binary column: the frame shares the payload, not the offsets."""
-    return pa.types.is_string(arrow_type) or pa.types.is_binary(arrow_type)
+    """A 32-bit-offset string column: the frame shares the payload, not the offsets."""
+    return pa.types.is_string(arrow_type)
 
 
 def lazy_spec(rows: int, schema: pa.Schema, *, charge_pandas: bool = True) -> TableBytesSpec:
@@ -173,13 +177,14 @@ def input_bytes(specs: Iterable[TableBytesSpec]) -> int:
     return total + union_bytes(ranges)
 
 
-_WIDENED_OFFSET_BYTES = 8  # the frame's 64-bit offsets, one per row, in place of the 32-bit ones
+_WIDENED_OFFSET_BYTES = 8  # the frame's 64-bit offsets: one per row plus one terminal per chunk
 
 
 def pandas_bytes(specs: Iterable[TableBytesSpec]) -> int:
     """Each charged table's pandas copy, less the columns that share the Arrow buffers."""
     return sum(
-        s.rows
+        s.widened_chunks * _WIDENED_OFFSET_BYTES
+        + s.rows
         * sum(
             _WIDENED_OFFSET_BYTES if f.name in s.pandas_widened else _pandas_cell_bytes(f.type)
             for f in s.schema

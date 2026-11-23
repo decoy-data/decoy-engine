@@ -466,11 +466,41 @@ def test_at_c20c_a_32_bit_offset_string_column_is_charged_its_widened_offsets(
     )
     ceiling = 30_000
     assert rf.input_bytes([resident_spec(table, charge_pandas=False)]) < ceiling
+    assert _lb(table) == 53_260  # measured: 20,484 input + 8 * (rows + 1 terminal offset)
     with pytest.raises(ExecutionError) as caught:
         rf.check_pre_transform(
             cfg, {"t": table}, SimpleNamespace(edges=[]), "auto", kill_ceiling_bytes=ceiling
         )
     assert caught.value.code == CODE_REFUSED
+
+
+def test_at_c20c_each_chunk_of_a_widened_string_column_adds_a_terminal_offset() -> None:
+    frame = pd.DataFrame({"s": pd.array(["x"] * 10, dtype=pd.ArrowDtype(pa.string()))})
+    one = pa.Table.from_pandas(frame, preserve_index=False)
+    table = pa.concat_tables([one, one, one])
+    assert table.column("s").num_chunks == 3
+    spec = resident_spec(table)
+    assert spec.pandas_widened == frozenset({"s"})
+    assert rf.pandas_bytes([spec]) == (30 + 3) * 8
+
+
+def test_at_c20c_a_binary_column_the_frame_reuses_is_not_charged(tmp_path: Path) -> None:
+    """The frame reuses binary offsets and payload, so 4,096 one-byte values fit a 30,000 ceiling."""
+    from types import SimpleNamespace
+
+    rows = 4096
+    frame = pd.DataFrame({"b": pd.array([b"x"] * rows, dtype=pd.ArrowDtype(pa.binary()))})
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    cfg = tk.single_table_config(
+        tmp_path,
+        table,
+        transforms=[{"op": "limit", "n": 1}],
+        columns=[{"name": "b", "strategy": "redact"}],
+    )
+    assert _lb(table) == rf.input_bytes([resident_spec(table, charge_pandas=False)]) < 30_000
+    rf.check_pre_transform(
+        cfg, {"t": table}, SimpleNamespace(edges=[]), "auto", kill_ceiling_bytes=30_000
+    )
 
 
 def test_at_c20_a_lazy_fallback_source_is_read_once_then_refused_before_its_copy(
