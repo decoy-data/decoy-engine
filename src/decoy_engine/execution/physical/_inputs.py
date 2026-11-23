@@ -358,7 +358,14 @@ def compute_plan_hash(inputs: PhysicalPlanInputs) -> str:
         *((facts.lazy_transform_bearing,) if facts.lazy_transform_bearing else ()),
         *(("fk_ooc_dtype_hazard",) if facts.fk_ooc_dtype_hazard else ()),
         *(() if inputs.chunked_dispatcher_enabled else ("chunked_dispatcher_off",)),
-        *(() if inputs.resident_fit is None else (inputs.resident_fit,)),
+        # The verdict and its code only. The byte figures come from the host ceiling and from how the
+        # table was priced (a lazy source by its Parquet footer, a resident one by its Arrow size), so
+        # hashing them would give one job a different plan hash per host and per input form.
+        *(
+            ()
+            if inputs.resident_fit is None
+            else (inputs.resident_fit.verdict, inputs.resident_fit.code)
+        ),
     )
     digest = hashlib.sha256()
     for part in parts:

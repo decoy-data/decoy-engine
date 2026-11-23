@@ -1,0 +1,3 @@
+### Fixed (physical plan hash no longer depends on the host or the input form, COMPANION-REDS, 2026-11-23)
+
+The physical plan hash of a no-FK job covered the stored resident-fit verdict with its byte figures. Those figures come from the host memory ceiling and from how the table was priced (a lazy source by its Parquet footer, a resident one by its Arrow size), so the same job got a different `plan_hash` and `activation_hash` on another host and for a lazy source against a resident one. The hash now covers the verdict and its code only. Pipelines that took the no-FK full-frame route since 0.28.3 see their physical plan hash change once.
