@@ -188,3 +188,12 @@ def test_the_out_of_core_collector_uses_the_public_builder() -> None:
     assert "validators._types" not in source
     assert "validators._registry" not in source
     assert "assemble_report" in source
+
+
+def test_validator_function_is_the_registered_function_and_refuses_an_unknown_name() -> None:
+    from decoy_engine.validators import validator_function
+    from decoy_engine.validators._registry import _REGISTRY
+
+    assert validator_function("luhn") is _REGISTRY["luhn"]
+    with pytest.raises(KeyError):
+        validator_function("no_such_validator")
