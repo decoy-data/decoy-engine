@@ -19,9 +19,9 @@ from pandas._libs import tslib
 from decoy_engine import reasons
 from decoy_engine.errors import ValidatorStateError
 from decoy_engine.validators import ValidationSession, validate
+from decoy_engine.validators._dates import is_blank as _is_blank
 from decoy_engine.validators._fk_validators import key_bytes
 from decoy_engine.validators._registry import _REGISTRY
-from decoy_engine.validators._relationship_checks import _is_blank
 from tests.unit.validators._fold_cases import build_cases, build_extra_cases
 from tests.unit.validators.test_session_invariance import feed
 
@@ -135,6 +135,7 @@ def _retained_bytes_per_item(run: Any) -> float:
     return (after - before) / _ROWS
 
 
+@pytest.mark.serial
 def test_the_estimate_for_a_pending_date_observation_is_at_least_its_real_cost() -> None:
     case = build_cases()["parent_window_respected"]
     child = pa.table(
@@ -151,6 +152,7 @@ def test_the_estimate_for_a_pending_date_observation_is_at_least_its_real_cost()
     assert reserved >= real, (reserved, real)
 
 
+@pytest.mark.serial
 def test_the_estimate_for_a_pending_foreign_key_is_at_least_its_real_cost() -> None:
     case = build_cases()["fk_intact"]
     child = pa.table({"pid": list(range(1, _ROWS + 1))})
@@ -163,7 +165,7 @@ def test_the_estimate_for_a_pending_foreign_key_is_at_least_its_real_cost() -> N
     real = _retained_bytes_per_item(run)
     reserved = session._folds[0]._budget.used / _ROWS  # type: ignore[attr-defined]
     assert reserved >= real, (reserved, real)
-    assert key_bytes(1) > 0
+    assert key_bytes((1,)) > 0
 
 
 # --- M5 ---------------------------------------------------------------------------------------

@@ -122,14 +122,21 @@ class LeakCheckFold:
         if columns is None:
             return
         self._observed.add(table)
-        if span.source is None:
+        out_names = set(span.output.schema.names)
+        wanted = [
+            p
+            for p in columns
+            if self._plan.columns[p].skip is None and self._plan.columns[p].column in out_names
+        ]
+        if wanted and span.source is None:
             raise ValueError(
                 f"leak_check configured for table {table!r} but no source table was "
                 "provided; leak verification cannot run. Pass the source table via "
                 "run_pipeline(sources=...) or exclude this table from leak_check's scope."
             )
-        out_names = set(span.output.schema.names)
-        src_names = set(span.source.schema.names)
+        # Without a source every column in scope is skipped by config, so only the output
+        # schema is needed to say which of them the run produced.
+        src_names = set(span.source.schema.names) if span.source is not None else out_names
         present = [
             position
             for position in columns
@@ -138,14 +145,19 @@ class LeakCheckFold:
         ]
         for position in present:
             self._state[position].present = True
-        reading = [p for p in present if self._plan.columns[p].skip is None]
-        if reading and span.source.num_rows != span.output.num_rows:
+        source = span.source
+        reading = (
+            [p for p in present if self._plan.columns[p].skip is None] if source is not None else []
+        )
+        if source is not None and reading and source.num_rows != span.output.num_rows:
             raise ValidatorStateError(
                 code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
                 message=f"the source rows for table {table!r} do not line up with its output rows.",
             )
         if reading:
             self._compared_tables.add(table)
+        if source is None:
+            return
         for position in reading:
             col = self._plan.columns[position]
             state = self._state[position]
@@ -159,7 +171,7 @@ class LeakCheckFold:
                     "cannot verify a strategy it does not know how to interpret; classify it "
                     "in decoy_engine.validators._scope (and its drift sentry) before use."
                 )
-            src_vals = span.source.column(col.column).to_pylist()
+            src_vals = source.column(col.column).to_pylist()
             out_vals = span.output.column(col.column).to_pylist()
             for i, (src_val, out_val) in enumerate(zip(src_vals, out_vals, strict=True)):
                 if src_val is None:

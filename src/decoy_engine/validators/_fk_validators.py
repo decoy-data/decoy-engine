@@ -46,6 +46,7 @@ against the key-state budget.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from typing import Any
 
@@ -126,13 +127,14 @@ def _child_fk_values(
     FK relationship).
 
     Args:
-        table: Child table (read-only; not mutated).
+        table: Child table (read-only; not mutated). The caller has checked it holds every
+            column; a missing one is a skip, not a silent drop.
         columns: List of column names forming the child FK.
 
     Returns:
         List of tuples (or None) with one entry per row.
     """
-    col_arrays = [table.column(c).to_pylist() for c in columns if c in table.schema.names]
+    col_arrays = [table.column(c).to_pylist() for c in columns]
     if not col_arrays:
         return []
     # If ALL columns in the FK tuple are null, treat the whole FK as null.
@@ -143,10 +145,11 @@ def _child_fk_values(
 # Folds
 # ---------------------------------------------------------------------------
 
-# Rough bytes a Python tuple key of one value costs, and each extra column. The budget is a
-# ceiling on retained state, so the estimate leans high.
-_KEY_BASE_BYTES = 180
-_KEY_COLUMN_BYTES = 56
+# Fixed overhead of one retained key (tuple, set or dict entry) and the pointer cost of each
+# value in it; the values themselves are charged by `sys.getsizeof`. The budget is a ceiling on
+# retained state, so the estimate leans high.
+_KEY_BASE_BYTES = 150
+_KEY_COLUMN_BYTES = 16
 _INDEX_BYTES = 60
 
 
@@ -157,15 +160,27 @@ def _skip_table(skipped: list[SkippedColumn], table: str) -> None:
         skipped.append(record)
 
 
-def key_bytes(width: int) -> int:
-    """Estimated bytes of one retained key tuple with ``width`` columns."""
-    return _KEY_BASE_BYTES + _KEY_COLUMN_BYTES * max(width, 1)
+def key_bytes(key: tuple[Any, ...]) -> int:
+    """Estimated bytes one retained key tuple costs: the tuple, its entry and every value in it.
+
+    A string key costs its length, so a key of 1,000 characters is charged as such.
+    """
+    return _KEY_BASE_BYTES + sum(sys.getsizeof(v) + _KEY_COLUMN_BYTES for v in key)
 
 
 class _ChildEdge:
     """One (relationship, child table) pair and what has been seen of it."""
 
-    __slots__ = ("child_cols", "child_table", "parent", "pending", "ref", "seen", "tally")
+    __slots__ = (
+        "child_cols",
+        "child_table",
+        "missing",
+        "parent",
+        "pending",
+        "ref",
+        "seen",
+        "tally",
+    )
 
     def __init__(
         self,
@@ -181,7 +196,28 @@ class _ChildEdge:
         # key -> [exact count, first positions]; children whose parent table is not complete.
         self.pending: dict[tuple[Any, ...], tuple[int, list[int]]] = {}
         self.seen = False
+        self.missing: list[str] = []
         self.ref = f"{parent.table}.{parent.columns} -> {child_table}.{child_cols}"
+
+    def readable(self, output: pa.Table | pa.RecordBatch) -> bool:
+        """Mark the table seen; True when it holds every FK column, else note the gaps."""
+        self.seen = True
+        gaps = [c for c in self.child_cols if c not in output.schema.names]
+        for c in gaps:
+            if c not in self.missing:
+                self.missing.append(c)
+        return not gaps
+
+    def skip_unread(self, skipped: list[SkippedColumn]) -> bool:
+        """Record why the edge was not checked. True when it was not."""
+        if not self.seen:
+            _skip_table(skipped, self.child_table)
+            return True
+        if self.missing:
+            code = reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN
+            skipped.extend(SkippedColumn(self.child_table, c, code) for c in self.missing)
+            return True
+        return False
 
 
 class _ParentSide:
@@ -247,15 +283,13 @@ class FkIntactFold:
         parent.seen = True
         found = set(_parent_keys(span.output, parent.columns, parent.table))
         new = found - parent.keys
-        self._budget.reserve(
-            len(new) * key_bytes(len(parent.columns)), table=parent.table, column=None
-        )
+        self._budget.reserve(sum(key_bytes(k) for k in new), table=parent.table, column=None)
         parent.keys |= new
 
     def _add_child(self, edge: _ChildEdge, span: RowSpan) -> None:
-        edge.seen = True
+        if not edge.readable(span.output):
+            return
         parent = edge.parent
-        width = len(edge.child_cols)
         for i, fk in enumerate(_child_fk_values(span.output, edge.child_cols)):
             if fk is None:
                 continue  # null FK -> not a broken reference; skip
@@ -267,7 +301,7 @@ class FkIntactFold:
             held = edge.pending.get(fk)
             if held is None:
                 self._budget.reserve(
-                    key_bytes(width) + _INDEX_BYTES, table=edge.child_table, column=None
+                    key_bytes(fk) + _INDEX_BYTES, table=edge.child_table, column=None
                 )
                 edge.pending[fk] = (1, [position])
                 continue
@@ -287,11 +321,10 @@ class FkIntactFold:
                     self._resolve(edge)
 
     def _resolve(self, edge: _ChildEdge) -> None:
-        width = len(edge.child_cols)
         for fk, (count, positions) in edge.pending.items():
             if fk not in edge.parent.keys:
                 edge.tally.add_group(count, positions)
-            self._budget.release(key_bytes(width) + _INDEX_BYTES * len(positions))
+            self._budget.release(key_bytes(fk) + _INDEX_BYTES * len(positions))
         edge.pending.clear()
 
     def finish(self) -> FoldResult:
@@ -306,8 +339,7 @@ class FkIntactFold:
         checked: list[tuple[str, str | None]] = []
         skipped: list[SkippedColumn] = []
         for edge in self._edges:
-            if not edge.seen:
-                _skip_table(skipped, edge.child_table)
+            if edge.skip_unread(skipped):
                 continue
             checked.append((edge.child_table, None))
             count = edge.tally.count
@@ -361,7 +393,8 @@ class NoOrphanChildrenFold:
         for edge in self._edges:
             if edge.child_table != table:
                 continue
-            edge.seen = True
+            if not edge.readable(span.output):
+                continue
             for i, fk in enumerate(_child_fk_values(span.output, edge.child_cols)):
                 if fk is None:
                     edge.tally.add(span.offset + i)
@@ -371,8 +404,7 @@ class NoOrphanChildrenFold:
         checked: list[tuple[str, str | None]] = []
         skipped: list[SkippedColumn] = []
         for edge in self._edges:
-            if not edge.seen:
-                _skip_table(skipped, edge.child_table)
+            if edge.skip_unread(skipped):
                 continue
             checked.append((edge.child_table, None))
             count = edge.tally.count

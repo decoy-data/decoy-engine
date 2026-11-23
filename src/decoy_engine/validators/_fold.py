@@ -19,10 +19,17 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from decoy_engine import reasons
 from decoy_engine.errors import ValidatorStateError
-from decoy_engine.validators._types import FINDING_INDEX_CAP, RowSpan, SkippedColumn
+from decoy_engine.validators._types import (
+    FINDING_INDEX_CAP,
+    RowSpan,
+    SkippedColumn,
+    ValidationReport,
+    ValidatorResult,
+    result_status,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     import pyarrow as pa
 
@@ -50,6 +57,65 @@ class Fold(Protocol):
         """Tables whose spans must carry a source (empty for a fold that reads none)."""
 
     def finish(self) -> FoldResult: ...
+
+
+def unchecked_columns(
+    configured: Mapping[str, Sequence[str]],
+    *,
+    table_seen: Callable[[str], bool],
+    column_seen: Callable[[str, int], bool],
+    missing_table: str,
+    missing_column: str,
+) -> list[SkippedColumn]:
+    """The tables and columns an entry names that the run never produced, in config order.
+
+    A table that is not there is one whole-table skip; a column that is not there is its own
+    skip. ``column_seen`` takes the table and the position of the column in its list, so a column
+    listed twice is two checks.
+    """
+    skips: list[SkippedColumn] = []
+    for table, columns in configured.items():
+        if columns and not table_seen(table):
+            skips.append(SkippedColumn(table, None, missing_table))
+            continue
+        skips.extend(
+            SkippedColumn(table, column, missing_column)
+            for position, column in enumerate(columns)
+            if not column_seen(table, position)
+        )
+    return skips
+
+
+def assemble_report(
+    names: Sequence[str], outcomes: Sequence[FoldResult], elapsed_ms: float
+) -> ValidationReport:
+    """The one place a ``ValidationReport`` is built, for every route.
+
+    ``names`` and ``outcomes`` are the configured entries in order and what each one gave. The
+    session and the out-of-core collector both call it, so status, skips and ``results`` cannot
+    differ between routes.
+    """
+    findings: list[ValidatorFinding] = []
+    results: list[ValidatorResult] = []
+    for index, (name, outcome) in enumerate(zip(names, outcomes, strict=True)):
+        findings.extend(outcome.findings)
+        results.append(
+            ValidatorResult(
+                validator=name,
+                entry_index=index,
+                status=result_status(outcome.findings, outcome.checked, outcome.skipped),
+                checked=outcome.checked,
+                skipped=outcome.skipped,
+                failing_row_count=sum(f.failing_row_count for f in outcome.findings),
+            )
+        )
+    return ValidationReport(
+        passed=not findings,
+        validators_run=tuple(dict.fromkeys(names)),
+        findings=tuple(findings),
+        elapsed_ms=elapsed_ms,
+        results=tuple(results),
+    )
 
 
 def finding_index_cap(config: Mapping[str, Any]) -> int | None:

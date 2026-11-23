@@ -46,15 +46,15 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.validators import finding_index_cap
-from decoy_engine.validators._registry import _REGISTRY
-from decoy_engine.validators._types import (
+from decoy_engine.validators import (
+    FoldResult,
     SkippedColumn,
     ValidationReport,
     ValidatorFinding,
-    ValidatorResult,
-    result_status,
+    assemble_report,
+    finding_index_cap,
 )
+from decoy_engine.validators._registry import _REGISTRY
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -265,10 +265,8 @@ class ValidatorCollector:
                     failing.extend(offset + i for i in finding.failing_row_indices[: max(room, 0)])
         self._elapsed += time.perf_counter() - started
 
-    def _result(
-        self, ordinal: int, name: str, per_entry: dict[int, list[ValidatorFinding]]
-    ) -> ValidatorResult:
-        """The entry's result: what it checked, what it could not check, and the verdict."""
+    def _outcome(self, ordinal: int, per_entry: dict[int, list[ValidatorFinding]]) -> FoldResult:
+        """What the entry checked, what it could not check and what it found."""
         found = tuple(per_entry.get(ordinal, ()))
         checked = tuple(
             (s.table, s.column)
@@ -288,14 +286,7 @@ class ValidatorCollector:
                 for s in self._ordered
                 if s.key[0] == ordinal and s.table == table and s.key not in self._seen
             )
-        return ValidatorResult(
-            validator=name,
-            entry_index=ordinal,
-            status=result_status(found, checked, tuple(skips)),
-            checked=checked,
-            skipped=tuple(skips),
-            failing_row_count=sum(f.failing_row_count for f in found),
-        )
+        return FoldResult(found, checked, tuple(skips))
 
     def assemble(self) -> ValidationReport:
         """The `_registry.validate` report: findings in configured order, merged indices."""
@@ -318,16 +309,8 @@ class ValidatorCollector:
             )
             findings.append(found)
             per_entry.setdefault(slot.key[0], []).append(found)
-        results = tuple(
-            self._result(ordinal, name, per_entry) for ordinal, name in enumerate(self._names)
-        )
-        return ValidationReport(
-            passed=not findings,
-            validators_run=tuple(dict.fromkeys(self._names)),
-            findings=tuple(findings),
-            elapsed_ms=self._elapsed * 1000.0,
-            results=results,
-        )
+        outcomes = [self._outcome(ordinal, per_entry) for ordinal in range(len(self._names))]
+        return assemble_report(self._names, outcomes, self._elapsed * 1000.0)
 
 
 def build_validator_collector(

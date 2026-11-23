@@ -95,10 +95,13 @@ def result_status(
     checked: tuple[tuple[str, str | None], ...],
     skipped: tuple[SkippedColumn, ...],
 ) -> Literal["passed", "failed", "skipped"]:
-    """The one rule for an entry's status: a finding fails it, checking nothing skips it."""
+    """The one rule for an entry's status: a finding fails it, checking nothing skips it.
+
+    An entry that checked nothing never reads as passed, whether or not it recorded why.
+    """
     if findings:
         return "failed"
-    if not checked and skipped:
+    if not checked:
         return "skipped"
     return "passed"
 
