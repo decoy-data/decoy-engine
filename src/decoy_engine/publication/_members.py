@@ -22,6 +22,7 @@ import os
 import stat
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
@@ -36,7 +37,13 @@ from decoy_engine.fileaccess import (
 from decoy_engine.publication._descriptor import Artifact
 from decoy_engine.publication._types import ROLES, Role, has_row_count
 
-__all__ = ["Member", "check_member_paths", "measure_members", "stage_is_closed"]
+__all__ = ["Member", "check_member_paths", "measure_members", "stage_file_path", "stage_is_closed"]
+
+
+def stage_file_path(root: str, relpath: str) -> Path:
+    """The local path of unit path `relpath` under stage `root`: a join of strings, no file-system
+    call. Kept here so the delivery stage itself imports no `pathlib`."""
+    return Path(root).joinpath(*relpath.split("/"))
 
 
 def _one(path: object, max_depth: int = UNIT_PATH_MAX_DEPTH) -> None:

@@ -38,6 +38,7 @@ from decoy_engine.fileaccess import _fdtree, _openat2, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
+from decoy_engine.fileaccess._stage_claim import StageClaim, parent_identity_of
 from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
 
@@ -52,12 +53,15 @@ STAGE_PREFIX: dict[str, str] = {
     "vault": "_decoy_vault_stage_",
     "pack": "_decoy_pack_stage_",
     "publication": "._decoy_publication_pending_",
+    "delivery_slots": "._decoy_delivery_slots_",
     "pointer": "._decoy_pointer_stage_",
 }
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
 DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})  # stage fsync, rename, parent fsync
 # Labels whose stage holds secrets or real data (0600 at creation), durable-replace ones included.
-PRIVATE_LABELS = DURABLE_REPLACE_LABELS | {"quarantine", "isolated", "vault", "publication"}
+PRIVATE_LABELS = DURABLE_REPLACE_LABELS | {
+    *("quarantine", "isolated", "vault", "publication", "delivery_slots")
+}
 # `DURABLE_LABELS` publish exclusively: the writer fsyncs the stage, it is linked, then the parent is
 # fsynced (the commit point; its failure is raised). A failure removes only the stage.
 DURABLE_LABELS: frozenset[str] = frozenset({"vault"})
@@ -278,7 +282,7 @@ def _discard(state: _State) -> None:
         _close(state.parent_fd)
 
 
-class _StageDir(StageWalk):
+class _StageDir(StageWalk, StageClaim):
     """Name-taking operations over one stage directory descriptor."""
 
     strict = True
@@ -416,14 +420,7 @@ class RootedOutputTxn(_StageDir):
                     raise
             else:
                 try:
-                    _call(
-                        os.link,
-                        state.stage_name,
-                        self._leaf,
-                        src_dir_fd=parent,
-                        dst_dir_fd=parent,
-                        follow_symlinks=False,
-                    )
+                    _durable.link_noclobber_at(parent, state.stage_name, parent, self._leaf)
                 except FileExistsError:
                     _discard(state)
                     raise
@@ -474,10 +471,13 @@ class RootedOutputDir:
             validate_component(part, req.field_key)
         self._root_fd = root_fd
         self._parents = parts[:-1]
-        self._leaf = parts[-1]
+        self._leaf = self.leaf = parts[-1]
         self.display = req.field_key
         self.locator = req.locator
         self._field_key = req.field_key
+
+    def parent_identity(self) -> tuple[int, int]:
+        return parent_identity_of(lambda: self._open_parent(create=False))
 
     def _open_parent(self, *, create: bool, chain: list[int] | None = None) -> int:
         """The leaf's parent, opened from the root; `chain` keeps every directory above it."""

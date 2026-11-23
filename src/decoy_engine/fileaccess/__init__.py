@@ -64,6 +64,7 @@ from decoy_engine.fileaccess._scratch_reports import (
     ReclaimOutcome,
     ReclaimReport,
 )
+from decoy_engine.fileaccess._stage_claim import probe_claim
 from decoy_engine.fileaccess._types import (
     CONTRACT_VERSION,
     CommitUncertain,
@@ -75,7 +76,9 @@ from decoy_engine.fileaccess._types import (
     FileHandle,
     FileRequest,
     FileRole,
+    FileSeal,
     LeafTooLarge,
+    LinkUnsupported,
     LockTimeout,
     LockUnavailable,
     OutputDir,
@@ -158,7 +161,9 @@ __all__ = [
     "FileHandle",
     "FileRequest",
     "FileRole",
+    "FileSeal",
     "LeafTooLarge",
+    "LinkUnsupported",
     "LocalFileAccess",
     "LockTimeout",
     "LockUnavailable",
@@ -195,6 +200,7 @@ __all__ = [
     "open_protected_dir",
     "own_entry",
     "position_key",
+    "probe_claim",
     "protected_scratch_dir",
     "read_all",
     "read_checked",

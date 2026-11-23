@@ -48,6 +48,7 @@ from decoy_engine.fileaccess._output import (
     create_private_child_at,
     make_stage_dir_at,
 )
+from decoy_engine.fileaccess._stage_claim import StageClaim, parent_identity_of
 from decoy_engine.fileaccess._stage_walk import PathStageWalk, StageLife
 from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
@@ -152,7 +153,7 @@ class LocalDirHandle:
         self.close()
 
 
-class _LocalStageDir(PathStageWalk):
+class _LocalStageDir(PathStageWalk, StageClaim):
     """Name-taking operations over one stage directory, by path."""
 
     strict = False
@@ -305,8 +306,7 @@ class LocalOutputTxn(_LocalStageDir):
             raise FileAccessUnavailable("the label does not fit this stage kind or mode")
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS and sys.platform != "win32"
         self._created: list[str] = []
-        # A durable stage is created and published through its parent's descriptor, opened
-        # before the stage exists, so no step after the link can fail for want of one.
+        # A durable stage publishes through a parent descriptor opened before the stage exists.
         self._parent_fd = -1
         self._held = HeldStage()  # a publication stage's descriptor, holding its lock
         stage: Path | None = None
@@ -367,11 +367,9 @@ class LocalOutputTxn(_LocalStageDir):
         return super().create_file(component)
 
     def _create_durable_stage(self) -> int:
-        """Open the parent, then create the stage beside the leaf through the private-file
-        choke point (mode exactly 0600). A failure here leaves nothing and keeps the ambient
-        error shape: the class and the target's path."""
-        # Before any syscall: the shared publish validates the leaf too, but only after the
-        # stage exists, and a refusal there would leave it.
+        """Create the 0600 stage beside the leaf through the private-file choke point; a failure
+        leaves nothing and keeps the ambient error shape (the class and the target's path)."""
+        # Validate first: the shared publish checks the leaf only after the stage exists.
         validate_component(self._target.name, "fileaccess.stage")
         name = f"{STAGE_PREFIX[self._label]}{secrets.token_hex(6)}"
         failed: OSError | None = None
@@ -415,9 +413,8 @@ class LocalOutputTxn(_LocalStageDir):
             self._close_parent()
 
     def _writes_through(self) -> bool:
-        """An existing special file (`/dev/null`) or symlink is written in place, as the
-        un-staged writer always did, because a stage beside it cannot be created or renamed
-        over it."""
+        """A special file (`/dev/null`) or symlink is written in place, as the un-staged writer
+        always did: a stage beside it cannot be renamed over it."""
         return self._target.is_symlink() or (self._target.exists() and not self._target.is_file())
 
     def local_stage_path(self) -> str:
@@ -462,7 +459,7 @@ class LocalOutputTxn(_LocalStageDir):
             return
         occupied = False
         try:
-            os.link(staged, self._target)
+            _durable.link_noclobber_at(None, staged, None, self._target)
         except FileExistsError:
             occupied = True
         if occupied:  # raised outside the handler: the link error (both paths) never rides
@@ -508,9 +505,12 @@ class LocalOutputDir:
 
     def __init__(self, req: FileRequest) -> None:
         self._target = Path(req.locator)
-        self.display = req.locator
-        self.locator = req.locator
+        self.display = self.locator = req.locator
+        self.leaf = self._target.name
         self._field_key = req.field_key
+
+    def parent_identity(self) -> tuple[int, int]:
+        return parent_identity_of(self._parent_fd)
 
     def begin(
         self,

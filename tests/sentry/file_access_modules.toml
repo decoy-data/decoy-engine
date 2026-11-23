@@ -13,6 +13,7 @@ adapter_modules = [
 
 # Rule 2: raw fd-relative primitives only, with a held descriptor and a validated name.
 capability_modules = [
+  "decoy_engine/fileaccess/_stage_claim.py",
   "decoy_engine/fileaccess/_rooted.py",
   "decoy_engine/fileaccess/_output.py",
   "decoy_engine/fileaccess/_preopened.py",
@@ -28,6 +29,9 @@ capability_creators = [
   "decoy_engine/fileaccess/_output.py::create_output_file_at",
   "decoy_engine/fileaccess/_durable.py::discard_stage_at",
   "decoy_engine/fileaccess/_durable.py::publish_exclusive_durable",
+  "decoy_engine/fileaccess/_durable.py::link_noclobber_at",
+  "decoy_engine/fileaccess/_stage_claim.py::claim_file_at",
+  "decoy_engine/fileaccess/_stage_claim.py::seal_at",
   "decoy_engine/fileaccess/_durable.py::publish_replace_durable",
   "decoy_engine/fileaccess/_durable.py::open_subdir_at",
   "decoy_engine/fileaccess/_durable.py::entries_at",

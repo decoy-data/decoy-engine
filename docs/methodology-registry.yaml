@@ -319,6 +319,10 @@ modules:
     pattern: Git commit then ref update
     source: Git update-ref and refs/files-backend.c (the ref moves only after the object is written; a lost swap leaves an unreferenced commit)
 
+  - path: src/decoy_engine/fileaccess/_stage_claim.py
+    pattern: Maildir delivery and git finalize_object_file (a no-clobber link places a finished file)
+    source: D. J. Bernstein, Maildir (tmp to new with link); Git object-file.c finalize_object_file (link, then unlink the temporary name); POSIX linkat and openat over held directory descriptors
+
   - path: src/decoy_engine/publication/_sink_state.py
     pattern: a table-driven finite-state machine
     source: UML state machines and the W3C SCXML state-transition table; java.util.concurrent.FutureTask (state changed under a guard, the task run outside it)

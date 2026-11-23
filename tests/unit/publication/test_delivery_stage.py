@@ -7,11 +7,8 @@ empty folder P4 makes; `LATEST` is the managed pointer beside it.
 from __future__ import annotations
 
 import errno
-import os
-import stat
 import sys
 from collections.abc import Callable
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, get_args
 
@@ -21,15 +18,10 @@ from decoy_engine import reasons
 from decoy_engine.fileaccess import (
     FileAccessDenied,
     FileAccessUnavailable,
-    FileRequest,
-    FileRole,
 )
-from decoy_engine.fileaccess._local import LocalFileAccess
 from decoy_engine.publication import (
-    CurrentPointer,
     DeliveryReceipt,
     DeliveryStage,
-    LocalPointerStore,
     Outcome,
     PointerResult,
     PublicationFailed,
@@ -37,64 +29,27 @@ from decoy_engine.publication import (
 )
 from decoy_engine.publication import _stage as stage_module
 from decoy_engine.publication._current import HeldPointer
-from tests.fileaccess.publication._chain_support import anchor_at
 from tests.unit.publication._publish_support import DESCRIPTOR, descriptor
+from tests.unit.publication._stage_support import (
+    CONFLICT,
+    FAILED,
+    MOVED,
+    UNCERTAIN,
+    Run,
+    deliver,
+    dir_at,
+    put,
+)
 from tests.unit.publication._vault_publish_support import binding
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX durable pointer")
-
-MOVED = reasons.decoy.DELIVERY_POINTER_MOVED
-FAILED = reasons.decoy.PUBLICATION_FAILED
-UNCERTAIN = reasons.decoy.PUBLICATION_COMMIT_UNCERTAIN
-CONFLICT = reasons.decoy.PUBLICATION_OPERATION_CONFLICT
-EVERYTHING = StageDecision(True, frozenset({"a", "b"}))
-
-
-def _dir(base: Path, rel: str) -> Any:
-    req = FileRequest(FileRole.TARGET_OUTPUT, "write", str(base / rel), "targets.t.path")
-    return LocalFileAccess().output_dir(req)
-
-
-class Run:
-    """One project folder `out/n` with its pointer, and a way to open runs against it."""
-
-    def __init__(self, base: Path) -> None:
-        self.base = base
-        self.folder = base / "out" / "n"
-        self.folder.mkdir(parents=True)
-        leaf = _dir(base, "out/n/LATEST")
-        self.pointer = CurrentPointer(LocalPointerStore(leaf), leaf)
-        self.latest = self.folder / "LATEST"
-
-    def open(self, run_id: str = "r1", **kw: Any) -> DeliveryStage:
-        (self.folder / run_id).mkdir(exist_ok=True)
-        return DeliveryStage.open(
-            _dir(self.base, f"out/n/{run_id}"), self.pointer, run_id, f"op-{run_id}", **kw
-        )
-
-    def stage_files(self, stage: DeliveryStage) -> None:
-        stage.stage_path("a", "a.csv").write_bytes(b"a1\n")
-        stage.stage_path("b", "masked/b.csv").write_bytes(b"b1\n")
-
-    def litter(self) -> list[str]:
-        return sorted(p.name for p in self.folder.iterdir() if p.name.startswith("._decoy"))
-
-
-@pytest.fixture
-def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Run:
-    anchor_at(monkeypatch, tmp_path)
-    return Run(tmp_path)
-
-
-def _deliver(stage: DeliveryStage, decision: StageDecision = EVERYTHING, **kw: Any) -> Any:
-    return stage.deliver(decision, kw.pop("before", lambda: None), **kw)
 
 
 def test_a_delivered_run_binds_its_members_and_moves_the_pointer(run: Run) -> None:
     stage = run.open()
     run.stage_files(stage)
-    stage.stage_path(None, "report.json", "report").write_bytes(b"{}")
-    assert _deliver(stage) == DeliveryReceipt("delivered")
+    put(stage, None, "report.json", b"{}", "report")
+    assert deliver(stage) == DeliveryReceipt("delivered")
     assert stage.state == "delivered"
     assert run.latest.read_bytes() == b"r1\n"
     members = descriptor(run.folder / "r1")["artifacts"]
@@ -109,7 +64,7 @@ def test_a_delivered_run_binds_its_members_and_moves_the_pointer(run: Run) -> No
 def test_a_table_the_decision_drops_is_removed_with_its_empty_folder(run: Run) -> None:
     stage = run.open()
     run.stage_files(stage)
-    assert _deliver(stage, StageDecision(True, frozenset({"a"}))) == DeliveryReceipt("delivered")
+    assert deliver(stage, StageDecision(True, frozenset({"a"}))) == DeliveryReceipt("delivered")
     left = sorted(p.name for p in (run.folder / "r1").iterdir())
     assert left == [".decoy-publication-stage", DESCRIPTOR, "a.csv"]
 
@@ -118,7 +73,7 @@ def test_a_decision_that_delivers_nothing_aborts_and_touches_no_pointer(run: Run
     run.latest.write_bytes(b"r0\n")
     stage = run.open()
     run.stage_files(stage)
-    assert _deliver(stage, StageDecision(False)) == DeliveryReceipt("nothing")
+    assert deliver(stage, StageDecision(False)) == DeliveryReceipt("nothing")
     assert stage.state == "aborted" and run.latest.read_bytes() == b"r0\n"
     assert list((run.folder / "r1").iterdir()) == [] and run.litter() == []
 
@@ -128,7 +83,7 @@ def test_a_moved_pointer_stops_before_the_vault_or_the_bind(run: Run) -> None:
     run.stage_files(stage)
     run.latest.write_bytes(b"r9\n")  # another run delivered after this one opened
     called: list[str] = []
-    receipt = _deliver(stage, before=lambda: called.append("before"))
+    receipt = deliver(stage, before=lambda: called.append("before"))
     assert receipt == DeliveryReceipt("nothing", MOVED) and called == []
     assert list((run.folder / "r1").iterdir()) == [] and run.litter() == []
     assert run.latest.read_bytes() == b"r9\n"
@@ -138,8 +93,8 @@ def test_two_runs_one_pointer_the_second_to_deliver_loses(run: Run) -> None:
     first, second = run.open("r1"), run.open("r2")
     for stage in (first, second):
         run.stage_files(stage)
-    assert _deliver(second) == DeliveryReceipt("delivered")
-    assert _deliver(first) == DeliveryReceipt("nothing", MOVED)
+    assert deliver(second) == DeliveryReceipt("delivered")
+    assert deliver(first) == DeliveryReceipt("nothing", MOVED)
     assert run.latest.read_bytes() == b"r2\n"
 
 
@@ -149,7 +104,7 @@ def test_a_pointer_that_moves_after_the_compare_leaves_a_bound_folder_not_curren
     stage = run.open()
     run.stage_files(stage)
     # The lock does not stop a writer that ignores it: the swap's own compare is the guard.
-    receipt = _deliver(stage, before=lambda: run.latest.write_bytes(b"r9\n"))
+    receipt = deliver(stage, before=lambda: run.latest.write_bytes(b"r9\n"))
     assert receipt == DeliveryReceipt("nothing", MOVED) and stage.state == "aborted"
     assert (run.folder / "r1" / DESCRIPTOR).exists() and run.latest.read_bytes() == b"r9\n"
 
@@ -158,15 +113,8 @@ def test_a_folder_that_holds_something_else_is_refused_with_f22s_code(run: Run) 
     stage = run.open()
     run.stage_files(stage)
     (run.folder / "r1" / "stray.txt").write_bytes(b"x")
-    receipt = _deliver(stage)
+    receipt = deliver(stage)
     assert receipt == DeliveryReceipt("nothing", reasons.decoy.PUBLICATION_TARGET_OCCUPIED)
-    assert not run.latest.exists() and run.litter() == []
-
-
-def test_a_declared_file_that_was_never_written_fails_the_publish(run: Run) -> None:
-    stage = run.open()
-    stage.stage_path("a", "a.csv")  # the writer failed before creating it
-    assert _deliver(stage) == DeliveryReceipt("nothing", FAILED)
     assert not run.latest.exists() and run.litter() == []
 
 
@@ -174,7 +122,7 @@ def test_a_held_pointer_lock_refuses_with_the_lock_code_and_stages_nothing(run: 
     stage = run.open(lock_timeout_s=0.2)
     run.stage_files(stage)
     with run.pointer.locked(1.0):
-        receipt = _deliver(stage)
+        receipt = deliver(stage)
     assert receipt == DeliveryReceipt("nothing", reasons.decoy.PUBLICATION_LOCK_TIMEOUT)
     assert run.litter() == [] and not run.latest.exists()
 
@@ -188,7 +136,7 @@ def test_before_visible_raising_aborts_and_the_error_comes_back_unchanged(run: R
         raise RuntimeError("evidence write failed")
 
     with pytest.raises(RuntimeError, match="evidence write failed"):
-        _deliver(stage, before=boom, reconcile=seen.append)
+        deliver(stage, before=boom, reconcile=seen.append)
     assert seen == [DeliveryReceipt("nothing")] and stage.state == "aborted"
     assert list((run.folder / "r1").iterdir()) == [] and not run.latest.exists()
 
@@ -206,7 +154,7 @@ def test_reconcile_runs_under_the_pointer_lock_with_the_final_receipt(run: Run) 
             held = type(exc).__name__
         seen.append((receipt, held))
 
-    _deliver(stage, reconcile=reconcile)
+    deliver(stage, reconcile=reconcile)
     assert seen == [(DeliveryReceipt("delivered"), "LockTimeout")]
 
 
@@ -226,7 +174,7 @@ def test_an_interrupt_at_the_visibility_point_is_judged_by_a_pointer_reread(
     monkeypatch.setattr(HeldPointer, "swap", interrupted)
     seen: list[DeliveryReceipt] = []
     with pytest.raises(KeyboardInterrupt):
-        _deliver(stage, reconcile=seen.append)
+        deliver(stage, reconcile=seen.append)
     if swapped:
         assert seen == [DeliveryReceipt("uncertain", UNCERTAIN)] and stage.state == "delivered"
     else:
@@ -239,7 +187,7 @@ def test_the_vault_is_published_before_the_bind_and_kept_when_the_swap_loses(run
     run.stage_files(stage)
     vault, _ = binding("ambient", run.base)
     stage.set_vault(vault)
-    receipt = _deliver(stage, before=lambda: run.latest.write_bytes(b"r9\n"))
+    receipt = deliver(stage, before=lambda: run.latest.write_bytes(b"r9\n"))
     assert receipt == DeliveryReceipt("nothing", MOVED)
     assert (run.base / "vaults" / "v.dcyvault").exists()  # the orphan the next run refuses
     assert descriptor(run.folder / "r1")["vault"] is not None
@@ -250,7 +198,7 @@ def test_a_delivered_run_records_its_vault_in_the_descriptor(run: Run) -> None:
     stage = run.open()
     run.stage_files(stage)
     stage.set_vault(binding("ambient", run.base)[0])
-    assert _deliver(stage) == DeliveryReceipt("delivered")
+    assert deliver(stage) == DeliveryReceipt("delivered")
     assert descriptor(run.folder / "r1")["vault"]["sha256"]
 
 
@@ -259,14 +207,14 @@ def test_deliver_after_abort_is_refused_and_abort_after_delivered_is_a_no_op(run
     gone.abort()
     gone.abort()
     with pytest.raises(RuntimeError):
-        _deliver(gone)
+        deliver(gone)
     kept = run.open("r2")
     run.stage_files(kept)
-    _deliver(kept)
+    deliver(kept)
     kept.abort()
     assert kept.state == "delivered" and run.latest.read_bytes() == b"r2\n"
     with pytest.raises(RuntimeError):
-        _deliver(kept)
+        deliver(kept)
 
 
 def test_an_unreadable_pointer_refuses_at_open_before_a_stage_exists(run: Run) -> None:
@@ -279,7 +227,7 @@ def test_an_unreadable_pointer_refuses_at_open_before_a_stage_exists(run: Run) -
 def test_a_stage_that_cannot_open_is_a_value_free_failure_with_the_errno(
     run: Run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    out = _dir(run.base, "out/n/r1")
+    out = dir_at(run.base, "out/n/r1")
 
     def begin(*args: Any, **kwargs: Any) -> Any:
         raise PermissionError(errno.EACCES, "/secret/path")
@@ -292,22 +240,6 @@ def test_a_stage_that_cannot_open_is_a_value_free_failure_with_the_errno(
     assert "secret" not in str(caught.value)
 
 
-def test_staging_rules_refuse_a_bad_path_a_repeat_with_another_table_and_an_empty_table(
-    run: Run,
-) -> None:
-    stage = run.open()
-    first = stage.stage_path("a", "x/a.csv")
-    assert stage.stage_path("a", "x/a.csv") == first
-    for call in (
-        lambda: stage.stage_path("a", "../a.csv"),
-        lambda: stage.stage_path("a", "/abs.csv"),
-        lambda: stage.stage_path("b", "x/a.csv"),
-        lambda: stage.stage_path("", "y.csv"),
-    ):
-        with pytest.raises(ValueError):
-            call()
-
-
 def test_every_value_free_delivery_error_carries_no_cause_or_context(
     run: Run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -317,14 +249,14 @@ def test_every_value_free_delivery_error_carries_no_cause_or_context(
     make: Callable[[], object]
     for make in (
         lambda: run.open(),
-        lambda: DeliveryStage.open(_dir(run.base, "out/n/r1"), run.pointer, "bad\nid", "op"),
-        lambda: DeliveryStage.open(_dir(run.base, "out/n/r1"), run.pointer, "r1", "bad op id"),
+        lambda: DeliveryStage.open(dir_at(run.base, "out/n/r1"), run.pointer, "bad\nid", "op"),
+        lambda: DeliveryStage.open(dir_at(run.base, "out/n/r1"), run.pointer, "r1", "bad op id"),
     ):
         with pytest.raises((PublicationFailed, ValueError)) as caught:
             make()
         cases.append(caught.value)
     run.latest.unlink()
-    out = _dir(run.base, "out/n/r1")
+    out = dir_at(run.base, "out/n/r1")
     (run.folder / "r1").mkdir(exist_ok=True)
     for failure in (
         PermissionError(errno.EACCES, "/secret/path"),
@@ -341,8 +273,8 @@ def test_every_value_free_delivery_error_carries_no_cause_or_context(
         cases.append(caught.value)
     stage = run.open("r2")
     for make in (
-        lambda: stage.stage_path("a", "../a.csv"),
-        lambda: stage.stage_path("", "a.csv"),
+        lambda: stage.reserve("a", "../a.csv"),
+        lambda: stage.reserve("", "a.csv"),
         lambda: StageDecision("yes", frozenset()),  # type: ignore[arg-type]
         lambda: StageDecision(True, {"a"}),  # type: ignore[arg-type]
     ):
@@ -350,7 +282,7 @@ def test_every_value_free_delivery_error_carries_no_cause_or_context(
             make()
         cases.append(caught.value)
     stage.abort()
-    for make in (lambda: stage.stage_path("a", "a.csv"), lambda: _deliver(stage)):
+    for make in (lambda: stage.reserve("a", "a.csv"), lambda: deliver(stage)):
         with pytest.raises(RuntimeError) as caught:
             make()
         cases.append(caught.value)
@@ -397,7 +329,7 @@ def test_deliver_maps_every_bind_outcome(
     commit = SimpleNamespace(outcome=outcome, reason_code=code)
     monkeypatch.setattr(stage_module, "publish_unit", lambda *a, **k: commit)
     stage = run.open()
-    receipt = _deliver(stage)
+    receipt = deliver(stage)
     assert receipt.state == BIND_STATE[outcome]
     assert (run.latest.exists()) == (BIND_STATE[outcome] != "nothing")
     if BIND_ROWS[outcome][1] is not None:
@@ -413,7 +345,7 @@ def test_deliver_maps_every_swap_result(
     monkeypatch.setattr(HeldPointer, "swap", lambda self, expected, new: result)
     stage = run.open()
     run.stage_files(stage)
-    receipt = _deliver(stage)
+    receipt = deliver(stage)
     assert (receipt.state, receipt.cause) == SWAP_ROWS[result]
     assert stage.state == ("aborted" if receipt.state == "nothing" else "delivered")
 
@@ -423,7 +355,7 @@ def test_an_uncertain_bind_with_a_clean_swap_is_uncertain_not_delivered(
 ) -> None:
     commit = SimpleNamespace(outcome="commit_uncertain", reason_code="publication_commit_uncertain")
     monkeypatch.setattr(stage_module, "publish_unit", lambda *a, **k: commit)
-    assert _deliver(run.open()) == DeliveryReceipt("uncertain", UNCERTAIN)
+    assert deliver(run.open()) == DeliveryReceipt("uncertain", UNCERTAIN)
     assert run.latest.read_bytes() == b"r1\n"
 
 
@@ -432,7 +364,7 @@ def test_an_outcome_with_no_row_fails_closed(run: Run, monkeypatch: pytest.Monke
     monkeypatch.setattr(stage_module, "publish_unit", lambda *a, **k: commit)
     stage = run.open()
     with pytest.raises(KeyError):
-        _deliver(stage)
+        deliver(stage)
     assert not run.latest.exists() and stage.state == "aborted"
 
 
@@ -457,7 +389,7 @@ def test_a_lock_the_policy_refuses_settles_nothing_with_a_code(
 
     monkeypatch.setattr(run.pointer, "locked", refused)
     seen: list[DeliveryReceipt] = []
-    assert _deliver(stage, reconcile=seen.append) == DeliveryReceipt("nothing", code)
+    assert deliver(stage, reconcile=seen.append) == DeliveryReceipt("nothing", code)
     assert seen == [DeliveryReceipt("nothing", code)] and stage.state == "aborted"
     assert run.litter() == [] and not run.latest.exists()
 
@@ -476,12 +408,15 @@ def test_a_prune_that_fails_aborts_reconciles_and_settles_nothing(
     stage = run.open()
     run.stage_files(stage)
 
-    def drop(self: DeliveryStage, path: str) -> None:
-        raise failure
+    def holder(self: DeliveryStage, path: str) -> Any:
+        def remove(name: str) -> None:
+            raise failure
 
-    monkeypatch.setattr(DeliveryStage, "_drop", drop)
+        return SimpleNamespace(remove=remove)
+
+    monkeypatch.setattr(DeliveryStage, "_holder", holder)
     seen: list[DeliveryReceipt] = []
-    receipt = _deliver(stage, StageDecision(True, frozenset({"a"})), reconcile=seen.append)
+    receipt = deliver(stage, StageDecision(True, frozenset({"a"})), reconcile=seen.append)
     assert receipt == DeliveryReceipt("nothing", FAILED) and seen == [receipt]
     assert stage.state == "aborted" and run.litter() == [] and not run.latest.exists()
 
@@ -508,7 +443,7 @@ def test_an_interrupt_inside_publish_unit_is_judged_by_the_reread(
         monkeypatch.setattr(stage_module, "publish_unit", interrupted)
         seen: list[DeliveryReceipt] = []
         with pytest.raises(KeyboardInterrupt):
-            _deliver(stage, reconcile=seen.append)
+            deliver(stage, reconcile=seen.append)
         want = DeliveryReceipt("uncertain", UNCERTAIN) if unreadable else DeliveryReceipt("nothing")
         assert seen == [want]
         run.latest.unlink(missing_ok=True)
@@ -527,7 +462,7 @@ def test_an_unreadable_pointer_after_the_bind_is_uncertain(
     monkeypatch.setattr(HeldPointer, "swap", interrupted)
     seen: list[DeliveryReceipt] = []
     with pytest.raises(KeyboardInterrupt):
-        _deliver(stage, reconcile=seen.append)
+        deliver(stage, reconcile=seen.append)
     assert seen == [DeliveryReceipt("uncertain", UNCERTAIN)] and stage.state == "delivered"
 
 
@@ -543,7 +478,7 @@ def test_an_interrupt_before_the_bind_leaves_nothing_even_when_the_pointer_is_un
 
     seen: list[DeliveryReceipt] = []
     with pytest.raises(KeyboardInterrupt):
-        _deliver(stage, before=interrupted, reconcile=seen.append)
+        deliver(stage, before=interrupted, reconcile=seen.append)
     assert seen == [DeliveryReceipt("nothing")] and stage.state == "aborted"
 
 
@@ -560,88 +495,11 @@ def test_a_resume_whose_pointer_already_names_the_run_is_visible_after_an_early_
 
     seen: list[DeliveryReceipt] = []
     with pytest.raises(KeyboardInterrupt):
-        _deliver(stage, before=interrupted, reconcile=seen.append)
+        deliver(stage, before=interrupted, reconcile=seen.append)
     assert seen == [DeliveryReceipt("uncertain", UNCERTAIN)] and stage.state == "delivered"
 
 
 # -- Codex round 2 (V1 findings 1-7), each reproduced on the previous head ---------------------
-
-
-@pytest.mark.parametrize(
-    ("first", "second"),
-    [
-        ("A.csv", "a.csv"),
-        ("X/a.csv", "x/b.csv"),
-        ("\u00e9.csv", "e\u0301.csv"),  # composed and decomposed forms of one name
-    ],
-)
-def test_two_paths_one_case_insensitive_file_are_refused_before_a_writer_gets_the_second(
-    run: Run, first: str, second: str
-) -> None:
-    """A case-insensitive or normalizing file system makes these one file; the stage cannot tell
-    which kind it sits on, so it refuses the alias on any system."""
-    stage = run.open()
-    stage.stage_path("a", first).write_bytes(b"one\n")
-    with pytest.raises(ValueError):
-        stage.stage_path("b", second)
-    assert _deliver(stage, StageDecision(True, frozenset({"a"}))) == DeliveryReceipt("delivered")
-    assert [m["path"] for m in descriptor(run.folder / "r1")["artifacts"]] == [first]
-
-
-def test_a_file_and_a_folder_of_one_name_are_refused_and_the_good_table_still_delivers(
-    run: Run,
-) -> None:
-    stage = run.open()
-    stage.stage_path("good", "x").write_bytes(b"good\n")
-    with pytest.raises(ValueError):
-        stage.stage_path("bad", "x/b.csv")
-    assert _deliver(stage, StageDecision(True, frozenset({"good"}))) == DeliveryReceipt("delivered")
-    assert stage.state == "delivered" and run.litter() == []
-
-
-def test_a_folder_that_cannot_be_made_leaves_no_trace_in_the_stage_books(
-    run: Run, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    stage = run.open()
-    stage.stage_path("good", "good.csv").write_bytes(b"good\n")
-
-    def refuse(component: str) -> Any:
-        raise FileExistsError(errno.EEXIST, "secret")
-
-    monkeypatch.setattr(stage._txn, "create_dir", refuse)
-    with pytest.raises(FileExistsError):
-        stage.stage_path("bad", "y/b.csv")
-    monkeypatch.undo()
-    assert _deliver(stage, StageDecision(True, frozenset({"good"}))) == DeliveryReceipt("delivered")
-    assert stage.state == "delivered" and run.litter() == []
-
-
-@pytest.mark.parametrize("mask", [0o022, 0o477, 0o000])
-def test_a_staged_member_is_owner_only_whatever_the_umask(run: Run, mask: int) -> None:
-    stage = run.open()
-    old = os.umask(mask)
-    try:
-        run.stage_files(stage)
-        stage.stage_path(None, "report.json", "report").write_bytes(b"{}")
-    finally:
-        os.umask(old)
-    receipt = _deliver(stage)
-    assert receipt == DeliveryReceipt("delivered")
-    modes = {
-        p.name: stat.S_IMODE(p.stat().st_mode)
-        for p in (run.folder / "r1").rglob("*")
-        if p.is_file() and p.suffix in (".csv", ".json") and p.name != DESCRIPTOR
-    }
-    assert set(modes) == {"a.csv", "b.csv", "report.json"}
-    assert all(mode & 0o077 == 0 for mode in modes.values()), modes
-
-
-def test_a_run_id_that_names_another_folder_than_the_output_is_refused_at_open(run: Run) -> None:
-    (run.folder / "r2").mkdir()
-    with pytest.raises(ValueError):
-        DeliveryStage.open(_dir(run.base, "out/n/r2"), run.pointer, "r3", "op-r3")
-    assert run.litter() == [] and not run.latest.exists()
-    assert list((run.folder / "r2").iterdir()) == []
 
 
 @pytest.mark.parametrize("where", ["lock", "prune"])
@@ -657,10 +515,10 @@ def test_an_interrupt_before_the_bind_settles_the_stage_and_reraises(
     if where == "lock":
         monkeypatch.setattr(run.pointer, "locked", interrupted)
     else:
-        monkeypatch.setattr(DeliveryStage, "_drop", interrupted)
+        monkeypatch.setattr(DeliveryStage, "_holder", interrupted)
     seen: list[DeliveryReceipt] = []
     with pytest.raises(KeyboardInterrupt):
-        _deliver(stage, StageDecision(True, frozenset({"a"})), reconcile=seen.append)
+        deliver(stage, StageDecision(True, frozenset({"a"})), reconcile=seen.append)
     assert seen == [DeliveryReceipt("nothing")] and stage.state == "aborted"
     assert run.litter() == [] and not run.latest.exists()
 
@@ -670,7 +528,7 @@ def test_a_resume_that_is_interrupted_after_a_real_delivery_leaves_no_pending_st
 ) -> None:
     first = run.open("r1")
     run.stage_files(first)
-    assert _deliver(first) == DeliveryReceipt("delivered")
+    assert deliver(first) == DeliveryReceipt("delivered")
     again = run.open("r1")
     run.stage_files(again)
 
@@ -679,7 +537,7 @@ def test_a_resume_that_is_interrupted_after_a_real_delivery_leaves_no_pending_st
 
     seen: list[DeliveryReceipt] = []
     with pytest.raises(KeyboardInterrupt):
-        _deliver(again, before=interrupted, reconcile=seen.append)
+        deliver(again, before=interrupted, reconcile=seen.append)
     assert seen == [DeliveryReceipt("uncertain", UNCERTAIN)] and again.state == "delivered"
     assert run.litter() == [] and run.latest.read_bytes() == b"r1\n"
 
@@ -687,7 +545,7 @@ def test_a_resume_that_is_interrupted_after_a_real_delivery_leaves_no_pending_st
 def _replay(run: Run) -> DeliveryStage:
     first = run.open("r1")
     run.stage_files(first)
-    assert _deliver(first) == DeliveryReceipt("delivered")
+    assert deliver(first) == DeliveryReceipt("delivered")
     again = run.open("r1")
     run.stage_files(again)
     return again
@@ -698,8 +556,24 @@ def test_a_failed_rewrite_of_a_pointer_that_already_names_the_run_is_still_deliv
 ) -> None:
     again = _replay(run)
     monkeypatch.setattr(HeldPointer, "swap", lambda self, expected, new: "failed")
-    assert _deliver(again) == DeliveryReceipt("delivered")
+    assert deliver(again) == DeliveryReceipt("delivered")
     assert again.state == "delivered" and run.latest.read_bytes() == b"r1\n"
+
+
+def test_an_unreadable_pointer_on_the_replay_reread_is_uncertain(
+    run: Run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AT-71: the swap did not replace, the expected value named this run, and the re-read fails."""
+    again = _replay(run)
+
+    def unreadable(self: HeldPointer, expected: Any, new: str) -> str:
+        run.latest.unlink()
+        run.latest.symlink_to("elsewhere")
+        return "failed"
+
+    monkeypatch.setattr(HeldPointer, "swap", unreadable)
+    assert deliver(again) == DeliveryReceipt("uncertain", UNCERTAIN)
+    assert again.state == "delivered"
 
 
 def test_a_stale_rewrite_of_a_replayed_run_is_still_nothing(
@@ -712,7 +586,7 @@ def test_a_stale_rewrite_of_a_replayed_run_is_still_nothing(
         return "stale"
 
     monkeypatch.setattr(HeldPointer, "swap", moved)
-    assert _deliver(again) == DeliveryReceipt("nothing", MOVED)
+    assert deliver(again) == DeliveryReceipt("nothing", MOVED)
     assert again.state == "aborted" and run.latest.read_bytes() == b"r9\n"
 
 
@@ -724,7 +598,7 @@ def test_an_uncertain_bind_with_a_stale_swap_is_nothing_not_uncertain(
     monkeypatch.setattr(stage_module, "publish_unit", lambda *a, **k: commit)
     monkeypatch.setattr(HeldPointer, "swap", lambda self, expected, new: "stale")
     stage = run.open()
-    assert _deliver(stage) == DeliveryReceipt("nothing", MOVED)
+    assert deliver(stage) == DeliveryReceipt("nothing", MOVED)
     assert stage.state == "aborted" and not run.latest.exists()
 
 

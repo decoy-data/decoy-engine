@@ -37,7 +37,9 @@ from decoy_engine.fileaccess._output import (
 from decoy_engine.fileaccess._types import (
     CommitUncertain,
     FileAccessUnavailable,
+    FileSeal,
     LeafTooLarge,
+    LinkUnsupported,
     LockTimeout,
     LockUnavailable,
     StageDir,
@@ -53,6 +55,12 @@ T = TypeVar("T")
 # that the entry is lost (PostgreSQL `fsync_fname_ext` tolerates EBADF and EINVAL; ENOTSUP is added
 # because FUSE and Darwin report it for a directory fsync). Any other errno is fatal.
 _DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
+# A link failing with one of these means the file system cannot hard-link here (EPERM: FAT and
+# some FUSE and SMB mounts; EOPNOTSUPP and ENOTSUP: no link support; ENOSYS: no `linkat`; EXDEV:
+# another device), not that the name is taken. Every caller maps them to `LinkUnsupported`.
+_LINK_UNSUPPORTED = frozenset(
+    {errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS, errno.EXDEV}
+)
 FD_STAGED_LABELS = DURABLE_LABELS | DURABLE_REPLACE_LABELS  # staged through a held parent fd
 _POLL_S = 0.05
 _CHUNK = 1 << 16
@@ -345,19 +353,58 @@ def discard_stage_at(dir_fd: int, name: str) -> None:
         pass
 
 
+def link_noclobber_at(
+    src_dir_fd: int | None,
+    src_name: str | os.PathLike[str],
+    dst_dir_fd: int | None,
+    dst_name: str | os.PathLike[str],
+) -> None:
+    """The one no-clobber hard link: the file system decides whether `dst_name` is taken.
+
+    With descriptors, both names are validated components beneath held directories and the link
+    never follows a symlink. With neither descriptor (the ambient policy's own path operands) it
+    is the portable two-path call, so a backend with no descriptor form still works. Raises
+    `FileExistsError` for a taken name, `LinkUnsupported` for `_LINK_UNSUPPORTED` (or a backend
+    that cannot take descriptor keywords) and an errno-only `OSError` for anything else; no
+    path, name or OS text rides along."""
+    with_fds = src_dir_fd is not None or dst_dir_fd is not None
+    kwargs: dict[str, object] = {}
+    if with_fds:
+        validate_component(src_name, _CREATOR_KEY)
+        validate_component(dst_name, _CREATOR_KEY)
+        kwargs = {"src_dir_fd": src_dir_fd, "dst_dir_fd": dst_dir_fd, "follow_symlinks": False}
+    code = 0
+    try:
+        os.link(src_name, dst_name, **kwargs)  # type: ignore[arg-type]
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend
+        code = errno.ENOSYS
+    if code == errno.EEXIST:
+        raise FileExistsError(errno.EEXIST, "output exists")
+    if code in _LINK_UNSUPPORTED:
+        raise LinkUnsupported(code)
+    if code:
+        raise OSError(code, os.strerror(code))
+
+
 def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
     """The one durable exclusive publish: `link(2)` the fsynced stage to `leaf` (the
     compare-and-set), fsync the directory (the commit point), then drop the stage name.
 
-    Raises `FileExistsError` for an existing leaf and an errno-only `OSError` for any other
-    failure. Removal of the stage is attempted on every path (a failed removal is swallowed and leaves
-    only the encrypted 0600 stage); a leaf that was linked is never removed, so a directory
-    fsync failure reports an error with the vault kept."""
+    Raises `FileExistsError` for an existing leaf, `LinkUnsupported` for a file system that
+    cannot link, and an errno-only `OSError` for any other failure. Removal of the stage is
+    attempted on every path (a failed removal is swallowed and leaves only the encrypted 0600
+    stage); a leaf that was linked is never removed, so a directory fsync failure reports an
+    error with the vault kept."""
     validate_component(stage_name, _CREATOR_KEY)
     validate_component(leaf, _CREATOR_KEY)
     code = 0
+    unsupported = False
     try:
-        os.link(stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
+        link_noclobber_at(parent_fd, stage_name, parent_fd, leaf)
+    except LinkUnsupported as exc:
+        code, unsupported = exc.errno or errno.EIO, True
     except OSError as exc:
         code = exc.errno or errno.EIO
     if not code:
@@ -369,6 +416,8 @@ def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> Non
     discard_stage_at(parent_fd, stage_name)
     if code == errno.EEXIST:
         raise FileExistsError(errno.EEXIST, "output exists")
+    if unsupported:
+        raise LinkUnsupported(code)
     if code:
         raise OSError(code, os.strerror(code))
 
@@ -518,6 +567,14 @@ class _ReadOnlyStageDir:
 
     def local_stage_path(self) -> str:
         raise FileAccessUnavailable("a read-only stage view has no stage path")
+
+    def claim_from(self, source: StageDir, src_component: str, dst_component: str) -> FileSeal:
+        _refuse_change()
+
+    def seal_of(self, component: str) -> FileSeal | None:
+        from decoy_engine.fileaccess._stage_claim import seal_at
+
+        return seal_at(self._held(), component)
 
     def __reduce__(self) -> tuple[object, ...]:
         raise TypeError("a stage view cannot be serialized")

@@ -153,6 +153,11 @@ class CurrentPointer:
         self._store = store
         self._lock = lock
 
+    @property
+    def leaf_dir(self) -> OutputDir:
+        """The pointer's own leaf capability, for the destination agreement check."""
+        return self._lock
+
     def read(self) -> PointerState:
         return self._store.read()
 
