@@ -2,7 +2,7 @@ Breaking: `nested` `provider_config.target` accepts only a closed RFC 9535 subse
 
 ### Changed (nested target grammar, NESTED-FREEZE, 2026-11-23)
 
-A `nested` target is `$` followed by `.name`, `.*`, `['name']`, `[*]`, `[index]` or `[start:end:step]`. One function, `decoy_engine._nested_json.parse_target`, reads it for the plan check and the handler, and `TargetPath.find` evaluates it, so what a target selects no longer depends on a JSONPath library (jsonpath-ng 1.8 and 1.16 disagreed on an array selector applied to an object). A target outside the subset fails at compile and in `decoy validate` with the position and the form found. No shipped doc, example, CLI or platform config used a refused form.
+A `nested` target is `$` followed by `.name`, `.*`, `['name']`, `[*]`, `[index]` or `[start:end:step]`. One function, `decoy_engine._nested_json.parse_target`, reads it for the plan check and the handler, and `TargetPath.find` evaluates it, so what a target selects no longer depends on a JSONPath library (jsonpath-ng 1.8 and 1.16 disagreed on an array selector applied to an object). A target outside the subset fails at compile and in `decoy validate` with the position and the form found, under the new reason `plan/nested_target_unsupported`. No shipped doc, example, CLI or platform config used a refused form.
 
 The overlap warning `nested_jsonpath_path_overlap` is no longer raised: no subset target can match a path and its prefix.
 
