@@ -23,13 +23,14 @@ import numpy as np
 import pyarrow as pa
 
 from decoy_engine.execution import _unified_slice_admission as _admission
+from decoy_engine.execution._fk_keys import table_from_pandas_keeping_source_types
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._unified_slice import UnifiedSliceInvariantError
 from decoy_engine.execution.native import _chunked_evidence
 from decoy_engine.execution.native._operator_params import FakerParams
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Collection, Iterable, Mapping
 
     import pandas as pd
 
@@ -192,6 +193,8 @@ def reconstruct_source_shaped_output(
     *,
     table: str,
     frame: pd.DataFrame,
+    source: pa.Table,
+    untouched: Collection[str],
     masked_table: pa.Table,
     nodes: Iterable[PhysicalNode],
     when_selected: Mapping[str, np.ndarray[Any, np.dtype[np.bool_]]] | None = None,
@@ -241,6 +244,6 @@ def reconstruct_source_shaped_output(
     # C5c-ii option A: an all-null/empty admitted deterministic-Faker column over bool/int/uint is
     # `string` here too, matching the full-frame oracle so the flag-on/flag-off D9 parity holds.
     out = pin_degenerate_to_string(
-        pa.Table.from_pandas(frame, preserve_index=False), degenerate_pin
+        table_from_pandas_keeping_source_types(frame, source, untouched), degenerate_pin
     )
     return {table: out}

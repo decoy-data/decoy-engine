@@ -188,16 +188,27 @@ def passthrough_columns(
     ]
 
 
-def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any) -> frozenset[str]:
+def untouched_columns(
+    nodes: Iterable[Any],
+    names: Sequence[str],
+    registry: Any,
+    fk_edges: Iterable[Any] = (),
+    table: str | None = None,
+) -> frozenset[str]:
     """The columns of a table no work node changes. The node-side twin of
     `passthrough_columns` for the full-frame and sequential adapters, which hold work nodes
     rather than the config: it asks the same `handler_written_columns` registry about an entry
     rebuilt from each node's plan slice, so a column a handler writes beyond the node's own
     (a composite's canonical outputs) is touched here as it is there. A passthrough node, `when:`
-    or not, leaves its column as the source held it; every other node masks its own columns."""
+    or not, leaves its column as the source held it; every other node masks its own columns.
+    A relationship key of `table` (`fk_edges`) is never untouched: the cascade rewrites a child
+    key to follow its masked parent whatever the key's own strategy says."""
     from decoy_engine.execution._adapter import provider_config_to_dict
+    from decoy_engine.execution._strategies import output_declaration
     from decoy_engine.plan._types import ColumnSeed
 
+    # A passthrough handler that does not declare its output is its input changes the column.
+    passthrough_is_input = output_declaration("passthrough", ()).is_input
     entries: list[dict[str, Any]] = []
     masked: set[str] = set()
     for node in nodes:
@@ -215,12 +226,17 @@ def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any)
                 "when": seed.when,
             }
         )
-        if node.kind != "scalar" or node.strategy != "passthrough":
+        if node.kind != "scalar" or node.strategy != "passthrough" or not passthrough_is_input:
             masked |= set(node.columns)
     written = handler_written_columns(entries, registry)
     if written is None:  # a handler writes columns no declaration can name: nothing is untouched
         return frozenset()
-    return frozenset(names) - written - masked
+    cascaded: set[str] = set()
+    if table is not None:
+        from decoy_engine.execution._fk_keys import fk_columns_for_table
+
+        cascaded = fk_columns_for_table(fk_edges, table)
+    return frozenset(names) - written - masked - cascaded
 
 
 def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]]:

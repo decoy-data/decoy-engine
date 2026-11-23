@@ -426,7 +426,7 @@ def run_sequential(
                 register_exact_int_sources(ctx, table, src, df, nodes_by_table.get(table, ()))
                 native_run.prepare_table(plan, table, src.schema, graph)
                 # C5c-ii: capture the degenerate-Faker pin set from the SOURCE schema before
-                # `del src` drops it; applied to this table's output after from_pandas below.
+                # `src` is released; applied to this table's output after from_pandas below.
                 from decoy_engine.execution._faker_degenerate_pin import (
                     deterministic_faker_pin_columns_from_plan,
                 )
@@ -434,8 +434,8 @@ def run_sequential(
                 faker_pin = deterministic_faker_pin_columns_from_plan(
                     plan, table, src.schema, relationship_graph=graph
                 )
-                src_schema = src.schema  # kept for the output conversion; `src` is released
-                del src
+                src_schema = src.schema
+                # `src` stays until the output is assembled: untouched columns are written from it.
 
                 # Snapshot this table's parent-key columns pre-mask, for its outgoing
                 # edges, so a child can rebuild the key map after eviction.
@@ -525,14 +525,19 @@ def run_sequential(
                 out = pin_degenerate_to_string(
                     table_from_pandas_keeping_source_types(
                         frames[table],
-                        src_schema,
+                        src,
                         untouched_columns(
-                            nodes_by_table.get(table, ()), src_schema.names, registry
+                            nodes_by_table.get(table, ()),
+                            src_schema.names,
+                            registry,
+                            graph.edges,
+                            table,
                         ),
                         [c for (t, c) in ctx.native_date_columns if t == table],
                     ),
                     faker_pin,
                 )
+                del src
                 conversion_ms += (time.perf_counter() - t1) * 1000.0
                 if cast_run is not None:  # after the parent maps were built from the typed frame
                     out, table_records = cast_run.render_table(table, out, table_records)

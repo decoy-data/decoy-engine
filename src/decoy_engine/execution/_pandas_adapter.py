@@ -318,8 +318,14 @@ class PandasExecutionAdapter:
             {
                 t: table_from_pandas_keeping_source_types(
                     f,
-                    sources[t].schema,
-                    untouched_columns((n for n in ordered if n.table == t), f.columns, registry),
+                    sources[t],
+                    untouched_columns(
+                        (n for n in ordered if n.table == t),
+                        f.columns,
+                        registry,
+                        relationship_graph.edges,
+                        t,
+                    ),
                     [c for (table, c) in ctx.native_date_columns if table == t],
                 )
                 for t, f in frames.items()

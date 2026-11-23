@@ -1076,6 +1076,16 @@ only this site moves.
   values, column names, other Arrow types, nullability and row-group layout do not change. The
   public names `output_schema` and `output_table` are additive. In-memory results returned
   to a caller are outside this promise.
+  ROUTE-OUTPUT-CONTRACT, untouched columns (UF-DOMAIN S1, 2026-11-22): on every pandas-built
+  route (full-frame, sequential, unified slice) a column no rule changes is written from the
+  source Arrow column as stored, not from a pandas round trip. A `decimal` keeps its precision,
+  a nullable integer not declared lossless stays an integer, a `large_string` stays
+  `large_string`, an all-null or zero-row column keeps its source type (not `null`), and a float
+  NaN stays NaN (pandas turned it into null); this is what the chunked lane already wrote. One function,
+  `table_from_pandas_keeping_source_types`, builds that output from the source table's row
+  count and column order, and raises before any output exists if the frame no longer holds the
+  source's rows. The schema `pandas` metadata now lists only the columns built from the frame.
+  The earlier output of those routes changes for the lossy types named above.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
   that would auto-chunk alone dispatches on the same lane, so the auto-chunk shape above now

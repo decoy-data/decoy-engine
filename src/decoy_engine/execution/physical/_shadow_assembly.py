@@ -77,23 +77,10 @@ def assemble_column(strategy: str, parts: list[pa.Array]) -> pa.Array:
         return pa.nulls(n, type=pa.null()) if combined.null_count == n else combined
     if strategy in _NULL_ON_EMPTY_STRATEGIES:  # empty + all-null -> null, else string
         return pa.nulls(n, type=pa.null()) if combined.null_count == n else combined
-    # passthrough is value-identity, so its OUTPUT SCHEMA is exactly whatever
-    # the pandas full-frame oracle infers when the table round-trips
-    # `table.to_pandas()` -> `from_pandas(preserve_index=False)` (the oracle's
-    # own mechanism, `_pandas_adapter.py`). Reproduce THAT -- a TABLE-level
-    # round-trip, not an array-level `array.to_pandas()`: the two can diverge on
-    # metadata-carrying dtypes across pandas versions (Codex final-gate:
-    # nullable-int handling), while the single-column table round-trip matches
-    # the oracle's per-column inference by construction for every admitted type
-    # (large_string -> string, all-null bool/string -> null, int+null ->
-    # float64, big-int/uint, empty -> pandas' own inference). The output equals
-    # the ORACLE's output, not necessarily the source: passthrough itself never
-    # masks, but the oracle's float64 promotion of a null-bearing integer loses
-    # precision beyond 2**53 (e.g. 2**53+1 -> 2**53), and this reproduces that
-    # exactly. So it reconciles the shadow to the oracle, never to the raw
-    # source.
-    normalized = pa.Table.from_pandas(pa.table({"c": combined}).to_pandas(), preserve_index=False)
-    return normalized.column("c").combine_chunks()
+    # passthrough is value-identity: every pandas-built route writes the column as the source
+    # holds it (UF-DOMAIN S1, `table_from_pandas_keeping_source_types`), so the shadow output is
+    # the native column unchanged and agrees with the oracle by the same rule.
+    return combined
 
 
 def fpe_node_warnings(
