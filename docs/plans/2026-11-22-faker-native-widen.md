@@ -1,14 +1,16 @@
-Status: plan (revision 3, 2026-11-22)
+Status: plan (revision 4, 2026-11-23)
 
 # FAKER-NATIVE-WIDEN: every poolable string Faker provider runs native under the default pool
 
 Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: FAKER-NATIVE-WIDEN (group mask; record `docs/records/2026-11-19-engine-speed-and-route-completeness.md` item C1; V1 fast-path audit rank 2, vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`). Engine only. The CLI gets it through its next engine pin bump.
 
-No earlier plan file exists for this row: `git log --all -- 'docs/plans/*faker*widen*'` is empty and no plan branch names the row outside the 2026-11-19 record. This is revision 3.
+No earlier plan file exists for this row: `git log --all -- 'docs/plans/*faker*widen*'` is empty and no plan branch names the row outside the 2026-11-19 record. This is revision 4.
 
 Revision 2 (Dennis round 1, NO-GO): the out-of-core reservation is measured from the built pool, so widening cannot fail a job that reroutes and succeeds today (S0, W1); the out-of-core template proof uses a deterministic copy of the HIPAA set; the totality sentry walks every `pool_native` backend; the Mimesis gate record is spelled out; three missed text and test sites are named.
 
 Revision 3 (Dennis round 2, NO-GO): S0 retains a lower-bound pre-build refusal, the totality exclusion table names all ten excluded providers, and the carried DEFAULT-POOL assertion flips are explicit.
+
+Revision 4 (Codex round 1, NO-GO): S0 refuses a pool from a construction-peak bound, all pool budgets use `measured_pool_bytes`, and W1d proves that the peak guard runs before the build. P2-P5 no longer claim independent fail-before coverage.
 
 Anchors: a path with no prefix is under `src/decoy_engine/`. Read at engine `origin/main` `70881ad79` (0.28.3). Line numbers are at that head. The plan builds on `plan/faker-default-pool` (revision 3) and must stay consistent with `plan/faker-migrate` (revision 3.9), `plan/route-label-truth`, `plan/per-column-routing` and `plan/native-threads-default`.
 
@@ -70,6 +72,7 @@ Search run: how pool- or dictionary-based fake-data tools decide which generator
 - `classify_provider` and the live `ProviderRegistry`: the source the totality sentry walks.
 - `pool_values_are_strings` and the codes `faker_provider_output_not_string`, `chunked_faker_nondeterministic_pool_not_string`: the runtime guard for a pool that is not all strings, for any provider and locale.
 - `resolve_faker_pool_identity` and `effective_pool_size` (FAKER-DEFAULT-POOL): unchanged.
+- `measured_pool_bytes` (FAKER-DEFAULT-POOL PR #768): moved to `generation/pool/_value_pool.py` and used by both `PoolCache` and the out-of-core reservation. There is one pool-budget function.
 - The parity helpers in `tests/parity/_faker_seq_data.py`, `tests/parity/_ooc_faker_data.py` and `tests/native/_chunked_faker_support.py`: reused by the new proof tests.
 
 ## 3. Guarantee and non-goals
