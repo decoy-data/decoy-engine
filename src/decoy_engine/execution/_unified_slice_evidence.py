@@ -24,10 +24,10 @@ import pyarrow as pa
 
 from decoy_engine.execution import _unified_slice_admission as _admission
 from decoy_engine.execution._operator_registry import OPERATORS
-from decoy_engine.execution._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution._unified_slice import UnifiedSliceInvariantError
 from decoy_engine.execution.native import _chunked_evidence
 from decoy_engine.execution.native._operator_params import FakerParams
+from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping

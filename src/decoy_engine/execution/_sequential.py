@@ -170,12 +170,12 @@ from decoy_engine.execution._runner import (
 from decoy_engine.execution._sequential_composite_chain import decline_composite_chain
 from decoy_engine.execution._sequential_native import SeqNativeRun
 from decoy_engine.execution._sequential_order import table_topo_order
-from decoy_engine.execution._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution._transactional_sink import (
     TransactionalSink,
     _CallableSinkAdapter,
 )
 from decoy_engine.execution.pipeline._post_scan import note_quarantined, publish_after_gate
+from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning

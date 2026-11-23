@@ -16,8 +16,8 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.execution import run_pipeline
-from decoy_engine.execution._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution._unified_slice_evidence import reconstruct_source_shaped_output
+from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.relationships._graph import OrphanPolicy
 from tests.native._chunked_entry_support import key_provider
 from tests.parity import _d2b_shapes as s
