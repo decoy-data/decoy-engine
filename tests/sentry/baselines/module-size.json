@@ -32,6 +32,9 @@
   "src/decoy_engine/detection/detectors.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
   },
+  "src/decoy_engine/execution/_fk_keys.py": {
+   "reason": "UF-DOMAIN S1: the one output assembler sits beside its FK helpers (ceiling 641); a split would separate it from _with_source_types"
+  },
   "src/decoy_engine/execution/_pandas_adapter.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
   },
