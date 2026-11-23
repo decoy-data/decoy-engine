@@ -15,18 +15,19 @@ class TestPerCatalogEntry:
         """Post-S6 swap (per S6 spec §7): the 5 synthetic identifiers
         (ssn, ein, npi, ndc, mrn) moved out of the Faker catalog and into
         DecoyNativeAdapter bindings in get_default_registry(). Faker-bound
-        catalog is now 19; full registry is 24."""
-        assert len(get_default_catalog()) == 19
+        catalog was 19 and the full registry 24. GEN-PROVIDERS E3 adds the two sex-keyed
+        first names, so the Faker-bound catalog is 21."""
+        assert len(get_default_catalog()) == 21
 
-    def test_full_registry_has_34_entries(self) -> None:
-        """Full registry: 19 Faker + 5 DecoyNative (S6) + 2 composite
-        (S8) + 4 MG-1 S4 domain providers + 4 MG-4 composites = 34.
+    def test_full_registry_has_36_entries(self) -> None:
+        """Full registry: 21 Faker (19 + 2 sex-keyed first names, GEN-PROVIDERS E3) + 5
+        DecoyNative (S6) + 2 composite (S8) + 4 MG-1 S4 domain providers + 4 MG-4 composites = 36.
 
         Drift guard: this count cell mirrors the canary cell at
         `test_documented_allowlist_matches_registry` (MG-8 Step 5).
         A new provider registration updates both in lockstep."""
         registry = get_default_registry()
-        assert len(registry.known_providers()) == 34
+        assert len(registry.known_providers()) == 36
 
     def test_all_entries_validate_at_import(self) -> None:
         """Pydantic raises at construction if any field is missing/mistyped.

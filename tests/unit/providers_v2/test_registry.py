@@ -27,10 +27,10 @@ class TestDefaultRegistry:
     def test_has_unknown_provider_false(self) -> None:
         assert get_default_registry().has("not_a_real_provider") is False
 
-    def test_known_providers_returns_frozenset_of_34(self) -> None:
+    def test_known_providers_returns_frozenset_of_36(self) -> None:
         """19 Faker + 5 DecoyNative (S6) + 2 composite (S8) + 4 MG-1 S4
         domain providers (PAN/ICD-10/IBAN/CUSIP) + 4 MG-4 composites
-        (person/address/provider/custom) = 34. Mimesis adds more only
+        (person/address/provider/custom) + 2 sex-keyed first names (GEN-PROVIDERS E3) = 36. Mimesis adds more only
         when installed AND adopted (empty by default).
 
         Drift guard: the canonical canary cell is
@@ -41,7 +41,7 @@ class TestDefaultRegistry:
         """
         known = get_default_registry().known_providers()
         assert isinstance(known, frozenset)
-        assert len(known) == 34
+        assert len(known) == 36
 
     def test_get_adapter_for_unknown_raises(self) -> None:
         with pytest.raises(ProviderError) as excinfo:

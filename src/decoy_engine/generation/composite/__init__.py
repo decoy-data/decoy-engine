@@ -41,6 +41,7 @@ from decoy_engine.generation.composite._custom import (
 from decoy_engine.generation.composite._errors import CompositeError
 from decoy_engine.generation.composite._factory import (
     COMPOSITES,
+    OPTIONAL_FIELDS_KEY,
     CompositeDescriptor,
     CompositeFactory,
 )
@@ -66,6 +67,7 @@ from decoy_engine.generation.composite._validate import composite_wiring_consist
 __all__ = [
     "COMPOSITES",
     "COMPOSITE_BACKEND",
+    "OPTIONAL_FIELDS_KEY",
     "BundlePool",
     "CompositeAdapter",
     "CompositeAddress",

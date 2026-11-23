@@ -76,3 +76,7 @@ def anchored_date_of_birth(
     end = change_year(DOB_ANCHOR, -minimum_age)
     dob = fake.date_time_ad(tzinfo=tzinfo, start_datetime=start, end_datetime=end).date()
     return dob if dob != start else dob + timedelta(days=1)
+
+
+def age_on_anchor(dob: datetime.date, anchor: datetime.date = DOB_ANCHOR) -> int:  # STUB (E3 red)
+    return 0

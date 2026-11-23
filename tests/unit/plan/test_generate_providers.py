@@ -138,6 +138,20 @@ def test_a_composite_column_with_a_known_field_is_accepted() -> None:
     )
 
 
+def test_the_optional_person_fields_are_accepted_and_other_composites_have_none() -> None:
+    assert_accepted(cfg([comp("first_name"), comp("sex"), comp("age")]))
+    assert_refused(
+        cfg([comp("sex", "x", provider="composite_name_email")]),
+        "generate_provider_field_unknown",
+        p("x", "field"),
+    )
+    assert_refused(
+        cfg([comp("Sex", "x"), comp("AGE", "y")]),
+        "generate_provider_field_unknown",
+        p("x", "field"),
+    )
+
+
 @pytest.mark.parametrize("field", [CANARY, "", "FIRST_NAME", "first_name "])
 def test_an_unknown_field_is_refused_without_quoting_it(field: str) -> None:
     assert_refused(cfg([comp(field, "x")]), "generate_provider_field_unknown", p("x", "field"))

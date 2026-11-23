@@ -52,7 +52,7 @@ def check_provider_column(
                 raise _refusal(reasons.plan.GENERATE_PROVIDER_FIELD_UNEXPECTED, table, name, key)
     elif col.get("field") is None:
         raise _refusal(reasons.plan.GENERATE_PROVIDER_FIELD_REQUIRED, table, name, "field")
-    elif col["field"] not in composite.output_columns:
+    elif col["field"] not in (*composite.output_columns, *composite.optional_columns):
         raise _refusal(reasons.plan.GENERATE_PROVIDER_FIELD_UNKNOWN, table, name, "field")
     locale = col.get("locale") or default_locale
     if locale is not None and locale not in caps.supported_locales:

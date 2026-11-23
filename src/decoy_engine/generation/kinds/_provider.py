@@ -21,7 +21,7 @@ name or a value, so they are never forwarded.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from decoy_engine import reasons
@@ -63,6 +63,7 @@ def provider_column_values(
     derive_key: Any,
     instance_default_locale: str | None,
     bundle_cache: BundleCache | None,
+    siblings: Sequence[Mapping[str, Any]] = (),
 ) -> list[Any]:
     """``n`` values for a ``provider`` generate column, in its locale or the instance default.
 
@@ -75,7 +76,9 @@ def provider_column_values(
     registry = get_default_registry()
     locale = str(col.get("locale") or instance_default_locale or DEFAULT_GENERATE_LOCALE)
     if col.get("field") is not None:
-        return provider_group_values(col, n, seed, derive_key, registry, locale, bundle_cache)
+        return provider_group_values(
+            col, n, seed, derive_key, registry, locale, bundle_cache, siblings
+        )
     ctx = GenDeriveContext.for_column(derive_key=derive_key, column_config=col, fallback_seed=seed)
     return provider_generate(col, n, ctx, registry, locale)
 

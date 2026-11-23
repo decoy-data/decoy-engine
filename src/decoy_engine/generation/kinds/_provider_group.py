@@ -16,6 +16,7 @@ Failures follow the scalar path: one fixed-text error, raised after the `except`
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
@@ -48,8 +49,13 @@ def provider_group_values(
     registry: ProviderRegistry,
     locale: str,
     bundle_cache: BundleCache | None,
+    siblings: Sequence[Mapping[str, Any]] = (),
 ) -> list[Any]:
-    """``n`` values of the composite field ``col`` names, from its group's bundle."""
+    """``n`` values of the composite field ``col`` names, from its group's bundle.
+
+    ``siblings`` are the table's columns: the optional slots any member of the group names
+    (`sex`, `age`) are drawn into the one bundle, whichever member asks first.
+    """
     if bundle_cache is None:
         # Without the table's cache each member would draw its own bundle, and a fresh group
         # (an OS-entropy root per draw) would be silently incoherent.
@@ -58,12 +64,30 @@ def provider_group_values(
     cached = bundle_cache.get(key)
     if cached is None:
         cached = guarded_values(
-            col, lambda: _draw_bundle(col, key, n, seed, derive_key, registry, locale)
+            col,
+            lambda: _draw_bundle(
+                col, key, n, seed, derive_key, registry, locale, _requested(col, key, siblings)
+            ),
         )
         bundle_cache[key] = cached
     bundle = cached
     field = str(col["field"])
     return guarded_values(col, lambda: list(bundle[field]))
+
+
+def _requested(
+    col: dict[str, Any], key: tuple[str, str], siblings: Sequence[Mapping[str, Any]]
+) -> frozenset[str]:
+    """The fields the group's members name, this column's own included."""
+    fields = {str(col["field"])}
+    for other in siblings:
+        if (
+            other.get("type") == "provider"
+            and other.get("field") is not None
+            and (str(other["provider"]), group_of(dict(other))) == key
+        ):
+            fields.add(str(other["field"]))
+    return frozenset(fields)
 
 
 def _draw_bundle(
@@ -74,10 +98,11 @@ def _draw_bundle(
     derive_key: Any,
     registry: ProviderRegistry,
     locale: str,
+    requested: frozenset[str],
 ) -> dict[str, list[Any]]:
     import pandas as pd
 
-    from decoy_engine.generation.composite import COMPOSITES
+    from decoy_engine.generation.composite import COMPOSITES, OPTIONAL_FIELDS_KEY
     from decoy_engine.providers_v2 import ProviderError, ProviderSpec
 
     provider, group = key
@@ -102,7 +127,9 @@ def _draw_bundle(
     namespace = f"gen-provider/{col.get(TABLE_KEY)}/{group}"
     value_seed = group_ctx.family_bytes(_VALUE_FAMILY)
     try:
-        generator = COMPOSITES[provider].factory(namespace, registry, {})
+        descriptor = COMPOSITES[provider]
+        optional = requested & frozenset(descriptor.optional_columns)
+        generator = descriptor.factory(namespace, registry, {OPTIONAL_FIELDS_KEY: optional})
         spec = ProviderSpec(locale=locale, deterministic=True, namespace=namespace, seed=value_seed)
         # The row ordinal is the source value, as in the scalar identifier path.
         source = pd.Series(range(n), dtype="int64")

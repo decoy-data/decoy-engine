@@ -71,4 +71,7 @@ def test_the_factory_builds_the_named_generator_for_its_namespace(name: str) -> 
     assert generator.coherent_namespace == "ns"
     if not descriptor.variable_output:
         assert tuple(sorted(generator.output_columns)) == descriptor.output_columns
-    assert descriptor.optional_columns == ()
+    # Only composite_person has optional slots; they never join the canonical set.
+    expected = ("age", "sex") if name == "composite_person" else ()
+    assert descriptor.optional_columns == expected
+    assert set(descriptor.optional_columns).isdisjoint(descriptor.output_columns)

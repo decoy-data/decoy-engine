@@ -386,7 +386,9 @@ def _generate_column(
             col, n, seed, generated or {}, pools, siblings, reference_date=reference_date
         )
     elif kind == "provider":
-        values = provider_column_values(col, n, seed, derive_key, instance_default_locale, bundles)
+        values = provider_column_values(
+            col, n, seed, derive_key, instance_default_locale, bundles, siblings
+        )
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set
         # at validation; this branch is the defensive fallback for callers that

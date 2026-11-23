@@ -30,7 +30,10 @@ if TYPE_CHECKING:
     from decoy_engine.generation.composite._generator import CompositeGenerator
     from decoy_engine.providers_v2 import ProviderRegistry
 
-__all__ = ["COMPOSITES", "CompositeDescriptor", "CompositeFactory"]
+__all__ = ["COMPOSITES", "OPTIONAL_FIELDS_KEY", "CompositeDescriptor", "CompositeFactory"]
+
+# The factory-config key that carries the optional slots a generation group asks for.
+OPTIONAL_FIELDS_KEY = "optional_fields"
 
 CompositeFactory = Callable[
     [str, "ProviderRegistry | None", Mapping[str, Any]], "CompositeGenerator"
@@ -43,7 +46,8 @@ class CompositeDescriptor:
 
     `output_columns` is the sorted canonical set the wiring check compares a coherent group
     against; it is empty for a composite whose outputs the config declares
-    (`variable_output`). `optional_columns` are extra slots a caller may request; none exist yet.
+    (`variable_output`). `optional_columns` are extra slots a caller may request; the wiring check
+    never counts them, so masking is unchanged by their existence.
     """
 
     name: str
@@ -66,9 +70,15 @@ def _city_state_zip(
 
 
 def _person(
-    namespace: str, registry: ProviderRegistry | None, _config: Mapping[str, Any]
+    namespace: str, registry: ProviderRegistry | None, config: Mapping[str, Any]
 ) -> CompositeGenerator:
-    return composite_person(coherent_namespace=namespace, registry=registry)
+    # Generation hands the requested optional slots over as a frozenset. Masking passes the
+    # column's user config, which cannot hold one, so a masking person never gets optional slots.
+    requested = config.get(OPTIONAL_FIELDS_KEY)
+    optional = requested if isinstance(requested, frozenset) else frozenset()
+    return composite_person(
+        coherent_namespace=namespace, registry=registry, optional_fields=optional
+    )
 
 
 def _address(
@@ -108,7 +118,10 @@ COMPOSITES: Mapping[str, CompositeDescriptor] = {
         ),
         CompositeDescriptor("composite_custom", _custom, output_columns=(), variable_output=True),
         CompositeDescriptor(
-            "composite_person", _person, _canonical(CompositePerson.output_columns)
+            "composite_person",
+            _person,
+            _canonical(CompositePerson.output_columns),
+            optional_columns=_canonical(CompositePerson.optional_columns),
         ),
         CompositeDescriptor(
             "composite_address", _address, _canonical(CompositeAddress.output_columns)

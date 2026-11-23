@@ -336,3 +336,30 @@ def test_resolve_pool_provider_date_of_birth_is_anchored(monkeypatch: pytest.Mon
     assert first == [str(anchored_date_of_birth(ref)) for _ in range(30)]
     ref.seed_instance(11)
     assert ranged == [str(anchored_date_of_birth(ref, None, 18, 65)) for _ in range(30)]
+
+
+# ---- age on the anchor (GEN-PROVIDERS E3, AT-15) ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("dob", "anchor", "age"),
+    [
+        # A birthday on the anchor day counts; the day after does not.
+        (dt.date(2000, 10, 16), dt.date(2026, 10, 16), 26),
+        (dt.date(2000, 10, 17), dt.date(2026, 10, 16), 25),
+        (dt.date(2000, 10, 15), dt.date(2026, 10, 16), 26),
+        # A 29 February birthday falls on 1 March in a common year.
+        (dt.date(2000, 2, 29), dt.date(2027, 2, 28), 26),
+        (dt.date(2000, 2, 29), dt.date(2027, 3, 1), 27),
+        (dt.date(2000, 2, 29), dt.date(2028, 2, 29), 28),
+        # Born on the anchor day: zero.
+        (dt.date(2026, 10, 16), dt.date(2026, 10, 16), 0),
+    ],
+)
+def test_age_is_whole_years_with_the_birthday_rule(dob: dt.date, anchor: dt.date, age: int) -> None:
+    assert _dob_anchor.age_on_anchor(dob, anchor) == age
+
+
+def test_age_defaults_to_the_anchor_not_the_wall_clock() -> None:
+    # The day after the anchor birthday: 25 on the anchor, 26 on any later real date.
+    assert _dob_anchor.age_on_anchor(dt.date(2000, 10, 17)) == 25

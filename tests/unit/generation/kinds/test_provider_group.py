@@ -235,7 +235,12 @@ def composite_config(
     rows: int = 500, seed: int = SEED, extra: list[dict[str, Any]] | None = None
 ) -> Any:
     cols = [member(p, f, f"{p}.{f}") for p in FIXED for f in COMPOSITES[p].output_columns]
-    return cfg([table("t", rows, [*cols, *(extra or [])])], seed)
+    # A second person group asks for the optional slots, so the first group's bytes stay the E2 ones.
+    optional = [
+        member("composite_person", f, f"composite_person+.{f}", group="optional")
+        for f in ("first_name", "sex", "age", "dob")
+    ]
+    return cfg([table("t", rows, [*cols, *optional, *(extra or [])])], seed)
 
 
 def digests(table_: pa.Table) -> dict[str, str]:
@@ -441,3 +446,97 @@ def test_a_group_member_drawn_without_a_table_cache_is_a_programming_error() -> 
         provider_column_values(col, 5, SEED, None, None, None)
     with pytest.raises(RuntimeError):
         synthesize._generate_column(col, 5, SEED, table_name="t")
+
+
+# ---- E3: sex and age on composite_person -----------------------------------------------------
+
+SEX_ROWS = 20_000
+
+
+@pytest.fixture(scope="module")
+def sexed() -> dict[str, list[Any]]:
+    cols = [
+        member("composite_person", f)
+        for f in ("first_name", "last_name", "email", "dob", "sex", "age")
+    ]
+    return run(cols, SEX_ROWS)
+
+
+def test_every_first_name_comes_from_the_pool_of_its_rows_sex_at_20000_rows(
+    sexed: dict[str, list[Any]],
+) -> None:
+    from faker.providers.person.en_US import Provider
+
+    female, male = set(Provider.first_names_female), set(Provider.first_names_male)
+    assert set(sexed["sex"]) == {"F", "M"}
+    for sex, first in zip(sexed["sex"], sexed["first_name"], strict=True):
+        assert first in (female if sex == "F" else male)
+        assert first not in ((male - female) if sex == "F" else (female - male))
+    share = sexed["sex"].count("F") / SEX_ROWS
+    assert 0.45 < share < 0.55
+
+
+def test_age_is_whole_years_from_dob_to_the_anchor_on_every_row(
+    sexed: dict[str, list[Any]],
+) -> None:
+    import datetime as dt
+
+    from decoy_engine.generation._dob_anchor import DOB_ANCHOR
+
+    for dob, age in zip(sexed["dob"], sexed["age"], strict=True):
+        born = dt.date.fromisoformat(dob)
+        years = (
+            DOB_ANCHOR.year
+            - born.year
+            - ((DOB_ANCHOR.month, DOB_ANCHOR.day) < (born.month, born.day))
+        )
+        assert age == str(years)
+
+
+def test_sex_and_age_are_text_like_every_other_provider_value(sexed: dict[str, list[Any]]) -> None:
+    assert all(isinstance(v, str) for v in sexed["sex"])
+    assert all(isinstance(v, str) and v.isdigit() for v in sexed["age"])
+
+
+def test_the_email_follows_the_sex_keyed_name_and_the_members_agree_in_any_order() -> None:
+    fields = ("first_name", "last_name", "email", "sex", "age")
+    cols = [member("composite_person", f) for f in fields]
+    base = run(cols, 300)
+    assert run(list(reversed(cols)), 300) == base
+    renamed = run([member("composite_person", f, f"x_{f}") for f in fields], 300)
+    assert {k: renamed[f"x_{k}"] for k in fields} == base
+    for first, last, email in zip(
+        base["first_name"], base["last_name"], base["email"], strict=True
+    ):
+        assert email.split("@", 1)[0] == f"{first}.{last}".lower()
+
+
+def test_asking_for_age_changes_no_other_value_and_asking_for_sex_changes_only_the_first_name() -> (
+    None
+):
+    plain = run(person_fields(), 300)
+    with_age = run([*person_fields(), member("composite_person", "age")], 300)
+    with_sex = run([*person_fields(), member("composite_person", "sex")], 300)
+    for f in plain:
+        assert with_age[f] == plain[f]
+    assert with_sex["first_name"] != plain["first_name"]
+    assert with_sex["dob"] == plain["dob"] and with_sex["last_name"] == plain["last_name"]
+
+
+def test_a_group_that_does_not_ask_for_sex_is_untouched_by_another_group_that_does() -> None:
+    guardian = [
+        member("composite_person", f, f"g_{f}", group="guardian") for f in ("first_name", "email")
+    ]
+    alone = run([*person_fields(), *guardian], 300)
+    mixed = run(
+        [*person_fields(), *guardian, member("composite_person", "sex", "g_sex", group="guardian")],
+        300,
+    )
+    for f in person_fields():
+        assert mixed[f["name"]] == alone[f["name"]]
+    assert mixed["g_first_name"] != alone["g_first_name"]
+
+
+def test_a_member_alone_can_ask_for_sex_without_the_rest_of_its_group() -> None:
+    out = run([member("composite_person", "sex")], 50)
+    assert set(out["sex"]) <= {"F", "M"}

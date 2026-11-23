@@ -54,6 +54,9 @@ class CompositePerson:
     composite_name: str = "composite_person"
     # Sorted form so the wiring check matches the sorted coherent group.
     output_columns: tuple[str, ...] = ("dob", "email", "first_name", "last_name")
+    # Slots a generation group may ask for. They never join the canonical set, so masking's
+    # wiring check and its bytes do not see them.
+    optional_columns: tuple[str, ...] = ("age", "sex")
 
     def __init__(
         self,
@@ -61,7 +64,15 @@ class CompositePerson:
         coherent_namespace: str,
         registry: ProviderRegistry | None = None,
         pool_size: int = 10_000,
+        optional_fields: frozenset[str] = frozenset(),
     ) -> None:
+        unknown = optional_fields - frozenset(self.optional_columns)
+        if unknown:
+            raise CompositeError(
+                code=reasons.plan.GENERATE_PROVIDER_FIELD_UNKNOWN,
+                message="composite_person got an optional field it does not have.",
+            )
+        self._optional = optional_fields
         self.coherent_namespace = coherent_namespace
         self._registry = registry
         self._pool_size = pool_size
@@ -214,12 +225,17 @@ class CompositePerson:
             last_vals.append(last)
             email_vals.append(self._email(first, last, domain, fmt))
             dob_vals.append(dob_arr[dob_idx])
-        return {
+        out = {
             "first_name": pd.Series(first_vals),
             "last_name": pd.Series(last_vals),
             "email": pd.Series(email_vals),
             "dob": pd.Series(dob_vals),
         }
+        if "sex" in self._optional:  # STUB (E3 red)
+            out["sex"] = pd.Series(["F"] * len(source))
+        if "age" in self._optional:  # STUB (E3 red)
+            out["age"] = pd.Series([0] * len(source))
+        return out
 
     def generate_bundle(
         self,
@@ -258,12 +274,14 @@ def composite_person(
     coherent_namespace: str,
     registry: ProviderRegistry | None = None,
     pool_size: int = 10_000,
+    optional_fields: frozenset[str] = frozenset(),
 ) -> CompositePerson:
     """Construct a CompositePerson generator bound to `coherent_namespace`."""
     return CompositePerson(
         coherent_namespace=coherent_namespace,
         registry=registry,
         pool_size=pool_size,
+        optional_fields=optional_fields,
     )
 
 

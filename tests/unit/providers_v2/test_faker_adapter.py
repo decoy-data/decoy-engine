@@ -199,3 +199,29 @@ class TestPersonProvidersSurviveFakerVersion:
             assert isinstance(out, str) and out, (
                 f"V2 registry failed to generate a value for {semantic_name!r}"
             )
+
+
+class TestSexKeyedFirstNames:
+    """GEN-PROVIDERS E3: the two registry names the person composite draws first names from."""
+
+    @pytest.mark.parametrize("name", ["person_first_name_female", "person_first_name_male"])
+    def test_the_name_is_registered_and_draws_from_its_sex_list(self, name: str) -> None:
+        from faker.providers.person.en_US import Provider
+
+        registry = get_default_registry()
+        assert registry.has(name)
+        caps = registry.get_capabilities(name)
+        assert caps.backend_type == "faker"
+        assert caps.supported_locales == ("en_US",)
+        names = (
+            Provider.first_names_female if name.endswith("female") else Provider.first_names_male
+        )
+        other = (
+            Provider.first_names_male if name.endswith("female") else Provider.first_names_female
+        )
+        only_here = set(names) - set(other)
+        adapter = registry.get_adapter(name)
+        drawn = {adapter.generate(name, spec=_spec()) for _ in range(300)}
+        assert drawn <= set(names)
+        assert not (drawn & (set(other) - set(names)))
+        assert drawn & only_here

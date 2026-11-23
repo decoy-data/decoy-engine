@@ -14,7 +14,11 @@ from __future__ import annotations
 import datetime
 
 import pandas as pd
+import pytest
+from faker.providers.person.en_US import Provider as _EnUs
 
+from decoy_engine.generation._dob_anchor import age_on_anchor
+from decoy_engine.generation.composite import CompositeError
 from decoy_engine.generation.composite._person import CompositePerson
 from decoy_engine.providers_v2._adapter import ProviderSpec
 
@@ -93,3 +97,96 @@ class TestNullHandling:
         # Row 0 + 2 are populated.
         assert not pd.isna(out["first_name"].iloc[0])
         assert not pd.isna(out["first_name"].iloc[2])
+
+
+FEMALE = set(_EnUs.first_names_female)
+MALE = set(_EnUs.first_names_male)
+BASE = ("first_name", "last_name", "email", "dob")
+
+
+def _bundle(optional: set[str], n: int = 400, extra: dict | None = None) -> dict[str, pd.Series]:
+    c = CompositePerson(coherent_namespace="p", pool_size=300, optional_fields=frozenset(optional))
+    src = pd.Series([f"row{i}" for i in range(n)])
+    return c.generate_bundle(_spec(extra), n, source=src, deterministic=True)
+
+
+class TestOptionalFields:
+    def test_the_canonical_columns_never_include_the_optional_ones(self):
+        assert CompositePerson.output_columns == ("dob", "email", "first_name", "last_name")
+        assert set(CompositePerson.optional_columns) == {"age", "sex"}
+
+    def test_no_optional_field_gives_exactly_the_four_canonical_columns(self):
+        assert set(_bundle(set())) == set(BASE)
+
+    def test_sex_and_age_are_added_only_when_requested(self):
+        assert set(_bundle({"sex"})) == {*BASE, "sex"}
+        assert set(_bundle({"age"})) == {*BASE, "age"}
+        assert set(_bundle({"sex", "age"})) == {*BASE, "sex", "age"}
+
+    def test_a_field_the_composite_does_not_have_is_refused(self):
+        with pytest.raises(CompositeError):
+            CompositePerson(coherent_namespace="p", optional_fields=frozenset({"height"}))
+
+    def test_every_first_name_comes_from_the_pool_of_its_rows_sex(self):
+        out = _bundle({"sex"}, 600)
+        assert set(out["sex"]) == {"F", "M"}
+        for sex, first in zip(out["sex"], out["first_name"], strict=True):
+            assert first in (FEMALE if sex == "F" else MALE)
+        # 13 names are in both lists (Faker 40.23), so a unisex draw shows in the names that are
+        # in one list only.
+        for sex, first in zip(out["sex"], out["first_name"], strict=True):
+            assert first not in ((MALE - FEMALE) if sex == "F" else (FEMALE - MALE))
+
+    def test_age_is_whole_years_from_dob_to_the_anchor(self):
+        out = _bundle({"age"}, 500)
+        for dob, age in zip(out["dob"], out["age"], strict=True):
+            assert age == age_on_anchor(dob)
+            assert isinstance(age, int)
+
+    def test_age_alone_changes_no_other_column(self):
+        base = _bundle(set())
+        with_age = _bundle({"age"})
+        for k in BASE:
+            assert base[k].tolist() == with_age[k].tolist()
+
+    def test_sex_changes_the_first_name_and_nothing_else_in_the_base(self):
+        base = _bundle(set())
+        with_sex = _bundle({"sex"})
+        assert base["first_name"].tolist() != with_sex["first_name"].tolist()
+        for k in ("last_name", "dob"):
+            assert base[k].tolist() == with_sex[k].tolist()
+
+    def test_the_email_follows_the_sex_keyed_first_name(self):
+        out = _bundle({"sex"})
+        for first, last, email in zip(
+            out["first_name"], out["last_name"], out["email"], strict=True
+        ):
+            assert email.startswith(f"{first}.{last}@".lower())
+
+    def test_sex_is_stable_for_a_source_and_split_roughly_evenly(self):
+        a = _bundle({"sex"}, 2000)
+        b = _bundle({"sex"}, 2000)
+        assert a["sex"].tolist() == b["sex"].tolist()
+        assert 0.45 < (a["sex"] == "F").mean() < 0.55
+
+    def test_null_sources_give_null_sex_and_age(self):
+        c = CompositePerson(
+            coherent_namespace="p", pool_size=100, optional_fields=frozenset({"sex", "age"})
+        )
+        out = c.generate_bundle(_spec(), 3, source=pd.Series(["a", None, "b"]), deterministic=True)
+        assert pd.isna(out["sex"].iloc[1]) and pd.isna(out["age"].iloc[1])
+        assert not pd.isna(out["sex"].iloc[0]) and not pd.isna(out["age"].iloc[2])
+
+    def test_the_pool_build_without_optional_fields_is_unchanged(self):
+        c = _make()
+        pool = c.build_pool(_spec(), size=5)
+        assert pool.output_columns == ("dob", "email", "first_name", "last_name")
+
+    def test_a_pool_draw_without_a_source_refuses_optional_fields(self):
+        c = CompositePerson(
+            coherent_namespace="p", pool_size=50, optional_fields=frozenset({"sex"})
+        )
+        with pytest.raises(CompositeError):
+            c.generate_bundle(_spec(), 3, deterministic=False)
+        with pytest.raises(CompositeError):
+            c.build_pool(_spec(), size=3)
