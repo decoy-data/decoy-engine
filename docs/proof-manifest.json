@@ -502,7 +502,7 @@
       "kind": "mask",
       "title": "Calendar-bucket date perturbation",
       "column": "event_date",
-      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: event_date\n    strategy: bucket_perturb\n    namespace: event_date\n    provider_config:\n      bucket: month",
+      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: event_date\n    strategy: bucket_perturb\n    namespace: event_date\n    provider_config:\n      bucket: month\n      date_format: '%Y-%m-%d'",
       "input": [
         {
           "event_date": "2024-01-15"

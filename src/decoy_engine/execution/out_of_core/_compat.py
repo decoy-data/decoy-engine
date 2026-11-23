@@ -372,8 +372,7 @@ def _faker_conditional_rejection(
     exact `string`; None admits it.
 
     The admitted shape is the one `_faker_native` runs: a provider on the native
-    allowlist, `deterministic` with `cardinality_mode=reuse`, a namespace, and an
-    explicit pool_size. Non-deterministic/positional REUSE and UNIQUE/MATCH/SCALE
+    allowlist, `deterministic` with `cardinality_mode=reuse`, and a namespace. Non-deterministic/positional REUSE and UNIQUE/MATCH/SCALE
     decline on the shape alone, so the job keeps the sequential/full-frame route.
 
     The exact-`string` source gate is the no-regression fix: a non-string source
@@ -389,7 +388,7 @@ def _faker_conditional_rejection(
         return OutOfCoreRejection(
             "out_of_core_faker_pool_unsupported",
             f"{node.table}.{node.columns}: out-of-core faker admits only deterministic REUSE with "
-            "a person-name provider, a namespace, and an explicit pool_size; other shapes fall "
+            "a person-name provider and a namespace; other shapes fall "
             "back to sequential/full-frame.",
         )
     if source_types is not None:

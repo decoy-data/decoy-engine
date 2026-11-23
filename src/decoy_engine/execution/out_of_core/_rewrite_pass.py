@@ -37,7 +37,7 @@ from decoy_engine.execution.out_of_core._emit import (
     emit_to_sink,
     empty_output_table,
 )
-from decoy_engine.execution.out_of_core._hash_run import OocHashRun
+from decoy_engine.execution.out_of_core._hash_run import OocHashRun, fk_child_skip_columns
 from decoy_engine.execution.out_of_core._mask import masked_output_type, table_seed
 from decoy_engine.execution.out_of_core._memory_estimate import resolve_phase_memory_limits
 from decoy_engine.execution.out_of_core._relation import build_parent_key_relation_aligned
@@ -124,7 +124,7 @@ def _stream_table(
         if batch_rows is None:
             batch_rows = _join_ooc._JOIN_BATCH_ROWS
         source_schema = raw.schema
-        skip_columns = frozenset(col for edge in incoming_edges for col in edge.child_columns)
+        skip_columns = fk_child_skip_columns(incoming_edges)
         # Hash columns are decided once here, before any row is read (a column never changes backend).
         hash_plan = (hash_run or OocHashRun()).prepare_table(
             plan, table_name, source_schema, skip_columns, incoming_edges, site="batch_join"

@@ -398,6 +398,31 @@ def test_at_c9_the_compiler_reads_the_stored_verdict_and_never_gathers(
     assert stored.plan_hash != _compiler.compile_physical_plan(inputs).plan_hash
 
 
+def test_the_plan_hash_ignores_the_byte_figures_of_the_verdict() -> None:
+    """The pricing method (a lazy footer or a resident table) and the host ceiling move the byte
+    figures, never the verdict. On the same host, lazy and resident input of one job must give the
+    same plan hash. The hash still covers facts.budget_bytes, so it is not host-independent."""
+    from decoy_engine.execution.physical import _compiler
+    from decoy_engine.execution.physical._snapshot import capture_physical_plan_inputs
+
+    table = _table()
+    inputs = capture_physical_plan_inputs(
+        _cfg(table), {support.TABLE: table}, engine_version=support.ENGINE_VERSION
+    )
+    small_host = rf.ResidentFit("FIT", CODE_FITS, 1, 100, 50, 400, 800)
+    big_host = rf.ResidentFit("FIT", CODE_FITS, 1, 7_000, 3_000, 64_000, 128_000)
+
+    def digest(fit: rf.ResidentFit) -> str:
+        return _compiler.compile_physical_plan(
+            dataclasses.replace(inputs, resident_fit=fit)
+        ).plan_hash
+
+    assert digest(small_host) == digest(big_host)
+    assert digest(small_host) != digest(dataclasses.replace(small_host, verdict="UNKNOWN"))
+    # The code is hashed too: the same verdict under another code is another plan.
+    assert digest(small_host) != digest(dataclasses.replace(small_host, code=CODE_REFUSED))
+
+
 def test_at_c10_the_code_is_a_capacity_code() -> None:
     assert CODE_REFUSED in errors.CAPACITY_REASON_CODES
     assert CODE_REFUSED not in errors.CAPACITY_EXCLUSIONS

@@ -252,6 +252,12 @@ def test_chunked_entrypoints_reject_on_creation_with_no_chunk_masked(
             table=TABLE,
             engine_version=ENGINE_VERSION,
             key_provider=key_provider(),
+            # The schema the chunks were cut from; only `run_mask_pipeline_chunked` takes it (#750).
+            **(
+                {"source_schema": _CHUNK_PARTITIONS[partition][0].schema}
+                if fn is run_mask_pipeline_chunked
+                else {}
+            ),
         )
     assert exc.value.code == _CODE
     assert adapter_runs == [] and native_chunks == []

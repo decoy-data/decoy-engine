@@ -62,7 +62,7 @@ from decoy_engine.execution.out_of_core import _join as _join_ooc
 from decoy_engine.execution.out_of_core import _validate_batch
 from decoy_engine.execution.out_of_core._budget import check_temp_disk_budget
 from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext
-from decoy_engine.execution.out_of_core._hash_run import OocHashRun
+from decoy_engine.execution.out_of_core._hash_run import OocHashRun, fk_child_skip_columns
 from decoy_engine.execution.out_of_core._mask import mask_batch  # noqa: F401 -- patch seam
 from decoy_engine.execution.out_of_core._memory_estimate import (
     memory_limit_for,
@@ -220,6 +220,22 @@ def run_fk_out_of_core(
         job_seed=plan.seed_envelope.job_seed,
         max_pool_bytes=min(budget_bytes, _faker_pool_cap) if budget_bytes else _faker_pool_cap,
     )
+    hash_run = OocHashRun(native_threads=native_threads, faker_pool=faker_pool)
+    incoming, outgoing = _edge_indexes(relationship_graph)
+    # Every executable table's faker pools are decided and reserved here, before any scratch
+    # exists, so an over-budget job fails with nothing on disk. `prepare_table` reuses the plans.
+    try:
+        hash_run.prepare_faker_tables(
+            plan,
+            {
+                table: (sources[table].schema, fk_child_skip_columns(incoming[table]))
+                for table in _table_order(plan, relationship_graph, sources)
+                if table in sources
+            },
+        )
+    except BaseException:
+        faker_pool.close()
+        raise
     # Opened only after the pool exists, so nothing that can fail sits between the arena being
     # made and the `try` whose `finally` reclaims it. A handed arena is its opener's to reclaim.
     owned: ScratchArena | None = None
@@ -227,7 +243,6 @@ def run_fk_out_of_core(
         _arena = owned = ScratchArena.fresh(under=temp_dir)
     root = Path(_arena.local_path())
     try:
-        incoming, outgoing = _edge_indexes(relationship_graph)
         parent_relations: dict[RelationshipEdge, ParentKeyRelation] = {}
         outputs: dict[str, pa.Table] = {}
         warnings: list[QualityWarning] = []
@@ -240,7 +255,6 @@ def run_fk_out_of_core(
         # the first's. Same shape as the full-frame sink, so a multi-table
         # job's evidence list matches the pandas oracle's shape byte-for-byte.
         code_set_corpora: dict[tuple[str, str], dict[str, Any]] = {}
-        hash_run = OocHashRun(native_threads=native_threads, faker_pool=faker_pool)
         relations, joins = _arena.create_dir("relations"), _arena.create_dir("joins")
         # One width state per pass-through text column of each table, so a child's FK types see its parent's.
         run_widths: dict[str, dict[str, TextWidthState]] = {}

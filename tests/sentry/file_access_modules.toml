@@ -29,6 +29,8 @@ capability_creators = [
   "decoy_engine/fileaccess/_durable.py::discard_stage_at",
   "decoy_engine/fileaccess/_durable.py::publish_exclusive_durable",
   "decoy_engine/fileaccess/_durable.py::publish_replace_durable",
+  "decoy_engine/fileaccess/_durable.py::open_subdir_at",
+  "decoy_engine/fileaccess/_durable.py::entries_at",
 ]
 
 # The only module that may construct `LocalFileAccess`.

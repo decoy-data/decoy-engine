@@ -4,7 +4,7 @@ gates.sh writes, per run label (`branch`, `baseline`): `<label>.steps` with one
 tab-separated `name rc cmd` line per step, `<label>-<name>.log`, and for pytest
 steps `<label>-<name>.xml` (JUnit, family xunit1 so testcases carry `file`). A parallel run
 (GATES_WORKERS > 1) adds a second `tests` pass for the `serial` marker, `<label>-tests-serial.xml`
-and `.log`; every `tests` count, id and totals check reads both files as one run (`_xmls`).
+and `.log`; every count, id and totals check of a step with a serial pass reads both files as one run (`_xmls`).
 Counts and failing ids both come from the JUnit files; log text is never parsed for ids. Only
 pytest's final totals line is read from each log, to cross-check the JUnit.
 It also owns the stored failing-id baseline (`--write-baseline`, the compare against a
@@ -66,10 +66,8 @@ def _steps(out: Path, label: str) -> list[tuple[str, int, str]]:
 
 
 def _xmls(out: Path, label: str, name: str) -> list[Path]:
-    """JUnit files of a step: the `tests` step has a second file after a parallel run."""
-    files = [out / f"{label}-{name}.xml"]
-    if name == "tests":
-        files.append(out / f"{label}-tests-serial.xml")
+    """JUnit files of a step: a step that ran a parallel pass has a second, serial file."""
+    files = [out / f"{label}-{name}.xml", out / f"{label}-{name}-serial.xml"]
     return [f for f in files if f.exists()]
 
 

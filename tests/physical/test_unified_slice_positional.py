@@ -510,7 +510,6 @@ def _timestamps() -> pa.Table:
 
 _DECLINES: dict[str, tuple[pa.Table, list[dict[str, Any]], Callable[..., None] | None]] = {
     "faker_provider_outside_allowlist": (str_source(30), [nd_faker(provider="person_email")], None),
-    "faker_no_pool_size": (str_source(30), [nd_faker(pool_size=None)], None),
     "faker_unique": (str_source(30), [nd_faker(cardinality_mode="unique")], None),
     # `faker_when` / `cat_when` moved out of the decline set in C8-iii-d-2: a string-reference
     # `when:` now runs natively (see tests/physical/test_c8_iii_d2_unified_positional_when.py).
@@ -676,22 +675,10 @@ _VERDICTS: dict[str, tuple[bool, tuple[str, ...], str | None, bool, str | None]]
     ),
     "cat_nd_weighted": (False, ("categorical_not_deterministic:c",), None, True, None),
     "faker_det": (False, ("no_native_kernel:c:faker",), None, True, None),
-    "faker_det_no_pool": (
-        False,
-        ("no_native_kernel:c:faker",),
-        "chunked_strategy_conditions_unmet",
-        False,
-        "fallback_policy_not_native:c:python_only",
-    ),
+    "faker_det_no_pool": (False, ("no_native_kernel:c:faker",), None, True, None),
     "faker_nd": (False, ("no_native_kernel:c:faker",), None, True, None),
     "faker_nd_no_ns": (False, ("no_native_kernel:c:faker",), None, True, None),
-    "faker_nd_no_pool": (
-        False,
-        ("no_native_kernel:c:faker",),
-        "chunked_strategy_conditions_unmet",
-        False,
-        "fallback_policy_not_native:c:python_only",
-    ),
+    "faker_nd_no_pool": (False, ("no_native_kernel:c:faker",), None, True, None),
     "faker_nd_provider_outside": (
         False,
         ("no_native_kernel:c:faker",),
@@ -898,11 +885,14 @@ _FAKER_CLAUSES: dict[str, Callable[[Path], tuple[Case, dict[str, Any] | None]]] 
     "slice_deterministic": lambda p: (_cat_case(p, nd_faker()), {"deterministic": True}),
     "not_reuse": lambda p: (_cat_case(p, nd_faker(cardinality_mode="unique")), None),
     "slice_not_reuse": lambda p: (_cat_case(p, nd_faker()), {"cardinality_mode": "unique"}),
-    "no_pool_size": lambda p: (_cat_case(p, nd_faker(pool_size=None)), None),
     "provider_outside_allowlist": lambda p: (_cat_case(p, nd_faker(provider="person_email")), None),
     "vault": lambda p: (_cat_case(p, nd_faker(vault=True)), None),
     "timestamp_source": lambda p: (_cat_case(p, nd_faker(), source=_timestamps()), None),
 }
+
+
+def test_8_a_missing_pool_size_is_not_a_condition(tmp_path: Path) -> None:
+    assert _bindable(_FAKER_PRED, _cat_case(tmp_path, nd_faker(pool_size=None))) is True
 
 
 @pytest.mark.parametrize("clause", sorted(_FAKER_CLAUSES))
