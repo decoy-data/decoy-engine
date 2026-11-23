@@ -446,6 +446,33 @@ def test_at_c20c_a_column_that_does_not_share_is_still_charged(
     assert copies == []
 
 
+def test_at_c20c_a_32_bit_offset_string_column_is_charged_its_widened_offsets(
+    tmp_path: Path,
+) -> None:
+    """The frame shares the string payload but allocates new 64-bit offsets; refuse at the ceiling.
+
+    4,096 one-char `ArrowDtype(string)` values: 20,484 input bytes, 32,776 bytes of new offsets.
+    """
+    from types import SimpleNamespace
+
+    rows = 4096
+    frame = pd.DataFrame({"s": pd.array(["x"] * rows, dtype=pd.ArrowDtype(pa.string()))})
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    cfg = tk.single_table_config(
+        tmp_path,
+        table,
+        transforms=[{"op": "limit", "n": 1}],
+        columns=[{"name": "s", "strategy": "redact"}],
+    )
+    ceiling = 30_000
+    assert rf.input_bytes([resident_spec(table, charge_pandas=False)]) < ceiling
+    with pytest.raises(ExecutionError) as caught:
+        rf.check_pre_transform(
+            cfg, {"t": table}, SimpleNamespace(edges=[]), "auto", kill_ceiling_bytes=ceiling
+        )
+    assert caught.value.code == CODE_REFUSED
+
+
 def test_at_c20_a_lazy_fallback_source_is_read_once_then_refused_before_its_copy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, copies: list[str], reads: list[str]
 ) -> None:

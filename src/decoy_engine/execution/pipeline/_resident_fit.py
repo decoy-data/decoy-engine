@@ -57,7 +57,8 @@ class TableBytesSpec:
     ranges: a buffer shared by several tables, or two slices of one allocation that overlap, is
     counted once. `charge_pandas` is false for a table the run holds but never converts to pandas
     (a generated table in a mixed job). `pandas_shared` names the columns whose pandas form is
-    the Arrow column itself (an Arrow-backed dtype), which add no bytes to the input union.
+    the Arrow column itself (an Arrow-backed dtype), which add no bytes to the input union. `pandas_widened` are the shared 32-bit-offset string and
+    binary columns, whose frame still allocates 64-bit offsets.
     """
 
     rows: int
@@ -66,17 +67,20 @@ class TableBytesSpec:
     charge_pandas: bool = True
     buffer_ranges: tuple[tuple[int, int], ...] = dataclasses.field(default=(), compare=False)
     pandas_shared: frozenset[str] = frozenset()
+    pandas_widened: frozenset[str] = frozenset()
 
 
 def resident_spec(table: pa.Table, *, charge_pandas: bool = True) -> TableBytesSpec:
     ranges = _buffer_ranges(table)
+    shared = _arrow_backed_columns(table)
     return TableBytesSpec(
         rows=table.num_rows,
         schema=table.schema,
         resident_input_bytes=union_bytes(ranges),
         charge_pandas=charge_pandas,
         buffer_ranges=ranges,
-        pandas_shared=_arrow_backed_columns(table),
+        pandas_shared=shared,
+        pandas_widened=frozenset(n for n in shared if _widens_offsets(table.schema.field(n).type)),
     )
 
 
@@ -123,9 +127,12 @@ def _arrow_backed_columns(table: pa.Table) -> frozenset[str]:
     `ArrowDtype` over the same chunks, so it adds no bytes. An integer column with nulls is the
     exception: the transform frame maps it to a nullable numpy-backed dtype, which copies.
     """
+    from decoy_engine.execution._transforms_table import null_bearing_int_columns
+
     meta = table.schema.pandas_metadata
     if not meta:
         return frozenset()
+    null_copied = set(null_bearing_int_columns(table))
     names: set[str] = set()
     for entry in meta.get("columns", ()):
         name = entry.get("field_name")
@@ -133,11 +140,15 @@ def _arrow_backed_columns(table: pa.Table) -> frozenset[str]:
             continue
         if name not in table.column_names:
             continue
-        column = table.column(name)
-        if pa.types.is_integer(column.type) and column.null_count > 0:
+        if name in null_copied:
             continue
         names.add(name)
     return frozenset(names)
+
+
+def _widens_offsets(arrow_type: pa.DataType) -> bool:
+    """A 32-bit-offset string or binary column: the frame shares the payload, not the offsets."""
+    return pa.types.is_string(arrow_type) or pa.types.is_binary(arrow_type)
 
 
 def lazy_spec(rows: int, schema: pa.Schema, *, charge_pandas: bool = True) -> TableBytesSpec:
@@ -162,10 +173,18 @@ def input_bytes(specs: Iterable[TableBytesSpec]) -> int:
     return total + union_bytes(ranges)
 
 
+_WIDENED_OFFSET_BYTES = 8  # the frame's 64-bit offsets, one per row, in place of the 32-bit ones
+
+
 def pandas_bytes(specs: Iterable[TableBytesSpec]) -> int:
     """Each charged table's pandas copy, less the columns that share the Arrow buffers."""
     return sum(
-        s.rows * sum(_pandas_cell_bytes(f.type) for f in s.schema if f.name not in s.pandas_shared)
+        s.rows
+        * sum(
+            _WIDENED_OFFSET_BYTES if f.name in s.pandas_widened else _pandas_cell_bytes(f.type)
+            for f in s.schema
+            if f.name in s.pandas_widened or f.name not in s.pandas_shared
+        )
         for s in specs
         if s.charge_pandas
     )
