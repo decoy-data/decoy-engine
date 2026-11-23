@@ -17,6 +17,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
+from decoy_engine.contracts.bucketize_width import resolve_bucketize_width
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import DeclaredCastingPlan, PlanDeclaredColumn, freeze_json
@@ -42,12 +43,20 @@ def strategy_output_logical(
         return logical
     if strategy == "hash":
         return _STRING_ONLY_OUT
+    if strategy == "top_code":
+        # top_code reads exact integers and renders every cell as text.
+        return _STRING_ONLY_OUT if logical == "integer" else None
     if strategy == "bucketize":
+        if logical == "decimal":
+            # An integer effective width gives an integer lower bound, rendered as text in every
+            # format. Whether the decimal is narrow enough for float64 is the shape rule's call.
+            return (
+                _STRING_ONLY_OUT if type(resolve_bucketize_width(provider_config)) is int else None
+            )
         if logical != "integer":
             return None
         fmt = str(provider_config.get("format", "lower")).lower()
-        width = provider_config.get("width")
-        integral = isinstance(width, int) and not isinstance(width, bool)
+        integral = type(resolve_bucketize_width(provider_config)) is int
         if fmt == "lower" and integral:
             return "integer"
         return _STRING_ONLY_OUT if fmt == "range" and integral else None

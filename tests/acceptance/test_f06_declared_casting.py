@@ -15,6 +15,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.contracts.column_shape import NO_SOURCES
+from tests._column_shapes import INT_DECL
 from tests.acceptance._f06_support import (
     INT64,
     ISO_DATE,
@@ -771,12 +772,7 @@ def test_b7_legacy_plan_yaml_differs_only_by_the_documented_version_line(tmp_pat
     from decoy_engine.profile._source import profile_source
 
     src = write_csv(tmp_path / "s.csv", ["age"], [["42"], ["7"]])
-    cfg = validate(
-        config(
-            [column("age", "bucketize", provider_config={"width": 10, "format": "lower"})],
-            source_path=src,
-        )
-    )
+    cfg = validate(config([column("age", "redact")], source_path=src))
     plan = compile_plan(
         cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES
     )
@@ -843,7 +839,6 @@ def test_b7_legacy_config_and_plan_match_the_baseline_fixture(tmp_path: Path) ->
     from decoy_engine import reasons
     from decoy_engine.config import PipelineConfig
     from decoy_engine.plan._compile import compile_plan
-    from decoy_engine.plan._serialize import plan_to_yaml
     from decoy_engine.profile._source import profile_source
 
     fixture = json.loads(
@@ -871,13 +866,44 @@ def test_b7_legacy_config_and_plan_match_the_baseline_fixture(tmp_path: Path) ->
     (tmp_path / "p.csv").write_text("id,age,note\n1,42,a\n2,7,b\n3,13,c\n")
     run_cfg = json.loads(dump)
     run_cfg["sources"]["p"]["path"] = str(tmp_path / "p.csv")
-    plan = compile_plan(
-        run_cfg,
-        profile_source(run_cfg, seed=7),
+    # The frozen baseline runs `bucketize` over an undeclared csv column. Since column-shape E3 that
+    # config is refused at compile (a breaking change, named in the changelog), so the baseline plan
+    # can no longer be reproduced. The config hash is still pinned above.
+    from decoy_engine.plan._errors import PlanCompileError
+
+    with pytest.raises(PlanCompileError) as refused_plan:
+        compile_plan(
+            run_cfg,
+            profile_source(run_cfg, seed=7),
+            decoy_engine_version="legacy-fixture",
+            sources=NO_SOURCES,
+        )
+    assert refused_plan.value.code == "column_shape_required"
+
+    # With the recommended declaration on `age` the config compiles, and every other plan line is
+    # the frozen baseline's: only the age column, its shape, the hashes and the version move.
+    import yaml
+
+    from decoy_engine.plan._serialize import plan_to_yaml
+
+    declared_cfg = copy.deepcopy(run_cfg)
+    declared_cfg["tables"][0]["columns"][1].update(INT_DECL)
+    declared = compile_plan(
+        declared_cfg,
+        profile_source(declared_cfg, seed=7),
         decoy_engine_version="legacy-fixture",
         sources=NO_SOURCES,
     )
-    assert plan.pipeline_config_hash == fixture["pipeline_config_hash"]
-    assert plan_to_yaml(plan) == fixture["plan_yaml_at_baseline"].replace(
-        "plan_version: 2", "plan_version: 5", 1
-    ).replace(_BASELINE_PROFILE_HASH, _SHAPED_PROFILE_HASH, 1)
+    got = yaml.safe_load(plan_to_yaml(declared))
+    frozen = yaml.safe_load(fixture["plan_yaml_at_baseline"])
+    for plan_dict in (got, frozen):
+        for key in (
+            "plan_version",
+            "pipeline_config_hash",
+            "profile_hash",
+            "column_shapes",
+            "declared_casting",
+        ):
+            plan_dict.pop(key, None)
+        plan_dict["seed_envelope"]["per_table"]["p"]["per_column"].pop("age")
+    assert got == frozen

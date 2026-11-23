@@ -357,13 +357,14 @@ class TestCardinalityCollisions:
     def test_quarantine_counts_the_aligned_rows_only(self, tmp_path: Path) -> None:
         """AT-Z4: one row removed by another column's format_error."""
         values = [f"src-{i}" for i in range(60)]
-        ages = [f"{10 + i}" for i in range(60)]
+        ages = [f"2020-01-{1 + i % 28:02d}" for i in range(60)]
         ages[0] = "badX"
         # row 0 carries the only src-0, so a count over the unaligned source says 60, not 59
         bucket = {
             "name": "age",
-            "strategy": "bucketize",
-            "provider_config": {"width": 10},
+            "strategy": "date_shift",
+            "namespace": "age_ns",
+            "provider_config": {"date_format": "%Y-%m-%d"},
             "_values": ages,
         }
         q = {

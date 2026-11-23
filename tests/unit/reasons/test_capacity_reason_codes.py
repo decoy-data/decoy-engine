@@ -12,6 +12,7 @@ _CAPACITY_WORDS = re.compile(r"memory|budget|capacity|oom|disk|spill|resource|rs
 
 EXPECTED = {
     "generation_budget_exceeded",
+    "nonfk_full_frame_capacity_exceeded",
     "out_of_core_insufficient_memory",
     "out_of_core_fanin_exceeds_budget",
     "out_of_core_faker_pool_budget_exceeded",

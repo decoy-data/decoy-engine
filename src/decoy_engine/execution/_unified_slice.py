@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionAdapter, ExecutionResult
     from decoy_engine.execution._pipeline_context import PipelineRunContext, RouteDecision
     from decoy_engine.execution._planner import ExecutionPlan
+    from decoy_engine.execution.pipeline import ResidentFit
     from decoy_engine.generation.pool import PoolCache
     from decoy_engine.keyprovider import KeyProvider
     from decoy_engine.plan._types import Plan
@@ -153,6 +154,7 @@ def _execute_admitted(
     pool_cache: PoolCache,
     native_threads: int,
     chunked_dispatcher_enabled: bool,
+    resident_fit: ResidentFit | None = None,
 ) -> ExecutionResult | None:
     """Everything past the cheap admission gate: build the LIVE (D4)
     `PhysicalPlanInputs`, compile the real physical plan, run the remaining
@@ -213,6 +215,7 @@ def _execute_admitted(
             out_of_core_budget_bytes=out_of_core_budget_bytes,
             engine_version=engine_version,
             chunked_dispatcher_enabled=chunked_dispatcher_enabled,
+            resident_fit=resident_fit,
         )
         physical_plan = compile_physical_plan(inputs)
 
@@ -466,4 +469,5 @@ def maybe_run_unified_slice(
         pool_cache=pool_cache,
         native_threads=ctx.native_threads,
         chunked_dispatcher_enabled=ctx.chunked_dispatcher_enabled,
+        resident_fit=decision.resident_fit,
     )
