@@ -370,7 +370,7 @@ def test_one_non_c1_faker_column_reroutes_whole_table_not_just_that_column() -> 
     # on_oracle for why this does not exercise the full chunked oracle fallback).
     config = _config(
         _faker_column("FIRST"),
-        _faker_column("LAST", provider="address_city", deterministic=False, namespace="ns_l"),
+        _faker_column("LAST", provider="person_dob", deterministic=False, namespace="ns_l"),
     )
     decision = plan_native_route(
         config,

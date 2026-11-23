@@ -253,6 +253,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("defects/test_faker_pool_size_one_resolver.py", "ALLOWED"),
     ),
     Source(
+        "faker-native-allowlist-total",
+        "defects/test_faker_native_allowlist_total.py",
+        in_code("defects/test_faker_native_allowlist_total.py", "EXCLUDED"),
+    ),
+    Source(
         "lossless-int-columns",
         "defects/test_lossless_int_columns.py",
         in_code("defects/test_lossless_int_columns.py", "ALLOWED", nested=True),
