@@ -17,6 +17,9 @@ baseline = "tests/sentry/baselines/f29-producer-inventory.json"
 [[sentry]]
 id = "f29-consumer-inventory"
 baseline = "tests/sentry/baselines/f29-consumer-inventory.json"
+approved_growth = [
+  { key = "generation/pool/_sampler.py::derive_pool_indices::exc.code", decision = "owner 2026-11-23 rename of an existing site (_derive_pool_indices promoted to a public pool export), no new consumer" },
+]
 
 [[sentry]]
 id = "secret-material-census"
@@ -31,7 +34,7 @@ approved_growth = [
   { key = "decoy_engine/generation/pool/_sampler.py::derive_validated_indices::mask_key", decision = "owner 2026-11-21 GEN-WINDOWED-BATCH S2 shared batch-draw helper replaces WindowedDateProvider.row_seed_int" },
   { key = "decoy_engine/transforms/windowed_date.py::_draw_offsets::seed", decision = "owner 2026-11-21 GEN-WINDOWED-BATCH S2 batched offset draw split from apply_windowed_date" },
   { key = "decoy_engine/transforms/bucket_perturb.py::apply_bucket_perturb_dates::job_seed", decision = "owner 2026-11-22 standing go-with-recommended authority (orchestrator applied, pending owner confirmation): COLUMN-SHAPE-RULE E2 typed date path (plan 2026-11-21-column-shape-rule section 3.3); the seed is wiped on every exit" },
-  { key = "decoy_engine/execution/_strategies/_faker_positional.py::computed_mask_draw::seed", decision = "owner 2026-11-23 go-with-recommended (plan 2026-11-22-gen-nonfaker-draws section 5.2): the computed uuid, integer and choice draw takes the mask key or job seed and wipes it on every exit; builder-applied, pending owner confirmation" },
+  { key = "decoy_engine/execution/_strategies/_faker_positional.py::computed_mask_draw::seed", decision = "owner 2026-11-23 go-with-recommended (plan 2026-11-22-gen-nonfaker-draws section 5.2): the computed uuid, integer and choice draw takes the mask key or job seed and wipes it on every exit; owner confirmed 2026-11-23" },
 ]
 
 [[sentry]]
