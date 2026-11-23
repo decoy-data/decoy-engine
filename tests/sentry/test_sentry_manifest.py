@@ -189,9 +189,11 @@ def test_a_broken_route_split_is_detected() -> None:
     assert stray != text
     assert any("outside LAYER_IGNORE" in f for f in route_findings(stray))
     unignored = text.replace(
-        '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS', "${SENTRY_PATHS"
+        '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS', "${SPLIT_PATHS"
     )
-    assert "the sentry step does not apply LAYER_IGNORE" in route_findings(unignored)
+    assert "the shared split builder does not apply LAYER_IGNORE" in route_findings(unignored)
+    other_paths = re.sub(r"SPLIT_PATHS=\(\$\{SENTRY_PATHS", "SPLIT_PATHS=(${OTHER_PATHS", text)
+    assert "the sentry step does not run SENTRY_PATHS" in route_findings(other_paths)
 
 
 def test_a_nested_new_sentry_is_picked_up(tmp_path: Path) -> None:
