@@ -89,8 +89,21 @@ class TestConstructionPeakFloor:
         # floor must exceed the measured size of the smallest possible pool.
         n = 100
         pool = _make_pool(np.array([""] * n, dtype=object))
-        assert construction_floor(n) > measured_pool_bytes(pool)
+        assert construction_floor(n, strings=True) > measured_pool_bytes(pool)
 
     def test_floor_is_linear_in_size(self) -> None:
-        assert construction_floor(0) == 0
-        assert construction_floor(10) == 10 * construction_floor(1)
+        for strings in (True, False):
+            assert construction_floor(0, strings=strings) == 0
+            assert construction_floor(10, strings=strings) == 10 * construction_floor(
+                1, strings=strings
+            )
+
+    def test_the_type_free_floor_is_below_the_string_floor_and_above_an_int_pool(self) -> None:
+        n = 100
+        ints = _make_pool(np.array([1000 + i for i in range(n)], dtype=object))
+        assert construction_floor(n, strings=False) < construction_floor(n, strings=True)
+        # Distinct ints are real objects, so the final pool is above the bare slots but the
+        # type-free floor never exceeds what the build holds.
+        assert (
+            construction_floor(n, strings=False) <= measured_pool_bytes(ints) + 3 * 8 * n + 16 * n
+        )

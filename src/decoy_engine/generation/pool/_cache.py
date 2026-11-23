@@ -103,11 +103,14 @@ class PoolCache:
         if pool_bytes > self._max_bytes:
             raise PoolCapacityError(
                 code=reasons.runtime.POOL_EXCEEDS_CACHE_BUDGET,
+                # Value-free, like the out-of-core budget error: no provider or byte counts
+                # in the text. The counts stay on the exception for a caller that needs them.
                 message=(
-                    f"Pool for {pool.provider!r} measured at {pool_bytes} bytes "
-                    f"exceeds cache budget {self._max_bytes} bytes. Increase the "
-                    "budget via `decoy_engine.settings` or reduce the pool size."
+                    "the pool exceeds the cache budget. Increase the budget via "
+                    "`decoy_engine.settings` or reduce the pool size."
                 ),
+                pool_bytes=pool_bytes,
+                max_bytes=self._max_bytes,
             )
         with self._lock:
             # Re-inserting an existing identity must not double-count its

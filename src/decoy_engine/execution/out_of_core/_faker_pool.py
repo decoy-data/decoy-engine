@@ -31,6 +31,7 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution.native._real_type_admission import C1_PROVIDER_ALLOWLIST
 from decoy_engine.generation.pool._builder import PoolBuilder
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._identity import PoolIdentity, resolve_faker_pool_identity
@@ -155,8 +156,8 @@ class OocFakerPoolContext:
 
         On a cache hit the stored pool is returned with no rebuild. On a miss the
         pool is refused before any build when the construction-peak floor
-        (``construction_floor``: the string objects plus the builder's four
-        pointer copies and its distinct-count set) cannot fit; otherwise it is built (bounded by its
+        (``construction_floor``: the value objects, counted only for a string-allowlisted
+        provider, plus the builder's four pointer copies and its distinct-count set) cannot fit; otherwise it is built (bounded by its
         ``pool_size``), measured with ``measured_pool_bytes`` and reserved against the
         run allowance. A pool that does not fit raises ``out_of_core_faker_pool_budget_exceeded``, is dropped
         and never enters the cache. The reservation never depends on a batch or
@@ -174,8 +175,14 @@ class OocFakerPoolContext:
         if cached is not None:
             return cached
         # Refuse before building when even the construction-peak floor cannot fit: the build
-        # holds more than the final pool, so a huge pool_size never allocates a provider.
-        self._check_fits(construction_floor(prepared.pool_size))
+        # holds more than the final pool, so a huge pool_size never allocates a provider. The
+        # string floor applies only to a provider on the native string allowlist; any other
+        # provider gets the type-free floor, since its values may cost less than a str.
+        self._check_fits(
+            construction_floor(
+                prepared.pool_size, strings=prepared.provider in C1_PROVIDER_ALLOWLIST
+            )
+        )
         pool = self._builder.build(
             prepared.provider,
             size=prepared.pool_size,

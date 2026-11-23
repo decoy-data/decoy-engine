@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from decoy_engine.generation.pool import PoolCache, PoolCapacityError, ValuePool
+from decoy_engine.generation.pool._value_pool import measured_pool_bytes
 
 
 def _make_pool(provider: str, size: int, seed: bytes = b"\x00" * 8) -> ValuePool:
@@ -53,6 +54,19 @@ class TestEviction:
         with pytest.raises(PoolCapacityError) as excinfo:
             cache.put(big_pool)
         assert excinfo.value.code == "pool_exceeds_cache_budget"
+
+    def test_the_budget_error_text_is_value_free_and_keeps_the_counts_as_attributes(self) -> None:
+        cache = PoolCache(max_bytes=100)
+        big_pool = _make_pool("secretprovider", 1000)
+        with pytest.raises(PoolCapacityError) as excinfo:
+            cache.put(big_pool)
+        text = str(excinfo.value)
+        assert "secretprovider" not in text
+        assert str(excinfo.value.pool_bytes) not in text
+        assert str(excinfo.value.max_bytes) not in text
+        assert not any(ch.isdigit() for ch in text.replace("pool_exceeds_cache_budget", ""))
+        assert excinfo.value.max_bytes == 100
+        assert excinfo.value.pool_bytes == measured_pool_bytes(big_pool)
 
     def test_eviction_counter_increments(self) -> None:
         cache = PoolCache(max_bytes=2000)
