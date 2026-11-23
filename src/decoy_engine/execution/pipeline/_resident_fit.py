@@ -52,23 +52,51 @@ class TableBytesSpec:
     """One table's size facts.
 
     `resident_input_bytes` is set for a table already in memory and is `None` for a lazy table,
-    which is priced from rows and schema alone. `charge_pandas` is false for a table the run holds
-    but never converts to pandas (a generated table in a mixed job).
+    which is priced from rows and schema alone. `buffer_sizes` maps each distinct buffer address
+    of a resident table to its size, so `input_bytes` counts a buffer shared by several tables
+    once. `charge_pandas` is false for a table the run holds but never converts to pandas (a
+    generated table in a mixed job).
     """
 
     rows: int
     schema: pa.Schema
     resident_input_bytes: int | None = None
     charge_pandas: bool = True
+    buffer_sizes: Mapping[int, int] = dataclasses.field(default_factory=dict, compare=False)
 
 
 def resident_spec(table: pa.Table, *, charge_pandas: bool = True) -> TableBytesSpec:
+    sizes = _buffer_sizes(table)
     return TableBytesSpec(
         rows=table.num_rows,
         schema=table.schema,
-        resident_input_bytes=resident_table_bytes(table),
+        resident_input_bytes=sum(sizes.values()),
         charge_pandas=charge_pandas,
+        buffer_sizes=sizes,
     )
+
+
+def _buffer_sizes(table: pa.Table) -> dict[int, int]:
+    """Size of each distinct physical buffer under `table`, keyed by its address."""
+    sizes: dict[int, int] = {}
+    for column in table.columns:
+        for chunk in column.chunks:
+            _collect_buffers(chunk, sizes)
+    return sizes
+
+
+def _collect_buffers(array: pa.Array, sizes: dict[int, int]) -> None:
+    for buffer in array.buffers():
+        if buffer is not None and buffer.size:
+            sizes[buffer.address] = max(sizes.get(buffer.address, 0), buffer.size)
+    t = array.type
+    if pa.types.is_dictionary(t):
+        _collect_buffers(array.dictionary, sizes)
+    elif pa.types.is_struct(t):
+        for i in range(t.num_fields):
+            _collect_buffers(array.field(i), sizes)
+    elif pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_map(t):
+        _collect_buffers(array.values, sizes)
 
 
 def lazy_spec(rows: int, schema: pa.Schema, *, charge_pandas: bool = True) -> TableBytesSpec:
@@ -87,12 +115,22 @@ def resident_table_bytes(table: pa.Table) -> int:
 
 
 def input_bytes(specs: Iterable[TableBytesSpec]) -> int:
-    return sum(
-        s.resident_input_bytes
-        if s.resident_input_bytes is not None
-        else _lazy_input_bytes(s.rows, s.schema)
-        for s in specs
-    )
+    """Lazy tables from rows and schema; resident tables by distinct buffer across all of them.
+
+    Tables read from one source or sliced from one table share buffers, so summing each table
+    alone would count a shared buffer twice and break the lower bound.
+    """
+    total = 0
+    distinct: dict[int, int] = {}
+    for s in specs:
+        if s.resident_input_bytes is None:
+            total += _lazy_input_bytes(s.rows, s.schema)
+        elif s.buffer_sizes:
+            for address, size in s.buffer_sizes.items():
+                distinct[address] = max(distinct.get(address, 0), size)
+        else:
+            total += s.resident_input_bytes
+    return total + sum(distinct.values())
 
 
 def pandas_bytes(specs: Iterable[TableBytesSpec]) -> int:

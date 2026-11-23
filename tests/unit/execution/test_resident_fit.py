@@ -239,3 +239,16 @@ def test_an_extension_array_over_a_shared_storage_buffer_counts_once() -> None:
         return pa.table({"e": pa.ExtensionArray.from_storage(_Tagged(), storage), "x": storage})
 
     assert _assert_between_largest_buffer_and_held(build) == 8000
+
+
+def test_tables_sharing_a_buffer_are_priced_once() -> None:
+    """Two tables over one buffer hold it once; the bound must not sum it per table."""
+    values = pa.array(range(1000), pa.int64())
+    one = pa.table({"x": values})
+    two = pa.table({"y": values})
+    three = one.slice(10, 20)
+    specs = [resident_spec(t, charge_pandas=False) for t in (one, two, three)]
+    assert input_bytes(specs) == 8000
+    assert sum(s.resident_input_bytes or 0 for s in specs) == 24000
+    distinct = pa.table({"z": pa.array(range(1000), pa.int64())})
+    assert input_bytes([*specs, resident_spec(distinct, charge_pandas=False)]) == 16000
