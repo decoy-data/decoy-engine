@@ -52,8 +52,6 @@ def find_matches(expr: Any, parsed: Any, column: str) -> list[Any]:
     matches: list[Any] = []
     try:
         matches = expr.find(parsed)
-    except IndexError:
-        pass  # an index past the end of an array selects nothing (RFC 9535 section 2.3.3)
     except (TypeError, KeyError):
         failed = True
     if failed:

@@ -147,3 +147,29 @@ def test_quoted_names_decode_rfc_escapes() -> None:
     assert parse_target("$['\\u00e9\\ud83d\\ude00']").segments[0].value == "é\U0001f600"
     assert parse_target("$[0:4:2]").segments[0].value == (0, 4, 2)
     assert parse_target("$[9007199254740991]").segments[0].value == 2**53 - 1
+
+
+_SHORT_ARRAY_ROW = json.dumps(
+    {"items": [{"tags": ["a", "b", "SECRET"]}, {"tags": ["a", "b"]}, {"tags": []}]}
+)
+
+
+def test_short_array_in_one_branch_does_not_unmask_the_others() -> None:
+    """An index past the end selects nothing for that branch only, never for the whole find."""
+    handler = NestedStrategyHandler()
+    df = pd.DataFrame({"data": [_SHORT_ARRAY_ROW]})
+    target = "$.items[*].tags[2]"
+    out, _ = handler.run(df, "data", _seed({"target": target, "strategy": "redact"}), _FakeCtx())
+    items = json.loads(out["data"].iloc[0])["items"]
+    assert items[0]["tags"] == ["a", "b", "REDACTED"]
+    assert items[1]["tags"] == ["a", "b"] and items[2]["tags"] == []
+
+
+def test_negative_index_past_the_start_selects_nothing_for_that_branch() -> None:
+    handler = NestedStrategyHandler()
+    row = json.dumps({"items": [{"tags": ["SECRET", "b"]}, {"tags": ["x"]}]})
+    df = pd.DataFrame({"data": [row]})
+    target = "$.items[*].tags[-2]"
+    out, _ = handler.run(df, "data", _seed({"target": target, "strategy": "redact"}), _FakeCtx())
+    items = json.loads(out["data"].iloc[0])["items"]
+    assert items[0]["tags"] == ["REDACTED", "b"] and items[1]["tags"] == ["x"]

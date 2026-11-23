@@ -247,6 +247,23 @@ def _slice_rest(text: str, start: int | None, pos: int) -> tuple[Segment, int] |
     return Segment("slice", (start, end, step)), at
 
 
+class _InRangeIndex(Index):
+    """An index that selects nothing when it is outside the array, for that one node only.
+
+    jsonpath-ng raises `IndexError` for a negative index past the start. Catching that around a
+    whole `find` would drop the matches of every other branch (`$.items[*].tags[2]` with one short
+    array), so those leaves would go out unmasked. A non-list value keeps jsonpath-ng's own
+    behavior, which the handler refuses as an unwritable container.
+    """
+
+    def find(self, datum: Any) -> list[Any]:
+        value = getattr(datum, "value", datum)
+        (index,) = self.indices
+        if isinstance(value, list) and not -len(value) <= index < len(value):
+            return []
+        return super().find(datum)  # type: ignore[no-any-return]
+
+
 def to_jsonpath(path: TargetPath) -> Any:
     """The jsonpath-ng expression for the segments, built node by node (never parsed)."""
     expr: Any = Root()
@@ -263,6 +280,6 @@ def _node(segment: Segment) -> Any:
     if segment.kind == "all_items":
         return Slice()
     if segment.kind == "index":
-        return Index(segment.value)
+        return _InRangeIndex(segment.value)
     start, end, step = segment.value
     return Slice(start, end, step)
