@@ -32,6 +32,8 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from decoy_engine._nested_json import nested_children
+from decoy_engine.errors import ValidationError
+from decoy_engine.expressions._when_parser import parse_when, when_column_refs
 from decoy_engine.generation.composite import COMPOSITES
 
 # Whether an entry reads its own column from the source or produces it. A created column is
@@ -195,9 +197,18 @@ def _nested(entry: Mapping[str, Any]) -> ColumnAccess:
 
 
 def _when(entry: Mapping[str, Any]) -> ColumnAccess:
-    """`run_with_when_gate` evaluates the predicate over the whole frame."""
-    names = predicate_names(str(entry.get("when")))
-    return _READS_UNKNOWN if names is None else ColumnAccess(reads=frozenset(names))
+    """`run_with_when_gate` evaluates the predicate over the whole frame.
+
+    The reads come from `when_column_refs`, the one producer the evaluator, the native
+    admission and the chunk carry share, so a quoted or `source.` name is read exactly as
+    written. A predicate outside the closed grammar reads every column (`_READS_UNKNOWN`).
+    `predicate_names` is the separate scanner for derived and transform expressions.
+    """
+    try:
+        refs = when_column_refs(parse_when(str(entry.get("when"))))
+    except ValidationError:
+        return _READS_UNKNOWN
+    return ColumnAccess(reads=frozenset(read.column for read in refs))
 
 
 def _union(a: ColumnAccess, b: ColumnAccess) -> ColumnAccess:
