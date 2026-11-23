@@ -27,6 +27,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._runner import build_work_list
 from decoy_engine.execution._unified_slice import QUALITY_METRICS_KEY, UnifiedSliceInvariantError
@@ -736,6 +737,7 @@ def _verdict(tmp_path: Path, columns: list[dict[str, Any]]) -> tuple[Any, ...]:
             engine_version="v",
             first_schema=source.schema,
             registry=registry,
+            siblings=NO_SOURCES,
         )
     except PlanCompileError as exc:
         # The plan compiler refuses a config that omits a required setting before any route is

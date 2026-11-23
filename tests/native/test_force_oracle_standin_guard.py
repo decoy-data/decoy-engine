@@ -14,6 +14,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked_profile import first_chunk_profile
 from decoy_engine.execution.native._dispatch import _static_route_decision
 from decoy_engine.providers_v2 import get_default_registry
@@ -44,6 +45,7 @@ def _decide(col: dict[str, Any]) -> Any:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
 
 

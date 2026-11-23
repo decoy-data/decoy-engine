@@ -18,6 +18,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_carry import passthrough_columns, plan_carry
@@ -488,10 +489,14 @@ def test_row_error_chunk_reports_generated_values_for_written_columns(
     _provider, columns, data, written = CASES[case]
     bad = {
         "name": "age",
-        "strategy": "bucketize",
-        "provider_config": {"width": 10},
+        "strategy": "date_shift",
+        "namespace": "age_ns",
+        "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
     }
-    data = {**data, "age": ["23", "x1", "47", "50", "51", "52"]}
+    data = {
+        **data,
+        "age": ["2020-01-01", "x1", "2020-01-03", "2020-01-04", "2020-01-05", "2020-01-06"],
+    }
     config = make_config([*columns, bad], global_settings=_WARN)
     _patch_out_composite_refusal(monkeypatch)
     sink = _row_error_run(config, [_source(data)])
@@ -519,8 +524,15 @@ def test_caller_only_composite_fails_closed_before_any_output(
     ]
     data = {c: [f"SECRET-{c}-{i}" for i in range(N)] for c in ("a", "b", "c")}
     if row_errors:
-        columns.append({"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}})
-        data["age"] = ["23", "x1", "47", "50", "51", "52"]
+        columns.append(
+            {
+                "name": "age",
+                "strategy": "date_shift",
+                "namespace": "age_ns",
+                "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+            }
+        )
+        data["age"] = ["2020-01-01", "x1", "2020-01-03", "2020-01-04", "2020-01-05", "2020-01-06"]
     config = make_config(columns, global_settings=_WARN)
     _patch_out_composite_refusal(monkeypatch)
     sink: list[Any] = []
@@ -731,7 +743,7 @@ def test_registry_is_a_required_keyword() -> None:
     from decoy_engine.execution.native._chunked_evidence import plan_column_backends
 
     with pytest.raises(TypeError):
-        plan_column_backends({}, None, table=TABLE, engine_version="v")  # type: ignore[call-arg]
+        plan_column_backends({}, None, table=TABLE, engine_version="v", siblings=NO_SOURCES)  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         _pipeline_auto_chunk._legacy_route_evidence(  # type: ignore[call-arg]
             config,
@@ -885,8 +897,15 @@ def test_a_composite_with_a_when_still_generates_every_output(
     columns: list[dict[str, Any]] = [entry]
     data = {c: [f"SECRET-{c}-{i}" for i in range(N)] for c in ("first_name", "last_name", "email")}
     if row_errors:
-        columns.append({"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}})
-        data["age"] = ["23", "x1", "47", "50", "51", "52"]
+        columns.append(
+            {
+                "name": "age",
+                "strategy": "date_shift",
+                "namespace": "age_ns",
+                "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+            }
+        )
+        data["age"] = ["2020-01-01", "x1", "2020-01-03", "2020-01-04", "2020-01-05", "2020-01-06"]
     config = make_config(columns, global_settings=_WARN)
     _patch_out_composite_refusal(monkeypatch)
     source = _source(data)
