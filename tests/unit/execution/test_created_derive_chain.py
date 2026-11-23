@@ -186,3 +186,34 @@ def test_a_run_gated_on_a_created_column_refuses_before_any_column_runs(tmp_path
         _run_columns(tmp_path, columns)
     assert reason_from_exception(caught.value).code != "when_expression_error"
     assert "aa_tgt" in str(caught.value)
+
+
+_UNREADABLE = ["f'{g}' + o", "b'x' + o", "`unterminated + o"]
+
+
+def test_transform_expression_readers_keep_the_generic_scanner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A1 control: `_transforms` and `_derive_created` read the broad pandas-expression
+    language through `predicate_names`, not the closed `when:` grammar. Routing either site
+    through `parse_when` turns this red."""
+    from decoy_engine.execution._column_access import SURFACE_DECLARATIONS
+
+    def table(expression: str) -> dict[str, Any]:
+        ops = [{"op": "derive", "column": "t", "expression": expression}]
+        return {"name": "t", "columns": [], "transforms": ops}
+
+    declare = SURFACE_DECLARATIONS["surface:transforms"]
+    arithmetic = declare(table("g + o * 2"))
+    assert arithmetic.reads == frozenset({"g", "o"}) and not arithmetic.reads_unknown
+    assert created_columns(table("g + o * 2"), ("g", "o"), REG) == {"t"}
+    for expression in _UNREADABLE:
+        assert declare(table(expression)).reads_unknown, expression
+        assert created_columns(table(expression), ("g", "o"), REG) == frozenset(), expression
+
+    # A token kind the scanner does not know is also unreadable, at both sites.
+    import pandas.core.computation.parsing as parsing
+
+    monkeypatch.setattr(parsing, "tokenize_string", lambda expr: iter([(9999, "?"), (1, "g")]))
+    assert declare(table("g + o")).reads_unknown
+    assert created_columns(table("g + o"), ("g", "o"), REG) == frozenset()

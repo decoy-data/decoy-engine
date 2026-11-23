@@ -4,6 +4,11 @@
 // parentheses) of two atom shapes only:
 //   <column> <cmp> <literal>      (or the literal first)
 //   <column> [not] in [<literal>, ...]
+// A <column> is a bare name, `source.<name>` (the original value; the bare form means the same),
+// `masked.<name>` (parsed, then refused in V1) or a backtick-quoted name, with or without the
+// prefix, for a name that holds a dot or another character outside [A-Za-z0-9_]. A quoted name
+// holds no backtick, backslash or control character. `source` and `masked` are prefixes only
+// before a dot: a column named `source` still reads bare.
 // No arithmetic, calls, attributes, subscripts, ref-to-ref comparisons, chained
 // comparisons, None or empty lists. Names that pandas eval would resolve to
 // something other than a column, and the words held back for later grammar, are
@@ -24,11 +29,16 @@ start: or_expr
      | membership
      | "(" or_expr ")"
 
-comparison: IDENT CMP literal  -> col_first
-          | literal CMP IDENT  -> lit_first
+comparison: ref CMP literal  -> col_first
+          | literal CMP ref  -> lit_first
 
-membership: IDENT "in" literal_list          -> in_op
-          | IDENT "not" "in" literal_list    -> not_in_op
+membership: ref "in" literal_list          -> in_op
+          | ref "not" "in" literal_list    -> not_in_op
+
+ref: IDENT                   -> bare_ref
+   | QUOTED_NAME             -> quoted_ref
+   | IDENT "." IDENT         -> prefixed_ref
+   | IDENT "." QUOTED_NAME   -> prefixed_quoted_ref
 
 literal_list: "[" literal ("," literal)* "]"
 
@@ -42,6 +52,7 @@ CMP: "==" | "!=" | "<=" | ">=" | "<" | ">"
 IDENT: /[A-Za-z_][A-Za-z0-9_]*/
 // No leading zeros: pandas eval rejects `01` as a Python syntax error.
 NUMBER: /-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/
+QUOTED_NAME: /`[^`\\\x00-\x1f\x7f-\x9f  ]+`/
 SQ_STRING: /'[^'"\\\x00-\x1f\x7f-\x9f  ]*'/
 DQ_STRING: /"[^'"\\\x00-\x1f\x7f-\x9f  ]*"/
 
