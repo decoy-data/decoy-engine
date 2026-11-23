@@ -2,7 +2,7 @@ Status: plan (revision 2, 2026-11-23; GSA S1a, S2 and S3 dependency corrected fo
 
 # GEN-PER-COLUMN: each generate column takes its own route, and one declined column no longer sends the plan to the legacy loop
 
-Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: GEN-PER-COLUMN (group generate, V1), from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`) and the owner direction of 2026-11-22: every kind runs its fastest path by default, each column runs its own path, faster and more robust wins even when output bytes change (every byte change is named here), output stays deterministic per seed, engine-gap deadline 2026-12-15. Builds on GEN-STREAM-ALL (`origin/plan/gen-stream-all` `008acffed`, `docs/plans/2026-11-22-gen-stream-all.md`, called GSA below). Five slices: four engine PRs and one engine-plus-CLI pair (S5).
+Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: GEN-PER-COLUMN (group generate, V1), from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`) and the owner direction of 2026-11-22: every kind runs its fastest path by default, each column runs its own path, faster and more robust wins even when output bytes change (every byte change is named here), output stays deterministic per seed, engine-gap deadline 2026-12-15. Builds on GEN-STREAM-ALL (`origin/plan/gen-stream-all` `6ccfea9b4`, `docs/plans/2026-11-22-gen-stream-all.md`, called GSA below). Five slices: four engine PRs and one engine-plus-CLI pair (S5).
 
 Anchors: a path with no prefix is in this repository (decoy-engine); `CLI:` is the decoy CLI repo. Read at engine `origin/main` `70881ad79` (0.28.3; the GSA branch adds only docs, so its code is the same) and CLI `origin/main` `77da171f`. Line numbers are at those heads. Where GSA moves code (its S1a moves `_table_batches` to `generation/stream/_batches.py`), this plan names the moved place and the line at main.
 
@@ -261,7 +261,7 @@ S5:
 
 ## 12. Related plans
 
-- GSA: this row starts after GSA S1a (the assembler move) and renames GSA's `gen_legacy_*` codes (section 4). GSA S4's `declines` list becomes `columns`; if both land before a release, GSA S4 can ship `columns` directly.
+- GSA: this row starts after GSA S1a, S2 and S3 (the assembler move and the provider, lookup, statistical and inherit streams) and renames GSA's `gen_legacy_*` codes (section 4). GSA S4's `declines` list becomes `columns`; if both land before a release, GSA S4 can ship `columns` directly.
 - `plan/per-column-routing`: the mask-lane form of the same rule (each column its own backend). Its `executed_backend` vocabulary is for mask nodes; generation keeps its own route set, both shown on the card.
 - `plan/route-label-truth`: both edit `reasons/route/__init__.py` and `_retired.py` (parallel ledger lines, keep both on merge). Its `kernel_less_expression` code means "no compiled kernel" on the mask lane and is not reused here (GSA section 4 gives the reason).
 - `plan/expect-off-route`: its S3 wraps the caller's sink in a validating proxy in `run_pipeline`, so this plan's `generate` path needs no validator call and `_streamed.py` gets no edit from it. The deferred parent pass in S4 here writes a parent after its children. That plan's keyed folds take tables in any order: a child row whose parent has not arrived waits in a pending map, reserved against the key-state budget, and is probed when the parent table finishes. No refusal fires, and its V8 has a child-first cell for this case.
