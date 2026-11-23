@@ -41,7 +41,7 @@ from decoy_engine.execution.physical._shadow_coordinator import ShadowCoordinato
 from decoy_engine.execution.physical._shadow_diff_codes import CELL_VALUE_DIFF, ShadowDifference
 from decoy_engine.generation.pool import PoolBuilder, PoolCache
 from decoy_engine.generation.pool._errors import PoolCapacityError
-from decoy_engine.generation.pool._value_pool import estimate_pool_bytes
+from decoy_engine.generation.pool._value_pool import measured_pool_bytes
 from decoy_engine.keyprovider import SecretKeyProvider
 from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry, get_default_registry
 from decoy_engine.providers_v2._errors import ProviderError
@@ -903,7 +903,7 @@ def test_12b_lru_state_matches_the_oracle_for_a_b_a_c(
         config={},
         namespace="probe",
     )
-    budget = int(estimate_pool_bytes(probe) * 2.5)
+    budget = int(measured_pool_bytes(probe) * 2.5)
 
     oracle_cache = _CacheRecorder(monkeypatch, budget)
     case.run(lane=False)

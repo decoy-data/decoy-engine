@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from decoy_engine import reasons
 from decoy_engine.generation.pool._errors import PoolCapacityError
 from decoy_engine.generation.pool._events import QualityWarning
-from decoy_engine.generation.pool._value_pool import ValuePool, estimate_pool_bytes
+from decoy_engine.generation.pool._value_pool import ValuePool, measured_pool_bytes
 
 if TYPE_CHECKING:
     # S8: BundlePool subclasses ValuePool and rides the same cache (R5).
@@ -99,12 +99,12 @@ class PoolCache:
             PoolCapacityError(code='pool_exceeds_cache_budget') if `pool`
             alone is larger than `max_bytes`.
         """
-        pool_bytes = estimate_pool_bytes(pool)
+        pool_bytes = measured_pool_bytes(pool)
         if pool_bytes > self._max_bytes:
             raise PoolCapacityError(
                 code=reasons.runtime.POOL_EXCEEDS_CACHE_BUDGET,
                 message=(
-                    f"Pool for {pool.provider!r} estimated at {pool_bytes} bytes "
+                    f"Pool for {pool.provider!r} measured at {pool_bytes} bytes "
                     f"exceeds cache budget {self._max_bytes} bytes. Increase the "
                     "budget via `decoy_engine.settings` or reduce the pool size."
                 ),
@@ -118,11 +118,11 @@ class PoolCache:
             # byte-identical.
             existing = self._entries.pop(pool.identity, None)
             if existing is not None:
-                self._bytes_used -= estimate_pool_bytes(existing)
+                self._bytes_used -= measured_pool_bytes(existing)
             # Evict LRU until the new pool fits.
             while self._bytes_used + pool_bytes > self._max_bytes and self._entries:
                 _, evicted = self._entries.popitem(last=False)
-                self._bytes_used -= estimate_pool_bytes(evicted)
+                self._bytes_used -= measured_pool_bytes(evicted)
                 self._evictions += 1
             self._entries[pool.identity] = pool
             self._bytes_used += pool_bytes

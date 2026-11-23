@@ -17,7 +17,7 @@ bounding and identity reuse can be proven in isolation.
 Established pattern reused, not re-invented: ``PoolBuilder`` builds, ``PoolCache``
 stores, ``resolve_faker_pool_identity`` keys. The one thing added over a bare
 ``PoolCache`` is a build-time reservation gate: each new pool is measured with
-``measured_pool_bytes`` (object sizes, not the character-only ``PoolCache`` estimate) and refused when
+``measured_pool_bytes`` (the one pool-byte function, shared with ``PoolCache``) and refused when
 it would not fit the run's pool allowance, so a job can never grow pool memory
 without a bound and never sizes a pool from a batch or source row count. The stock
 ``PoolBuilder`` returns exactly ``pool_size`` values, so the build itself is
@@ -26,7 +26,6 @@ bounded by the pool size.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,24 +34,12 @@ from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.generation.pool._builder import PoolBuilder
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._identity import PoolIdentity, resolve_faker_pool_identity
-from decoy_engine.generation.pool._value_pool import ValuePool
+from decoy_engine.generation.pool._value_pool import (
+    ValuePool,
+    construction_floor,
+    measured_pool_bytes,
+)
 from decoy_engine.providers_v2 import ProviderRegistry
-
-# The smallest a pool value can cost: CPython's empty `str` object plus its 8-byte array slot.
-# `measured_pool_bytes` charges every value at least this much, so `pool_size` times it is a
-# true lower bound for the pre-build refusal and never refuses a pool that would fit.
-_MIN_BYTES_PER_VALUE = sys.getsizeof("") + 8
-
-
-def measured_pool_bytes(pool: ValuePool) -> int:
-    """Resident bytes of a built pool: each string object's own size plus its 8-byte array slot.
-
-    `estimate_pool_bytes` (the `PoolCache` figure) charges characters only and measures about
-    2.6x low on a default name pool, so the run reservation uses the object sizes instead."""
-    values = pool.values
-    if values.dtype != object:
-        return int(values.nbytes)
-    return sum(sys.getsizeof(v) for v in values) + 8 * len(values)
 
 
 @dataclass(frozen=True)
@@ -167,8 +154,9 @@ class OocFakerPoolContext:
         """Return the pool for ``prepared``, building it at most once per run.
 
         On a cache hit the stored pool is returned with no rebuild. On a miss the
-        pool is refused before any build when ``pool_size`` times the
-        per-value lower bound (an empty ``str`` plus its array slot) cannot fit; otherwise it is built (bounded by its
+        pool is refused before any build when the construction-peak floor
+        (``construction_floor``: the string objects plus the builder's four
+        pointer copies and its distinct-count set) cannot fit; otherwise it is built (bounded by its
         ``pool_size``), measured with ``measured_pool_bytes`` and reserved against the
         run allowance. A pool that does not fit raises ``out_of_core_faker_pool_budget_exceeded``, is dropped
         and never enters the cache. The reservation never depends on a batch or
@@ -185,9 +173,9 @@ class OocFakerPoolContext:
         cached = self._cache.get(prepared.identity)
         if cached is not None:
             return cached
-        # Refuse before building when even the lower bound cannot fit: a huge pool_size
-        # never allocates a provider.
-        self._check_fits(prepared.pool_size * _MIN_BYTES_PER_VALUE)
+        # Refuse before building when even the construction-peak floor cannot fit: the build
+        # holds more than the final pool, so a huge pool_size never allocates a provider.
+        self._check_fits(construction_floor(prepared.pool_size))
         pool = self._builder.build(
             prepared.provider,
             size=prepared.pool_size,

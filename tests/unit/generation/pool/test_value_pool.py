@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 import pytest
 
 from decoy_engine.generation.pool._value_pool import (
     ValuePool,
     _freeze_array,
-    estimate_pool_bytes,
+    construction_floor,
+    measured_pool_bytes,
 )
 
 
@@ -61,13 +64,33 @@ class TestIdentityTuple:
 
 
 class TestByteEstimate:
-    def test_object_dtype_estimate_caps_per_string(self) -> None:
-        # 3 short strings; estimate uses len*4 with cap.
-        pool = _make_pool(np.array(["hi", "ok", "yo"], dtype=object))
-        # 8 + 8 + 8 = 24
-        assert estimate_pool_bytes(pool) == 24
+    def test_object_dtype_counts_each_string_object_and_its_slot(self) -> None:
+        values = np.array(["hi", "ok", "yo"], dtype=object)
+        pool = _make_pool(values)
+        assert measured_pool_bytes(pool) == sum(sys.getsizeof(v) + 8 for v in values)
+
+    def test_long_strings_are_not_undercounted(self) -> None:
+        # A characters-only estimate charged 4 bytes per char and undercounted
+        # short strings; the object size is the same on every length.
+        values = np.array(["x" * 6, "y" * 30], dtype=object)
+        assert measured_pool_bytes(_make_pool(values)) == (
+            sys.getsizeof("x" * 6) + sys.getsizeof("y" * 30) + 16
+        )
 
     def test_numeric_dtype_uses_nbytes(self) -> None:
         arr = np.array([1, 2, 3, 4], dtype=np.int64)
         pool = _make_pool(arr)
-        assert estimate_pool_bytes(pool) == arr.nbytes
+        assert measured_pool_bytes(pool) == arr.nbytes
+
+
+class TestConstructionPeakFloor:
+    def test_floor_is_above_the_final_pool_of_empty_strings(self) -> None:
+        # The peak holds pointer copies and a set on top of the final pool, so the
+        # floor must exceed the measured size of the smallest possible pool.
+        n = 100
+        pool = _make_pool(np.array([""] * n, dtype=object))
+        assert construction_floor(n) > measured_pool_bytes(pool)
+
+    def test_floor_is_linear_in_size(self) -> None:
+        assert construction_floor(0) == 0
+        assert construction_floor(10) == 10 * construction_floor(1)

@@ -256,7 +256,9 @@ class OocHashRun:
         self._text_mask_loaded = False
         self._text_mask_bound: BoundTextMaskKernel | None = None
         self._plans: list[TableHashPlan] = []
-        self._faker_plans: dict[str, TableFakerPlan | None] = {}
+        # Keyed by table, and stored with the inputs the decision was made from: a table prepared
+        # again with a different schema or skip set is decided afresh, never served a stale plan.
+        self._faker_plans: dict[str, tuple[pa.Schema, frozenset[str], TableFakerPlan | None]] = {}
         self._remap: list[dict[str, Any]] = []
 
     def _kernel(self) -> BoundHashKernel | None:
@@ -331,7 +333,13 @@ class OocHashRun:
     def _decide_faker(
         self, plan: Plan, table_name: str, source_schema: pa.Schema, skip_columns: frozenset[str]
     ) -> TableFakerPlan | None:
-        """The one faker decision for a table: None when it has no executable faker column."""
+        """The one faker decision for a table: None when it has no executable faker column.
+
+        Two paths reach it. The run-level path is `prepare_faker_tables`, called by
+        `out_of_core/_runner.py` for the whole job before any scratch exists, so an over-budget
+        job fails with nothing on disk; it stores each decision with its inputs. The standalone
+        path is `prepare_table` deciding on its own, used by the stream and rewrite drivers when
+        they run without the runner (and by the runner's own call when the stored inputs differ)."""
         seed = table_seed(plan, table_name)
         faker_seeds = {
             column: column_seed
@@ -355,10 +363,13 @@ class OocHashRun:
 
         `decide_faker_table` resolves each pool identity, deduplicates it and reserves it against
         the pool budget, so an over-budget job fails here, before the arena is made. The plans
-        are stored and `prepare_table` reuses them, so the decision runs once per table."""
+        are stored with their schema and skip set, and `prepare_table` reuses a stored plan only
+        when its own schema and skip set match, so the decision runs once per table."""
         for table_name, (source_schema, skip_columns) in tables.items():
-            self._faker_plans[table_name] = self._decide_faker(
-                plan, table_name, source_schema, skip_columns
+            self._faker_plans[table_name] = (
+                source_schema,
+                skip_columns,
+                self._decide_faker(plan, table_name, source_schema, skip_columns),
             )
 
     def prepare_table(
@@ -475,10 +486,12 @@ class OocHashRun:
             else None
         )
         # Already decided (and its pools reserved) before the scratch arena was made, when the
-        # runner prepared the whole job; a standalone driver decides here.
+        # runner prepared the whole job; a standalone driver, or a call whose schema or skip set
+        # differs from the stored one, decides here.
+        stored = self._faker_plans.get(table_name)
         faker = (
-            self._faker_plans[table_name]
-            if table_name in self._faker_plans
+            stored[2]
+            if stored is not None and stored[0].equals(source_schema) and stored[1] == skip_columns
             else self._decide_faker(plan, table_name, source_schema, skip_columns)
         )
         table_plan = TableHashPlan(

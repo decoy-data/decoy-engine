@@ -631,8 +631,8 @@ def test_w1_distinct_default_pools_run_under_the_measured_reservation(
 
 @NEEDS_COMPANION
 def test_w1_reserved_bytes_are_the_sum_of_the_measured_pools(tmp_path: Path) -> None:
-    from decoy_engine.execution.out_of_core._faker_pool import measured_pool_bytes
     from decoy_engine.generation.pool._builder import PoolBuilder
+    from decoy_engine.generation.pool._value_pool import measured_pool_bytes
 
     built: list[int] = []
 
@@ -679,3 +679,71 @@ def test_f7_an_explicit_null_pool_size_behaves_as_absent_on_every_route(
     null = _run(cfg_null, src)
     assert null.outputs["t"].equals(absent.outputs["t"])
     _assert_native(null, rows)
+
+
+# ---------------------------------------------------------------------------
+# Round 1: the stored plan is keyed by its inputs.
+# ---------------------------------------------------------------------------
+
+
+def _faker_child_job(
+    tmp_path: Path, child_faker: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, pa.Table]]:
+    """P(k) parent; C has the FK child column k, and `child_faker` replaces k's strategy."""
+    cfg, src = _fk_job(tmp_path, [])
+    cfg["tables"][1]["columns"] = [child_faker]
+    return cfg, src
+
+
+@NEEDS_COMPANION
+def test_r1_a_faker_on_an_fk_child_column_reserves_no_pool_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution.out_of_core import _runner
+
+    seen: list[tuple[int, int, int]] = []
+
+    class Recording(OocFakerPoolContext):
+        def close(self) -> None:
+            seen.append((self.pool_count, self.reserved_bytes, self.builds))
+            super().close()
+
+    monkeypatch.setattr(_runner, "OocFakerPoolContext", Recording)
+    faker_k = _column(FIRST, name="k", deterministic=True, namespace="ns_k")
+    cfg, src = _faker_child_job(tmp_path, faker_k)
+    _run(cfg, src, execution_mode="out_of_core", out_of_core_budget_bytes=_BUDGET)
+    # The FK child column takes its value from the parent, so no pool is built for it.
+    assert seen == [(0, 0, 0)]
+
+
+@NEEDS_COMPANION
+@pytest.mark.parametrize(
+    ("stored_skip", "called_skip", "expect_faker"),
+    [
+        pytest.param(frozenset(), frozenset({"f1", "f2", "f3"}), False, id="skip_added"),
+        pytest.param(frozenset({"f1", "f2", "f3"}), frozenset(), True, id="skip_dropped"),
+        pytest.param(frozenset(), frozenset(), True, id="same_inputs_reuse"),
+    ],
+)
+def test_r1_prepare_table_reuses_a_stored_plan_only_for_the_same_inputs(
+    tmp_path: Path, stored_skip: frozenset[str], called_skip: frozenset[str], expect_faker: bool
+) -> None:
+    plan = _compiled(tmp_path)
+    pool = _context(plan)
+    run = OocHashRun(faker_pool=pool)
+    run.prepare_faker_tables(plan, {"P": (_FULL_SCHEMA, stored_skip)})
+    stored = run._faker_plans["P"][2]
+    got = run.prepare_table(plan, "P", _FULL_SCHEMA, called_skip, [], site="test")
+    assert (got.faker is not None) is expect_faker
+    if stored_skip == called_skip:
+        assert got.faker is stored
+
+
+@NEEDS_COMPANION
+def test_r1_a_changed_schema_is_decided_afresh(tmp_path: Path) -> None:
+    plan = _compiled(tmp_path)
+    run = OocHashRun(faker_pool=_context(plan))
+    run.prepare_faker_tables(plan, {"P": (_FULL_SCHEMA, frozenset())})
+    narrow = pa.schema([pa.field("k", pa.string())])
+    got = run.prepare_table(plan, "P", narrow, frozenset(), [], site="test")
+    assert got.faker is None
