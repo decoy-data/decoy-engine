@@ -415,12 +415,13 @@ jobs:
       # The Mimesis extra rebinds the person_* providers to Mimesis (the adoption matrix), which
       # moves the frozen Faker KATs in tests/native, so it cannot be in the venv for the steps
       # above. test_faker_native_widen.py::test_p5b runs the real adapter on the native lane and
-      # importorskips mimesis; this job forbids skips, so the file runs last, after the extra is
-      # synced from the lock (--inexact keeps the companion installed by companion-env).
+      # importorskips mimesis; this job forbids skips, so the file runs last, in a second lock venv
+      # with the extra. The lock sync is exact, so the companion is rebuilt and reasserted too.
+      - uses: ./.github/actions/companion-env
+        with:
+          extras: "dev mimesis"
       - name: Faker native widen with the Mimesis extra (companion-present case, must not skip)
-        run: |
-          uv sync --frozen --inexact --extra dev --extra mimesis --python "$RUNNER_TEMP/venv/bin/python"
-          python scripts/ci/pytest_must_not_skip.py --require-companion -- tests/parity/test_faker_native_widen.py -v --tb=short
+        run: python scripts/ci/pytest_must_not_skip.py --require-companion -- tests/parity/test_faker_native_widen.py -v --tb=short
 
   # core-companion-wide: the companion-gated tests outside tests/native, in a job of their own so a
   # slow run cannot push core-companion-present over its timeout. A test there that no step in that
