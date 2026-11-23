@@ -345,6 +345,7 @@ def test_mixed_faker_and_hash_all_admit_when_faker_is_c1_variant() -> None:
     assert routed == {"FIRST": "native_pool", "SSN": "native_kernel"}
 
 
+@_NEEDS_COMPANION
 def test_a_faker_column_without_pool_size_is_admitted_like_the_declared_default() -> None:
     # The pool size resolves through `effective_pool_size`, so an absent one admits exactly as
     # `pool_size: 10000` does.
