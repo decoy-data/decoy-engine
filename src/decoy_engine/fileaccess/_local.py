@@ -1,18 +1,11 @@
 """`LocalFileAccess`: today's ambient semantics, the no-policy CLI default.
 
 Paths are plain paths relative to the CWD, symlinks are followed, `display` is the path, and
-every open is lazy so a missing file fails inside the library call with the same text it
-always had. Output transactions use ordinary path calls (a stage directory in the target's
-parent, one `os.replace`), which is exactly what the sinks did before the policy existed.
-This module (with its output-chain openers in `_local_chain.py`) is the one place ambient
-opens of caller or config paths are allowed.
-
-On POSIX, directories on an output chain come from the creators in `_output.py` (F22 5.0
-rule 1, through `_local_chain.py`): the deepest existing ancestor is opened by path, links
-followed as before, and each missing component is made under it by `make_parent_dir_at`; stage
-directories come from `make_stage_dir_at`. A `DIRECTORY_PUBLISH_LABELS` publish (F22 5.1)
-fsyncs the stage tree, renames, then fsyncs the parent and each directory above it up to the
-mount boundary (5.0 rule D). The win32 arm keeps the plain path calls.
+every open is lazy so a missing file fails inside the library call with the same text it always
+had. Output transactions use ordinary path calls (a stage directory in the target's parent, one
+`os.replace`), as the sinks did before the policy existed. This module (with `_local_chain.py`)
+is the one place ambient opens of caller or config paths are allowed. A durable directory
+publish fsyncs the stage tree, renames, then fsyncs each directory above it up to the mount.
 """
 
 from __future__ import annotations
@@ -55,6 +48,7 @@ from decoy_engine.fileaccess._output import (
     create_private_child_at,
     make_stage_dir_at,
 )
+from decoy_engine.fileaccess._stage_walk import PathStageWalk, StageLife
 from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
     FileRequest,
@@ -158,22 +152,24 @@ class LocalDirHandle:
         self.close()
 
 
-class _LocalStageDir:
+class _LocalStageDir(PathStageWalk):
     """Name-taking operations over one stage directory, by path."""
 
     strict = False
 
-    def __init__(self, path: Path, display: str, *, private: bool = False) -> None:
+    def __init__(
+        self, path: Path, display: str, *, private: bool = False, life: StageLife | None = None
+    ) -> None:
         self._dir = path
         self.display = display
         self._display = display
-        self._finished = False
+        self._life = life or StageLife()
         self._private = private  # files 0600 with the owner bits restored (F22 Q8)
 
     def _check(self, *components: str) -> None:
         """Refuse a name that would leave the stage. Length and NUL are left to the operating
         system so the ambient policy raises the same errors a plain path write always did."""
-        if self._finished:
+        if self._life.finished:
             raise FileAccessUnavailable("output transaction is finished")
         for component in components:
             if not component or component in (".", "..") or "/" in component:
@@ -203,7 +199,9 @@ class _LocalStageDir:
                 _close(make_stage_dir_at(parent, component))
             finally:
                 _close(parent)
-        return _LocalStageDir(self._dir / component, self._display, private=self._private)
+        return _LocalStageDir(
+            self._dir / component, self._display, private=self._private, life=self._life
+        )
 
     def remove(self, component: str) -> None:
         self._check(component)
@@ -296,6 +294,7 @@ class LocalOutputTxn(_LocalStageDir):
         self._target = target
         self.owner = owner
         self._kind = kind
+        self._walkable = kind == "dir"
         self._mode = mode
         self._label = self.label = label
         self._staged_file: Path | None = None
@@ -404,7 +403,7 @@ class LocalOutputTxn(_LocalStageDir):
         staged = self._staged_file
         if staged is None:  # pragma: no cover - checked by publish
             raise FileAccessUnavailable("nothing was staged")
-        self._finished = True
+        self._life.end()
         try:
 
             def rename() -> None:
@@ -427,14 +426,15 @@ class LocalOutputTxn(_LocalStageDir):
         return str(self._stage)
 
     def publish(self) -> None:
-        if self._finished:
+        if self._life.finished:
             raise FileAccessUnavailable("output transaction is finished")
         if self._kind == "dir":
             if self._stage is None:  # pragma: no cover - a dir stage always has one
                 raise FileAccessUnavailable("output transaction is finished")
             if self._durable_dir:
                 _publish_durable_dir(self._stage, self._held, self._target)
-                self._stage, self._finished = None, True
+                self._stage = None
+                self._life.end()
                 strict = len(self._created) + 1
                 _durable._sync_bound(lambda: _sync_up(self._target.parent, strict))
                 return
@@ -444,7 +444,7 @@ class LocalOutputTxn(_LocalStageDir):
                 _ensure_dirs(self._target.parent)
             os.replace(self._stage, self._target)
             self._stage = None
-            self._finished = True
+            self._life.end()
             return
         staged = self._staged_file
         if staged is None:
@@ -453,11 +453,11 @@ class LocalOutputTxn(_LocalStageDir):
             self._publish_durable()
             return
         if self._direct:
-            self._finished = True
+            self._life.end()
             return
         if self._mode == "replace":
             os.replace(staged, self._target)
-            self._finished = True
+            self._life.end()
             _sync_dir(self._target.parent)
             return
         occupied = False
@@ -468,9 +468,9 @@ class LocalOutputTxn(_LocalStageDir):
         if occupied:  # raised outside the handler: the link error (both paths) never rides
             with contextlib.suppress(OSError):
                 staged.unlink(missing_ok=True)
-            self._finished = True
+            self._life.end()
             raise FileExistsError(errno.EEXIST, "output exists")
-        self._finished = True
+        self._life.end()
         try:
             os.unlink(staged)
         except OSError as exc:
@@ -481,9 +481,9 @@ class LocalOutputTxn(_LocalStageDir):
             )
 
     def abort(self) -> None:
-        if self._finished:
+        if self._life.finished:
             return
-        self._finished = True
+        self._life.end()
         if self._stage is not None:
             shutil.rmtree(self._stage, ignore_errors=True)
             self._stage = None

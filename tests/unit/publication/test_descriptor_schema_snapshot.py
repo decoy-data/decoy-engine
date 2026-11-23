@@ -35,7 +35,7 @@ DECLARATION = (
     (
         "artifacts",
         "list:object:"
-        "(path=rel_path,role=one_of:table,rows=count,sha256=fullmatch:[0-9a-f]{64},size=count)",
+        "(path=rel_path,role=one_of:table|quarantine|report,rows=nullable:count,sha256=fullmatch:[0-9a-f]{64},size=count)",
     ),
     ("vault", "nullable:object:(sha256=fullmatch:[0-9a-f]{64},size=count,entry_count=count)"),
     ("engine_version", "fullmatch:[0-9][0-9A-Za-z.+!_-]{0,63}"),

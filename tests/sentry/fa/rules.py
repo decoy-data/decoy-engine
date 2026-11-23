@@ -205,7 +205,15 @@ def _held_fd(expr: ast.AST, info: FunctionInfo, depth: int = 0, listed: bool = F
     if isinstance(expr, ast.Call):
         func = expr.func
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-        if name in {"open", "dup", "openat2", "_confined_open", "_open_parent", "_call"}:
+        if name in {
+            "open",
+            "dup",
+            "openat2",
+            "_confined_open",
+            "_open_parent",
+            "_call",
+            "_open_leaf_at",
+        }:
             return True
         return _rooted_at_held(expr)
     return False

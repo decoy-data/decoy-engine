@@ -336,8 +336,19 @@ hash and the physical plan hash move for any pipeline that uses `bucketize`, `to
 recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
 `column_shape_required` (plan and runtime) is registered unreleased.
 
+**Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
+version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
+stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to
+`table`, `quarantine` or `report`; the path rule is stricter and shared by writer and reader (at most 8
+components, no reserved name, no path that is a folder of another); duplicate paths give `bad_path` (the order
+check is `a > b`, so an equal pair reaches the duplicate rule). `StageDir` gains `open_subdir` and `entries`, and
+`publish_unit` takes `members=` beside `tables=`. An older reader that meets such a unit cannot load its
+descriptor, treats the folder as occupied and refuses; it never overwrites the unit. Rerunning the same run id on
+such a reader refuses, and a new run id is unaffected.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
+
 
 ## 2. The compatibility surface is wider than the API
 
