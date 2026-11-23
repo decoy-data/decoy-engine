@@ -273,6 +273,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # decoy-engine dev/CI profile (`uv sync --frozen --extra dev --extra lint --extra vault
             # --extra cloud`, Python 3.10.20). Re-pin from a fresh sync (installed_distribution_set,
             # compute_lock_fingerprint). A stamp moves only the engine version; old snapshots stay.
+            "9663ac0b8ad7dfef3d635a8d3f848722169209fd03c293af4a7b453cfbcb3204",
             "bd14c8a5cc2d3896547f743150fdf35d340c1f2e95e923dcba6c00065bb53cfd",
             "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
             "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
@@ -302,6 +303,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
             # tooling, pinned in the CLI repo's requirements-certified.txt (reproduce: `--no-dev` install on
             # 3.10.20, then cert_smoke.py). All stay, newest first; 0.28.0 lacks joserfc.
+            "a4aad6c7f862083285736bdac3e176baff40b382439429e7abd2c46ec615acaf",
             "228ed71e6f0a6ba9d62c25abeff6e668a53a8851d68e313a2f946367b33d631a",
             "44aaa90fef509a80a7c3def099592c6c4326d47d8bbf79d9043171f8e3a61ba9",
             "b61dcfd6431f18667d85921b8aa71a78ccc92ebff0dfd46c76b8e04c4bd17c02",

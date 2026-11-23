@@ -32,6 +32,36 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.4", "A `when:` column can now be written `source.<name>`, which m"): (
+        "an addition: `source.<name>` is new accepted syntax; `masked.` is reserved only in the new prefix form"
+    ),
+    ("0.28.4", "A faker column that leaves out `pool_size` now takes the def"): (
+        "the Breaking bullet on a faker column with no pool_size covers it"
+    ),
+    ("0.28.4", "The publisher now refuses a stage that holds any entry no me"): (
+        "a stray entry in a stage was never a valid publish input; the publisher only starts checking it"
+    ),
+    ("0.28.4", "A reader older than this release that meets a unit with `row"): (
+        "the older reader refuses and never overwrites; the new members appear only in units this release writes"
+    ),
+    ("0.28.4", "A `nested` target is `$` followed by `.name`, `.*`, `['name'"): (
+        "the Breaking bullet on the closed nested target subset covers it"
+    ),
+    ("0.28.4", "`bucket_perturb` no longer detects a date format from the ce"): (
+        "the Breaking bullet on bucket_perturb with no date_format covers it"
+    ),
+    ("0.28.4", "`bucket_perturb` now runs on a column that is already a date"): (
+        "an addition: a typed date column now runs; the refusals named are its own and no earlier config ran there"
+    ),
+    ("0.28.4", "`bucketize` and `top_code` no longer read numbers out of tex"): (
+        "the Breaking bullet on bucketize and top_code needing an F06 numeric declaration covers it"
+    ),
+    ("0.28.4", "A column the strategy cannot compute exactly is refused at c"): (
+        "the Breaking bullet on bucketize and top_code (decimal bound) covers it; these columns ran with wrong buckets before"
+    ),
+    ("0.28.4", "`run_mask_pipeline_chunked` no longer raises `unhashable typ"): (
+        "a fix: the call raised before and now runs"
+    ),
     ("0.28.3", "A `date_format` that is not text is refused on every column."): (
         "the Breaking bullet on `date_shift` for a number, boolean or decimal column covers it"
     ),

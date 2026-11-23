@@ -127,7 +127,7 @@ STORED_SHAPE_UNKNOWN = _d(
 COLUMN_SHAPE_REQUIRED = _d(
     "column_shape_required",
     "A strategy reads numbers or dates from text and the column carries no declaration.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 COLUMN_SHAPE_MISMATCH = _d(
     "column_shape_mismatch",

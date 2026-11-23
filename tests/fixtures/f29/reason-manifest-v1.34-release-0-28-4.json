@@ -1,0 +1,279 @@
+{
+  "entries": [
+    {
+      "code": "when_masked_reference_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "ValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
+      "symbol": "WHEN_MASKED_REFERENCE_UNSUPPORTED"
+    },
+    {
+      "code": "column_shape_required",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A strategy reads numbers or dates from text and the column carries no declaration.",
+      "symbol": "COLUMN_SHAPE_REQUIRED"
+    },
+    {
+      "code": "nested_target_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "Nested target unsupported.",
+      "symbol": "NESTED_TARGET_UNSUPPORTED"
+    },
+    {
+      "code": "when_masked_reference_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
+      "symbol": "WHEN_MASKED_REFERENCE_UNSUPPORTED"
+    },
+    {
+      "code": "nonfk_full_frame_fits",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "decision",
+      "namespace": "route",
+      "owner": "decoy_engine.execution.pipeline._resident_fit",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "success",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "info"
+        },
+        {
+          "outcome": "success",
+          "phase": "compile",
+          "retry": "never",
+          "severity": "info"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A job with no foreign keys fits in memory by the byte estimate.",
+      "symbol": "NONFK_FULL_FRAME_FITS"
+    },
+    {
+      "code": "nonfk_full_frame_probe_fits",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "decision",
+      "namespace": "route",
+      "owner": "decoy_engine.execution.pipeline._resident_fit",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "success",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "info"
+        },
+        {
+          "outcome": "success",
+          "phase": "compile",
+          "retry": "never",
+          "severity": "info"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A job with no foreign keys fits in memory by a measured probe.",
+      "symbol": "NONFK_FULL_FRAME_PROBE_FITS"
+    },
+    {
+      "code": "nonfk_full_frame_unverified",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "decision",
+      "namespace": "route",
+      "owner": "decoy_engine.execution.pipeline._resident_fit",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "success",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "info"
+        },
+        {
+          "outcome": "success",
+          "phase": "compile",
+          "retry": "never",
+          "severity": "info"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A job with no foreign keys could not be shown to fit or not fit, so it runs as before.",
+      "symbol": "NONFK_FULL_FRAME_UNVERIFIED"
+    },
+    {
+      "code": "column_shape_required",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "StrategyError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A strategy reads numbers or dates from text and the plan lists no declaration for the column.",
+      "symbol": "COLUMN_SHAPE_REQUIRED"
+    },
+    {
+      "code": "nonfk_full_frame_capacity_exceeded",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "environment_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "environment_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "environment_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "environment_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A job with no foreign keys would hold more memory than this machine can give it.",
+      "symbol": "NONFK_FULL_FRAME_CAPACITY_EXCEEDED"
+    },
+    {
+      "code": "when_masked_reference_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "StrategyError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
+      "symbol": "WHEN_MASKED_REFERENCE_UNSUPPORTED"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.34.0"
+}
