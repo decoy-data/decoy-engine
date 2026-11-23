@@ -269,7 +269,7 @@ def masked_output_type(seed: ColumnSeed, source_type: pa.DataType | None = None)
     if seed.strategy == "hash":
         return pa.string()
     if seed.strategy == "faker":
-        # The native allowlist is person-name providers, whose pools are string
+        # The native allowlist holds only providers whose pools are string
         # values, so the admitted faker payload always emits string (nulls
         # preserved). A schema-less consumer can pin this before any batch.
         return pa.string()

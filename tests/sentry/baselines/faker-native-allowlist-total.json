@@ -1,0 +1,36 @@
+{
+ "sentry_id": "faker-native-allowlist-total",
+ "created_in": "FAKER-NATIVE-WIDEN",
+ "entries": {
+  "person_dob": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_ssn": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_ein": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_npi": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_ndc": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_mrn": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_pan": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_icd10": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_iban": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  },
+  "synthetic_cusip": {
+   "reason": "initial inventory of EXCLUDED in test_faker_native_allowlist_total.py; each reason is asserted by the sentry"
+  }
+ }
+}

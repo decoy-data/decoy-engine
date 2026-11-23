@@ -417,9 +417,9 @@ def test_f5a_whole_column_cardinality_modes_stay_python(
 def test_f5b_a_provider_outside_the_allowlist_stays_python(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for seed in (faker_seed(provider="person_email"), positional_seed(provider="person_email")):
+    for seed in (faker_seed(provider="person_dob"), positional_seed(provider="person_dob")):
         trio = run_trio(payload_shape({"f": (cells(40), seed)}), monkeypatch)
-        _declined(trio, "f", "faker_provider_not_native:f:person_email")
+        _declined(trio, "f", "faker_provider_not_native:f:person_dob")
 
 
 @pytest.mark.parametrize(

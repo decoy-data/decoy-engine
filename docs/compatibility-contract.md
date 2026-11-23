@@ -1055,7 +1055,8 @@ only this site moves.
   keeps the position-keyed draw of slice C5b-i, taken at the chunk's global row offset, so
   chunked output equals the whole-frame run for any chunk size. A column is admitted when it
   uses a provider in the C1
-  string-output allowlist (`person_first_name`, `person_last_name`), has no `when:` and is not
+  string-output allowlist (the `faker` operator's `provider_allowlist` in
+  `execution/_operator_registry.py`), has no `when:` and is not
   `unique`, `match_source_cardinality` or `scale_source_cardinality`; the namespace stays
   optional. A string source runs the compiled path and any other source type runs the chunked
   oracle leg with the same draw. A column that fails one of these conditions keeps running

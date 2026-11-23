@@ -278,7 +278,7 @@ def test_w1e_a_pool_of_ints_that_fits_is_admitted_and_a_string_pool_over_budget_
     # An int costs less than an empty str, so the string floor must not refuse an int pool
     # that fits. The int provider is off the string allowlist, so it gets the type-free floor.
     size = _CFG["pool_size"]
-    int_provider = "person_email"
+    int_provider = "person_dob"
     assert int_provider not in C1_PROVIDER_ALLOWLIST
     string_floor = construction_floor(size, strings=True)
     any_floor = construction_floor(size, strings=False)

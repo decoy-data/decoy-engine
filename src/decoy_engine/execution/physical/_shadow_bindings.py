@@ -3,7 +3,7 @@
 Called from the compiler's `_build_nodes` at compile time, for exactly the
 native-admitted slice strategies the shadow coordinator shadows: passthrough,
 redact, truncate, keyed hash (Task 4.4), (Task 4.6 slice 1) deterministic
-faker over the frozen C1 provider allowlist, and (Phase 5 Track B)
+faker over the faker operator's provider allowlist, and (Phase 5 Track B)
 deterministic categorical over string categories, plus the two position-keyed
 variants (the seeded non-deterministic categorical and the non-deterministic REUSE
 faker), which `positional_categorical_bindable` / `positional_faker_bindable` admit
