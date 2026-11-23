@@ -24,8 +24,7 @@ def _with_source_types(
 
     A date strategy hands pandas ``datetime.date`` cells, which Arrow reads as ``date32`` (so a
     ``date64`` source changes type) and, for an all-null chunk, as ``null`` (so chunk schemas
-    differ) and a decimal gets the precision pandas' object round trip changed. Only those losses
-    are repaired; any other type difference is left as it is.
+    differ). Only those two losses are repaired; any other type difference is left as it is.
     """
     if schema is None:
         return table
@@ -35,9 +34,7 @@ def _with_source_types(
         want = schema.field(name).type
         have = table.schema.field(name).type
         if have != want and (
-            pa.types.is_null(have)
-            or (pa.types.is_date64(want) and have == pa.date32())
-            or (pa.types.is_decimal(want) and pa.types.is_decimal(have))
+            pa.types.is_null(have) or (pa.types.is_date64(want) and have == pa.date32())
         ):
             position = table.schema.get_field_index(name)
             table = table.set_column(position, name, table.column(position).cast(want))

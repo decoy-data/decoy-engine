@@ -27,9 +27,6 @@ FK = "_fk_keys.py"
 ALLOWED: dict[str, dict[tuple[str, str], str]] = {
     "fk_columns_for_table": {
         ("execution/_fk_keys.py", "lossless_int_columns"): "the one construction of the set",
-        ("execution/_chunked_carry.py", "_unchanged_and_cascaded"): (
-            "a relationship key the FK cascade rewrites is never an untouched column"
-        ),
         ("execution/_pipeline_full_frame.py", "_raise_if_source_value_unrepresentable"): (
             "diagnostic only: it has no plan or registry and retries one column to attribute a failure"
         ),

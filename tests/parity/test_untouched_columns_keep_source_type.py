@@ -591,7 +591,7 @@ def test_a_stored_index_column_left_untouched_is_not_dropped() -> None:
 # gets its source type back.
 
 
-def _passthrough_parent_run(parent: pa.Table) -> pa.Table:
+def _passthrough_parent_run(parent: pa.Table, route: str) -> pa.Table:
     plan = s.make_plan(
         {
             "A": s.table_seed({"k": s.passthrough()}),
@@ -600,14 +600,25 @@ def _passthrough_parent_run(parent: pa.Table) -> pa.Table:
     )
     graph = s.graph(s.edge("A", "k", "B", "k", "ns_k", OrphanPolicy.PRESERVE))
     child = pa.table({"k": parent.column("k").slice(0, 0), "x": pa.array([], pa.int64())})
-    return s.run_seq(s.Shape(plan, graph, {"A": parent, "B": child})).outputs["A"]
+    shape = s.Shape(plan, graph, {"A": parent, "B": child})
+    result = s.run_full(shape) if route == "full_frame" else s.run_seq(shape)
+    return result.outputs["A"]
 
 
-def test_unchanged_decimal_parent_key_keeps_its_precision() -> None:
-    parent = pa.table({"k": pa.array([_D("1.25"), _D("2.50")], pa.decimal128(12, 2))})
-    assert _passthrough_parent_run(parent).schema.field("k").type == pa.decimal128(12, 2)
+_PARENTS = {
+    "decimal": pa.table({"k": pa.array([_D("1.25"), _D("2.50")], pa.decimal128(12, 2))}),
+    "string_zero_row": pa.table({"k": pa.array([], pa.string())}),
+    "time64_ns": pa.table({"k": pa.array([1000, None, 2000], pa.time64("ns"))}),
+    "float_nan": pa.table({"k": pa.array([1.0, float("nan"), 2.0], pa.float64())}),
+}
 
 
-def test_unchanged_zero_row_string_parent_key_keeps_string() -> None:
-    parent = pa.table({"k": pa.array([], pa.string())})
-    assert _passthrough_parent_run(parent).schema.field("k").type == pa.string()
+@pytest.mark.parametrize("route", ["full_frame", "sequential"])
+@pytest.mark.parametrize("case", sorted(_PARENTS))
+def test_unchanged_parent_key_is_carried_from_the_source(case: str, route: str) -> None:
+    """A parent key no rule changes and no edge rewrites is an untouched column: type and cells
+    (a float NaN stays NaN) are the source's."""
+    parent = _PARENTS[case]
+    out = _passthrough_parent_run(parent, route)
+    assert out.schema.field("k").type == parent.schema.field("k").type
+    assert _same_cells(out.column("k"), parent.column("k"))

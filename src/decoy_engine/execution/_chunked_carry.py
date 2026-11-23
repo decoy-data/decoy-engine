@@ -215,38 +215,9 @@ def untouched_columns(
     rebuilt from each node's plan slice, so a column a handler writes beyond the node's own
     (a composite's canonical outputs) is touched here as it is there. A passthrough node, `when:`
     or not, leaves its column as the source held it; every other node masks its own columns.
-    A relationship key of `table` (`fk_edges`) is never untouched: the cascade rewrites a child
-    key to follow its masked parent whatever the key's own strategy says."""
-    unchanged, cascaded = _unchanged_and_cascaded(nodes, names, registry, fk_edges, table)
-    return unchanged - cascaded
-
-
-def assembly_inputs(
-    nodes: Iterable[Any],
-    names: Sequence[str],
-    registry: Any,
-    fk_edges: Iterable[Any],
-    table: str,
-    date_columns: Iterable[str] = (),
-) -> tuple[frozenset[str], list[str]]:
-    """What the one assembler needs about `table`: its `untouched_columns`, and the columns whose
-    source type is restored after a frame round trip. Those are the date columns, plus a parent
-    key the rules leave unchanged: it is rebuilt from the frame (a key follows the cascade), so a
-    zero-row or all-null key or a decimal precision would otherwise change type. A child key is
-    not restored: its values follow the masked parent."""
-    edges = tuple(fk_edges)
-    unchanged, cascaded = _unchanged_and_cascaded(nodes, names, registry, edges, table)
-    parents = {c for e in edges if e.parent_table == table for c in e.parent_columns}
-    return unchanged - cascaded, [*date_columns, *sorted(unchanged & parents)]
-
-
-def _unchanged_and_cascaded(
-    nodes: Iterable[Any],
-    names: Sequence[str],
-    registry: Any,
-    fk_edges: Iterable[Any],
-    table: str | None,
-) -> tuple[frozenset[str], frozenset[str]]:
+    A child key of `table` (`fk_edges`) is never untouched: the cascade rewrites it to follow its
+    masked parent whatever its own strategy says. A parent key is only read, so it is untouched
+    when its own rule leaves it alone."""
     from decoy_engine.execution._adapter import provider_config_to_dict
     from decoy_engine.plan._types import ColumnSeed
 
@@ -272,13 +243,11 @@ def _unchanged_and_cascaded(
             masked |= set(node.columns)
     written = handler_written_columns(entries, registry)
     if written is None:  # a handler writes columns no declaration can name: nothing is untouched
-        return frozenset(), frozenset()
-    cascaded: set[str] = set()
-    if table is not None:
-        from decoy_engine.execution._fk_keys import fk_columns_for_table
-
-        cascaded = fk_columns_for_table(fk_edges, table)
-    return frozenset(names) - written - masked, frozenset(cascaded)
+        return frozenset()
+    # A child key is rebuilt from the masked parent. A parent key no other edge rewrites is only
+    # read by the cascade, so it stays untouched when its own rule leaves it alone.
+    cascaded = {c for e in fk_edges if e.child_table == table for c in e.child_columns}
+    return frozenset(names) - written - masked - cascaded
 
 
 def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]]:
@@ -332,7 +301,6 @@ __all__ = [
     "PASSTHROUGH_UNREPRESENTABLE_CODE",
     "CarryPlan",
     "adapter_fk_safe_columns",
-    "assembly_inputs",
     "carried_columns",
     "has_when",
     "is_stock_adapter",

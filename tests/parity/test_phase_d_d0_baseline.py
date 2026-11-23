@@ -130,9 +130,11 @@ _SUCCESS_CASES = [
         parent=TableExpect(
             "pk:double,payload:string",
             "pk:double,payload:string",
-            {"pk": [None, 1.0, 2.0], "payload": _PP},
+            # Rule 3 (UF-DOMAIN S1): an unchanged parent key is written from the source, so the
+            # oracle keeps NaN as the out-of-core route does.
             {"pk": [_NAN, 1.0, 2.0], "payload": _PP},
-            frozenset({"field_metadata", "row_set", "row_order", "cellwise_values", "null_vs_nan"}),
+            {"pk": [_NAN, 1.0, 2.0], "payload": _PP},
+            frozenset({"field_metadata"}),
         ),
         child=_same("fk:double,payload:string", {"fk": [None, 1.0, 2.0], "payload": _CP}),
         masked=[ExpectedMask("parent", "pk", "passthrough_array")],
