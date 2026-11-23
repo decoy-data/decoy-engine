@@ -532,6 +532,10 @@ _SHADOW = "a shadow-run comparison finding, not a refusal that stops a job"
 _DISK = "disk or quota, not memory"
 _POOL_SHORT = "a uniqueness shortfall in the value pool, not memory"
 _UNKNOWN = "the check could not read its input; no capacity verdict was reached"
+_VALIDATOR_RUN = (
+    "a validator's own run-time state ceiling, raised by the validation run; "
+    "no capacity check produces it"
+)
 CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
     {
         reasons.runtime.FK_FULL_FRAME_OOM_RISK_REJECTED: _ROUTING,
@@ -557,6 +561,7 @@ CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
         reasons.runtime.HOLD_BACK_SPILL_UNAVAILABLE: _NOT_SET,
         reasons.verification.CANARY_RESOURCE_LIMIT: _NOT_MEMORY,
         reasons.physical.RESOURCE_LIMIT_BREACH: _SHADOW,
+        reasons.runtime.VALIDATOR_KEY_STATE_OVER_BUDGET: _VALIDATOR_RUN,
     }
 )
 
