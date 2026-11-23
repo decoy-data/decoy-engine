@@ -195,9 +195,9 @@ class TestPoolCacheThreadSafety:
         assert stats.entries == len(pools)
         # Exact accounting: re-puts of an already-cached identity must not
         # double-count bytes (each pool is counted exactly once).
-        from decoy_engine.generation.pool._value_pool import estimate_pool_bytes
+        from decoy_engine.generation.pool._value_pool import measured_pool_bytes
 
-        assert stats.bytes_used == sum(estimate_pool_bytes(p) for p in pools)
+        assert stats.bytes_used == sum(measured_pool_bytes(p) for p in pools)
         for pool in pools:
             assert cache.get(pool.identity) is pool
 

@@ -609,7 +609,8 @@ def _route_config(
 
 # (mode, namespace) -> the chunked conditions that stay unmet. Snapshot of engine main 4fe5de9d.
 # The REUSE rows left this table when C5b-ii admitted a REUSE column that declares a pool_size
-# to the chunked route; `_REUSE_WITHOUT_POOL_SIZE` keeps the rest of that routing pinned.
+# to the chunked route; `_REUSE_WITHOUT_POOL_SIZE` keeps the rest of that routing pinned. A
+# REUSE column with no `pool_size` takes the default of 10000 and is admitted too.
 _ROUTE_CASES = [
     ("unique", "ns_f", 2),
     ("match_source_cardinality", "ns_f", 2),
@@ -656,7 +657,7 @@ class TestRoutingConstant:
         assert "requires deterministic: true" in head
 
     @pytest.mark.parametrize("namespace", _REUSE_WITHOUT_POOL_SIZE)
-    def test_a_reuse_column_without_a_pool_size_keeps_the_veto_and_runs_full_frame(
+    def test_a_reuse_column_without_a_pool_size_runs_chunked_like_the_declared_default(
         self, tmp_path: Any, namespace: str | None
     ) -> None:
         from decoy_engine.execution import run_pipeline
@@ -665,30 +666,27 @@ class TestRoutingConstant:
         from decoy_engine.profile import profile_source
         from tests.unit.execution import _multi_table_support as mt
 
-        cfg, src = _route_config(tmp_path, "reuse", namespace, pool_size=None)
-        plan = compile_plan(
-            cfg,
-            profile_source(cfg, seed=42),
-            decoy_engine_version="c5b-ii-route-test",
-            sources=NO_SOURCES,
-        )
-        decision = classify_job(
-            cfg,
-            plan=plan,
-            registry=_REG,
-            relationship_graph=_GRAPH,
-            substrate="pandas",
-            source_tables=src,
-            auto_chunk_threshold_rows=10,
-        )
-        assert decision.mode == "pandas_fallback"
-        assert decision.rejections["chunked"].startswith(
-            "chunked_strategy_conditions_unmet: column(s) f (faker: "
-        )
+        decisions = {}
+        for pool_size in (None, 10_000):
+            cfg, src = _route_config(tmp_path, "reuse", namespace, pool_size=pool_size)
+            plan = compile_plan(
+                cfg,
+                profile_source(cfg, seed=42),
+                decoy_engine_version="c5b-ii-route-test",
+                sources=NO_SOURCES,
+            )
+            decisions[pool_size] = classify_job(
+                cfg,
+                plan=plan,
+                registry=_REG,
+                relationship_graph=_GRAPH,
+                substrate="pandas",
+                source_tables=src,
+                auto_chunk_threshold_rows=10,
+            )
+        assert decisions[None].mode == decisions[10_000].mode == "chunked"
         res = run_pipeline(cfg, sources=src, **mt.kw())
-        block = res.quality_metrics["auto_chunk"]
-        assert block["mode"] == "full_frame"
-        assert block["reason"].startswith("chunked_strategy_conditions_unmet")
+        assert res.quality_metrics["auto_chunk"]["mode"] == "chunked"
 
     @pytest.mark.parametrize(("mode", "namespace", "unmet"), _ROUTE_CASES[:2])
     def test_end_to_end_run_stays_full_frame_with_the_same_code(
@@ -724,7 +722,7 @@ class TestRoutingConstant:
             check_chunked_compatibility(make_config([col]), table="t", registry=_REG)
         assert exc.value.code == "chunked_strategy_conditions_unmet"
 
-    def test_out_of_core_still_rejects_every_faker_with_the_same_code(self) -> None:
+    def test_out_of_core_rejects_the_non_deterministic_faker_with_the_same_code(self) -> None:
         from decoy_engine.execution._runner import build_work_list, order_work
         from decoy_engine.execution.out_of_core._compat import check_out_of_core_compatibility
 
@@ -732,8 +730,12 @@ class TestRoutingConstant:
             plan, graph = _fk_plan(_seed(namespace="ns", deterministic=det))
             work = order_work(build_work_list(plan, _REG), graph)
             compat = check_out_of_core_compatibility(plan, work, graph)
-            assert not compat.accepted
-            assert [r.code for r in compat.rejections] == ["out_of_core_faker_pool_unsupported"] * 2
+            codes = [r.code for r in compat.rejections]
+            if det:  # a deterministic REUSE column with no pool_size takes the default
+                assert "out_of_core_faker_pool_unsupported" not in codes
+            else:
+                assert not compat.accepted
+                assert codes == ["out_of_core_faker_pool_unsupported"] * 2
 
     @pytest.mark.parametrize(
         "mode", ["reuse", "unique", "match_source_cardinality", "scale_source_cardinality"]

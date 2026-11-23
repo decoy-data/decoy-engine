@@ -17,7 +17,7 @@ live sets by tests.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Union
@@ -28,6 +28,42 @@ from decoy_engine import reasons
 from decoy_engine.errors import DecoyError, ValidationError
 
 WHEN_OUTSIDE_GRAMMAR_CODE = reasons.config.WHEN_OUTSIDE_CLOSED_GRAMMAR
+WHEN_MASKED_REFERENCE_CODE = reasons.config.WHEN_MASKED_REFERENCE_UNSUPPORTED
+
+
+@dataclass(frozen=True)
+class WhenRefusalCodes:
+    """One parser refusal, as each boundary reports it. `masked` selects the boundary's message."""
+
+    config: str
+    plan: str
+    runtime: str
+    masked: bool = False
+
+
+# The one mapping from a parser refusal code (`ValidationError.code`) to the code each boundary
+# raises: the config field validator, the plan compile check, the runtime gate and the envelope
+# check. A boundary reads its code from here (`when_refusal_codes`), never from its own
+# comparison, so a new refusal is one row. Pinned by tests/sentry/defects/test_when_refusal_codes.py.
+WHEN_REFUSALS: dict[str, WhenRefusalCodes] = {
+    WHEN_OUTSIDE_GRAMMAR_CODE: WhenRefusalCodes(
+        config=reasons.config.WHEN_OUTSIDE_CLOSED_GRAMMAR,
+        plan=reasons.plan.WHEN_OUTSIDE_CLOSED_GRAMMAR,
+        runtime=reasons.runtime.WHEN_OUTSIDE_CLOSED_GRAMMAR,
+    ),
+    WHEN_MASKED_REFERENCE_CODE: WhenRefusalCodes(
+        config=reasons.config.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+        plan=reasons.plan.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+        runtime=reasons.runtime.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+        masked=True,
+    ),
+}
+
+
+def when_refusal_codes(exc: ValidationError) -> WhenRefusalCodes:
+    """The boundary codes for a `parse_when` refusal; any other code reads as outside the grammar."""
+    return WHEN_REFUSALS.get(exc.code or "", WHEN_REFUSALS[WHEN_OUTSIDE_GRAMMAR_CODE])
+
 
 _GRAMMAR_PATH = Path(__file__).parent / "when_grammar.lark"
 _PARSER = lark.Lark(
@@ -82,6 +118,20 @@ RESERVED_NAMES: frozenset[str] = frozenset(
 
 Scalar = Union[int, float, str, bool]  # noqa: UP007 -- evaluated at import on 3.10
 
+WhenPhase = Literal["source", "masked"]
+# The only two words that may prefix a column before a dot. `source` is the original value and
+# `masked` the value after masking (refused in V1). Neither is a keyword: a column named
+# `source` still reads bare. Pinned by tests/sentry/defects/test_when_reserved_names.py.
+_PHASES: frozenset[str] = frozenset({"source", "masked"})
+
+
+@dataclass(frozen=True, order=True)
+class WhenRead:
+    """One column a predicate reads, and the phase of its value."""
+
+    column: str
+    phase: WhenPhase = "source"
+
 
 @dataclass(frozen=True)
 class Compare:
@@ -90,6 +140,7 @@ class Compare:
     value: Scalar
     # True when the literal was written first (`'a' == s`).
     literal_first: bool = False
+    phase: WhenPhase = "source"
 
 
 @dataclass(frozen=True)
@@ -97,6 +148,7 @@ class InList:
     ref: str
     values: tuple[Scalar, ...]
     negated: bool = False
+    phase: WhenPhase = "source"
 
 
 @dataclass(frozen=True)
@@ -114,7 +166,15 @@ WhenExpr = Union[Compare, InList, Not, BoolOp]  # noqa: UP007
 
 
 class _RejectError(DecoyError):
-    """A construct the closed grammar refuses; carries the reason for the config error."""
+    """A construct the closed grammar refuses; carries the reason for the config error.
+
+    `masked` marks a `masked.` reference: valid grammar that V1 does not evaluate, reported
+    under its own code.
+    """
+
+    def __init__(self, reason: str, *, masked: bool = False) -> None:
+        super().__init__(reason)
+        self.masked = masked
 
 
 def _name(token: Any) -> str:
@@ -126,6 +186,24 @@ def _name(token: Any) -> str:
     if name in RESERVED_NAMES:
         raise _RejectError(f"{name!r} is reserved (pandas eval would not read it as a column)")
     return name
+
+
+def _read(prefix: Any, token: Any, *, quoted: bool) -> WhenRead:
+    """The `WhenRead` for `prefix.name` (or a bare name when `prefix` is None)."""
+    if prefix is not None:
+        word = str(prefix)
+        if word not in _PHASES:
+            raise _RejectError(
+                "only `source.` or `masked.` may prefix a column; quote a column name that "
+                "holds a dot with backticks"
+            )
+        if word == "masked":
+            raise _RejectError(
+                "a `masked.` reference in `when:` is planned for 1.x; V1 reads original values only",
+                masked=True,
+            )
+    text = str(token)[1:-1] if quoted else str(token)
+    return WhenRead(_name(text))
 
 
 def _number(token: Any) -> int | float:
@@ -155,17 +233,31 @@ class _Build(lark.Transformer):  # type: ignore[type-arg]
     def not_op(self, items: list[Any]) -> WhenExpr:
         return Not(items[0])
 
+    def bare_ref(self, items: list[Any]) -> WhenRead:
+        return _read(None, items[0], quoted=False)
+
+    def quoted_ref(self, items: list[Any]) -> WhenRead:
+        return _read(None, items[0], quoted=True)
+
+    def prefixed_ref(self, items: list[Any]) -> WhenRead:
+        return _read(items[0], items[1], quoted=False)
+
+    def prefixed_quoted_ref(self, items: list[Any]) -> WhenRead:
+        return _read(items[0], items[1], quoted=True)
+
     def col_first(self, items: list[Any]) -> WhenExpr:
-        return Compare(_name(items[0]), str(items[1]), items[2])
+        return Compare(items[0].column, str(items[1]), items[2], phase=items[0].phase)
 
     def lit_first(self, items: list[Any]) -> WhenExpr:
-        return Compare(_name(items[2]), str(items[1]), items[0], literal_first=True)
+        return Compare(
+            items[2].column, str(items[1]), items[0], literal_first=True, phase=items[2].phase
+        )
 
     def in_op(self, items: list[Any]) -> WhenExpr:
-        return InList(_name(items[0]), tuple(items[1]))
+        return InList(items[0].column, tuple(items[1]), phase=items[0].phase)
 
     def not_in_op(self, items: list[Any]) -> WhenExpr:
-        return InList(_name(items[0]), tuple(items[1]), negated=True)
+        return InList(items[0].column, tuple(items[1]), negated=True, phase=items[0].phase)
 
     def literal_list(self, items: list[Any]) -> list[Scalar]:
         return list(items)
@@ -189,8 +281,15 @@ def _reject(reason: str) -> ValidationError:
     )
 
 
+def _reject_masked(reason: str) -> ValidationError:
+    return ValidationError(reason, code=WHEN_MASKED_REFERENCE_CODE)
+
+
 def parse_when(expr: str) -> WhenExpr:
     """Parse `expr` into a frozen AST, or raise `ValidationError(code="when_outside_closed_grammar")`.
+
+    A `masked.` reference raises `ValidationError(code="when_masked_reference_unsupported")`
+    instead: the grammar admits it, V1 does not evaluate it.
 
     The message names the position and the construct, never the expression text, and no
     exception chain or context is kept: Lark's diagnostics quote the offending text, so the
@@ -211,6 +310,7 @@ def parse_when(expr: str) -> WhenExpr:
         raise _reject(f"more than {_MAX_NESTING_DEPTH} parentheses")
     # The reason is chosen inside the handlers but raised after they exit: raising inside an
     # `except` would leave the Lark error on `__context__`, and its message quotes the text.
+    masked = False
     try:
         tree = _PARSER.parse(text)
         built: WhenExpr = _Build().transform(tree)
@@ -220,13 +320,14 @@ def parse_when(expr: str) -> WhenExpr:
         orig = exc.orig_exc
         # Any other transformer failure carries its own message, which can quote the text.
         reason = str(orig) if isinstance(orig, _RejectError) else "the predicate does not parse"
+        masked = isinstance(orig, _RejectError) and orig.masked
     except lark.exceptions.UnexpectedInput as exc:
         reason = f"unexpected input at position {getattr(exc, 'pos_in_stream', '?')}"
     except lark.exceptions.LarkError:
         reason = "the predicate does not parse"
     except RecursionError:
         reason = "the predicate is nested too deeply"
-    raise _reject(reason)
+    raise _reject_masked(reason) if masked else _reject(reason)
 
 
 @lru_cache(maxsize=1024)
@@ -258,14 +359,27 @@ def validate_envelope_when(envelope: Any) -> None:
                 else:
                     parse_when(when)
                 continue
-            except ValidationError:
-                pass
-            raise ValidationError(
-                f"the when predicate of table {table!r} column {column!r} is outside the "
-                "closed grammar",
-                path=f"tables.{table}.columns.{column}.when",
-                code=WHEN_OUTSIDE_GRAMMAR_CODE,
-            )
+            except ValidationError as exc:
+                refusal = exc
+            raise _envelope_refusal(refusal, table, column)
+
+
+def _envelope_refusal(refusal: ValidationError, table: object, column: object) -> ValidationError:
+    """The envelope error for a parser refusal; the code is the refusal's row in `WHEN_REFUSALS`."""
+    codes = when_refusal_codes(refusal)
+    path = f"tables.{table}.columns.{column}.when"
+    if codes.masked:
+        return ValidationError(
+            f"the when predicate of table {table!r} column {column!r} reads a `masked.` "
+            "value; V1 reads original values only",
+            path=path,
+            code=codes.config,
+        )
+    return ValidationError(
+        f"the when predicate of table {table!r} column {column!r} is outside the closed grammar",
+        path=path,
+        code=codes.config,
+    )
 
 
 def validate_plan_when(plan: Any) -> None:
@@ -291,14 +405,18 @@ def _check_size(ast: WhenExpr) -> None:
             stack.extend((operand, depth + 1) for operand in node.operands)
 
 
-def when_column_refs(ast: WhenExpr) -> tuple[str, ...]:
-    """The column names a parsed predicate reads, sorted and de-duplicated."""
-    found: set[str] = set()
+def when_column_refs(ast: WhenExpr) -> tuple[WhenRead, ...]:
+    """The columns a parsed predicate reads, with their phase, sorted and de-duplicated.
+
+    The one producer of `WhenRead`: every consumer (admission, the row masks, the gate, the
+    read sets) takes this type, so a name set and a read set cannot be compared by mistake.
+    """
+    found: set[WhenRead] = set()
     stack: list[WhenExpr] = [ast]
     while stack:
         node = stack.pop()
         if isinstance(node, (Compare, InList)):
-            found.add(node.ref)
+            found.add(WhenRead(node.ref, node.phase))
         elif isinstance(node, Not):
             stack.append(node.operand)
         else:
@@ -323,18 +441,67 @@ def when_literals_by_ref(ast: WhenExpr) -> dict[str, tuple[Scalar, ...]]:
     return {ref: tuple(values) for ref, values in found.items()}
 
 
+def alias_reads(ast: WhenExpr) -> tuple[WhenExpr, dict[str, WhenRead]]:
+    """`ast` with every read renamed to a positional alias (`_w0`, `_w1`, ...), and the alias map.
+
+    pandas eval cannot read `source.status` or a name with a dot the way the grammar means
+    them, so the evaluator runs the aliased predicate on a frame built under the aliases. A
+    predicate with no prefix and no quote gives the same mask as its raw text.
+    """
+    alias_of = {read: f"_w{i}" for i, read in enumerate(when_column_refs(ast))}
+
+    def walk(node: WhenExpr) -> WhenExpr:
+        if isinstance(node, (Compare, InList)):
+            return replace(node, ref=alias_of[WhenRead(node.ref, node.phase)])
+        if isinstance(node, Not):
+            return Not(walk(node.operand))
+        return BoolOp(node.op, tuple(walk(o) for o in node.operands))
+
+    return walk(ast), {alias: read for read, alias in alias_of.items()}
+
+
+def render_leaf(node: Compare | InList) -> str:
+    """One comparison or membership test as text pandas eval reads (the ref is used as written)."""
+    if isinstance(node, InList):
+        return f"{node.ref} {'not in' if node.negated else 'in'} {list(node.values)!r}"
+    if node.literal_first:
+        return f"{node.value!r} {node.op} {node.ref}"
+    return f"{node.ref} {node.op} {node.value!r}"
+
+
+def render_when(ast: WhenExpr) -> str:
+    """The whole predicate as text pandas eval reads, fully parenthesised.
+
+    Meant for an aliased AST (`alias_reads`), whose refs are plain identifiers.
+    """
+    if isinstance(ast, (Compare, InList)):
+        return render_leaf(ast)
+    if isinstance(ast, Not):
+        return f"(not {render_when(ast.operand)})"
+    return "(" + f" {ast.op} ".join(render_when(o) for o in ast.operands) + ")"
+
+
 __all__ = [
     "RESERVED_NAMES",
+    "WHEN_MASKED_REFERENCE_CODE",
     "WHEN_OUTSIDE_GRAMMAR_CODE",
+    "WHEN_REFUSALS",
     "BoolOp",
     "Compare",
     "InList",
     "Not",
     "WhenExpr",
+    "WhenPhase",
+    "WhenRead",
+    "WhenRefusalCodes",
+    "alias_reads",
     "parse_when",
     "parse_when_cached",
+    "render_leaf",
+    "render_when",
     "validate_envelope_when",
     "validate_plan_when",
     "when_column_refs",
     "when_literals_by_ref",
+    "when_refusal_codes",
 ]

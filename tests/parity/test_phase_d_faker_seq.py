@@ -198,15 +198,15 @@ def test_f5d_no_companion_reports_the_unavailable_reason(monkeypatch: pytest.Mon
         assert result.outputs["P"].equals(run_full(shape).outputs["P"])
 
 
-def test_f5f_a_deterministic_faker_without_a_pool_size_declines(
+def test_f5f_a_deterministic_faker_without_a_pool_size_runs_native_with_the_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _declines(
-        faker_seed(pool_size=None),
-        cells(30),
-        "faker_not_deterministic_reuse_variant:f",
-        monkeypatch,
-    )
+    kernel = install_cat(monkeypatch, CatMarkingKernel())
+    seed = faker_seed(pool_size=None)
+    out = run_seq(payload_shape({"f": (strs(SRC), seed)}))
+    [call] = [c for c in kernel.calls if c.namespace == NS]
+    assert call.pool_size == 10_000
+    assert faker_entry(out, "f")["executed_backend"] == "rust_companion"
 
 
 def test_f5c_missing_namespace_is_the_oracles_error_not_a_fallback(
@@ -251,7 +251,7 @@ def test_the_seed_level_precondition_is_the_node_level_one() -> None:
     for seed in cases:
         node = SimpleNamespace(plan_slice=seed)
         assert faker_pool_precondition_met(node) is faker_pool_precondition_met_seed(seed)
-    expected = [True, False, False, False, False, False]
+    expected = [True, False, True, False, False, False]
     assert [faker_pool_precondition_met_seed(c) for c in cases] == expected
     # A group slice is never a ColumnSeed: the node wrapper keeps its guard.
     assert faker_pool_precondition_met(SimpleNamespace(plan_slice=object())) is False

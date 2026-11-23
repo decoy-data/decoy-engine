@@ -233,9 +233,9 @@ def test_chunked_faker_rejection_prose_is_truthful_per_mode() -> None:
         )
 
     # C5b-ii admits a complete REUSE entry (explicit pool_size), so the prose is read from an
-    # entry that still fails stage A; the deferral wording is gone.
-    reuse = failures("reuse")
-    assert "position-keyed" in reuse and "C5b-ii" not in reuse
+    # entry that still fails stage A (a provider off the allowlist); the deferral wording is gone.
+    reuse = failures("reuse", provider="address_city")
+    assert "chunked allowlist" in reuse and "C5b-ii" not in reuse
     unique = failures("unique", pool_size=10)
     assert "whole-column draw" in unique and "not chunk-safe" in unique
     assert "chunk-variant" not in reuse + unique
