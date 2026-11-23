@@ -1,4 +1,4 @@
-Status: plan (revision 1, 2026-11-22)
+Status: plan (revision 2, 2026-11-23)
 
 # GEN-NONFAKER-DRAWS: uuid, random_int_range and random_choice draw per batch from keyed kernels (mask) and numpy words (generate); lorem pools
 
@@ -12,6 +12,8 @@ Anchors: a path with no prefix is under `src/decoy_engine/` in decoy-engine. `CL
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `bugfix.md` (the compile refusal below), `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `api-and-compatibility.md`, `security.md` (keyed derivation), `performance.md`, `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md` ("Where things go").
 
+Revision 2 answers Dennis round 1 (2 DESIGN, 3 MEDIUM, 4 V2-LOG). Owner decisions recorded 2026-11-23 (go with recommended): `lorem_text` becomes poolable; uuid is version 4 over keyed bits; `text` and `paragraph` join GEN-STREAM-ALL group A; the generate-side byte change is accepted; S1 is in the V1 closing set.
+
 Risk: R2 (keyed masking output, a new provider class on every mask route, a named generate-side byte change). Plan review: Dennis, then Codex. Code gate: Codex and Dennis.
 
 Owner direction (2026-11-22): fastest path by default; faster and more robust wins even when bytes change, and every byte change is named (section 10); output stays deterministic per seed; mask-side values are deterministic per (seed, namespace, row) on every route and do not depend on chunk size.
@@ -22,7 +24,7 @@ Owner direction (2026-11-22): fastest path by default; faster and more robust wi
 
 The audit lists the five non-poolable Faker providers as "pandas, per-row draw". The code is stricter than that. `plan/_checks.py:99` `check_non_poolable_provider_with_pool_backend`, called at `plan/_compile.py:197`, refuses any `strategy: faker` column whose provider has `poolable=False` (`providers_v2/_real_registry.py:86-90`: `address_full`, `lorem_text`, `uuid`, `random_int_range`, `random_choice`), with `reasons.plan.NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND`. The reason given there: `FakerStrategyHandler` always builds a pool (`execution/_strategies/_faker.py`), and `PoolBuilder.build` raises for these providers.
 
-But the engine's own scan recommends this config. `profiling/recommendations.py:344-347` gives a detected UUID column the starter `strategy: faker, provider: uuid`. The CLI init does the same (`CLI:src/decoy/cli/_init_inference.py:188-190`) and suggests `provider: random_choice` for IP addresses (`:198`). So a config that `decoy scan` and `decoy init` write fails at compile. Under the V1 bar that is a function break.
+But the engine's own scan recommends this config. `profiling/recommendations.py:344-347` gives a detected UUID column the starter `strategy: faker, provider: uuid`. The CLI init does the same for UUID columns (`CLI:src/decoy/cli/_init_inference.py:188-190`). For IPv4 columns init writes `redact` (`:192-199`), and its review text tells the user to swap to `faker` with `provider: random_choice`, which compile refuses too. So the UUID config that `decoy scan` and `decoy init` write fails at compile, and so does the IPv4 swap their review text suggests. Under the V1 bar that is a function break.
 
 ### 1.2 Generate side: one Faker call per row, seeded per row
 
@@ -66,10 +68,10 @@ Search run: UUID layout for derived and random identifiers (RFC 9562 sections 5.
 After this row:
 
 1. Mask side: `strategy: faker` with `provider: uuid`, `random_int_range` or `random_choice` compiles and runs on every mask route (pandas full frame, chunked, sequential, out-of-core, unified slice) as a computed draw. No pool is built. The value for a row is a pure function of (mask key or job seed, namespace, source value) in deterministic mode, and of (job seed, namespace, global row number) in non-deterministic mode. It does not depend on chunk size, batch size, thread count or route. Nulls stay null in place.
-2. Mask side: with the companion, the draw runs in the compiled kernel; without it, the Python reference gives the same bytes on the pandas route.
-3. Mask side: `lorem_text` becomes poolable (Q1) and runs on the existing faker pool path. `address_full` stays refused at compile, as today.
+2. Mask side: index draws go through the one checked index helper, `derive_validated_indices` (`generation/pool/_sampler.py:119`), directly or through `positional_pool_indices` (`execution/_strategies/_faker_positional.py:47`). That helper picks the compiled kernel when the companion is present and the byte-identical reference otherwise, on every route. The uuid draw picks its `derive_batch` kernel the same way the hash strategy does (`load_compiled_crypto_kernel`, `execution/native/_crypto_ext.py:431`, else `reference_keyed_derivation`, `execution/native/_crypto_reference.py:268`). No route passes its own kernel, so no route can draw different bytes.
+3. Mask side: `lorem_text` becomes poolable (owner decision) and runs on the existing faker pool path. The flip also moves generate-side `provider: lorem_text` onto the pool path through `draw_path` (`generation/kinds/_provider.py:47`); that byte change is named in section 10 and lands with its `Breaking:` line in S2, the slice that flips the flag. `address_full` stays refused at compile, as today.
 4. Generate side: `faker_type: uuid4`, `random_int`, `random_element` and the `provider` kind with `uuid`, `random_int_range`, `random_choice` draw per batch from one raw-word stream per column. The output is deterministic per seed and independent of batch layout. This changes their bytes (section 10).
-5. Generate side: `text`, `sentence`, `paragraph` and `provider: lorem_text` pool through GEN-STREAM-ALL's eligible set (`text` and `paragraph` added to group A, Q3).
+5. Generate side: `text`, `sentence`, `paragraph` and `provider: lorem_text` pool through GEN-STREAM-ALL's eligible set (`text` and `paragraph` added to group A, owner decision).
 6. One formatter module turns bits into values for both sides (section 5.1).
 7. The scan and init recommendations for UUID and IP columns compile and run (AT-1).
 
@@ -84,27 +86,30 @@ Non-goals: `address_full` (composite; FAKER-NATIVE-WIDEN and the composite rows 
 | E1 | mask, deterministic, non-null value | keyed draw on the value |
 | E2 | mask, non-deterministic (`cardinality_mode` absent or `reuse`) | keyed draw on the global row number |
 | E3 | null source | null out in place; in positional mode the row still uses its row number (as `sample_faker_array_positional` does) |
-| E4 | `random_int_range` with `max < min`, `step < 1`, or a count over 2**56 | compile refusal, new code `computed_draw_range_invalid` |
+| E4 | `random_int_range` with `max < min`, `step < 1`, a count `(max - min) // step + 1` over 2**56, or a top value `min + (count - 1) * step` outside int64 | compile refusal, new code `computed_draw_range_invalid` |
 | E5 | `random_choice` with an empty or non-list `elements` | compile refusal, new code `computed_draw_elements_invalid` |
 | E6 | `unique` or a cardinality mode other than `reuse` on a computed provider | compile refusal, new code `computed_draw_mode_unsupported` |
-| E7 | companion absent | Python reference on the pandas route; native routes decline with their existing companion-absent reason |
+| E7 | companion absent | the shared helpers pick the Python reference; same bytes. Native routes decline with their existing companion-absent reason and the column runs on the pandas route |
 | E8 | `address_full` | compile refusal, existing `NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND` (`plan/_checks.py:99`) |
 | E9 | generate, any batch layout | same output (raw-word stream) |
+| E10 | a user namespace containing `/computed:` | compile refusal, new code `computed_draw_namespace_reserved` |
+| E11 | out-of-core, positional mode or a source that is not exact `string` | declines with the existing reasons (`faker_not_deterministic_reuse`, `string_source_type_rejection`, `execution/out_of_core/_faker_native.py:76-90`); the column takes the route a declined faker column takes today |
+| E12 | generate, a `faker_kwargs` shape section 5.3 does not admit | stays on `PerRowFakerStream`, bytes unchanged; never a runtime crash |
 
 ### Routes
 
 | Route | Mask side | Generate side |
 |---|---|---|
-| pandas full frame | `FakerStrategyHandler` (`execution/_strategies/_faker.py`) dispatches computed providers to the computed draw with the reference kernels | - |
+| pandas full frame | `FakerStrategyHandler` (`execution/_strategies/_faker.py`) dispatches computed providers to `computed_mask_draw` | - |
 | chunked native, unified slice | faker `OperatorSpec` (`execution/_operator_registry.py:205-214`) admits the three providers; the step dispatches on provider class | - |
 | sequential | `_sequential_native_ops.py` faker admission reads the same spec | - |
-| out-of-core | `out_of_core/_faker_native.py` admission reads the same class | - |
+| out-of-core | `out_of_core/_faker_native.py` admits computed providers in deterministic mode on exact-`string` sources (no `pool_size` needed); declines positional and other sources (E11) | - |
 | streamed generation | - | `ComputedDrawStream.next_array` |
 | whole-table generation (`synthesize.py`) | - | the same stream, drawn once for all rows |
 
 ### Codes
 
-Three new plan codes (E4, E5, E6), registered once in `reasons/plan`. If ROUTE-LABEL-TRUTH has merged, its `kernel_less_per_row_faker` family loses `uuid`, `random_int_range` and `random_choice` (they now have a kernel) and its sentry sees the change; if it has not merged, nothing to do. Any route decline code this row needs goes in `reasons/route` once.
+Four new plan codes (E4, E5, E6, E10), registered once in `reasons/plan`. One runtime code, `reasons.runtime.COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN`, for positional keys, beside `FAKER_POSITION_OUT_OF_DOMAIN` (`execution/_strategies/_faker_positional.py:27`). Positional computed draws are their own positional site, `mask.faker_computed_position`: when NATIVE-THREADS-DEFAULT S2 adds `POSITIONAL_SITES` (not on main yet), this site gets its own row there, so its re-key is explicit and not inherited from the faker pool site. If ROUTE-LABEL-TRUTH has merged, its `kernel_less_per_row_faker` family loses `uuid`, `random_int_range` and `random_choice` (they now have a kernel) and its sentry sees the change; if it has not merged, nothing to do. Any route decline code this row needs goes in `reasons/route` once.
 
 ### FK shapes
 
@@ -117,7 +122,7 @@ Three new plan codes (E4, E5, E6), registered once in `reasons/plan`. If ROUTE-L
 | Provider | Fields | Default |
 |---|---|---|
 | `uuid` | none | - |
-| `random_int_range` | `min`, `max`, `step` | `_FAKER_DEFAULT_KWARGS` today (`providers_v2/_faker_adapter.py`) |
+| `random_int_range` | `min`, `max`, `step` (ints, not bools) | 0, 9999, 1 (Faker `random_int` defaults; `generation/_numeric_typing.py:54`) |
 | `random_choice` | `elements` (list of scalars) | `("a", "b", "c")` (`_faker_adapter.py:76`) |
 | `lorem_text` | Faker `text` kwargs | Faker defaults |
 | all | `deterministic`, `namespace`, `cardinality_mode` | as for faker |
@@ -145,14 +150,19 @@ Principles that apply: one place per fact (the bit-to-value formatting; the prov
 - `int_from_index(index, *, lo, step) -> pa.Array` (int64).
 - `choice_from_index(index, elements) -> pa.Array` (`pool_take` over the elements as one Arrow array).
 - `ComputedDraw` spec: provider, parsed fields, count. Built and validated once at compile (E4, E5), and read by both sides.
+- `computed_draw_spec(kind, kwargs) -> ComputedDraw | None`: the one parser. On the generate side `None` means "stay per row" (E12); on the mask side the compile check turns a refusal into E4 or E5.
 
 ### 5.2 Mask side
 
-- Registry: `_faker_cap` gains `draw: Literal["pool", "computed"]`. `uuid`, `random_int_range`, `random_choice` become `computed`; `lorem_text` becomes poolable (Q1); `address_full` stays not poolable.
+- Registry: `_faker_cap` gains `draw: Literal["pool", "computed"]`. `uuid`, `random_int_range`, `random_choice` become `computed`; `lorem_text` becomes poolable (owner decision); `address_full` stays not poolable.
 - `classify_provider` returns a new class `computed_native` for `draw="computed"`.
 - `check_non_poolable_provider_with_pool_backend` keeps refusing `poolable=False` providers that are not computed (so `address_full`), and the new E4 to E6 checks run for computed ones.
-- One function, `computed_mask_draw(source, *, spec, mode, key, namespace, row_offset, gate_positions, index_kernel, hash_kernel)`, in the existing faker positional strategy module family. Deterministic mode passes the source column to the kernels; positional mode passes `positional_key_array(row_offset, n, gate_positions=...)`. uuid takes `hash_kernel.derive_batch(..., truncate=32)` and decodes hex to bytes; the other two take `index_kernel.derive_index_batch(..., pool_size=spec.count)`. The pandas handler passes the reference kernels; native steps pass the compiled ones. Same function, so the same bytes.
-- Namespaces: the selection namespace is the column namespace plus `/computed:<provider>`, so a computed draw never shares index material with a pool draw in the same namespace.
+- One function, `computed_mask_draw(source, *, spec, mode, key, namespace, row_offset, gate_positions)`, in the faker positional strategy module. It calls no kernel method directly for indices:
+  - `random_int_range` and `random_choice`, deterministic: `derive_validated_indices(nonnull_values, mask_key=key, namespace=ns, pool_size=spec.count)`.
+  - The same two, positional: `positional_pool_indices(n, row_offset=..., job_seed=key, namespace=ns, pool_size=spec.count, gate_positions=..., domain_code=COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN)`. `positional_pool_indices` gains the `domain_code` keyword, default unchanged.
+  - uuid: `derive_batch(..., truncate=32)` on the kernel chosen as in guarantee 2, over the source values or over `positional_key_array(...)`, then hex to bytes and `uuid_from_bits`. S1 first checks `derive_batch` accepts the uint64 key array as `derive_index_batch` does; if not, it casts the keys to string once, and AT-3 freezes whichever form ships.
+  - Because index draws use the shared helpers, NATIVE-THREADS-DEFAULT S1 (thread budget in the helper) and S2/S3 (re-keys) reach them with no edit here. The only kernel seam this row owns is the uuid `derive_batch` choice, and it reuses the hash strategy's chooser.
+- Namespaces: the selection namespace is the column namespace plus `/computed:<provider>`, so a computed draw never shares index material with a pool draw in the same namespace. A user namespace containing `/computed:` is refused (E10).
 - Native admission: the faker `OperatorSpec` keeps one `provider_allowlist`; the three providers join it with their class. FAKER-NATIVE-WIDEN edits the same allowlist for poolable providers; whichever merges second rebases on the other's list.
 
 ### 5.3 Generate side
@@ -160,12 +170,22 @@ Principles that apply: one place per fact (the bit-to-value formatting; the prov
 `ComputedDrawStream` in `generation/stream/_computed_draw.py`, built by `_faker_stream` (`generation/_column_streams.py:330`) and by the `provider` kind's builder for the computed providers, before the pool check:
 
 - One `np.random.PCG64(ctx.base_int("draw"))` bit generator per column. Each value takes a fixed number of raw 64-bit words: uuid two, the others one. Index is `word % count` (bias at most `count / 2**64`).
-- `next_array(offset, size)` draws `size * words` raw words in order. A batch boundary cannot change a value.
+- `next_array(offset, size, type)`, the GEN-VECTOR-STREAMS signature. It copies the column's start state and calls `PCG64.advance(offset * words)`, then reads `size * words` raw words. A value depends only on its row number, so no batch layout can change it, and out-of-order batches give the same column.
 - Whole-table generation calls the same stream for all rows at once.
+- `faker_kwargs` shapes S3 admits (via `computed_draw_spec`); everything else stays on `PerRowFakerStream` with bytes unchanged (E12):
+
+| Type | Admitted | Stays per row |
+|---|---|---|
+| `uuid4`, `provider: uuid` | no kwargs; `cast_to=str` | `cast_to=None`, any other `cast_to`, any other kwarg |
+| `random_int`, `provider: random_int_range` | int `min`, `max`, `step` (any subset, defaults 0, 9999, 1) that pass E4 | float or string bounds, bools, unknown kwargs |
+| `random_element`, `provider: random_choice` | `elements` as a list or tuple of scalars, length 1 or more | a string `elements` (Faker reads it as characters), a dict (weighted), an empty list, unknown kwargs |
+
+A generate config whose bounds fail E4 stays per row too, so whatever Faker does today it still does; the generate side refuses nothing new.
+- Shadow generation: `SHADOW_ADMISSIBLE_FAKER_TYPES` is `POOL_ELIGIBLE_FAKER_TYPES` (`execution/physical/_shadow_generation.py:100`). Adding `text` and `paragraph` to group A widens it. S3 adds both types to the shadow parity cells; if a cell fails, S3 pins the shadow set to its current members instead of widening it.
 
 ### 5.4 Lorem
 
-Mask: `lorem_text` with `poolable=True` uses the existing pool path, so FAKER-DEFAULT-POOL and the native pool select (once FAKER-NATIVE-WIDEN admits it) apply. Generate: `text` and `paragraph` join GEN-STREAM-ALL group A as certified pairs (its harness checks they reproduce under a seed).
+Mask: `lorem_text` with `poolable=True` uses the existing pool path, so FAKER-DEFAULT-POOL and the native pool select (once FAKER-NATIVE-WIDEN admits it) apply. The same flag sends generate `provider: lorem_text` to pool through `draw_path`; S2 names it (section 10) and ships its `Breaking:` line. Generate: `text` and `paragraph` join GEN-STREAM-ALL group A as certified pairs (its harness checks they reproduce under a seed).
 
 ## 6. Placement
 
@@ -176,7 +196,8 @@ Mask: `lorem_text` with `poolable=True` uses the existing pool path, so FAKER-DE
 | provider class | `execution/native/_provider_class.py` | "Native companion bridge" | - |
 | registry flag | `providers_v2/_real_registry.py`, capability type | "Providers" | - |
 | compile checks E4 to E6 | `plan/checks/_computed_draw.py` (new) | "Plan compile and checks": new checks in `plan/checks/` | `plan/_checks.py:99` |
-| codes | `reasons/plan` (three codes) | reasons | - |
+| codes | `reasons/plan` (four codes), `reasons/runtime` (one code) | reasons | - |
+| `domain_code` keyword | `execution/_strategies/_faker_positional.py` `positional_pool_indices` | "Masking strategy handler" | - |
 | draw sites | `execution/native/_draw_sites_mask.py`, `_draw_sites_gen.py` | "Native companion bridge" | existing sites |
 | tests | `tests/unit/generation/stream/test_computed_draw.py`, `tests/unit/execution/strategies/test_faker_computed.py`, `tests/unit/plan/checks/test_computed_draw.py` | "Unit tests" | - |
 
@@ -211,7 +232,7 @@ If `_faker_positional.py` would pass 600 lines, `computed_mask_draw` goes into a
 | 6 | No reaching into private modules | `execution/` imports the formatter through `generation.stream`'s public names | import-linter |
 | 7 | No hidden CI failures | companion-absent leg must run the reference path tests | CI review |
 | 8 | One input, one trust class | no | - |
-| 9 | Mutations on the final head | yes | M1 to M6 on the final head, head recorded |
+| 9 | Mutations on the final head | yes | M1 to M8 on the final head, head recorded |
 | 10 | Allowlisted helpers are still checked | the faker `provider_allowlist` | AT-2 walks every provider in the allowlist |
 | 11 | No raised caps | `_strategies` freeze 28, `generation/` 25, module size | no new module in either; sizes listed |
 
@@ -219,14 +240,16 @@ If `_faker_positional.py` would pass 600 lines, `computed_mask_draw` goes into a
 
 | ID | Test | Fail-before | Slice |
 |---|---|---|---|
-| AT-1 | The scan starter for a UUID column and the CLI init config for UUID and IPv4 columns compile and run end to end | `NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND` today | S1 |
-| AT-2 | Route parity: the three providers, deterministic and positional, string and int sources with nulls, give equal output on pandas (reference kernels), unified slice, chunked (several chunk sizes), sequential and out-of-core | refused today | S1 (pandas, chunked, unified), S2 (sequential, out-of-core) |
-| AT-3 | Frozen vectors: fixed key, namespace and inputs give committed uuid, int and choice outputs; uuid strings match `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z` | no draw today | S1 |
+| AT-1 | Every `DetectorDescriptor` starter in `profiling/recommendations.py` goes through `compile_plan` and a run on a small frame; plus the IPv4 swap the init review text suggests (`faker`, `random_choice`) | the UUID starter fails with `NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND` today | S1 |
+| AT-2 | Route parity: the three providers, deterministic and positional, string and int sources with nulls, give equal output on pandas (companion present and absent), unified slice, chunked (several chunk sizes) and sequential. Out-of-core cells: deterministic on exact-`string` sources equal the other routes; positional and non-string cells decline with the E11 reasons and still equal the other routes' output | refused today | S1 (pandas, chunked, unified), S2 (sequential, out-of-core) |
+| AT-3 | Frozen vectors: fixed key, namespace and inputs give committed uuid, int and choice outputs; every uuid matches `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z`; every int is in `[min, max]` with `(v - min) % step == 0`; every choice is in `elements` | no draw today | S1 |
 | AT-4 | Chunk and thread invariance (mask): chunk sizes 1, 7, 65,536; `native_threads` 1 and 4; `when:` gate positions | refused today | S1 |
 | AT-5 | Batch invariance (generate): layouts `[1]*7`, `[7, 4096, 3]`, one batch, and the whole-table path give equal columns | per-row Faker today has the property too; fail-before is AT-10 | S3 |
-| AT-6 | FK: a deterministic `uuid` key column masks parent and child to equal values; a positional key column is refused with the existing reason | refused today | S1 |
-| AT-7 | Compile refusals E4, E5, E6 with `True`, `"5"`, `5.0`, empty and non-list `elements`; messages value-free; cause and context None | no codes today | S1 |
-| AT-8 | `address_full` is still refused; `lorem_text` now pools and runs | `lorem_text` refused today | S2 |
+| AT-6 | FK: a deterministic `uuid` key column masks parent and child to equal values, with the child rows reordered and duplicated so row number and value differ; a positional key column is refused with the existing reason | refused today | S1 |
+| AT-7 | Compile refusals E4 (including the int64 top-value cell), E5, E6, E10 with `True`, `"5"`, `5.0`, empty and non-list `elements`; messages value-free; cause and context None | no codes today | S1 |
+| AT-8 | `address_full` is still refused; `lorem_text` now pools and runs on the mask side; generate `provider: lorem_text` takes `draw_path == "pool"` and its golden changes as named | `lorem_text` refused today | S2 |
+| AT-11 | Generate kwargs: every row of the section 5.3 table; admitted shapes take `ComputedDrawStream`, the rest produce today's per-row bytes; none raises | no computed stream today | S3 |
+| AT-12 | Structure: `computed_mask_draw` holds no `derive_index_batch` call (AST check in the test) | no function today | S1 |
 | AT-9 | Speed, `perf`, Dell: masked `uuid` over 1,000,000 rows on the chunked native route at or under 200 ns per row | refused today | S1 |
 | AT-10 | Generate speed and byte change: `uuid4` over 1,000,000 rows at or under 100 ns per row; the output differs from the per-row Faker golden (proves the new path ran) | per-row Faker today | S3 |
 
@@ -240,6 +263,8 @@ If `_faker_positional.py` would pass 600 lines, `computed_mask_draw` goes into a
 | M4 | deterministic mode keys on the row number | AT-6 |
 | M5 | `int_from_index` ignores `step` | AT-3 |
 | M6 | generate stream uses `Generator.integers` per batch | AT-5 |
+| M7 | `computed_mask_draw` calls `derive_index_batch` on its own kernel instead of `derive_validated_indices` | AT-12 |
+| M8 | `computed_draw_spec` admits a string `elements` | AT-11 |
 
 ## 10. Frozen contracts and byte changes
 
@@ -250,7 +275,9 @@ Generate side, byte change (pre-GA correction, one `Breaking:` line in the chang
 - `faker_type: uuid4` and `provider: uuid`: values change; still RFC 9562 version 4 strings.
 - `faker_type: random_int` and `provider: random_int_range`: values change; same range and step.
 - `faker_type: random_element` and `provider: random_choice`: values change; same element set.
-- `faker_type: text`, `paragraph` and `provider: lorem_text`: values change from per-row text to pool picks (via GEN-STREAM-ALL).
+- `provider: lorem_text`: values change from per-row text to pool picks in S2, when the poolable flag flips (`draw_path`, `generation/kinds/_provider.py:47`). S2 carries its own `Breaking:` line.
+- `faker_type: text` and `paragraph`: values change from per-row text to pool picks in S3 (GEN-STREAM-ALL group A).
+- Generate configs with kwargs outside the section 5.3 table: no change.
 
 Every other generate type keeps its bytes. FAKER-MIGRATE's output lock lists `uuid4`, `random_int` and `random_element` cells for the adapter; S3 regenerates those cells with this row's change named in the lock diff.
 
@@ -260,22 +287,23 @@ Every other generate type keeps its bytes. FAKER-MIGRATE's output lock lists `uu
 - A user relies on `random_int` returning a Python int on the pandas route. The output column is int64 on every route; AT-2 compares types.
 - A uuid column feeds a database UUID type that rejects version 4 from non-random sources. No validator can tell; noted only.
 - FAKER-NATIVE-WIDEN rewrites the allowlist shape. Section 5.2 names the rebase.
-- The positional namespace suffix collides with a user namespace ending in `/computed:uuid`. The registry refuses namespaces containing `/computed:` (one check in S1).
+- The positional namespace suffix collides with a user namespace ending in `/computed:uuid`. Compile refuses namespaces containing `/computed:` with `computed_draw_namespace_reserved` (E10, S1).
+- NATIVE-THREADS-DEFAULT S2 lands before S1 here. Then S1 adds the `mask.faker_computed_position` row to `POSITIONAL_SITES` itself; if S1 lands first, S2 of that row adds it.
 
 ## 12. Slices
 
 | Slice | Content | Size | Gate |
 |---|---|---|---|
 | S1 | registry flag and class; compile checks E4 to E6 and codes; formatter; `computed_mask_draw`; pandas handler, unified slice and chunked native admission; draw sites; AT-1 to AT-4, AT-6, AT-7, AT-9 | M: about 350 lines, 400 lines tests | Codex and Dennis; T2 on faker, plan and native selections |
-| S2 | sequential and out-of-core admission; `lorem_text` poolable; AT-2 rest, AT-8 | S: about 100 lines, 150 lines tests | Codex |
-| S3 | generate side: `ComputedDrawStream`, wiring in `_faker_stream` and the provider kind; GEN-STREAM-ALL group A gains `text`, `paragraph`; changelog `Breaking:`; FAKER-MIGRATE lock cells; AT-5, AT-10 | M: about 200 lines, 250 lines tests | Codex and Dennis; depends on GEN-VECTOR-STREAMS S1 and GEN-STREAM-ALL S1b |
+| S2 | sequential and out-of-core admission (out-of-core deterministic string only, E11 declines); `lorem_text` poolable with its generate-side `Breaking:` line; AT-2 rest, AT-8 | S: about 110 lines, 160 lines tests | Codex |
+| S3 | generate side: `ComputedDrawStream`, `computed_draw_spec` kwargs table, wiring in `_faker_stream` and the provider kind (`draw_path` gains `computed`); GEN-STREAM-ALL group A gains `text`, `paragraph` with shadow parity cells; changelog `Breaking:`; FAKER-MIGRATE lock cells; AT-5, AT-10, AT-11 | M: about 200 lines, 250 lines tests | Codex and Dennis; depends on GEN-VECTOR-STREAMS S1 and GEN-STREAM-ALL S1b |
 
 S1 is the V1 function fix and should go first; it does not wait for the generation rows. All three fit before 2026-12-15 if GEN-STREAM-ALL S1b and GEN-VECTOR-STREAMS S1 merge by early December.
 
-## 13. Open questions for the owner
+## 13. Owner decisions and follow-ups
 
-- Q1: Mask-side `lorem_text`: make it poolable (recommended, uses the existing pool path) or keep refusing it?
-- Q2: uuid layout: version 4 over keyed bits (recommended, matches today's Faker output kind) or RFC 9562 version 8?
-- Q3: Add `text` and `paragraph` to GEN-STREAM-ALL group A (recommended) so generate-side lorem pools?
-- Q4: The generate-side byte change for `uuid4`, `random_int`, `random_element` (section 10) is accepted under the 2026-11-22 direction? Recommended: yes.
-- Q5: S1 is a V1 function fix (scan and init write a config that fails). Put S1 in the V1 closing set ahead of the rest of the row? Recommended: yes.
+Decided 2026-11-23 (go with recommended): `lorem_text` poolable; uuid version 4 over keyed bits; `text` and `paragraph` join group A; generate byte change accepted; S1 in the V1 closing set.
+
+CLI follow-up row (CLI roadmap, `docs/roadmap/groups/mask.md`): after the engine release that carries S1, repin the engine in the CLI and add a CLI test that runs `decoy init` on a frame with a UUID column and then runs the written config. Optional in the same row: let init write `faker` with `random_choice` for IPv4 instead of `redact`, if the owner wants that default.
+
+No open owner questions.
