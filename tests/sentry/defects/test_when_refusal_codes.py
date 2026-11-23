@@ -88,3 +88,19 @@ def test_parser_refusals_resolve_to_a_row() -> None:
             parse_when(expr)
         assert info.value.code == key
         assert info.value.code in WHEN_REFUSALS
+
+
+@pytest.mark.parametrize(
+    ("expr", "key"),
+    [
+        ("x.y()", WHEN_OUTSIDE_GRAMMAR_CODE),
+        ("masked.x > 1", WHEN_MASKED_REFERENCE_CODE),
+    ],
+)
+def test_the_runtime_gate_raises_the_row_runtime_code(expr: str, key: str) -> None:
+    from decoy_engine.execution._errors import StrategyError
+    from decoy_engine.execution._when_gate import _require_closed_grammar
+
+    with pytest.raises(StrategyError) as info:
+        _require_closed_grammar(expr, "redact", "c")
+    assert info.value.code == WHEN_REFUSALS[key].runtime
