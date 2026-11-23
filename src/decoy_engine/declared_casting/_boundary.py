@@ -26,7 +26,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.declared_casting import (
@@ -189,6 +189,20 @@ def plan_column_shapes(plan: Any) -> dict[tuple[str, str], ColumnShape]:
     the plan lists the column with a shape that needs none, never from the pandas dtype.
     """
     return {(c.table, c.column): c.shape for c in getattr(plan, "column_shapes", None) or ()}
+
+
+def native_date_columns(plan: Any) -> Mapping[tuple[str, str], ColumnShape]:
+    """(table, column) -> shape of each column the plan lists as a native date or zoned timestamp.
+
+    Same view as ``ExecutionContext.native_date_columns`` for a caller that holds a plan, not a
+    context. A declared date column keeps its text output, so it is not in it.
+    """
+    declared = declared_date_shift_columns(plan)
+    return {
+        key: shape
+        for key, shape in plan_column_shapes(plan).items()
+        if shape in TYPED_DATE_SHAPES and key not in declared
+    }
 
 
 @dataclass

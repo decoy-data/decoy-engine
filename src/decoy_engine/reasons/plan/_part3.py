@@ -134,11 +134,6 @@ COLUMN_SHAPE_MISMATCH = _d(
     "A strategy cannot read the shape of the column it is set on.",
     since="1.33.0",
 )
-COLUMN_SHAPE_REQUIRED = _d(
-    "column_shape_required",
-    "A strategy reads values from text and the column does not declare how to read them.",
-    since=UNRELEASED,
-)
 COLUMN_SHAPE_FORMAT_UNUSED = _d(
     "column_shape_format_unused",
     "A date_format is set on a column that is already a date, so it is not used.",
