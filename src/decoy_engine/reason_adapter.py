@@ -117,6 +117,13 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.validation.finding_review", "ReviewIntegrityOffError", "post_scan"),
     ("decoy_engine.profiling.bound_baseline", "BaselineBindingError", "pre_scan"),
 )
+# File-access failures with one meaning each, by class name (this module imports no family). The
+# publication lock map reads the same table, so a reason change is one edit (F22 reasons).
+FILE_ACCESS_FIXED: Mapping[str, ReasonCode] = {
+    "FileAccessDenied": reasons.decoy.FILE_ACCESS_DENIED,
+    "LockUnavailable": reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE,
+    "LockTimeout": reasons.decoy.PUBLICATION_LOCK_TIMEOUT,
+}
 # Engine exceptions that carry no code but have one fixed meaning: (module, class, reason).
 _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("builtins", "MemoryError", reasons.decoy.PROCESS_OUT_OF_MEMORY),
@@ -129,7 +136,7 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.execution._isolated_commit", "CommitError", reasons.decoy.PUBLICATION_FAILED),
     ("decoy_engine.sdk", "TransientError", reasons.decoy.CONNECTOR_TRANSIENT_FAILURE),
     ("decoy_engine.sdk", "PermanentError", reasons.decoy.CONNECTOR_PERMANENT_FAILURE),
-    ("decoy_engine.fileaccess._types", "FileAccessDenied", reasons.decoy.FILE_ACCESS_DENIED),
+    *(("decoy_engine.fileaccess._types", n, r) for n, r in FILE_ACCESS_FIXED.items()),
     ("decoy_engine.profiling.scan_set", "ScanSourceError", reasons.runtime.SCAN_SOURCE_FAILED),
     ("decoy_engine.profiling.scan_set_read", "ScanSetReadError", reasons.config.UNTAGGED),
     # F22 errno-only file-access errors: one meaning each, whoever raised them.
@@ -138,12 +145,6 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
         "CommitUncertain",
         reasons.decoy.PUBLICATION_COMMIT_UNCERTAIN,
     ),
-    (
-        "decoy_engine.fileaccess._types",
-        "LockUnavailable",
-        reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE,
-    ),
-    ("decoy_engine.fileaccess._types", "LockTimeout", reasons.decoy.PUBLICATION_LOCK_TIMEOUT),
     # A bounded read over its cap; the publisher maps its own reads to a refusal first.
     ("decoy_engine.fileaccess._types", "LeafTooLarge", reasons.decoy.PUBLICATION_FAILED),
     ("decoy_engine.publication._current", "PointerUnreadable", reasons.decoy.PUBLICATION_FAILED),

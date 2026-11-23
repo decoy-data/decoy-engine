@@ -12,6 +12,8 @@ text, a path or a table value.
 
 from __future__ import annotations
 
+import os
+import unicodedata
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
@@ -64,6 +66,12 @@ StageState = Literal["open", "delivering", "delivered", "aborted"]
 _FAILED = reasons.decoy.PUBLICATION_FAILED
 _UNCERTAIN = reasons.decoy.PUBLICATION_COMMIT_UNCERTAIN
 _MOVED = reasons.decoy.DELIVERY_POINTER_MOVED
+_UNWRITTEN_MTIME_NS = 0  # a pre-created member keeps this stamp until a writer opens it
+
+
+def _fold(path: str) -> str:
+    """The key under which a case-insensitive or normalizing file system sees `path` as one name."""
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", path).casefold())
 
 
 @dataclass(frozen=True)
@@ -157,6 +165,7 @@ class DeliveryStage:
         self._expected, self._run_id, self._request = expected, run_id, request
         self._staged: dict[str, tuple[str | None, Role]] = {}
         self._dirs: dict[str, StageDir] = {}
+        self._names: dict[str, tuple[str, bool]] = {}  # folded path -> (spelling, is_folder)
         self._members: list[Member] = []
         self._state: StageState = "open"
         self._crossed = False  # set once `publish_unit` may have bound the unit
@@ -177,6 +186,8 @@ class DeliveryStage:
         request = PublicationRequest(operation_id, lock_timeout_s=lock_timeout_s)
         if not is_pointer_value(run_id):
             raise ValueError("invalid run_id")
+        if out.locator.rstrip("/\\").replace("\\", "/").rpartition("/")[2] != run_id:
+            raise ValueError("run_id does not name the output folder")  # the pointer must bind it
         expected: PointerState | None = None
         txn: OutputTxn | None = None
         os_errno: int | None = None
@@ -205,22 +216,45 @@ class DeliveryStage:
         self._request = replace(self._request, vault=binding)
 
     def stage_path(self, table: str | None, relpath: str, role: Role = "table") -> Path:
-        """The local path of one staged file, its folders made. `table` is the table the file
-        belongs to; `None` marks a file that is always delivered, like the report."""
+        """The local path of one staged file, its folders made and the file created owner-only
+        (`0600`, whatever the umask). `table` is the table the file belongs to; `None` marks a
+        file that is always delivered, like the report. A path that is the same file as a staged
+        one on a case-insensitive file system, or a file where a folder is staged (or the
+        reverse), is refused before the stage records or creates anything."""
         self._require_open()
         member = Member(relpath, role)  # the one path rule, value-free
         if table is not None and not table:
             raise ValueError("invalid table")
-        if self._staged.setdefault(member.path, (table, role)) != (table, role):
-            raise ValueError("path already staged")
+        local = Path(self._txn.local_stage_path()) / member.path
+        known = self._staged.get(member.path)
+        if known is not None:
+            if known != (table, role):
+                raise ValueError("path already staged")
+            return local
+        parts = member.path.split("/")
+        self._check_names(parts)
         holder: StageDir = self._txn
         prefix = ""
-        for part in member.path.split("/")[:-1]:
+        for part in parts[:-1]:
             prefix = f"{prefix}{part}/"
             if prefix not in self._dirs:
-                self._dirs[prefix] = holder.create_dir(part)
+                self._dirs[prefix] = holder.create_dir(part)  # recorded once it exists
+                self._names[_fold(prefix.rstrip("/"))] = (prefix.rstrip("/"), True)
             holder = self._dirs[prefix]
-        return Path(self._txn.local_stage_path()) / member.path
+        os.close(holder.create_file(parts[-1]))
+        os.utime(local, ns=(0, _UNWRITTEN_MTIME_NS))  # `_unwritten` reads this back
+        self._staged[member.path] = (table, role)
+        self._names[_fold(member.path)] = (member.path, False)
+        return local
+
+    def _check_names(self, parts: list[str]) -> None:
+        """Refuse a name that aliases a staged file or folder, or sits across the file and folder
+        divide. Folders on the way are compared as folders, the last part as a file."""
+        for depth in range(1, len(parts) + 1):
+            spelling = "/".join(parts[:depth])
+            held = self._names.get(_fold(spelling))
+            if held is not None and held != (spelling, depth < len(parts)):
+                raise ValueError("path conflicts with a staged path")
 
     def abort(self) -> None:
         """Remove the stage. The pointer is never touched; a no-op once delivered."""
@@ -244,18 +278,18 @@ class DeliveryStage:
             self.abort()
             return DeliveryReceipt("nothing")
         self._state = "delivering"
-        if not self._prune(decision.delivered):
-            return self._settle(DeliveryReceipt("nothing", _FAILED), reconcile)
-        with ExitStack() as stack:
-            held, refusal = _acquire(stack, self._pointer, self._request.lock_timeout_s)
-            if held is None:
-                return self._settle(DeliveryReceipt("nothing", refusal), reconcile)
-            try:
-                receipt = self._visible(held, before_visible)
-            except BaseException:
+        try:
+            if not self._prune(decision.delivered):
+                return self._settle(DeliveryReceipt("nothing", _FAILED), reconcile)
+            with ExitStack() as stack:
+                held, refusal = _acquire(stack, self._pointer, self._request.lock_timeout_s)
+                if held is None:
+                    return self._settle(DeliveryReceipt("nothing", refusal), reconcile)
+                return self._settle(self._visible(held, before_visible), reconcile)
+        except BaseException:
+            if self._state == "delivering":  # not yet settled: an interrupt or a bug, never a row
                 self._settle(self._after_interrupt(), reconcile)
-                raise
-            return self._settle(receipt, reconcile)
+            raise
 
     def _visible(self, held: HeldPointer, before_visible: Callable[[], None]) -> DeliveryReceipt:
         now = self._read()
@@ -269,7 +303,17 @@ class DeliveryStage:
         bind = BIND_VERDICTS[commit.outcome]
         if bind.state == "nothing":
             return DeliveryReceipt("nothing", bind.cause or _refusal_code(commit))
-        return _combine(bind, SWAP_VERDICTS[held.swap(self._expected, self._run_id)])
+        swap = SWAP_VERDICTS[held.swap(self._expected, self._run_id)]
+        if swap.state == "nothing" and self._names_run(self._expected.raw):
+            # A replay (F23): the pointer already named this run, so a failed rewrite changes
+            # nothing while it still does. The row assumes the folder is not current.
+            now = self._read()
+            if now is not None and self._names_run(now.raw):
+                swap = _Verdict("delivered", None)
+        return _combine(bind, swap)
+
+    def _names_run(self, raw: bytes | None) -> bool:
+        return raw is not None and raw == pointer_bytes(self._run_id)
 
     def _read(self) -> PointerState | None:
         state: PointerState | None = None
@@ -294,11 +338,11 @@ class DeliveryStage:
     def _settle(
         self, receipt: DeliveryReceipt, reconcile: Callable[[DeliveryReceipt], None] | None
     ) -> DeliveryReceipt:
-        if receipt.state == "nothing":
-            self._txn.abort()  # a no-op once the unit is bound
-            self._state = "aborted"
-        else:
-            self._state = "delivered"
+        if receipt.state == "nothing" or not self._crossed:
+            # Never bound: a fresh stage must not outlive a receipt that says the run is visible
+            # (a resume interrupted before the bind). A no-op once the unit is bound.
+            self._txn.abort()
+        self._state = "aborted" if receipt.state == "nothing" else "delivered"
         if reconcile is not None:
             reconcile(receipt)
         return receipt
@@ -324,7 +368,16 @@ class DeliveryStage:
         except (OSError, FileAccessDenied, FileAccessUnavailable):
             failed = True
         self._members = [Member(p, self._staged[p][1]) for p in keep]
-        return not failed
+        return not failed and not any(self._unwritten(p) for p in keep)
+
+    def _unwritten(self, path: str) -> bool:
+        """Whether a declared file still has the empty, never-opened stamp `stage_path` gave it:
+        its writer failed before writing. A written empty file has a fresh mtime."""
+        try:
+            seen = (Path(self._txn.local_stage_path()) / path).stat()
+        except OSError:
+            return True
+        return seen.st_size == 0 and seen.st_mtime_ns == _UNWRITTEN_MTIME_NS
 
     def _drop(self, path: str) -> None:
         try:

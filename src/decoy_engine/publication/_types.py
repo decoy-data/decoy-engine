@@ -33,6 +33,7 @@ from decoy_engine.fileaccess import (
     LockTimeout,
     LockUnavailable,
 )
+from decoy_engine.reason_adapter import FILE_ACCESS_FIXED
 from decoy_engine.reasons import ReasonCode
 
 if TYPE_CHECKING:
@@ -89,12 +90,13 @@ _ERRNO_NAMES: Final = frozenset(errno.errorcode.values())
 MAX_COUNT: Final = 2**63 - 1
 DEFAULT_LOCK_TIMEOUT_S: Final = 30.0
 
-# The one map from a failed `OutputDir.lock` to its reason code. The first two match
-# `reason_adapter._FIXED`; the other two are what a strict or missing policy raises at the lock.
+# The one map from a failed `OutputDir.lock` to its reason code. The first three read the table
+# `reason_adapter` classifies by, so the two never disagree; the last is what a strict or missing
+# policy raises at the lock.
 _LOCK_REASONS: Final = (
-    (LockTimeout, reasons.decoy.PUBLICATION_LOCK_TIMEOUT),
-    (LockUnavailable, reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE),
-    (FileAccessDenied, reasons.decoy.FILE_ACCESS_DENIED),
+    (LockTimeout, FILE_ACCESS_FIXED["LockTimeout"]),
+    (LockUnavailable, FILE_ACCESS_FIXED["LockUnavailable"]),
+    (FileAccessDenied, FILE_ACCESS_FIXED["FileAccessDenied"]),
     (FileAccessUnavailable, reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE),
 )
 LOCK_ERRORS: Final = tuple(kind for kind, _ in _LOCK_REASONS)
