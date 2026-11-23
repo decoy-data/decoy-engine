@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -386,3 +387,56 @@ assert mapped, "column buffer is not inside a mapping of the staged file"
         timeout=60,
         env={**os.environ, **CAPPED_ENV},  # the allocator pins every real child starts with
     )
+
+
+def _round_trip(tmp_path, table):
+    manifest = stage_sources(tmp_path, {"t": table})
+    loaded = _isolated_worker._load_sources(manifest, lazy=True)["t"]
+    actual = loaded.to_table() if isinstance(loaded, LazySource) else loaded
+    return manifest, actual
+
+
+def test_multi_chunk_dictionaries_with_fixed_list_round_trip(tmp_path):
+    dict_type = pa.dictionary(pa.int32(), pa.string())
+    fixed = pa.list_(pa.int64(), 2)
+    chunks = [
+        pa.table(
+            {
+                "d": pa.array(["a", None, "b"], dict_type),
+                "e": pa.array([None, "x", "x"], dict_type),
+                "f": pa.array([[1, 2], [3, 4], [5, 6]], fixed),
+            }
+        ),
+        pa.table(
+            {
+                "d": pa.array(["c", "a", None, "d"], dict_type),
+                "e": pa.array(["y", None, "z", "y"], dict_type),
+                "f": pa.array([[7, 8]] * 4, fixed),
+            }
+        ),
+    ]
+    table = pa.concat_tables(chunks)
+    assert table.column("d").num_chunks == 2
+    manifest, actual = _round_trip(tmp_path, table)
+    assert manifest["t"]["format"] == "ipc"
+    assert str(actual.schema) == str(table.schema)
+    # Unifying rewrites each field's dictionary, so compare the values and the unified table.
+    assert actual.to_pylist() == table.to_pylist()
+    assert actual.equals(table.unify_dictionaries())
+
+
+_PARQUET_REFUSED = {
+    "decimal128_negative_scale": pa.array([Decimal("1.2E+3"), None], pa.decimal128(6, -2)),
+    "decimal256_negative_scale": pa.array([Decimal("1.2E+3"), None], pa.decimal256(6, -2)),
+    "fixed_size_binary_zero": pa.array([b"", None], pa.binary(0)),
+}
+
+
+@pytest.mark.parametrize("name", list(_PARQUET_REFUSED))
+def test_parquet_refused_parameters_route_through_ipc(tmp_path, name):
+    table = pa.table({"x": _PARQUET_REFUSED[name]})
+    assert arrow_adapter.parquet_holds_type(table.schema.field(0).type) is False
+    manifest, actual = _round_trip(tmp_path, table)
+    assert manifest["t"]["format"] == "ipc"
+    assert str(actual.schema) == str(table.schema)
+    assert actual.equals(table)
