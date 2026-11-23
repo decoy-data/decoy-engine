@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-22; Dennis round 1 applied)
+Status: plan (revision 3, 2026-11-23; Dennis round 1 and Codex findings applied)
 
 # GEN-STREAM-ALL: every fast generator kind on the streamed lane, picks by index, pooled Faker types widened
 
@@ -35,13 +35,13 @@ Why the four kinds are streamable now (read at `70881ad79`):
 - **Pool sampling for synthetic text.** SDV's `AnonymizedFaker` (RDT) builds a bounded set of Faker values and samples from it unless `cardinality_rule` is `unique`, and it never pools a column that SDV metadata marks as a primary key. Decoy already pools (`_faker_pool.py`, harness in `scripts/faker-determinism/`); this row widens the type set, adds the key opt-out SDV has, and drops the threshold.
 - **Prefix-stable streams.** numpy `Generator` and Python `random.Random` are sequential: drawing b then c values equals drawing b+c. The existing streams (`src/decoy_engine/generation/_column_streams.py`) rely on this.
 - **Bounded join for inherit.** A hash map built from the parent while it streams, then probed per child batch, is the build/probe hash join (Graefe 1993, "Query evaluation techniques"); its memory is reserved in the existing budget ledger.
-- **Generated code from a data file.** The certified-pairs JSON is the source; a script writes the Python constant and a test fails when they differ (the same shape as the engine's other derived tables, for example `scripts/secret_material_census.py` and `tests/sentry/secret_material_census.json`). Needed because `scripts/` is not in the wheel, so the runtime cannot read the JSON.
+- **Generated code from a data file.** The certified-pairs JSON is the source for locale-specific pairs only; a script writes that Python constant and a test fails when they differ (the same shape as the engine's other derived tables, for example `scripts/secret_material_census.py` and `tests/sentry/secret_material_census.json`). The separate global registry for the legacy ten is `POOL_ELIGIBLE_FAKER_TYPES` in `_faker_pool.py:62-75`; runtime eligibility and the harness `POSITIVE_CONTROL` both read that registry. Needed because `scripts/` is not in the wheel, so the runtime cannot read the JSON.
 
 ### Reuse inventory
 
 - `src/decoy_engine/generation/_faker_pool.py`: `PooledSelector`, `open_pooled_selector` (`:459`), `build_pool_values`, `pool_eligible`, `pool_opted_out` (`:243`), `POOL_ELIGIBLE_FAKER_TYPES` (`:62`), `POOL_ELIGIBLE_LOCALE_PAIRS`. The one pool owner.
 - `src/decoy_engine/generation/pool/_sampler.py:278-281` `PoolSampler` REUSE draw (`rng.integers(0, pool.size, size=n)`, `pool.values[indices]`): the second pick site, which moves to the same take helper.
-- `scripts/faker-determinism/check_determinism.py` and `scripts/faker-determinism/certified_pairs.json` (a list of `{faker_type, locale, kwargs, pool_digest, output_digest}`): the certification source.
+- `scripts/faker-determinism/check_determinism.py` and `scripts/faker-determinism/certified_pairs.json` (a list of `{faker_type, locale, kwargs, pool_digest, output_digest}`): the locale-pair certification source. `_faker_pool.py:62-75` `POOL_ELIGIBLE_FAKER_TYPES` is the global legacy-ten registry; `check_determinism.py:55-58` imports it for `POSITIVE_CONTROL` rather than copying it.
 - `src/decoy_engine/generation/_reproducibility.py:40-57` `_CLOCK_FAKER_EXACT` and `_CLOCK_FAKER_PREFIXES`: the one list of clock-dependent Faker types.
 - `src/decoy_engine/reasons/route/_part1.py:109` `_d = _catalog.route(...)`: the registration form for route codes.
 - `_column_streams.py` `make_column_stream`, `_faker_stream` (`:331`); `_admission.py` `classify_plan`; `generation/window.py`; `statistical/_sample.py`; the budget ledger, `_preflight` (`_streamed.py:222`) and `_bounds.py:58` `FAKER_VALUE_CAPS`.
@@ -100,7 +100,7 @@ Run card: S4 records `quality_metrics["generation_route"] = {"route": "streamed"
 
 ### Fields
 
-The runtime eligible set is `src/decoy_engine/generation/pool/_eligible.py`, written by `scripts/faker-determinism/write_eligible.py` from `certified_pairs.json` (S1b). A test regenerates it in memory and fails on any difference.
+Runtime eligibility combines two sources in `_faker_pool.pool_eligible`: `POOL_ELIGIBLE_FAKER_TYPES` in `src/decoy_engine/generation/_faker_pool.py:62-75` is the one global legacy-ten registry read by both runtime and the determinism harness, while `src/decoy_engine/generation/pool/_eligible.py` is the locale-pair set written by `scripts/faker-determinism/write_eligible.py` from `certified_pairs.json` (S1b). A test regenerates the locale-pair set in memory and fails on any difference; the generated file does not restate the global ten.
 
 - Legacy 10 (unchanged, eligible in every locale): `first_name`, `last_name`, `name`, `prefix`, `suffix`, `city`, `state`, `country`, `job`, `company` (`src/decoy_engine/generation/_faker_pool.py:62-75`).
 - Existing certified pairs (unchanged): `POOL_ELIGIBLE_LOCALE_PAIRS`, now generated, same contents.
@@ -117,8 +117,8 @@ The runtime eligible set is `src/decoy_engine/generation/pool/_eligible.py`, wri
 
 ## 5. Slices and size
 
-- **S1a TAKE-MOVE (byte-identical).** `pool_take(pool: pa.Array, indices: np.ndarray) -> pa.Array` in `src/decoy_engine/generation/pool/_value_pool.py` (88 lines, about +15); `ValuePool` holds its values once as a `pa.Array` beside the frozen numpy array. `PooledSelector.take(n)` and `PoolSampler` REUSE (`src/decoy_engine/generation/pool/_sampler.py:280-281`, converts to the pandas Series it returns today) both call it with the same RNG draw. `_table_batches` and `_check_width` move to `src/decoy_engine/generation/stream/_batches.py` (new package, about 160 lines with the Arrow path), which accepts a `pa.Array` from a stream and builds the column without a list unless a sibling, collector or declared cast needs the values; the null mask is the same `default_rng(base_int("np")).random(size)` draw applied with `pc.if_else`. `_streamed.py` 600 to about 470. Bytes: identical (A2).
-- **S1b POOL-RULE (byte change).** Drop `N_THRESHOLD`; `P = min(rows, DEFAULT_POOL_SIZE)`; for `rows <= P` the column is the pool in build order. Eligible set generated (`pool/_eligible.py`, about 90 lines generated; `scripts/faker-determinism/write_eligible.py`, about 40). Harness run for group A and B pairs on the CI Faker pin; digests committed. `pool_opted_out(col, *, key_columns)` (`_faker_pool.py:243`) gains the key opt-out; `key_columns` is a frozenset of `(table, column)` computed once by `classify_plan` from `reference` and `inherit` keys. Callers updated: `src/decoy_engine/generation/_window_admission.py:383`, `:437`, `src/decoy_engine/generation/_column_streams.py:347`, `src/decoy_engine/generation/_faker_pool.py:317`, `src/decoy_engine/generation/_streamed.py:200`. `_faker_pool.py` 545 to about 470 (type list moved out). Shadow and draw-site edits. Group B merges only after the owner confirms; until then the generator writes group A only.
+- **S1a TAKE-MOVE (byte-identical).** `pool_take(pool: pa.Array, indices: np.ndarray) -> pa.Array` in `src/decoy_engine/generation/pool/_value_pool.py` (88 lines, about +15); `ValuePool` and `PooledSelector` deliberately retain both forms: one `pa.Array` for the take path beside the frozen numpy object array required by the existing non-REUSE sampler paths. `_bounds.py` adds one `faker_pool_resident_bytes(pool_size, payload)` choke point that conservatively sums the retained numpy/object representation, the Arrow data, offsets and validity buffers, and conversion peak; both preflight and the live ledger reservation at `_column_streams.py:350-354` call it. `PooledSelector.take(n)` and `PoolSampler` REUSE (`src/decoy_engine/generation/pool/_sampler.py:280-281`, converts to the pandas Series it returns today) both call `pool_take` with the same RNG draw. `_table_batches` and `_check_width` move to `src/decoy_engine/generation/stream/_batches.py` (new package, about 160 lines with the Arrow path), which accepts a `pa.Array` from a stream and builds the column without a list unless a sibling, collector or declared cast needs the values; the null mask is the same `default_rng(base_int("np")).random(size)` draw applied with `pc.if_else`. `_streamed.py` 600 to about 470. Bytes: identical (A2). Reservation: both retained forms and conversion peak are covered (A14).
+- **S1b POOL-RULE (byte change).** Drop `N_THRESHOLD`; `P = min(rows, DEFAULT_POOL_SIZE)`; for `rows <= P` the column is the pool in build order. The preflight and `_column_streams.py:350-354` reservation pass `P`, never the fixed `DEFAULT_POOL_SIZE`, to `faker_pool_resident_bytes`; a small job therefore pays only for the pool it builds (A15). The locale-pair set is generated (`pool/_eligible.py`, about 90 lines generated; `scripts/faker-determinism/write_eligible.py`, about 40), while the global legacy-ten registry remains `POOL_ELIGIBLE_FAKER_TYPES` in `_faker_pool.py` and is read by runtime and harness. Harness run for group A and B pairs on the CI Faker pin; digests committed. `pool_opted_out(col, *, key_columns)` (`_faker_pool.py:243`) gains the key opt-out; `key_columns` is a frozenset of `(table, column)` computed once by `classify_plan` from `reference` and `inherit` keys. Callers updated: `src/decoy_engine/generation/_window_admission.py:383`, `:437`, `src/decoy_engine/generation/_column_streams.py:347`, `src/decoy_engine/generation/_faker_pool.py:317`, `src/decoy_engine/generation/_streamed.py:200`. `_faker_pool.py` 545 to about 400 (locale-pair list moved out; global registry stays). Shadow and draw-site edits. Group B merges only after the owner confirms; until then the generator writes group A only.
 - **S2 PROVIDER-LOOKUP.** `provider` stream per draw path; `lookup` stream on one persistent `random.Random(base_int("py"))`. `_column_streams.py` 381 to about 450, `kinds/_provider.py` 159 to about 185, `kinds/_lookup.py` 289 to about 305. Bytes identical to legacy (A5).
 - **S3 STATISTICAL-INHERIT.** `src/decoy_engine/generation/statistical/_stream.py` (new, about 120), `src/decoy_engine/generation/relational/_inherit_stream.py` (new, about 100), registration in `_column_streams.py` (about +10), `_fidelity_gate.py` accumulator (about +30). Values identical; the fidelity warning may fire at a different score.
 - **S4 ROUTE-CODES-CARD.** Engine: `reasons/route/_generation.py` (new, about 40), `_admission.py` (codes, about +15), `_streamed.py` (reason from codes), `_pipeline_generate_mask.py` (calls `run_generation` through the plan entry so the result's route and declines reach `quality_metrics`; edits only, no new module in `execution/`), `docs/qa/12-generation.md`, `docs/qa/15-execution-routes-native.md`, compatibility contract. CLI (after the engine pin): `src/decoy/cli/run/_render.py` (one fact, about +8), the `--json` shape snapshot `tests/fixtures/release_freeze/json-shapes.json`.
@@ -143,7 +143,7 @@ New public names: `pool_take` is private (`generation/pool/`). `quality_metrics[
 
 - Principles: single responsibility (the batch assembler moves out of `_streamed.py`, which keeps the run's orchestration; the change pain it removes is a 600-line file edited for every new kind). Open/closed for kinds (a new streamable kind registers a stream in `make_column_stream` and flips its admission row; no edit to the assembler).
 - Pattern: Arrow dictionary decode (index then take); SDV pooled Faker with key opt-out; build/probe hash join.
-- One place per fact: the eligible set (certified JSON, generated module checked by a test); clock types (`_reproducibility.py`); code summaries (`reasons.route` registry); pick (`pool_take`); key columns (computed once in `classify_plan`, passed as a typed frozenset).
+- One place per fact: global legacy-ten eligibility (`_faker_pool.py` `POOL_ELIGIBLE_FAKER_TYPES`, read by runtime and harness); locale-pair eligibility (`certified_pairs.json`, generated module checked by a test); pool memory accounting (`_bounds.py` `faker_pool_resident_bytes`, used by preflight and the live ledger); clock types (`_reproducibility.py`); code summaries (`reasons.route` registry); pick (`pool_take`); key columns (computed once in `classify_plan`, passed as a typed frozenset).
 - House style: `pool_opted_out` takes a typed `key_columns` argument, not a flag; no new flag arguments.
 
 ## 8. Class table
@@ -177,18 +177,20 @@ New public names: `pool_take` is private (`generation/pool/`). `quality_metrics[
 | 10 | Allowlisted helpers are still checked | `pool_take` | not an allowlist entry; both call sites are named in A2 and a test asserts no other `pool.values[` gather remains in `generation/` |
 | 11 | No raised caps | `generation/` fan-out (25), `_streamed.py` size | the new module goes in a new sub-package; `_streamed.py` shrinks; no cap or pin is raised |
 
-## 9. Acceptance tests (each fails before its slice, except A2 and A5, byte controls that pass before and after)
+## 9. Acceptance tests (each fails before its slice, except A2, A3 and A5, controls that pass before and after)
 
 S1a:
 
 - **A2 take parity.** A legacy-10 type at 120,000 rows, with `null_probability: 0.1`, gives the same Parquet digest through `pool_take` and the moved assembler as at `70881ad79`; `PoolSampler` REUSE gives the same Series. A test asserts no other `pool.values[` gather remains under `src/decoy_engine/generation/`.
-- **A3 batch invariance.** Each pooled type, rows {1, 9,999, 10,000, 10,001, 120,000}, batches {1, 7, 4096, rows}: one digest per case across batch sizes and between resident and sink runs.
+- **A3 batch invariance control.** Each pooled type, rows {1, 9,999, 10,000, 10,001, 120,000}, batches {1, 7, 4096, rows}: one digest per case across batch sizes and between resident and sink runs. This passes before and after S1a and S1b and guards their refactors.
+- **A14 pool representation reservation.** With a bounded fake provider and 120,000 rows, the live ledger's recorded reservation equals `faker_pool_resident_bytes(10_000, payload)`, including the retained numpy/object and Arrow representations plus conversion peak. A budget of exactly that reservation plus the unchanged batch requirement admits and completes the job; one byte less refuses before the first provider call. Mutating the helper to omit either retained representation makes the recorded-reservation assertion fail.
 
 S1b:
 
-- **A1 eligible set.** `pool/_eligible.py` equals the module `write_eligible.py` produces from `certified_pairs.json`; removing a pair from the JSON in a scratch copy makes the test fail; the 10 legacy types are eligible in a locale the file never names (for example `pt_BR`). No eligible type is in the clock set (`date` and `date_time` are not eligible: fail-before is n/a, the test guards the rule). Fail-before for the generated module: it does not exist.
+- **A1 eligible sources.** `pool/_eligible.py` equals the locale-pair module `write_eligible.py` produces from `certified_pairs.json`; removing a pair from the JSON in a scratch copy makes the test fail. The runtime global set is the exact `POOL_ELIGIBLE_FAKER_TYPES` registry that the harness imports for `POSITIVE_CONTROL`, with no generated or harness copy; the 10 legacy types are eligible in a locale the JSON never names (for example `pt_BR`). No eligible type is in the clock set (`date` and `date_time` are not eligible: fail-before is n/a, the test guards the rule). Fail-before for the generated locale-pair module: it does not exist.
 - **A4 width bound.** A fake provider whose pool holds one value over its `FAKER_VALUE_CAPS` refuses in budget mode before any row is written.
-- **A12 key opt-out.** An `email` column that a `reference` in another table points to, and a `user_name` column that is an `inherit` key, run per row (distinct values at 30,000 rows); the same type on a non-key column pools. Fail-before: no key opt-out exists.
+- **A12 key opt-out.** An instrumented provider returns the same value on every call so distinct counts cannot prove the route. For an `email` column targeted by a `reference` and a `user_name` column used as an `inherit` key, a spy asserts `open_pooled_selector` is not selected and the provider takes the per-row path; the same types on non-key columns select `open_pooled_selector` and build exactly `P` values. Fail-before: no key opt-out exists.
+- **A15 small-pool admission.** With the same bounded fake provider and `rows = 9`, the live ledger records `faker_pool_resident_bytes(9, payload)`. A tight budget of exactly that reservation plus the unchanged batch requirement admits and completes the job. That budget is below `faker_pool_resident_bytes(10_000, payload)`, proving the fixed 10,000 reservation is gone; one byte less refuses before the first provider call.
 - **A10 speed (performance gate, vm-run on the Dell node, not unit).** 10M rows of `email` (non-key) to Parquet in under 3 s (about 20 min today); 10M rows of `first_name` in under 1.0 s (1.46 s today). Recorded in the slice record with the commit.
 
 S2:
@@ -222,7 +224,11 @@ Golden tests that cite `N_THRESHOLD` or pool bytes and change in S1b (regenerate
 
 `docs/compatibility-contract.md`: one generation entry (pool rule, eligible-set source, key opt-out, codes, `generation_route`). `docs/determinism.md`: pool paragraph.
 
-## 11. Pre-mortem
+## 11. Cross-plan edits
+
+- `origin/plan/gen-per-column` `docs/plans/2026-11-22-gen-per-column.md:164` must replace its dependency on only GSA S1a with GSA S1a, S2 and S3 before GEN-PER-COLUMN S1 starts. Its column routes require the provider and lookup streams from GSA S2 and the statistical and inherit streams from GSA S3, in addition to the assembler from S1a. GEN-PER-COLUMN S5 also remains after GSA S4 because it extends GSA's generation card fact.
+
+## 12. Pre-mortem
 
 - A user joins on a non-key email column and gets fan-out from repeats. Named in the changelog with `unique: true` and `pooled: false`. A column that is a declared join target is already a key column and does not pool.
 - A join target that is not declared in the plan (the user joins outside Decoy). Not visible to the engine; the changelog says to mark it `unique: true`.
@@ -231,7 +237,7 @@ Golden tests that cite `N_THRESHOLD` or pool bytes and change in S1b (regenerate
 - The inherit map for a 100M-row parent does not fit: budget mode refuses; unbounded mode holds the map, which is smaller than the parent table legacy held.
 - ROUTE-LABEL-TRUTH and this row both edit `reasons/route/__init__.py` (one star import each): parallel ledger lines, keep both on merge.
 
-## 12. Open questions for the owner
+## 13. Open questions for the owner
 
 1. Group B (owner-pending, asked by Dennis): pool `email`, `user_name`, `phone_number`, `url`, `domain_name`, `ipv4`, `street_address`, `postcode` and the related types on non-key columns, with the automatic key opt-out? Recommended: yes.
 2. For `rows <= 10,000`, emit the pool in build order (recommended) or always draw indices?
