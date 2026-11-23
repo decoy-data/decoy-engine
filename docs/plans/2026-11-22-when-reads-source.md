@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-22; Dennis R1 items closed, owner grammar seam added)
+Status: plan (revision 2.1, 2026-11-23; amendment A1 from the S1 build: one reader for the chunk read set, the rev9 backtick tests; revision 2, 2026-11-22: Dennis R1 items closed, owner grammar seam added)
 
 # WHEN-READS-SOURCE: a `when:` condition reads the original value on every route
 
@@ -285,3 +285,20 @@ Test scope: T0 per edit; T1 impact selection plus the named tests and the sentri
 ## 12. Open questions for the owner
 
 None. The contract, the prefixes, the V1 refusal of `masked.` and the out-of-scope line for created columns are the owner's decisions of 2026-11-22. The 1.x design for masked reads is a note (section 7), not a decision taken here.
+
+## Amendment A1 (2026-11-23, from the S1 build, engine #769)
+
+The S1 builder found two gaps. Both are fixed here, and S1 carries them.
+
+**A1.1 One reader for the chunk read set.** `execution/_column_access.predicate_names` (`:100`) is a second reader of `when:` columns. It runs pandas' tokenizer and NFKC-normalizes every name, including backtick-quoted ones. After S1 the evaluator reads exactly the columns `when_column_refs` returns (item 10, the alias map). For a quoted fullwidth name the two disagree: the evaluator reads the exact column and the read set collects the normalized name. A read set that misses a column the predicate reads hands it a placeholder, so rows can be selected wrongly and a column left unmasked (the failure the `predicate_names` docstring itself names). Fix at the source: `predicate_names` stops tokenizing. It calls `when_column_refs` and returns `{read.column for read in refs}`, or None when the predicate does not parse (callers keep treating every passthrough column as read). There is then one producer of `when:` reads. Name normalization lives only in the grammar's name rule: an unquoted name is NFKC-normalized there, which keeps today's behavior (pandas resolves a fullwidth bare `x` and a ligature `file` to `x` and `file`); a quoted name is exact and is not normalized. If keeping bare-name NFKC is not possible in the grammar, stop and report; do not change bare-name behavior silently.
+
+**A1.2 Acceptance and mutation.**
+- **AT-S1e read set equals evaluator reads.** For a predicate corpus (bare, fullwidth bare, ligature bare, quoted dotted, quoted fullwidth, `source.` with each form, a string literal holding a name, an unparsable predicate), the chunk read set equals the set of columns the evaluator reads (spy on the alias map), and the unparsable case returns None. Runs in `tests/sentry/defects/` beside the reserved-name sentry.
+- **Mutation A1-M1:** normalize quoted names in the grammar's name rule (AT-S1e red on the quoted fullwidth case). **A1-M2:** restore the tokenizer inside `predicate_names` (AT-S1e red on the quoted fullwidth case). **A1-M3:** drop the None return for an unparsable predicate (AT-S1e red).
+
+**A1.3 Tests that change.** Backtick quoting is valid from S1 (item 9), so these cases now assert the opposite of what they assert on main. Change them in a separate commit whose message cites A1.3; every changed case asserts the masked output equals the oracle and the read set holds the exact quoted column:
+- `tests/native/test_chunked_entry_rev9_read.py::test_backtick_predicate_is_rejected_at_compile` (4 cases): rename to `test_backtick_predicate_is_accepted` and assert acceptance plus oracle equality.
+- `tests/native/test_chunked_entry_rev9_nfkc.py::test_nfkc_spelled_predicate_is_rejected_at_compile` (the 4 backtick cases): a quoted NFKC-spelled name reads the exact column; if no such column exists, it is refused with the grammar's unknown-column code at compile, not with the old backtick refusal. The bare NFKC cases keep their current outcome unchanged.
+- `tests/unit/execution/test_c8_iii_c_boundaries.py`: the two `WhenSpec(...)` constructions pass `WhenRead("x")` for the typed field; no assertion changes.
+
+**A1.4 Size.** `_column_access.py` shrinks (the tokenizer loop goes). No ceiling rises.
