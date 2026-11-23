@@ -168,9 +168,9 @@ def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, di
         else:
             fmt = "ipc"
             component = f"s{index:04d}.arrow"
-            with arrow_adapter.ipc_new_file(stage, component, table.schema) as writer:
-                # The IPC file format allows one dictionary per field; unify the chunks' own.
-                writer.write_table(table.unify_dictionaries())
+            # The stream format carries each chunk's own dictionary; the file format allows one.
+            with arrow_adapter.ipc_new_stream(stage, component, table.schema) as writer:
+                writer.write_table(table)
         manifest[name] = {"path": str(work_root / component), "format": fmt}
     return manifest
 

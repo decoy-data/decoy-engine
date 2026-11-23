@@ -253,6 +253,8 @@ _IPC_TYPES = {
     "large_list_view",
     "sparse_union",
     "dense_union",
+    "dictionary_string",
+    "dictionary_binary",
     "dictionary_int",
     "dictionary_large_string",
     "dictionary_string_view",
@@ -396,33 +398,95 @@ def _round_trip(tmp_path, table):
     return manifest, actual
 
 
-def test_multi_chunk_dictionaries_with_fixed_list_round_trip(tmp_path):
-    dict_type = pa.dictionary(pa.int32(), pa.string())
-    fixed = pa.list_(pa.int64(), 2)
-    chunks = [
-        pa.table(
-            {
-                "d": pa.array(["a", None, "b"], dict_type),
-                "e": pa.array([None, "x", "x"], dict_type),
-                "f": pa.array([[1, 2], [3, 4], [5, 6]], fixed),
-            }
-        ),
-        pa.table(
-            {
-                "d": pa.array(["c", "a", None, "d"], dict_type),
-                "e": pa.array(["y", None, "z", "y"], dict_type),
-                "f": pa.array([[7, 8]] * 4, fixed),
-            }
-        ),
-    ]
-    table = pa.concat_tables(chunks)
-    assert table.column("d").num_chunks == 2
+def _assert_exact(table, actual):
+    """Equal schema and values, and every chunk keeps its own dictionary, order and indices."""
+    assert actual.schema.equals(table.schema)
+    assert str(actual.schema) == str(table.schema)
+    assert actual.to_pylist() == table.to_pylist()
+    for name in table.column_names:
+        want, got = table.column(name), actual.column(name)
+        assert [len(c) for c in got.chunks] == [len(c) for c in want.chunks]
+        for w, g in zip(want.chunks, got.chunks, strict=True):
+            assert g.type.equals(w.type)
+            if pa.types.is_dictionary(w.type):
+                assert g.dictionary.equals(w.dictionary)
+                assert g.indices.equals(w.indices)
+
+
+def _dict_chunks(dtype, *chunks):
+    """A column whose chunks each carry their own (indices, dictionary)."""
+    return pa.chunked_array(
+        [
+            pa.DictionaryArray.from_arrays(
+                pa.array(indices, dtype.index_type),
+                pa.array(values, dtype.value_type),
+                ordered=dtype.ordered,
+            )
+            for indices, values in chunks
+        ],
+        dtype,
+    )
+
+
+_DICT_FIXED = pa.list_(pa.int64(), 2)
+_DICTIONARY_CASES = {
+    "fixed_list_beside_string_dicts": pa.table(
+        {
+            "d": _dict_chunks(
+                pa.dictionary(pa.int32(), pa.string()),
+                ([0, None, 1], ["a", "b"]),
+                ([0, 1, None, 2], ["c", "a", "d"]),
+            ),
+            "f": pa.chunked_array([[[1, 2], [3, 4], [5, 6]], [[7, 8]] * 4], _DICT_FIXED),
+        }
+    ),
+    "list_values": pa.table(
+        {
+            "x": _dict_chunks(
+                pa.dictionary(pa.int32(), pa.list_(pa.int64())),
+                ([0, 1, 0], [[1], [2, 3]]),
+                ([1, None, 0], [[9], [2, 3]]),
+            )
+        }
+    ),
+    "int8_union_over_128": pa.table(
+        {
+            "x": _dict_chunks(
+                pa.dictionary(pa.int8(), pa.string()),
+                (list(range(100)), [f"a{i}" for i in range(100)]),
+                (list(range(100)), [f"b{i}" for i in range(100)]),
+            )
+        }
+    ),
+    "ordered_conflicting": pa.table(
+        {
+            "x": _dict_chunks(
+                pa.dictionary(pa.int32(), pa.string(), ordered=True),
+                ([0, 1], ["b", "c"]),
+                ([0, 1], ["c", "b"]),
+            )
+        }
+    ),
+    "string_null_entry": pa.table(
+        {
+            "x": _dict_chunks(
+                pa.dictionary(pa.int32(), pa.string()),
+                ([0, 1, None], ["a", None]),
+                ([1, 0], ["b", None]),
+            )
+        }
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(_DICTIONARY_CASES))
+def test_dictionaries_stage_byte_exact_through_ipc(tmp_path, name):
+    table = _DICTIONARY_CASES[name]
+    assert all(c.num_chunks == 2 for c in table.columns)
+    assert not any(arrow_adapter.parquet_holds_type(f.type) for f in table.schema)
     manifest, actual = _round_trip(tmp_path, table)
     assert manifest["t"]["format"] == "ipc"
-    assert str(actual.schema) == str(table.schema)
-    # Unifying rewrites each field's dictionary, so compare the values and the unified table.
-    assert actual.to_pylist() == table.to_pylist()
-    assert actual.equals(table.unify_dictionaries())
+    _assert_exact(table, actual)
 
 
 _PARQUET_REFUSED = {

@@ -22,9 +22,9 @@ def _strict(handle: FileHandle) -> bool:
 
 
 def ipc_read_path(handle: FileHandle) -> pa.Table:
-    """The returned Arrow buffers retain the mapped private file."""
+    """Read a staged IPC stream; the returned Arrow buffers retain the mapped private file."""
     with guarded("isolated.sources", True, pa.memory_map, handle.library_path(), "r") as source:
-        reader = guarded("isolated.sources", True, pa.ipc.open_file, source)
+        reader = guarded("isolated.sources", True, pa.ipc.open_stream, source)
         return guarded("isolated.sources", True, reader.read_all)
 
 
@@ -166,7 +166,8 @@ def _parquet_exact(t: pa.DataType) -> bool:
     if isinstance(t, pa.BaseExtensionType):
         return False
     if pa.types.is_dictionary(t):
-        return t.index_type == pa.int32() and t.value_type in (pa.string(), pa.binary())
+        # Parquet refuses a null dictionary entry, which no type check can see.
+        return False
     if pa.types.is_timestamp(t):
         return t.unit in ("ms", "us", "ns")
     return (
