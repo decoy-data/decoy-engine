@@ -217,6 +217,32 @@ def untouched_columns(
     or not, leaves its column as the source held it; every other node masks its own columns.
     A relationship key of `table` (`fk_edges`) is never untouched: the cascade rewrites a child
     key to follow its masked parent whatever the key's own strategy says."""
+    unchanged, cascaded = _unchanged_and_cascaded(nodes, names, registry, fk_edges, table)
+    return unchanged - cascaded
+
+
+def cascaded_unchanged_columns(
+    nodes: Iterable[Any],
+    names: Sequence[str],
+    registry: Any,
+    fk_edges: Iterable[Any] = (),
+    table: str | None = None,
+) -> frozenset[str]:
+    """The relationship keys of `table` whose own rule leaves them as the source held them. They
+    are rebuilt from the frame (a key follows its masked parent), and the assembler gives the
+    rebuilt column its source type back where pandas lost it (a zero-row or all-null key, a
+    decimal precision)."""
+    unchanged, cascaded = _unchanged_and_cascaded(nodes, names, registry, fk_edges, table)
+    return unchanged & cascaded
+
+
+def _unchanged_and_cascaded(
+    nodes: Iterable[Any],
+    names: Sequence[str],
+    registry: Any,
+    fk_edges: Iterable[Any],
+    table: str | None,
+) -> tuple[frozenset[str], frozenset[str]]:
     from decoy_engine.execution._adapter import provider_config_to_dict
     from decoy_engine.plan._types import ColumnSeed
 
@@ -242,13 +268,13 @@ def untouched_columns(
             masked |= set(node.columns)
     written = handler_written_columns(entries, registry)
     if written is None:  # a handler writes columns no declaration can name: nothing is untouched
-        return frozenset()
+        return frozenset(), frozenset()
     cascaded: set[str] = set()
     if table is not None:
         from decoy_engine.execution._fk_keys import fk_columns_for_table
 
         cascaded = fk_columns_for_table(fk_edges, table)
-    return frozenset(names) - written - masked - cascaded
+    return frozenset(names) - written - masked, frozenset(cascaded)
 
 
 def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]]:

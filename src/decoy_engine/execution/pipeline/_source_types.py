@@ -24,7 +24,8 @@ def _with_source_types(
 
     A date strategy hands pandas ``datetime.date`` cells, which Arrow reads as ``date32`` (so a
     ``date64`` source changes type) and, for an all-null chunk, as ``null`` (so chunk schemas
-    differ). Only those two losses are repaired; any other type difference is left as it is.
+    differ) and a decimal gets the precision pandas' object round trip changed. Only those losses
+    are repaired; any other type difference is left as it is.
     """
     if schema is None:
         return table
@@ -34,22 +35,34 @@ def _with_source_types(
         want = schema.field(name).type
         have = table.schema.field(name).type
         if have != want and (
-            pa.types.is_null(have) or (pa.types.is_date64(want) and have == pa.date32())
+            pa.types.is_null(have)
+            or (pa.types.is_date64(want) and have == pa.date32())
+            or (pa.types.is_decimal(want) and pa.types.is_decimal(have))
         ):
             position = table.schema.get_field_index(name)
             table = table.set_column(position, name, table.column(position).cast(want))
     return table
 
 
-def _expected_index(source: pa.Table) -> pd.Index | None:
-    """The index `to_pandas()` gives this source: the range its own pandas metadata describes
-    (any start and step, so `df.iloc[::2]` and `df.iloc[::-1]` sources hold), else `0..n`.
-    None when the metadata stores the index as a column; the row count is the only check then."""
-    meta = source.schema.pandas_metadata or {}
-    described = meta.get("index_columns", [])
-    if any(isinstance(c, str) for c in described):
-        return None
-    for entry in described:
+def _stored_index_names(source: pa.Table) -> list[str]:
+    """The source columns its pandas metadata stores as the frame index. A name the schema does
+    not hold (stale metadata) is not one."""
+    listed = (source.schema.pandas_metadata or {}).get("index_columns", [])
+    return [
+        c
+        for c in dict.fromkeys(x for x in listed if isinstance(x, str))
+        if c in source.schema.names
+    ]
+
+
+def _expected_index(source: pa.Table, stored: list[str]) -> pd.Index:
+    """The index `to_pandas()` gives this source: the values of its stored index columns, else
+    the range its own pandas metadata describes (any start and step, so `df.iloc[::2]` and
+    `df.iloc[::-1]` sources hold), else `0..n`."""
+    if stored:
+        values = source.select(stored).replace_schema_metadata(None).to_pandas()
+        return pd.MultiIndex.from_frame(values) if len(stored) > 1 else pd.Index(values[stored[0]])
+    for entry in (source.schema.pandas_metadata or {}).get("index_columns", []):
         if isinstance(entry, dict) and entry.get("kind") == "range":
             try:
                 found = pd.RangeIndex(int(entry["start"]), int(entry["stop"]), int(entry["step"]))
@@ -102,22 +115,19 @@ def table_from_pandas_keeping_source_types(
     given = dict(arrow_columns or {})
     n_rows = source.num_rows
     # A source that stores its pandas index as a column reads back with that column as the frame
-    # index, never as a frame column, and the output has never carried it.
-    stored_index = {
-        c
-        for c in (source.schema.pandas_metadata or {}).get("index_columns", [])
-        if isinstance(c, str)
-    }
+    # index, so the frame no longer holds it. The output drops it, unless a rule left it untouched
+    # (a configured passthrough column is never dropped).
+    stored_index = _stored_index_names(source)
     if frame.shape[0] != n_rows:
         raise _rows_changed(
             f"The frame has {frame.shape[0]} rows and the source has {n_rows}.",
         )
-    expected = _expected_index(source)
-    if expected is not None and not frame.index.equals(expected):
+    if not frame.index.equals(_expected_index(source, stored_index)):
         raise _rows_changed(
             f"The frame index no longer matches the source row order ({n_rows} rows).",
         )
-    names = [c for c in source.schema.names if c not in stored_index]
+    dropped = {c for c in stored_index if c not in untouched and c not in given}
+    names = [c for c in source.schema.names if c not in dropped]
     source_names = set(names)
     carried = {c for c in names if c in untouched or c in given}
     # Source columns keep the source's order. A column the frame holds and the source does not

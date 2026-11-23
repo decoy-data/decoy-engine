@@ -47,7 +47,7 @@ from decoy_engine.execution._adapter import (
     StrategyHandler,
     TokenVaultWriter,
 )
-from decoy_engine.execution._chunked_carry import untouched_columns
+from decoy_engine.execution._chunked_carry import cascaded_unchanged_columns, untouched_columns
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources
 from decoy_engine.execution._faker_degenerate_pin import apply_degenerate_faker_pin
@@ -329,7 +329,16 @@ class PandasExecutionAdapter:
                         relationship_graph.edges,
                         t,
                     ),
-                    [c for (table, c) in ctx.native_date_columns if table == t],
+                    [c for (table, c) in ctx.native_date_columns if table == t]
+                    + sorted(
+                        cascaded_unchanged_columns(
+                            (n for n in ordered if n.table == t),
+                            f.columns,
+                            registry,
+                            relationship_graph.edges,
+                            t,
+                        )
+                    ),
                 )
                 for t, f in frames.items()
             },

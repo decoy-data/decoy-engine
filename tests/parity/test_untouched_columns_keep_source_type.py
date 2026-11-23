@@ -538,3 +538,76 @@ def test_d2_passthrough_and_untouched_agree_when_the_handler_changes_the_column(
         set(untouched_columns(nodes, names, REG)),
     )
     assert changed == (set(), set())
+
+
+# Stored pandas index (Codex R3): the frame index must be the source's stored index values.
+
+
+def _stored_source() -> pa.Table:
+    frame = pd.DataFrame(
+        {"v": ["a", "b", "c"], "u": [10, 20, 30], "k": ["k0", "k1", "k2"]}
+    ).set_index("k")
+    return pa.Table.from_pandas(frame)
+
+
+def test_stored_index_in_source_order_assembles() -> None:
+    source = _stored_source()
+    out = table_from_pandas_keeping_source_types(source.to_pandas(), source, {"u"})
+    assert out.column_names == ["v", "u"]
+    assert out.column("u").to_pylist() == [10, 20, 30]
+
+
+def test_stored_index_reordered_frame_is_refused() -> None:
+    source = _stored_source()
+    frame = source.to_pandas().iloc[[2, 1, 0]]
+    frame["v"] = ["X2", "X1", "X0"]
+    with pytest.raises(ExecutionError) as info:
+        table_from_pandas_keeping_source_types(frame, source, {"u"})
+    assert info.value.code == "output_assembly_rows_changed"
+
+
+def test_stale_index_metadata_naming_an_absent_column_does_not_disable_the_guard() -> None:
+    import json
+
+    source = pa.table({"v": ["a", "b", "c"], "u": [10, 20, 30]}).replace_schema_metadata(
+        {b"pandas": json.dumps({"index_columns": ["ghost"], "columns": []}).encode()}
+    )
+    frame = pd.DataFrame({"v": ["a", "b", "c"], "u": [10, 20, 30]}).iloc[[2, 1, 0]]
+    with pytest.raises(ExecutionError) as info:
+        table_from_pandas_keeping_source_types(frame, source, {"u"})
+    assert info.value.code == "output_assembly_rows_changed"
+
+
+def test_a_stored_index_column_left_untouched_is_not_dropped() -> None:
+    frame = pd.DataFrame({"v": ["a", "b", "c"], "rowid": [7, 8, 9]}).set_index("rowid")
+    source = pa.Table.from_pandas(frame)
+    assert source.column_names == ["v", "rowid"]
+    out = table_from_pandas_keeping_source_types(source.to_pandas(), source, {"rowid"})
+    assert out.column_names == ["v", "rowid"]
+    assert out.column("rowid").to_pylist() == [7, 8, 9]
+
+
+# FK keys (Codex R3): a relationship key the rules leave unchanged is rebuilt from the frame and
+# gets its source type back.
+
+
+def _passthrough_parent_run(parent: pa.Table) -> pa.Table:
+    plan = s.make_plan(
+        {
+            "A": s.table_seed({"k": s.passthrough()}),
+            "B": s.table_seed({"k": s.passthrough(), "x": s.passthrough()}),
+        }
+    )
+    graph = s.graph(s.edge("A", "k", "B", "k", "ns_k", OrphanPolicy.PRESERVE))
+    child = pa.table({"k": parent.column("k").slice(0, 0), "x": pa.array([], pa.int64())})
+    return s.run_seq(s.Shape(plan, graph, {"A": parent, "B": child})).outputs["A"]
+
+
+def test_unchanged_decimal_parent_key_keeps_its_precision() -> None:
+    parent = pa.table({"k": pa.array([_D("1.25"), _D("2.50")], pa.decimal128(12, 2))})
+    assert _passthrough_parent_run(parent).schema.field("k").type == pa.decimal128(12, 2)
+
+
+def test_unchanged_zero_row_string_parent_key_keeps_string() -> None:
+    parent = pa.table({"k": pa.array([], pa.string())})
+    assert _passthrough_parent_run(parent).schema.field("k").type == pa.string()

@@ -107,7 +107,8 @@ def test_a_zero_row_generated_parent_matches_the_oracle_exactly(tmp_path: Path) 
     """FR0 declares a zero-row core table's columns `string`, but the mixed route must still
     publish what the full_frame oracle does. Admission declines ANY zero-row generated table
     (see the independent and lookup tests below), so the job runs the pregenerated full-frame
-    continuation and the output equals the oracle in values AND schema types (the source type, `string`)."""
+    continuation and the output equals the oracle in values AND schema types (both columns keep the declared
+    `string`: the unchanged parent key gets its type back, and the other column is untouched)."""
     config, child = _job(tmp_path, [ID, KIND], rows=0)
     declared = generate_tables_via_plan_for(config)[PARENT]
     assert [str(f.type) for f in declared.schema] == ["string", "string"]
@@ -119,7 +120,7 @@ def test_a_zero_row_generated_parent_matches_the_oracle_exactly(tmp_path: Path) 
     )
     want = oracle(config, {CHILD: child})
     _assert_same_values_and_fields(got.outputs, want.outputs)
-    assert [str(f.type) for f in got.outputs[PARENT].schema] == ["null", "string"]
+    assert [str(f.type) for f in got.outputs[PARENT].schema] == ["string", "string"]
     assert got.outputs[PARENT].num_rows == 0
 
     sink = RecordingSink()
