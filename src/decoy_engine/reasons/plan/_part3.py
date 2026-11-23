@@ -23,8 +23,11 @@ __all__ = [
     "GENERATE_FORMULA_TEMPLATE_SYNTAX",
     "GENERATE_LOCALE_UNKNOWN",
     "GENERATE_OPTION_INVALID",
+    "GENERATE_PROVIDER_FIELD_DUPLICATE",
     "GENERATE_PROVIDER_FIELD_REQUIRED",
     "GENERATE_PROVIDER_FIELD_UNEXPECTED",
+    "GENERATE_PROVIDER_FIELD_UNKNOWN",
+    "GENERATE_PROVIDER_GROUP_MISMATCH",
     "GENERATE_PROVIDER_LOCALE_UNSUPPORTED",
     "GENERATE_PROVIDER_UNKNOWN",
     "GENERATE_PROVIDER_UNSUPPORTED",
@@ -199,6 +202,11 @@ GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER = _d(
     "Generate column names a registry provider in faker_type; use type provider instead.",
     since="1.32.0",
 )
+GENERATE_PROVIDER_FIELD_DUPLICATE = _d(
+    "generate_provider_field_duplicate",
+    "Generate columns take the same composite field twice in one group.",
+    since=UNRELEASED,
+)
 GENERATE_PROVIDER_FIELD_REQUIRED = _d(
     "generate_provider_field_required",
     "Generate column uses a composite provider without naming the field it takes.",
@@ -208,6 +216,16 @@ GENERATE_PROVIDER_FIELD_UNEXPECTED = _d(
     "generate_provider_field_unexpected",
     "Generate column sets field or group on a provider that has no fields.",
     since="1.32.0",
+)
+GENERATE_PROVIDER_FIELD_UNKNOWN = _d(
+    "generate_provider_field_unknown",
+    "Generate column names a field the composite provider does not have.",
+    since=UNRELEASED,
+)
+GENERATE_PROVIDER_GROUP_MISMATCH = _d(
+    "generate_provider_group_mismatch",
+    "Generate columns in one composite group disagree on locale or determinism.",
+    since=UNRELEASED,
 )
 GENERATE_PROVIDER_LOCALE_UNSUPPORTED = _d(
     "generate_provider_locale_unsupported",

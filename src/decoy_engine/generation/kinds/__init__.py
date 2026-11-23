@@ -49,9 +49,11 @@ from decoy_engine.generation.kinds._provider import (
     provider_column_values,
     provider_generate,
 )
+from decoy_engine.generation.kinds._provider_group import BundleCache, group_of
 
 __all__ = [
     "MAX_LOOKUP_ENTRIES",
+    "BundleCache",
     "CategoricalTable",
     "ConstantStream",
     "LookupList",
@@ -66,6 +68,7 @@ __all__ = [
     "constant_payload_bound",
     "constant_values",
     "draw_path",
+    "group_of",
     "lookup_digests",
     "lookup_file_format",
     "lookup_values",

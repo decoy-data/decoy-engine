@@ -2207,9 +2207,9 @@ the assembled output tables, not on individual columns mid-run.
 
 ### provider
 
-Draws each row from a scalar provider in the masking provider registry, by the same name and
-through the same adapter. Every value is text, including the providers that return a number or
-a date (`random_int_range`, `person_dob`), so a formula or derived column reads it as text.
+Draws each row from a provider in the masking provider registry, by the same name and through
+the same adapter. Every value is text, including the providers that return a number or a date
+(`random_int_range`, `person_dob`), so a formula or derived column reads it as text.
 
 ```yaml
 - name: npi
@@ -2219,9 +2219,8 @@ a date (`random_int_range`, `person_dob`), so a formula or derived column reads 
 ```
 
 - `provider`: a registry name. The nine synthetic identifiers keep their check digits. An unknown
-  name is refused at `decoy validate` with `generate_provider_unknown`; `composite_custom` and the
-  composite providers are refused (`generate_provider_unsupported`,
-  `generate_provider_field_required`) until a later release.
+  name is refused at `decoy validate` with `generate_provider_unknown`; `composite_custom` is
+  refused with `generate_provider_unsupported`.
 - `locale`: refused with `generate_provider_locale_unsupported` unless the provider declares it.
   With no `locale`, the instance default applies and is checked before any draw. SSN, EIN, NPI
   and NDC declare `en_US` only; CUSIP declares `en_CA` and `en_US`.
@@ -2232,6 +2231,37 @@ a date (`random_int_range`, `person_dob`), so a formula or derived column reads 
   `generate_faker_type_is_domain_provider`, which points here.
 - A failure inside a draw is reported as `generation_provider_failed` with the table and column
   only, never the provider text.
+
+#### Composite groups
+
+A composite provider writes several coherent columns from one draw per row. Each output is its
+own generate column. `field` names the output, and the columns of one table that share a
+`provider` and a `group` take their values from one draw, so the email on a row is built from
+that row's first and last name and the ZIP belongs to that row's state.
+
+```yaml
+- {name: first_name, type: provider, provider: composite_person, field: first_name}
+- {name: last_name,  type: provider, provider: composite_person, field: last_name}
+- {name: email,      type: provider, provider: composite_person, field: email}
+- {name: g_first,    type: provider, provider: composite_person, field: first_name, group: guardian}
+- {name: city,  type: provider, provider: composite_city_state_zip, field: city}
+- {name: zip,   type: provider, provider: composite_city_state_zip, field: zip}
+```
+
+- The composites are `composite_person` (`dob`, `email`, `first_name`, `last_name`),
+  `composite_name_email` (`email`, `first_name`, `last_name`), `composite_city_state_zip`
+  (`city`, `state`, `zip`), `composite_address` (`city`, `state`, `street_address`, `zip`) and
+  `composite_provider` (`npi`, `practice_address`, `provider_name`).
+- `field` is required and must be one of the composite's outputs: `generate_provider_field_required`
+  and `generate_provider_field_unknown`. Use a subset of the outputs if you like.
+- `group` defaults to the provider name. Give two groups to get two people in one table. A group
+  is the columns with the same provider and group in one table; two tables never share one.
+- Members of a group must declare the same `locale` (or all leave it out) and the same
+  `determinism`, or the run is refused with `generate_provider_group_mismatch`. A `field` may
+  appear once per group (`generate_provider_field_duplicate`).
+- The values of a group do not change when you reorder, rename or add columns. A group with
+  `determinism: fresh` on every member changes on each run and stays coherent within the run.
+- `null_probability` on a member nulls only that column.
 
 ### validators:
 

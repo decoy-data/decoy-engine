@@ -31,7 +31,10 @@ from decoy_engine.plan._checks_grouped_series import check_grouped_series_refs
 from decoy_engine.plan._checks_windowed_date import check_windowed_date_refs
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan.checks._formula_types import check_formula_text_use
-from decoy_engine.plan.checks._generate_providers import registry_provider_names
+from decoy_engine.plan.checks._generate_providers import (
+    check_provider_groups,
+    registry_provider_names,
+)
 from decoy_engine.plan.checks._relationship_keys import check_generated_parent_keys
 
 __all__ = ["DEFERRED", "check_faker_default_locale", "check_generate_columns"]
@@ -144,6 +147,7 @@ def check_generate_columns(
             types = reader_types(config, provider_snapshot=provider_snapshot)
         for index in range(len(cols)):
             _check_column(table_name, cols, index, by_name, fakers, default_locale, types or {})
+        check_provider_groups(table_name, cols)
     check_generated_parent_keys(config)
 
 

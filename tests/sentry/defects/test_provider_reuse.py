@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
-MODULES = ("generation/kinds/_provider.py",)
+MODULES = ("generation/kinds/_provider.py", "generation/kinds/_provider_group.py")
 FORBIDDEN_TOKENS = frozenset({"derive", "derive_value", "default_rng", "Faker", "seed_instance"})
 IDENTIFIERS = "decoy_engine.providers_v2.identifiers"
 COMPOSITE_PRIVATE = "decoy_engine.generation.composite" + "._"
