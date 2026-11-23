@@ -14,7 +14,6 @@ from pydantic import ValidationError
 import decoy_engine
 from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
-from decoy_engine.contracts.column_shape import NO_SOURCES
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 BASELINE = json.loads((FIXTURES / "f06" / "legacy-compat-baseline.json").read_text())
@@ -138,18 +137,14 @@ def test_json_schema_lists_name_as_an_optional_string() -> None:
 
 def test_name_does_not_change_the_plan_hash(tmp_path: Path) -> None:
     """Renaming a pipeline is data binding, not masking semantics: the plan hash must not move."""
-    from decoy_engine.plan._compile import compile_plan
-    from decoy_engine.profile._source import profile_source
+    from decoy_engine.plan._compile import _hash_config
 
     (tmp_path / "p.csv").write_text("id,age,note\n1,42,a\n2,7,b\n3,13,c\n")
 
     def _hash(**extra: Any) -> str:
         raw = _raw(**extra)
         raw["sources"]["p"]["path"] = str(tmp_path / "p.csv")
-        cfg = PipelineConfig.model_validate(raw).model_dump()
-        plan = compile_plan(
-            cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES
-        )
-        return str(plan.pipeline_config_hash)
+        # The hash reads the config alone. E3 refuses this undeclared bucketize column at compile.
+        return _hash_config(PipelineConfig.model_validate(raw).model_dump())
 
     assert _hash() == _hash(name="orders") == _hash(name="sales")

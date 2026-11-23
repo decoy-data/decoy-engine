@@ -35,6 +35,7 @@ import pytest
 from decoy_engine.execution import _pipeline_routing_signals as signals
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline import run_pipeline
+from tests._column_shapes import INT_DECL
 from tests._declared_schema import declare_rest
 from tests.parity import _strict_compare as sc
 
@@ -164,7 +165,12 @@ _PARENT_PAYLOAD = [
         "deterministic": True,
         "provider_config": {"categories": ["north", "south", "east", "west"]},
     },
-    {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+    {
+        "name": "age",
+        "strategy": "bucketize",
+        "provider_config": {"width": 10},
+        **INT_DECL,
+    },
     {"name": "note", "strategy": "redact"},
     {"name": "code", "strategy": "truncate", "provider_config": {"length": 4}},
     {

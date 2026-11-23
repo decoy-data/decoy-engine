@@ -53,6 +53,7 @@ from decoy_engine.relationships import (
     RelationshipGraph,
     build_namespace_registry,
 )
+from tests._column_shapes import INT_DECL
 from tests.physical._shadow_helpers import (
     ENGINE_VERSION,
     assert_diagnostics_multisets_equal,
@@ -457,6 +458,7 @@ def test_top_code_warning_and_row_error_parity(tmp_path: Path) -> None:
             "name": "age",
             "strategy": "top_code",
             "provider_config": {"cap": 89, "over_label": "90+"},
+            **INT_DECL,
         }
     ]
     source = pa.table({"age": pa.array(["45", "92", "oops"], type=pa.string())})
