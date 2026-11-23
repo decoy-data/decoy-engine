@@ -103,7 +103,9 @@ def route_findings(text: str) -> list[str]:
         found.append("no layers step runs exactly $LAYER_TEST")
     # The sentry step builds its command in split_pytest_cmds, which puts LAYER_IGNORE before the
     # paths in every pass; the step must hand that builder SENTRY_PATHS.
-    if not re.search(r'\$\{LAYER_IGNORE\[@\]\+"\$\{LAYER_IGNORE\[@\]\}"\} \$\{SPLIT_PATHS', text):
+    split_lines = [line for line in text.splitlines() if "${SPLIT_PATHS[@]" in line]
+    ignore_then_paths = '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS'
+    if not split_lines or any(ignore_then_paths not in line for line in split_lines):
         found.append("the shared split builder does not apply LAYER_IGNORE")
     if not re.search(r"^\s+SPLIT_PATHS=\(\$\{SENTRY_PATHS\[@\]\+", text, re.MULTILINE):
         found.append("the sentry step does not run SENTRY_PATHS")
@@ -192,6 +194,16 @@ def test_a_broken_route_split_is_detected() -> None:
         '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS', "${SPLIT_PATHS"
     )
     assert "the shared split builder does not apply LAYER_IGNORE" in route_findings(unignored)
+    # Dropping the ignore from any one pass alone must also be caught.
+    target = '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS'
+    count = text.count(target)
+    assert count >= 2
+    for nth in range(count):
+        at = -1
+        for _ in range(nth + 1):
+            at = text.index(target, at + 1)
+        one_pass = text[:at] + "${SPLIT_PATHS" + text[at + len(target) :]
+        assert "the shared split builder does not apply LAYER_IGNORE" in route_findings(one_pass)
     other_paths = re.sub(r"SPLIT_PATHS=\(\$\{SENTRY_PATHS", "SPLIT_PATHS=(${OTHER_PATHS", text)
     assert "the sentry step does not run SENTRY_PATHS" in route_findings(other_paths)
 
