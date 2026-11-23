@@ -104,6 +104,7 @@ __all__ = [
     "WEAK_MASK_SECRET",
     "WHEN_EXPRESSION_ERROR",
     "WHEN_EXPRESSION_NOT_BOOLEAN",
+    "WHEN_MASKED_REFERENCE_UNSUPPORTED",
     "WHEN_OUTSIDE_CLOSED_GRAMMAR",
     "WHEN_PREDICATE_NOT_NATIVE",
     "WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET",
@@ -230,6 +231,11 @@ TRUNCATE_LENGTH_INVALID = _d("truncate_length_invalid", "Truncate length invalid
 TRUNCATE_MASK_CHAR_INVALID = _d("truncate_mask_char_invalid", "Truncate mask char invalid.")
 WHEN_EXPRESSION_ERROR = _d("when_expression_error", "When expression error.")
 WHEN_EXPRESSION_NOT_BOOLEAN = _d("when_expression_not_boolean", "When expression not boolean.")
+WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
+    "when_masked_reference_unsupported",
+    "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
+    since=UNRELEASED,
+)
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
 
 _d = _catalog.runtime("SubsetInternalError")

@@ -328,7 +328,7 @@ def _when_read_columns(
             if not isinstance(when, str):
                 continue
             try:
-                refs = when_column_refs(parse_when_cached(when))
+                refs = [r.column for r in when_column_refs(parse_when_cached(when))]
             except ValidationError:
                 continue  # the evaluator raises its coded error; nothing to protect here
             out[table] = out.get(table, set()) | set(refs)
