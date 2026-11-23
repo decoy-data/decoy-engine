@@ -22,8 +22,6 @@ from decoy_engine import reasons
 from decoy_engine.fileaccess import (
     FileAccessDenied,
     FileAccessUnavailable,
-    LockTimeout,
-    LockUnavailable,
     OutputDir,
     OutputTxn,
     StageDir,
@@ -35,17 +33,20 @@ from decoy_engine.publication._current import (
     PointerState,
     PointerUnreadable,
     is_pointer_value,
+    pointer_bytes,
 )
 from decoy_engine.publication._members import Member
 from decoy_engine.publication._publish import failed_receipt, publish_unit
 from decoy_engine.publication._types import (
     DEFAULT_LOCK_TIMEOUT_S,
+    LOCK_ERRORS,
     CommitReceipt,
     Outcome,
     PublicationFailed,
     PublicationRequest,
     Role,
     VaultBinding,
+    lock_reason,
 )
 from decoy_engine.reasons import ReasonCode
 
@@ -122,10 +123,8 @@ def _acquire(
     code: ReasonCode | None = None
     try:
         held = stack.enter_context(pointer.locked(timeout_s))
-    except LockTimeout:
-        code = reasons.decoy.PUBLICATION_LOCK_TIMEOUT
-    except LockUnavailable:
-        code = reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE
+    except LOCK_ERRORS as exc:
+        code = lock_reason(exc)
     return held, code
 
 
@@ -282,11 +281,13 @@ class DeliveryStage:
 
     def _after_interrupt(self) -> DeliveryReceipt:
         """4.7 rule 2: under the held lock, `LATEST` naming this run means it is visible, with
-        durability unknown. An unreadable pointer cannot prove it is not."""
-        if not self._crossed:
+        durability unknown. An unreadable pointer cannot prove it is not. Before the bind point
+        the pointer is re-read only when it already named this run (a resume, plan 7.1)."""
+        named = pointer_bytes(self._run_id)
+        if not self._crossed and self._expected.raw != named:
             return DeliveryReceipt("nothing")
         now = self._read()
-        if now is None or now.raw == f"{self._run_id}\n".encode("ascii"):
+        if now is None or now.raw == named:
             return DeliveryReceipt("uncertain", _UNCERTAIN)
         return DeliveryReceipt("nothing")
 
@@ -320,7 +321,7 @@ class DeliveryStage:
             for folder in sorted(self._dirs, key=len, reverse=True):
                 if not any(p.startswith(folder) for p in keep):
                     self._drop(folder)
-        except OSError:
+        except (OSError, FileAccessDenied, FileAccessUnavailable):
             failed = True
         self._members = [Member(p, self._staged[p][1]) for p in keep]
         return not failed

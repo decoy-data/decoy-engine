@@ -179,6 +179,10 @@ stage reads only plain data, so `publication` never imports `delivery`: the call
   with that same state. `reconcile(receipt)` runs under the lock with the final receipt and must
   not raise. An exception or interrupt after the bind may have happened is judged by one pointer
   re-read (`LATEST` names this run: `uncertain`), reconciled, and raised again.
+- The stage writes local paths, so it works under the ambient file-access policy only. A strict
+  policy refuses `local_stage_path`.
+- A second interrupt while `deliver` settles a receipt can leave the stage state `delivering`; the
+  pointer, not the state, says whether the run is visible.
 - `abort()` removes the stage and never touches the pointer; it is a no-op after `delivered`. A
   `deliver` after `abort` raises `RuntimeError`.
 

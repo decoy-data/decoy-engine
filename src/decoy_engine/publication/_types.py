@@ -26,7 +26,14 @@ from typing import TYPE_CHECKING, Final, Literal, get_args
 
 from decoy_engine import reasons
 from decoy_engine._error_base import DecoyError
-from decoy_engine.fileaccess import CommitUncertain
+from decoy_engine.fileaccess import (
+    CommitUncertain,
+    FileAccessDenied,
+    FileAccessUnavailable,
+    LockTimeout,
+    LockUnavailable,
+)
+from decoy_engine.reasons import ReasonCode
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import OutputDir
@@ -34,6 +41,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_LOCK_TIMEOUT_S",
+    "LOCK_ERRORS",
     "MAX_COUNT",
     "OPERATION_ID_PATTERN",
     "ROLES",
@@ -53,6 +61,7 @@ __all__ = [
     "is_hex64",
     "is_operation_id",
     "is_token",
+    "lock_reason",
     "raise_for_outcome",
 ]
 
@@ -79,6 +88,24 @@ _ERRNO_NAMES: Final = frozenset(errno.errorcode.values())
 # Counts and sizes are stored as JSON integers that other readers parse as signed 64-bit.
 MAX_COUNT: Final = 2**63 - 1
 DEFAULT_LOCK_TIMEOUT_S: Final = 30.0
+
+# The one map from a failed `OutputDir.lock` to its reason code. The first two match
+# `reason_adapter._FIXED`; the other two are what a strict or missing policy raises at the lock.
+_LOCK_REASONS: Final = (
+    (LockTimeout, reasons.decoy.PUBLICATION_LOCK_TIMEOUT),
+    (LockUnavailable, reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE),
+    (FileAccessDenied, reasons.decoy.FILE_ACCESS_DENIED),
+    (FileAccessUnavailable, reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE),
+)
+LOCK_ERRORS: Final = tuple(kind for kind, _ in _LOCK_REASONS)
+
+
+def lock_reason(exc: BaseException) -> ReasonCode:
+    """The reason code for a lock failure. A handler calls this and keeps only the code."""
+    for kind, code in _LOCK_REASONS:
+        if isinstance(exc, kind):
+            return code
+    raise TypeError("not a lock failure")
 
 
 def is_operation_id(value: object) -> bool:

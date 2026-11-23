@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, get_args
@@ -15,7 +16,12 @@ from typing import Any, get_args
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine.fileaccess import FileRequest, FileRole
+from decoy_engine.fileaccess import (
+    FileAccessDenied,
+    FileAccessUnavailable,
+    FileRequest,
+    FileRole,
+)
 from decoy_engine.fileaccess._local import LocalFileAccess
 from decoy_engine.publication import (
     CurrentPointer,
@@ -38,6 +44,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX durable p
 MOVED = reasons.decoy.DELIVERY_POINTER_MOVED
 FAILED = reasons.decoy.PUBLICATION_FAILED
 UNCERTAIN = reasons.decoy.PUBLICATION_COMMIT_UNCERTAIN
+CONFLICT = reasons.decoy.PUBLICATION_OPERATION_CONFLICT
 EVERYTHING = StageDecision(True, frozenset({"a", "b"}))
 
 
@@ -299,10 +306,13 @@ def test_staging_rules_refuse_a_bad_path_a_repeat_with_another_table_and_an_empt
             call()
 
 
-def test_every_value_free_delivery_error_carries_no_cause_or_context(run: Run) -> None:
+def test_every_value_free_delivery_error_carries_no_cause_or_context(
+    run: Run, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """AT-27. The errors the stage raises itself, each built outside a handler."""
     run.latest.symlink_to("elsewhere")
     cases: list[Any] = []
+    make: Callable[[], object]
     for make in (
         lambda: run.open(),
         lambda: DeliveryStage.open(_dir(run.base, "out/n/r1"), run.pointer, "bad\nid", "op"),
@@ -312,6 +322,21 @@ def test_every_value_free_delivery_error_carries_no_cause_or_context(run: Run) -
             make()
         cases.append(caught.value)
     run.latest.unlink()
+    out = _dir(run.base, "out/n/r1")
+    (run.folder / "r1").mkdir(exist_ok=True)
+    for failure in (
+        PermissionError(errno.EACCES, "/secret/path"),
+        FileAccessDenied("targets.t.path"),
+        FileAccessUnavailable("secret"),
+    ):
+
+        def begin(*args: Any, _failure: Exception = failure, **kwargs: Any) -> Any:
+            raise _failure
+
+        monkeypatch.setattr(out, "begin", begin)
+        with pytest.raises(PublicationFailed) as caught:
+            DeliveryStage.open(out, run.pointer, "r1", "op-1")
+        cases.append(caught.value)
     stage = run.open("r2")
     for make in (
         lambda: stage.stage_path("a", "../a.csv"),
@@ -327,36 +352,39 @@ def test_every_value_free_delivery_error_carries_no_cause_or_context(run: Run) -
         with pytest.raises(RuntimeError) as caught:
             make()
         cases.append(caught.value)
-    assert len(cases) == 9
+    assert len(cases) == 12
     assert all(e.__cause__ is None and e.__context__ is None for e in cases)
-    assert all("bad" not in str(e) and "elsewhere" not in str(e) for e in cases)
+    assert all(not any(word in str(e) for word in ("bad", "elsewhere", "secret")) for e in cases)
 
 
 # -- AT-28: the outcome tables ---------------------------------------------------------------
 
-BIND_STATE = {
-    "published": "delivered",
-    "already_committed": "delivered",
-    "commit_uncertain": "uncertain",
-    "refused": "nothing",
-    "operation_conflict": "nothing",
-    "failed": "nothing",
+BIND_ROWS = {
+    "published": ("delivered", None),
+    "already_committed": ("delivered", None),
+    "commit_uncertain": ("uncertain", UNCERTAIN),
+    "refused": ("nothing", None),
+    "operation_conflict": ("nothing", CONFLICT),
+    "failed": ("nothing", FAILED),
 }
-SWAP_STATE = {
-    "replaced": "delivered",
-    "stale": "nothing",
-    "uncertain": "uncertain",
-    "unknown": "uncertain",
-    "failed": "nothing",
-    "conflict": "nothing",
+SWAP_ROWS = {
+    "replaced": ("delivered", None),
+    "stale": ("nothing", MOVED),
+    "uncertain": ("uncertain", UNCERTAIN),
+    "unknown": ("uncertain", UNCERTAIN),
+    "failed": ("nothing", FAILED),
+    "conflict": ("nothing", FAILED),
 }
+BIND_STATE = {k: state for k, (state, _) in BIND_ROWS.items()}
+SWAP_STATE = {k: state for k, (state, _) in SWAP_ROWS.items()}
 
 
 def test_each_outcome_and_each_swap_result_maps_to_exactly_one_state() -> None:
+    """Plan 4.4 row by row: the state and the cause, not the state alone."""
     assert set(stage_module.BIND_VERDICTS) == set(get_args(Outcome))
     assert set(stage_module.SWAP_VERDICTS) == set(get_args(PointerResult))
-    assert {k: v.state for k, v in stage_module.BIND_VERDICTS.items()} == BIND_STATE
-    assert {k: v.state for k, v in stage_module.SWAP_VERDICTS.items()} == SWAP_STATE
+    assert {k: (v.state, v.cause) for k, v in stage_module.BIND_VERDICTS.items()} == BIND_ROWS
+    assert {k: (v.state, v.cause) for k, v in stage_module.SWAP_VERDICTS.items()} == SWAP_ROWS
 
 
 @pytest.mark.parametrize("outcome", get_args(Outcome))
@@ -370,8 +398,10 @@ def test_deliver_maps_every_bind_outcome(
     receipt = _deliver(stage)
     assert receipt.state == BIND_STATE[outcome]
     assert (run.latest.exists()) == (BIND_STATE[outcome] != "nothing")
+    if BIND_ROWS[outcome][1] is not None:
+        assert receipt.cause == BIND_ROWS[outcome][1]
     if outcome == "commit_uncertain":
-        assert receipt.cause == UNCERTAIN and stage.state == "delivered"
+        assert stage.state == "delivered"
 
 
 @pytest.mark.parametrize("result", get_args(PointerResult))
@@ -382,7 +412,7 @@ def test_deliver_maps_every_swap_result(
     stage = run.open()
     run.stage_files(stage)
     receipt = _deliver(stage)
-    assert receipt.state == SWAP_STATE[result]
+    assert (receipt.state, receipt.cause) == SWAP_ROWS[result]
     assert stage.state == ("aborted" if receipt.state == "nothing" else "delivered")
 
 
@@ -402,3 +432,131 @@ def test_an_outcome_with_no_row_fails_closed(run: Run, monkeypatch: pytest.Monke
     with pytest.raises(KeyError):
         _deliver(stage)
     assert not run.latest.exists() and stage.state == "aborted"
+
+
+# -- lock and prune failures, interrupts ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        (FileAccessDenied("targets.t.path"), reasons.decoy.FILE_ACCESS_DENIED),
+        (FileAccessUnavailable("secret"), reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE),
+    ],
+)
+def test_a_lock_the_policy_refuses_settles_nothing_with_a_code(
+    run: Run, monkeypatch: pytest.MonkeyPatch, failure: Exception, code: Any
+) -> None:
+    stage = run.open()
+    run.stage_files(stage)
+
+    def refused(timeout_s: float) -> Any:
+        raise failure
+
+    monkeypatch.setattr(run.pointer, "locked", refused)
+    seen: list[DeliveryReceipt] = []
+    assert _deliver(stage, reconcile=seen.append) == DeliveryReceipt("nothing", code)
+    assert seen == [DeliveryReceipt("nothing", code)] and stage.state == "aborted"
+    assert run.litter() == [] and not run.latest.exists()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        PermissionError(errno.EACCES, "/secret/path"),
+        FileAccessDenied("t.p"),
+        FileAccessUnavailable(),
+    ],
+)
+def test_a_prune_that_fails_aborts_reconciles_and_settles_nothing(
+    run: Run, monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    stage = run.open()
+    run.stage_files(stage)
+
+    def drop(self: DeliveryStage, path: str) -> None:
+        raise failure
+
+    monkeypatch.setattr(DeliveryStage, "_drop", drop)
+    seen: list[DeliveryReceipt] = []
+    receipt = _deliver(stage, StageDecision(True, frozenset({"a"})), reconcile=seen.append)
+    assert receipt == DeliveryReceipt("nothing", FAILED) and seen == [receipt]
+    assert stage.state == "aborted" and run.litter() == [] and not run.latest.exists()
+
+
+def _make_pointer_unreadable(run: Run) -> None:
+    run.latest.unlink(missing_ok=True)
+    run.latest.symlink_to("elsewhere")
+
+
+def test_an_interrupt_inside_publish_unit_is_judged_by_the_reread(
+    run: Run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bind may have happened: an unreadable pointer is `uncertain`, a readable one that does
+    not name this run is `nothing`."""
+    for unreadable in (False, True):
+        stage = run.open(f"r{int(unreadable) + 1}")
+        run.stage_files(stage)
+
+        def interrupted(*args: Any, _unreadable: bool = unreadable, **kwargs: Any) -> Any:
+            if _unreadable:
+                _make_pointer_unreadable(run)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(stage_module, "publish_unit", interrupted)
+        seen: list[DeliveryReceipt] = []
+        with pytest.raises(KeyboardInterrupt):
+            _deliver(stage, reconcile=seen.append)
+        want = DeliveryReceipt("uncertain", UNCERTAIN) if unreadable else DeliveryReceipt("nothing")
+        assert seen == [want]
+        run.latest.unlink(missing_ok=True)
+
+
+def test_an_unreadable_pointer_after_the_bind_is_uncertain(
+    run: Run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage = run.open()
+    run.stage_files(stage)
+
+    def interrupted(self: HeldPointer, expected: Any, new: str) -> Any:
+        _make_pointer_unreadable(run)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(HeldPointer, "swap", interrupted)
+    seen: list[DeliveryReceipt] = []
+    with pytest.raises(KeyboardInterrupt):
+        _deliver(stage, reconcile=seen.append)
+    assert seen == [DeliveryReceipt("uncertain", UNCERTAIN)] and stage.state == "delivered"
+
+
+def test_an_interrupt_before_the_bind_leaves_nothing_even_when_the_pointer_is_unreadable(
+    run: Run,
+) -> None:
+    stage = run.open()
+    run.stage_files(stage)
+
+    def interrupted() -> None:
+        _make_pointer_unreadable(run)
+        raise KeyboardInterrupt
+
+    seen: list[DeliveryReceipt] = []
+    with pytest.raises(KeyboardInterrupt):
+        _deliver(stage, before=interrupted, reconcile=seen.append)
+    assert seen == [DeliveryReceipt("nothing")] and stage.state == "aborted"
+
+
+def test_a_resume_whose_pointer_already_names_the_run_is_visible_after_an_early_interrupt(
+    run: Run,
+) -> None:
+    """F23 resume (plan 7.1): `LATEST` naming the run means delivered, even before the bind."""
+    run.latest.write_bytes(b"r1\n")
+    stage = run.open("r1")
+    run.stage_files(stage)
+
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    seen: list[DeliveryReceipt] = []
+    with pytest.raises(KeyboardInterrupt):
+        _deliver(stage, before=interrupted, reconcile=seen.append)
+    assert seen == [DeliveryReceipt("uncertain", UNCERTAIN)] and stage.state == "delivered"
