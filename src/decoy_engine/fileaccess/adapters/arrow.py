@@ -171,7 +171,7 @@ def _parquet_exact(t: pa.DataType) -> bool:
         return t.unit in ("ms", "us", "ns")
     return (
         t in _EXACT_SCALARS
-        or (isinstance(t, (pa.Decimal128Type, pa.Decimal256Type)) and t.scale >= 0)
+        or (isinstance(t, (pa.Decimal128Type, pa.Decimal256Type)) and 0 <= t.scale <= t.precision)
         or (pa.types.is_fixed_size_binary(t) and t.byte_width > 0)
         or pa.types.is_time64(t)
         or pa.types.is_duration(t)

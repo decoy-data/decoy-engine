@@ -428,6 +428,8 @@ def test_multi_chunk_dictionaries_with_fixed_list_round_trip(tmp_path):
 _PARQUET_REFUSED = {
     "decimal128_negative_scale": pa.array([Decimal("1.2E+3"), None], pa.decimal128(6, -2)),
     "decimal256_negative_scale": pa.array([Decimal("1.2E+3"), None], pa.decimal256(6, -2)),
+    "decimal128_scale_above_precision": pa.array([None, None], pa.decimal128(2, 5)),
+    "decimal256_scale_above_precision": pa.array([None, None], pa.decimal256(2, 5)),
     "fixed_size_binary_zero": pa.array([b"", None], pa.binary(0)),
 }
 
