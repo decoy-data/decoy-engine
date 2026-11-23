@@ -308,7 +308,8 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The whole-tree step below runs off pull requests only, so a PR keeps the old 30 minutes.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 60 }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
@@ -425,8 +426,10 @@ jobs:
 
       # The companion-gated tests outside tests/native. A test there that no step above names skips
       # in every other lane, so it can go red with no signal (57 were red on main when this step was added).
-      # Same two-pass split and marker filter as ci.yml's regression gate.
+      # Same two-pass split and marker filter as ci.yml's regression gate. Push to main and schedule
+      # only: a red main is fixed first, and a PR keeps its fast lane.
       - name: Whole tests/parity and tests/unit/execution directories (companion-present case)
+        if: github.event_name != 'pull_request'
         run: |
           pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial" -n 4 --dist loadfile -q --tb=short
           pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and serial" -q --tb=short || [ $? -eq 5 ]
