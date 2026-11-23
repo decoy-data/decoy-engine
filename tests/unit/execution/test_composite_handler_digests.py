@@ -18,6 +18,7 @@ from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import WorkNode
 from decoy_engine.execution._strategies._composite import CompositeHandler
+from decoy_engine.generation.composite import COMPOSITES
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.providers_v2 import get_default_registry
@@ -119,6 +120,10 @@ def digests() -> dict[str, dict[str, str]]:
         }
         for provider in CASES
     }
+
+
+def test_the_cases_cover_every_composite_in_the_table() -> None:
+    assert set(CASES) == set(COMPOSITES)
 
 
 @pytest.mark.parametrize("mode", ["keyed", "fresh"])

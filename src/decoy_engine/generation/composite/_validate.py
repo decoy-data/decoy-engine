@@ -30,32 +30,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
-from decoy_engine.generation.composite._address import CompositeAddress
-from decoy_engine.generation.composite._city_state_zip import CompositeCityStateZip
-from decoy_engine.generation.composite._name_email import CompositeNameEmail
-from decoy_engine.generation.composite._person import CompositePerson
-from decoy_engine.generation.composite._provider import CompositeProvider
+from decoy_engine.generation.composite._factory import COMPOSITES
 from decoy_engine.plan._errors import PlanCompileError
 
 if TYPE_CHECKING:
     from decoy_engine.relationships._namespace import NamespaceRegistry
 
-# composite_name -> its canonical output_columns, sorted (the form the coherent
-# group is compared against). MG-4 (2026-05-31) adds person / address /
-# provider with fixed output_columns; composite_custom is handled separately
-# because its outputs are config-defined.
+# composite_name -> its canonical output_columns, sorted (the form the coherent group is
+# compared against), read from the one descriptor table. A composite whose outputs the config
+# declares (composite_custom) has no fixed set.
 _COMPOSITE_OUTPUT_COLUMNS: dict[str, tuple[str, ...]] = {
-    CompositeNameEmail.composite_name: tuple(sorted(CompositeNameEmail.output_columns)),
-    CompositeCityStateZip.composite_name: tuple(sorted(CompositeCityStateZip.output_columns)),
-    CompositePerson.composite_name: tuple(sorted(CompositePerson.output_columns)),
-    CompositeAddress.composite_name: tuple(sorted(CompositeAddress.output_columns)),
-    CompositeProvider.composite_name: tuple(sorted(CompositeProvider.output_columns)),
+    name: d.output_columns for name, d in COMPOSITES.items() if not d.variable_output
 }
 
 # composite_custom is variable-length; its output_columns are the coherent
 # group itself (declared in the YAML). The wiring check skips the
 # group-vs-output-columns equality check for this composite.
-_VARIABLE_OUTPUT_COMPOSITES: frozenset[str] = frozenset({"composite_custom"})
+_VARIABLE_OUTPUT_COMPOSITES: frozenset[str] = frozenset(
+    name for name, d in COMPOSITES.items() if d.variable_output
+)
 
 
 def composite_wiring_consistent(config: dict[str, Any], registry: NamespaceRegistry) -> None:

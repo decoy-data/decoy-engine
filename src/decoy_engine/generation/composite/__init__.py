@@ -39,6 +39,11 @@ from decoy_engine.generation.composite._custom import (
     composite_custom,
 )
 from decoy_engine.generation.composite._errors import CompositeError
+from decoy_engine.generation.composite._factory import (
+    COMPOSITES,
+    CompositeDescriptor,
+    CompositeFactory,
+)
 from decoy_engine.generation.composite._generator import (
     CompositeAdapter,
     CompositeGenerator,
@@ -59,13 +64,16 @@ from decoy_engine.generation.composite._provider import (
 from decoy_engine.generation.composite._validate import composite_wiring_consistent
 
 __all__ = [
+    "COMPOSITES",
     "COMPOSITE_BACKEND",
     "BundlePool",
     "CompositeAdapter",
     "CompositeAddress",
     "CompositeCityStateZip",
     "CompositeCustom",
+    "CompositeDescriptor",
     "CompositeError",
+    "CompositeFactory",
     "CompositeGenerator",
     "CompositeNameEmail",
     "CompositePerson",

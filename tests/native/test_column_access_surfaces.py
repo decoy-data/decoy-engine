@@ -32,7 +32,7 @@ from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.execution._runner import build_work_list
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution._strategies._composite import CompositeHandler
-from decoy_engine.generation.composite import _generator
+from decoy_engine.generation.composite import COMPOSITES, _generator
 from decoy_engine.generation.composite._address import CompositeAddress
 from decoy_engine.generation.composite._city_state_zip import CompositeCityStateZip
 from decoy_engine.generation.composite._name_email import CompositeNameEmail
@@ -95,20 +95,20 @@ def _handler_provider_literals(source: str) -> set[str]:
 
 
 def test_g2_composite_providers_agree_across_handler_generator_and_declarations() -> None:
+    # The handler builds every composite from the `COMPOSITES` table, so it holds no provider
+    # name of its own; the table, the registry-side name set and the declarations are one set.
     literals = _handler_provider_literals(inspect.getsource(CompositeHandler.run))
     declared = _keys("composite")
-    assert literals == set(_generator._COMPOSITE_NAMES) == declared
+    assert literals == set()
+    assert set(COMPOSITES) == set(_generator._COMPOSITE_NAMES) == declared
 
 
 def test_g2_check_fails_for_a_stub_provider_branch() -> None:
     source = inspect.getsource(CompositeHandler.run)
-    marker = (
-        "        else:\n            raise ExecutionError(\n"
-        "                code=reasons.runtime.UNSUPPORTED_STRATEGY,"
-    )
+    marker = "        descriptor = COMPOSITES.get(node.provider"
     assert marker in source
     patched = source.replace(
-        marker, "        elif node.provider == 'composite_stub':\n            pass\n" + marker
+        marker, "        if node.provider == 'composite_stub':\n            pass\n" + marker
     )
     literals = _handler_provider_literals(patched)
     assert literals - _keys("composite") == {"composite_stub"}
