@@ -36,6 +36,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism._derive import derive
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._chunked_profile import first_chunk_profile
@@ -351,6 +352,7 @@ def _chunked_preflight(tmp_path: Path, columns: list[dict]) -> Any:
         engine_version=ENGINE_VERSION,
         first_schema=source.schema,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
 
 

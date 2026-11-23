@@ -13,7 +13,7 @@ and `tests/integration/test_row_errors_e2e.py`, but with a two-table FK job
 routed via a `ParquetTransactionalSink`).
 
 Shape: a parent/child FK pair (`parent.id` -> `child.parent_id`, one edge, no
-orphans). The PARENT has a `bucketize` column with one uncoercible cell
+orphans). The PARENT has a `date_shift` column with one uncoercible cell
 ("badX"). Asserts:
   (a) leak closed: the raw "badX" is absent from the committed parquet output.
   (b) quarantine JSONL carries the real bad value.
@@ -43,7 +43,7 @@ from decoy_engine.execution import ParquetTransactionalSink
 from decoy_engine.execution._pipeline import run_pipeline
 from tests._declared_schema import declare_rest
 
-_AGE = ["10", "20", "30", "40", "50", "badX"]
+_AGE = ["2020-01-10", "2020-01-20", "2020-01-30", "2020-02-10", "2020-02-20", "badX"]
 _IDS = ["p0", "p1", "p2", "p3", "p4", "p5"]
 
 
@@ -70,7 +70,7 @@ def _parent_table(*, gated: bool) -> pa.Table:
     }
     if gated:
         # dennis's exact reproduction shape: keep=[0,0,0,1,1,1], the bad cell is
-        # the last GATED row; "30" is an innocent UNMATCHED (keep=0) row.
+        # the last GATED row; "2020-01-30" is an innocent UNMATCHED (keep=0) row.
         cols["keep"] = [0, 0, 0, 1, 1, 1]
     return pa.table(cols)
 
@@ -96,8 +96,9 @@ def _fk_config(
 
     age_col: dict[str, Any] = {
         "name": "age",
-        "strategy": "bucketize",
-        "provider_config": {"width": 10},
+        "strategy": "date_shift",
+        "namespace": "age_ns",
+        "provider_config": {"date_format": "%Y-%m-%d"},
     }
     parent_columns = [_faker_col("id", "parent_ns"), age_col]
     if gated:
@@ -172,8 +173,8 @@ class TestFkSequentialLeakClosure:
         out_age = out_parent.column("age").to_pylist()
         assert "badX" not in out_age
 
-        # (c) innocent row preserved; exactly one row removed.
-        assert "30" in out_age
+        # (c) innocent rows still emitted (as shifted dates); exactly one row removed.
+        assert all(len(v) == 10 for v in out_age)
         assert out_parent.num_rows == 5
 
         # (b) quarantine JSONL carries the real bad value.
@@ -228,9 +229,9 @@ class TestFkSequentialLeakClosureWhenGated:
         out_parent = pq.read_table(tmp_path / "out" / "parent.parquet")
         out_age = out_parent.column("age").to_pylist()
         assert "badX" not in out_age
-        # "30" is the innocent UNMATCHED (keep=0) row; must not be deleted by a
+        # "2020-01-30" is the innocent UNMATCHED (keep=0) row; must not be deleted by a
         # mis-indexed filter.
-        assert "30" in out_age
+        assert "2020-01-30" in out_age
         assert out_parent.num_rows == 5
 
         records = [json.loads(line) for line in Path(qpath).read_text().splitlines()]
@@ -518,7 +519,10 @@ class TestSequentialMultiTableQuarantineJsonlNotClobbered:
                 "id": pa.array([f"c{i}" for i in range(len(_IDS))], type=pa.string()),
                 "parent_id": pa.array(_IDS, type=pa.string()),
                 # A second, non-FK column with its own bad cell.
-                "note": pa.array(["1", "2", "3", "4", "5", "badY"], type=pa.string()),
+                "note": pa.array(
+                    ["2020-03-01", "2020-03-02", "2020-03-03", "2020-03-04", "2020-03-05", "badY"],
+                    type=pa.string(),
+                ),
             }
         )
         parent_src = _write_source(tmp_path, parent, "parent")
@@ -549,7 +553,12 @@ class TestSequentialMultiTableQuarantineJsonlNotClobbered:
                     "name": "parent",
                     "columns": [
                         _faker_col("id", "parent_ns"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "date_shift",
+                            "namespace": "age_ns",
+                            "provider_config": {"date_format": "%Y-%m-%d"},
+                        },
                     ],
                 },
                 {
@@ -558,8 +567,9 @@ class TestSequentialMultiTableQuarantineJsonlNotClobbered:
                         _faker_col("parent_id", "parent_ns"),
                         {
                             "name": "note",
-                            "strategy": "bucketize",
-                            "provider_config": {"width": 10},
+                            "strategy": "date_shift",
+                            "namespace": "note_ns",
+                            "provider_config": {"date_format": "%Y-%m-%d"},
                         },
                     ],
                 },

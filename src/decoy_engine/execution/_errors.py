@@ -84,6 +84,26 @@ class QuarantineError(ExecutionError):
         super().__init__(code=code, message=message)
 
 
+def nonfk_full_frame_capacity_error(
+    *, needed_bytes: int, kill_ceiling_bytes: int
+) -> ExecutionError:
+    """A job with no foreign keys would hold more than the kill ceiling on the full-frame route.
+
+    The one place the refusal is built, for every phase and the physical compiler. Numbers and
+    remedies only: no table, column, path or value reaches the text. Callers raise it outside any
+    `except`, so it has no `__cause__` or `__context__`.
+    """
+    summary = reasons.get("runtime", reasons.runtime.NONFK_FULL_FRAME_CAPACITY_EXCEEDED).summary
+    return ExecutionError(
+        code=reasons.runtime.NONFK_FULL_FRAME_CAPACITY_EXCEEDED,
+        message=(
+            f"{summary} The figure checked is {needed_bytes} bytes and the memory ceiling is "
+            f"{kill_ceiling_bytes} bytes. Run on a machine with more memory, or reduce the "
+            "table's rows or columns."
+        ),
+    )
+
+
 def seq_ineligible(message: str) -> ConfigError:
     """An explicit ``execution_mode="sequential"`` for a job that is not eligible for it.
 

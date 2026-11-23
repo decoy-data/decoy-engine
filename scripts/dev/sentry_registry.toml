@@ -130,7 +130,6 @@ baseline = "tests/sentry/baselines/package-fanout.json"
 id = "import-layers"
 baseline = "tests/sentry/baselines/import-layers.json"
 approved_growth = [
-  { key = "policy-direction::decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
   { key = "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
   { key = "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution.out_of_core._mask", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
   { key = "policy-direction::decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
@@ -256,6 +255,10 @@ baseline = "tests/sentry/baselines/lossless-int-columns.json"
 [[sentry]]
 id = "column-shape-classifier"
 baseline = "tests/sentry/baselines/column-shape-classifier.json"
+
+[[sentry]]
+id = "bucketize-width-contract"
+baseline = "tests/sentry/baselines/bucketize-width-contract.json"
 
 [[sentry]]
 id = "signature-exemptions"

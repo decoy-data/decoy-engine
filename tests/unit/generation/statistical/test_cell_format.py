@@ -172,10 +172,11 @@ def test_scrub_replaces_a_non_dict_block(bad: object) -> None:
 
 
 def test_the_descriptor_lists_exactly_the_members_the_learner_writes() -> None:
+    # The freetext sample is digit-only so the learner writes every member the descriptor lists.
     samples = {
         "numeric": pd.Series([1.5]),
         "datetime": pd.Series(pd.to_datetime(["2021-01-01"])),
-        "freetext": pd.Series(["x"]),
+        "freetext": pd.Series(["12"]),
         "categorical": pd.Series(["x"]),
         "empty": pd.Series([], dtype=object),
     }

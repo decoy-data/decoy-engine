@@ -13,6 +13,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import ExecutionError
 from decoy_engine.execution import _pipeline_auto_chunk as ac
 from decoy_engine.execution import _pipeline_route_exec as rx
@@ -219,7 +220,7 @@ def _call(cfg: dict[str, Any], src: pa.Table, **kw: Any) -> Any:
         "dispatcher_enabled": True,
     }
     params.update(kw)
-    return ac.run_auto_chunk(cfg, src, **params)
+    return ac.run_auto_chunk(cfg, src, **params, sources=NO_SOURCES)
 
 
 def test_run_auto_chunk_dispatcher_lane_returns_the_five_part_shape() -> None:
@@ -365,6 +366,7 @@ def test_the_legacy_evidence_is_planned_from_this_tables_config_and_engine_versi
         "engine_version": "ev-1",
         "registry": get_default_registry(),
         "first_schema": src.schema,
+        "siblings": NO_SOURCES,
     }
 
 
@@ -389,6 +391,7 @@ def test_the_legacy_lane_plans_its_evidence_with_the_run_engine_version(
             "engine_version": "ev-2",
             "registry": get_default_registry(),
             "first_schema": src.schema,
+            "siblings": NO_SOURCES,
         }
     ]
 
@@ -448,6 +451,7 @@ def test_the_delegate_forwards_every_argument_and_returns_the_result_unchanged(
         key_provider=markers["keys"],  # type: ignore[arg-type]
         native_threads=5,
         dispatcher_enabled=False,
+        sources=NO_SOURCES,
     )
     assert result is sentinel
     assert seen["config"] is markers["config"] and seen["source"] is markers["source"]
@@ -458,7 +462,7 @@ def test_the_delegate_forwards_every_argument_and_returns_the_result_unchanged(
     assert set(seen) == {
         "config", "source", "table", "engine_version", "registry", "adapter",
         "vault_writer", "chunk_size_rows", "key_provider", "native_threads", "dispatcher_enabled",
-        "cast_run",
+        "cast_run", "sources",
     }  # fmt: skip
 
 
@@ -469,7 +473,7 @@ def test_the_delegate_defaults_are_one_thread_and_the_dispatcher_on(
     monkeypatch.setattr(ac, "run_auto_chunk", lambda *a, **k: seen.update(k))
     rx.run_mask_chunked(
         {}, pa.table({"a": [1]}), table="t", engine_version="v", registry=None,  # type: ignore[arg-type]
-        adapter=None, vault_writer=None, chunk_size_rows=1,
+        adapter=None, vault_writer=None, chunk_size_rows=1, sources=NO_SOURCES,
     )  # fmt: skip
     assert seen["native_threads"] == 1 and seen["dispatcher_enabled"] is True
     assert seen["key_provider"] is None

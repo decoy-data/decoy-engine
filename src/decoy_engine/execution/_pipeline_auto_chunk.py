@@ -35,6 +35,7 @@ from decoy_engine._arrow_types import (
     unify_text_widths,
     widen_text_columns,
 )
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked_input
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import ExecutionResult
@@ -45,10 +46,10 @@ from decoy_engine.fileaccess import ScratchArena
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
+    from decoy_engine.contracts.column_shape import SourceFacts
     from decoy_engine.execution._chunked_preresolved import PreResolvedColumn
     from decoy_engine.execution._transactional_sink import TransactionalSink
     from decoy_engine.keyprovider import KeyProvider
-    from decoy_engine.profile._readers import LazySource
     from decoy_engine.providers_v2 import ProviderRegistry
 
 __all__ = [
@@ -200,25 +201,22 @@ def _legacy_route_evidence(
     planned backend, and `pandas_read_passthrough` lists every passthrough column."""
     from decoy_engine.execution._chunked_carry import passthrough_columns
     from decoy_engine.execution._chunked_profile import first_chunk_profile
-    from decoy_engine.execution.native._chunked_evidence import (
-        chunk_route_evidence,
-        plan_column_backends,
-    )
+    from decoy_engine.execution.native import _chunked_evidence as _evidence
 
-    # Profile the real first slice, as the dispatcher lane's preflight does, so a
-    # type-dependent admission decision plans the same backend on both lanes.
+    # Profile the real first slice, as the dispatcher lane does: the same backend on both lanes.
     profile = first_chunk_profile(
         source.slice(0, chunk_size_rows), table=table, engine_version=engine_version
     )
-    columns = plan_column_backends(
+    columns = _evidence.plan_column_backends(
         config,
         profile,
         table=table,
         engine_version=engine_version,
         registry=registry,
         first_schema=source.schema,
+        siblings=NO_SOURCES,
     )
-    evidence = chunk_route_evidence(
+    evidence = _evidence.chunk_route_evidence(
         table=table,
         native_admitted=False,
         reroute_reason=lane_reason,
@@ -305,12 +303,12 @@ def _run_dispatcher(
     chunk_results: list[ExecutionResult],
     preresolved: PreResolvedColumn | None = None,
     cast_run: Any = None,
+    sources: SourceFacts,
 ) -> pa.Table:
     # Looked up through the module so a spy on the core sees the call.
     from decoy_engine.execution.native.chunked import _core
 
-    # The C5c-ii producer: resident slices carry the resident schema metadata-inclusive,
-    # which the chunked route needs to admit deterministic Faker over bool/int/uint.
+    # The C5c-ii producer: slices carry the resident schema, which admits deterministic Faker.
     producer = _chunked_input.fixed_schema_chunks_from_resident(source, chunk_size_rows)
     chunks_in, render = _declared_wrap(
         cast_run, table, producer if preresolved is None else preresolved.wrap(producer)
@@ -329,6 +327,7 @@ def _run_dispatcher(
                 key_provider=key_provider,
                 base_row_offset=0,
                 native_threads=native_threads,
+                sources=sources,
             )
         )
     )
@@ -359,6 +358,7 @@ def _run_streamed(
     cast_run: Any = None,  # accepted for the shared call shape; run_auto_chunk refuses it earlier
     align_row_groups: bool = False,
     collected: dict[str, pa.Table] | None = None,
+    sources: SourceFacts,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The dispatcher lane with the chunks streamed into `sink`; returns the `output` and
     `input` blocks. A `LazySource` is read as batches (B6b) and its handle is closed on every
@@ -378,8 +378,7 @@ def _run_streamed(
         if preresolved is not None:
             first = preresolved.substitute(first, 0, preresolved.schema_for(first.schema))
             stream = preresolved.wrap(stream)
-        # The columns B1's schema rule pins resolve from chunk 0, so only the rest can hold
-        # the stream back (`_chunked_output_sink` module docstring).
+        # The columns B1's schema rule pins resolve from chunk 0; only the rest hold the stream.
         rule = build_schema_rule(config, table=table, first=first, registry=registry)
         chunks = _core.mask_chunked(
             config,
@@ -393,22 +392,22 @@ def _run_streamed(
             key_provider=key_provider,
             base_row_offset=0,
             native_threads=native_threads,
+            sources=sources,
         )
         wide_columns = large_text_names(rule.passthrough_types)
         arrived: dict[str, set[pa.DataType]] = {}
         stats = _output_sink.stream_table(
             sink,
             table,
-            # Every sink sees the source `large_string` field on each chunk, as on main: a writer
-            # fixes its schema before chunk one and a later promotion must not change it.
+            # Every sink sees the source `large_string` field on each chunk: a writer fixes its
+            # schema before chunk one.
             widen_text_columns(chunks, wide_columns, arrived),
             fixed_columns=rule.string_columns | frozenset(rule.passthrough_types),
             align_row_groups=align_row_groups,
             empty_schema=first.schema if first.num_rows == 0 else None,
         )
         if collected is not None:
-            # No later chunk can promote a column that stayed narrow, so the resident
-            # collector gets the narrowed type.
+            # No later chunk can promote a narrow column: the collector gets the narrowed type.
             collected[table] = narrow_text_columns(collected[table], arrived)
     finally:
         inputs.close()
@@ -454,6 +453,7 @@ def run_auto_chunk(
     preresolved: PreResolvedColumn | None = None,
     cast_run: Any = None,
     align_row_groups: bool = False,
+    sources: SourceFacts,
 ) -> tuple[dict[str, pa.Table], tuple[Any, ...], float, tuple[Any, ...], dict[str, Any]]:
     """Mask one eligible table in `chunk_size_rows`-row slices on the selected lane.
 
@@ -463,16 +463,17 @@ def run_auto_chunk(
     `code_set_corpora` (when a chunk masked a code_set column), `chunked_route` (the
     backend evidence) and a partial `auto_chunk` block (`lane`, `lane_reason`,
     `native_threads`) that `stamp_execution_metrics` merges into the six existing keys.
-    Row errors are not part of the return: both lanes fail closed with
-    `RowErrorsFailedError` the moment a chunk reports one. An error after the first
-    chunk propagates with its own type and code; nothing retries on the other lane.
+    Row errors are not part of the return: both lanes fail closed with `RowErrorsFailedError`
+    the moment a chunk reports one; nothing retries on the other lane.
+
+    `sources`: the job's facts, so the dispatcher lane compiles `table` beside its siblings
+    (`NO_SOURCES` for a single table; the legacy lane compiles the table alone).
 
     `align_row_groups` (a run that requires streaming): the streamed output keeps one row group
     per masked chunk instead of regrouping across chunks; see `_chunked_output_sink.stream_table`.
 
-    `preresolved` (the mixed route's coupled FK key, `_chunked_preresolved`) replaces
-    one column's source values with a slice resolved up front, per chunk, before the
-    masker sees the chunk; the column is configured `passthrough`. Dispatcher lane only.
+    `preresolved` (the mixed route's coupled FK key, `_chunked_preresolved`) replaces one
+    column's source values per chunk before the masker sees it. Dispatcher lane only.
 
     `cast_run` (F06): the run's declared-casting boundary. Each chunk is cast (typed, quarantined
     rows removed, absolute row offsets kept) before the masker sees it and rendered after, on
@@ -484,10 +485,8 @@ def run_auto_chunk(
     from decoy_engine.execution.native._chunked_evidence import aggregate_chunked_route_evidence
 
     lane, lane_reason = select_lane(dispatcher_enabled)
-    # No publication sink, so the lazy input is read in batches and the output comes back
-    # resident. The engine's callable adapter already materializes one table for a callable
-    # consumer; it is local to this call and never becomes the run's sink, so the post-scan
-    # gate sees the same resident output as on a resident-input run.
+    # No publication sink: the lazy input is read in batches and the output comes back resident,
+    # so the post-scan gate sees the same resident output as on a resident-input run.
     collected: dict[str, pa.Table] | None = (
         {} if sink is None and isinstance(source, LazySource) else None
     )
@@ -520,8 +519,7 @@ def run_auto_chunk(
     output_block: dict[str, Any] | None = None
     input_block: dict[str, Any] | None = None
     masked: pa.Table | None = None
-    # E5a: the collector's spill scratch lives exactly as long as the lane; closing the scope
-    # removes it on success and on every exception, after the input and spill stage close.
+    # E5a: the collector's spill scratch lives as long as the lane; the scope removes it.
     with ExitStack() as scope:
         if collected is not None:
             sink = _collector(collected, scope)
@@ -535,6 +533,7 @@ def run_auto_chunk(
                 chunk_results=streamed_evidence,
                 align_row_groups=align_row_groups,
                 collected=collected,
+                sources=sources,
                 **common,
             )
             evidence = _without_elapsed(streamed_evidence.route_evidence())
@@ -547,6 +546,7 @@ def run_auto_chunk(
                 source,
                 native_threads=native_threads,
                 chunk_results=chunk_results,
+                sources=sources,
                 **common,
             )
             evidence = _without_elapsed(aggregate_chunked_route_evidence(chunk_results))

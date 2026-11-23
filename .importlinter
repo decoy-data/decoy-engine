@@ -41,7 +41,6 @@ ignore_imports =
     decoy_engine.generation.pool._sampler -> decoy_engine.execution.native._crypto_ext
     decoy_engine.generation.pool._sampler -> decoy_engine.execution.native._index_ext
     decoy_engine.internal.faker_setup -> decoy_engine.generation._dob_anchor
-    decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize
     decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors
     decoy_engine.plan._checks_correctness -> decoy_engine.execution.out_of_core._mask
     decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code
@@ -84,8 +83,6 @@ forbidden_modules =
     decoy_engine.execution
 allow_indirect_imports = true
 ignore_imports =
-    # finding 1: strategy policy lives in execution
-    decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize
     # finding 1: strategy policy lives in execution
     decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors
     # finding 1: strategy policy lives in execution

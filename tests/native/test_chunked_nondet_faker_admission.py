@@ -137,12 +137,22 @@ def test_the_stage_a_consumers_return_the_identical_config_verdict(
         static_admitted, evidence_native = False, False
     else:
         static = _dispatch._static_route_decision(
-            config, profile, table=TABLE, engine_version=ENGINE_VERSION, registry=_REG
+            config,
+            profile,
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            registry=_REG,
+            siblings=NO_SOURCES,
         )
         backends = {
             c.column: c.planned_backend
             for c in plan_column_backends(
-                config, profile, table=TABLE, engine_version=ENGINE_VERSION, registry=_REG
+                config,
+                profile,
+                table=TABLE,
+                engine_version=ENGINE_VERSION,
+                registry=_REG,
+                siblings=NO_SOURCES,
             )
         }
         static_admitted, evidence_native = static.native_admitted, backends["f"] == "rust_companion"

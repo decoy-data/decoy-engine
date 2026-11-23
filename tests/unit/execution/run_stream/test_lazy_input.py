@@ -23,6 +23,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _pipeline_auto_chunk as ac
 from decoy_engine.execution import _transactional_sink
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
@@ -549,7 +550,7 @@ def _lane_call(cfg: dict[str, Any], source: Any, **kw: Any) -> Any:
         "dispatcher_enabled": True,
     }
     params.update(kw)
-    return ac.run_auto_chunk(cfg, source, **params)
+    return ac.run_auto_chunk(cfg, source, **params, sources=NO_SOURCES)
 
 
 def _flat_job(tmp_path: Path, rows: int = 2_000) -> tuple[dict[str, Any], pa.Table, LazySource]:
