@@ -200,7 +200,7 @@ def test_routing_reroutes_a_nonstring_faker_source_instead_of_admitting_it() -> 
     "seed_kwargs",
     [
         pytest.param({"deterministic": False}, id="positional-reuse"),
-        pytest.param({"provider": "address_city"}, id="non-allowlisted-provider"),
+        pytest.param({"provider": "person_dob"}, id="non-allowlisted-provider"),
         pytest.param({"cardinality_mode": "unique"}, id="unique-mode"),
         pytest.param({"namespace": None}, id="no-namespace"),
     ],

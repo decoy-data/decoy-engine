@@ -182,7 +182,7 @@ _SEED_SHAPES: dict[str, Callable[[int | None], Any]] = {
     "positional_no_namespace": lambda size: positional_seed(None, pool_size=size),
     "deterministic_no_namespace": lambda size: faker_seed(None, pool_size=size),
     "unique": lambda size: faker_seed(mode="unique", pool_size=size),
-    "outside_allowlist": lambda size: faker_seed(provider="person_email", pool_size=size),
+    "outside_allowlist": lambda size: faker_seed(provider="person_dob", pool_size=size),
 }
 
 
@@ -214,7 +214,7 @@ def test_f2_the_seed_level_admission_points_ignore_the_pool_size(shape: str) -> 
         {"deterministic": True, "namespace": "ns"},
         {"deterministic": True},
         {"deterministic": True, "namespace": "ns", "cardinality_mode": "unique"},
-        {"deterministic": False, "provider": "person_email"},
+        {"deterministic": False, "provider": "person_dob"},
     ],
     ids=["nondet", "nondet_ns", "det_ns", "det_no_ns", "unique", "nondet_outside_allowlist"],
 )
@@ -262,7 +262,7 @@ def test_f2_the_unified_binding_ignores_the_pool_size(tmp_path: Path, determinis
 def test_f3_a_non_allowlisted_deterministic_provider_runs_the_chunked_oracle_leg(
     tmp_path: Path,
 ) -> None:
-    shape = {"provider": "person_email", "deterministic": True, "namespace": "ns_fdp"}
+    shape = {"provider": "person_dob", "deterministic": True, "namespace": "ns_fdp"}
     cfg, src = _job(tmp_path, [_column(**shape)], _source(120_000))
     got = _run(cfg, src)
     assert got.quality_metrics["auto_chunk"]["mode"] == "chunked"

@@ -556,7 +556,7 @@ _DECLINE_CASES: dict[str, tuple[pa.Table, list[dict[str, Any]], Callable[..., No
     ),
     "provider_outside_allowlist": (
         string_source(),
-        [faker_column(provider="person_email")],
+        [faker_column(provider="person_dob")],
         None,
     ),
     "when_set": (string_source(), [faker_column()], _when),
