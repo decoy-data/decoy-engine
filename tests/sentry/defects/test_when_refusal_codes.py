@@ -93,8 +93,8 @@ def test_parser_refusals_resolve_to_a_row() -> None:
 @pytest.mark.parametrize(
     ("expr", "key"),
     [
-        ("x.y()", WHEN_OUTSIDE_GRAMMAR_CODE),
-        ("masked.x > 1", WHEN_MASKED_REFERENCE_CODE),
+        ("x.y()", "when_outside_closed_grammar"),
+        ("masked.x > 1", "when_masked_reference_unsupported"),
     ],
 )
 def test_the_runtime_gate_raises_the_row_runtime_code(expr: str, key: str) -> None:
@@ -103,4 +103,4 @@ def test_the_runtime_gate_raises_the_row_runtime_code(expr: str, key: str) -> No
 
     with pytest.raises(StrategyError) as info:
         _require_closed_grammar(expr, "redact", "c")
-    assert info.value.code == WHEN_REFUSALS[key].runtime
+    assert info.value.code == key
