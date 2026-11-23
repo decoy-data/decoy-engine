@@ -345,6 +345,12 @@ def check_chunked_compatibility(config: dict[str, Any], *, table: str, registry:
                 nondeterministic_categoricals.append(str(col_entry.get("name", "?")))
                 continue
             failures = _conditional_admission_failures(col_entry)
+            if failures and strategy == "bucket_perturb":
+                # The format is a condition of text only; a native date needs none.
+                text = bucket_perturb_gate.config_proves_text(
+                    config, table=table, column=str(col_entry.get("name", "?"))
+                )
+                failures = failures if text else []
             if failures:
                 conditions_unmet.append((str(col_entry.get("name", "?")), str(strategy), failures))
             continue

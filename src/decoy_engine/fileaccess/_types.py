@@ -190,6 +190,13 @@ class EntryView(Protocol):
     def is_symlink(self) -> bool: ...
 
 
+class StageEntry(EntryView, Protocol):
+    """A stage listing entry: its kind, read without following a link, as one closed token."""
+
+    @property
+    def kind(self) -> Literal["file", "dir", "link", "other"]: ...
+
+
 @runtime_checkable
 class FileHandle(Protocol):
     """An open, already-authorized regular file."""
@@ -258,6 +265,15 @@ class StageDir(Protocol):
 
     def local_stage_path(self) -> str:
         """The stage path, for the one subprocess route; strict policies raise."""
+        ...
+
+    def open_subdir(self, component: str) -> StageDir:
+        """One existing folder of this stage as a read-only stage, opened without following a
+        link. Every change through it is refused, and it refuses after the owning stage ends."""
+        ...
+
+    def entries(self) -> Iterator[StageEntry]:
+        """The entries now in this stage, each with its kind read without following a link."""
         ...
 
 

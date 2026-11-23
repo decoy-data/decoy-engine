@@ -196,6 +196,20 @@ in the logging config, no log file is written any more (project-layout E2).
   a strict policy it answers "inconclusive" and routing falls back to the static estimate. The
   isolated and governor routes themselves fail closed with `FileAccessUnavailable`.
 
+## Reading a stage: `open_subdir` and `entries`
+
+A `StageDir` lists and descends without following a link. `entries()` returns the names in the
+stage with each kind read from the entry itself (`is_file`, `is_dir`, `is_symlink`; the
+`follow_symlinks` argument is ignored). `open_subdir(component)` opens one folder with
+`O_DIRECTORY | O_NOFOLLOW` relative to the held descriptor and returns a read-only stage over it
+(a link gives `ELOOP`, a file `ENOTDIR`, `..` a denial). That view reads and descends only:
+`create_file`, `create_dir`, `remove`, `rename` and `local_stage_path` raise
+`FileAccessUnavailable`. It owns its descriptor, and the owning stage closes it on publish, abort
+or reclaim; after that every call on the stage or the view raises `FileAccessUnavailable`. All
+three implementors (the strict and ambient output stages and `ScratchArena`) share one view and
+one listing (`_durable._ReadOnlyStageDir`, `_durable.entries_at`); both helpers are registered
+capability creators in `tests/sentry/file_access_modules.toml`.
+
 ## Reclaiming dead stages (F26)
 
 `reclaim_stages(directory, *, apply, min_age_s=3600) -> ReclaimReport` judges the dead

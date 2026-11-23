@@ -32,6 +32,7 @@ __all__ = [
     "declared_shape",
     "is_bounded_decimal",
     "is_nested_type",
+    "native_date_shapes",
     "source_facts_of",
     "source_format_for",
     "table_source_facts",
@@ -142,6 +143,17 @@ ColumnShapes = Mapping[tuple[str, str], ColumnShape]
 # The shapes a date strategy reads as dates with no parse format. Every site that asks "is this
 # column a native date" reads this set, and a sentry test fails if one keeps its own copy.
 TYPED_DATE_SHAPES = frozenset({ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ})
+
+
+def native_date_shapes(
+    shapes: Mapping[tuple[str, str], ColumnShape], declared: Collection[tuple[str, str]]
+) -> dict[tuple[str, str], ColumnShape]:
+    """The (table, column) entries of ``shapes`` that are native dates or zoned timestamps.
+
+    The one producer of that view: ``StrategyContext.native_date_columns`` and the chunked source
+    gate both call it. A declared date column keeps its text output, so ``declared`` leaves it out.
+    """
+    return {k: v for k, v in shapes.items() if v in TYPED_DATE_SHAPES and k not in declared}
 
 
 def is_bounded_decimal(precision: Any, scale: Any) -> bool:
