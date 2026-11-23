@@ -147,7 +147,7 @@ from decoy_engine.declared_casting._boundary import (
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
-from decoy_engine.execution._chunked_carry import cascaded_unchanged_columns, untouched_columns
+from decoy_engine.execution._chunked_carry import assembly_inputs
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
 from decoy_engine.execution._fk_keys import lossless_int_columns, to_pandas_fk_safe
 from decoy_engine.execution._guards import run_chunk_ingest_guards
@@ -522,22 +522,13 @@ def run_sequential(
                     table_from_pandas_keeping_source_types(
                         frames[table],
                         src,
-                        untouched_columns(
+                        *assembly_inputs(
                             nodes_by_table.get(table, ()),
                             src.column_names,
                             registry,
                             graph.edges,
                             table,
-                        ),
-                        [c for (t, c) in ctx.native_date_columns if t == table]
-                        + sorted(
-                            cascaded_unchanged_columns(
-                                nodes_by_table.get(table, ()),
-                                src.column_names,
-                                registry,
-                                graph.edges,
-                                table,
-                            )
+                            [c for (t, c) in ctx.native_date_columns if t == table],
                         ),
                     ),
                     faker_pin,

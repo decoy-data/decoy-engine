@@ -221,19 +221,23 @@ def untouched_columns(
     return unchanged - cascaded
 
 
-def cascaded_unchanged_columns(
+def assembly_inputs(
     nodes: Iterable[Any],
     names: Sequence[str],
     registry: Any,
-    fk_edges: Iterable[Any] = (),
-    table: str | None = None,
-) -> frozenset[str]:
-    """The relationship keys of `table` whose own rule leaves them as the source held them. They
-    are rebuilt from the frame (a key follows its masked parent), and the assembler gives the
-    rebuilt column its source type back where pandas lost it (a zero-row or all-null key, a
-    decimal precision)."""
-    unchanged, cascaded = _unchanged_and_cascaded(nodes, names, registry, fk_edges, table)
-    return unchanged & cascaded
+    fk_edges: Iterable[Any],
+    table: str,
+    date_columns: Iterable[str] = (),
+) -> tuple[frozenset[str], list[str]]:
+    """What the one assembler needs about `table`: its `untouched_columns`, and the columns whose
+    source type is restored after a frame round trip. Those are the date columns, plus a parent
+    key the rules leave unchanged: it is rebuilt from the frame (a key follows the cascade), so a
+    zero-row or all-null key or a decimal precision would otherwise change type. A child key is
+    not restored: its values follow the masked parent."""
+    edges = tuple(fk_edges)
+    unchanged, cascaded = _unchanged_and_cascaded(nodes, names, registry, edges, table)
+    parents = {c for e in edges if e.parent_table == table for c in e.parent_columns}
+    return unchanged - cascaded, [*date_columns, *sorted(unchanged & parents)]
 
 
 def _unchanged_and_cascaded(
@@ -328,6 +332,7 @@ __all__ = [
     "PASSTHROUGH_UNREPRESENTABLE_CODE",
     "CarryPlan",
     "adapter_fk_safe_columns",
+    "assembly_inputs",
     "carried_columns",
     "has_when",
     "is_stock_adapter",

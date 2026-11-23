@@ -11,7 +11,7 @@
   "adapter_fk_safe_columns::execution/native/_when_mask.py::plan_when_masks": {
    "reason": "existing entry of defects/test_lossless_int_columns.py, registered when the baseline scan found it unregistered; may only shrink"
   },
-  "fk_columns_for_table::execution/_chunked_carry.py::untouched_columns": {
+  "fk_columns_for_table::execution/_chunked_carry.py::_unchanged_and_cascaded": {
    "reason": "UF-DOMAIN S1: a relationship key the FK cascade rewrites is never an untouched column"
   },
   "fk_columns_for_table::execution/_fk_keys.py::lossless_int_columns": {
