@@ -305,9 +305,9 @@ class TestChunkedCompatibility:
         assert exc.value.code == "strategy_not_chunk_safe"
         assert "shuffle" in str(exc.value)
 
-    def test_faker_without_pool_size_rejected(self, tmp_path) -> None:
-        """Deterministic faker without the explicit capacity declaration:
-        the non-chunked 10k default is never applied silently here."""
+    def test_faker_without_pool_size_admitted(self, tmp_path) -> None:
+        """Deterministic faker without a `pool_size`: the default of 10000 applies, as on the
+        full-frame route, so the conditions no longer name the pool size."""
         cfg = _config(
             tmp_path,
             [
@@ -320,18 +320,10 @@ class TestChunkedCompatibility:
                 }
             ],
         )
-        with pytest.raises(PlanCompileError) as exc:
-            list(
-                run_mask_pipeline_chunked(
-                    cfg,
-                    [],
-                    table="accounts",
-                    source_schema=declared_schema(cfg, "accounts"),
-                    engine_version=_ENGINE_VERSION,
-                )
-            )
-        assert exc.value.code == "chunked_strategy_conditions_unmet"
-        assert "pool_size" in str(exc.value)
+        from decoy_engine.execution._chunked import _conditional_admission_failures
+
+        [column] = cfg["tables"][0]["columns"]
+        assert _conditional_admission_failures(column) == []
 
     def test_faker_non_deterministic_rejected(self, tmp_path) -> None:
         cfg = _config(

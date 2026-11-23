@@ -3,7 +3,8 @@
 Row `g` of a non-deterministic REUSE Faker draws `pool.values[derive_index(job_seed,
 selection_namespace, encode_int(g), pool.size)]`, so a chunk reproduces the whole-frame draw
 from its global row offset (`execution/_strategies/_faker_positional.py`). Stage A decides from
-the column's config alone whether the chunked route may run it, and is read by every chunked
+the column's config alone (pool size is not a condition: an absent size resolves to the
+default through `effective_pool_size`, as on the oracle) whether the chunked route may run it, and is read by every chunked
 consumer: the compatibility veto, the `when:` gate, the static route decision, the evidence
 planner and the output-type pin. Stage B (the first chunk's source dtype) only picks the leg: a
 string source runs the native kernel, anything else runs the chunked oracle.
@@ -51,14 +52,7 @@ def is_positional_faker_entry(col_entry: Mapping[str, Any]) -> bool:
 
 def positional_faker_failures(col_entry: Mapping[str, Any]) -> list[str]:
     """Unmet stage-A conditions of a position-keyed faker column; empty when admitted."""
-    cfg = col_entry.get("provider_config") or {}
     failures: list[str] = []
-    if col_entry.get("pool_size") is None and cfg.get("pool_size") is None:
-        failures.append(
-            "position-keyed faker requires an explicit pool_size (top-level or "
-            "provider_config.pool_size) as the chunked capacity declaration (the non-chunked "
-            "default of 10000 is not applied silently here)"
-        )
     provider = col_entry.get("provider")
     if provider not in _PROVIDER_ALLOWLIST:
         failures.append(

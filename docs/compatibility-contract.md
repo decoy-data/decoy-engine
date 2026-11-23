@@ -1054,13 +1054,15 @@ only this site moves.
   Non-deterministic `reuse` Faker joined the chunked route on 2026-10-06 (slice C5b-ii). It
   keeps the position-keyed draw of slice C5b-i, taken at the chunk's global row offset, so
   chunked output equals the whole-frame run for any chunk size. A column is admitted when it
-  declares an explicit `pool_size` (top level or `provider_config`), uses a provider in the C1
+  uses a provider in the C1
   string-output allowlist (`person_first_name`, `person_last_name`), has no `when:` and is not
   `unique`, `match_source_cardinality` or `scale_source_cardinality`; the namespace stays
   optional. A string source runs the compiled path and any other source type runs the chunked
   oracle leg with the same draw. A column that fails one of these conditions keeps running
-  whole-frame, and a missing `pool_size` or a provider outside the allowlist reports
-  `chunked_strategy_conditions_unmet` naming the unmet condition. A column that is admitted and
+  whole-frame, and a provider outside the allowlist reports
+  `chunked_strategy_conditions_unmet` naming the unmet condition. A missing `pool_size` is not a
+  condition (FAKER-DEFAULT-POOL, 2026-11-22): the pool takes the default of 10,000 on every
+  route, as the whole-frame run does. A column that is admitted and
   carries `when:` fails with `chunked_faker_nondeterministic_when_not_supported`, because the
   oracle numbers only the matching rows. The chunked output type of an admitted column is
   pinned to `string` on both chunked legs, with or without the companion. Under
@@ -1097,6 +1099,13 @@ only this site moves.
   route carries none, the same metadata difference the other pinned strategies record here. A custom
   provider registered under the configured name whose pool holds non-string values fails closed with
   `faker_provider_output_not_string` before any chunk is written, as for the position-keyed variant.
+  FAKER-DEFAULT-POOL (2026-11-22): a deterministic or non-deterministic `reuse` Faker with no
+  `pool_size` (absent or null, at top level or in `provider_config`) is admitted exactly as the
+  same column declaring `pool_size: 10000`, on the unified, chunked, sequential and out-of-core
+  routes. Values are unchanged. The ROUTE-OUTPUT-CONTRACT string typing of an empty or all-null
+  output applies to the newly admitted chunked columns. An out-of-core job whose faker pools
+  exceed the pool budget now fails with `out_of_core_faker_pool_budget_exceeded` before the run
+  starts, and the message no longer carries the provider, pool size or byte counts.
   `ColumnConfig` gained an optional `when: str` field (2026-10-06, slice C8-i), additive. It accepts
   a closed grammar only (a comparison of one column and one literal, `in` and `not in` over a
   literal list, `and`, `or`, `not` and parentheses), validated when the config loads with the
