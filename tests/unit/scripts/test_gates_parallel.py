@@ -256,7 +256,7 @@ def test_reporter_reads_the_serial_junit_of_a_sentry_step(tmp_path: Path) -> Non
         _suite(_CASES.split('<testcase classname="tests.test_a" name="test_bad"')[0], 1, 0, 0)
     )
     (out / "branch-sentry-serial.xml").write_text(_suite(_SERIAL_CASES, 2, 1, 0))
-    assert gr.junit_failing_ids(out, "branch") == ["tests/test_s.py::TestS::test_timing"]
+    assert gr.failing_ids(out, "branch") == ["tests/test_s.py::TestS::test_timing"]
     assert gr._counts(out, "branch", "sentry").startswith("passed=2 failed=1")
 
 
