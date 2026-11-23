@@ -232,11 +232,16 @@ def uuid_from_hex(hexes: pa.Array) -> pa.Array:
 
 
 def int_from_index(index: np.ndarray[Any, Any], *, lo: int, step: int) -> pa.Array:
-    """`lo + index * step` as int64; the final values fit int64, so wrapping products are exact."""
-    idx = np.asarray(index).astype(np.int64, copy=False)
+    """`lo + index * step` as int64, for every range `parse_computed_draw` accepts.
+
+    The arithmetic runs modulo 2**64 on uint64 operands, so a step at or past 2**63 (legal when
+    the count is small) cannot overflow a conversion, and a wrapped product is exact because the
+    final value fits int64. A step past 2**64 only occurs with one value, where the index is 0."""
+    word = 1 << 64
+    idx = np.asarray(index).astype(np.uint64, copy=False)
     with np.errstate(over="ignore"):
-        values = np.int64(lo) + idx * np.int64(step)
-    return pa.array(values, type=pa.int64())
+        wrapped = np.uint64(lo % word) + idx * np.uint64(step % word)
+    return pa.array(wrapped.view(np.int64), type=pa.int64())
 
 
 def choice_from_index(index: np.ndarray[Any, Any], elements: Sequence[Any]) -> list[Any]:

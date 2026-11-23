@@ -103,6 +103,49 @@ class TestIntFromIndex:
         assert out.to_pylist() == [-(2**63), 2**63 - 256]
 
 
+class TestEveryCompileAcceptedRangeRuns:
+    """Codex R1: a range compile accepts must draw, including steps that do not fit int64.
+
+    The plan's E4 refuses only a bad bound, a count over 2**56 or a top value outside int64, so
+    `step >= 2**63` is legal when the count is small. The draw does its arithmetic modulo 2**64
+    and the final value always fits int64."""
+
+    @staticmethod
+    def _run(lo: int, hi: int, step: int, indexes: list[int]) -> list[int]:
+        spec = parse_computed_draw("mask", "random_int_range", {"min": lo, "max": hi, "step": step})
+        assert isinstance(spec, ComputedDrawSpec)
+        assert 0 <= max(indexes) < spec.count
+        return int_from_index(
+            np.array(indexes, dtype=np.uint64), lo=spec.lo, step=spec.step
+        ).to_pylist()
+
+    def test_step_two_to_the_63(self) -> None:
+        assert self._run(-(2**63), 0, 2**63, [0, 1]) == [-(2**63), 0]
+
+    def test_step_equal_to_the_span(self) -> None:
+        assert self._run(0, 2**63 - 1, 2**63 - 1, [0, 1]) == [0, 2**63 - 1]
+        assert self._run(-(2**63), 2**63 - 1, 2**64 - 1, [0, 1]) == [-(2**63), 2**63 - 1]
+
+    def test_step_larger_than_the_span_is_one_value(self) -> None:
+        assert self._run(5, 9, 10**30, [0, 0]) == [5, 5]
+
+    def test_the_full_int64_range_with_step_one_is_refused_not_crashed(self) -> None:
+        found = parse_computed_draw(
+            "mask", "random_int_range", {"min": -(2**63), "max": 2**63 - 1, "step": 1}
+        )
+        assert found == DrawRefusal("range")
+
+    def test_the_lowest_int64_values_with_step_one(self) -> None:
+        assert self._run(-(2**63), -(2**63) + 9, 1, [0, 1, 9]) == [
+            -(2**63),
+            -(2**63) + 1,
+            -(2**63) + 9,
+        ]
+
+    def test_the_highest_int64_values_with_step_one(self) -> None:
+        assert self._run(2**63 - 10, 2**63 - 1, 1, [0, 9]) == [2**63 - 10, 2**63 - 1]
+
+
 class TestChoiceFromIndex:
     def test_selects_the_element_at_each_index(self) -> None:
         got = choice_from_index(np.array([2, 0, 1, 2], dtype=np.uint64), ("a", "b", "c"))

@@ -111,6 +111,12 @@ class TestFrozenVectors:
         assert all(10 <= v <= 50 and (v - 10) % 5 == 0 for v in got)
         assert set(got) == {10, 15, 20, 25, 30, 35, 40, 45, 50}
 
+    @pytest.mark.parametrize("mode", ["deterministic", "positional"])
+    def test_a_step_of_two_to_the_63_masks_without_overflow(self, mode: str) -> None:
+        kw = {"min": -(2**63), "max": 0, "step": 2**63}
+        got = _draw("random_int_range", kw, pd.Series([f"v{i}" for i in range(40)]), mode=mode)
+        assert set(got) == {-(2**63), 0}
+
     def test_every_choice_is_an_element(self) -> None:
         got = _draw("random_choice", CHOICE_KW, pd.Series([f"v{i}" for i in range(200)]))
         assert set(got) == set(CHOICE_KW["elements"])
