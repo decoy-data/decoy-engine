@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from typing import Any, TypeVar
 
-from decoy_engine.fileaccess import _durable, _osflags
+from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._entry import is_ambient, require_ambient
 from decoy_engine.fileaccess._errors import deny, guarded, guarded_iter
@@ -43,13 +43,8 @@ from decoy_engine.fileaccess._protected_dir import (
 )
 from decoy_engine.fileaccess._rooted import Root, RootedFileAccess, lexical_ok
 from decoy_engine.fileaccess._scratch_reports import CleanupReport, Disposition
-from decoy_engine.fileaccess._types import (
-    FileAccessUnavailable,
-    FileRequest,
-    FileRole,
-    StageDir,
-    StageEntry,
-)
+from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
+from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, FileRole
 
 if sys.platform != "win32":
     import fcntl
@@ -114,14 +109,16 @@ class _Fd:  # one descriptor, closed at most once by its arena's finalizer or th
             _close(fd)
 
 
-class _Root:  # what an arena tree shares, held apart from the arenas so collection can clean up
+class _Root(
+    StageLife
+):  # what an arena tree shares, held apart from the arenas so collection can clean up
     def __init__(self, fd: int, base_fd: int, name: str, path: str, *, owning: bool) -> None:
+        super().__init__()
         self.fd, self.base_fd = _Fd(fd), _Fd(base_fd)
         self.name, self.path, self.owning = name, path, owning
-        self.releases, self.finished = True, False
+        self.releases = True
         self.report: CleanupReport | None = None
         self.children: list[_Fd] = []
-        self.views: list[Callable[[], None]] = []  # closes of the read-only views opened on it
 
 
 def _reclaim(root: _Root) -> CleanupReport:
@@ -145,9 +142,7 @@ def _reclaim(root: _Root) -> CleanupReport:
 
 def _release(root: _Root, *, keep_base: bool = False) -> None:
     """Close every descriptor of the tree; an arena that owns nothing leaves the disk as is."""
-    root.finished = True
-    while root.views:
-        root.views.pop()()
+    root.end()
     for held in (*root.children, root.fd, *(() if keep_base else (root.base_fd,))):
         held.close()
 
@@ -185,7 +180,7 @@ def _mark_and_publish(fd: int, base_fd: int, pending: str) -> str:
         _close(marker)
 
 
-class ScratchArena:
+class ScratchArena(StageWalk):
     """An A-4 `StageDir` over private scratch. Children share the root's lock and finished state;
     only the opener's `reclaim()`, its `with` exit or collection of the owning root removes."""
 
@@ -202,7 +197,7 @@ class ScratchArena:
     ) -> None:
         if issuer is not _ISSUER:
             raise FileAccessUnavailable("a scratch arena is made by ScratchArena.fresh")
-        self._root = root
+        self._root = self._life = root
         self._fd = fd
         self._rel = rel
         # The opener's finalizer owns the whole tree, so a live child keeps it from collection.
@@ -304,18 +299,8 @@ class ScratchArena:
         opener = self._opener or self
         return ScratchArena(_ISSUER, self._root, child, (*self._rel, component), opener)
 
-    def _alive(self) -> bool:
-        return not self._root.finished
-
-    def open_subdir(self, component: str) -> StageDir:
-        self._check()
-        return _durable.open_subdir_at(
-            self._fd.fd, component, self._alive, self._root.views.append, _DISPLAY, True
-        )
-
-    def entries(self) -> Iterator[StageEntry]:
-        self._check()
-        return iter(list(_durable.entries_at(self._fd.fd)))
+    def _held_fd(self) -> int:
+        return self._fd.fd
 
     def remove(self, component: str) -> None:
         self._check(component, writes=True)

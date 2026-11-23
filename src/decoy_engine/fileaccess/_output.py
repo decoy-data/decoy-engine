@@ -2,24 +2,23 @@
 
 Pattern: `cap-std`'s `Dir` (create, rename and remove only through a held directory handle),
 Spark's `FileOutputCommitter` (stage privately, publish with one rename, delete the stage on
-abort) and POSIX `renameat`/`linkat` between directory fds. The caller never supplies or
-sees a stage pathname: the stage has a random name beside the final leaf, so publication is
-a rename on one filesystem. Every child name passes `validate_component` inside the
-transaction, and every operation is one `dir_fd`-relative call with `O_NOFOLLOW`, so a
-symlink planted in the stage is never followed.
+abort) and POSIX `renameat`/`linkat` between directory fds. The caller never supplies or sees a
+stage pathname: the stage has a random name beside the final leaf, so publication is a rename on
+one filesystem. Every child name passes `validate_component` inside the transaction, and every
+operation is one `dir_fd`-relative call with `O_NOFOLLOW`, so a symlink planted in the stage is
+never followed.
 
 Publication keeps each sink's existing semantics: a directory stage publishes with plain
 `rename(2)` (`ENOTEMPTY` on a non-empty destination, stage intact for `abort()`), a file stage with
-`link(2)` (`exclusive`) or `rename(2)` (`replace`; the `pointer` label then fsyncs its parent). A
-`DIRECTORY_PUBLISH_LABELS` stage is fsynced before the rename and its parent chain after it.
+`link(2)` (`exclusive`) or `rename(2)` (`replace`; `pointer` then fsyncs its parent). A
+`DIRECTORY_PUBLISH_LABELS` stage is fsynced before the rename and its parent chain after.
 
 Directories are made by one core, `_make_dir_core`, with two entry points: `make_stage_dir_at`
 (private stage directories, exact 0700) and `make_parent_dir_at` (user-named output parents at
-their real name, born mode with the owner bits forced). The core creates with the requested
-mode, observes the mode the filesystem actually gave (the umask or a default ACL decides it),
-and repairs only the owner bits, so Decoy can always open what it made; it never reads or sets
-the process umask. A parent keeps an inherited set-group-ID bit through that repair, as Git's
-`adjust_shared_perm` keeps `S_ISGID` on a shared repository directory.
+their real name, born mode with the owner bits forced). The core creates with the requested mode,
+observes the mode the filesystem gave (the umask or a default ACL decides it) and repairs only the
+owner bits, so Decoy can always open what it made; it never reads or sets the process umask. A
+parent keeps an inherited set-group-ID bit through that repair, as Git's `adjust_shared_perm` does.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ import secrets
 import stat
 import sys
 import weakref
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Literal, TypeVar
 
@@ -39,13 +38,8 @@ from decoy_engine.fileaccess import _fdtree, _openat2, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
-from decoy_engine.fileaccess._types import (
-    FileAccessUnavailable,
-    FileRequest,
-    StageDir,
-    StageEntry,
-    StageLabel,
-)
+from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
+from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
 
 # The only names a caller can influence: a closed label picks a prefix, never a path.
 STAGE_PREFIX: dict[str, str] = {
@@ -62,7 +56,7 @@ STAGE_PREFIX: dict[str, str] = {
 }
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
 DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})  # stage fsync, rename, parent fsync
-# Labels whose stage holds secrets or real data (0600 at creation); durable-replace ones included.
+# Labels whose stage holds secrets or real data (0600 at creation), durable-replace ones included.
 PRIVATE_LABELS = DURABLE_REPLACE_LABELS | {"quarantine", "isolated", "vault", "publication"}
 # `DURABLE_LABELS` publish exclusively: the writer fsyncs the stage, it is linked, then the parent is
 # fsynced (the commit point; its failure is raised). A failure removes only the stage.
@@ -243,7 +237,7 @@ def _mark_publication_stage(parent_fd: int, name: str, stage_fd: int) -> None:
         raise
 
 
-class _State:
+class _State(StageLife):
     """What a transaction owns, held apart from the object so collection can clean up."""
 
     def __init__(self, parent_fd: int, stage_name: str, kind: str) -> None:
@@ -251,11 +245,10 @@ class _State:
         self.stage_name = stage_name
         self.kind = kind
         self.stage_fd = -1
-        self.finished = False
+        super().__init__()
         self.file_created = False
         self.child_fds: list[int] = []
         self.chain_fds: list[int] = []  # root down to the parent's parent, for a durable publish
-        self.views: list[Callable[[], None]] = []  # closes of the read-only views opened on it
 
 
 def _close_all(fds: list[int]) -> None:
@@ -263,16 +256,10 @@ def _close_all(fds: list[int]) -> None:
         _close(fds.pop())
 
 
-def _close_views(state: _State) -> None:
-    while state.views:
-        state.views.pop()()
-
-
 def _discard(state: _State) -> None:
     if state.finished:
         return
-    state.finished = True
-    _close_views(state)
+    state.end()
     try:
         if state.kind == "dir":
             if state.stage_fd >= 0:
@@ -291,7 +278,7 @@ def _discard(state: _State) -> None:
         _close(state.parent_fd)
 
 
-class _StageDir:
+class _StageDir(StageWalk):
     """Name-taking operations over one stage directory descriptor."""
 
     strict = True
@@ -300,7 +287,7 @@ class _StageDir:
         self._fd = dir_fd
         self.display = display
         self._display = display
-        self._live = live
+        self._live = self._life = live
         self._mode = mode_bits
 
     def _check(self, *components: str) -> None:
@@ -338,26 +325,6 @@ class _StageDir:
 
     def local_stage_path(self) -> str:
         raise FileAccessUnavailable("a strict policy has no stage path to hand to a subprocess")
-
-    def _held(self) -> int:
-        if self._live.finished or self._fd < 0:
-            raise FileAccessUnavailable("output transaction is finished")
-        return self._fd
-
-    def _alive(self) -> bool:
-        return not self._live.finished
-
-    def open_subdir(self, component: str) -> StageDir:
-        from decoy_engine.fileaccess import _durable
-
-        return _durable.open_subdir_at(
-            self._held(), component, self._alive, self._live.views.append, self._display, True
-        )
-
-    def entries(self) -> Iterator[StageEntry]:
-        from decoy_engine.fileaccess import _durable
-
-        return iter(list(_durable.entries_at(self._held())))
 
     def __reduce__(self) -> tuple[object, ...]:
         raise TypeError(
@@ -467,8 +434,7 @@ class RootedOutputTxn(_StageDir):
             self._rename_stage()
             if state.kind == "file":
                 _durable._sync(parent)
-        state.finished = True
-        _close_views(state)
+        state.end()
         if state.stage_fd >= 0:
             _close(state.stage_fd)
             state.stage_fd = -1

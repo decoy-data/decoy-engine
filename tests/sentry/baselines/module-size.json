@@ -65,12 +65,6 @@
   "src/decoy_engine/execution/out_of_core/_stream_join.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
   },
-  "src/decoy_engine/fileaccess/_local.py": {
-   "reason": "DELIV E2f: read-only stage traversal bridge; dense ceiling set in test_module_size.py"
-  },
-  "src/decoy_engine/fileaccess/_output.py": {
-   "reason": "DELIV E2f: read-only stage traversal bridge; dense ceiling set in test_module_size.py"
-  },
   "src/decoy_engine/internal/faker_setup.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
   },
