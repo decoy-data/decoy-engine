@@ -78,5 +78,10 @@ def anchored_date_of_birth(
     return dob if dob != start else dob + timedelta(days=1)
 
 
-def age_on_anchor(dob: datetime.date, anchor: datetime.date = DOB_ANCHOR) -> int:  # STUB (E3 red)
-    return 0
+def age_on_anchor(dob: datetime.date, anchor: datetime.date = DOB_ANCHOR) -> int:
+    """Whole years from ``dob`` to ``anchor``: a pure function, with no wall-clock read.
+
+    The birthday counts on the day itself. A 29 February birthday falls on 1 March in a common
+    year, which is what comparing (month, day) tuples gives.
+    """
+    return anchor.year - dob.year - ((anchor.month, anchor.day) < (dob.month, dob.day))

@@ -48,6 +48,9 @@ _FAKER_METHOD_MAP: dict[str, str] = {
     # Person attributes
     "person_name": "name",
     "person_first_name": "first_name",
+    # Sex-keyed pools the person composite draws from (GEN-PROVIDERS E3).
+    "person_first_name_female": "first_name_female",
+    "person_first_name_male": "first_name_male",
     "person_last_name": "last_name",
     "person_full_name": "name",
     "person_email": "email",

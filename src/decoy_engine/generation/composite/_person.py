@@ -15,6 +15,13 @@ Methodology: identical pattern to composite_name_email
 (`_name_email.py`), with one extra output slot (dob) and the email
 derivation reused unchanged. Mirrors SDV's HMA1 shared-latent
 approach per engineering-best-practices section 6.2.
+
+Optional slots (generation only): `sex` and `age`. With `sex`, each row does a second derive on
+`coherent_namespace + "/ext"` (the precedent in `_custom.py`); the low bit of byte 0 picks F or
+M, and the first name then comes from that sex's pool, indexed by the main latent's first slot.
+Drawing the sex first is the only coherent order, because 13 names are in both Faker lists.
+`age` is a pure function of the row's dob and the fixed dob anchor, with no draw. With neither
+requested the bundle is byte-identical to the four-slot bundle.
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.determinism import COMPOSITE_SEED_WIDTHS, derive, resolve_seed, seed_bytes_to_int
+from decoy_engine.generation._dob_anchor import age_on_anchor
 from decoy_engine.generation.composite._backend import COMPOSITE_BACKEND
 from decoy_engine.generation.composite._bundle_pool import BundlePool
 from decoy_engine.generation.composite._errors import CompositeError
@@ -46,6 +54,8 @@ _DEFAULT_DOMAINS: tuple[str, ...] = (
 )
 _DEFAULT_EMAIL_FORMAT = "{first}.{last}@{domain}"
 _POOL_SIZE_MAX = 2**56
+# Sex code -> the registry provider its first names come from.
+_SEX_PROVIDERS: dict[str, str] = {"F": "person_first_name_female", "M": "person_first_name_male"}
 
 
 class CompositePerson:
@@ -80,6 +90,8 @@ class CompositePerson:
         self._last: np.ndarray | None = None
         self._dob: np.ndarray | None = None
         self._pools_seed: bytes | None = None
+        self._sex_pools: dict[str, np.ndarray] = {}
+        self._sex_pools_seed: bytes | None = None
 
     def _pools(self, spec: ProviderSpec) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Build first/last/dob pools for `spec.seed`; a different seed rebuilds them."""
@@ -127,6 +139,29 @@ class CompositePerson:
             self._pools_seed = spec.seed
         return self._first, self._last, self._dob
 
+    def _sex_first_pools(self, spec: ProviderSpec) -> dict[str, np.ndarray]:
+        """The female and male first-name pools for `spec.seed`, built once per seed."""
+        assert spec.seed is not None  # noqa: S101 -- resolved by the entry point
+        if not self._sex_pools or self._sex_pools_seed != spec.seed:
+            from decoy_engine.generation.pool._builder import PoolBuilder
+            from decoy_engine.providers_v2 import get_default_registry
+
+            registry = self._registry if self._registry is not None else get_default_registry()
+            builder = PoolBuilder(registry)
+            self._sex_pools = {
+                sex: builder.build(
+                    provider=provider,
+                    size=self._pool_size,
+                    job_seed=spec.seed,
+                    locale=spec.locale or "en_US",
+                    config={},
+                    namespace=self.coherent_namespace,
+                ).values
+                for sex, provider in _SEX_PROVIDERS.items()
+            }
+            self._sex_pools_seed = spec.seed
+        return self._sex_pools
+
     def _resolve_domains(self, spec: ProviderSpec) -> tuple[str, ...]:
         configured = spec.extra.get("domain_pool")
         if configured is None:
@@ -142,6 +177,14 @@ class CompositePerson:
     def _email(first: Any, last: Any, domain: str, fmt: str) -> str:
         return fmt.format(first=str(first).lower(), last=str(last).lower(), domain=domain)
 
+    def _refuse_optional_without_source(self) -> None:
+        # The pool path has no per-row source to key the sex draw on; only the keyed path emits them.
+        if self._optional:
+            raise CompositeError(
+                code=reasons.plan.DETERMINISTIC_REQUIRES_SOURCE_AND_SEED,
+                message="composite_person optional fields need a deterministic draw.",
+            )
+
     def _check_pool_size(self, size: int) -> None:
         if size > _POOL_SIZE_MAX:
             raise CompositeError(
@@ -154,6 +197,7 @@ class CompositePerson:
 
     def build_pool(self, spec: ProviderSpec, *, size: int | None = None) -> BundlePool:
         """Build a BundlePool of coherent (first, last, email, dob) tuples."""
+        self._refuse_optional_without_source()
         chosen = resolve_seed(spec.seed)
         spec = dataclasses.replace(spec, seed=chosen)
         n = size if size is not None else self._pool_size
@@ -203,6 +247,11 @@ class CompositePerson:
         last_vals: list[Any] = []
         email_vals: list[Any] = []
         dob_vals: list[Any] = []
+        sex_vals: list[Any] = []
+        age_vals: list[Any] = []
+        want_sex = "sex" in self._optional
+        want_age = "age" in self._optional
+        sex_pools = self._sex_first_pools(spec) if want_sex else {}
         is_null = source.isna()
         for i in range(len(source)):
             if is_null.iloc[i]:
@@ -210,6 +259,8 @@ class CompositePerson:
                 last_vals.append(pd.NA)
                 email_vals.append(pd.NA)
                 dob_vals.append(pd.NA)
+                sex_vals.append(pd.NA)
+                age_vals.append(pd.NA)
                 continue
             canonical = _canonicalize_source(source.iloc[i])
             latent = derive(spec.seed, self.coherent_namespace, canonical)
@@ -218,23 +269,33 @@ class CompositePerson:
             last_idx = int.from_bytes(latent[8:16], "big") % len(last_arr)
             domain_idx = int.from_bytes(latent[16:24], "big") % len(domains)
             dob_idx = int.from_bytes(latent[24:32], "big") % len(dob_arr)
-            first = first_arr[first_idx]
+            if want_sex:
+                ext = derive(spec.seed, self.coherent_namespace + "/ext", canonical)
+                sex = "F" if ext[0] & 1 == 0 else "M"
+                sex_pool = sex_pools[sex]
+                first = sex_pool[int.from_bytes(latent[0:8], "big") % len(sex_pool)]
+                sex_vals.append(sex)
+            else:
+                first = first_arr[first_idx]
             last = last_arr[last_idx]
             domain = domains[domain_idx]
             first_vals.append(first)
             last_vals.append(last)
             email_vals.append(self._email(first, last, domain, fmt))
-            dob_vals.append(dob_arr[dob_idx])
+            dob = dob_arr[dob_idx]
+            dob_vals.append(dob)
+            if want_age:
+                age_vals.append(age_on_anchor(dob))
         out = {
             "first_name": pd.Series(first_vals),
             "last_name": pd.Series(last_vals),
             "email": pd.Series(email_vals),
             "dob": pd.Series(dob_vals),
         }
-        if "sex" in self._optional:  # STUB (E3 red)
-            out["sex"] = pd.Series(["F"] * len(source))
-        if "age" in self._optional:  # STUB (E3 red)
-            out["age"] = pd.Series([0] * len(source))
+        if want_sex:
+            out["sex"] = pd.Series(sex_vals)
+        if want_age:
+            out["age"] = pd.Series(age_vals)
         return out
 
     def generate_bundle(
@@ -245,6 +306,8 @@ class CompositePerson:
         source: pd.Series | None = None,
         deterministic: bool = False,
     ) -> dict[str, pd.Series]:
+        if not deterministic:
+            self._refuse_optional_without_source()
         if deterministic and (source is None or spec.seed is None):
             raise CompositeError(
                 code=reasons.plan.DETERMINISTIC_REQUIRES_SOURCE_AND_SEED,

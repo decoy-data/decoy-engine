@@ -48,7 +48,7 @@ on speed evidence alone.
   procedure below).
 - The `mimesis` extra is pinned `>=19.0,<20`; widening past 19.x requires
   re-running this evaluation.
-- Registry shape is unchanged: 34 providers either way; adoption rebinds the
+- Registry shape is unchanged: 36 providers either way (34 before the two sex-keyed first names of GEN-PROVIDERS E3); adoption rebinds the
   5 adopted names to MimesisAdapter when the extra is installed and leaves
   everything Faker/native when it is not
   (`test_optional_dep.py::test_mimesis_binding_matches_install_state`).

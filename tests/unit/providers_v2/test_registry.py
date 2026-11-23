@@ -121,6 +121,8 @@ _DOCUMENTED_PROVIDERS: frozenset[str] = frozenset(
         "synthetic_account_number",
         "person_name",
         "person_first_name",
+        "person_first_name_female",  # GEN-PROVIDERS E3
+        "person_first_name_male",
         "person_last_name",
         "person_email",
         "person_phone",

@@ -4,7 +4,7 @@
   "surface": {
     "mask": 24,
     "generate": 16,
-    "providers": 34
+    "providers": 36
   },
   "hero": {
     "name": "HIPAA claims warehouse",
@@ -1122,6 +1122,18 @@
     {
       "name": "person_first_name",
       "backend": "faker (mimesis with the `mimesis` extra)",
+      "deterministic": false,
+      "unique": true
+    },
+    {
+      "name": "person_first_name_female",
+      "backend": "faker",
+      "deterministic": false,
+      "unique": true
+    },
+    {
+      "name": "person_first_name_male",
+      "backend": "faker",
       "deterministic": false,
       "unique": true
     },

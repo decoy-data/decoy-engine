@@ -47,7 +47,7 @@ This inventory lists strategies and provider capabilities, not route eligibility
 
 This enumeration combines V2 configuration types and legacy ColumnGenerator keys.
 
-## Synthetic providers (34)
+## Synthetic providers (36)
 
 Provider backend names identify adapters. `decoy_native` identifies the engine's Python identifier providers, not the Rust companion. The Deterministic column describes provider capability, not deterministic pool-backed masking.
 
@@ -68,6 +68,8 @@ Provider backend names identify adapters. `decoy_native` identifies the engine's
 | `person_dob` | faker | no | yes |
 | `person_email` | faker (mimesis with the `mimesis` extra) | no | yes |
 | `person_first_name` | faker (mimesis with the `mimesis` extra) | no | yes |
+| `person_first_name_female` | faker | no | yes |
+| `person_first_name_male` | faker | no | yes |
 | `person_full_name` | faker (mimesis with the `mimesis` extra) | no | yes |
 | `person_last_name` | faker (mimesis with the `mimesis` extra) | no | yes |
 | `person_name` | faker (mimesis with the `mimesis` extra) | no | yes |

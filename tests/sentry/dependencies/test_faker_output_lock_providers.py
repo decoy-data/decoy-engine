@@ -40,6 +40,8 @@ COMMITTED = {
     "person_dob": "3ebd3655d5e82023f397d8e449c84056c77a99e05d7d9cdcd0f17c2992757164",
     "person_email": "b8ce659f768470b1a74384541b73e8a58273008d8265d17f40572c234abb6d01",
     "person_first_name": "69d2d4da0cf6ea7533747d3c5c8e27d4d7e3d2d0fbef24e8b550dc3876d5fd08",
+    "person_first_name_female": "0366c47f15b7c0df3f2d67b03e89397b86cee7106a2aa499c7dbcd379c46e1bd",
+    "person_first_name_male": "c38a668a147e8ce17a69d669ec1908d1e40efc8a15994d6de6b4b7b80f881e24",
     "person_full_name": "f89289c8f88a8583300e5f248d24aaa0112b1be9473a63046aad3c43843a71fc",
     "person_last_name": "74787ccf8bd8f72f4c8b958674ec60233ad90739e48507b7ce6bda9ab55a08dc",
     "person_name": "cf96f66a478a733f56446b0b77af403d93b61fbbed87b06be869b8974eac2b65",
@@ -67,12 +69,16 @@ def test_every_faker_backed_provider_matches_its_committed_digest() -> None:
     assert got == COMMITTED
 
 
-# The composite outputs that draw names and dates from Faker (GEN-PROVIDERS E2), as one table.
+# The composite outputs that draw names and dates from Faker (GEN-PROVIDERS E2; E3 adds the optional-slot group `composite_person+`), as one table.
 COMPOSITE_COMMITTED = {
     "composite_address.street_address": "ba7b9e29fd9e7224fc49f6eb1c5ae6a4ff8e172000918124a31e01993306b907",
     "composite_name_email.email": "827a6736531cf7dac01fa51db52f15b271a05d098d9fdf13370079e145505816",
     "composite_name_email.first_name": "89cbe8d7b15fe95b3b1d6ec0223a5cf2a11120332414b948eb3ae8d9813685b6",
     "composite_name_email.last_name": "0bd90db873ac06413dedfbcf8ece0f9decda00c65a04a888f02c03b08b27f98d",
+    "composite_person+.age": "d84eb8b4e5837573dda3a5c32e56c3b0084b2c5cdc4ffef0f050e00850734039",
+    "composite_person+.dob": "a2fbeea037f807abdb95b796402b680a80abf077ed35ae40630058fe316df981",
+    "composite_person+.first_name": "aeafe5b0b6343704c498ccdc2de3865e56a3ee51561923c18e9ec5e1fcb38676",
+    "composite_person+.sex": "5798cd28c7064ec6d240cbbfb0a597a24ae5e504d8173a772642f21dcb3408eb",
     "composite_person.dob": "3aae31c6f08a0c9efe65fc35f734f4af5a29cdfab7823025f0ee91361026dcdf",
     "composite_person.email": "eff07ec2196477eba9443eacee46e532c5308e7d2bdc05acc1dab6cb9e6fa149",
     "composite_person.first_name": "624d37a958fdec8f84f5c8629634d2a63f7d0ee5a5232266945c44981d46538d",

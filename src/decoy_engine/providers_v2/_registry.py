@@ -102,7 +102,7 @@ class ProviderRegistry:
         `known_providers()` / `get_capabilities()` above: read-only, no
         registry mutation, stable for an unchanged registry instance.
 
-        This is the engine's CURATED catalog (19 entries in the default
+        This is the engine's CURATED catalog (21 entries in the default
         registry as of this writing), not the ~200-method Faker reflection
         surface that `internal.faker_setup.get_faker_providers` builds for
         the legacy V1 `faker_type:` masking path -- that reflection surface

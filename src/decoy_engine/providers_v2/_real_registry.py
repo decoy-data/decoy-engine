@@ -72,6 +72,8 @@ _CATALOG: tuple[CapabilityMatrix, ...] = (
     # Person attributes (7) -- PII-shaped, poolable
     _faker_cap("person_name", poolable=True),
     _faker_cap("person_first_name", poolable=True),
+    _faker_cap("person_first_name_female", poolable=True),
+    _faker_cap("person_first_name_male", poolable=True),
     _faker_cap("person_last_name", poolable=True),
     _faker_cap("person_full_name", poolable=True),
     _faker_cap("person_email", poolable=True),
@@ -93,7 +95,7 @@ _CATALOG: tuple[CapabilityMatrix, ...] = (
 
 
 def get_default_catalog() -> tuple[CapabilityMatrix, ...]:
-    """Return the 19-entry Faker-bound default catalog (immutable tuple).
+    """Return the 21-entry Faker-bound default catalog (immutable tuple).
 
     The full default registry includes 5 additional DecoyNative-bound
     entries for the synthetic identifiers (per S6 spec §7). Combined
