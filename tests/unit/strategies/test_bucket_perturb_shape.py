@@ -404,7 +404,7 @@ def _ctx(native: dict[tuple[str, str], ColumnShape]) -> StrategyContext:
         relationship_graph=RelationshipGraph(edges=(), ordering=()),
         namespace_registry=NamespaceRegistry(bindings=()),
         job_seed=(0x42).to_bytes(8, "big"),
-        native_date_columns=native,
+        column_shapes=native,
     )
     object.__setattr__(ctx, "current_table", "t")
     return ctx
