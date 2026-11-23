@@ -1,27 +1,23 @@
 """The resolve and route phases of `run_pipeline`, as a typed carrier.
 
-`run_pipeline` used to hold every resolved value as a local and hand the whole bag to the
-unified-slice lane through `locals()`. The resolve phase now ends in one frozen
-`PipelineRunContext`, the route phase in one frozen `RouteDecision`, and every layer-1 route
-executor takes `(ctx, decision)`.
+The resolve phase ends in one frozen `PipelineRunContext`, the route phase in one frozen
+`RouteDecision`, and every layer-1 route executor takes `(ctx, decision)`.
 
 Phases (each frozen at its own phase boundary):
 
 1. `build_run_context` validates the knobs, selects the adapter, profiles, compiles the plan,
    resolves the keyed-mask secret, builds the relationship graph and prepares engine-owned
-   table transforms. It runs in exactly the order the inline code did, so a bad input raises
-   the same error before the same expensive step.
-2. `decide_route` calls the frozen routing helpers (`_pipeline_routing`) and the out-of-core
-   decline check, in the old order. It decides; it executes nothing.
+   table transforms, in the old inline order, so a bad input raises the same error first.
+2. `decide_route` calls the frozen routing helpers and the out-of-core decline check, in the
+   old order. It decides; it executes nothing.
 3. Executors build their own route-local state. `resident_sources` and the `PoolCache` are
    full_frame-only and are created inside the full_frame executor, never here, so a bounded
    route can still return or reject before any source is materialized.
 
 Freezing is shallow: field bindings cannot change, but the source mappings, sink, registry
-and caches keep whatever mutability the code relied on. Construction only reads its inputs.
-The context carries RESOLVED values under the plain names (`registry` and `key_provider` are
-the resolved ones; the raw arguments are not kept), so no executor can reach for the unresolved
-form by mistake.
+and caches keep whatever mutability the code relied on. The context carries RESOLVED values
+under the plain names (the raw arguments are not kept), so no executor can reach for the
+unresolved form by mistake.
 
 `classify_table_kinds` is owned by `decoy_engine.config`; it is re-exported here and by
 `_pipeline`, so its public import paths are unchanged.
@@ -43,6 +39,7 @@ from decoy_engine.execution._transforms_admission import out_of_core_declined, r
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
 from decoy_engine.execution.pipeline._host import ThreadSource, native_threads_for_run
 from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
+from decoy_engine.execution.pipeline._resident_fit import store_resident_fit
 from decoy_engine.execution.pipeline._route_decision import decide_split
 from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
 from decoy_engine.fileaccess import config_relative
@@ -60,6 +57,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution._planner import ExecutionPlan
     from decoy_engine.execution._transactional_sink import TransactionalSink
     from decoy_engine.execution._transforms_prepare import PreparedSources
+    from decoy_engine.execution.pipeline._resident_fit import ResidentFit
     from decoy_engine.execution.pipeline._stream import StreamVerdict
     from decoy_engine.execution.pipeline._subset_stage import SubsetStageScope
     from decoy_engine.keyprovider import KeyProvider
@@ -165,6 +163,8 @@ class RouteDecision:
     # The B7 per-table split the full-frame executor runs, decided here so one decision serves
     # the executor and anything that prices the run; `None` leaves the job whole.
     split: MultiTableSplit | None = None
+    # Set only by `store_resident_fit` for a no-FK job the full-frame route holds whole.
+    resident_fit: ResidentFit | None = None
 
 
 def refuse_vault_with_sink(sink: Any, vault_writer: Any) -> None:
@@ -498,14 +498,13 @@ def decide_route(ctx: PipelineRunContext) -> RouteDecision:
 
     Layer 1: relationship-bearing pure-mask jobs take a bounded-memory route (out-of-core when
     large + compatible, else sequential); a large FK job no bounded route can take is rejected
-    before read. That is an early return / a fail-closed raise. The SC2 admission + size signals
-    are inert (False/None/None/True) off the relationship+mask shape, so non-FK jobs keep the
-    pre-SC2 routing. The size signal comes from the (SC7a bounded) profile metadata, so the
-    gates fire on the lazy `source_loader` path too (SC7b, closing the F2 reject-before-read hole).
+    before read. The SC2 admission + size signals are inert off the relationship+mask shape, so
+    non-FK jobs keep the pre-SC2 routing. The size signal comes from the (SC7a bounded) profile
+    metadata, so the gates fire on the lazy `source_loader` path too (SC7b).
 
     Layer 2 classification is computed before any layer-1 early return so `explain_plan`
-    surfaces it on every route, relationship jobs included. `keep_lazy` is the B6b footer
-    snapshot of lazy candidates; see `_pipeline_routing`.
+    surfaces it on every route. `keep_lazy` is the B6b footer snapshot of lazy candidates. A
+    no-FK job left on the full-frame route is priced last, by `store_resident_fit`.
     """
     if ctx.stream_required:
         from decoy_engine.execution.pipeline import _stream
@@ -561,7 +560,7 @@ def decide_route(ctx: PipelineRunContext) -> RouteDecision:
         table_kinds=ctx.table_kinds,
         execution_mode=ctx.execution_mode,
     )
-    return RouteDecision(
+    decision = RouteDecision(
         route=route,
         route_reason=route_reason,
         execution_plan_decision=execution_plan_decision,
@@ -571,6 +570,7 @@ def decide_route(ctx: PipelineRunContext) -> RouteDecision:
         mixed=mixed if route == "mixed" else None,
         split=decide_split(ctx, route, route_chunked, keep_lazy),
     )
+    return store_resident_fit(ctx, decision)
 
 
 def _mixed_static_plan(ctx: PipelineRunContext) -> MixedStaticPlan | None:

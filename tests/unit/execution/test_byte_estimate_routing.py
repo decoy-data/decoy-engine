@@ -47,6 +47,7 @@ from decoy_engine.execution._pipeline_routing import decide_execution_route
 from decoy_engine.execution._pipeline_routing_signals import byte_estimate_full_frame_fits
 from decoy_engine.profile._types import ColumnProfile, TableProfile
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
+from tests._column_shapes import INT_DECL
 from tests._declared_schema import declare_rest
 
 _MB = 1024 * 1024
@@ -638,7 +639,12 @@ def _fk_pure_mask_config(tmp_path: Path, n: int = 20) -> dict[str, Any]:
                     "name": "parent",
                     "columns": [
                         _faker_col("id", "ns"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "bucketize",
+                            "provider_config": {"width": 10},
+                            **INT_DECL,
+                        },
                     ],
                 },
                 {"name": "child", "columns": [_faker_col("parent_id", "ns")]},

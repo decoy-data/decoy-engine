@@ -12,7 +12,7 @@ Jobs are compiled from a config dict with the same helpers `run_pipeline`
 uses (`compile_job` below), then handed straight to `run_sequential` so a
 test can control `quarantine_config` byte-for-byte (including omitting keys)
 and read the raw `ExecutionResult` the pipeline would otherwise repackage.
-The masking configs (bucketize / date_shift row errors, FK-key cascade)
+The masking configs (date_shift row errors, FK-key cascade)
 mirror the proven integration fixtures in
 tests/integration/test_fk_sequential_row_error_leak.py and
 tests/integration/test_quarantine_commit_fate.py.
@@ -37,7 +37,14 @@ from decoy_engine.relationships._graph import OrphanPolicy
 from tests._declared_schema import declare_rest
 from tests.perf_fixtures.fk_relational import build_fk_relational
 
-_AGE = ["10", "20", "30", "40", "50", "badX"]
+_AGE = ["2020-01-10", "2020-01-20", "2020-01-30", "2020-02-10", "2020-02-20", "badX"]
+# `age` is a date column read by date_shift: it is the format_error source of these fixtures.
+_AGE_COL = {
+    "name": "age",
+    "strategy": "date_shift",
+    "namespace": "age_ns",
+    "provider_config": {"date_format": "%Y-%m-%d"},
+}
 _IDS = ["p0", "p1", "p2", "p3", "p4", "p5"]
 _KEY_DATES = ["2020-01-01", "2020-02-01", "2020-03-01", "2020-04-01", "2020-05-01", "notadate"]
 
@@ -103,7 +110,7 @@ def _faker_col(name: str, namespace: str) -> dict[str, Any]:
 
 
 def _fk_bucketize_config(tmp_path: Path, quarantine: dict[str, Any] | None) -> dict[str, Any]:
-    """Parent has a `bucketize` `age` column with one uncoercible cell ("badX"
+    """Parent has a `date_shift` `age` column with one uncoercible cell ("badX"
     at full-table index 5); a child FK references the parent. This is the
     integration suite's format_error shape."""
     parent = pa.table(
@@ -143,7 +150,7 @@ def _fk_bucketize_config(tmp_path: Path, quarantine: dict[str, Any] | None) -> d
                 "name": "parent",
                 "columns": [
                     _faker_col("id", "parent_ns"),
-                    {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                    dict(_AGE_COL),
                 ],
             },
             {"name": "child", "columns": [_faker_col("parent_id", "parent_ns")]},
@@ -246,7 +253,7 @@ def test_quarantine_covers_row_error_filters_and_records(tmp_path: Path) -> None
     # (a) leak closed + innocent row preserved: exactly one row removed.
     out_age = res.outputs["parent"].column("age").to_pylist()
     assert "badX" not in out_age
-    assert "30" in out_age
+    assert all(len(v) == 10 for v in out_age)  # the innocent rows are shifted dates
     assert res.outputs["parent"].num_rows == 5
 
     # (b) row_errors field carries the drained record, table-attributed, full
@@ -492,7 +499,10 @@ def _multi_table_quarantine_config(tmp_path: Path, qpath: str) -> dict[str, Any]
         {
             "id": pa.array([f"c{i}" for i in range(len(_IDS))], type=pa.string()),
             "parent_id": pa.array(_IDS, type=pa.string()),
-            "note": pa.array(["1", "2", "3", "4", "5", "badY"], type=pa.string()),
+            "note": pa.array(
+                ["2020-03-01", "2020-03-02", "2020-03-03", "2020-03-04", "2020-03-05", "badY"],
+                type=pa.string(),
+            ),
         }
     )
     return declare_rest(
@@ -528,14 +538,14 @@ def _multi_table_quarantine_config(tmp_path: Path, qpath: str) -> dict[str, Any]
                     "name": "parent",
                     "columns": [
                         _faker_col("id", "parent_ns"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        dict(_AGE_COL),
                     ],
                 },
                 {
                     "name": "child",
                     "columns": [
                         _faker_col("parent_id", "parent_ns"),
-                        {"name": "note", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {**_AGE_COL, "name": "note", "namespace": "note_ns"},
                     ],
                 },
             ],
@@ -1116,7 +1126,10 @@ def test_row_error_count_accumulates_same_key(tmp_path: Path) -> None:
     parent = pa.table(
         {
             "id": pa.array(_IDS, type=pa.string()),
-            "age": pa.array(["10", "bad1", "30", "bad2", "50", "60"], type=pa.string()),
+            "age": pa.array(
+                ["2020-01-10", "bad1", "2020-01-30", "bad2", "2020-02-20", "2020-03-01"],
+                type=pa.string(),
+            ),
         }
     )
     child = pa.table(
@@ -1153,7 +1166,7 @@ def test_row_error_count_accumulates_same_key(tmp_path: Path) -> None:
                 "name": "parent",
                 "columns": [
                     _faker_col("id", "parent_ns"),
-                    {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                    dict(_AGE_COL),
                 ],
             },
             {"name": "child", "columns": [_faker_col("parent_id", "parent_ns")]},

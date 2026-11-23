@@ -307,6 +307,21 @@ pass (`decoy validate`) defers a column whose type it cannot see, so a missing `
 pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
 date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
 
+**Pre-GA correction (COLUMN-SHAPE E3, 2026-11-21).** Breaking for configs, no shim. `bucketize` and `top_code`
+refuse a text column unless it declares `logical_type` (integer with a `parse_format`, or for `bucketize` a decimal
+with precision 15 or less), at compile with `plan/column_shape_required`. A shape the strategy cannot read is
+`plan/column_shape_mismatch`: a decimal under `top_code`, a decimal wider than 15 digits under `bucketize`, or a
+decimal `bucketize` whose width is not a whole number from 1 to 10^15. A typed integer or float needs nothing, a
+typed decimal runs only under `bucketize` with a whole-number width. The handlers refuse a column the plan does
+not list as typed with `runtime/column_shape_required`. A `bucketize` or `top_code` over an undeclared text column
+therefore stops compiling, and their per-row `format_error` can no longer come from a compiled run. The nested
+`bucketize` child is always text, so it is always refused. `bucketize` reads `preset` and `width` in one place,
+`contracts/bucketize_width.py`; a sentry pins its callers. The F06 declared-casting output rule now covers
+`top_code` on an integer and `bucketize` on a decimal, and a preset on a declared integer is admitted. The plan
+hash and the physical plan hash move for any pipeline that uses `bucketize`, `top_code` or `fpe`. Adding the
+recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
+`column_shape_required` (plan and runtime) is registered unreleased.
+
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
 stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to
@@ -489,6 +504,20 @@ numeric histogram accompanying `exact_values` or `quantile_grid` has one bin; wi
 it has equal-width bins on a 1, 2, 5 grid and every non-empty bin is held by at least 10 rows.
 `numeric_bins` outside 1 to 1000 is refused with `quality.numeric_bins_invalid` (new, `since`
 unreleased) by every snapshot writer, and above 1000 by the DP fit (`dp_numeric_bins_invalid`).
+
+`cell_format.char_class` (FIT-CODES-TEXT, 2026-11) is one new optional member of the `cell_format` block
+of a `freetext` column entry. It carries on both `distribution-snapshot/v1` (the raw writer and
+`include_values=True`, through `compute_distribution_snapshot(..., cell_format=True)`) and
+`distribution-snapshot/v2` (the plain redacted writer). Its only value is `"digits"`: every non-blank
+cell of the column is ASCII `0` to `9` (`re.fullmatch("[0-9]+", cell)`), so the sampler draws digit strings
+at the fitted lengths. It is one enum token with no source value, so `scrub_cell_format` keeps `"digits"`
+and nulls any other value. This engine reads it under both tags, and a snapshot without it generates as
+before. This is a recorded exception to the additive-field rule below: an engine older than this
+change does not ignore the member. Its strict decoder refuses it with `statistical_cell_format_invalid`
+and never misreads it. The same holds for a pinned plan: an older engine that reads a plan whose stored
+`cell_format` holds `char_class` requires exactly six members and refuses it with the same code. A new tag was not minted: the old reader fails closed with a coded refusal,
+and one member does not justify a v3. After 1.0 the member and its single value are frozen; a new value
+is additive in 1.x and needs the same old-reader note.
 
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because

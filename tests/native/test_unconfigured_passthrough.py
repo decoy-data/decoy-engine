@@ -17,6 +17,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution import ExecutionError
 from decoy_engine.execution._chunked_profile import first_chunk_profile
@@ -239,6 +240,7 @@ def test_plan_native_route_takes_the_policy_keyword_and_defaults_to_the_veto() -
             first_schema=schema,
             **kw,
             registry=get_default_registry(),
+            siblings=NO_SOURCES,
         )
 
     assert plan().evidence.native_admitted is False
@@ -262,6 +264,7 @@ def test_plan_native_route_warn_still_vetoes_a_missing_configured_column() -> No
         first_schema=schema,
         unconfigured_policy="warn",
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert got.evidence.native_admitted is False
     assert got.evidence.reroute_reason == "uncovered_columns:['u'];missing_configured_columns:['q']"
@@ -460,7 +463,9 @@ def test_real_type_rejection_reasons_are_unchanged_for_every_hash_source_type(
     config = make_config([hash_col("c")])
     chunk = pa.Table.from_batches([], schema=schema)
     profile = first_chunk_profile(chunk, table=TABLE, engine_version=ENGINE_VERSION)
-    decision = _static_route_decision(config, profile, table=TABLE, engine_version=ENGINE_VERSION)
+    decision = _static_route_decision(
+        config, profile, table=TABLE, engine_version=ENGINE_VERSION, siblings=NO_SOURCES
+    )
     before = hash_config_rejection(
         "c", TABLE, profile, resident_sources={TABLE: schema.empty_table()}
     )

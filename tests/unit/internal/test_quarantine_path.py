@@ -22,7 +22,7 @@ from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.plan._compile import _hash_config
 from tests._declared_schema import declare_rest
 
-_AGE = ["10", "20", "30", "40", "50", "badX"]
+_AGE = ["2020-01-10", "2020-01-20", "2020-01-30", "2020-02-10", "2020-02-20", "badX"]
 _IDS = ["p0", "p1", "p2", "p3", "p4", "p5"]
 
 
@@ -82,7 +82,12 @@ def _fk_config(tmp_path: Path, declared: str) -> tuple[dict[str, Any], dict[str,
                 "name": "parent",
                 "columns": [
                     {**fk, "name": "id"},
-                    {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                    {
+                        "name": "age",
+                        "strategy": "date_shift",
+                        "namespace": "age_ns",
+                        "provider_config": {"date_format": "%Y-%m-%d"},
+                    },
                 ],
             },
             {

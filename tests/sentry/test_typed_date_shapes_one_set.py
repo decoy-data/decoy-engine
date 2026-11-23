@@ -17,7 +17,11 @@ from decoy_engine.contracts.strategy_requirements import (
     SHAPE_REQUIREMENTS_BY_STRATEGY,
     shape_declaration_needed,
 )
-from decoy_engine.declared_casting._boundary import native_date_columns
+from decoy_engine.declared_casting._boundary import plan_column_shapes
+from decoy_engine.execution._adapter import StrategyContext
+from decoy_engine.generation.pool._cache import PoolCache
+from decoy_engine.relationships._graph import RelationshipGraph
+from decoy_engine.relationships._namespace import NamespaceRegistry
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 HOME = "contracts/column_shape.py"
@@ -63,5 +67,13 @@ def test_the_plan_boundary_lists_exactly_the_set() -> None:
     plan = SimpleNamespace(
         column_shapes=tuple(SimpleNamespace(table="t", column=s.value, shape=s) for s in S)
     )
-    assert set(native_date_columns(plan).values()) == TYPED_DATE_SHAPES
-    assert len(native_date_columns(plan)) == len(TYPED_DATE_SHAPES)
+    ctx = StrategyContext(
+        registry=None,  # type: ignore[arg-type]
+        pool_cache=PoolCache(),
+        relationship_graph=RelationshipGraph(edges=(), ordering=()),
+        namespace_registry=NamespaceRegistry(bindings=()),
+        job_seed=(0x42).to_bytes(8, "big"),
+        column_shapes=plan_column_shapes(plan),
+    )
+    assert set(ctx.native_date_columns.values()) == TYPED_DATE_SHAPES
+    assert len(ctx.native_date_columns) == len(TYPED_DATE_SHAPES)

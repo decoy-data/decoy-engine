@@ -1,0 +1,18 @@
+{
+ "sentry_id": "bucketize-width-contract",
+ "created_in": "COLUMN-SHAPE-E3",
+ "entries": {
+  "execution/_strategies/_bucketize.py": {
+   "reason": "the handler resolves the width it buckets by"
+  },
+  "plan/_checks_bucketize.py": {
+   "reason": "the compile check refuses an unresolvable width"
+  },
+  "contracts/strategy_requirements.py": {
+   "reason": "the shape rule tests a decimal column's width"
+  },
+  "plan/_checks_declared_casting.py": {
+   "reason": "the F06 proof tests whether the width is an integer"
+  }
+ }
+}

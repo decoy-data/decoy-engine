@@ -28,6 +28,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config._pipeline import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution.native import _dispatch, _operator_step
 from decoy_engine.execution.native import _index_ext as _index_ext_module
@@ -201,6 +202,7 @@ def test_non_c1_faker_variant_stays_on_oracle(columns: list[dict]) -> None:
         table="t",
         engine_version=_ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     ).evidence
 
     assert decision.native_admitted is False
@@ -228,6 +230,7 @@ def test_non_deterministic_reuse_faker_is_admitted_as_the_position_keyed_variant
         table="t",
         engine_version=_ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     ).evidence
 
     assert decision.native_admitted is True
@@ -301,6 +304,7 @@ def test_missing_namespace_on_deterministic_column_never_reaches_native_admissio
             table="t",
             engine_version=_ENGINE_VERSION,
             registry=get_default_registry(),
+            siblings=NO_SOURCES,
         )
 
 
@@ -355,6 +359,7 @@ def test_one_non_c1_faker_column_reroutes_whole_table_not_just_that_column() -> 
         table="t",
         engine_version=_ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     ).evidence
 
     assert decision.native_admitted is False
@@ -678,7 +683,12 @@ def test_plan_native_route_agrees_with_run_native_or_oracle_chunked() -> None:
     config = _config(_faker_column())
     profile = _profile("FIRST")
     decision = plan_native_route(
-        config, profile, table="t", engine_version=_ENGINE_VERSION, registry=get_default_registry()
+        config,
+        profile,
+        table="t",
+        engine_version=_ENGINE_VERSION,
+        registry=get_default_registry(),
+        siblings=NO_SOURCES,
     ).evidence
     assert decision.native_admitted is True
 
@@ -1472,6 +1482,7 @@ def test_static_rejection_never_reaches_either_companion_probe(
         table="t",
         engine_version=_ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     ).evidence
     assert decision.native_admitted is False
     assert decision.reroute_reason == "fk_relationship_not_native_route"
@@ -1534,6 +1545,7 @@ def test_coverage_mismatch_with_extra_and_missing_column_never_reaches_either_pr
         engine_version=_ENGINE_VERSION,
         first_schema=schema,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     ).evidence
     assert decision.native_admitted is False
     assert decision.reroute_reason is not None

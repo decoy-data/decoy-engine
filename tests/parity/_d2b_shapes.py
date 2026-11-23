@@ -22,6 +22,7 @@ from decoy_engine.plan._types import ColumnSeed, GroupSeed, SeedEnvelope, TableS
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests._column_shapes import numeric_shapes
 from tests.parity._d1a_hash_data import _PASSTHROUGH, JOB_SEED, column_seed
 
 REGISTRY = get_default_registry()
@@ -48,8 +49,10 @@ def table_seed(
 
 
 def make_plan(tables: dict[str, TableSeed]) -> Any:
+    per_table = tuple(tables.items())
     return SimpleNamespace(
-        seed_envelope=SeedEnvelope(job_seed=JOB_SEED, per_table=tuple(tables.items()))
+        seed_envelope=SeedEnvelope(job_seed=JOB_SEED, per_table=per_table),
+        column_shapes=numeric_shapes(per_table),
     )
 
 
