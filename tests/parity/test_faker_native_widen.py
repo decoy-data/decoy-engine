@@ -510,11 +510,11 @@ def test_w1_a_pool_over_the_floor_is_refused_before_building_and_a_fitting_one_i
 
     registry = get_default_registry()
     small = 1_000
-    budget = construction_floor(small, strings=True) * 4
+    room = construction_floor(small, strings=True) * 4
 
     def make(size: int) -> tuple[OocFakerPoolContext, Any]:
         ctx = OocFakerPoolContext(
-            registry=registry, job_seed=b"\x05" * 8, max_pool_bytes=budget, builder=Spy(registry)
+            registry=registry, job_seed=b"\x05" * 8, max_pool_bytes=room, builder=Spy(registry)
         )
         return ctx, ctx.prepare(provider=provider, namespace="ns_w1", cfg={}, plan_pool_size=size)
 
@@ -527,4 +527,4 @@ def test_w1_a_pool_over_the_floor_is_refused_before_building_and_a_fitting_one_i
     ctx, prepared = make(small)  # fits
     pool = ctx.get_pool(prepared)
     assert builds == [1]
-    assert ctx.reserved_bytes == measured_pool_bytes(pool) <= budget
+    assert ctx.reserved_bytes == measured_pool_bytes(pool) <= room
