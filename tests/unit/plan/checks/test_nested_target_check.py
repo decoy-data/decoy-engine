@@ -86,6 +86,17 @@ def _config(target: Any) -> dict[str, Any]:
     }
 
 
+def _compilable(base: dict, target: Any) -> dict:
+    """The conftest config that compiles against `simple_profile`, with its column made nested."""
+    column = {
+        "name": "name",
+        "strategy": "nested",
+        "provider_config": {"target": target, "strategy": "redact"},
+    }
+    base["tables"][0]["columns"] = [column]
+    return base
+
+
 @pytest.mark.parametrize("target", _ACCEPTED)
 def test_a1_accepted_target_passes_validate(target: str) -> None:
     run_config_only_checks(_config(target))
@@ -102,18 +113,28 @@ def test_a1_refused_target_fails_validate_with_the_code(target: str) -> None:
 
 @pytest.mark.parametrize("target", _REFUSED)
 def test_a1_refused_target_fails_compile_plan_with_the_code(
-    target: str, simple_profile: Profile
+    target: str, simple_config: dict, simple_profile: Profile
 ) -> None:
     with pytest.raises(PlanCompileError) as exc:
         compile_plan(
-            _config(target), simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+            _compilable(simple_config, target),
+            simple_profile,
+            decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
     assert exc.value.code == "nested_target_unsupported"
 
 
 @pytest.mark.parametrize("target", _ACCEPTED)
-def test_a1_accepted_target_passes_compile_plan(target: str, simple_profile: Profile) -> None:
-    compile_plan(_config(target), simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
+def test_a1_accepted_target_passes_compile_plan(
+    target: str, simple_config: dict, simple_profile: Profile
+) -> None:
+    compile_plan(
+        _compilable(simple_config, target),
+        simple_profile,
+        decoy_engine_version="0.1.0",
+        sources=NO_SOURCES,
+    )
 
 
 def test_message_names_position_form_and_target() -> None:
