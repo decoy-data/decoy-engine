@@ -348,6 +348,9 @@ def test_bad_manifest_precedes_reads(monkeypatch, bad, lazy):
     sys.platform != "linux", reason="requires procfs and Linux address-space accounting"
 )
 @pytest.mark.parametrize("kind", ["as", "data"])
+# The `as` cell (VmSize, cap baseline + 3 x size) only pins that the read fits;
+# it does not prove zero copy. The `data` cell (VmData, cap baseline + size // 2)
+# plus the /proc/self/maps check below prove the column is mapped, not copied.
 def test_mapped_ipc_under_cap(tmp_path, kind):
     table = pa.table({"x": pa.array([1] * 8_000_000, pa.date64())})
     manifest = stage_sources(tmp_path, {"t": table})
@@ -362,11 +365,20 @@ manifest = json.loads(sys.argv[1])
 kind = sys.argv[2]
 field = "VmSize" if kind == "as" else "VmData"
 size = Path(manifest["t"]["path"]).stat().st_size
-baseline =read_vm_fields(os.getpid(), (field,))[field]
-apply_mem_cap(baseline + (3 * size if kind == "as" else size), kind)
+baseline = read_vm_fields(os.getpid(), (field,))[field]
+apply_mem_cap(baseline + (3 * size if kind == "as" else size // 2), kind)
 table = _load_sources(manifest, lazy=True)["t"]
 assert table.num_rows == 8_000_000
-assert table["x"].chunk(0).buffers()[1].size >= 64_000_000
+buf = table["x"].chunk(0).buffers()[1]
+assert buf.size >= 64_000_000
+staged = os.path.realpath(manifest["t"]["path"])
+mapped = False
+for line in Path("/proc/self/maps").read_text().splitlines():
+    parts = line.split(maxsplit=5)
+    if len(parts) == 6 and os.path.realpath(parts[5].removesuffix(" (deleted)")) == staged:
+        lo, hi = (int(v, 16) for v in parts[0].split("-"))
+        mapped = mapped or lo <= buf.address < hi
+assert mapped, "column buffer is not inside a mapping of the staged file"
 """
     subprocess.run(  # noqa: S603 -- fixed child script and test-owned source
         [sys.executable, "-c", script, json.dumps(manifest), kind],
