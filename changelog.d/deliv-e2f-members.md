@@ -5,3 +5,5 @@
 The publisher now refuses a stage that holds any entry no member names (a stray file, a link, a special file, an empty folder). `StageDir` gains `open_subdir` and `entries`, which never follow a link; `open_subdir` gives a read-only view.
 
 A reader older than this release that meets a unit with `rows: null`, a `quarantine` or `report` member, or a nested path cannot load its descriptor and treats the folder as occupied, so it refuses and never overwrites the unit. Rerunning the same run id on such a reader refuses; a new run id is unaffected.
+
+Contract entry: "Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23)" in `docs/compatibility-contract.md`.
