@@ -261,7 +261,7 @@ class _InRangeIndex(Index):
         (index,) = self.indices
         if isinstance(value, list) and not -len(value) <= index < len(value):
             return []
-        return super().find(datum)  # type: ignore[no-any-return]
+        return super().find(datum)
 
 
 def to_jsonpath(path: TargetPath) -> Any:

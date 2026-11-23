@@ -655,7 +655,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "import-linter", marker = "extra == 'layers'", specifier = "==2.15" },
     { name = "joserfc", specifier = ">=1.7.7,<2" },
-    { name = "jsonpath-ng", specifier = ">=1.8.0,<2" },
+    { name = "jsonpath-ng", specifier = ">=1.8.0,<1.9" },
     { name = "lark", specifier = ">=1.1" },
     { name = "lightgbm", specifier = "==4.6.0" },
     { name = "linkify-it-py", marker = "extra == 'docs'", specifier = ">=2" },

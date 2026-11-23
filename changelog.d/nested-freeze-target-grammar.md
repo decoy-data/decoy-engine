@@ -1,4 +1,4 @@
-Breaking: `nested` `provider_config.target` is limited to a closed RFC 9535 subset, so `compile_plan` and `run_config_only_checks` refuse `$..a`, filters, unions, a missing `$`, dot-quoted names, backticks and `$['*']` with the new reason `plan.nested_target_unsupported`; `jsonpath-ng` is pinned to `>=1.8.0,<2`
+Breaking: `nested` `provider_config.target` is limited to a closed RFC 9535 subset, so `compile_plan` and `run_config_only_checks` refuse `$..a`, filters, unions, a missing `$`, dot-quoted names, backticks and `$['*']` with the new reason `plan.nested_target_unsupported`; `jsonpath-ng` is pinned to `>=1.8.0,<1.9`
 
 ### Changed (nested target grammar, NESTED-FREEZE, 2026-11-23)
 
