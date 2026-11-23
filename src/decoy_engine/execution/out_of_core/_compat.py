@@ -388,7 +388,7 @@ def _faker_conditional_rejection(
         return OutOfCoreRejection(
             "out_of_core_faker_pool_unsupported",
             f"{node.table}.{node.columns}: out-of-core faker admits only deterministic REUSE with "
-            "a person-name provider and a namespace; other shapes fall "
+            "an allowlisted poolable provider and a namespace; other shapes fall "
             "back to sequential/full-frame.",
         )
     if source_types is not None:

@@ -77,7 +77,7 @@ def decline_reason(column: str, schema: pa.Schema, seed: ColumnSeed) -> str | No
     """None when `column` can run the deterministic-REUSE native faker payload, else a reason.
 
     The admitted subset is the exact one the sequential and chunked routes gate
-    on: a person-name provider on `C1_PROVIDER_ALLOWLIST`, the deterministic
+    on: an allowlisted poolable string provider on `C1_PROVIDER_ALLOWLIST`, the deterministic
     REUSE precondition (`deterministic`, `cardinality_mode=reuse`, a namespace),
     and an exact-`string` source. The non-deterministic
     (positional) REUSE leg needs the global row offset and is out of this slice's
