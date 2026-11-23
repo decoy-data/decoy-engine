@@ -84,7 +84,7 @@ _STAGE_A: list[tuple[str, dict[str, Any], bool]] = [
         True,
     ),
     ("missing_pool_size", nd_faker(pool_size=None), True),
-    ("off_allowlist_provider", nd_faker(provider="address_city"), False),
+    ("off_allowlist_provider", nd_faker(provider="person_dob"), False),
     ("date_provider", nd_faker(provider="person_dob"), False),
     ("unique", nd_faker(namespace="ns_f", cardinality_mode="unique"), False),
     ("match", nd_faker(namespace="ns_f", cardinality_mode="match_source_cardinality"), False),
@@ -249,7 +249,7 @@ def test_a_missing_pool_size_is_not_a_veto_condition() -> None:
 
 def test_an_off_allowlist_provider_veto_names_the_column_and_drops_the_deferral_text() -> None:
     with pytest.raises(PlanCompileError) as info:
-        _check([nd_faker(name="tier", provider="address_city"), passthrough("p")])
+        _check([nd_faker(name="tier", provider="person_dob"), passthrough("p")])
     assert info.value.code == VETO
     assert info.value.path == f"tables.{TABLE}.columns"
     assert "tier" in info.value.message
@@ -258,9 +258,9 @@ def test_an_off_allowlist_provider_veto_names_the_column_and_drops_the_deferral_
 
 def test_an_off_allowlist_provider_names_the_provider_and_the_allowlist() -> None:
     with pytest.raises(PlanCompileError) as info:
-        _check([nd_faker(provider="address_city"), passthrough("p")])
+        _check([nd_faker(provider="person_dob"), passthrough("p")])
     assert info.value.code == VETO
-    assert "address_city" in info.value.message and "allowlist" in info.value.message
+    assert "person_dob" in info.value.message and "allowlist" in info.value.message
 
 
 @pytest.mark.parametrize("mode", ["unique", "match_source_cardinality", "scale_source_cardinality"])
@@ -405,7 +405,7 @@ def _mixed_job(tmp_path: Path, provider: str) -> tuple[dict[str, Any], pa.Table]
 
 @pytest.mark.parametrize(
     ("provider", "registry"),
-    [("person_dob", None), ("address_zip", "int")],
+    [("person_dob", None), ("person_dob", "int")],
     ids=["date_output", "numeric_output"],
 )
 def test_a_non_allowlisted_provider_stays_whole_frame_and_equals_the_forced_run(
@@ -586,7 +586,7 @@ def test_a_deterministic_faker_with_when_is_unaffected() -> None:
 
 
 def test_a_non_admissible_faker_with_when_keeps_the_retained_code() -> None:
-    assert _code([nd_faker(provider="address_city", when="p > 1"), passthrough("p")]) == VETO
+    assert _code([nd_faker(provider="person_dob", when="p > 1"), passthrough("p")]) == VETO
 
 
 def test_a_blank_when_does_not_trigger_the_when_rejection() -> None:

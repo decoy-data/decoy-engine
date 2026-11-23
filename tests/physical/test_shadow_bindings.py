@@ -382,11 +382,11 @@ def test_faker_non_poolable_provider_hand_built_node_is_unbound(tmp_path: Path) 
 
 
 def test_faker_provider_outside_c1_allowlist_is_unbound(tmp_path: Path) -> None:
-    """A pool-native provider that is nonetheless NOT one of the two frozen
-    C1 providers (`person_first_name`/`person_last_name`) must stay unbound --
+    """A pool-native provider that is nonetheless NOT on the faker operator's
+    allowlist (`person_dob`, a date pool) must stay unbound --
     the allowlist, not bare poolability, is the gate."""
     source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
-    plan = _plan_for(tmp_path, source, [_faker_column(provider="person_email")])
+    plan = _plan_for(tmp_path, source, [_faker_column(provider="person_dob")])
     node = plan.tables[0].nodes[0]
     assert node.execution is None
 

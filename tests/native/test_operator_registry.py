@@ -53,7 +53,21 @@ def test_spec_is_frozen() -> None:
 def test_group_key_has_no_target_resident_types_and_faker_has_the_allowlist() -> None:
     assert OPERATORS["group_key"].unified_resident_types is None
     assert OPERATORS["faker"].provider_allowlist == frozenset(
-        {"person_first_name", "person_last_name"}
+        {
+            "person_first_name",
+            "person_last_name",
+            "person_name",
+            "person_full_name",
+            "person_email",
+            "person_phone",
+            "address_street",
+            "address_city",
+            "address_state",
+            "address_zip",
+            "synthetic_account_number",
+            "synthetic_member_id",
+            "synthetic_plan_id",
+        }
     )
     assert OPERATORS["passthrough"].unified_resident_types == frozenset(
         {pa.string(), pa.int64(), pa.bool_()}
