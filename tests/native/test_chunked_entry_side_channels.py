@@ -256,7 +256,7 @@ _REJECTIONS: dict[str, Callable[[], tuple[dict[str, Any], pa.Table, str]]] = {
     "conditions_unmet": lambda: (
         _with_extra(
             _ADMITTED,
-            {"name": "x", "strategy": "faker", "provider": "address_city", "namespace": "n"},
+            {"name": "x", "strategy": "faker", "provider": "person_dob", "namespace": "n"},
         ),
         _STR.append_column("x", pa.array(["a"] * 6)),
         TABLE,

@@ -447,7 +447,7 @@ def test_a_nested_child_needs_its_format(tmp_path: Path) -> None:
     column = cfg["tables"][0]["columns"][0]
     column["strategy"] = "nested"
     column["provider_config"] = {
-        "target": "when",
+        "target": "$.when",
         "strategy": "bucket_perturb",
         "strategy_config": {"bucket": "month"},
     }

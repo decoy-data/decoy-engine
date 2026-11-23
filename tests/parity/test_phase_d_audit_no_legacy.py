@@ -754,10 +754,10 @@ def test_seq_ner_text_redact_declines_to_the_python_handler(
 
 def test_seq_faker_declined_config_runs_the_python_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     kernel = install_cat(monkeypatch, CatMarkingKernel())
-    seed = faker_seed(provider="person_email")  # provider outside the native allowlist
+    seed = faker_seed(provider="person_dob")  # provider outside the native allowlist
     shape = payload_shape({"f": (strs(FAKER_SRC), seed)})
     result = run_seq(shape)
-    assert_python_ran(result, "f", "faker_provider_not_native:f:person_email")
+    assert_python_ran(result, "f", "faker_provider_not_native:f:person_dob")
     assert [c for c in kernel.calls if c.namespace == "ns_f"] == []  # the compiled kernel idle
     assert result.outputs["P"].equals(run_full(shape).outputs["P"])
 

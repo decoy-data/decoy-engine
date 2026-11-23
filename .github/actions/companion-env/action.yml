@@ -1,11 +1,15 @@
 name: companion-env
 description: Lock venv with the dev extra, then build and install the native companion from source and assert it loads. Run after checkout.
+inputs:
+  extras:
+    description: Space-separated uv extras for the lock venv.
+    default: "dev"
 runs:
   using: composite
   steps:
     - uses: ./.github/actions/lock-env
       with:
-        extras: "dev"
+        extras: ${{ inputs.extras }}
     - name: Install stable Rust (companion build only; the core needs none)
       uses: dtolnay/rust-toolchain@stable
     - name: Build and install the companion (maturin, same-platform)

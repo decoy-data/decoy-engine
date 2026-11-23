@@ -208,10 +208,27 @@ _SPECS = (
         full_frame_assembly="tokenizing",
         positional_resident_types=_STRING_ONLY | POSITIONAL_FAKER_SOURCE_TYPES,
         deterministic_resident_types=_STRING_ONLY | DETERMINISTIC_FAKER_SOURCE_TYPES,
-        # The frozen C1 recipe's providers (FIRST=person_first_name, LAST/MAIDEN=
-        # person_last_name). Every other pool_native provider is out of scope and is
-        # rejected with a coded reason rather than silently admitted.
-        provider_allowlist=frozenset({"person_first_name", "person_last_name"}),
+        # The string-pool providers proven by tests/parity/test_faker_native_widen.py. Every
+        # other pool_native provider is rejected with a coded reason rather than silently
+        # admitted; tests/sentry/defects/test_faker_native_allowlist_total.py walks the live
+        # registry so a new pool_native provider must be listed here or excluded there.
+        provider_allowlist=frozenset(
+            {
+                "person_first_name",
+                "person_last_name",
+                "person_name",
+                "person_full_name",
+                "person_email",
+                "person_phone",
+                "address_street",
+                "address_city",
+                "address_state",
+                "address_zip",
+                "synthetic_account_number",
+                "synthetic_member_id",
+                "synthetic_plan_id",
+            }
+        ),
     ),
     OperatorSpec(
         strategy="categorical",

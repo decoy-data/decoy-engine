@@ -422,7 +422,7 @@ def test_4_config_incomplete_positional_categorical_with_when_keeps_its_code() -
 
 def test_4_config_incomplete_positional_faker_with_when_keeps_its_code() -> None:
     # A provider outside the allowlist is what stage A still refuses; a missing pool_size is not.
-    column = pos_faker(when="keep == 'A'", provider="person_email")
+    column = pos_faker(when="keep == 'A'", provider="person_dob")
     assert _code([column, passthrough("keep")]) == "chunked_strategy_conditions_unmet"
 
 

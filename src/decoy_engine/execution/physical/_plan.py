@@ -84,7 +84,7 @@ class ExecutionBinding:
     COMPILE time (Task 4.4 C0; design doc section 8.1's per-node field list,
     scoped to the five strategies the shadow coordinator admits -- passthrough,
     redact, truncate, keyed hash, and (Task 4.6 slice 1) deterministic faker
-    over the frozen C1 provider allowlist). Populated only when the node's
+    over the faker operator's provider allowlist). Populated only when the node's
     compiled config was admitted to the corresponding native kernel or pool
     route; every other node leaves `PhysicalNode.execution` unset.
 

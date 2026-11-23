@@ -1055,7 +1055,8 @@ only this site moves.
   keeps the position-keyed draw of slice C5b-i, taken at the chunk's global row offset, so
   chunked output equals the whole-frame run for any chunk size. A column is admitted when it
   uses a provider in the C1
-  string-output allowlist (`person_first_name`, `person_last_name`), has no `when:` and is not
+  string-output allowlist (the `faker` operator's `provider_allowlist` in
+  `execution/_operator_registry.py`), has no `when:` and is not
   `unique`, `match_source_cardinality` or `scale_source_cardinality`; the namespace stays
   optional. A string source runs the compiled path and any other source type runs the chunked
   oracle leg with the same draw. A column that fails one of these conditions keeps running
@@ -1124,6 +1125,14 @@ only this site moves.
   infers (Arrow `null`), while the chunked route yields `string`; values are unchanged. The
   auto-chunk planner keeps such a table chunked only when every column the predicate reads is a
   `string`. The unified full-frame route and out-of-core still decline `when:`.
+  The `when:` grammar gained reference forms (2026-11-22, WHEN-READS-SOURCE S1), additive: a column
+  is a bare name or `source.<name>` (the same thing: the original value), a backtick-quoted name
+  (`` `a.b` ``, with or without the prefix) for a name outside `[A-Za-z0-9_]`, or `masked.<name>`,
+  which parses and is refused with the new error type `when_masked_reference_unsupported`
+  (V1 reads original values only). The prefix set is exactly `source` and `masked`; any other
+  dotted prefix stays `when_outside_closed_grammar`. A quoted name holds no backtick, backslash or
+  control character, and `RESERVED_NAMES` applies to the name inside the quotes. Every predicate that
+  parsed before parses to the same tree and selects the same rows.
   `run_pipeline` gains two keyword-only arguments (2026-10-01): `native_threads: int = 1`
   (the default moved on 2026-11-20 to `None`, see the ENGINE-THREADS-DEFAULT entry below; 1 to 1024; the kernel thread budget of the auto-chunk dispatcher lane, no output
   byte depends on it) and `chunked_dispatcher_enabled: bool = True` (the kill switch that
