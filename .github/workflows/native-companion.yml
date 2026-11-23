@@ -31,6 +31,10 @@ name: native-companion
 
 on:
   pull_request:
+  # Main runs the companion lane too: a companion-gated test skips in every other lane, so a
+  # merge that broke one stayed unseen on main until someone ran the lane by hand.
+  push:
+    branches: [main]
   schedule:
     - cron: "37 3 * * *"
   workflow_dispatch:
@@ -304,7 +308,7 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
@@ -418,6 +422,14 @@ jobs:
         run: |
           pytest tests/native -m "not serial" -n 4 --dist loadfile -q --tb=short
           pytest tests/native -m "serial" -q --tb=short || [ $? -eq 5 ]
+
+      # The companion-gated tests outside tests/native. A test there that no step above names skips
+      # in every other lane, so it can go red with no signal (57 were red on main when this step was added).
+      # Same two-pass split and marker filter as ci.yml's regression gate.
+      - name: Whole tests/parity and tests/unit/execution directories (companion-present case)
+        run: |
+          pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial" -n 4 --dist loadfile -q --tb=short
+          pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and serial" -q --tb=short || [ $? -eq 5 ]
 
   # companion-fuzz-sanitizer: the KeyedDerivationKernel is the one security-sensitive native
   # unit, so it gets fuzz + sanitizer evidence beyond the KAT/proptest/clippy gates above. A
