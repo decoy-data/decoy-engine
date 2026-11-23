@@ -103,10 +103,10 @@ Non-goals: `address_full` (composite; FAKER-NATIVE-WIDEN and the composite rows 
 
 | Route | Mask side | Generate side |
 |---|---|---|
-| pandas full frame | `FakerStrategyHandler` (`execution/_strategies/_faker.py`) dispatches all three computed providers to `computed_mask_draw`; the descriptor pins natural mask output type | - |
+| pandas full frame | `FakerStrategyHandler` (`execution/_strategies/_faker.py:44`) dispatches all three computed providers to `computed_mask_draw`; the descriptor pins natural mask output type | - |
 | chunked native, unified slice | `resolve_operator_variant` turns an exact-string computed descriptor into a computed operator variant that does not build a pool; other output types take E13 before the existing string-tokenizing pool operator or assembly runs | - |
 | sequential | native admission reads the same descriptor and exact-string rule; other output types take E13 and the job falls through to the pandas full-frame route | - |
-| out-of-core | existing `out_of_core/_faker_native.py` admission adds computed providers only for deterministic reuse, exact-`string` source and exact-`string` computed output; `out_of_core/_mask.py::masked_output_type` reads the same descriptor; other shapes take E11 | - |
+| out-of-core | existing `out_of_core/_faker_native.py` admission adds computed providers only for deterministic reuse, exact-`string` source and exact-`string` computed output; `out_of_core/_mask.py:253` `masked_output_type` reads the same descriptor; other shapes take E11 | - |
 | streamed generation | - | `ComputedDrawStream.next_array` |
 | whole-table generation (`synthesize.py`) | - | the same stream, drawn once for all rows |
 
