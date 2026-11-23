@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
+from decoy_engine._arrow_types import TextWidthState, is_text
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.execution.native._fpe_route import fpe_config_from_params, fpe_residual_warnings
@@ -79,8 +80,12 @@ def assemble_column(strategy: str, parts: list[pa.Array]) -> pa.Array:
         return pa.nulls(n, type=pa.null()) if combined.null_count == n else combined
     # passthrough is value-identity: every pandas-built route writes the column as the source
     # holds it (UF-DOMAIN S1, `table_from_pandas_keeping_source_types`), so the shadow output is
-    # the native column unchanged and agrees with the oracle by the same rule.
-    return combined
+    # the native column, with text narrowed by the O3 rule as the assembler does.
+    return (
+        TextWidthState().observe_column(combined).combine_chunks()
+        if is_text(combined.type)
+        else combined
+    )
 
 
 def fpe_node_warnings(

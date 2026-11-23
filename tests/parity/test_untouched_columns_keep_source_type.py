@@ -16,6 +16,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.execution import run_pipeline
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._unified_slice_evidence import reconstruct_source_shaped_output
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.relationships._graph import OrphanPolicy
@@ -70,7 +71,18 @@ def _same_cells(a: pa.ChunkedArray, b: pa.ChunkedArray) -> bool:
     return a.type == b.type and [repr(v) for v in a.to_pylist()] == [repr(v) for v in b.to_pylist()]
 
 
+def _o3(table: pa.Table) -> pa.Table:
+    """The source as every route writes it: carried text leaves as `string` (O3)."""
+    for i, field in enumerate(table.schema):
+        if pa.types.is_large_string(field.type):
+            table = table.set_column(
+                i, field.with_type(pa.string()), table.column(i).cast(pa.string())
+            )
+    return table
+
+
 def _assert_columns_equal_source(out: pa.Table, source: pa.Table, names: list[str]) -> None:
+    source = _o3(source)
     for name in names:
         assert out.schema.field(name).type == source.schema.field(name).type, name
         assert _same_cells(out.column(name), source.column(name)), name
@@ -193,9 +205,10 @@ def test_u7_same_output_types_on_every_option(tmp_path: Path, options: dict[str,
     source = _u7_source(2_000)
     out = _u7_run(tmp_path, source, **options)
     assert out.num_rows == source.num_rows
+    want = _o3(source)
     for name in _U7_TYPES:
-        assert out.schema.field(name).type == source.schema.field(name).type, name
-        assert _same_cells(out.column(name), source.column(name)), name
+        assert out.schema.field(name).type == want.schema.field(name).type, name
+        assert _same_cells(out.column(name), want.column(name)), name
 
 
 def test_u7_sequential_fk_child_matches_full_frame() -> None:
@@ -221,25 +234,27 @@ def _source3() -> pa.Table:
 def test_u8_frame_one_row_short_raises_with_counts_only() -> None:
     source = _source3()
     frame = pd.DataFrame({"a": [1, 2], "b": ["secret-1", "secret-2"], "c": [1.5, 2.5]})
-    with pytest.raises(RuntimeError) as exc:
+    with pytest.raises(ExecutionError) as exc:
         table_from_pandas_keeping_source_types(frame, source, {"c"})
-    assert "2 rows" in str(exc.value) and "3 rows" in str(exc.value)
+    assert exc.value.code == "output_assembly_rows_changed"
+    assert "2 rows" in str(exc.value) and "has 3" in str(exc.value)
     assert "secret" not in str(exc.value)
 
 
 def test_u8_reordered_index_raises() -> None:
     source = _source3()
     frame = source.to_pandas().iloc[[2, 1, 0]]
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ExecutionError) as exc:
         table_from_pandas_keeping_source_types(frame, source, {"c"})
+    assert exc.value.code == "output_assembly_rows_changed"
 
 
 def test_u8_columns_out_of_order_raise() -> None:
     source = _source3()
     frame = source.to_pandas()[["b", "a", "c"]]
-    with pytest.raises(RuntimeError) as exc:
+    with pytest.raises(ExecutionError) as exc:
         table_from_pandas_keeping_source_types(frame, source, set())
-    assert "order" in str(exc.value)
+    assert exc.value.code == "output_assembly_columns_mismatch"
 
 
 def test_u8_zero_column_frame_takes_source_row_count() -> None:
@@ -326,9 +341,9 @@ def test_u1_subset_run_keeps_untouched_types_for_the_kept_rows(tmp_path: Path) -
         auto_chunk=False,
     ).outputs[TABLE]
     assert out.num_rows == 20
-    kept = source.take(pa.array(out.column("id").to_pylist(), pa.int64()))
+    kept = _o3(source.take(pa.array(out.column("id").to_pylist(), pa.int64())))
     for name in typed:
-        assert out.schema.field(name).type == source.schema.field(name).type, name
+        assert out.schema.field(name).type == kept.schema.field(name).type, name
         assert _same_cells(out.column(name), kept.column(name)), name
 
 
@@ -336,14 +351,10 @@ def test_u7_chunked_route_matches_the_other_routes(tmp_path: Path) -> None:
     source = _u7_source(120_000)
     out = _u7_run(tmp_path, source, auto_chunk=True)
     assert out.num_rows == source.num_rows
+    want = _o3(source)
     for name in _U7_TYPES:
-        want = source.schema.field(name).type
-        # The chunked lane narrows a passthrough `large_string` to `string` (its O3 rule); the
-        # plan's U7 expects `large_string` here, which is S3's scope (see the S1 report).
-        if pa.types.is_large_string(want):
-            want = pa.string()
-        assert out.schema.field(name).type == want, name
-        assert _same_cells(out.column(name), source.column(name).cast(want)), name
+        assert out.schema.field(name).type == want.schema.field(name).type, name
+        assert _same_cells(out.column(name), want.column(name)), name
 
 
 def test_u7_validator_forces_full_frame_with_the_same_types(tmp_path: Path) -> None:
@@ -360,6 +371,170 @@ def test_u7_validator_forces_full_frame_with_the_same_types(tmp_path: Path) -> N
         key_provider=key_provider(),
         auto_chunk=False,
     ).outputs[TABLE]
+    want = _o3(source)
     for name in _U7_TYPES:
-        assert out.schema.field(name).type == source.schema.field(name).type, name
-        assert _same_cells(out.column(name), source.column(name)), name
+        assert out.schema.field(name).type == want.schema.field(name).type, name
+        assert _same_cells(out.column(name), want.column(name)), name
+
+
+# B1: a pandas-written source whose metadata describes a non-unit range index.
+
+
+def _ranged_source(step: int, n: int = 12, key: str = "h") -> pa.Table:
+    frame = pd.DataFrame(
+        {
+            "id": range(n * abs(step)),
+            key: [f"v{i}" for i in range(n * abs(step))],
+            "amt": [_D(f"{i}.50") for i in range(n * abs(step))],
+        }
+    )
+    return pa.Table.from_pandas(frame.iloc[::step])
+
+
+@pytest.mark.parametrize("step", [2, -1], ids=["step2", "step-1"])
+@pytest.mark.parametrize("unified", [False, True], ids=["full_frame", "unified"])
+def test_b1_ranged_index_source_runs_on_full_frame_and_unified(
+    tmp_path: Path, step: int, unified: bool
+) -> None:
+    source = _ranged_source(step)
+    path = write_source(source, tmp_path / "t.parquet")
+    cfg = make_cfg([pass_col("id"), hash_col("h"), pass_col("amt")], path=path)
+    out = run_pipeline(
+        cfg,
+        sources={TABLE: source},
+        engine_version="uf-domain-s1",
+        key_provider=key_provider(),
+        auto_chunk=False,
+        unified_slice_enabled=unified,
+    ).outputs[TABLE]
+    assert out.num_rows == source.num_rows
+    assert out.column("id").to_pylist() == source.column("id").to_pylist()
+    assert out.schema.field("amt").type == source.schema.field("amt").type
+
+
+@pytest.mark.parametrize("step", [2, -1], ids=["step2", "step-1"])
+def test_b1_ranged_index_source_runs_on_the_sequential_route(step: int) -> None:
+    child = _ranged_source(step, key="k")
+    keys = child.column("k").to_pylist()
+    plan = s.make_plan(
+        {
+            "A": s.table_seed({"k": s.hashed("ns_k")}),
+            "B": s.table_seed({"k": s.hashed("ns_k"), "amt": s.passthrough()}),
+        }
+    )
+    graph = s.graph(s.edge("A", "k", "B", "k", "ns_k", OrphanPolicy.PRESERVE))
+    shape = s.Shape(
+        plan,
+        graph,
+        {
+            "A": pa.table({"k": s.strs(keys)}),
+            "B": child.select(["k", "amt"]),
+        },
+    )
+    out = s.run_seq(shape).outputs["B"]
+    assert out.num_rows == child.num_rows
+    assert out.schema.field("amt").type == child.schema.field("amt").type
+
+
+def test_b1_a_reordered_frame_is_refused_with_a_registered_code() -> None:
+    source = _ranged_source(2)
+    frame = source.to_pandas().iloc[::-1]
+    with pytest.raises(ExecutionError) as info:
+        table_from_pandas_keeping_source_types(frame, source, {"id", "amt"})
+    assert info.value.code == "output_assembly_rows_changed"
+    with pytest.raises(ExecutionError) as info:
+        table_from_pandas_keeping_source_types(source.to_pandas().iloc[:-1], source, {"id"})
+    assert info.value.code == "output_assembly_rows_changed"
+    with pytest.raises(ExecutionError) as info:
+        table_from_pandas_keeping_source_types(
+            source.to_pandas()[["h", "id", "amt"]], source, set()
+        )
+    assert info.value.code == "output_assembly_columns_mismatch"
+
+
+# V1-2: carried columns keep the pandas dtype their source metadata names.
+
+
+def _dtype_source(n: int = 6, key: str = "h") -> pa.Table:
+    frame = pd.DataFrame(
+        {
+            key: [f"v{i}" for i in range(n)],
+            "i": pd.array([1, None, 3, 4, None, 6][:n], dtype="Int64"),
+            "t": pd.array(["a", None, "c", "d", "e", "f"][:n], dtype="string"),
+        }
+    )
+    return pa.Table.from_pandas(frame, preserve_index=False)
+
+
+def _assert_pandas_dtypes(out: pa.Table) -> None:
+    dtypes = out.to_pandas().dtypes
+    assert str(dtypes["i"]) == "Int64"
+    assert str(dtypes["t"]) == "string"
+
+
+@pytest.mark.parametrize("unified", [False, True], ids=["full_frame", "unified"])
+def test_v12_carried_columns_keep_their_pandas_dtype(tmp_path: Path, unified: bool) -> None:
+    source = _dtype_source()
+    path = write_source(source, tmp_path / "t.parquet")
+    cfg = make_cfg([hash_col("h"), pass_col("i"), pass_col("t")], path=path)
+    out = run_pipeline(
+        cfg,
+        sources={TABLE: source},
+        engine_version="uf-domain-s1",
+        key_provider=key_provider(),
+        auto_chunk=False,
+        unified_slice_enabled=unified,
+    ).outputs[TABLE]
+    _assert_pandas_dtypes(out)
+
+
+def test_v12_carried_columns_keep_their_pandas_dtype_sequential() -> None:
+    child = _dtype_source(key="k")
+    keys = child.column("k").to_pylist()
+    plan = s.make_plan(
+        {
+            "A": s.table_seed({"k": s.hashed("ns_k")}),
+            "B": s.table_seed({"k": s.hashed("ns_k"), "i": s.passthrough(), "t": s.passthrough()}),
+        }
+    )
+    graph = s.graph(s.edge("A", "k", "B", "k", "ns_k", OrphanPolicy.PRESERVE))
+    shape = s.Shape(
+        plan,
+        graph,
+        {"A": pa.table({"k": s.strs(keys)}), "B": child},
+    )
+    _assert_pandas_dtypes(s.run_seq(shape).outputs["B"])
+
+
+# D2: the passthrough rule is read in one place.
+
+
+def test_d2_passthrough_and_untouched_agree_when_the_handler_changes_the_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from decoy_engine.execution._chunked_carry import passthrough_columns, untouched_columns
+    from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.execution._strategies import SCALAR_HANDLERS
+    from decoy_engine.execution._strategies._passthrough import PassthroughHandler
+    from tests.native.test_column_access_surfaces import REG, _compile
+
+    class _Changes(PassthroughHandler):
+        output_is_input = False
+
+    columns = [{"name": "p", "strategy": "passthrough"}, {"name": "r", "strategy": "redact"}]
+    data = {"p": pa.array(["a", "b"]), "r": pa.array(["x", "y"])}
+    plan = _compile(columns, data)
+    nodes = [n for n in build_work_list(plan, REG) if n.table == "t"]
+    cfg = {"tables": [{"name": "t", "columns": columns}]}
+    names = ["p", "r"]
+    honest = (
+        set(passthrough_columns(cfg, table="t", names=names, registry=REG)),
+        set(untouched_columns(nodes, names, REG)),
+    )
+    assert honest == ({"p"}, {"p"})
+    monkeypatch.setitem(SCALAR_HANDLERS, "passthrough", _Changes())
+    changed = (
+        set(passthrough_columns(cfg, table="t", names=names, registry=REG)),
+        set(untouched_columns(nodes, names, REG)),
+    )
+    assert changed == (set(), set())

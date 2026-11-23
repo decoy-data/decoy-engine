@@ -11,6 +11,9 @@ from collections.abc import Collection, Mapping
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine import reasons
+from decoy_engine._arrow_types import TextWidthState, is_text
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.safe_output import attach_output_metadata
 
 
@@ -38,11 +41,40 @@ def _with_source_types(
     return table
 
 
-def _index_keeps_source_order(index: pd.Index, stored: bool) -> bool:
-    """True when `index` is still the source's row order: the stored index the source carries, or
-    a unit-step range (pandas metadata may start it above zero). A reordered or filtered frame
-    carries an integer index that is neither."""
-    return stored or (isinstance(index, pd.RangeIndex) and index.step == 1)
+def _expected_index(source: pa.Table) -> pd.Index | None:
+    """The index `to_pandas()` gives this source: the range its own pandas metadata describes
+    (any start and step, so `df.iloc[::2]` and `df.iloc[::-1]` sources hold), else `0..n`.
+    None when the metadata stores the index as a column; the row count is the only check then."""
+    meta = source.schema.pandas_metadata or {}
+    described = meta.get("index_columns", [])
+    if any(isinstance(c, str) for c in described):
+        return None
+    for entry in described:
+        if isinstance(entry, dict) and entry.get("kind") == "range":
+            try:
+                found = pd.RangeIndex(int(entry["start"]), int(entry["stop"]), int(entry["step"]))
+            except (KeyError, TypeError, ValueError):
+                break
+            if len(found) == source.num_rows:
+                return found
+            break
+    return pd.RangeIndex(source.num_rows)
+
+
+def _rows_changed(detail: str) -> ExecutionError:
+    """Refusal: the frame is no longer the source's rows. Counts only, never a name or value."""
+    summary = reasons.get("runtime", reasons.runtime.OUTPUT_ASSEMBLY_ROWS_CHANGED).summary
+    return ExecutionError(
+        code=reasons.runtime.OUTPUT_ASSEMBLY_ROWS_CHANGED, message=f"{summary} {detail}"
+    )
+
+
+def _columns_mismatch(detail: str) -> ExecutionError:
+    """Refusal: the frame's columns are not the source's, in order. Counts only."""
+    summary = reasons.get("runtime", reasons.runtime.OUTPUT_ASSEMBLY_COLUMNS_MISMATCH).summary
+    return ExecutionError(
+        code=reasons.runtime.OUTPUT_ASSEMBLY_COLUMNS_MISMATCH, message=f"{summary} {detail}"
+    )
 
 
 def table_from_pandas_keeping_source_types(
@@ -63,7 +95,7 @@ def table_from_pandas_keeping_source_types(
 
     The frame must still be the source's rows: same count and an index still in source order (no row
     dropped or reordered since the source was read), and its remaining columns in source order. A
-    mismatch raises before any output exists; the message carries counts and names only.
+    mismatch raises `ExecutionError` before any output exists; the message carries counts only.
     With `source=None` there is nothing to keep, and the whole frame converts."""
     if source is None:
         return pa.Table.from_pandas(frame, preserve_index=False)
@@ -76,10 +108,14 @@ def table_from_pandas_keeping_source_types(
         for c in (source.schema.pandas_metadata or {}).get("index_columns", [])
         if isinstance(c, str)
     }
-    if frame.shape[0] != n_rows or not _index_keeps_source_order(frame.index, bool(stored_index)):
-        raise RuntimeError(
-            f"output assembly: frame has {frame.shape[0]} rows or a reordered index, "
-            f"source has {n_rows} rows"
+    if frame.shape[0] != n_rows:
+        raise _rows_changed(
+            f"The frame has {frame.shape[0]} rows and the source has {n_rows}.",
+        )
+    expected = _expected_index(source)
+    if expected is not None and not frame.index.equals(expected):
+        raise _rows_changed(
+            f"The frame index no longer matches the source row order ({n_rows} rows).",
         )
     names = [c for c in source.schema.names if c not in stored_index]
     source_names = set(names)
@@ -90,9 +126,8 @@ def table_from_pandas_keeping_source_types(
     if [c for c in frame.columns if c in source_names] != in_frame or any(
         c not in frame.columns and c not in carried for c in names
     ):
-        raise RuntimeError(
-            f"output assembly: frame columns do not match the source columns in order "
-            f"({frame.shape[1]} frame columns, {len(names)} source columns)"
+        raise _columns_mismatch(
+            f"The frame has {frame.shape[1]} columns and the source has {len(names)}.",
         )
     order = list(frame.columns)
     previous: str | None = None
@@ -112,13 +147,28 @@ def table_from_pandas_keeping_source_types(
             columns.append(given[name])
             fields.append(pa.field(name, given[name].type))
         elif name in carried:
-            columns.append(source.column(name))
-            fields.append(source.schema.field(name))
+            column = source.column(name)
+            field = source.schema.field(name)
+            if is_text(field.type):
+                # O3: carried text leaves as `string` while it fits 32-bit offsets.
+                column = TextWidthState().observe_column(column)
+                field = field.with_type(column.type)
+            columns.append(column)
+            fields.append(field)
         else:
             columns.append(built.column(name))
             fields.append(built.schema.field(name))
     # Row count comes from the source: from_pandas of a zero-column frame has zero rows.
-    schema = attach_output_metadata(pa.schema(fields), built.schema.metadata, carried=carried)
+    # A carried column's pandas dtype hint (`Int64`, `string`) is the one its frame column has;
+    # a zero-row conversion reads it without copying any cell.
+    held = [c for c in names if c in carried and c in frame.columns]
+    hints = pa.Table.from_pandas(frame[held].iloc[:0], preserve_index=False).schema.metadata
+    schema = attach_output_metadata(
+        pa.schema(fields),
+        built.schema.metadata,
+        carried=carried,
+        carried_meta=hints,
+    )
     return pa.Table.from_arrays(columns, schema=schema)
 
 

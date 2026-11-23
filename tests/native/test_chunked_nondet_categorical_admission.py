@@ -762,9 +762,7 @@ def test_e3_large_string_when_runs_chunked_and_equals_the_string_source(
     merged = pa.concat_tables(got)
     # O3: a pass-through large_string column leaves both entries as string.
     assert {o.schema.field("c").type for o in got} == {pa.string()}
-    # Rule 3 (A1): the pandas-built oracle chunk path keeps an untouched large_string as stored.
-    keep_type = pa.large_string() if entry == "run_mask_pipeline_chunked" else pa.string()
-    assert {o.schema.field("keep").type for o in got} == {keep_type}
+    assert {o.schema.field("keep").type for o in got} == {pa.string()}
     assert whole.schema.field("c").type == whole.schema.field("keep").type == pa.string()
     for name in ("c", "keep"):
         assert merged.column(name).to_pylist() == whole.column(name).to_pylist()

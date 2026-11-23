@@ -113,8 +113,7 @@ def test_o3a_run_mask_chunked_writes_string(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_o3a_run_mask_pipeline_chunked_writes_string() -> None:
     got = _run("run_mask_pipeline_chunked", split(_source(KEEP), 2))
-    # Rule 3 (A1): the pandas-built oracle keeps an untouched large_string as stored.
-    assert {t.schema.field("keep").type for t in got} == {pa.large_string()}
+    assert {t.schema.field("keep").type for t in got} == {pa.string()}
     assert column_values(got, "keep") == KEEP
 
 
@@ -143,8 +142,7 @@ def test_o3a_whole_frame_writes_string(tmp_path: Path) -> None:
     )
     out = got.outputs[TABLE]
     assert "unified_slice_activation" not in got.quality_metrics
-    # Rule 3 (A1): a whole-frame untouched large_string keeps its type.
-    assert out.schema.field("keep").type == pa.large_string()
+    assert out.schema.field("keep").type == pa.string()
     assert out.column("keep").to_pylist() == KEEP
 
 
@@ -172,8 +170,7 @@ def test_o3a_unified_slice_declines_large_string_and_writes_string(tmp_path: Pat
     assert "unified_slice_activation" in control.quality_metrics
     got = r3._go(cfg, {"t": _large_text(table)}, key_provider=r3.key_provider())
     assert "unified_slice_activation" not in got.quality_metrics
-    # Rule 3 (A1): the pandas fallback keeps an untouched large_string as stored.
-    assert got.outputs["t"].schema.field("p").type == pa.large_string()
+    assert got.outputs["t"].schema.field("p").type == pa.string()
     assert got.outputs["t"].column("p").to_pylist() == table.column("p").to_pylist()
 
 
@@ -351,9 +348,7 @@ def test_o3e_oversized_chunk_with_fitting_rows_splits_and_succeeds(
     consumed: list[int] = []
     got = _run(entry, _one_shot(split(_source(values), 3), consumed))
     assert consumed == [3, 3]  # the one-shot iterator is read once, never replayed
-    # Rule 3 (A1): the oracle chunk path keeps an untouched large_string as stored.
-    want = pa.large_string() if entry == "run_mask_pipeline_chunked" else pa.string()
-    assert {t.schema.field("keep").type for t in got} == {want}
+    assert {t.schema.field("keep").type for t in got} == {pa.string()}
     assert column_values(got, "keep") == values
 
 
@@ -524,8 +519,7 @@ def test_o3e_pandas_routes_succeed_under_a_small_limit(small_limit: None, tmp_pa
     got = _pipeline(
         tmp_path, _source(values), execution_mode="full_frame", unified_slice_enabled=False
     )
-    # Rule 3 (A1): the whole-frame route keeps an untouched large_string as stored.
-    assert got.outputs[TABLE].schema.field("keep").type == pa.large_string()
+    assert got.outputs[TABLE].schema.field("keep").type == pa.string()
     assert got.outputs[TABLE].column("keep").to_pylist() == values
     cfg, tables = r3.fk_job(tmp_path)
     seq = r3._go(

@@ -1108,12 +1108,13 @@ only this site moves.
   ROUTE-OUTPUT-CONTRACT, untouched columns (UF-DOMAIN S1, 2026-11-22): on every pandas-built
   route (full-frame, sequential, unified slice) a column no rule changes is written from the
   source Arrow column as stored, not from a pandas round trip. A `decimal` keeps its precision,
-  a nullable integer not declared lossless stays an integer, a `large_string` stays
-  `large_string`, an all-null or zero-row column keeps its source type (not `null`), and a float
+  a nullable integer not declared lossless stays an integer, carried text follows the
+  pass-through text width rule (O3) on every route, an all-null or zero-row column keeps its source type (not `null`), and a float
   NaN stays NaN (pandas turned it into null); this is what the chunked lane already wrote. One function,
   `table_from_pandas_keeping_source_types`, builds that output from the source table's row
-  count and column order, and raises before any output exists if the frame no longer holds the
-  source's rows. The schema `pandas` metadata now lists only the columns built from the frame.
+  count and column order, and raises `ExecutionError` (`output_assembly_rows_changed`, `output_assembly_columns_mismatch`)
+  before any output exists if the frame no longer holds the source's rows. A carried column keeps
+  the pandas dtype hint its source named.
   The earlier output of those routes changes for the lossy types named above.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
