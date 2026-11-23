@@ -1152,7 +1152,9 @@ and C1 are all on main, so they are no longer open dependencies.
   flag/path checks and boundary refusals (config file not a mapping or not
   UTF-8, shape, descriptor, dialect, names file, selection, relationship),
   all before any data row is read; integer 2 for unchanged Click parse errors,
-  including a missing positional `SOURCES`, an unknown option or a bad choice;
+  an unknown option or a bad choice (`SOURCES` is optional so the config route
+  works; an empty invocation reaches the manual "one input required" check and
+  exits 1);
   3 for a scan failure (`_multi.py:461`) and for an `OSError` raised while
   `load_config_mapping` reads an existing config file (`exit_code_for` and
   `config_refusal` treat that as the environment, not the config). Routing:
@@ -1232,7 +1234,7 @@ plan contract and is not restated here.
 | # | Class | Risk here | Closing structure | Sentry or property test | Mutation |
 |---|---|---|---|---|---|
 | 1 | value | a cell value or names-file record reaches the card, `--json`, `--output`, an error or a log | output built only from `scan_set_to_dict(detail=False)`; refusals raised outside handlers with fixed text naming keys | T2-config-canary, TE-scan-value-free, landed T2-canary | M2-leak-config (a), (b), (c); ME-leak (each chosen so it does leak) |
-| 2 | cleanup | a failed scan leaves a partial `--output` or an integrity spill | one atomic write after every table (`_atomic`), S1b spill through LIB L0 | T2-atomic (landed), S1b T5-spill tests | M2-partial |
+| 2 | cleanup | a failed scan leaves a partial `--output` or an integrity spill | one atomic write after every table (`_atomic`), S1b spill through LIB L0 | T2-atomic (landed), S1b T5-spill tests | M2-partial: write `--output` before the last table finishes, so a scan failure on table 2 leaves a file; T2-atomic goes red |
 | 3 | state | the CLI edits the prepared descriptors between prepare and scan | `ScanDeclaration` holds deep copies behind `MappingProxyType` | TE-scan-immutable | ME-mutable |
 | 4 | route | positional, config and demo routes reach `scan_sources` by different checks, or two copies of the gate's exception contract drift | one shared `_prepare` helper with a caller-supplied pass-through set behind both gates; every `scan_sources` call fed only from `scan_declaration` | AT-C8 in G-ONE-DECLARED-READ, T2-config-boundary, T2-config-refusal-code, T2-demo-gated | M2-boundary-bypass, M2-relabel, M2-demo-ungated |
 | 5 | referential | a malformed relationship is mislabeled unchecked; a relationship names a table missing from `sources`, or key widths differ; or a valid generate-table relationship is wrongly refused | `_scan_integrity` owns one parse-and-validate core; it parses all entries before the full-pipeline entry point partitions sourceless relationships, while strict `declare` refuses them | T2-skip-integrity, TE-scan-valid, TE-scan-mixed, T2-config-mixed | M2-skip-validate, ME-refuse-mixed, M2-refuse-mixed, ME-raw-partition |
@@ -1240,7 +1242,7 @@ plan contract and is not restated here.
 | 7 | toctou | the names file changes between the dialect check and the scan read | resolved names are inlined in the capability; the file is read once | TE-scan-names-once | ME-keep-file |
 | 8 | weak | an integrity test passes with zero counts or one child | fixtures with known non-zero orphan, null and duplicate counts and two children | T2-integrity, T2-integrity-shapes | M2-hide, M2-first-child-only |
 | 9 | refactor | extracting `validate_scan_inputs` or moving `_parse_layout` changes behavior | pure moves; existing tests unchanged | TE-scan-parity, landed S1c.1 tests | ME-drift |
-| 10 | frozen | engine API or CLI JSON changes shape | additive export and classmethod only, recorded in `test_public_api.py` and `frozen-surfaces.md`; envelope keys unchanged except the additive `relationships_unchecked` on the `--config` route | TE-scan-not-scan, T2-parquet-compat, T2-config-envelope | M2-extra-key, M2-flat-config |
+| 10 | frozen | engine API or CLI JSON changes shape | additive export and classmethod only, recorded in `test_public_api.py` and `frozen-surfaces.md`; envelope keys unchanged except the additive `relationships_unchecked` on the `--config` route | TE-scan-not-scan, T2-parquet-compat, T2-config-envelope | M2-extra-key (emit `relationships_unchecked` on the positional route too; the envelope-key snapshot test goes red), M2-flat-config |
 
 #### Enumerations
 
@@ -1906,3 +1908,6 @@ in full):
 - Platform: `decoy-platform/api/storm/helpers.py` seeds suggested relationship
   decisions from the name-only `run_cross_file_walk`. V2 replaces that call
   with the value-based API, run where the data is read (the pre-scan worker).
+
+
+Revision 8.1 (2026-11-23, Codex plan review of rev 8): exit 2 no longer lists a missing positional `SOURCES` (it is optional; the empty invocation exits 1 through the manual check, as T2-config-flags asserts); M2-partial and M2-extra-key are defined as concrete edits. E-S1c merged at `92152f328` and ships in engine v0.28.1 to v0.28.3, so S1c.2 is buildable on current main.
