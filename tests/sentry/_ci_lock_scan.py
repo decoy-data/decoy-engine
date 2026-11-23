@@ -250,6 +250,38 @@ def _step_findings(
     return findings
 
 
+LOCAL_ACTION_PREFIX = "./.github/actions/"
+
+
+def expand_steps(
+    steps: list[dict[str, Any]], actions_dir: Path = ACTIONS, _seen: frozenset[str] = frozenset()
+) -> list[dict[str, Any]]:
+    """The steps with every `uses: ./.github/actions/<x>` step followed by that action's own steps.
+
+    The `uses` step stays in place, so order is kept; a composite action that wraps lock-env or a
+    build-constrained install is therefore inspected through its steps for every caller.
+    """
+    out: list[dict[str, Any]] = []
+    for st in steps:
+        out.append(st)
+        uses = str(st.get("uses", ""))
+        if not uses.startswith(LOCAL_ACTION_PREFIX) or uses in _seen:
+            continue
+        found = next((actions_dir / uses[len(LOCAL_ACTION_PREFIX) :]).glob("action.y*ml"), None)
+        if found is None:
+            continue
+        inner = (yaml.safe_load(found.read_text(encoding="utf-8")).get("runs") or {}).get("steps")
+        out += expand_steps(inner or [], actions_dir, _seen | {uses})
+    return out
+
+
+def has_build_constraint(steps: list[dict[str, Any]], actions_dir: Path = ACTIONS) -> bool:
+    return any(
+        "--build-constraint .github/build-constraints.txt" in _step_text(s)
+        for s in expand_steps(steps, actions_dir)
+    )
+
+
 def scan_workflow(wf: dict[str, Any], *, role: str = "workflow", name: str = "") -> list[str]:
     """Every lock-install violation in one parsed workflow, as `job: message` strings.
 
@@ -271,7 +303,10 @@ def scan_workflow(wf: dict[str, Any], *, role: str = "workflow", name: str = "")
         commands = [shell_commands(t) for t in texts]
         locked_at: int | None = None
         exempt = is_mac_gate(name, job_name, job)
-        uses_uv = any(str(st.get("uses", "")) in {LOCK_ENV_USES, SETUP_UV_USES} for st in steps)
+        # A step that runs a local composite action counts through that action's own steps.
+        uses_uv = any(
+            str(st.get("uses", "")) in {LOCK_ENV_USES, SETUP_UV_USES} for st in expand_steps(steps)
+        )
         if role == "workflow" and _env_sets_venv(job.get("env")):
             findings.append(f"{job_name}: copies the venv env block; use {LOCK_ENV_USES}")
         findings += [
@@ -279,7 +314,11 @@ def scan_workflow(wf: dict[str, Any], *, role: str = "workflow", name: str = "")
             for n in env_mapping_index_names(job.get("env"))
         ]
         for index, step_cmds in enumerate(commands):
-            if str(steps[index].get("uses", "")) == LOCK_ENV_USES and locked_at is None:
+            wraps_lock = any(
+                str(inner.get("uses", "")) == LOCK_ENV_USES
+                for inner in expand_steps([steps[index]])
+            )
+            if wraps_lock and locked_at is None:
                 locked_at = index
             findings += _step_findings(job_name, steps[index], texts[index], step_cmds, role)
             for cmd in step_cmds:

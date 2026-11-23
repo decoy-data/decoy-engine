@@ -27,7 +27,8 @@ HEAD = "b" * 40
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
 GATE_CONTEXT = "engine-gate/verdict"
 
-# The 16 names GitHub showed for native-companion.yml in run 42170946535, plus two path-scope jobs.
+# The 16 names GitHub showed for native-companion.yml in run 42170946535, plus the two path-scope
+# jobs and core-companion-wide: 19 in all.
 NATIVE_NAMES = [
     "companion-wheel-linux (3.10, x86_64)",
     "companion-wheel-linux (3.10, aarch64)",

@@ -29,6 +29,7 @@ from tests.sentry._ci_lock_scan import (
     _step_text,
     _supported_minors,
     audit_findings,
+    has_build_constraint,
     is_mac_gate,
     permission_findings,
     scan_actions,
@@ -98,13 +99,27 @@ def test_build_constraints_pin_the_backends() -> None:
         versions = set(re.findall(r"maturin-version:\s*v?([\d.]+)", text))
         assert versions == {pins["maturin"]}, (name, versions, pins["maturin"])
     companion = _real_workflows()["native-companion.yml"]["jobs"]["core-companion-present"]["steps"]
-    assert any(
-        "--build-constraint .github/build-constraints.txt" in _step_text(s) for s in companion
-    )
+    assert has_build_constraint(companion)
+    wide = _real_workflows()["native-companion.yml"]["jobs"]["core-companion-wide"]["steps"]
+    assert has_build_constraint(wide)
     packaging = _real_workflows()["ci.yml"]["jobs"]["packaging-gate"]
     assert str(packaging.get("env", {}).get("PIP_CONSTRAINT", "")).endswith(
         ".github/build-constraints.txt"
     )
+
+
+def test_a_composite_action_that_drops_the_build_constraint_is_a_finding(tmp_path: Path) -> None:
+    action = tmp_path / "companion-env"
+    action.mkdir()
+    steps = [{"uses": "./.github/actions/companion-env"}]
+    body = "runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: {run}\n"
+    cmd = "uv pip install ./decoy-engine-native"
+    (action / "action.yml").write_text(
+        body.format(run=cmd + " --build-constraint .github/build-constraints.txt"), encoding="utf-8"
+    )
+    assert has_build_constraint(steps, tmp_path)
+    (action / "action.yml").write_text(body.format(run=cmd), encoding="utf-8")
+    assert not has_build_constraint(steps, tmp_path)
 
 
 def test_pip_audit_reads_the_lock() -> None:
