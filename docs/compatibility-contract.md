@@ -1369,6 +1369,23 @@ the child as integers and a null, not as `float64` with `NaN`, so `hash` and `to
 output of `NaN` or a pandas null is written as JSON `null`; an infinite output fails the row
 (`nested_child_non_finite`). A null-free leaf list and an all-float-exact cell give the bytes they gave before.
 
+**Nested target grammar (NESTED-FREEZE, 2026-11-23).** Recorded pre-GA change. `provider_config.target` of a
+`nested` column is a closed subset of RFC 9535 JSONPath. It is `$` followed by segments: `.name`, `.*`,
+`['name']` or `["name"]` (RFC escapes), `[*]`, `[index]` and `[start:end:step]`. An index is an integer with no
+leading zero, not `-0`, within plus or minus 2^53 - 1; a slice start, end and step follow the same integer rules. A step is 1 or more. A quoted name allows only the RFC escapes and no raw control character or unpaired surrogate. Nothing else is accepted: no `..`,
+filter, function, union or blank space outside a quoted name, no missing `$`, no dot-quoted name, no quoted name
+`*`, and none of the jsonpath-ng extensions (`|`, `&`, `where`, backticks). A target outside the grammar is refused by
+`compile_plan` and `run_config_only_checks` with the new plan reason `plan.nested_target_unsupported`. The
+message names table, column, config path, character position and form, and shows the target text up to 64
+characters (a longer one reads `first 64 of N characters`); it never shows a cell. `nested_jsonpath_parse_error`
+stays as the handler backstop when the handler runs without a compiled plan. The engine evaluates the grammar itself (`TargetPath.find`), so what a target selects does not depend on the
+any JSONPath library. A name selects a member of an object. `.*` selects the members of an object or the items of an
+array, at any depth. A quoted name decodes its RFC 9535 2.3.1.2 escapes. `[*]`, an index and a slice select items of an array only; on an object or a scalar they fail closed with
+`nested_target_unwritable_container` (the index case was a bare `KeyError`), and on a null they select nothing. An
+index outside an array selects nothing for that branch only. `nested_jsonpath_path_overlap` stays registered and is no
+longer raised, because no subset target can match a path and its prefix. The engine no longer depends on jsonpath-ng:
+the requirement is removed and `tests/sentry/defects/test_nested_target_choke_point.py` fails on any import of it.
+
 ### 3.5 Disguises
 
 Disguises are dated/versioned specs (`disguises/`, `disguises/loader.py`,

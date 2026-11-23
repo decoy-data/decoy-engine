@@ -182,7 +182,9 @@ class TestCellFaults:
             return '{"a":' * (levels - 1) + '{"a":"x"}' + "}" * (levels - 1)
 
         ok, warnings, ctx = _run_nested(
-            [nest(MASK_MAX_DEPTH)], {"target": "$..a", "strategy": "redact"}, monkeypatch
+            [nest(MASK_MAX_DEPTH)],
+            {"target": "$" + ".a" * MASK_MAX_DEPTH, "strategy": "redact"},
+            monkeypatch,
         )
         assert ctx.row_errors == []
         for cell, count in ((nest(MASK_MAX_DEPTH + 1), 1), ("[" * 5000 + "]" * 5000, 1)):

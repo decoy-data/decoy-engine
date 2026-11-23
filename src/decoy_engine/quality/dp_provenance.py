@@ -263,11 +263,10 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # reproducible locked profile tested on that interpreter: the engine's own
 # dev/CI lock, and the `decoy` CLI's pristine runtime profile (engine + CLI
 # runtime deps, no dev tooling), whose proof-critical library versions are pinned to EXACTLY the
-# certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the
-# annotation below) so the DP behaviour is the tested behaviour; the CLI's extra
-# packages (typer/rich/...) are off the DP code path. Membership, not equality:
-# a distinct profile with the same proof-critical set earns its own row rather
-# than forcing an isolated fit environment (ROADMAP item 2 / phase 9, CLI host wiring).
+# certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the annotation below) so the
+# DP behaviour is the tested behaviour; the CLI's extra packages (typer/rich/...) are off the DP
+# code path. Membership, not equality: a distinct profile with the same proof-critical set earns
+# its own row rather than forcing an isolated fit environment (ROADMAP item 2 / phase 9).
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
     (CERTIFIED_PLATFORM, "3.10.20.final"): frozenset(
         {
@@ -298,6 +297,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
             "502037cad62e1e645a666eb088b0bc9f69fec82d2ac980b0c2d52a2cc707a7f1",
+            "c12baeadc1c64e00df81c3d359ec58eaeef24a7d62a02c2d31098c37bfaa5241",
             "f9708482fe4f95139ce9a1272f0110b38b8de83e8d2a567cca5b5f7c1f1ad2bf",
             # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
             # tooling, pinned in the CLI repo's requirements-certified.txt (reproduce: `--no-dev` install on
