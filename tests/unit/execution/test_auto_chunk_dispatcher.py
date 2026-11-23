@@ -138,7 +138,9 @@ def test_non_routed_jobs_have_equal_quality_metrics_for_any_valid_knobs(
             {"native_threads": 1024, "chunked_dispatcher_enabled": True},
         ):
             other = run_pipeline(cfg, sources=sources, **kwargs, **knobs)
-            # The thread record names the count the run used; it is the one field a knob moves.
+            # The thread record names the count the run used, and the dispatcher kill switch is part of
+            # the physical plan hash by design. Those are the fields a knob moves; `hashed` leaves the
+            # hashes out of the comparison when the switch is off.
             hashed = (
                 "chunked_dispatcher_enabled" not in knobs or knobs["chunked_dispatcher_enabled"]
             )

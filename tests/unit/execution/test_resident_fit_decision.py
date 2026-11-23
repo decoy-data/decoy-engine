@@ -399,8 +399,9 @@ def test_at_c9_the_compiler_reads_the_stored_verdict_and_never_gathers(
 
 
 def test_the_plan_hash_ignores_the_byte_figures_of_the_verdict() -> None:
-    """Host ceilings and the pricing method (a lazy footer or a resident table) move the byte
-    figures, never the verdict. The same job must hash the same on every host and input form."""
+    """The pricing method (a lazy footer or a resident table) and the host ceiling move the byte
+    figures, never the verdict. On the same host, lazy and resident input of one job must give the
+    same plan hash. The hash still covers facts.budget_bytes, so it is not host-independent."""
     from decoy_engine.execution.physical import _compiler
     from decoy_engine.execution.physical._snapshot import capture_physical_plan_inputs
 
@@ -418,6 +419,8 @@ def test_the_plan_hash_ignores_the_byte_figures_of_the_verdict() -> None:
 
     assert digest(small_host) == digest(big_host)
     assert digest(small_host) != digest(dataclasses.replace(small_host, verdict="UNKNOWN"))
+    # The code is hashed too: the same verdict under another code is another plan.
+    assert digest(small_host) != digest(dataclasses.replace(small_host, code=CODE_REFUSED))
 
 
 def test_at_c10_the_code_is_a_capacity_code() -> None:

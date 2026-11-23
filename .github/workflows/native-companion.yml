@@ -308,8 +308,7 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
-    # The whole-tree step below runs off pull requests only, so a PR keeps the old 30 minutes.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 60 }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
@@ -424,12 +423,28 @@ jobs:
           pytest tests/native -m "not serial" -n 4 --dist loadfile -q --tb=short
           pytest tests/native -m "serial" -q --tb=short || [ $? -eq 5 ]
 
-      # The companion-gated tests outside tests/native. A test there that no step above names skips
-      # in every other lane, so it can go red with no signal (57 were red on main when this step was added).
-      # Same two-pass split and marker filter as ci.yml's regression gate. Push to main and schedule
-      # only: a red main is fixed first, and a PR keeps its fast lane.
+  # core-companion-wide: the companion-gated tests outside tests/native, in a job of their own so a
+  # slow run cannot push core-companion-present over its timeout. A test there that no step in that
+  # job names skips in every other lane, so it can go red with no signal (57 were red on main when
+  # this job was added). Same two-pass split and marker filter as ci.yml's regression gate. Push to
+  # main, schedule and dispatch only: a red main is fixed first, and a PR keeps its fast lane. One
+  # run on the Dell took 42 minutes for the parallel pass and 2 for the serial pass.
+  core-companion-wide:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/lock-env
+        with:
+          extras: "dev"
+      - name: Install stable Rust (companion build only; the core needs none)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build and install the companion (maturin, same-platform)
+        run: uv pip install --python "$RUNNER_TEMP/venv/bin/python" --build-constraint .github/build-constraints.txt ./decoy-engine-native
+      - name: Assert the companion loads
+        run: python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); print(st); assert st.ok, st"
       - name: Whole tests/parity and tests/unit/execution directories (companion-present case)
-        if: github.event_name != 'pull_request'
         run: |
           pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial" -n 4 --dist loadfile -q --tb=short
           pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and serial" -q --tb=short || [ $? -eq 5 ]
@@ -444,6 +459,8 @@ jobs:
   # sanitizer-instrumented, or the linker rejects the ABI mismatch between instrumented and
   # plain std). A crash, a sanitizer report, or an unexpected process exit fails the job.
   companion-fuzz-sanitizer:
+    # Not on a push to main: schedule and dispatch keep it.
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

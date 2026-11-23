@@ -358,9 +358,11 @@ def compute_plan_hash(inputs: PhysicalPlanInputs) -> str:
         *((facts.lazy_transform_bearing,) if facts.lazy_transform_bearing else ()),
         *(("fk_ooc_dtype_hazard",) if facts.fk_ooc_dtype_hazard else ()),
         *(() if inputs.chunked_dispatcher_enabled else ("chunked_dispatcher_off",)),
-        # The verdict and its code only. The byte figures come from the host ceiling and from how the
-        # table was priced (a lazy source by its Parquet footer, a resident one by its Arrow size), so
-        # hashing them would give one job a different plan hash per host and per input form.
+        # The verdict and its code only. The byte figures depend on how the table was priced (a lazy
+        # source by its Parquet footer, a resident one by its Arrow size) and on the host ceiling, so
+        # hashing them would give a lazy and a resident input of one job different plan hashes on the
+        # same host. facts.budget_bytes above still comes from host RAM when no budget is set, so the
+        # hash is not host-independent.
         *(
             ()
             if inputs.resident_fit is None
