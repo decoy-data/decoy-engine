@@ -119,7 +119,8 @@ def test_index_past_the_end_selects_nothing_and_never_raises() -> None:
 def test_built_ast_equals_the_jsonpath_ng_parse(target: str) -> None:
     from jsonpath_ng import parse
 
-    assert repr(to_jsonpath(parse_target(target))) == repr(parse(target))
+    built = repr(to_jsonpath(parse_target(target))).replace("_InRangeIndex", "Index")
+    assert built == repr(parse(target))
 
 
 @pytest.mark.parametrize(
