@@ -352,6 +352,7 @@ def test_a_faker_column_without_pool_size_is_admitted_like_the_declared_default(
         "table": "t",
         "engine_version": _ENGINE_VERSION,
         "registry": get_default_registry(),
+        "siblings": NO_SOURCES,
     }
     omitted = plan_native_route(
         _config(_faker_column(pool_size=None)), _profile("FIRST"), **kwargs
@@ -543,9 +544,9 @@ def test_forced_eviction_still_rebuilds_value_identical_pool() -> None:
             "LAST": pa.array(["a", "b", "c"], type=pa.string()),
         }
     )
-    # Each pool alone is ~7.3 KB; a 10 KB budget fits one but not both, so
-    # inserting LAST's pool evicts FIRST's.
-    tiny_cache = PoolCache(max_bytes=10_000)
+    # Each pool alone measures ~18.9 KB (`measured_pool_bytes`); a 28 KB budget fits one but not
+    # both, so inserting LAST's pool evicts FIRST's.
+    tiny_cache = PoolCache(max_bytes=28_000)
     result, _ = _run_native(config, source, batch_size=2, pool_cache=tiny_cache)
     assert tiny_cache.stats().evictions >= 1
 
