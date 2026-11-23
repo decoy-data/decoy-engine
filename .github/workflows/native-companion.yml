@@ -311,11 +311,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      # mimesis: tests/parity/test_faker_native_widen.py::test_p5b runs the real Mimesis adapter
-      # on the native lane and importorskips it; this job forbids skips, so the extra must be here.
       - uses: ./.github/actions/companion-env
-        with:
-          extras: "dev mimesis"
       # ENGINE-THREADS-DEFAULT: default thread count against one thread, byte-equal on every
       # route, and the gap9 grant wiring; the per-route cells skip without the companion.
       - name: Thread default and grant parity (companion-present case)
@@ -404,6 +400,7 @@ jobs:
           python scripts/ci/pytest_must_not_skip.py --require-companion
           --allow-skip '*::test_without_the_real_companion_the_unpatched_route_is_python'
           -- tests/parity/native tests/parity/*native*.py
+          --ignore=tests/parity/test_faker_native_widen.py
           tests/unit/execution/test_o1_when_routes.py
           -v --tb=short
 
@@ -414,6 +411,16 @@ jobs:
         run: |
           pytest tests/native -m "not serial" -n 4 --dist loadfile -q --tb=short
           pytest tests/native -m "serial" -q --tb=short || [ $? -eq 5 ]
+
+      # The Mimesis extra rebinds the person_* providers to Mimesis (the adoption matrix), which
+      # moves the frozen Faker KATs in tests/native, so it cannot be in the venv for the steps
+      # above. test_faker_native_widen.py::test_p5b runs the real adapter on the native lane and
+      # importorskips mimesis; this job forbids skips, so the file runs last, after the extra is
+      # synced from the lock (--inexact keeps the companion installed by companion-env).
+      - name: Faker native widen with the Mimesis extra (companion-present case, must not skip)
+        run: |
+          uv sync --frozen --inexact --extra dev --extra mimesis --python "$RUNNER_TEMP/venv/bin/python"
+          python scripts/ci/pytest_must_not_skip.py --require-companion -- tests/parity/test_faker_native_widen.py -v --tb=short
 
   # core-companion-wide: the companion-gated tests outside tests/native, in a job of their own so a
   # slow run cannot push core-companion-present over its timeout. A test there that no step in that
