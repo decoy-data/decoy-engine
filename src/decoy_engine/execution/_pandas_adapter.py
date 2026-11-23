@@ -54,7 +54,6 @@ from decoy_engine.execution._fk_keys import (
     fk_nullable_int_array,
     lossless_fk_int_values,
     lossless_int_columns,
-    table_from_pandas_keeping_source_types,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._fk_resolve import (
@@ -73,6 +72,7 @@ from decoy_engine.execution._runner import (
     source_anchor_columns,
 )
 from decoy_engine.execution._sequential import run_sequential as _run_sequential
+from decoy_engine.execution._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution._strategies._composite import CompositeHandler
 from decoy_engine.execution._strategies._fpe import FpeStrategyHandler

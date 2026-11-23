@@ -149,11 +149,7 @@ from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
 from decoy_engine.execution._chunked_carry import untouched_columns
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
-from decoy_engine.execution._fk_keys import (
-    lossless_int_columns,
-    table_from_pandas_keeping_source_types,
-    to_pandas_fk_safe,
-)
+from decoy_engine.execution._fk_keys import lossless_int_columns, to_pandas_fk_safe
 from decoy_engine.execution._guards import run_chunk_ingest_guards
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
@@ -174,6 +170,7 @@ from decoy_engine.execution._runner import (
 from decoy_engine.execution._sequential_composite_chain import decline_composite_chain
 from decoy_engine.execution._sequential_native import SeqNativeRun
 from decoy_engine.execution._sequential_order import table_topo_order
+from decoy_engine.execution._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution._transactional_sink import (
     TransactionalSink,
     _CallableSinkAdapter,
@@ -434,7 +431,6 @@ def run_sequential(
                 faker_pin = deterministic_faker_pin_columns_from_plan(
                     plan, table, src.schema, relationship_graph=graph
                 )
-                src_schema = src.schema
                 # `src` stays until the output is assembled: untouched columns are written from it.
 
                 # Snapshot this table's parent-key columns pre-mask, for its outgoing
@@ -528,7 +524,7 @@ def run_sequential(
                         src,
                         untouched_columns(
                             nodes_by_table.get(table, ()),
-                            src_schema.names,
+                            src.column_names,
                             registry,
                             graph.edges,
                             table,

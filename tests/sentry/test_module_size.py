@@ -129,11 +129,7 @@ ALLOWLIST: dict[str, int] = {
     "src/decoy_engine/execution/_sequential_native.py": 700,
     # sequential FK route threading; split the per-table mask/quarantine loop.
     # cross-column V1 folds joint_mask key_by into the source-anchor build (a comment, no new logic).
-    # UF-DOMAIN S1: the output call passes the source table, FK edges and table (+5).
-    "src/decoy_engine/execution/_sequential.py": 684,
-    # FK key helpers plus the one output assembler (`table_from_pandas_keeping_source_types`);
-    # a split would separate the assembler from the `_with_source_types` repair it calls.
-    "src/decoy_engine/execution/_fk_keys.py": 641,
+    "src/decoy_engine/execution/_sequential.py": 680,
     # transactional publish hardening and row mask; split the publish cluster.
     "src/decoy_engine/quarantine.py": 658,
     # corpus schema checks and verify_corpus; split into _codeset_verify.py when next touched.
