@@ -233,6 +233,8 @@ def _quoted_name(text: str, pos: int) -> tuple[str, int] | TargetRefusal:
             out.append(char)
         elif ch < " ":
             return TargetRefusal(at, "control character in name")
+        elif "\ud800" <= ch <= "\udfff":
+            return TargetRefusal(at, "unpaired surrogate in name")
         else:
             out.append(ch)
             at += 1

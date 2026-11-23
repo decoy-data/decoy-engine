@@ -112,6 +112,7 @@ def test_index_past_the_end_selects_nothing_and_never_raises() -> None:
         ("$[01]", "leading zero"),
         ("$[9007199254740992]", "range"),
         ("$['a\\ud800']", "surrogate"),
+        ("$['\ud800']", "surrogate"),
         ("$.", "member name missing"),
     ],
 )
@@ -175,6 +176,12 @@ def test_dot_wildcard_selects_array_items_and_object_members() -> None:
         ("$.a[0]", {"a": "v"}),
         ("$.a[0:2]", {"a": 5}),
         ("$.a[*]", {"a": False}),
+        ("$[0]", {}),
+        ("$[5]", {"a": 1}),
+        ("$[*].a", 5),
+        ("$[*].a", "s"),
+        ("$[*].a", {}),
+        ("$.*[0]", [{"a": 1}]),
     ],
 )
 def test_array_selector_on_an_object_or_scalar_is_refused_by_the_evaluator(
@@ -197,3 +204,35 @@ def test_dot_wildcard_on_an_array_cell_masks_every_item() -> None:
         '["REDACTED", "REDACTED"]',
         '{"a": "REDACTED", "b": "REDACTED"}',
     ]
+
+
+def test_index_before_the_start_of_a_short_array_selects_nothing() -> None:
+    assert parse_target("$[-5]").find([1, 2, 3]) == []
+
+
+def test_dot_wildcard_below_the_root_selects_array_items() -> None:
+    handler = NestedStrategyHandler()
+    df = pd.DataFrame(
+        {"data": ['{"a": ["SSN-1", "SSN-2"], "b": "keep"}', '[["SSN-3"], ["SSN-4"]]']}
+    )
+    out, _ = handler.run(df, "data", _seed({"target": "$.a.*", "strategy": "redact"}), _FakeCtx())
+    assert json.loads(out["data"].iloc[0]) == {"a": ["REDACTED", "REDACTED"], "b": "keep"}
+    out, _ = handler.run(
+        df.iloc[[1]].copy(), "data", _seed({"target": "$[*].*", "strategy": "redact"}), _FakeCtx()
+    )
+    assert json.loads(out["data"].iloc[0]) == [["REDACTED"], ["REDACTED"]]
+
+
+def test_escaped_quoted_name_masks_the_decoded_key() -> None:
+    """Frozen change: RFC 9535 2.3.1.2 escapes are decoded; main read the backslash text."""
+    handler = NestedStrategyHandler()
+    cell = json.dumps({"a\nb": "SSN-1", "a'b": "SSN-2", "keep": "K"})
+    for target, key in (("$['a\\nb']", "a\nb"), ("$['a\\'b']", "a'b")):
+        df = pd.DataFrame({"data": [cell]})
+        seed = _seed({"target": target, "strategy": "redact"})
+        out, _ = handler.run(df, "data", seed, _FakeCtx())
+        parsed = json.loads(out["data"].iloc[0])
+        assert parsed[key] == "REDACTED" and parsed["keep"] == "K"
+        assert sorted(v for v in parsed.values() if v != "REDACTED") == sorted(
+            {"SSN-1", "SSN-2", "K"} - {"SSN-1" if key == "a\nb" else "SSN-2"}
+        )

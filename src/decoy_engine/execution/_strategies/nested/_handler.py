@@ -259,7 +259,7 @@ class NestedStrategyHandler:
         # resolution (strategy-name validation, nested-of-nested rejection,
         # SCALAR_HANDLERS lookup, technique_class) now lives in
         # `_resolve_child`, shared with `preflight()`. Resolving it here --
-        # before the jsonpath parse below, same position the inline checks
+        # before the target parse below, same position the inline checks
         # occupied pre-refactor -- keeps every error code, message, and raise
         # order byte-identical to the pre-extraction behavior (passing
         # `column` preserves the "(column=...)" message suffix).
@@ -279,7 +279,6 @@ class NestedStrategyHandler:
                     f"(column={column!r}): {parsed_target}"
                 ),
             )
-        jsonpath_expr = parsed_target
 
         col = df[column]
         if pd.api.types.is_extension_array_dtype(col.dtype):
@@ -314,7 +313,7 @@ class NestedStrategyHandler:
         # must fail closed rather than pass every cell through raw (TEST-3 P1-2).
         saw_parseable = False
         saw_matched_fault = False
-        # Per-position: (parsed_object, list[jsonpath_match]). Position
+        # Per-position: (parsed_object, list[match]). Position
         # is the row's 0-indexed offset in the column, not its label.
         per_position_state: dict[int, tuple[Any, list]] = {}
 
@@ -330,7 +329,7 @@ class NestedStrategyHandler:
                 record_fault(ctx, warnings, column, pos, exc.token)
                 continue
             saw_parseable = True
-            matches = find_matches(jsonpath_expr, parsed, column)
+            matches = find_matches(parsed_target, parsed, column)
             if not matches:
                 continue
             # A subset target has no descendant segment, so no match is a prefix of another.
@@ -473,9 +472,9 @@ class NestedStrategyHandler:
                             f"nested target resolved to a match whose masked value "
                             f"cannot be written back reliably for column {column!r} "
                             f"(an array/index selector applied to a JSON object; "
-                            f"the write would not replace the object). Failing closed to avoid leaking the source "
-                            f"value. Use an object-appropriate target (e.g. `$.*` or a "
-                            f"field path) instead of an array selector on an object."
+                            f"the write would not replace the object). Failing closed to "
+                            f"avoid leaking the source value. Use `$.*` or a member name "
+                            f"for an object, and `[*]` or an index only for an array."
                         ),
                     )
                 # Capture the return value. For a field/index path `update`

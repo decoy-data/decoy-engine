@@ -1351,7 +1351,7 @@ message names table, column, config path, character position and form, and shows
 characters (a longer one reads `first 64 of N characters`); it never shows a cell. `nested_jsonpath_parse_error`
 stays as the handler backstop when the handler runs without a compiled plan. The engine evaluates the grammar itself (`TargetPath.find`), so what a target selects does not depend on the
 any JSONPath library. A name selects a member of an object. `.*` selects the members of an object or the items of an
-array. `[*]`, an index and a slice select items of an array only; on an object or a scalar they fail closed with
+array, at any depth. A quoted name decodes its RFC 9535 2.3.1.2 escapes. `[*]`, an index and a slice select items of an array only; on an object or a scalar they fail closed with
 `nested_target_unwritable_container` (the index case was a bare `KeyError`), and on a null they select nothing. An
 index outside an array selects nothing for that branch only. `nested_jsonpath_path_overlap` stays registered and is no
 longer raised, because no subset target can match a path and its prefix. The engine no longer depends on jsonpath-ng:
