@@ -51,6 +51,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine import reasons
 from decoy_engine.validators._fold import (
     CappedIndices,
     FoldResult,
@@ -58,7 +59,7 @@ from decoy_engine.validators._fold import (
     finding_index_cap,
     run_whole,
 )
-from decoy_engine.validators._types import RowSpan, ValidatorFinding
+from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -144,9 +145,16 @@ def _child_fk_values(
 
 # Rough bytes a Python tuple key of one value costs, and each extra column. The budget is a
 # ceiling on retained state, so the estimate leans high.
-_KEY_BASE_BYTES = 120
+_KEY_BASE_BYTES = 180
 _KEY_COLUMN_BYTES = 56
-_INDEX_BYTES = 36
+_INDEX_BYTES = 60
+
+
+def _skip_table(skipped: list[SkippedColumn], table: str) -> None:
+    """Record a table the run did not produce, once."""
+    record = SkippedColumn(table, None, reasons.warning.VALIDATOR_SKIP_MISSING_TABLE)
+    if record not in skipped:
+        skipped.append(record)
 
 
 def key_bytes(width: int) -> int:
@@ -296,8 +304,10 @@ class FkIntactFold:
             self.table_complete(parent.table)
         findings: list[ValidatorFinding] = []
         checked: list[tuple[str, str | None]] = []
+        skipped: list[SkippedColumn] = []
         for edge in self._edges:
             if not edge.seen:
+                _skip_table(skipped, edge.child_table)
                 continue
             checked.append((edge.child_table, None))
             count = edge.tally.count
@@ -316,7 +326,7 @@ class FkIntactFold:
                         failing_row_count=count,
                     )
                 )
-        return FoldResult(tuple(findings), tuple(checked), ())
+        return FoldResult(tuple(findings), tuple(checked), tuple(skipped))
 
 
 class NoOrphanChildrenFold:
@@ -359,8 +369,10 @@ class NoOrphanChildrenFold:
     def finish(self) -> FoldResult:
         findings: list[ValidatorFinding] = []
         checked: list[tuple[str, str | None]] = []
+        skipped: list[SkippedColumn] = []
         for edge in self._edges:
             if not edge.seen:
+                _skip_table(skipped, edge.child_table)
                 continue
             checked.append((edge.child_table, None))
             count = edge.tally.count
@@ -379,7 +391,7 @@ class NoOrphanChildrenFold:
                         failing_row_count=count,
                     )
                 )
-        return FoldResult(tuple(findings), tuple(checked), ())
+        return FoldResult(tuple(findings), tuple(checked), tuple(skipped))
 
 
 def validate_fk_intact(

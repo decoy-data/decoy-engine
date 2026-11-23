@@ -89,8 +89,10 @@ __all__ = [
     "TRUNCATE_MASK_CHAR_INVALID",
     "UNIFIED_SLICE_INVARIANT_VIOLATION",
     "UNKNOWN_TRANSFORM_OP",
+    "VALIDATOR_COLUMN_MISSING",
     "VALIDATOR_KEY_STATE_OVER_BUDGET",
     "VALIDATOR_SOURCE_PAIRING_MISMATCH",
+    "VALIDATOR_SPAN_REPEATED",
     "VAULT_COMMIT_FAILED",
     "VAULT_CRYPTO_NOT_INSTALLED",
     "VAULT_ENTRY_TOO_LARGE",
@@ -490,5 +492,15 @@ VALIDATOR_KEY_STATE_OVER_BUDGET = _d(
 VALIDATOR_SOURCE_PAIRING_MISMATCH = _d(
     "validator_source_pairing_mismatch",
     "The source rows read for a leak check do not line up with the published rows.",
+    since=UNRELEASED,
+)
+VALIDATOR_COLUMN_MISSING = _d(
+    "validator_column_missing",
+    "A validator needs a parent key or window column that the parent table does not have.",
+    since=UNRELEASED,
+)
+VALIDATOR_SPAN_REPEATED = _d(
+    "validator_span_repeated",
+    "A validator that can only read a table whole was given the table in several batches.",
     since=UNRELEASED,
 )

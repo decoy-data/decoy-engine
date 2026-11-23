@@ -46,12 +46,14 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.validators import finding_index_cap
 from decoy_engine.validators._registry import _REGISTRY
 from decoy_engine.validators._types import (
-    FINDING_INDEX_CAP,
+    SkippedColumn,
     ValidationReport,
     ValidatorFinding,
     ValidatorResult,
+    result_status,
 )
 
 if TYPE_CHECKING:
@@ -229,6 +231,8 @@ class ValidatorCollector:
         self._counts: dict[_Key, int] = {}
         # A column the table has counts as checked even when the table has no rows, as on the
         # full-frame route.
+        self._cap = finding_index_cap(config)
+        self._tables = set(schemas or {})
         self._seen: set[_Key] = {
             slot.key
             for slot in self._ordered
@@ -256,9 +260,42 @@ class ValidatorCollector:
                     self._counts[slot.key] = (
                         self._counts.get(slot.key, 0) + finding.failing_row_count
                     )
-                    room = FINDING_INDEX_CAP - len(failing)
+                    room = len(finding.failing_row_indices) if self._cap is None else self._cap
+                    room -= len(failing)
                     failing.extend(offset + i for i in finding.failing_row_indices[: max(room, 0)])
         self._elapsed += time.perf_counter() - started
+
+    def _result(
+        self, ordinal: int, name: str, per_entry: dict[int, list[ValidatorFinding]]
+    ) -> ValidatorResult:
+        """The entry's result: what it checked, what it could not check, and the verdict."""
+        found = tuple(per_entry.get(ordinal, ()))
+        checked = tuple(
+            (s.table, s.column)
+            for s in self._ordered
+            if s.key[0] == ordinal and s.key in self._seen
+        )
+        skips: list[SkippedColumn] = []
+        tables = dict.fromkeys(s.table for s in self._ordered if s.key[0] == ordinal)
+        for table in tables:
+            if table not in self._tables:
+                skips.append(
+                    SkippedColumn(table, None, reasons.warning.VALIDATOR_SKIP_MISSING_TABLE)
+                )
+                continue
+            skips.extend(
+                SkippedColumn(table, s.column, reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN)
+                for s in self._ordered
+                if s.key[0] == ordinal and s.table == table and s.key not in self._seen
+            )
+        return ValidatorResult(
+            validator=name,
+            entry_index=ordinal,
+            status=result_status(found, checked, tuple(skips)),
+            checked=checked,
+            skipped=tuple(skips),
+            failing_row_count=sum(f.failing_row_count for f in found),
+        )
 
     def assemble(self) -> ValidationReport:
         """The `_registry.validate` report: findings in configured order, merged indices."""
@@ -282,19 +319,7 @@ class ValidatorCollector:
             findings.append(found)
             per_entry.setdefault(slot.key[0], []).append(found)
         results = tuple(
-            ValidatorResult(
-                validator=name,
-                entry_index=ordinal,
-                status="failed" if ordinal in per_entry else "passed",
-                checked=tuple(
-                    (s.table, s.column)
-                    for s in self._ordered
-                    if s.key[0] == ordinal and s.key in self._seen
-                ),
-                skipped=(),
-                failing_row_count=sum(f.failing_row_count for f in per_entry.get(ordinal, [])),
-            )
-            for ordinal, name in enumerate(self._names)
+            self._result(ordinal, name, per_entry) for ordinal, name in enumerate(self._names)
         )
         return ValidationReport(
             passed=not findings,

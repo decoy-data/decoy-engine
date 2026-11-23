@@ -66,6 +66,7 @@ Design constraints
 from __future__ import annotations
 
 from decoy_engine.errors import ValidatorFailedError
+from decoy_engine.validators._fold import finding_index_cap
 from decoy_engine.validators._registry import validate
 from decoy_engine.validators._scope import plan_scope, unchecked_named_columns
 from decoy_engine.validators._session import ValidationSession
@@ -87,6 +88,7 @@ __all__ = [
     "ValidatorFailedError",
     "ValidatorFinding",
     "ValidatorResult",
+    "finding_index_cap",
     "plan_scope",
     "unchecked_named_columns",
     "validate",

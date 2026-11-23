@@ -34,13 +34,14 @@ from typing import Any
 import pyarrow as pa
 
 import decoy_engine.checksums as _checksums
+from decoy_engine import reasons
 from decoy_engine.validators._fold import (
     CappedIndices,
     FoldResult,
     finding_index_cap,
     run_whole,
 )
-from decoy_engine.validators._types import RowSpan, ValidatorFinding
+from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
 # ---------------------------------------------------------------------------
 # The per-column fold shared by the check-digit validators and `_generic.py`
@@ -63,6 +64,7 @@ class ColumnFold:
         self._cap = cap
         self._tallies: dict[tuple[str, int], CappedIndices] = {}
         self._present: set[tuple[str, int]] = set()
+        self._observed: set[str] = set()
 
     def failing_positions(self, values: list[Any]) -> Iterable[int]:
         raise NotImplementedError
@@ -74,6 +76,7 @@ class ColumnFold:
         columns = self._columns.get(table)
         if not columns:
             return
+        self._observed.add(table)
         names = span.output.schema.names
         for occurrence, column in enumerate(columns):
             if column not in names:
@@ -93,10 +96,19 @@ class ColumnFold:
     def finish(self) -> FoldResult:
         findings: list[ValidatorFinding] = []
         checked: list[tuple[str, str | None]] = []
+        skipped: list[SkippedColumn] = []
         for table, columns in self._columns.items():
+            if columns and table not in self._observed:
+                skipped.append(
+                    SkippedColumn(table, None, reasons.warning.VALIDATOR_SKIP_MISSING_TABLE)
+                )
+                continue
             for occurrence, column in enumerate(columns):
                 key = (table, occurrence)
                 if key not in self._present:
+                    skipped.append(
+                        SkippedColumn(table, column, reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN)
+                    )
                     continue
                 checked.append((table, column))
                 tally = self._tallies.get(key)
@@ -112,7 +124,7 @@ class ColumnFold:
                         failing_row_count=tally.count,
                     )
                 )
-        return FoldResult(tuple(findings), tuple(checked), ())
+        return FoldResult(tuple(findings), tuple(checked), tuple(skipped))
 
 
 class _CheckDigitFold(ColumnFold):

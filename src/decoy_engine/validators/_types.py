@@ -90,6 +90,19 @@ class ValidatorResult:
     failing_row_count: int
 
 
+def result_status(
+    findings: tuple[ValidatorFinding, ...],
+    checked: tuple[tuple[str, str | None], ...],
+    skipped: tuple[SkippedColumn, ...],
+) -> Literal["passed", "failed", "skipped"]:
+    """The one rule for an entry's status: a finding fails it, checking nothing skips it."""
+    if findings:
+        return "failed"
+    if not checked and skipped:
+        return "skipped"
+    return "passed"
+
+
 @dataclass(frozen=True)
 class RowSpan:
     """One run of rows fed to a fold, in published row order.

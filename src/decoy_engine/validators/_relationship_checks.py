@@ -31,6 +31,8 @@ import pandas as pd
 import pyarrow as pa
 from pandas.tseries.api import guess_datetime_format
 
+from decoy_engine import reasons
+from decoy_engine.errors import ValidatorStateError
 from decoy_engine.validators._fk_validators import (
     _child_fk_values,
     _extract_relationships,
@@ -43,7 +45,7 @@ from decoy_engine.validators._fold import (
     finding_index_cap,
     run_whole,
 )
-from decoy_engine.validators._types import RowSpan, ValidatorFinding
+from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
 
 def _edge_for(
@@ -86,37 +88,68 @@ def _require_params(params: dict[str, Any], keys: list[str], validator_name: str
 # parent_window_respected
 # ---------------------------------------------------------------------------
 
-_OBSERVATION_BYTES = 120
+_OBSERVATION_BYTES = 200
 _UNSET: Any = object()
 
 
-class _OneFormatDates:
-    """Parses one date column with one format for every span.
+# The strings pandas passes over when it looks for the first value of a column to guess a format
+# from (`pandas._libs.tslib.first_non_null` skips these and every null object). A guard test
+# compares this set with pandas itself.
+_PANDAS_BLANK_STRINGS = frozenset({"", "NAT", "NaT", "nat", "NAN", "NaN", "nan"})
 
-    pandas 2 infers the format from the first non-null value of whatever it is given, so the
-    same rows parse differently when split into chunks. This takes the first non-null string of
-    the column, guesses its format once (`guess_datetime_format`, the guess `to_datetime` makes),
-    and passes it as ``format`` to every span, with ``format="mixed"`` when the guess is None,
-    which is what `to_datetime` does for a whole column then. Non-string values (dates,
-    timestamps) need no format.
+
+def _is_blank(value: Any) -> bool:
+    if isinstance(value, str):
+        return value in _PANDAS_BLANK_STRINGS
+    return value is None or bool(pd.isna(value))
+
+
+def _require_columns(span: RowSpan, table: str, columns: list[str]) -> None:
+    """Refuse a parent table that lacks a key or window column, naming the columns only."""
+    names = set(span.output.schema.names)
+    missing = [c for c in columns if c not in names]
+    if missing:
+        raise ValidatorStateError(
+            code=reasons.runtime.VALIDATOR_COLUMN_MISSING,
+            message=f"table {table!r} has no column(s) {missing!r} that the validator needs.",
+        )
+
+
+class _OneFormatDates:
+    """Parses one date column with one format for every span, to integer microseconds.
+
+    pandas 2 infers the format from the first value of whatever it is given that is not null or
+    a null string, so the same rows parse differently when split into chunks. This takes the
+    first such value of the column (by pandas' own rule, `_is_blank`), guesses its format once
+    (`guess_datetime_format`, the guess `to_datetime` makes), and passes it as ``format`` to every
+    span, with ``format="mixed"`` when the guess is None, which is what `to_datetime` does for a
+    whole column then. Non-string values (dates, timestamps) need no format. The format stays
+    unset while every value seen so far is blank. A cell that does not parse comes back as None.
     """
 
     def __init__(self) -> None:
         self._format: Any = _UNSET
 
-    def parse(self, values: list[Any]) -> pd.Series:
+    def parse(self, values: list[Any]) -> list[int | None]:
+        series = pd.Series(values, dtype=object) if not values else pd.Series(values)
         if self._format is _UNSET:
-            first = next((v for v in values if v is not None), _UNSET)
-            if first is _UNSET:
-                return pd.to_datetime(pd.Series(values, dtype=object), errors="coerce")
-            if isinstance(first, str):
-                self._format = guess_datetime_format(first) or "mixed"
-            else:
-                self._format = None
-        series = pd.Series(values)
-        if self._format is None:
-            return pd.to_datetime(series, errors="coerce")
-        return pd.to_datetime(series, format=self._format, errors="coerce")
+            first = next((v for v in values if not _is_blank(v)), _UNSET)
+            if first is not _UNSET:
+                if isinstance(first, str):
+                    self._format = guess_datetime_format(first) or "mixed"
+                else:
+                    self._format = None
+        if self._format is _UNSET or self._format is None:
+            parsed = pd.to_datetime(series, errors="coerce")
+        else:
+            parsed = pd.to_datetime(series, format=self._format, errors="coerce")
+        if parsed.dtype == object:
+            parsed = pd.to_datetime(parsed, errors="coerce", utc=True)
+        index = pd.DatetimeIndex(parsed).as_unit("us")
+        return [
+            None if missing else int(value)
+            for value, missing in zip(index.asi8.tolist(), index.isna().tolist(), strict=True)
+        ]
 
 
 class ParentWindowFold:
@@ -180,10 +213,12 @@ class ParentWindowFold:
         self._starts = _OneFormatDates()
         self._ends = _OneFormatDates()
         self._children = _OneFormatDates()
-        self._windows: dict[tuple[Any, ...], tuple[pd.Timestamp, pd.Timestamp]] = {}
-        self._pending: dict[tuple[Any, ...], list[tuple[int, pd.Timestamp, bool]]] = {}
+        self._windows: dict[tuple[Any, ...], tuple[int | None, int | None]] = {}
+        # key -> (row_index, parsed microseconds or None, raw cell was null), in arrival order.
+        self._pending: dict[tuple[Any, ...], list[tuple[int, int | None, bool]]] = {}
         self._parent_seen = False
         self._parent_complete = False
+        self._child_seen = False
         self._child_checked = False
 
     def paired_tables(self) -> frozenset[str]:
@@ -198,6 +233,9 @@ class ParentWindowFold:
     def _add_parent(self, span: RowSpan) -> None:
         self._parent_seen = True
         out = span.output
+        _require_columns(
+            span, self._parent_table, [*self._parent_cols, self._start_col, self._end_col]
+        )
         pk_lists = [out.column(c).to_pylist() for c in self._parent_cols]
         starts = self._starts.parse(out.column(self._start_col).to_pylist())
         ends = self._ends.parse(out.column(self._end_col).to_pylist())
@@ -211,10 +249,11 @@ class ParentWindowFold:
                     table=self._parent_table,
                     column=None,
                 )
-            self._windows[key] = (starts.iloc[i], ends.iloc[i])
+            self._windows[key] = (starts[i], ends[i])
 
     def _add_child(self, span: RowSpan) -> None:
         out = span.output
+        self._child_seen = True
         if self._child_column not in out.schema.names:
             return
         self._child_checked = True
@@ -223,7 +262,7 @@ class ParentWindowFold:
         for i, fk in enumerate(_child_fk_values(out, self._child_fk_cols)):
             if fk is None:
                 continue  # null FK: not this validator's concern (see no_orphan_children)
-            observation = (span.offset + i, dates.iloc[i], raw[i] is None)
+            observation = (span.offset + i, dates[i], raw[i] is None)
             if self._parent_complete:
                 self._judge(observation, self._windows.get(fk))
                 continue
@@ -242,19 +281,19 @@ class ParentWindowFold:
 
     def _judge(
         self,
-        observation: tuple[int, pd.Timestamp, bool],
-        window: tuple[pd.Timestamp, pd.Timestamp] | None,
+        observation: tuple[int, int | None, bool],
+        window: tuple[int | None, int | None] | None,
     ) -> None:
         index, date, raw_is_null = observation
         if raw_is_null:
             return  # null child date: skipped, not a violation
-        if pd.isna(date):
+        if date is None:
             self._failing.add(index)  # non-null child date that fails to parse: a defect
             return
         if window is None:
             return  # FK does not resolve to a parent row: fk_intact's concern, not this one
         start, end = window
-        if pd.isna(start) or pd.isna(end):
+        if start is None or end is None:
             self._failing.add(index)  # window cannot be verified: fail loud, not skip
             return
         if not (start <= date <= end):
@@ -281,7 +320,13 @@ class ParentWindowFold:
             )
         self.table_complete(self._parent_table)
         if not self._child_checked:
-            return FoldResult(())
+            code = (
+                reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN
+                if self._child_seen
+                else reasons.warning.VALIDATOR_SKIP_MISSING_TABLE
+            )
+            column = self._child_column if self._child_seen else None
+            return FoldResult((), (), (SkippedColumn(self._child_table, column, code),))
         checked = ((self._child_table, self._child_column),)
         count = self._failing.count
         if not count:
@@ -426,6 +471,7 @@ class ReconciliationFold:
     def _add_parent(self, span: RowSpan) -> None:
         out = span.output
         self._parent_seen = True
+        _require_columns(span, self._parent_table, self._parent_pk_cols)
         if self._parent_column not in out.schema.names:
             return
         self._parent_has_column = True
@@ -475,13 +521,26 @@ class ReconciliationFold:
                 column=self._child_column,
             )
 
+    def _skips(self) -> tuple[SkippedColumn, ...]:
+        missing_column = reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN
+        skips: list[SkippedColumn] = []
+        if not self._child_seen:
+            skips.append(
+                SkippedColumn(self._child_table, None, reasons.warning.VALIDATOR_SKIP_MISSING_TABLE)
+            )
+        elif not self._child_has_column:
+            skips.append(SkippedColumn(self._child_table, self._child_column, missing_column))
+        if not self._parent_has_column:
+            skips.append(SkippedColumn(self._parent_table, self._parent_column, missing_column))
+        return tuple(skips)
+
     def finish(self) -> FoldResult:
         if not self._parent_seen:
             raise ValueError(
                 f"reconciliation_holds: parent table {self._parent_table!r} not found in outputs."
             )
         if not (self._child_seen and self._parent_has_column and self._child_has_column):
-            return FoldResult(())
+            return FoldResult((), (), self._skips())
         failing = CappedIndices(self._cap)
         worst_delta = 0.0
         for index, key, parent_val in self._parent_rows:

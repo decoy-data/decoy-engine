@@ -102,14 +102,17 @@ class LeakCheckFold:
         self._max_ratio = float(params.get("max_identical_ratio", 0.02))
         self._min_rows = int(params.get("min_rows", 1))
         self._plan = plan_scope(config, entry)
-        self._by_table: dict[str, list[ScopedColumn]] = {}
-        for col in self._plan.columns:
-            self._by_table.setdefault(col.table, []).append(col)
-        self._state = {(c.table, c.column): _ColumnState(cap) for c in self._plan.columns}
+        # One state per occurrence in scope order: a column listed twice is two checks.
+        self._by_table: dict[str, list[int]] = {}
+        for position, col in enumerate(self._plan.columns):
+            self._by_table.setdefault(col.table, []).append(position)
+        self._state = [_ColumnState(cap) for _ in self._plan.columns]
         self._observed: set[str] = set()
+        self._compared_tables: set[str] = set()
 
     def paired_tables(self) -> frozenset[str]:
-        return frozenset(self._by_table)
+        """Tables with at least one column that was read against its source."""
+        return frozenset(self._compared_tables)
 
     def table_complete(self, table: str) -> None:
         return None
@@ -125,20 +128,27 @@ class LeakCheckFold:
                 "provided; leak verification cannot run. Pass the source table via "
                 "run_pipeline(sources=...) or exclude this table from leak_check's scope."
             )
-        if span.source.num_rows != span.output.num_rows:
+        out_names = set(span.output.schema.names)
+        src_names = set(span.source.schema.names)
+        present = [
+            position
+            for position in columns
+            if self._plan.columns[position].column in out_names
+            and self._plan.columns[position].column in src_names
+        ]
+        for position in present:
+            self._state[position].present = True
+        reading = [p for p in present if self._plan.columns[p].skip is None]
+        if reading and span.source.num_rows != span.output.num_rows:
             raise ValidatorStateError(
                 code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
                 message=f"the source rows for table {table!r} do not line up with its output rows.",
             )
-        out_names = set(span.output.schema.names)
-        src_names = set(span.source.schema.names)
-        for col in columns:
-            if col.column not in out_names or col.column not in src_names:
-                continue
-            state = self._state[(table, col.column)]
-            state.present = True
-            if col.skip is not None:
-                continue
+        if reading:
+            self._compared_tables.add(table)
+        for position in reading:
+            col = self._plan.columns[position]
+            state = self._state[position]
             if col.kind == "unclassified":
                 # Fail CLOSED (dennis review 2026-07-04): an unclassified strategy reaching here
                 # means the drift sentry was bypassed, and silently skipping the column would
@@ -168,8 +178,9 @@ class LeakCheckFold:
                     SkippedColumn(table, None, reasons.warning.LEAK_CHECK_SKIP_TABLE_NOT_PRODUCED)
                 )
                 continue
-            for col in self._by_table[table]:
-                state = self._state[(table, col.column)]
+            for position in self._by_table[table]:
+                col = self._plan.columns[position]
+                state = self._state[position]
                 if not state.present:
                     skipped.append(
                         SkippedColumn(

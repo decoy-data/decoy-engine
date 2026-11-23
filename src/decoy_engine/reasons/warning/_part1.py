@@ -47,6 +47,8 @@ __all__ = [
     "TEXT_MASK_SUB_FLOOR_SPAN_HANDLED",
     "TOP_CODE_GENERALIZED",
     "UNDECLARED_OUTPUT_COLUMNS",
+    "VALIDATOR_SKIP_MISSING_COLUMN",
+    "VALIDATOR_SKIP_MISSING_TABLE",
     "VALUE_REUSE_FIXED_POINT",
 ]
 
@@ -117,6 +119,16 @@ LEAK_CHECK_SKIP_TABLE_NOT_PRODUCED = _d(
 LEAK_CHECK_SKIP_WHEN = _d(
     "leak_check_skip_when",
     "leak_check skipped a column that carries a when predicate.",
+    since=UNRELEASED,
+)
+VALIDATOR_SKIP_MISSING_COLUMN = _d(
+    "validator_skip_missing_column",
+    "A validator skipped a column that is missing from the table.",
+    since=UNRELEASED,
+)
+VALIDATOR_SKIP_MISSING_TABLE = _d(
+    "validator_skip_missing_table",
+    "A validator skipped a table that this run did not produce.",
     since=UNRELEASED,
 )
 MIMESIS_LOCALE_FALLBACK = _d("mimesis_locale_fallback", "Mimesis locale fallback.")

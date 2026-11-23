@@ -14,7 +14,7 @@ import pytest
 
 from decoy_engine.validators import validate
 from decoy_engine.validators._registry import _REGISTRY
-from tests.unit.validators._fold_cases import build_cases
+from tests.unit.validators._fold_cases import build_cases, build_extra_cases
 
 _FK_REL = "parent.['id'] -> child.['pid']"
 
@@ -142,3 +142,40 @@ def test_the_whole_table_function_and_the_session_agree(name: str) -> None:
     direct = _REGISTRY[name](case.outputs, entry, case.config, sources=case.sources)
     via_session = validate(case.outputs, case.config, sources=case.sources).findings
     assert direct == via_session
+
+
+_WINDOW = "child.d fall outside the parent 'parent' window (start..end), fail to parse, or map"
+_REPEAT_ONE = "3 of 3 non-null cells identical to source (ratio 1.00); strategy 'hash'"
+_REPEAT_TWO = (
+    "3 of 3 non-null cells identical to source (ratio 1.00 > max_identical_ratio 0.02) "
+    "under strategy 'hash'"
+)
+# Also captured at 311ec1418.
+EXTRA_EXPECTED: dict[str, tuple[tuple[Any, ...], ...]] = {
+    "parent_window_leading_blank": (
+        (
+            "parent_window_respected",
+            "child",
+            "d",
+            (0, 2),
+            f"2 row(s) in {_WINDOW} to an unverifiable (null/unparseable) parent window",
+        ),
+    ),
+    "leak_check_repeated_column": (
+        ("leak_check", "t", "a", (0, 1, 2), f"{_REPEAT_ONE} produced no change"),
+        ("leak_check", "t", "a", (0, 1, 2), _REPEAT_TWO),
+        ("leak_check", "t", "a", (0, 1, 2), f"{_REPEAT_ONE} produced no change"),
+        ("leak_check", "t", "a", (0, 1, 2), _REPEAT_TWO),
+    ),
+    "leak_check_skipped_columns_do_not_pair": (),
+}
+
+
+@pytest.mark.parametrize("name", sorted(EXTRA_EXPECTED))
+def test_validate_matches_the_extra_findings_captured_before_the_fold_change(name: str) -> None:
+    case = build_extra_cases()[name]
+    report = validate(case.outputs, case.config, sources=case.sources)
+    got = tuple(
+        (f.validator, f.table, f.column, f.failing_row_indices, f.detail) for f in report.findings
+    )
+    assert got == EXTRA_EXPECTED[name]

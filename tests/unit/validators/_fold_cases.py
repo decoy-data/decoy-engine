@@ -192,3 +192,45 @@ def build_cases() -> dict[str, Case]:
         "parent_window_respected": _window_case(),
         "reconciliation_holds": _reconcile_case(),
     }
+
+
+def _blank_window_case() -> Case:
+    """A leading blank string: pandas takes the date format from the first real value."""
+    base = _window_case()
+    parent = pa.table({"id": [1], "start": ["2024-01-01"], "end": ["2024-12-31"]})
+    child = pa.table({"pid": [1, 1, 1], "d": ["", "2024-01-05", "01/05/2024"]})
+    return Case({"parent": parent, "child": child}, base.config, {})
+
+
+def _repeated_column_case() -> Case:
+    """leak_check with one column listed twice is two checks, as it always was."""
+    values = ["x1", "x2", "x3"]
+    tables = [{"name": "t", "columns": [{"name": "a", "strategy": "hash"}]}]
+    return Case(
+        {"t": pa.table({"a": values})},
+        {
+            "validators": [{"name": "leak_check", "columns": {"t": ["a", "a"]}}],
+            "tables": tables,
+            "relationships": [],
+        },
+        {"t": pa.table({"a": values})},
+    )
+
+
+def _skipped_unpaired_case() -> Case:
+    """Every column is skipped, so the source need not pair with the output."""
+    tables = [{"name": "t", "columns": [{"name": "e", "strategy": "passthrough"}]}]
+    return Case(
+        {"t": pa.table({"e": ["a", "b"]})},
+        {"validators": [{"name": "leak_check"}], "tables": tables, "relationships": []},
+        {"t": pa.table({"e": ["a", "b", "c"]})},
+    )
+
+
+def build_extra_cases() -> dict[str, Case]:
+    """Cases beyond one per validator; their expected findings were also captured at 311ec1418."""
+    return {
+        "parent_window_leading_blank": _blank_window_case(),
+        "leak_check_repeated_column": _repeated_column_case(),
+        "leak_check_skipped_columns_do_not_pair": _skipped_unpaired_case(),
+    }

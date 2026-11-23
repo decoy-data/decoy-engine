@@ -20,7 +20,7 @@ beside a capped sample of indices).
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
@@ -33,6 +33,7 @@ from decoy_engine.validators._types import (
     ValidationReport,
     ValidatorFinding,
     ValidatorResult,
+    result_status,
 )
 
 if TYPE_CHECKING:
@@ -153,18 +154,11 @@ class ValidationSession:
             outcome = fold.finish()
             findings.extend(outcome.findings)
             failing = sum(f.failing_row_count for f in outcome.findings)
-            status: Literal["passed", "failed", "skipped"]
-            if outcome.findings:
-                status = "failed"
-            elif not outcome.checked and outcome.skipped:
-                status = "skipped"
-            else:
-                status = "passed"
             results.append(
                 ValidatorResult(
                     validator=name,
                     entry_index=index,
-                    status=status,
+                    status=result_status(outcome.findings, outcome.checked, outcome.skipped),
                     checked=outcome.checked,
                     skipped=outcome.skipped,
                     failing_row_count=failing,

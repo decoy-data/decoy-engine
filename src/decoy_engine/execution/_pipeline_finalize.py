@@ -32,7 +32,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.execution._planner import AUTO_CHUNK_THRESHOLD_ROWS_DEFAULT
-from decoy_engine.generation.pool._events import QualityWarning
+from decoy_engine.generation.pool import QualityWarning
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult

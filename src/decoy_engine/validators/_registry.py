@@ -44,6 +44,8 @@ from typing import Any, Literal, NamedTuple
 
 import pyarrow as pa
 
+from decoy_engine import reasons
+from decoy_engine.errors import ValidatorStateError
 from decoy_engine.validators._catalog import (
     check_digit_fold,
     validate_iban,
@@ -154,6 +156,12 @@ class _WholeTableFold:
         self._tables: dict[str, pa.Table] = {}
 
     def add(self, table: str, span: RowSpan) -> None:
+        if table in self._tables:
+            # A second batch would overwrite the first and the verdict would cover the last one.
+            raise ValidatorStateError(
+                code=reasons.runtime.VALIDATOR_SPAN_REPEATED,
+                message=f"a whole-table validator was given table {table!r} in several batches.",
+            )
         self._tables[table] = span.output
 
     def table_complete(self, table: str) -> None:
