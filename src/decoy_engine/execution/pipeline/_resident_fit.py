@@ -342,15 +342,15 @@ def check_pre_read(
     tables: Iterable[str],
     *,
     graph: Any,
-    forced_full_frame: bool = False,
     kill_ceiling_bytes: int | None = None,
 ) -> None:
     """Refuse before `tables`, lazy Parquet sources about to be read whole, are read.
 
     Only a strict lower bound from each footer can refuse (rows and schema, no read). The route
-    is not decided yet, so a table is priced at its input bytes; a table forced to full-frame
-    whatever the route (a vault run) also carries its pandas copy. A CSV or fixed-width source
-    has no footer, is not priced, and is read as before. A job with a foreign key is out of scope.
+    is not decided yet, so a table is priced at its input bytes only, even for a vault run (the
+    chunked lane still bounds a vault job). A job that ends on full-frame is priced at the full
+    bound in `decide_route`. A CSV or fixed-width source has no footer, is not priced, and is read
+    as before. A job with a foreign key is out of scope.
     """
     from decoy_engine.config import classify_table_kinds
 
@@ -365,9 +365,7 @@ def check_pre_read(
         source = sources.get(name)
         footer = _footer_or_none(source) if isinstance(source, LazySource) else None
         if footer is not None:
-            specs.append(
-                lazy_spec(*footer, charge_pandas=forced_full_frame and kinds.get(name) == "mask")
-            )
+            specs.append(lazy_spec(*footer, charge_pandas=False))
     if specs:
         require_resident_fit(_lower_bound_verdict(lower_bound_bytes(specs), kill, len(specs)))
 

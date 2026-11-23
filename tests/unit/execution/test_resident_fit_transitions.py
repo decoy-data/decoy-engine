@@ -155,6 +155,31 @@ def test_at_c16_a_lazy_table_the_executor_reads_whole_is_refused_before_it_is_re
     assert resolved == []
 
 
+def test_at_c16_a_vault_run_is_priced_at_input_bytes_so_the_chunked_lane_can_take_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A vault run is not forced to full-frame: the auto-chunk lane still bounds it. Footer input
+    under H and full bound over H must run chunked, not refuse before the read."""
+    from decoy_engine.vault import vault_writer_for_config
+
+    src = pa.table({"h": pa.array([f"u{i}@x.example" for i in range(40)])})
+    path = support.write_source(src, tmp_path / "v.parquet")
+    cfg = support.make_cfg([{**support.hash_col("h"), "vault": True}], path=path)
+    lazy = LazySource(Path(path))
+    full = _footer_bytes(lazy, pandas=True)
+    assert _footer_bytes(lazy, pandas=False) <= full - 1 < full
+    _ceiling(monkeypatch, full - 1)
+    got = run_pipeline(
+        cfg,
+        {"t": lazy},
+        vault_writer=vault_writer_for_config(cfg),
+        resident_fallback=True,
+        **KW,
+    )
+    assert got.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    assert got.outputs["t"].num_rows == 40
+
+
 @pytest.mark.parametrize("kill_factor", [0.8, 1.05], ids=["lb-above-H", "lb-between-A-and-H"])
 def test_at_c16b_a_table_that_routes_chunked_is_not_charged_a_pandas_copy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kill_factor: float
@@ -425,12 +450,19 @@ def test_at_c20_a_forced_mode_or_a_foreign_key_job_is_not_priced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cfg, table = _transform_job(tmp_path)
-    _ceiling(monkeypatch, 1)
+    asked: list[str] = []
+    monkeypatch.setattr(rf, "_kill_ceiling", lambda: asked.append("asked") or 1, raising=False)
     run_pipeline(cfg, {"t": table}, execution_mode="full_frame", **KW)
     fk_cfg, tables = _fk_job(
         tmp_path, parent_transforms=[{"op": "filter", "expression": "id != ''"}]
     )
     run_pipeline(fk_cfg, tables, **KW)
+    assert asked == []
+
+    # The same transform job under `auto` does ask for the ceiling (here it refuses).
+    with pytest.raises(ExecutionError):
+        run_pipeline(cfg, {"t": table}, **KW)
+    assert asked == ["asked"]
 
 
 # ---- AT-C21: a mixed job that declines after generation ----------------------------------

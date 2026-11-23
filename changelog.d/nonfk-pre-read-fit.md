@@ -8,9 +8,9 @@ lower bound above the host or cgroup kill ceiling refuses, and a bound between 8
 ceiling runs as before.
 
 - Before a lazy Parquet source is read whole (the `resident_fallback` read), the bound is the
-  footer input bytes of the tables about to be read. A table the route may still run chunked is not
-  charged a pandas copy; a vault run, which is forced to full-frame, is. A source with no footer is
-  not priced.
+  footer input bytes of the tables about to be read. No table is charged a pandas copy there, a
+  vault run included, because the chunked lane may still take it; a job that ends on full-frame is
+  priced at the full bound in the route decision. A source with no footer is not priced.
 - Before a resident table is copied to pandas for its transforms, the bound is every resident input
   byte plus that table's pandas copy. A bound in the gap between 85% and 100% of the ceiling caps
   the final verdict at `route/nonfk_full_frame_unverified`.

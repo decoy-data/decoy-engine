@@ -52,13 +52,7 @@ def read_resident_fallback(
     if not rejected:
         return facts
     # Before the whole read: a footer lower bound beyond the kill ceiling refuses with nothing read.
-    check_pre_read(
-        config,
-        sources,
-        rejected,
-        graph=facts.graph,
-        forced_full_frame=run_values.get("vault_writer") is not None,
-    )
+    check_pre_read(config, sources, rejected, graph=facts.graph)
     resident = {n: materialize_source(v) if n in rejected else v for n, v in sources.items()}
     if rebuild is None:
         return replace(facts, caller_sources=resident)
