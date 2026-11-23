@@ -46,6 +46,11 @@ _FIRST_CODE = "re-raises the registered reason taken from a pydantic error type 
 _KERNEL_REASON = "forwards the ReasonCode a casting kernel returned for the failed cell"
 _DECISION_REASON = "forwards the rejection ReasonCode of the central route decision"
 
+_WHEN_ROW = (
+    "forwards the code a `WHEN_REFUSALS` row holds for the parser refusal; every row value is a "
+    "`reasons.*` constant (pinned by test_when_refusal_rows_are_registry_symbols)"
+)
+
 ADAPTERS: dict[tuple[str, str], str] = {
     # -- F06 declared casting ----------------------------------------------------------------
     ("contracts/_declared_base.py", "DeclaredCastContractError.__init__"): _CTOR,
@@ -119,6 +124,9 @@ ADAPTERS: dict[tuple[str, str], str] = {
         "builds the RECOVERING refusal receipt from the registry symbol "
         "`PUBLICATION_COMMIT_NOT_VISIBLE` as an exact `str` (a CommitReceipt takes no subclass)"
     ),
+    ("execution/_when_gate.py", "_require_closed_grammar"): _WHEN_ROW,
+    ("expressions/_when_parser.py", "validate_envelope_when"): _WHEN_ROW,
+    ("plan/_checks_when.py", "check_when_grammar"): _WHEN_ROW,
     ("execution/_transactional_sink.py", "ParquetTransactionalSink._leave"): (
         "forwards the code of the CommitReceipt the attempt ended with to the sink state table; "
         "the receipt accepts only a registered `decoy` code"
@@ -470,6 +478,48 @@ def test_route_decider_registry_returns_are_clean(tmp_path: Path) -> None:
     found = violations(_scan(root))
     # Only the composite's forwarding site remains, and it needs a named adapter.
     assert [k[:3] for k in found if k[0] == "route_clean.py"] == [("route_clean.py", "wrap", "kw")]
+
+
+def test_when_refusal_rows_are_registry_symbols() -> None:
+    """The forwarding adapters above are safe only while every table value is a registry symbol."""
+    import ast
+
+    tree = ast.parse((scan.SRC / "expressions/_when_parser.py").read_text(encoding="utf-8"))
+    rows = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "WhenRefusalCodes"
+    ]
+    assert len(rows) == 2
+    for call in rows:
+        for kw in call.keywords:
+            if kw.arg in ("config", "plan", "runtime"):
+                chain = scan._chain(kw.value)
+                assert chain and chain[0] == "reasons" and len(chain) == 3, ast.unparse(kw.value)
+
+
+@pytest.mark.parametrize(
+    ("rel", "forwarded"),
+    [
+        ("execution/_when_gate.py", "code=codes.runtime,"),
+        ("expressions/_when_parser.py", "code=codes.config,"),
+        ("plan/_checks_when.py", "code=codes.plan,"),
+    ],
+)
+def test_an_ad_hoc_literal_at_a_when_boundary_is_still_a_violation(
+    tmp_path: Path, rel: str, forwarded: str
+) -> None:
+    """The adapter entries accept a forwarded row value only: a literal code is still caught."""
+    source = (scan.SRC / rel).read_text(encoding="utf-8")
+    assert forwarded in source
+    root = tmp_path / "decoy_engine"
+    target = root / rel
+    target.parent.mkdir(parents=True)
+    target.write_text(source.replace(forwarded, 'code="adhoc_when_literal",', 1))
+    found = [k for k in violations(_scan(root)) if k[0] == rel and k[4] == "literal"]
+    assert found, rel
 
 
 def test_registry_backed_code_is_clean(tmp_path: Path) -> None:
