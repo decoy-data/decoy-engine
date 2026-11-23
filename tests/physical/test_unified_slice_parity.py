@@ -498,7 +498,11 @@ def test_string_dtype_column_matches_exact_metadata_while_activated(tmp_path: Pa
     assert leaf["activated"] is True
     meta = json.loads(on.outputs["t"].schema.metadata[b"pandas"])
     (col_meta,) = [c for c in meta["columns"] if c["name"] == "c"]
-    assert col_meta["numpy_type"] == "string"
+    # Plan section 10 (S1 Breaking line): the pandas blob lists only frame-built columns, so an
+    # untouched StringDtype column no longer carries the `string` dtype hint; its Arrow column is
+    # the source column as stored.
+    assert col_meta["numpy_type"] == "object"
+    assert on.outputs["t"].schema.field("c").type == source.schema.field("c").type
 
 
 # ---------------------------------------------------------------------------

@@ -121,15 +121,16 @@ def test_public_oracle_behavior_is_unchanged(shape: Shape, pos: int, configured:
         if shape.public == "exact" or i != pos:
             assert same_column(got.column("x"), src.column("x")), PINNED_UNDER
         else:
-            # `-2^63` is NaT to pandas: row 0 comes back null, nothing else changes.
-            assert got.column("x").is_null().to_pylist() == [True, True, False], PINNED_UNDER
+            # Rule 3 (A1): `-2^63` was NaT to pandas and came back null; an untouched column is now
+            # written from the source, so row 0 keeps its value and only the source null is null.
+            assert got.column("x").is_null().to_pylist() == [False, True, False], PINNED_UNDER
             assert got.column("x").type == src.column("x").type
             assert got.column("x")[2].as_py() == src.column("x")[2].as_py()
 
 
 @pytest.mark.parametrize("unit", ["s", "ms", "us", "ns"])
 @pytest.mark.parametrize("kind", ["timestamp", "duration"])
-def test_min_int64_is_yielded_itself_and_the_oracle_nulls_it(kind: str, unit: str) -> None:
+def test_min_int64_is_yielded_itself_and_the_oracle_keeps_it(kind: str, unit: str) -> None:
     shape = BY_NAME[f"{kind}_{unit}_min"]
     chunks = stream(shape, 1)
     for configured in (True, False):
@@ -139,8 +140,9 @@ def test_min_int64_is_yielded_itself_and_the_oracle_nulls_it(kind: str, unit: st
         out, *_ = entry(config, chunks)
         stored = out[1].column("x").cast(pa.int64())
         assert stored[0].as_py() == I64MIN
+        # Rule 3 (A1): the public oracle no longer nulls it; only the source null is null.
         assert public(config, chunks)[1].column("x").is_null().to_pylist() == [
-            True,
+            False,
             True,
             False,
         ]

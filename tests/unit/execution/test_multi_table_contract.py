@@ -385,14 +385,16 @@ def test_a_mixed_job_returns_each_table_in_its_own_shape(tmp_path: Path) -> None
     assert big.schema.field("keep").type == pa.string()  # O3: pass-through text narrows
     assert small.schema.metadata is not None and b"pandas" in small.schema.metadata
     assert small.equals(off.outputs["small"], check_metadata=True)
-    assert small.schema.field("keep").type == pa.string()
+    # Rule 3 (A1): the full-frame table keeps an untouched large_string as stored.
+    assert small.schema.field("keep").type == pa.large_string()
     assert big.column("h").to_pylist() == off.outputs["big"].column("h").to_pylist()
     assert small.column("h").to_pylist() == off.outputs["small"].column("h").to_pylist()
     # With the split off, both tables carry today's shape.
     for name in ("big", "small"):
         meta = off.outputs[name].schema.metadata
         assert meta is not None and b"pandas" in meta
-        assert off.outputs[name].schema.field("keep").type == pa.string()
+        # Rule 3 (A1): untouched large_string keeps its type on the pandas route.
+        assert off.outputs[name].schema.field("keep").type == pa.large_string()
 
 
 # ---------------------------------------------------------------------------

@@ -157,7 +157,7 @@ _SUCCESS_CASES = [
         nan_row=None,
         parent=_same("pk:string,payload:string", {"pk": list(_H), "payload": _PP}),
         child=TableExpect(
-            "fk:int64,payload:null",
+            "fk:int64,payload:string",
             "fk:null,payload:string",
             {"fk": [], "payload": []},
             {"fk": [], "payload": []},

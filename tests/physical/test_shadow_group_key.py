@@ -734,7 +734,8 @@ def test_unified_slice_int_sibling_parquet_round_trip_metadata(tmp_path: Path) -
     on_meta = json.loads(on_back.schema.metadata[b"pandas"])
     gb_off = next(c["numpy_type"] for c in off_meta["columns"] if c["name"] == _GB)
     gb_on = next(c["numpy_type"] for c in on_meta["columns"] if c["name"] == _GB)
-    assert gb_off == gb_on == "Int64"
+    # Rule 3 (A1): an untouched nullable int keeps the source `int64`, so no `Int64` hint.
+    assert gb_off == gb_on == "int64"
 
 
 # ── Runtime fail-closed guards at dispatch ───────────────────────────────────

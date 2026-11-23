@@ -119,8 +119,8 @@ def test_a_null_free_integer_column_is_unchanged_by_the_snapshot_path() -> None:
 
 
 def test_sibling_passthrough_and_faker_free_columns_are_not_converted() -> None:
-    # Only the hashed column reads the snapshot. A passthrough int+null sibling still widens to
-    # float64, exactly as before this change.
+    # Only the hashed column reads the snapshot. A passthrough int+null sibling is untouched, so
+    # it is written from the source (UF-DOMAIN S1) and keeps int64 instead of widening to float64.
     from tests.parity._d1a_hash_data import column_seed
 
     payload = pa.table(
@@ -132,8 +132,8 @@ def test_sibling_passthrough_and_faker_free_columns_are_not_converted() -> None:
     passthrough = column_seed("passthrough", namespace=None)
     out = run_full(payload, (("h", column_seed()), ("p", passthrough))).outputs
     assert out["t"].column("h").to_pylist()[1] is None
-    assert out["t"].column("p").type == pa.float64()
-    assert out["t"].column("p").to_pylist() == [4.0, None, 6.0]
+    assert out["t"].column("p").type == pa.int64()
+    assert out["t"].column("p").to_pylist() == [4, None, 6]
 
 
 def test_orphan_remap_keys_hash_from_themselves_not_the_parent_snapshot() -> None:

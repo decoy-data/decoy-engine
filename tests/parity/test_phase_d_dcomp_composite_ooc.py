@@ -373,7 +373,7 @@ def test_g5_zero_row_parent_is_typed_double_by_the_oracle_and_string_out_of_core
         parent_nan_row=None,
     )
     control_oracle, control_ooc = _run_oracle(plan, sources, graph), _run_ooc(plan, sources, graph)
-    assert sc.schema_signature(control_oracle.outputs["parent"]) == "pk:double,payload:null"
+    assert sc.schema_signature(control_oracle.outputs["parent"]) == "pk:double,payload:string"
     assert sc.schema_signature(control_ooc.outputs["parent"]) == "pk:string,payload:string"
 
 
