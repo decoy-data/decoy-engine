@@ -68,12 +68,20 @@ def test_non_ascii_native_path_is_not_quoted_away() -> None:
     assert changes(["decoy-engine-native/café.rs"]) == "native=true"
 
 
-@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch", "push", ""])
+@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch", ""])
 def test_events_other_than_pull_request_run_the_legs_without_git(event: str) -> None:
     def boom(argv: Sequence[str]) -> str:
         raise AssertionError("git must not run")
 
     assert ns.native_line(event, "", "", boom) == "native=true"
+
+
+def test_a_push_to_main_skips_the_legs_without_git() -> None:
+    # The PR that merged already built them; the aggregator judges native=false with skipped legs.
+    def boom(argv: Sequence[str]) -> str:
+        raise AssertionError("git must not run")
+
+    assert ns.native_line("push", "", "", boom) == "native=false"
 
 
 def test_a_git_error_and_a_runner_exception_run_the_legs() -> None:

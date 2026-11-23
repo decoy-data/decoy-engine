@@ -33,6 +33,7 @@ from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution.physical import _shadow_batch_runner
 from decoy_engine.execution.physical._shadow_diff_codes import (
     NATIVE_COMPANION_UNAVAILABLE,
+    SCHEMA_DIFF,
     ShadowDifference,
 )
 from decoy_engine.plan._errors import PlanCompileError
@@ -279,8 +280,14 @@ def _native_group_key_selects_no_target(tmp_path: Path, monkeypatch: pytest.Monk
         run = run_shadow_and_oracle(config, "t", source, key_provider=THROWAWAY_KEY_PROVIDER)
         assert_shadow_matches_oracle(run)
     except ShadowDifference as exc:
-        # Only a machine without the compiled companion may skip the comparison.
-        if exc.code != NATIVE_COMPANION_UNAVAILABLE:
+        # A machine without the compiled companion skips the comparison. With it, the batch loop
+        # runs to the end and the assembled set (`g`, `tgt`) differs from the source's (`g`): the
+        # bounded slice holds source columns only, and admission declines a created target
+        # (`_unified_slice_admission`: configured names must equal source names). This test calls the
+        # coordinator directly, so the coded diff is the expected end, and it must name the target.
+        if exc.code == SCHEMA_DIFF:
+            assert "tgt" in exc.detail
+        elif exc.code != NATIVE_COMPANION_UNAVAILABLE:
             raise
     assert selected, "the batch loop never ran"
     assert all("tgt" not in names for names in selected)

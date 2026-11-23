@@ -200,8 +200,12 @@ filename gives) is refused as `not_canonical` by the writer and the reader.
 | `engine_version` | the writing engine's version |
 
 An artifact `path` is relative to the unit root, `/`-separated; no component is empty, `.` or
-`..` or holds NUL, and the path is never the descriptor's own name. `role` is `"table"`. `rows`,
-`size` and `entry_count` are JSON integers from 0 to 2^63 - 1. Digests are 64 lowercase hex
+`..` or holds NUL, a path has at most 8 components, no two paths are equal, no path is a folder
+of another (`a` beside `a/b`), and the path is never a reserved name (the descriptor's own name
+or the stage marker, compared without case). `role` is `"table"`, `"quarantine"` or `"report"`.
+`rows` is the Parquet footer count for a `table` whose path ends in `.parquet`, and `null` for
+every other member; the key is always present, and a `.parquet` table with `null` or any other
+member with a number is refused. `size` and `entry_count` are JSON integers from 0 to 2^63 - 1. Digests are 64 lowercase hex
 digits.
 
 `result_id` is the SHA-256 of `decoy-publication-result/v1`, a NUL byte, and the canonical JSON
@@ -238,9 +242,22 @@ a `publication` stage of `out` holding exactly the Parquet tables named in `tabl
 directly in the stage. `publish_tables(out, {name: table}, request)` is the resident entry: it
 stages each table under its name and calls `publish_unit`. The caller names the files; the
 publisher measures every one itself through the stage (size, SHA-256, row count from the Parquet
-footer), never taking a number from the producer. A file left in the stage but not named is
-bound without being described, so a producer stages nothing else (the engine's own callers
-stage only the tables they name).
+footer), never taking a number from the producer.
+
+`publish_unit(out, txn, request, members=[Member(path, role), ...])` takes members that are not
+flat Parquet tables: nested paths such as `masked/customers.csv`, a CSV or fixed-width table, the
+quarantine file (`quarantine`) and the post-scan report (`report`). Pass `tables` or `members`,
+never both. Every path passes one rule before the lock is taken (`check_unit_path` for each,
+`check_unit_paths` for the set), the same rule the descriptor reader applies. The stage is
+closed: the publisher walks it through `StageDir.entries` and `StageDir.open_subdir` and refuses
+(`publication_failed`, nothing bound) any entry no member names, a link, a special file, a
+folder that is not a prefix of a member, or a member of the wrong kind. Only the stage's own
+marker at the root is allowed. An empty file is hashed as the empty string with size 0.
+
+A reader older than this change that meets a unit with `rows: null`, a `quarantine` or `report`
+member or a nested path cannot load its descriptor and treats the leaf as occupied
+(`publication_target_occupied`); it never overwrites the unit. A rerun of the same run id on
+such a reader therefore refuses, and a new run id is unaffected.
 
 Under the destination lock, held from the first read to the bind:
 

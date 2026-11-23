@@ -34,6 +34,7 @@ from typing import Any
 from decoy_engine import reasons
 from decoy_engine.generation.pool._capacity import unique_capacity_ok
 from decoy_engine.generation.pool._errors import PoolCapacityError
+from decoy_engine.generation.pool._identity import effective_pool_size
 
 
 def _resolve_provider_poolable(provider: str | None) -> bool:
@@ -131,7 +132,7 @@ def check_pool_capacity_pre_flight(
             resolved_pool_size = resolve_pool_size(
                 col_entry, table_name=table_name, col_name=col_name
             )
-            pool_size = resolved_pool_size if resolved_pool_size is not None else 10_000
+            pool_size = effective_pool_size(resolved_pool_size, {})
             source_distinct = distinct_lookup.get((table_name, col_name))
 
             if cardinality_mode == "unique":

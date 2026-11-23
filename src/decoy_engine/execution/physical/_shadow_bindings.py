@@ -221,7 +221,7 @@ def positional_faker_bindable(
     plan_slice: ColumnSeed, table: str, column: str, inputs: PhysicalPlanInputs
 ) -> bool:
     """Whether a non-deterministic REUSE faker may bind natively: the chunked route's stage A
-    (explicit `pool_size`, allowlisted provider) over the raw config, plus the unified
+    (allowlisted provider) over the raw config, plus the unified
     domain's own conditions (`_faker_pool_bindable`: no `when:` or vault, a poolable
     provider, a resident string or numeric source, no FK relationship). The slice's own determinism and
     cardinality mode are checked too, so a config and a compiled seed that disagree decline."""
@@ -321,13 +321,14 @@ def execution_binding_for_slice_node(
         if caps.key_source is None or namespace is None or cfg.get("checksum"):
             return None
     elif strategy == "faker":
-        # JC-5 already guarantees deterministic + reuse + a namespace + a resolved pool_size;
+        # JC-5 already guarantees deterministic + reuse + a namespace; the pool size may be None
+        # and then resolves to the default inside `resolve_faker_pool_identity`;
         # the position-keyed variant needs no configured namespace (it defaults per column).
         # Captured into locals so mypy narrows them instead of re-reading `plan_slice.*`
         # after the predicate call below, which it cannot prove leaves them unchanged.
         pool_size = plan_slice.pool_size
         provider = plan_slice.provider
-        if caps.key_source is None or pool_size is None or (namespace is None and not positional):
+        if caps.key_source is None or (namespace is None and not positional):
             return None  # pragma: no cover - JC-5 already guarantees these
         if not isinstance(provider, str) or not provider:
             return None  # pragma: no cover - faker always compiles a provider

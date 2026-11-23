@@ -43,7 +43,6 @@ import pytest
 from decoy_engine import run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
 from decoy_engine.contracts.column_shape import NO_SOURCES
-from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._chunked import check_chunked_compatibility, concat_masked_chunks
 from decoy_engine.execution._chunked_bucket_perturb import (
     bucket_perturb_conditional_failures,
@@ -567,7 +566,7 @@ class TestAdmissionBoundary:
         )
         assert result.quality_metrics["auto_chunk"]["mode"] == "full_frame"
 
-    def test_non_string_source_manual_entry_raises(self, tmp_path) -> None:
+    def test_integer_source_manual_entry_is_a_column_shape_mismatch(self, tmp_path) -> None:
         columns = [_bucket_perturb_col("d")]
         cfg = _config(tmp_path, columns)
         table = pa.table({"d": pa.array([20240101, None], type=pa.int64())})
@@ -581,7 +580,9 @@ class TestAdmissionBoundary:
                     engine_version=_ENGINE_VERSION,
                 )
             )
-        assert exc.value.code == "chunked_bucket_perturb_source_dtype_unsupported"
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2: `bucket_perturb` on an
+        # integer column is refused `column_shape_mismatch` at compile, before any chunk is read.
+        assert exc.value.code == "column_shape_mismatch"
         assert "d" in exc.value.message
 
     def test_non_string_source_later_chunk_drift_raises(self, tmp_path) -> None:
@@ -601,15 +602,14 @@ class TestAdmissionBoundary:
             )
         assert exc.value.code == "chunked_bucket_perturb_source_dtype_unsupported"
 
-    def test_non_string_source_auto_route_falls_back_to_oracle(self, tmp_path) -> None:
+    def test_integer_source_auto_route_is_a_column_shape_mismatch(self, tmp_path) -> None:
         table = pa.table({"d": pa.array([1, 2, 3, 4, 5, 6], type=pa.int64())})
         columns = [_bucket_perturb_col("d")]
         cfg = _config(tmp_path, columns)
         _write_csv_stub(tmp_path, "records", table)
-        # The ints do not parse as dates, so the full-frame run ends in row errors. The
-        # single-table `summary` is set only by the chunked legs, so its absence shows the
-        # auto route fell back.
-        with pytest.raises(RowErrorsFailedError) as caught:
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2: `bucket_perturb` on an
+        # integer column is refused `column_shape_mismatch` at compile, on the auto route too.
+        with pytest.raises(PlanCompileError) as caught:
             run_pipeline(
                 cfg,
                 sources={"records": table},
@@ -617,8 +617,7 @@ class TestAdmissionBoundary:
                 auto_chunk_threshold_rows=_LOW_THRESHOLD,
                 chunk_size_rows=2,
             )
-        assert caught.value.summary is None
-        assert caught.value.summaries_by_table
+        assert caught.value.code == "column_shape_mismatch"
 
     def test_source_dtype_collector_flags_non_string_admits_string(self) -> None:
         from types import SimpleNamespace
@@ -634,6 +633,23 @@ class TestAdmissionBoundary:
         assert (
             unsafe_bucket_perturb_source_columns(
                 nodes, pa.schema([("d", pa.large_string())]), table="records"
+            )
+            == []
+        )
+
+    def test_source_dtype_collector_leaves_out_the_plans_typed_dates(self) -> None:
+        from types import SimpleNamespace
+
+        nodes = [
+            SimpleNamespace(
+                table="records", kind="scalar", strategy="bucket_perturb", columns=("d",)
+            )
+        ]
+        date_schema = pa.schema([("d", pa.date32())])
+        assert unsafe_bucket_perturb_source_columns(nodes, date_schema, table="records") == ["d"]
+        assert (
+            unsafe_bucket_perturb_source_columns(
+                nodes, date_schema, table="records", typed_dates=frozenset({"d"})
             )
             == []
         )

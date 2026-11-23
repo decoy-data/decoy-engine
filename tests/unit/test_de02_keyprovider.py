@@ -110,7 +110,7 @@ _KEYED_COLUMNS = [
         "name": "hire_date",
         "strategy": "bucket_perturb",
         "namespace": "hire_ns",
-        "provider_config": {"bucket": "month"},
+        "provider_config": {"bucket": "month", "date_format": "%Y-%m-%d"},
     },
     {
         "name": "contact",

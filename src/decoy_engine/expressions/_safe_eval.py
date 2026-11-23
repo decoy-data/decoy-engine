@@ -15,7 +15,7 @@ and any name not explicitly placed in scope. We do not roll our own AST
 sandbox (the established-methodology rule): simpleeval is the ecosystem's
 standard "safely evaluate one user-supplied expression" library, the same way
 numexpr is the standard for vectorized expressions (used by derive/filter/when,
-see below) and jsonpath-ng is the standard for JSON paths.
+see below).
 
 Two scope presets:
 

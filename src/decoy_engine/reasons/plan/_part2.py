@@ -58,6 +58,7 @@ __all__ = [
     "JOINT_MASK_REFERENCE_INVALID",
     "JOINT_MASK_REFERENCE_MISSING",
     "JOINT_MASK_REFERENCE_NOT_FOUND",
+    "NESTED_TARGET_UNSUPPORTED",
     "NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND",
     "NULL_BEARING_INT_UNSUPPORTED",
     "ORPHAN_FK_POLICY_DUPLICATE",
@@ -238,6 +239,9 @@ JOINT_MASK_REFERENCE_INVALID = _d("joint_mask_reference_invalid", "Joint mask re
 JOINT_MASK_REFERENCE_MISSING = _d("joint_mask_reference_missing", "Joint mask reference missing.")
 JOINT_MASK_REFERENCE_NOT_FOUND = _d(
     "joint_mask_reference_not_found", "Joint mask reference not found."
+)
+NESTED_TARGET_UNSUPPORTED = _d(
+    "nested_target_unsupported", "Nested target unsupported.", since=UNRELEASED
 )
 NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND = _d(
     "non_poolable_provider_with_pool_backend", "Non poolable provider with pool backend."

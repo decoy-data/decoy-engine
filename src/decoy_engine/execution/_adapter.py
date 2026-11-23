@@ -24,7 +24,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
+from decoy_engine.contracts.column_shape import ColumnShape, native_date_shapes
 from decoy_engine.contracts.strategy_requirements import (
     SHAPE_REQUIREMENTS_BY_STRATEGY,
     shape_declaration_needed,
@@ -301,11 +301,7 @@ class StrategyContext:
         """The plan's native date and zoned-timestamp columns, derived from ``column_shapes``.
 
         A declared date column keeps its legacy text output, so it is not in the view."""
-        return {
-            key: shape
-            for key, shape in self.column_shapes.items()
-            if shape in TYPED_DATE_SHAPES and key not in self.declared_date_columns
-        }
+        return native_date_shapes(self.column_shapes, self.declared_date_columns)
 
     def code_set_corpora_metrics(self) -> dict[str, Any]:
         """HC-1 slice 1: the code_set corpus-provenance evidence block, or {}.
@@ -318,6 +314,17 @@ class StrategyContext:
         if not self.code_set_corpora:
             return {}
         return {"code_set_corpora": list(self.code_set_corpora.values())}
+
+    def native_date_shape(self, column: str) -> ColumnShape | None:
+        """The date or zoned-timestamp shape the plan lists for this top-level column, else None.
+
+        It keys on where the column sits in the plan (the table and column in
+        ``native_date_columns``, and not running as a nested child), never on the data, so a typed
+        column holding date objects and a text column are told apart by the plan alone.
+        """
+        if self.nested_outer_column:
+            return None
+        return self.native_date_columns.get((self.current_table, column))
 
     def record_date_preserved(self, column: str, count: int) -> None:
         """Add ``count`` sentinel rows a date operator passed through for ``column``."""

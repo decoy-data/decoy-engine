@@ -1706,8 +1706,8 @@ owner = "cam"
 reason = "the allocator removes a directory it issued, or one it created that failed its own check"
 
 [[entry]]
-module = "decoy_engine/publication/_publish.py"
-function = "_measure_one"
+module = "decoy_engine/publication/_members.py"
+function = "_digest"
 sink = "mmap.mmap"
 ordinal = 0
 rule = "a descriptor `OutputTxn.open_file` returned for a validated component of a publication stage; read-only map, no path"
@@ -1715,7 +1715,7 @@ owner = "cam"
 reason = "F22 5.2: the publisher measures each staged table itself (SHA-256 over the read-only map) through the stage capability"
 
 [[entry]]
-module = "decoy_engine/publication/_publish.py"
+module = "decoy_engine/publication/_members.py"
 function = "_measure_one"
 sink = "pyarrow.parquet.ParquetFile"
 ordinal = 0

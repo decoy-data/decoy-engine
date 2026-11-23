@@ -286,7 +286,8 @@ _DISTINCT = [f"src-{i}" for i in range(200)]
 
 class TestCardinalityCollisionsSeed:
     def test_omitted_pool_size_stays_none_on_the_seed(self, tmp_path: Path) -> None:
-        """AT-Z0 (no-regression): compile never stamps DEFAULT_POOL_SIZE on the seed."""
+        """AT-Z0: compile never stamps DEFAULT_POOL_SIZE on the seed (faker-default-pool plan, serialization note), and the seed
+        predicate no longer reads pool_size, so an omitted size admits (plan R1 and the _requirements.py edit)."""
         from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
         from decoy_engine.plan import compile_plan
 
@@ -300,7 +301,7 @@ class TestCardinalityCollisionsSeed:
         )
         seed = dict(dict(plan.seed_envelope.per_table)["t"].per_column)["a"]
         assert seed.pool_size is None
-        assert faker_pool_precondition_met_seed(seed) is False
+        assert faker_pool_precondition_met_seed(seed) is True
 
 
 def _profile_for(src: dict[str, pa.Table]) -> Profile:

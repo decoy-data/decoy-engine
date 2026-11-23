@@ -307,6 +307,20 @@ pass (`decoy validate`) defers a column whose type it cannot see, so a missing `
 pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
 date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
 
+**Pre-GA correction (COLUMN-SHAPE E2, 2026-11-22).** `bucket_perturb` no longer detects a date format from
+its cells. A text column (CSV, fixed width, a string column, a `nested` child) with no `provider_config.date_format`
+is refused at plan compile with `plan/column_shape_required` (new, registered unreleased); the config-only pass
+refuses it for CSV and fixed-width sources and defers a Parquet, database or Arrow column to compile, as for
+`date_shift`. A source column that is natively a date runs with no format, keeps its Arrow type, and shifts as a
+calendar date with no pandas date range limit; the digest input is its ISO text, so one namespace gives one
+position across a CSV table and a Parquet table. A `date_format` on such a column is accepted and not used
+(`plan/column_shape_format_unused`), and `preserve_values` needs no format there. A zoned or naive timestamp,
+integer, float, decimal, boolean or other column is refused with `plan/column_shape_mismatch`. A bucket position
+that falls outside years 1 to 9999 on a typed date is a `format_error` row error. `apply_bucket_perturb` takes
+`date_format` as a required `str`; a missing, blank or non-text value raises
+`runtime/bucket_perturb_requires_date_format`. Detection stays in `decoy scan`, the starter config and the free
+text strategies only (`tests/sentry/test_no_runtime_format_detection.py`). No stored format moves.
+
 **Pre-GA correction (COLUMN-SHAPE E3, 2026-11-21).** Breaking for configs, no shim. `bucketize` and `top_code`
 refuse a text column unless it declares `logical_type` (integer with a `parse_format`, or for `bucketize` a decimal
 with precision 15 or less), at compile with `plan/column_shape_required`. A shape the strategy cannot read is
@@ -322,8 +336,25 @@ hash and the physical plan hash move for any pipeline that uses `bucketize`, `to
 recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
 `column_shape_required` (plan and runtime) is registered unreleased.
 
+**Pre-GA correction (COMPANION-REDS, 2026-11-23).** The physical `plan_hash` and `activation_hash` of an auto-routed
+no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, unreleased), and its byte
+figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
+hash still covers `facts.budget_bytes`, so it can differ between hosts when no explicit budget is set.
+`pipeline_config_hash` does not move. No schema version moves.
+
+**Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
+version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
+stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to
+`table`, `quarantine` or `report`; the path rule is stricter and shared by writer and reader (at most 8
+components, no reserved name, no path that is a folder of another); duplicate paths give `bad_path` (the order
+check is `a > b`, so an equal pair reaches the duplicate rule). `StageDir` gains `open_subdir` and `entries`, and
+`publish_unit` takes `members=` beside `tables=`. An older reader that meets such a unit cannot load its
+descriptor, treats the folder as occupied and refuses; it never overwrites the unit. Rerunning the same run id on
+such a reader refuses, and a new run id is unaffected.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
+
 
 ## 2. The compatibility surface is wider than the API
 
@@ -1023,13 +1054,15 @@ only this site moves.
   Non-deterministic `reuse` Faker joined the chunked route on 2026-10-06 (slice C5b-ii). It
   keeps the position-keyed draw of slice C5b-i, taken at the chunk's global row offset, so
   chunked output equals the whole-frame run for any chunk size. A column is admitted when it
-  declares an explicit `pool_size` (top level or `provider_config`), uses a provider in the C1
+  uses a provider in the C1
   string-output allowlist (`person_first_name`, `person_last_name`), has no `when:` and is not
   `unique`, `match_source_cardinality` or `scale_source_cardinality`; the namespace stays
   optional. A string source runs the compiled path and any other source type runs the chunked
   oracle leg with the same draw. A column that fails one of these conditions keeps running
-  whole-frame, and a missing `pool_size` or a provider outside the allowlist reports
-  `chunked_strategy_conditions_unmet` naming the unmet condition. A column that is admitted and
+  whole-frame, and a provider outside the allowlist reports
+  `chunked_strategy_conditions_unmet` naming the unmet condition. A missing `pool_size` is not a
+  condition (FAKER-DEFAULT-POOL, 2026-11-22): the pool takes the default of 10,000 on every
+  route, as the whole-frame run does. A column that is admitted and
   carries `when:` fails with `chunked_faker_nondeterministic_when_not_supported`, because the
   oracle numbers only the matching rows. The chunked output type of an admitted column is
   pinned to `string` on both chunked legs, with or without the companion. Under
@@ -1066,6 +1099,13 @@ only this site moves.
   route carries none, the same metadata difference the other pinned strategies record here. A custom
   provider registered under the configured name whose pool holds non-string values fails closed with
   `faker_provider_output_not_string` before any chunk is written, as for the position-keyed variant.
+  FAKER-DEFAULT-POOL (2026-11-22): a deterministic or non-deterministic `reuse` Faker with no
+  `pool_size` (absent or null, at top level or in `provider_config`) is admitted exactly as the
+  same column declaring `pool_size: 10000`, on the unified, chunked, sequential and out-of-core
+  routes. Values are unchanged. The ROUTE-OUTPUT-CONTRACT string typing of an empty or all-null
+  output applies to the newly admitted chunked columns. An out-of-core job whose faker pools
+  exceed the pool budget now fails with `out_of_core_faker_pool_budget_exceeded` before the run
+  starts, and the message no longer carries the provider, pool size or byte counts.
   `ColumnConfig` gained an optional `when: str` field (2026-10-06, slice C8-i), additive. It accepts
   a closed grammar only (a comparison of one column and one literal, `in` and `not in` over a
   literal list, `and`, `or`, `not` and parentheses), validated when the config loads with the
@@ -1362,6 +1402,23 @@ for `int` fails the row (`nested_cell_number_out_of_range`). A leaf list of inte
 the child as integers and a null, not as `float64` with `NaN`, so `hash` and `tokenize` accept it. A child
 output of `NaN` or a pandas null is written as JSON `null`; an infinite output fails the row
 (`nested_child_non_finite`). A null-free leaf list and an all-float-exact cell give the bytes they gave before.
+
+**Nested target grammar (NESTED-FREEZE, 2026-11-23).** Recorded pre-GA change. `provider_config.target` of a
+`nested` column is a closed subset of RFC 9535 JSONPath. It is `$` followed by segments: `.name`, `.*`,
+`['name']` or `["name"]` (RFC escapes), `[*]`, `[index]` and `[start:end:step]`. An index is an integer with no
+leading zero, not `-0`, within plus or minus 2^53 - 1; a slice start, end and step follow the same integer rules. A step is 1 or more. A quoted name allows only the RFC escapes and no raw control character or unpaired surrogate. Nothing else is accepted: no `..`,
+filter, function, union or blank space outside a quoted name, no missing `$`, no dot-quoted name, no quoted name
+`*`, and none of the jsonpath-ng extensions (`|`, `&`, `where`, backticks). A target outside the grammar is refused by
+`compile_plan` and `run_config_only_checks` with the new plan reason `plan.nested_target_unsupported`. The
+message names table, column, config path, character position and form, and shows the target text up to 64
+characters (a longer one reads `first 64 of N characters`); it never shows a cell. `nested_jsonpath_parse_error`
+stays as the handler backstop when the handler runs without a compiled plan. The engine evaluates the grammar itself (`TargetPath.find`), so what a target selects does not depend on the
+any JSONPath library. A name selects a member of an object. `.*` selects the members of an object or the items of an
+array, at any depth. A quoted name decodes its RFC 9535 2.3.1.2 escapes. `[*]`, an index and a slice select items of an array only; on an object or a scalar they fail closed with
+`nested_target_unwritable_container` (the index case was a bare `KeyError`), and on a null they select nothing. An
+index outside an array selects nothing for that branch only. `nested_jsonpath_path_overlap` stays registered and is no
+longer raised, because no subset target can match a path and its prefix. The engine no longer depends on jsonpath-ng:
+the requirement is removed and `tests/sentry/defects/test_nested_target_choke_point.py` fails on any import of it.
 
 ### 3.5 Disguises
 

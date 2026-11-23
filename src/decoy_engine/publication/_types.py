@@ -48,6 +48,7 @@ __all__ = [
     "Role",
     "Unit",
     "VaultBinding",
+    "has_row_count",
     "is_count",
     "is_hex64",
     "is_operation_id",
@@ -64,7 +65,7 @@ Outcome = Literal[
     "commit_uncertain",
 ]
 Unit = Literal["immutable_directory/v1"]
-Role = Literal["table"]
+Role = Literal["table", "quarantine", "report"]
 
 UNIT_IMMUTABLE_DIRECTORY: Final[Unit] = "immutable_directory/v1"
 UNITS: Final[tuple[str, ...]] = get_args(Unit)
@@ -83,6 +84,12 @@ DEFAULT_LOCK_TIMEOUT_S: Final = 30.0
 def is_operation_id(value: object) -> bool:
     # fullmatch, not a `$` anchor: `$` also matches before a trailing newline.
     return type(value) is str and _OPERATION_ID.fullmatch(value) is not None
+
+
+def has_row_count(path: str, role: str) -> bool:
+    """Whether a member carries a Parquet footer row count: a `table` named `*.parquet`. Every
+    other member (a CSV table, the quarantine file, the report) has `rows` of `None`."""
+    return role == "table" and path.endswith(".parquet")
 
 
 def is_hex64(value: object) -> bool:
@@ -114,13 +121,13 @@ class ArtifactSummary:
 
     role: Role
     size: int
-    rows: int
+    rows: int | None
     sha256: str
 
     def __post_init__(self) -> None:
         _require(is_token(self.role, ROLES), "role")
         _require(is_count(self.size), "size")
-        _require(is_count(self.rows), "rows")
+        _require(self.rows is None or is_count(self.rows), "rows")
         _require(is_hex64(self.sha256), "sha256")
 
 

@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._operator_registry import ARROW_PYTHON, PANDAS_ORACLE, RUST_COMPANION
 from decoy_engine.execution.pipeline import route_summary
 from tests.unit.execution import _auto_chunk_support as support
@@ -101,16 +100,15 @@ def test_a_real_lane_run_reports_the_kernel_it_ran(tmp_path: Path) -> None:
     hashed = [support.hash_col("r"), support.pass_col("p")]
     cfg, source = rs.single_table_job(tmp_path, table, hashed)
     sink, _ = rs.real_sink(tmp_path)
-    result: Any = run_pipeline(
-        cfg, sources={"t": source}, sink=sink, engine_version=rs.ENGINE_VERSION
-    )
+    # Stream mode drops the 100,000-row threshold, so 200 rows really take the lane. Default
+    # routing runs a table this small full-frame, which has no per-column backend evidence.
+    result: Any = rs.run_stream(cfg, {"t": source}, sink)
     got = route_summary(result.quality_metrics)
     assert got.route == "auto_chunk"
     assert got.native_executed is True
 
     cfg2, source2 = rs.single_table_job(tmp_path, table)
     sink2, _ = rs.real_sink(tmp_path, "out2")
-    python_only: Any = run_pipeline(
-        cfg2, sources={"t": source2}, sink=sink2, engine_version=rs.ENGINE_VERSION
-    )
+    python_only: Any = rs.run_stream(cfg2, {"t": source2}, sink2)
+    assert route_summary(python_only.quality_metrics).route == "auto_chunk"
     assert route_summary(python_only.quality_metrics).native_executed is False
