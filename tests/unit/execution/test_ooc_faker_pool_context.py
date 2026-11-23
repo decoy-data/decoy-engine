@@ -274,7 +274,7 @@ def test_w1d_the_construction_peak_guard_runs_before_the_build(registry):
     assert builder.build_calls == 1
 
 
-def test_w1e_a_pool_of_ints_that_fits_is_admitted_and_a_string_pool_over_allowance_is_not(registry):
+def test_w1e_a_pool_of_ints_that_fits_is_admitted_and_a_string_pool_over_budget_is_not(registry):
     # An int costs less than an empty str, so the string floor must not refuse an int pool
     # that fits. The int provider is off the string allowlist, so it gets the type-free floor.
     size = _CFG["pool_size"]
@@ -295,7 +295,7 @@ def test_w1e_a_pool_of_ints_that_fits_is_admitted_and_a_string_pool_over_allowan
     sctx = _context(registry, max_pool_bytes=allowance, builder=strings)
     with pytest.raises(ExecutionError) as exc:
         sctx.get_pool(sctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
-    assert exc.value.code == "out_of_core_faker_pool_allowance_exceeded"
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
     assert strings.build_calls == 0
 
 
