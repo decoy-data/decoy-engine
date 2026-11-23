@@ -201,7 +201,6 @@ def test_routing_reroutes_a_nonstring_faker_source_instead_of_admitting_it() -> 
     [
         pytest.param({"deterministic": False}, id="positional-reuse"),
         pytest.param({"provider": "address_city"}, id="non-allowlisted-provider"),
-        pytest.param({"pool_size": None}, id="no-pool-size"),
         pytest.param({"cardinality_mode": "unique"}, id="unique-mode"),
         pytest.param({"namespace": None}, id="no-namespace"),
     ],

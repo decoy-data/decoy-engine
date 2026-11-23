@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from decoy_engine.execution._fk_keys import to_pandas_fk_safe
 from decoy_engine.execution._when_gate import _eval_predicate
-from decoy_engine.expressions._when_parser import parse_when, when_column_refs
+from decoy_engine.expressions._when_parser import WhenRead, parse_when, when_column_refs
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class WhenSpec:
     column: str
     strategy: str
     expression: str
-    refs: tuple[str, ...]
+    refs: tuple[WhenRead, ...]
 
 
 def when_specs(col_seed_by_name: Mapping[str, Any]) -> dict[str, WhenSpec]:
@@ -54,7 +54,7 @@ def when_mask(spec: WhenSpec, raw_chunk: pa.Table, protected: Collection[str]) -
     the oracle converts that table. A referenced column the chunk lacks is left out, and the
     oracle's own eval error for an undefined name is raised.
     """
-    present = [r for r in spec.refs if r in raw_chunk.column_names]
+    present = [r.column for r in spec.refs if r.column in raw_chunk.column_names]
     frame = to_pandas_fk_safe(raw_chunk.select(present), set(protected) & set(present))
     mask = _eval_predicate(frame, spec.expression, spec.strategy, column=spec.column)
     return pa.array(mask.to_numpy(dtype=bool, na_value=False), type=pa.bool_())

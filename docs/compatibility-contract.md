@@ -336,6 +336,12 @@ hash and the physical plan hash move for any pipeline that uses `bucketize`, `to
 recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
 `column_shape_required` (plan and runtime) is registered unreleased.
 
+**Pre-GA correction (COMPANION-REDS, 2026-11-23).** The physical `plan_hash` and `activation_hash` of an auto-routed
+no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, unreleased), and its byte
+figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
+hash still covers `facts.budget_bytes`, so it can differ between hosts when no explicit budget is set.
+`pipeline_config_hash` does not move. No schema version moves.
+
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
 stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to
@@ -1048,13 +1054,15 @@ only this site moves.
   Non-deterministic `reuse` Faker joined the chunked route on 2026-10-06 (slice C5b-ii). It
   keeps the position-keyed draw of slice C5b-i, taken at the chunk's global row offset, so
   chunked output equals the whole-frame run for any chunk size. A column is admitted when it
-  declares an explicit `pool_size` (top level or `provider_config`), uses a provider in the C1
+  uses a provider in the C1
   string-output allowlist (`person_first_name`, `person_last_name`), has no `when:` and is not
   `unique`, `match_source_cardinality` or `scale_source_cardinality`; the namespace stays
   optional. A string source runs the compiled path and any other source type runs the chunked
   oracle leg with the same draw. A column that fails one of these conditions keeps running
-  whole-frame, and a missing `pool_size` or a provider outside the allowlist reports
-  `chunked_strategy_conditions_unmet` naming the unmet condition. A column that is admitted and
+  whole-frame, and a provider outside the allowlist reports
+  `chunked_strategy_conditions_unmet` naming the unmet condition. A missing `pool_size` is not a
+  condition (FAKER-DEFAULT-POOL, 2026-11-22): the pool takes the default of 10,000 on every
+  route, as the whole-frame run does. A column that is admitted and
   carries `when:` fails with `chunked_faker_nondeterministic_when_not_supported`, because the
   oracle numbers only the matching rows. The chunked output type of an admitted column is
   pinned to `string` on both chunked legs, with or without the companion. Under
@@ -1091,6 +1099,13 @@ only this site moves.
   route carries none, the same metadata difference the other pinned strategies record here. A custom
   provider registered under the configured name whose pool holds non-string values fails closed with
   `faker_provider_output_not_string` before any chunk is written, as for the position-keyed variant.
+  FAKER-DEFAULT-POOL (2026-11-22): a deterministic or non-deterministic `reuse` Faker with no
+  `pool_size` (absent or null, at top level or in `provider_config`) is admitted exactly as the
+  same column declaring `pool_size: 10000`, on the unified, chunked, sequential and out-of-core
+  routes. Values are unchanged. The ROUTE-OUTPUT-CONTRACT string typing of an empty or all-null
+  output applies to the newly admitted chunked columns. An out-of-core job whose faker pools
+  exceed the pool budget now fails with `out_of_core_faker_pool_budget_exceeded` before the run
+  starts, and the message no longer carries the provider, pool size or byte counts.
   `ColumnConfig` gained an optional `when: str` field (2026-10-06, slice C8-i), additive. It accepts
   a closed grammar only (a comparison of one column and one literal, `in` and `not in` over a
   literal list, `and`, `or`, `not` and parentheses), validated when the config loads with the
@@ -1109,6 +1124,14 @@ only this site moves.
   infers (Arrow `null`), while the chunked route yields `string`; values are unchanged. The
   auto-chunk planner keeps such a table chunked only when every column the predicate reads is a
   `string`. The unified full-frame route and out-of-core still decline `when:`.
+  The `when:` grammar gained reference forms (2026-11-22, WHEN-READS-SOURCE S1), additive: a column
+  is a bare name or `source.<name>` (the same thing: the original value), a backtick-quoted name
+  (`` `a.b` ``, with or without the prefix) for a name outside `[A-Za-z0-9_]`, or `masked.<name>`,
+  which parses and is refused with the new error type `when_masked_reference_unsupported`
+  (V1 reads original values only). The prefix set is exactly `source` and `masked`; any other
+  dotted prefix stays `when_outside_closed_grammar`. A quoted name holds no backtick, backslash or
+  control character, and `RESERVED_NAMES` applies to the name inside the quotes. Every predicate that
+  parsed before parses to the same tree and selects the same rows.
   `run_pipeline` gains two keyword-only arguments (2026-10-01): `native_threads: int = 1`
   (the default moved on 2026-11-20 to `None`, see the ENGINE-THREADS-DEFAULT entry below; 1 to 1024; the kernel thread budget of the auto-chunk dispatcher lane, no output
   byte depends on it) and `chunked_dispatcher_enabled: bool = True` (the kill switch that

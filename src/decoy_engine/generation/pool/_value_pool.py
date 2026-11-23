@@ -13,6 +13,7 @@ the version separately for audit).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,27 +61,60 @@ def _freeze_array(values: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     return values
 
 
-def estimate_pool_bytes(pool: ValuePool) -> int:
-    """Conservative byte-size estimate for cache budgeting.
+# The smallest a STRING pool value can cost: CPython's empty `str` object plus its 8-byte array
+# slot. Only a pool known to hold strings may be floored with it: an int, float or None can
+# cost less (small ints and None are shared singletons that cost nothing beyond the slot).
+MIN_BYTES_PER_VALUE = sys.getsizeof("") + 8
 
-    Per S5 spec §4 "Bytes accounting": numpy.nbytes for fixed-width
-    dtypes; for object-dtype arrays (strings) the engine uses a fast
-    estimate capped at 4 bytes/char to prevent pathological cases.
-    """
-    if pool.values.dtype != object:
-        return int(pool.values.nbytes)
-    # Object dtype: estimate via sys.getsizeof per element, capped at
-    # len(str)*4 to avoid pathological deep-recursion sizes.
-    total = 0
-    for v in pool.values:
-        if isinstance(v, str):
-            total += min(len(v) * 4, 4096)  # cap at 4KB per string
-        else:
-            total += 64  # rough fallback for non-string objects
-    return total
+# `PoolBuilder.build` holds these at once per value, on top of the value object itself:
+# the adapter's result list, `list(raw_values)`, the object array and `tolist()` (four 8-byte
+# pointers), and one `set` slot for the distinct count (CPython stores a pointer and a cached
+# hash, 16 bytes, and never fewer slots than entries). The value objects are shared across
+# these containers, so they count once. The array slot is the first of the four pointers; this
+# adds the other three and the set slot.
+_POINTER_BYTES = 8
+_SET_SLOT_BYTES = 16
+_HELD_OVERHEAD_BYTES = 3 * _POINTER_BYTES + _SET_SLOT_BYTES
+# Floor per value for a pool of strings.
+BUILD_HELD_BYTES_PER_VALUE = MIN_BYTES_PER_VALUE + _HELD_OVERHEAD_BYTES
+# Floor per value for a pool of any other type: the array slot and the held overhead, with the
+# values themselves counted as free because they may be shared singletons.
+BUILD_HELD_BYTES_PER_VALUE_ANY = _POINTER_BYTES + _HELD_OVERHEAD_BYTES
 
 
-__all__ = ["ValuePool", "_freeze_array", "estimate_pool_bytes"]
+def measured_pool_bytes(pool: ValuePool) -> int:
+    """Resident bytes of a built pool: each string object's own size plus its 8-byte array slot.
+
+    The one pool-byte function: `PoolCache` budgets with it and the out-of-core run reserves
+    with it, so a pool that fits one ledger fits the other. A character-count estimate measured
+    from 0.5x to 2.6x off the real size depending on string length, which let the two ledgers
+    disagree."""
+    values = pool.values
+    if values.dtype != object:
+        return int(values.nbytes)
+    return sum(sys.getsizeof(v) for v in values) + 8 * len(values)
+
+
+def construction_floor(size: int, *, strings: bool) -> int:
+    """A floor on the peak bytes `PoolBuilder.build` holds while it builds `size` values.
+
+    Larger than the final pool because the builder keeps four pointer copies and a set of
+    the values until it returns. Used to refuse a pool before building it, so it is a floor:
+    a pool whose floor exceeds the budget cannot fit however small its values are. `strings`
+    is True only when the provider is known to return strings; any other pool uses the
+    smaller type-free floor so a pool of ints that fits is never refused."""
+    return size * (BUILD_HELD_BYTES_PER_VALUE if strings else BUILD_HELD_BYTES_PER_VALUE_ANY)
+
+
+__all__ = [
+    "BUILD_HELD_BYTES_PER_VALUE",
+    "BUILD_HELD_BYTES_PER_VALUE_ANY",
+    "MIN_BYTES_PER_VALUE",
+    "ValuePool",
+    "_freeze_array",
+    "construction_floor",
+    "measured_pool_bytes",
+]
 
 
 def _typing_compat() -> Any:

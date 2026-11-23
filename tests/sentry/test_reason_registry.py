@@ -34,6 +34,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _reason_scan as scan
 from _reason_sinks import discover_function_sinks
+from _reason_when_rows import is_when_row_read
 
 FIXTURES = scan.ROOT / "tests" / "fixtures" / "f29"
 
@@ -229,12 +230,13 @@ REGISTRY_HELPERS = frozenset(
 
 Key = tuple[str, str, str, str, str]
 
-
 _ROUTE_REASON_SLOT = re.compile(r"(^|\.)\w*route_reason$")
 
 
-def _is_violation(site: scan.Site) -> bool:
+def _is_violation(site: scan.Site, src: Path = scan.SRC) -> bool:
     if site.value_class in ("registry", "none"):
+        return False
+    if site.value_class in ("forward", "dynamic") and is_when_row_read(site, src):
         return False
     if (
         site.arg == "route_reason"
@@ -262,9 +264,11 @@ def _scan(
     return scan.scan(src, HELPER_SINKS if helpers is None else helpers)
 
 
-def violations(sites: list[scan.Site]) -> Counter[Key]:
+def violations(sites: list[scan.Site], src: Path = scan.SRC) -> Counter[Key]:
     return Counter(
-        (s.file, s.function, s.kind, s.family, s.value_class) for s in sites if _is_violation(s)
+        (s.file, s.function, s.kind, s.family, s.value_class)
+        for s in sites
+        if _is_violation(s, src)
     )
 
 

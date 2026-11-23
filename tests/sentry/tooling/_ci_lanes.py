@@ -240,7 +240,34 @@ def marker_findings(tree: Tree) -> list[str]:
     out += _agreement_findings(
         tree, [ln for ln in all_lanes if ln[:2] == ("ci.yml", "regression-gate")]
     )
+    out += _wide_findings(tree)
     return out
+
+
+WIDE_JOB = ("native-companion.yml", "core-companion-wide")
+
+
+def _wide_findings(tree: Tree) -> list[str]:
+    """M7: the wide companion job runs gates.sh's default marker expression, split the same way.
+
+    It selects directories, not the whole suite, so M5 does not read it; its `-m` expressions must
+    still be the gates.sh one plus `not serial` (parallel pass) and `serial` (serial pass).
+    """
+    try:
+        want = " ".join(parse_marker_expr(tree.gates).split())
+    except ValueError:
+        return []  # M5 already reports it
+    job = tree.workflows.get(WIDE_JOB[0], {}).get("jobs", {}).get(WIDE_JOB[1])
+    if job is None:
+        return [f"M7 {WIDE_JOB[0]}:{WIDE_JOB[1]} does not exist"]
+    exprs = sorted(
+        " ".join(m.split())
+        for step in job.get("steps", [])
+        for m in re.findall(r'pytest [^\n]*? -m "([^"]*)"', str(step.get("run", "")))
+    )
+    if exprs != sorted([f"{want} and not serial", f"{want} and serial"]):
+        return [f"M7 {WIDE_JOB[0]}:{WIDE_JOB[1]} -m expressions differ from the gates.sh default"]
+    return []
 
 
 SERIAL_STEP_IF = "${{ !cancelled() }}"
