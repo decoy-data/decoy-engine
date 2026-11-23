@@ -1,4 +1,4 @@
-Status: plan (revision 1, 2026-11-22)
+Status: plan (revision 2, 2026-11-23; GSA S1a, S2 and S3 dependency corrected for the Codex review)
 
 # GEN-PER-COLUMN: each generate column takes its own route, and one declined column no longer sends the plan to the legacy loop
 
@@ -161,7 +161,7 @@ Tombstoned in `reasons/route/_retired.py` (`deprecated_in` = the release with S5
 - **S4 PER-PARENT-AGGREGATE (engine; write order change, item 4).** `generation/relational/_aggregate_fold.py` (new, about 120); deferred parent pass in `_streamed.py` (about +35); `with_aggregates` keeps its pinned-path caller only. Tests V9, V11.
 - **S5 DELETE-LEGACY and CARD (engine-plus-CLI).** Engine: `_run_legacy` deleted (`_streamed.py:543-600`, net about -60), `PlanAdmission.eligible`/`.reason()`/`declines` removed with their callers (builder lists each), `GenerationResult.columns`, `quality_metrics["generation_route"]["columns"]` (edits in `_pipeline_generate_mask.py`, no new module in `execution/`), the tombstones, the sentry, `docs/qa/12-generation.md` (one row per route and code, naming the whole-column kinds that use pandas: `formula` with `references`, same-table `derived_aggregate`), `docs/compatibility-contract.md`. CLI after the engine pin: the `Generation` fact (GSA S4) shows `streamed` when every column streams, else `mixed: N whole-column (t.c: code, ...)` with up to three columns, then `+N more`, and `--json` carries `columns` (`CLI:src/decoy/cli/run/_render.py`, about +15); shape snapshot `CLI:tests/fixtures/release_freeze/json-shapes.json`. Tests V13, V14.
 
-Order: GSA S1a (the assembler move) lands first; then S1, S2, S3, S4 in order (S3 and S4 may swap); S5 last. New public names: none in `decoy_engine.__all__`; `GenerationResult.columns` and `ColumnRoute` are on the public generation result type, and `quality_metrics["generation_route"]["columns"]` is an evidence key. Each slice's new code has its consumer in the same slice, except S1's `TableColumnPlan` read sets, which S2 consumes before the row closes (recorded here per proportionality).
+Order: GSA S1a, S2 and S3 land before S1 starts; their assembler, provider and lookup streams, and statistical and inherit streams are prerequisites for this plan's `streamed` route. Then S1, S2, S3 and S4 land in order (S3 and S4 may swap). S5 remains after GSA S4 because it extends GSA's generation card fact, and lands last. New public names: none in `decoy_engine.__all__`; `GenerationResult.columns` and `ColumnRoute` are on the public generation result type, and `quality_metrics["generation_route"]["columns"]` is an evidence key. Each slice's new code has its consumer in the same slice, except S1's `TableColumnPlan` read sets, which S2 consumes before the row closes (recorded here per proportionality).
 
 ## 7. Placement
 
