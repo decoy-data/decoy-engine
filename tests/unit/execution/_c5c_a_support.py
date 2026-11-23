@@ -18,6 +18,7 @@ from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests._column_shapes import numeric_shapes
 
 REG = get_default_registry()
 GRAPH = RelationshipGraph(edges=(), ordering=())
@@ -63,11 +64,10 @@ def seed_of(strategy: str, *, when: str | None = None, **cfg: Any) -> ColumnSeed
 
 
 def plan_of(per_column: dict[str, ColumnSeed], table: str = "t") -> Any:
+    per_table = ((table, TableSeed(per_column=tuple(per_column.items()), per_group=())),)
     return SimpleNamespace(
-        seed_envelope=SeedEnvelope(
-            job_seed=SEED,
-            per_table=((table, TableSeed(per_column=tuple(per_column.items()), per_group=())),),
-        )
+        seed_envelope=SeedEnvelope(job_seed=SEED, per_table=per_table),
+        column_shapes=numeric_shapes(per_table),
     )
 
 

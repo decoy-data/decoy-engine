@@ -24,7 +24,11 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
+from decoy_engine.contracts.strategy_requirements import (
+    SHAPE_REQUIREMENTS_BY_STRATEGY,
+    shape_declaration_needed,
+)
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.generation.pool._events import QualityWarning
@@ -262,10 +266,10 @@ class StrategyContext:
     # its date shape. It keeps the legacy text output. Set from the plan by the routes that build
     # a context; empty otherwise.
     declared_date_columns: frozenset[tuple[str, str]] = frozenset()
-    # (table, column) -> shape of every column the plan proves is a native date or zoned
-    # timestamp, so it needs no `provider_config.date_format`. Empty otherwise, which makes the
-    # date_shift handler refuse a missing format. Declared columns are not in it.
-    native_date_columns: Mapping[tuple[str, str], ColumnShape] = field(default_factory=dict)
+    # The plan's shape for each column under a shape-reading strategy, keyed (table, column). The
+    # handlers read it to refuse a column the plan does not list as typed when it has no
+    # declaration or format. Empty for a caller that skipped compile, which refuses.
+    column_shapes: Mapping[tuple[str, str], ColumnShape] = field(default_factory=dict)
     # Integer Faker sources that pandas widened to float64, as their original Arrow
     # columns keyed (table, column), so deterministic keying sees exact integers. The
     # adapter fills it per table or chunk and releases it with that frame.
@@ -291,6 +295,17 @@ class StrategyContext:
         # defaults to the job_seed so no-secret runs feed the identical IKM.
         if not self.mask_key:
             object.__setattr__(self, "mask_key", self.job_seed)
+
+    @property
+    def native_date_columns(self) -> dict[tuple[str, str], ColumnShape]:
+        """The plan's native date and zoned-timestamp columns, derived from ``column_shapes``.
+
+        A declared date column keeps its legacy text output, so it is not in the view."""
+        return {
+            key: shape
+            for key, shape in self.column_shapes.items()
+            if shape in TYPED_DATE_SHAPES and key not in self.declared_date_columns
+        }
 
     def code_set_corpora_metrics(self) -> dict[str, Any]:
         """HC-1 slice 1: the code_set corpus-provenance evidence block, or {}.
@@ -330,6 +345,26 @@ class StrategyContext:
                 for (table, column), count in sorted(self.date_preserved.items())
             ]
         }
+
+
+def require_shape_declared(strategy: str, column: str, ctx: StrategyContext) -> None:
+    """Refuse a column the plan does not list as typed or declared (a caller that skipped compile).
+
+    Plan compile refuses a text column with no F06 cast before any read. This keys on the shape
+    the plan recorded for the column, never on the pandas dtype, and reads the same table row.
+    """
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY[strategy]
+    shape = ctx.column_shapes.get(
+        (ctx.current_table, ctx.nested_outer_column or column), ColumnShape.UNKNOWN
+    )
+    if shaped.requirement is not None and shape_declaration_needed(
+        shaped, shape, config_only=False
+    ):
+        raise StrategyError(
+            code=reasons.runtime.COLUMN_SHAPE_REQUIRED,
+            strategy=strategy,
+            message=f"column {column!r}: {shaped.requirement.message}",
+        )
 
 
 class StrategyHandler(Protocol):

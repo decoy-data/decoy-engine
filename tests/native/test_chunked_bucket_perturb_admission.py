@@ -13,6 +13,8 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
+from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_output_sink import OutputEvidenceAccumulator
 from decoy_engine.execution._errors import StrategyError
@@ -92,6 +94,7 @@ def test_static_route_decision_no_longer_emits_the_bucket_perturb_veto() -> None
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert "bucket_perturb_not_native_chunked_route" not in (decision.reroute_reason or "")
     assert decision.native_admitted is True

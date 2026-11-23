@@ -16,6 +16,7 @@ __all__ = [
     "CATEGORICAL_WEIGHT_BELOW_RESOLUTION",
     "CHECKSUM_INVALID",
     "CODE_SET_GEN_REQUIRES_NAMESPACE",
+    "COLUMN_SHAPE_REQUIRED",
     "CONFIG_REFERENCES_STORED_INDEX",
     "DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED",
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED",
@@ -126,6 +127,11 @@ CATEGORICAL_WEIGHTS_NONPOSITIVE = _d(
 CATEGORICAL_WEIGHTS_SHAPE = _d("categorical_weights_shape", "Categorical weights shape.")
 CODE_SET_GEN_REQUIRES_NAMESPACE = _d(
     "code_set_gen_requires_namespace", "Code set gen requires namespace."
+)
+COLUMN_SHAPE_REQUIRED = _d(
+    "column_shape_required",
+    "A strategy reads numbers or dates from text and the plan lists no declaration for the column.",
+    since=UNRELEASED,
 )
 DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED = _d(
     "date_preserve_values_with_group_by_unsupported",

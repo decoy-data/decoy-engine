@@ -56,6 +56,7 @@ from decoy_engine.execution._adapter import (
     StrategyOption,
     option,
     provider_config_to_dict,
+    require_shape_declared,
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -152,6 +153,7 @@ class TopCodeStrategyHandler:
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
+        require_shape_declared("top_code", column, ctx)
         bound = self._resolve_top_bound(cfg)
         if bound is None:
             # Fail closed (mirrors bucketize's `_resolve_width is None` raise):

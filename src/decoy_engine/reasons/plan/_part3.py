@@ -124,6 +124,11 @@ STORED_SHAPE_UNKNOWN = _d(
     "A stored plan names a column shape this engine does not know; compile the plan again.",
     since="1.33.0",
 )
+COLUMN_SHAPE_REQUIRED = _d(
+    "column_shape_required",
+    "A strategy reads numbers or dates from text and the column carries no declaration.",
+    since=UNRELEASED,
+)
 COLUMN_SHAPE_MISMATCH = _d(
     "column_shape_mismatch",
     "A strategy cannot read the shape of the column it is set on.",

@@ -36,6 +36,7 @@ from decoy_engine.keyprovider import SecretKeyProvider
 
 SAMPLE_ROWS = 5
 _CSV_IN = {"type": "file", "format": "csv", "has_header": True}
+_INT_TEXT = {"logical_type": "integer", "parse_format": {"id": "integer/ascii/v1"}}
 
 _MATRIX_GEN_PATH = Path(__file__).resolve().parent / "gen_capability_matrix.py"
 
@@ -409,7 +410,7 @@ CAPABILITY_PROOFS: list[CapabilityProof] = [
         "Bucketization",
         "age",
         ["42", "47", "81"],
-        {"provider_config": {"width": 10, "format": "range"}},
+        {"provider_config": {"width": 10, "format": "range"}, **_INT_TEXT},
         "Numeric values collapse into fixed-width ranges, so distinct inputs share a bucket.",
         # 42 and 47 both fall in the [40, 50) bucket, so output cardinality < input cardinality.
         lambda col, i, o: (
@@ -422,10 +423,8 @@ CAPABILITY_PROOFS: list[CapabilityProof] = [
         "top_code",
         "Top-coding (age 90+ generalization)",
         "age",
-        # Native integers (a real age column's shape), so the proof exercises the
-        # canonical numeric render, not just the string-passthrough path.
-        [67, 94, 101],
-        {"provider_config": {"preset": "hipaa_age"}},
+        ["67", "94", "101"],
+        {"provider_config": {"preset": "hipaa_age"}, **_INT_TEXT},
         "Ages over 89 collapse into a single '90+' category (HIPAA Safe Harbor "
         "§164.514(b)(2)(i)(C)); ages at or below 89 are preserved, so distinct "
         "high ages share one bucket while the rest keep their own value.",

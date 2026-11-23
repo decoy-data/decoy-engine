@@ -135,7 +135,22 @@ def _job(
     return support.make_cfg(columns, path=path), b6b.lazy(path), pq.read_table(path)
 
 
-@pytest.mark.parametrize("name", sorted(GATE_CASES))
+def test_classify_job_refuses_bucketize_over_a_text_source_alike_for_both_sources(
+    tmp_path: Path,
+) -> None:
+    """The plan refuses the undeclared text column before any routing decision, for a lazy
+    source and its table alike, so `bucketize_non_numeric` has no routing outcome to compare."""
+    from decoy_engine.plan import PlanCompileError
+
+    columns, data, _fragment = GATE_CASES["bucketize_non_numeric"]
+    cfg, lazy_src, resident = _job(columns, data, tmp_path)
+    for source in (lazy_src, resident):
+        with pytest.raises(PlanCompileError) as refused:
+            _classify(cfg, {b6b.TABLE: source}, THRESHOLD)
+        assert refused.value.code == "column_shape_required"
+
+
+@pytest.mark.parametrize("name", sorted(set(GATE_CASES) - {"bucketize_non_numeric"}))
 def test_classify_job_gives_a_lazy_source_the_twins_decision(name: str, tmp_path: Path) -> None:
     columns, data, fragment = GATE_CASES[name]
     cfg, lazy_src, resident = _job(columns, data, tmp_path)

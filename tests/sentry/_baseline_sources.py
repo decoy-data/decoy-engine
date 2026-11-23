@@ -189,6 +189,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_column_shape_classifier.py", "ALLOWED_CALLERS", nested=True),
     ),
     Source(
+        "bucketize-width-contract",
+        "test_bucketize_width_contract.py",
+        in_code("test_bucketize_width_contract.py", "ALLOWED_CALLERS"),
+    ),
+    Source(
         "package-fanout",
         "layout/test_package_fanout.py",
         in_code("layout/test_package_fanout.py", "FANOUT_ALLOWLIST"),
@@ -216,6 +221,11 @@ SOURCES: tuple[Source, ...] = (
         "dir-fd-readers",
         "test_platform_checks.py",
         in_code("test_platform_checks.py", "DIR_FD_ALLOWLIST"),
+    ),
+    Source(
+        "signature-exemptions",
+        "release/_signatures.py",
+        in_code("release/_signatures.py", "SIGNATURE_EXEMPTIONS"),
     ),
     Source(
         "ci-write-scopes",

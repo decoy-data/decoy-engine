@@ -243,7 +243,7 @@ def _newest_first(root: Path, names: list[str]) -> list[str]:
     return seen
 
 
-def _split_breaking(body: str) -> tuple[str, list[str]]:
+def breaking_lists(body: str) -> tuple[str, list[str]]:
     """The body without its 'Breaking for consumers' lists, and those lists' text."""
     out: list[str] = []
     lists: list[str] = []
@@ -264,7 +264,7 @@ def _compose(changelog: str, version: str, date: str, fragments: list[Fragment])
     nxt = _ANY_H2.search(changelog, after)
     if nxt is None:
         raise FragmentError("CHANGELOG.md has no released section below [Unreleased]")
-    old_body, old_lists = _split_breaking(changelog[after : nxt.start()])
+    old_body, old_lists = breaking_lists(changelog[after : nxt.start()])
     bullets = [f"- {f.breaking}" for f in fragments if f.breaking] + old_lists
     parts: list[str] = []
     if bullets:

@@ -321,6 +321,21 @@ that falls outside years 1 to 9999 on a typed date is a `format_error` row error
 `runtime/bucket_perturb_requires_date_format`. Detection stays in `decoy scan`, the starter config and the free
 text strategies only (`tests/sentry/test_no_runtime_format_detection.py`). No stored format moves.
 
+**Pre-GA correction (COLUMN-SHAPE E3, 2026-11-21).** Breaking for configs, no shim. `bucketize` and `top_code`
+refuse a text column unless it declares `logical_type` (integer with a `parse_format`, or for `bucketize` a decimal
+with precision 15 or less), at compile with `plan/column_shape_required`. A shape the strategy cannot read is
+`plan/column_shape_mismatch`: a decimal under `top_code`, a decimal wider than 15 digits under `bucketize`, or a
+decimal `bucketize` whose width is not a whole number from 1 to 10^15. A typed integer or float needs nothing, a
+typed decimal runs only under `bucketize` with a whole-number width. The handlers refuse a column the plan does
+not list as typed with `runtime/column_shape_required`. A `bucketize` or `top_code` over an undeclared text column
+therefore stops compiling, and their per-row `format_error` can no longer come from a compiled run. The nested
+`bucketize` child is always text, so it is always refused. `bucketize` reads `preset` and `width` in one place,
+`contracts/bucketize_width.py`; a sentry pins its callers. The F06 declared-casting output rule now covers
+`top_code` on an integer and `bucketize` on a decimal, and a preset on a declared integer is admitted. The plan
+hash and the physical plan hash move for any pipeline that uses `bucketize`, `top_code` or `fpe`. Adding the
+recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
+`column_shape_required` (plan and runtime) is registered unreleased.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
@@ -492,6 +507,20 @@ numeric histogram accompanying `exact_values` or `quantile_grid` has one bin; wi
 it has equal-width bins on a 1, 2, 5 grid and every non-empty bin is held by at least 10 rows.
 `numeric_bins` outside 1 to 1000 is refused with `quality.numeric_bins_invalid` (new, `since`
 unreleased) by every snapshot writer, and above 1000 by the DP fit (`dp_numeric_bins_invalid`).
+
+`cell_format.char_class` (FIT-CODES-TEXT, 2026-11) is one new optional member of the `cell_format` block
+of a `freetext` column entry. It carries on both `distribution-snapshot/v1` (the raw writer and
+`include_values=True`, through `compute_distribution_snapshot(..., cell_format=True)`) and
+`distribution-snapshot/v2` (the plain redacted writer). Its only value is `"digits"`: every non-blank
+cell of the column is ASCII `0` to `9` (`re.fullmatch("[0-9]+", cell)`), so the sampler draws digit strings
+at the fitted lengths. It is one enum token with no source value, so `scrub_cell_format` keeps `"digits"`
+and nulls any other value. This engine reads it under both tags, and a snapshot without it generates as
+before. This is a recorded exception to the additive-field rule below: an engine older than this
+change does not ignore the member. Its strict decoder refuses it with `statistical_cell_format_invalid`
+and never misreads it. The same holds for a pinned plan: an older engine that reads a plan whose stored
+`cell_format` holds `char_class` requires exactly six members and refuses it with the same code. A new tag was not minted: the old reader fails closed with a coded refusal,
+and one member does not justify a v3. After 1.0 the member and its single value are frozen; a new value
+is additive in 1.x and needs the same old-reader note.
 
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
@@ -833,6 +862,12 @@ only this site moves.
   -> tuple[Relationship, ...]` (CLI-QA1 E-b): the config's `relationships:` block as one
   `Relationship` per child, skipping malformed entries; an unequal composite column count, or an
   empty column list, raises `ValueError`. It replaces the private `_build_relationships`.
+  It also includes `decoy_engine.plan.NO_SOURCES` (SIGNATURE-SENTRY, 2026-11): the value a caller passes
+  as the required `sources` argument of `compile_plan` when it holds no tables. `decoy_engine.plan.SourceFacts`,
+  the type of that argument, is experimental (3.6) while COLUMN-SHAPE still moves its fields.
+  The signatures of every frozen and experimental name are checked against the last release tag by the
+  signature sentry (`tests/sentry/release/test_public_signatures.py`). A break needs one `Breaking:`
+  line in a `changelog.d` fragment that names the object and, for a parameter, the parameter, both in backticks.
   It also includes `read_csv_source`, `CsvDialect` and `resolve_csv_dialect`
   (CLI-DIALECT, 2026-11): `read_csv_source(path, dialect, *, table, dtype=None,
   nrows=None, chunksize=None, file_access=None, field_key="source.path")` reads
@@ -1477,6 +1512,10 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
 
 ## 6. How the freeze is enforced (the machinery)
 
+- **Signature sentry** (`tests/sentry/release/test_public_signatures.py`). Griffe compares the HEAD tree with
+  the newest release tag. Every parameter, kind, default, removal and base-class break on a frozen or
+  experimental name needs a pending `Breaking:` line that names it in backticks. Types and constant values
+  are out of scope; golden tests own the values. A reviewed false break goes in `SIGNATURE_EXEMPTIONS`.
 - **Golden / determinism snapshots** (the `tests/snapshots/golden` baselines a test
   reads, `tests/unit/determinism/test_derive_vectors.py`,
   `tests/native/test_draw_site_providers_golden.py` with
