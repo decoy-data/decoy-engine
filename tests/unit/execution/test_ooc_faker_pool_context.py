@@ -302,7 +302,8 @@ def test_w1e_a_pool_of_ints_that_fits_is_admitted_and_a_string_pool_over_budget_
 def test_w1f_the_floor_follows_the_resolved_adapter_not_the_provider_name(registry):
     # An allowlisted name rebound to an int adapter must get the type-free floor; the stock
     # adapter under the same allowance is refused by the string floor before any build.
-    from tests.physical.test_unified_slice_faker import CountingAdapter, rebound_registry
+    from tests.physical.test_unified_slice_faker import CountingAdapter
+    from tests.physical.test_unified_slice_faker import rebound_registry as swap_adapter_registry
 
     size = _CFG["pool_size"]
     assert _PROVIDER in C1_PROVIDER_ALLOWLIST
@@ -310,8 +311,8 @@ def test_w1f_the_floor_follows_the_resolved_adapter_not_the_provider_name(regist
         construction_floor(size, strings=False) + construction_floor(size, strings=True)
     ) // 2
 
-    rebound = rebound_registry(CountingAdapter(lambda i: 1000 + i))
-    ctx = OocFakerPoolContext(registry=rebound, job_seed=_JOB_SEED, max_pool_bytes=allowance)
+    swapped = swap_adapter_registry(CountingAdapter(lambda i: 1000 + i))
+    ctx = OocFakerPoolContext(registry=swapped, job_seed=_JOB_SEED, max_pool_bytes=allowance)
     pool = ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
     assert ctx.builds == 1
     assert measured_pool_bytes(pool) <= allowance
