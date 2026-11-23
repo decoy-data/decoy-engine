@@ -1,4 +1,4 @@
-Status: plan (revision 3, 2026-11-23)
+Status: plan (revision 4, 2026-11-23)
 
 # GEN-NONFAKER-DRAWS: uuid, random_int_range and random_choice draw per batch from keyed kernels (mask) and numpy words (generate); lorem pools
 
@@ -8,13 +8,15 @@ One plan for both sides. The mask side and the generate side share one fact: how
 
 Not combined with GEN-VECTOR-STREAMS (`plan/gen-vector-streams`). That row changes no bytes and has no mask side. This row's generate slice depends on its S1 (the `next_array` stream method).
 
-Anchors: a path with no prefix is under `src/decoy_engine/` in decoy-engine. `CLI:` is the decoy CLI repo. Read at engine `origin/main` `70881ad79` (0.28.3) and CLI `origin/main` at the same date. Line numbers are at those heads.
+Anchors: a path with no prefix is under `src/decoy_engine/` in decoy-engine. `CLI:` is the decoy CLI repo. Read at engine `origin/main` `311ec1418617e2eda94052e963e14bc7b3fd553b` and CLI `origin/main` at the same date. Line numbers are at those heads.
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `bugfix.md` (the compile refusal below), `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `api-and-compatibility.md`, `security.md` (keyed derivation), `performance.md`, `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md` ("Where things go").
 
 Revision 2 answers Dennis round 1 (2 DESIGN, 3 MEDIUM, 4 V2-LOG). Owner decisions recorded 2026-11-23 (go with recommended): `lorem_text` becomes poolable; uuid is version 4 over keyed bits; `text` and `paragraph` join GEN-STREAM-ALL group A; the generate-side byte change is accepted; S1 is in the V1 closing set.
 
 Revision 3 fixes Codex round 1: [V1] caller-specific generated dtypes and typed route scope, [DESIGN] one Faker draw-contract choke point, and [V2-LOG] the revision label.
+
+Revision 4 fixes Codex round 2. [DESIGN] The adapter derives its three computed provider-to-Faker mappings from the contract, and AT-13 guards them. Unrelated adapter mappings and member/plan defaults remain outside the registry. [V2-LOG] The engine anchor is current.
 
 Risk: R2 (keyed masking output, a new computed operator variant on the routes whose schema can carry it, a named generate-side byte change). Plan review: Dennis, then Codex. Code gate: Codex and Dennis.
 
@@ -147,13 +149,17 @@ Principles that apply: one place per fact (Faker draw arguments and defaults; bi
 
 ### 5.1 One draw-contract choke point and one formatter
 
-`providers_v2/_faker_draw_contracts.py` is the one cross-cutting source for the three computed Faker methods. Its frozen `FakerDrawContract` rows name the provider alias and Faker type, accepted argument names and strict shapes, defaults, and the natural result family. The existing `_FAKER_DEFAULT_KWARGS` data moves here and becomes a derived read-only view of these rows. The `random_int` entry now owns the existing `min=0`, `max=9999` numeric defaults that `_INT_PROVIDERS` currently repeats in `generation/_numeric_typing.py:54`. Consumers reach `faker_draw_contract(...)` through `providers_v2`'s public API:
+`providers_v2/_faker_draw_contracts.py` is the cross-cutting source for the three computed Faker methods. Each frozen `FakerDrawContract` row names the provider alias, Faker type, accepted arguments, strict shapes, defaults, and natural result family. Three mappings move from `_FAKER_METHOD_MAP` into these rows (`providers_v2/_faker_adapter.py:43-66`). They are `uuid -> uuid4`, `random_int_range -> random_int`, and `random_choice -> random_element`.
 
-- `FakerAdapter` builds its default kwargs from the contract-derived `_FAKER_DEFAULT_KWARGS` view.
+The adapter derives a read-only computed-method view from the rows. It merges this view with the unrelated static mappings. The computed-provider portion of `_FAKER_DEFAULT_KWARGS` is also a derived read-only view. Only the `random_choice` default moves from the current default table. The unrelated `synthetic_member_id` and `synthetic_plan_id` defaults remain adapter-owned (`providers_v2/_faker_adapter.py:70-76`). The `random_int` row owns the numeric defaults that `_INT_PROVIDERS` currently repeats (`generation/_numeric_typing.py:54`). Consumers reach `faker_draw_contract(...)` through the public `providers_v2` API:
+
+- `FakerAdapter` resolves the three computed aliases through the contract-derived method view. It combines computed defaults with unrelated adapter defaults before `_faker_call` applies `spec.extra` (`providers_v2/_faker_adapter.py:131-149`).
 - `_numeric_typing.py` keeps its unrelated integer providers where they are, but derives the `random_int` keys and bounds from the same contract rather than restating them.
 - `computed_draw_spec` validates and fills arguments from the contract. It contains no accepted-argument or default table of its own.
 
-`tests/sentry/generation/test_faker_draw_contract_choke_point.py` walks the adapter, numeric typing and computed-spec consumers. It proves every computed name resolves to the same contract row, proves `_FAKER_DEFAULT_KWARGS` and the numeric view are derived from it, and fails if a consumer introduces a local default or accepted-argument literal for these names. The seeded bypass changes `random_int`'s adapter or numeric default locally to 1 without changing the contract; the guard must turn red. This is the DESIGN choke point and guard, not a second provider table.
+`tests/sentry/generation/test_faker_draw_contract_choke_point.py` walks the adapter, numeric typing, and computed-spec consumers. It derives the computed inventory from the contract. It proves that `_FAKER_METHOD_MAP` exposes the three aliases through the contract-derived view. It also proves that computed defaults and numeric bounds come from the same rows. A local alias, default, or accepted-argument literal makes the sentry fail. The sentry records the two unrelated defaults as adapter-owned exclusions.
+
+The guard has two seeded bypasses. The first changes a local `random_int` default to 1. The second changes the adapter mapping from `random_choice -> random_element` to `random_choice -> random_elements`. The contract stays unchanged in both mutations, and each mutation must make the guard fail. This sentry is the DESIGN guard for the choke point.
 
 `generation/pool/_computed_draw.py`:
 
@@ -256,7 +262,7 @@ If `_faker_positional.py` would pass 600 lines, `computed_mask_draw` goes into a
 | 6 | No reaching into private modules | `execution/` and `generation.stream` import formatter/spec/index names through public `generation.pool`; generation and execution import draw contracts through public `providers_v2` | import-linter |
 | 7 | No hidden CI failures | companion-absent leg must run the reference path tests | CI review |
 | 8 | One input, one trust class | no | - |
-| 9 | Mutations on the final head | yes | M1 to M10 on the final head, head recorded |
+| 9 | Mutations on the final head | yes | M1 to M11 on the final head, head recorded |
 | 10 | Allowlisted helpers are still checked | the faker `provider_allowlist` | AT-2 walks every computed provider in the allowlist and proves a non-string descriptor cannot enter the string operator |
 | 11 | No raised caps | `_strategies` freeze 28, `generation/` 25, module size | no new module in either; sizes listed |
 
@@ -276,7 +282,7 @@ If `_faker_positional.py` would pass 600 lines, `computed_mask_draw` goes into a
 | AT-10 | Generate speed and byte change: `uuid4` over 1,000,000 rows at or under 100 ns per row; a fixed seed has a committed golden output vector from `ComputedDrawStream`; the output differs from the per-row Faker golden (proves the new path ran) | per-row Faker today | S3 |
 | AT-11 | Generate arguments and caller contracts: every row of the section 5.3 table. Each admitted caller kind has a committed value and Arrow-schema golden. In particular, plain `faker_type: random_int` is int64, `provider: random_int_range` is string, homogeneous integer `faker_type: random_element` keeps its natural/planned type, and mixed-scalar `provider: random_choice` yields only text without Arrow construction failure. E12 cells compare both bytes and schema with today's per-row or adapter-batch path | no computed stream today | S3 |
 | AT-12 | Structure: an AST check requires the deterministic index branch of `computed_mask_draw` to call public `generation.pool.derive_pool_indices`, and forbids direct `derive_index_batch` or bare `derive_validated_indices` calls there | no function today | S1 |
-| AT-13 | Draw-contract choke point: the sentry in section 5.1 derives the computed inventory, proves adapter defaults, numeric bounds and computed parsing resolve the same `FakerDrawContract`, and forbids local accepted-argument/default literals for those names. Seed a local `random_int` default of 1 in each consumer shape and prove the sentry fails | no shared contract today; the existing `_FAKER_DEFAULT_KWARGS` and `_INT_PROVIDERS` facts are separate | S1 |
+| AT-13 | Draw-contract choke point: the sentry in section 5.1 derives the computed inventory. The adapter method view, computed defaults, numeric bounds, and computed parser resolve the same `FakerDrawContract`. Local aliases, accepted-argument literals, and defaults for these names are forbidden. The unrelated `synthetic_member_id` and `synthetic_plan_id` defaults remain adapter-owned exclusions. Seed a local `random_int` default of 1 in each consumer shape. Seed a local `random_choice -> random_elements` adapter mapping. Each mutation must make the sentry fail. | no shared contract today. The existing `_FAKER_METHOD_MAP`, `_FAKER_DEFAULT_KWARGS`, and `_INT_PROVIDERS` facts are separate. | S1 |
 
 ## 9. Named mutations
 
@@ -292,6 +298,7 @@ If `_faker_positional.py` would pass 600 lines, `computed_mask_draw` goes into a
 | M8 | `computed_draw_spec` admits a string `elements` | AT-11 |
 | M9 | the provider caller materializes `random_int_range` with the faker-type int64 output policy instead of text coercion | AT-11 |
 | M10 | `resolve_operator_variant` returns the pool-shaped faker spec for uuid | AT-2 |
+| M11 | the adapter locally maps `random_choice` to `random_elements` instead of deriving `random_element` from its `FakerDrawContract` | AT-13 |
 
 ## 10. Frozen contracts and byte changes
 
