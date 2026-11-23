@@ -28,6 +28,7 @@ from decoy_engine.config import PipelineConfig
 from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.plan import PlanCompileError
+from tests._column_shapes import INT_DECL
 from tests._declared_schema import declared_schema
 from tests.native._b8_support import run_mask_pipeline_chunked_below_gate
 
@@ -586,7 +587,14 @@ class TestChunkedRowErrorsFailClosed:
 
     def _row_error_config(self, tmp_path, strategy: str) -> dict:
         if strategy == "bucketize":
-            columns = [{"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}]
+            columns = [
+                {
+                    "name": "age",
+                    "strategy": "bucketize",
+                    "provider_config": {"width": 10},
+                    **INT_DECL,
+                }
+            ]
         else:
             columns = [
                 {
@@ -598,7 +606,30 @@ class TestChunkedRowErrorsFailClosed:
             ]
         return _config(tmp_path, columns)
 
-    @pytest.mark.parametrize("strategy", ["bucketize", "date_shift"])
+    def test_bucketize_on_text_without_a_declaration_is_refused_at_compile(self, tmp_path) -> None:
+        """bucketize no longer emits per-row format errors from text: the plan refuses the
+        undeclared text column before any chunk is read."""
+        from decoy_engine.plan import PlanCompileError
+
+        cfg = _config(
+            tmp_path,
+            [{"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}],
+        )
+        chunk = pa.table({"age": pa.array(["23", "not-a-number"], type=pa.string())})
+        with pytest.raises(PlanCompileError) as exc_info:
+            list(
+                run_mask_pipeline_chunked(
+                    cfg,
+                    [chunk],
+                    table="accounts",
+                    source_schema=declared_schema(cfg, "accounts"),
+                    engine_version=_ENGINE_VERSION,
+                )
+            )
+        assert exc_info.value.code == "column_shape_required"
+        assert "not-a-number" not in str(exc_info.value)
+
+    @pytest.mark.parametrize("strategy", ["date_shift"])
     def test_uncoercible_cell_fails_closed(self, tmp_path, strategy: str) -> None:
         from decoy_engine.errors import RowErrorsFailedError
 
@@ -635,4 +666,4 @@ class TestChunkedRowErrorsFailClosed:
                 engine_version=_ENGINE_VERSION,
             )
         )
-        assert pa.concat_tables(out).column("age").to_pylist() == ["20", "40"]
+        assert pa.concat_tables(out).column("age").to_pylist() == [20, 40]

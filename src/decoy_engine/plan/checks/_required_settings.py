@@ -12,6 +12,7 @@ message only: no submitted value and no callable predicate, so a refusal cannot 
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterator
 from typing import Any
 
@@ -88,14 +89,52 @@ def _shape_mismatch(
     if shaped is None:
         return None
     t, c = table.get("name", "?"), col.get("name", "?")
+    provider_config = col.get("provider_config")
     message = shape_mismatch_message(
-        str(strategy), shaped, shapes.get((t, c), ColumnShape.UNKNOWN), c, t
+        str(strategy),
+        shaped,
+        shapes.get((t, c), ColumnShape.UNKNOWN),
+        c,
+        t,
+        provider_config if isinstance(provider_config, dict) else None,
     )
     if message is None:
         return None
     return PlanCompileError(
         code=reasons.plan.COLUMN_SHAPE_MISMATCH, path=f"tables.{t}.columns.{c}", message=message
     )
+
+
+def _undeclared_casts(
+    table: dict[str, Any], col: dict[str, Any], shapes: ColumnShapes, *, config_only: bool
+) -> Iterator[tuple[StrategyRequirement, str]]:
+    """Each numeric strategy that reads text without the F06 cast that makes it a number.
+
+    The cast is the column's own, so a `nested` child, which reads text whatever its parent says,
+    has none and is always refused.
+    """
+    where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+    strategy = col.get("strategy")
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy) if isinstance(strategy, str) else None
+    if shaped is not None and shaped.cast_declared and shaped.requirement is not None:
+        shape = shapes.get((table.get("name", "?"), col.get("name", "?")), ColumnShape.UNKNOWN)
+        if shape_declaration_needed(shaped, shape, config_only=config_only):
+            yield shaped.requirement, f"{where}." + ".".join(shaped.requirement.path)
+    if strategy != "nested" or not isinstance(col.get("provider_config"), dict):
+        return
+    for child in nested_children(col["provider_config"]):
+        child_shaped = (
+            SHAPE_REQUIREMENTS_BY_STRATEGY.get(child.strategy)
+            if isinstance(child.strategy, str)
+            else None
+        )
+        if (
+            child_shaped is not None
+            and child_shaped.cast_declared
+            and child_shaped.requirement is not None
+            and shape_declaration_needed(child_shaped, ColumnShape.TEXT, config_only=config_only)
+        ):
+            yield child_shaped.requirement, f"{where}.{child.config_path}.strategy"
 
 
 def column_shape_warnings(config: dict[str, Any], shapes: ColumnShapes) -> tuple[str, ...]:
@@ -107,7 +146,12 @@ def column_shape_warnings(config: dict[str, Any], shapes: ColumnShapes) -> tuple
     out: list[str] = []
     for table, col in shape_reading_columns(config):
         shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(col.get("strategy", ""))
-        if shaped is None or shaped.family != "date" or col.get("logical_type") is not None:
+        if (
+            shaped is None
+            or shaped.requirement is None
+            or shaped.family != "date"
+            or col.get("logical_type") is not None
+        ):
             continue
         shape = shapes.get((table, col["name"]), ColumnShape.UNKNOWN)
         fmt = lookup_path(col, shaped.requirement.path)
@@ -206,8 +250,9 @@ def check_required_strategy_settings(
             mismatch = _shape_mismatch(table, col, resolved)
             if mismatch is not None:
                 raise mismatch
-            for req, path in _missing_requirements(
-                table, col, derived, resolved, config_only=config_only
+            for req, path in itertools.chain(
+                _missing_requirements(table, col, derived, resolved, config_only=config_only),
+                _undeclared_casts(table, col, resolved, config_only=config_only),
             ):
                 raise PlanCompileError(
                     code=req.code,

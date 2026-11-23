@@ -307,6 +307,21 @@ pass (`decoy validate`) defers a column whose type it cannot see, so a missing `
 pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
 date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
 
+**Pre-GA correction (COLUMN-SHAPE E3, 2026-11-21).** Breaking for configs, no shim. `bucketize` and `top_code`
+refuse a text column unless it declares `logical_type` (integer with a `parse_format`, or for `bucketize` a decimal
+with precision 15 or less), at compile with `plan/column_shape_required`. A shape the strategy cannot read is
+`plan/column_shape_mismatch`: a decimal under `top_code`, a decimal wider than 15 digits under `bucketize`, or a
+decimal `bucketize` whose width is not a whole number from 1 to 10^15. A typed integer or float needs nothing, a
+typed decimal runs only under `bucketize` with a whole-number width. The handlers refuse a column the plan does
+not list as typed with `runtime/column_shape_required`. A `bucketize` or `top_code` over an undeclared text column
+therefore stops compiling, and their per-row `format_error` can no longer come from a compiled run. The nested
+`bucketize` child is always text, so it is always refused. `bucketize` reads `preset` and `width` in one place,
+`contracts/bucketize_width.py`; a sentry pins its callers. The F06 declared-casting output rule now covers
+`top_code` on an integer and `bucketize` on a decimal, and a preset on a declared integer is admitted. The plan
+hash and the physical plan hash move for any pipeline that uses `bucketize`, `top_code` or `fpe`. Adding the
+recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
+`column_shape_required` (plan and runtime) is registered unreleased.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 

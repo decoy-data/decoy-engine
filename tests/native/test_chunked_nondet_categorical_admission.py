@@ -238,12 +238,22 @@ def test_the_four_stage_a_consumers_return_the_identical_config_verdict(
         assert veto is False
         return
     static = _dispatch._static_route_decision(
-        config, profile, table=TABLE, engine_version=ENGINE_VERSION, registry=_REG
+        config,
+        profile,
+        table=TABLE,
+        engine_version=ENGINE_VERSION,
+        registry=_REG,
+        siblings=NO_SOURCES,
     )
     backends = {
         c.column: c.planned_backend
         for c in plan_column_backends(
-            config, profile, table=TABLE, engine_version=ENGINE_VERSION, registry=_REG
+            config,
+            profile,
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            registry=_REG,
+            siblings=NO_SOURCES,
         )
     }
     prepared = prepare_chunked_categoricals(seeds, _first_chunk().schema)

@@ -12,7 +12,7 @@ published outside the commit protocol.
 
 Reproduces the exact FK shape from
 `tests/integration/test_fk_sequential_row_error_leak.py` (a parent/child pair,
-one uncoercible `bucketize` cell "badX" on the parent, `format_error` covered
+one uncoercible `date_shift` cell "badX" on the parent, `format_error` covered
 by an enabled quarantine trigger), routed through `run_pipeline`'s
 sequential path (pinned via `use_byte_estimate_routing=False`, the TB-5
 rollback route, so the tiny fixtures stay sequential rather than fitting
@@ -64,7 +64,7 @@ from decoy_engine.execution import ParquetTransactionalSink
 from decoy_engine.execution._pipeline import run_pipeline
 from tests._declared_schema import declare_rest
 
-_AGE = ["10", "20", "30", "40", "50", "badX"]
+_AGE = ["2020-01-10", "2020-01-20", "2020-01-30", "2020-02-10", "2020-02-20", "badX"]
 _IDS = ["p0", "p1", "p2", "p3", "p4", "p5"]
 
 
@@ -146,7 +146,12 @@ def _config(tmp_path: Path, qpath: str) -> dict[str, Any]:
                     "name": "parent",
                     "columns": [
                         _faker_col("id", "parent_ns"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "date_shift",
+                            "namespace": "age_ns",
+                            "provider_config": {"date_format": "%Y-%m-%d"},
+                        },
                     ],
                 },
                 {"name": "child", "columns": [_faker_col("parent_id", "parent_ns")]},
