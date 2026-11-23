@@ -1,12 +1,9 @@
-"""One grammar for a `nested` target (NESTED-FREEZE choke point).
+"""The `nested` target has one grammar and one evaluator (NESTED-FREEZE choke point).
 
-`_nested_json.parse_target` is the only reader of the target text. A module that hands a target to
-a jsonpath-ng parser would accept forms the frozen subset refuses, so the plan check and the run
-could disagree. The scan fails on:
-
-- an import of `jsonpath_ng.parser`, `jsonpath_ng.lexer` or `jsonpath_ng.ext` (or below);
-- an import of `parse`, `JsonPathParser` or `JsonPathLexer` from `jsonpath_ng` (aliased or not);
-- an attribute `.parse`, `.JsonPathParser` or `.JsonPathLexer` on a name bound to `jsonpath_ng`.
+`_nested_json.parse_target` reads the target text and `TargetPath.find` evaluates it. A module that
+handed a target to a JSONPath library would accept forms the frozen subset refuses and select
+what the library decides, and the plan check and the run could disagree. jsonpath-ng is no longer
+a dependency, so the scan fails on any import of it, in any form.
 """
 
 from __future__ import annotations
@@ -17,43 +14,28 @@ import pytest
 
 from tests.sentry.defects import _defect_scan as scan
 
-_BARRED_MODULES = ("jsonpath_ng.parser", "jsonpath_ng.lexer", "jsonpath_ng.ext")
-_BARRED_NAMES = frozenset({"parse", "JsonPathParser", "JsonPathLexer"})
 
-
-def parser_uses(source: str) -> list[str]:
-    """Every parser use in one module's source, as `line: what`."""
-    tree = ast.parse(source)
-    bound: set[str] = set()
+def jsonpath_imports(source: str) -> list[str]:
+    """Every import of `jsonpath_ng` (or anything below it) in one module, as `line: what`."""
     found: list[str] = []
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "jsonpath_ng":
-                    bound.add(alias.asname or "jsonpath_ng")
-                if alias.name.startswith(_BARRED_MODULES):
-                    found.append(f"{node.lineno}: import {alias.name}")
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.startswith(_BARRED_MODULES):
-                found.append(f"{node.lineno}: from {node.module}")
-            elif node.module == "jsonpath_ng":
-                for alias in node.names:
-                    if alias.name in _BARRED_NAMES:
-                        found.append(f"{node.lineno}: from jsonpath_ng import {alias.name}")
-                    if alias.name in {"parser", "lexer", "ext"}:
-                        found.append(f"{node.lineno}: from jsonpath_ng import {alias.name}")
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in _BARRED_NAMES:
-            chain = scan.attr_chain(node)
-            if chain and chain[0] in bound:
-                found.append(f"{node.lineno}: {'.'.join(chain)}")
+            found += [
+                f"{node.lineno}: import {a.name}"
+                for a in node.names
+                if a.name.split(".")[0] == "jsonpath_ng"
+            ]
+        elif (
+            isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "jsonpath_ng"
+        ):
+            found.append(f"{node.lineno}: from {node.module} import ...")
     return sorted(found)
 
 
-def test_no_module_parses_a_target_with_jsonpath_ng() -> None:
+def test_no_module_imports_jsonpath_ng() -> None:
     offenders = {}
     for path in scan.source_files():
-        found = parser_uses(path.read_text(encoding="utf-8"))
+        found = jsonpath_imports(path.read_text(encoding="utf-8"))
         if found:
             offenders[path.relative_to(scan.SRC).as_posix()] = found
     assert offenders == {}
@@ -66,16 +48,14 @@ def test_no_module_parses_a_target_with_jsonpath_ng() -> None:
         "import jsonpath_ng as jp\nexpr = jp.parse(target_path)\n",
         "from jsonpath_ng.ext import parse as p\n",
         "from jsonpath_ng import parse\n",
-        "from jsonpath_ng import parse as p\n",
+        "from jsonpath_ng import Child, Fields\n",
         "from jsonpath_ng.parser import JsonPathParser\n",
         "import jsonpath_ng.lexer\n",
-        "import jsonpath_ng as jp\nx = jp.JsonPathParser()\n",
     ],
 )
-def test_scan_catches_each_bypass(source: str) -> None:
-    assert parser_uses(source) != []
+def test_scan_catches_each_import_form(source: str) -> None:
+    assert jsonpath_imports(source) != []
 
 
-def test_scan_allows_ast_classes_and_isinstance_checks() -> None:
-    source = "import jsonpath_ng\nfrom jsonpath_ng import Child, Fields\nok = isinstance(x, jsonpath_ng.Index)\n"
-    assert parser_uses(source) == []
+def test_scan_ignores_other_modules() -> None:
+    assert jsonpath_imports("import json\nfrom jsonpath_like import x\n") == []

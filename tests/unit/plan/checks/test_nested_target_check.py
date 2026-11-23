@@ -65,6 +65,10 @@ _REFUSED = [
     "$.a where b",
     "$.a & $.b",
     "$[length(@)]",
+    "$.first-name",
+    "$.a-b.c",
+    "$.@x",
+    "$.1a",
 ]
 
 

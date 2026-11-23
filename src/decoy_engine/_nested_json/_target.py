@@ -4,7 +4,7 @@ The target is frozen config, so the engine does not hand it to a parser whose ac
 with a library release. A target is `$` followed by segments: `.name`, `.*`, `['name']`,
 `["name"]`, `[*]`, `[index]` and `[start:end:step]` (RFC 9535 sections 2.2 to 2.5.1, 2.3.1 to
 2.3.4). Descendant segments, filters, function extensions, unions and every jsonpath-ng extension
-are refused. A quoted name `*` is refused too: jsonpath-ng reads it as a wildcard.
+are refused. A quoted name `*` is refused too: some JSONPath libraries read it as a wildcard.
 
 `parse_target` scans the text itself, and `TargetPath.find` evaluates it with our own code, so
 neither the accepted set nor what a selector matches depends on a jsonpath-ng release (1.8 coerced
@@ -210,7 +210,9 @@ def _quoted_segment(text: str, at: int, bracket: int) -> tuple[Segment, int] | T
         return named
     name, end = named
     if name == "*":
-        return TargetRefusal(bracket + 1, "quoted name '*' (a wildcard in jsonpath-ng)")
+        return TargetRefusal(
+            bracket + 1, "quoted name '*' (some JSONPath libraries read it as a wildcard)"
+        )
     return Segment("name", name), end
 
 

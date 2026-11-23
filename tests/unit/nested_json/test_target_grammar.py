@@ -186,3 +186,14 @@ def test_array_selector_on_an_object_or_scalar_is_refused_by_the_evaluator(
 
 def test_array_selector_on_null_selects_nothing() -> None:
     assert parse_target("$.a[0]").find({"a": None}) == []
+
+
+def test_dot_wildcard_on_an_array_cell_masks_every_item() -> None:
+    """Frozen change: jsonpath-ng 1.8 selected nothing here and left the cleartext items."""
+    handler = NestedStrategyHandler()
+    df = pd.DataFrame({"data": ['["SSN-1", "SSN-2"]', '{"a": "SSN-3", "b": "SSN-4"}']})
+    out, _ = handler.run(df, "data", _seed({"target": "$.*", "strategy": "redact"}), _FakeCtx())
+    assert out["data"].tolist() == [
+        '["REDACTED", "REDACTED"]',
+        '{"a": "REDACTED", "b": "REDACTED"}',
+    ]

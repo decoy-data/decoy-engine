@@ -1350,12 +1350,12 @@ filter, function, union or blank space outside a quoted name, no missing `$`, no
 message names table, column, config path, character position and form, and shows the target text up to 64
 characters (a longer one reads `first 64 of N characters`); it never shows a cell. `nested_jsonpath_parse_error`
 stays as the handler backstop when the handler runs without a compiled plan. The engine evaluates the grammar itself (`TargetPath.find`), so what a target selects does not depend on the
-installed jsonpath-ng. A name selects a member of an object. `.*` selects the members of an object or the items of an
+any JSONPath library. A name selects a member of an object. `.*` selects the members of an object or the items of an
 array. `[*]`, an index and a slice select items of an array only; on an object or a scalar they fail closed with
 `nested_target_unwritable_container` (the index case was a bare `KeyError`), and on a null they select nothing. An
 index outside an array selects nothing for that branch only. `nested_jsonpath_path_overlap` stays registered and is no
-longer raised, because no subset target can match a path and its prefix. The requirement stays `jsonpath-ng>=1.8.0,<2`
-(1.16 needs Python 3.11); no engine code imports it any more.
+longer raised, because no subset target can match a path and its prefix. The engine no longer depends on jsonpath-ng:
+the requirement is removed and `tests/sentry/defects/test_nested_target_choke_point.py` fails on any import of it.
 
 ### 3.5 Disguises
 

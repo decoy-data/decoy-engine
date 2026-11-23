@@ -9,7 +9,7 @@ survivor count and the resulting score are a conservative lower bound: some
 mutants counted "survived" here are in fact killed by tests outside this file.
 
 TQ crown-jewels pass, 2026-07-26. `nested` wraps a child strategy and applies it
-at a JSONPath target inside each JSON cell: parse -> locate leaves (`jsonpath_ng`)
+at a JSONPath target inside each JSON cell: parse -> locate leaves (`TargetPath.find`)
 -> collect into one Series -> run the child once (batch) -> write each masked
 value back at its own path -> re-serialize. Malformed JSON emits a
 `QualityWarning` and passes through; a no-match path is left unchanged with no
