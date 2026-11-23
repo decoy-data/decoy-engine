@@ -54,6 +54,7 @@ __all__ = [
     "NESTED_TARGET_MATCHED_NOTHING",
     "NESTED_TARGET_UNSET",
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
+    "NONFK_FULL_FRAME_CAPACITY_EXCEEDED",
     "NUMEXPR_REQUIRED",
     "POST_SCAN_DISTRIBUTION_DEFERRED",
     "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
@@ -439,6 +440,14 @@ POST_SCAN_DISTRIBUTION_DEFERRED = _d(
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
     since="1.30.0",
+)
+# A non-FK table the full-frame route holds whole: refused when even the input plus one pandas
+# copy cannot fit the kill ceiling, or a measured peak clears it by the calibration band.
+NONFK_FULL_FRAME_CAPACITY_EXCEEDED = _d(
+    "nonfk_full_frame_capacity_exceeded",
+    "A job with no foreign keys would hold more memory than this machine can give it.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since=UNRELEASED,
 )
 # A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
 # (a publication outcome) would name the wrong stage.
