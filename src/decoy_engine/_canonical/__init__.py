@@ -21,6 +21,7 @@ from decoy_engine._canonical._json import (
     strict_json_write,
 )
 from decoy_engine._canonical._strict_spec import (
+    UNIT_PATH_MAX_DEPTH,
     CountSpec,
     ExactSpec,
     ListSpec,
@@ -34,6 +35,8 @@ from decoy_engine._canonical._strict_spec import (
     SpecRefusedError,
     VersionSpec,
     attempt,
+    check_unit_path,
+    check_unit_paths,
     parse_or_token,
 )
 
@@ -43,6 +46,7 @@ __all__ = [
     "MASK_MAX_DEPTH",
     "PROFILE_JSON_TOKENS",
     "STRICT_JSON_TOKENS",
+    "UNIT_PATH_MAX_DEPTH",
     "CanonicalJsonError",
     "CanonicalStringError",
     "CountSpec",
@@ -62,6 +66,8 @@ __all__ = [
     "VersionSpec",
     "attempt",
     "canonical_json_bytes",
+    "check_unit_path",
+    "check_unit_paths",
     "jcs_bytes",
     "parse_or_token",
     "seed_fingerprint_bytes",

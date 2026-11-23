@@ -26,6 +26,8 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
@@ -498,11 +500,13 @@ class TestApplyBucketPerturbCore:
         )
         assert list(out) == ["2024-06-12"]
 
-    def test_autodetect_used_when_date_format_is_none(self):
-        """With date_format=None the format is detected from the data; passing None
-        into detection instead of the series would crash."""
-        out = apply_bucket_perturb(pd.Series(["2024-06-15"]), "month", _SEED, "dates", None)
-        assert list(out) == ["2024-06-12"]
+    def test_no_detection_when_date_format_is_none(self):
+        """COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (detection removed,
+        text needs `date_format`): with date_format=None the transform refuses and never reads a
+        format from the data, even from clean ISO values that detection used to read."""
+        with pytest.raises(ExecutionError) as exc:
+            apply_bucket_perturb(pd.Series(["2024-06-15"]), "month", _SEED, "dates", None)
+        assert exc.value.code == reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT
 
     def test_unparseable_value_is_reported_not_perturbed(self):
         """An unparseable cell is reported as a format error and left out of the bucketing,

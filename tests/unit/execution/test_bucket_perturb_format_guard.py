@@ -127,6 +127,9 @@ class _Ctx:
         self.mask_key = THROWAWAY_KEY_PROVIDER.mask_key()
         self.row_offset = 0
 
+    def native_date_shape(self, column: str) -> None:
+        return None
+
 
 def _nested_seed(child_format: Any, *, when: str | None = None) -> ColumnSeed:
     child = {"bucket": "month", "date_format": child_format}

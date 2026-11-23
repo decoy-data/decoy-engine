@@ -70,6 +70,12 @@ _DATE_SHIFT_FORMAT = StrategyRequirement(
     "date_shift needs provider_config.date_format, the strftime format of its dates.",
 )
 
+_BUCKET_PERTURB_FORMAT = StrategyRequirement(
+    (*_PROVIDER, "date_format"),
+    reasons.plan.COLUMN_SHAPE_REQUIRED,
+    "bucket_perturb reads dates from text; set provider_config.date_format.",
+)
+
 REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = MappingProxyType(
     {
         "hash": (_namespace("hash"),),
@@ -78,7 +84,7 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
             _namespace("date_shift"),
             _DATE_SHIFT_FORMAT,
         ),
-        "bucket_perturb": (_namespace("bucket_perturb"),),
+        "bucket_perturb": (_namespace("bucket_perturb"), _BUCKET_PERTURB_FORMAT),
         "categorical": (_namespace("categorical"),),
         "tokenize": (_namespace("tokenize"),),
         "shuffle": (_namespace("shuffle", when_path=("deterministic",), when_equals=True),),
@@ -145,6 +151,9 @@ def _number_declaration(strategy: str, tail: str) -> StrategyRequirement:
 _DATE_SHIFT_HINT = (
     "date_shift reads dates: use a date or zoned timestamp column, or text with a date_format."
 )
+_BUCKET_PERTURB_HINT = "bucket_perturb reads dates: use a date column, or text with a date_format."
+_BUCKET_PERTURB_CAST_HINT = "cast it to a date, or write it as text with a date_format."
+
 _NEEDS_NUMBER_DECLARATION = frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN})
 _TOP_CODE_DECIMAL_HINT = "top_code reads integers; cast the column to an integer."
 _TOP_CODE_ADMITTED = _NEEDS_NUMBER_DECLARATION | {ColumnShape.INTEGER, ColumnShape.FLOAT}
@@ -153,7 +162,8 @@ _TOP_CODE_ADMITTED = _NEEDS_NUMBER_DECLARATION | {ColumnShape.INTEGER, ColumnSha
 # ``unknown`` column (compile has no proof it is typed). Every other shape cannot be read. The
 # numeric strategies need an F06 integer declaration on text (``bucketize`` also takes a bounded
 # decimal) and compute as they do today on typed numbers. ``fpe`` needs no declaration: a text
-# column is its charset's business.
+# column is its charset's business. ``bucket_perturb`` runs bare on a date only: a zoned timestamp
+# is refused until a later row admits it.
 SHAPE_REQUIREMENTS_BY_STRATEGY: Mapping[str, ShapeRequirement] = MappingProxyType(
     {
         "date_shift": ShapeRequirement(
@@ -169,6 +179,19 @@ SHAPE_REQUIREMENTS_BY_STRATEGY: Mapping[str, ShapeRequirement] = MappingProxyTyp
                         "cast it to a date or a zoned timestamp, or write it as text with a "
                         "date_format."
                     )
+                }
+            ),
+        ),
+        "bucket_perturb": ShapeRequirement(
+            "date",
+            _BUCKET_PERTURB_FORMAT,
+            frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN}),
+            admitted=frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN, ColumnShape.DATE}),
+            default_hint=_BUCKET_PERTURB_HINT,
+            hints=MappingProxyType(
+                {
+                    ColumnShape.TIMESTAMP_NAIVE: _BUCKET_PERTURB_CAST_HINT,
+                    ColumnShape.TIMESTAMP_TZ: _BUCKET_PERTURB_CAST_HINT,
                 }
             ),
         ),

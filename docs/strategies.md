@@ -247,11 +247,16 @@ secret.
 - `bucket` (str, required): one of `week`, `month`, or `quarter`. An invalid
   or misspelled value raises `StrategyError(bucket_perturb_invalid_config)` at
   execution time, before any row is processed (fail-closed).
-- `date_format`: a strftime format; detected from the column if omitted, and the run
-  stops when none can be detected (set it explicitly, as detection is going away). It
-  must contain at least one date directive (`%Y`, `%m`, `%d`, ...) because the same
-  format writes each perturbed date back. `ISO8601`, `mixed`, a bare `%Q` or a
-  time-only format such as `%H:%M:%S` is rejected at compile time with
+- `date_format`: a strftime format. Required on a text column: a `bucket_perturb` column of text
+  without one is refused at plan compile (`column_shape_required`), and nothing guesses it from
+  the cells. A source column that is already a date (Parquet, DuckDB, a database or an Arrow
+  table) needs none. The column's type comes from the source schema, and the output keeps it: a
+  date stays a date. A `date_format` set on such a column is not used, and compile adds the
+  warning `column_shape_format_unused`. A timestamp (with or without a time zone), a number, a
+  boolean or a decimal column is refused at compile (`column_shape_mismatch`); cast it to a date,
+  or write it as text with a `date_format`. The format must contain at least one date directive
+  (`%Y`, `%m`, `%d`, ...) because the same format writes each perturbed date back. `ISO8601`,
+  `mixed`, a bare `%Q` or a time-only format such as `%H:%M:%S` is rejected at compile time with
   `bucket_perturb_date_format_unsupported`, and by the handler as
   `bucket_perturb_invalid_config`. Write a concrete pattern such as `%Y-%m-%d`.
   Time, fractional-second and timezone directives are allowed but write midnight,
@@ -278,11 +283,13 @@ and processes.
 Null values stay null. A non-null value that does not parse as a date is a
 `format_error` row error, as it is for `date_shift`: the run fails, or the row is
 quarantined when quarantine covers `format_error`. The source text is never written
-out as if it were masked. When no `date_format` is set and none can be detected from
-the data, the run stops with `bucket_perturb_requires_date_format`. The out-of-core
+out as if it were masked. A caller that reaches the strategy with no `date_format` on a
+column the plan does not list as a date (a run that skipped plan compile) stops with
+`bucket_perturb_requires_date_format`. The out-of-core
 route has no row-error channel, so on that route a value that does not parse stops
-the run with `bucket_perturb_unparseable_no_row_channel`. A date outside pandas' range (before 1677 or after 2262, such as 9999-12-31) is
-also a row error. To keep a known sentinel as it is, list it in `preserve_values`:
+the run with `bucket_perturb_unparseable_no_row_channel`. On a text column, a date outside pandas' range (before 1677 or after 2262, such as
+9999-12-31) is also a row error; a date column has no such limit, and only a bucket position outside the years 1
+to 9999 is a row error. To keep a known sentinel as it is, list it in `preserve_values`:
 it is kept unchanged even when it is out of that range.
 
 ```yaml
@@ -331,7 +338,7 @@ provider_config:
 ```
 
 - `date_format` is required when `preserve_values` is set on a text column; a typed date or
-  zoned timestamp column needs none, and its sentinel rows keep their source value and type.
+  zoned timestamp column (a date only, for `bucket_perturb`) needs none, and its sentinel rows keep their source value and type.
   The sentinel is matched by calendar date, so `01/01/2099` under `%d/%m/%Y` matches `2099-01-01` and a
   time of day is ignored. `%f`, `%Z`, `ISO8601` and `mixed` are rejected with it.
 - `9999-12-31` is matched explicitly. Without the option, pandas cannot represent
@@ -340,8 +347,9 @@ provider_config:
   perturbed.
 - A string source is emitted byte for byte. A typed date or timestamp source is
   rendered from its calendar date with `date_format`, so the output column stays
-  text. The exception is `date_shift` on a source column that is natively a date or a
-  zoned timestamp: its sentinel rows keep their source value and the column keeps its type.
+  text. The exception is `date_shift` or `bucket_perturb` on a source column that is natively a
+  date (or, for `date_shift`, a zoned timestamp): its sentinel rows keep their source value and
+  the column keeps its type.
 - It works on every route the operator runs on (pandas, native chunked, native
   full-frame, and out-of-core for `bucket_perturb`). Preserved rows never reach the
   keyed derivation, so a sentinel next to the 1677 or 2262 bounds is safe too.

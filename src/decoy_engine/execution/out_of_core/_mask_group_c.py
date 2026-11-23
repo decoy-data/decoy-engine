@@ -54,10 +54,9 @@ handle them), never a wrong output:
   that the full-frame path removes via the D8 quarantine pass; the out-of-core
   route returns before that pass and has no row-error/quarantine channel (the
   same wall SC3's `bucketize`/`date_shift` hit).
-- bucket_perturb without an explicit `date_format`. `apply_bucket_perturb` falls
-  back to `date_shift._detect_format` over the WHOLE series, which does not chunk
-  (a batch could detect a different format than the full column). Requiring an
-  explicit format keeps the transform per-value and byte-parity-able.
+- bucket_perturb without an explicit `date_format`. `apply_bucket_perturb` refuses a
+  missing format and never detects one from the cells, so a column with no format
+  (a native date) has no text kernel and stays off this route.
 - geo_generalize. Its k-anonymity cascade (ZIP5/ZIP3/state or H3 resolutions)
   thresholds each row on the count of records sharing that generalization ACROSS
   THE WHOLE DATASET; a chunk sees only partial counts, so the cascade decision is

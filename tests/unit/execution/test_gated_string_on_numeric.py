@@ -23,6 +23,7 @@ from decoy_engine.execution._gated_string_guard import (
     reject_gated_string_on_numeric,
     widen_numeric_target_for_strings,
 )
+from decoy_engine.plan import PlanCompileError
 from decoy_engine.relationships._namespace import NamespaceRegistry
 from tests.unit.execution import _c8_iii_c_support as sup
 from tests.unit.execution import _multi_table_support as mt
@@ -195,18 +196,21 @@ class TestNullablePredicateAndBucketPerturb:
                 strategy="faker",
             )
 
-    def test_bucket_perturb_without_a_format_refuses_instead_of_passing_numbers_through(
+    def test_bucket_perturb_on_an_integer_column_is_refused_at_compile(
         self, tmp_path: Path
     ) -> None:
         nums = pa.table({"c": pa.array([1, 2, 3, 4], pa.int64())})
         col = _gate_col(
             "bucket_perturb", namespace="ns_bp", provider_config={"bucket": "month"}, when="c > 2"
         )
-        with pytest.raises(ExecutionError) as exc:
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
+        # integer column: refused `column_shape_mismatch`): the compile refuses the pairing before
+        # any row runs, so the run-time guard is exercised by the faker cases above.
+        with pytest.raises(PlanCompileError) as exc:
             _run(tmp_path, nums, col)
-        assert exc.value.code == "bucket_perturb_requires_date_format"
+        assert exc.value.code == "column_shape_mismatch"
 
-    def test_bucket_perturb_that_emits_strings_is_caught_by_execution_guard(
+    def test_bucket_perturb_with_a_format_on_an_integer_column_is_refused_at_compile(
         self, tmp_path: Path
     ) -> None:
         dates = pa.table({"c": pa.array([20240115, 20240216, 20240317, 20240418], pa.int64())})
@@ -216,13 +220,16 @@ class TestNullablePredicateAndBucketPerturb:
             provider_config={"bucket": "month", "date_format": "%Y%m%d"},
             when="c > 20240300",
         )
-        with pytest.raises(ExecutionError) as exc:
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
+        # integer column: refused `column_shape_mismatch`): the compile refuses the pairing before
+        # any row runs, so the run-time guard is exercised by the faker cases above.
+        with pytest.raises(PlanCompileError) as exc:
             _run(tmp_path, dates, col)
-        assert exc.value.code == _CODE
+        assert exc.value.code == "column_shape_mismatch"
 
 
 class TestMixedOutput:
-    def test_codex_mixed_repro_bucket_perturb_raises(self, tmp_path: Path) -> None:
+    def test_codex_mixed_repro_bucket_perturb_is_refused_at_compile(self, tmp_path: Path) -> None:
         # Selected rows: 20240317 -> a date string, 4 -> kept integer. `produced` is mixed.
         mixed = pa.table({"c": pa.array([1, 2, 20240317, 4], pa.int64())})
         col = _gate_col(
@@ -231,9 +238,12 @@ class TestMixedOutput:
             provider_config={"bucket": "month", "date_format": "%Y%m%d"},
             when="c > 2",
         )
-        with pytest.raises(ExecutionError) as exc:
+        # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
+        # integer column: refused `column_shape_mismatch`): the compile refuses the pairing before
+        # any row runs, so the run-time guard is exercised by the faker cases above.
+        with pytest.raises(PlanCompileError) as exc:
             _run(tmp_path, mixed, col)
-        assert exc.value.code == _CODE
+        assert exc.value.code == "column_shape_mismatch"
 
     def test_intrinsically_mixed_output_on_full_gate_raises(self) -> None:
         source = pd.Series([1, 2, 3], dtype="int64")
