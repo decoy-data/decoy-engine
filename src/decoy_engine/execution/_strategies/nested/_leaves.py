@@ -42,25 +42,24 @@ _FAULTS: dict[str, tuple[str, str]] = {
 def find_matches(expr: Any, parsed: Any, column: str) -> list[Any]:
     """The JSONPath matches in one parsed cell, the single place `find` is called.
 
-    jsonpath-ng treats an array selector on a scalar as a one-item list, but it calls `len()` on a
-    `JsonNumber` (a lossy number kept as read). That `TypeError` is the same fault as an array
-    selector on a plain scalar, which the writeback check refuses with the unwritable-container
-    code, so it gets that code here. An index on an object raises `KeyError`: same fault, same
-    code. No match is returned, so nothing can be written back.
+    An array selector applied to an object or a scalar raises `TypeError` from `TargetPath.find`:
+    the write-back could not replace what it would select, so it gets the unwritable-container
+    code here. No match is returned, so nothing can be written back.
     """
     failed = False
     matches: list[Any] = []
     try:
         matches = expr.find(parsed)
-    except (TypeError, KeyError):
+    except TypeError:
         failed = True
     if failed:
         raise StrategyError(
             code=reasons.runtime.NESTED_TARGET_UNWRITABLE_CONTAINER,
             strategy="nested",
             message=(
-                f"nested target cannot be applied to a number in column {column!r}: an array "
-                "selector on a scalar. Failing closed to avoid leaking the source value."
+                f"nested target cannot be applied to this cell in column {column!r}: an array "
+                "selector on a value that is not an array. Failing closed to avoid leaking the "
+                "source value."
             ),
         )
     return matches

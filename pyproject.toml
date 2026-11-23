@@ -96,10 +96,11 @@ dependencies = [
     # JSONPath. jsonpath-ng (MIT) is the established, maintained
     # implementation; matches our posture for numexpr / polars (do not roll
     # our own parser). Required at import time of the nested strategy
-    # module; absent imports fall back to a typed runtime error. Capped at 1.8.x: how an array
-    # selector acts on an object or scalar changes in later releases (1.16 does not coerce), and
-    # the handler's fail-closed writeback guard and its tests are written against 1.8.
-    "jsonpath-ng>=1.8.0,<1.9",
+    # module; absent imports fall back to a typed runtime error. NESTED-FREEZE: the nested
+    # target grammar and its evaluator are our own (`_nested_json/_target.py`), so no engine code
+    # imports jsonpath-ng any more and the result does not move with its release. The tests that
+    # prove that run against 1.8 (Python 3.10, which 1.16 does not support) and 1.16.
+    "jsonpath-ng>=1.8.0,<2",
     # SEC.1 / C1 (2026-06-03): user-supplied `formula` expressions evaluate
     # under simpleeval's restricted single-expression sandbox instead of
     # CPython eval() (which, even with empty __builtins__, was a known RCE via

@@ -3,8 +3,8 @@ masking.
 
 Wraps a child strategy. For each cell:
   1. Parse the cell as JSON (object or array).
-  2. Use jsonpath-ng, fed by the one target grammar (`_nested_json.parse_target`), to locate
-     one or more leaf values at `target`.
+  2. Locate one or more leaf values at `target` with the one target grammar
+     (`_nested_json.parse_target`) and its evaluator (`TargetPath.find`).
   3. Collect the leaf values into a temporary Series.
   4. Run the child strategy against that Series (single batch call).
   5. Write the masked values back into the parsed JSON at the same
@@ -44,22 +44,21 @@ Config (`provider_config`):
                                     strategy. Optional, defaults to
                                     empty.
 
-Established methodology citation: jsonpath-ng is the maintained
-Python implementation of the JSONPath specification (RFC 9535 draft
-+ Stefan Goessner's reference syntax). MIT-licensed; matches our
-posture for numexpr / polars (we don't reinvent parsers).
+Established methodology citation: the target grammar is a closed subset of RFC 9535
+(JSONPath). `_nested_json._target` scans it and evaluates it with our own code, so the frozen
+behavior does not move with a jsonpath-ng release (1.8 and 1.16 disagree on an array selector
+applied to an object).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import jsonpath_ng
 import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine._canonical import StrictJsonError, strict_json_plain, strict_json_write
-from decoy_engine._nested_json import TargetRefusal, nested_children, parse_target, to_jsonpath
+from decoy_engine._nested_json import TargetRefusal, nested_children, parse_target
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -76,31 +75,21 @@ from decoy_engine.plan._types import ColumnSeed
 
 
 def _writeback_would_corrupt(full_path: Any, root: Any) -> bool:
-    """True if `full_path.update(root, value)` would misplace the write.
+    """True if writing at `full_path` would not replace the selected value.
 
-    jsonpath-ng coerces an array selector (`[*]`, `[i]`, a slice) applied to a
-    dict into a synthetic singleton list, so the match's `full_path` ends in an
-    `Index` even though the real parent container is the dict. `.update()` then
-    writes an integer key onto the dict instead of replacing the object, leaving
-    the original value in place (a cleartext leak). The signature is a
-    segment-vs-parent-type mismatch: an `Index` whose parent is not a list, or a
-    `Fields` whose parent is not a dict. Reliable writes (Fields->dict,
-    Index->list) and root/`this` targets (handled by capturing the update
-    return) are not flagged.
+    `TargetPath.find` only selects through the right container (a name in an object, a position
+    in an array), so this re-walks the keys against the cell as a second check at the write: a
+    key whose container has the other type, or is gone, fails closed instead of writing a new key
+    next to the cleartext.
     """
-    if isinstance(full_path, jsonpath_ng.Child):
-        parent_path, last = full_path.left, full_path.right
-        found = parent_path.find(root)
-        if not found:
-            return True  # parent unresolvable -> cannot verify the write, fail closed
-        parent_val = found[0].value
-    else:
-        last = full_path
-        parent_val = root
-    if isinstance(last, jsonpath_ng.Index):
-        return not isinstance(parent_val, list)
-    if isinstance(last, jsonpath_ng.Fields):
-        return not isinstance(parent_val, dict)
+    node = root
+    for key in full_path.keys:
+        if isinstance(key, int):
+            if not isinstance(node, list) or not 0 <= key < len(node):
+                return True
+        elif not isinstance(node, dict) or key not in node:
+            return True
+        node = node[key]
     return False
 
 
@@ -290,7 +279,7 @@ class NestedStrategyHandler:
                     f"(column={column!r}): {parsed_target}"
                 ),
             )
-        jsonpath_expr = to_jsonpath(parsed_target)
+        jsonpath_expr = parsed_target
 
         col = df[column]
         if pd.api.types.is_extension_array_dtype(col.dtype):
@@ -472,15 +461,10 @@ class NestedStrategyHandler:
             for m in matches:
                 new_value = new_leaf_values[cursor]
                 cursor += 1
-                # Fail closed if jsonpath_ng would misapply this writeback. When
-                # an array selector (`[*]`, `[i]`, a slice) targets a dict,
-                # jsonpath_ng coerces the dict into a synthetic singleton list, so
-                # `full_path` becomes an Index that `.update()` writes as a NEW
-                # integer key on the dict instead of replacing the object -- the
-                # original cleartext survives (Codex 2026-07-31 BLOCKER: `$[*]` on
-                # `{"ssn": ...}` added key "0" and republished the SSN). The
-                # segment-vs-parent-type mismatch is the coercion signature; a
-                # reliable write must not leak, so reject the whole run.
+                # `TargetPath.find` already refuses an array selector on an object. This is the
+                # second check at the write: a key whose container has the other type would add
+                # a new key next to the cleartext (Codex 2026-07-31 BLOCKER: `$[*]` on
+                # `{"ssn": ...}` added key "0" and republished the SSN), so reject the run.
                 if _writeback_would_corrupt(m.full_path, parsed):
                     raise StrategyError(
                         code=reasons.runtime.NESTED_TARGET_UNWRITABLE_CONTAINER,
@@ -489,16 +473,15 @@ class NestedStrategyHandler:
                             f"nested target resolved to a match whose masked value "
                             f"cannot be written back reliably for column {column!r} "
                             f"(an array/index selector applied to a JSON object; "
-                            f"jsonpath-ng coerces it and the write would not replace "
-                            f"the object). Failing closed to avoid leaking the source "
+                            f"the write would not replace the object). Failing closed to avoid leaking the source "
                             f"value. Use an object-appropriate target (e.g. `$.*` or a "
                             f"field path) instead of an array selector on an object."
                         ),
                     )
-                # Capture the return value. For a field/index path jsonpath_ng
+                # Capture the return value. For a field/index path `update`
                 # mutates `parsed` in place and returns it, but for a ROOT target
                 # (`$`, or the backtick-`this` selector) the root has no parent to
-                # write into, so `Root.update()` returns the replacement WITHOUT
+                # write into, so `MatchPath.update()` returns the replacement WITHOUT
                 # mutating `parsed`. Discarding it re-serialized the original
                 # cleartext -- a masked-root cell (e.g. target `$` + redact) would
                 # publish raw PII with no error or warning. Reassigning `parsed`
@@ -512,20 +495,11 @@ class NestedStrategyHandler:
 
 
 def _path_segments(match: Any) -> tuple[str, ...]:
-    """Return the dotted segments of a jsonpath_ng match's full_path.
+    """Return the dotted segments of a match's full_path (`user.email` -> ("user", "email")).
 
-    `match.full_path` is a chain of Fields / Index / Slice nodes; its
-    `str` representation yields a dotted expression like `user.name`
-    or `(user.email)` (recursive-descent compound paths wrap in
-    parens). We strip the wrapping parens before splitting on `.` so
-    that `(user.email)` -> ("user", "email") aligns with the bare
-    `user` segment from the recursive root match for prefix-overlap
-    detection.
+    A wrapping paren pair is stripped so a path written `(user.email)` splits the same way.
     """
     raw = str(match.full_path).strip()
-    # Strip a single outer paren wrapper if present (jsonpath_ng emits
-    # these for compound recursive paths). Inner parens, if any,
-    # remain inside the segment.
     if raw.startswith("(") and raw.endswith(")"):
         raw = raw[1:-1]
     return tuple(raw.split("."))
@@ -535,7 +509,7 @@ def _order_matches_deepest_first(matches: list) -> list:
     """Return matches sorted by path depth descending.
 
     QA-3 F14 (2026-05-31): when the JSONPath produces overlapping
-    matches (one path is a prefix of another), `jsonpath_ng.update`
+    matches (one path is a prefix of another), a write
     in original order can silently lose the inner write. Sorting
     deepest-first makes the outer container's masked value the LAST
     write, so the final cell reflects the parent's masking; this is

@@ -1349,11 +1349,13 @@ filter, function, union or blank space outside a quoted name, no missing `$`, no
 `compile_plan` and `run_config_only_checks` with the new plan reason `plan.nested_target_unsupported`. The
 message names table, column, config path, character position and form, and shows the target text up to 64
 characters (a longer one reads `first 64 of N characters`); it never shows a cell. `nested_jsonpath_parse_error`
-stays as the handler backstop when the handler runs without a compiled plan. An index selector on a JSON object
-cell fails closed with `nested_target_unwritable_container` (it was a bare `KeyError`), and an index past the end of
-an array selects nothing. `nested_jsonpath_path_overlap` stays registered and is no longer raised, because no
-subset target can match a path and its prefix. Known gap to RFC 9535: `$.*` on an array cell selects nothing
-under jsonpath-ng. Widening the grammar later is additive. The dependency is `jsonpath-ng>=1.8.0,<1.9`.
+stays as the handler backstop when the handler runs without a compiled plan. The engine evaluates the grammar itself (`TargetPath.find`), so what a target selects does not depend on the
+installed jsonpath-ng. A name selects a member of an object. `.*` selects the members of an object or the items of an
+array. `[*]`, an index and a slice select items of an array only; on an object or a scalar they fail closed with
+`nested_target_unwritable_container` (the index case was a bare `KeyError`), and on a null they select nothing. An
+index outside an array selects nothing for that branch only. `nested_jsonpath_path_overlap` stays registered and is no
+longer raised, because no subset target can match a path and its prefix. The requirement stays `jsonpath-ng>=1.8.0,<2`
+(1.16 needs Python 3.11); no engine code imports it any more.
 
 ### 3.5 Disguises
 

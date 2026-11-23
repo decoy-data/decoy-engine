@@ -6,9 +6,10 @@ with a library release. A target is `$` followed by segments: `.name`, `.*`, `['
 2.3.4). Descendant segments, filters, function extensions, unions and every jsonpath-ng extension
 are refused. A quoted name `*` is refused too: jsonpath-ng reads it as a wildcard.
 
-`parse_target` scans the text itself and builds jsonpath_ng AST nodes (`to_jsonpath`), so no
-jsonpath-ng parser is on the public surface. `tests/sentry/defects/test_nested_target_choke_point.py`
-fails on a module that imports one.
+`parse_target` scans the text itself, and `TargetPath.find` evaluates it with our own code, so
+neither the accepted set nor what a selector matches depends on a jsonpath-ng release (1.8 coerced
+an array selector on an object, 1.16 does not). `tests/sentry/defects/test_nested_target_choke_point.py`
+fails on a module that imports a jsonpath-ng parser.
 """
 
 from __future__ import annotations
@@ -17,9 +18,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from jsonpath_ng import Child, Fields, Index, Root, Slice
-
-__all__ = ["Segment", "TargetPath", "TargetRefusal", "parse_target", "to_jsonpath"]
+__all__ = ["Match", "MatchPath", "Segment", "TargetPath", "TargetRefusal", "parse_target"]
 
 # RFC 9535 section 2.1.1: the I-JSON integer range.
 _MAX_INDEX: Final = 2**53 - 1
@@ -39,8 +38,75 @@ class Segment:
 
 
 @dataclass(frozen=True)
+class MatchPath:
+    """Where a match sits: the keys from the root, each a member name or an array position."""
+
+    keys: tuple[str | int, ...]
+
+    def update(self, root: Any, value: Any) -> Any:
+        """The root with the value written at this path (the root itself for the empty path)."""
+        if not self.keys:
+            return value
+        node = root
+        for key in self.keys[:-1]:
+            node = node[key]
+        node[self.keys[-1]] = value
+        return root
+
+    def __str__(self) -> str:
+        return ".".join(f"[{k}]" if isinstance(k, int) else k for k in self.keys)
+
+
+@dataclass(frozen=True)
+class Match:
+    value: Any
+    full_path: MatchPath
+
+
+@dataclass(frozen=True)
 class TargetPath:
     segments: tuple[Segment, ...]
+
+    def find(self, root: Any) -> list[Match]:
+        """Every value the target selects in one parsed cell.
+
+        Rules, decided here and not left to a library: a name selects a member of an object; `.*`
+        selects the members of an object or the items of an array (RFC 9535 2.3.2); `[*]`, an index
+        and a slice select items of an array only. Applied to an object or a scalar they raise
+        `TypeError` (the handler maps it to `nested_target_unwritable_container`), because a
+        write-back could not replace what they would select there. A null selects nothing. An index
+        outside the array selects nothing for that branch only. A name on a non-object selects
+        nothing.
+        """
+        found = [Match(root, MatchPath(()))]
+        for segment in self.segments:
+            found = [hit for match in found for hit in _step(segment, match)]
+        return found
+
+
+def _step(segment: Segment, match: Match) -> list[Match]:
+    value, keys = match.value, match.full_path.keys
+
+    def at(key: str | int) -> Match:
+        return Match(value[key], MatchPath((*keys, key)))
+
+    if segment.kind == "name":
+        return [at(segment.value)] if isinstance(value, dict) and segment.value in value else []
+    if segment.kind == "all_members":
+        if isinstance(value, dict):
+            return [at(k) for k in value]
+        return [at(i) for i in range(len(value))] if isinstance(value, list) else []
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError("array selector on a value that is not an array")
+    if segment.kind == "all_items":
+        return [at(i) for i in range(len(value))]
+    if segment.kind == "index":
+        position = segment.value + len(value) if segment.value < 0 else segment.value
+        return [at(position)] if 0 <= position < len(value) else []
+    start, end, step = segment.value
+    return [at(i) for i in range(*slice(start, end, step).indices(len(value)))]
 
 
 @dataclass(frozen=True)
@@ -245,41 +311,3 @@ def _slice_rest(text: str, start: int | None, pos: int) -> tuple[Segment, int] |
             return TargetRefusal(at + 1, "slice step must be 1 or more")
         at = after
     return Segment("slice", (start, end, step)), at
-
-
-class _InRangeIndex(Index):
-    """An index that selects nothing when it is outside the array, for that one node only.
-
-    jsonpath-ng raises `IndexError` for a negative index past the start. Catching that around a
-    whole `find` would drop the matches of every other branch (`$.items[*].tags[2]` with one short
-    array), so those leaves would go out unmasked. A non-list value keeps jsonpath-ng's own
-    behavior, which the handler refuses as an unwritable container.
-    """
-
-    def find(self, datum: Any) -> list[Any]:
-        value = getattr(datum, "value", datum)
-        (index,) = self.indices
-        if isinstance(value, list) and not -len(value) <= index < len(value):
-            return []
-        return super().find(datum)
-
-
-def to_jsonpath(path: TargetPath) -> Any:
-    """The jsonpath-ng expression for the segments, built node by node (never parsed)."""
-    expr: Any = Root()
-    for segment in path.segments:
-        expr = Child(expr, _node(segment))
-    return expr
-
-
-def _node(segment: Segment) -> Any:
-    if segment.kind == "name":
-        return Fields(segment.value)
-    if segment.kind == "all_members":
-        return Fields("*")
-    if segment.kind == "all_items":
-        return Slice()
-    if segment.kind == "index":
-        return _InRangeIndex(segment.value)
-    start, end, step = segment.value
-    return Slice(start, end, step)

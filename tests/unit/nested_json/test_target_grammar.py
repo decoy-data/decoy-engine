@@ -14,7 +14,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from decoy_engine._nested_json import TargetRefusal, parse_target, to_jsonpath
+from decoy_engine._nested_json import TargetRefusal, parse_target
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies.nested._handler import NestedStrategyHandler
 from decoy_engine.execution._strategies.nested._leaves import find_matches
@@ -25,11 +25,8 @@ _CASES: list[dict[str, Any]] = _FIXTURE["cases"]
 _INVALID = [c for c in _CASES if c.get("invalid")]
 _REFUSED_VALID = [c for c in _CASES if not c.get("invalid") and not c["subset"]]
 _ACCEPTED = [c for c in _CASES if not c.get("invalid") and c["subset"]]
-_SELECTS = [
-    c for c in _ACCEPTED if not c.get("fails_closed") and not c.get("jsonpath_ng_selects_nothing")
-]
+_SELECTS = [c for c in _ACCEPTED if not c.get("fails_closed")]
 _FAILS_CLOSED = [c for c in _ACCEPTED if c.get("fails_closed")]
-_NOTHING = [c for c in _ACCEPTED if c.get("jsonpath_ng_selects_nothing")]
 
 
 def _ids(cases: list[dict[str, Any]]) -> list[str]:
@@ -66,8 +63,7 @@ def test_valid_rfc_selectors_outside_the_subset_are_refused(case: dict[str, Any]
 
 @pytest.mark.parametrize("case", _SELECTS, ids=_ids(_SELECTS))
 def test_subset_selector_selects_what_the_cts_says(case: dict[str, Any]) -> None:
-    expr = to_jsonpath(parse_target(case["selector"]))
-    got = [m.value for m in find_matches(expr, case["document"], "data")]
+    got = [m.value for m in find_matches(parse_target(case["selector"]), case["document"], "data")]
     wanted = [case["result"]] if "result" in case else case["results"]
     assert got in wanted
 
@@ -81,13 +77,6 @@ def test_subset_selector_that_jsonpath_ng_misapplies_fails_closed(case: dict[str
             df, "data", _seed({"target": case["selector"], "strategy": "redact"}), _FakeCtx()
         )
     assert exc.value.code == "nested_target_unwritable_container"
-
-
-@pytest.mark.parametrize("case", _NOTHING, ids=_ids(_NOTHING))
-def test_dot_wildcard_on_an_array_selects_nothing_in_jsonpath_ng(case: dict[str, Any]) -> None:
-    """Known gap to RFC 9535: `$.*` on an array selects its items there, nothing here. The cell
-    stays as it is and a column with no match at all raises `nested_target_matched_nothing`."""
-    assert to_jsonpath(parse_target(case["selector"])).find(case["document"]) == []
 
 
 def test_a3_quoted_star_is_not_a_member_name() -> None:
@@ -110,17 +99,6 @@ def test_index_past_the_end_selects_nothing_and_never_raises() -> None:
     df = pd.DataFrame({"data": ["[1, 2]", "[1, 2, 3]"]})
     out, _ = handler.run(df, "data", _seed({"target": "$[2]", "strategy": "redact"}), _FakeCtx())
     assert out["data"].tolist() == ["[1, 2]", '[1, 2, "REDACTED"]']
-
-
-@pytest.mark.parametrize(
-    "target",
-    ["$", "$.a", "$.a.b", "$.*", "$[*]", "$[0]", "$[-1]", "$[1:]", "$[0:4:2]", "$.users[*].email"],
-)
-def test_built_ast_equals_the_jsonpath_ng_parse(target: str) -> None:
-    from jsonpath_ng import parse
-
-    built = repr(to_jsonpath(parse_target(target))).replace("_InRangeIndex", "Index")
-    assert built == repr(parse(target))
 
 
 @pytest.mark.parametrize(
@@ -174,3 +152,37 @@ def test_negative_index_past_the_start_selects_nothing_for_that_branch() -> None
     out, _ = handler.run(df, "data", _seed({"target": target, "strategy": "redact"}), _FakeCtx())
     items = json.loads(out["data"].iloc[0])["items"]
     assert items[0]["tags"] == ["REDACTED", "b"] and items[1]["tags"] == ["x"]
+
+
+def test_dot_wildcard_selects_array_items_and_object_members() -> None:
+    """RFC 9535 2.3.2. Decided in our evaluator, not by the installed jsonpath-ng."""
+    path = parse_target("$.*")
+    assert [m.value for m in path.find([1, 2])] == [1, 2]
+    assert [m.value for m in path.find({"a": 1, "b": [2]})] == [1, [2]]
+    assert path.find("text") == []
+
+
+@pytest.mark.parametrize(
+    ("target", "cell"),
+    [
+        ("$[*]", {"a": 1}),
+        ("$[0]", {"a": 1}),
+        ("$[0:1]", {"0": 1}),
+        ("$[*]", "text"),
+        ("$[0]", 5),
+        ("$[:]", True),
+        ("$.a[*]", {"a": {"k": "v"}}),
+        ("$.a[0]", {"a": "v"}),
+        ("$.a[0:2]", {"a": 5}),
+        ("$.a[*]", {"a": False}),
+    ],
+)
+def test_array_selector_on_an_object_or_scalar_is_refused_by_the_evaluator(
+    target: str, cell: Any
+) -> None:
+    with pytest.raises(TypeError):
+        parse_target(target).find(cell)
+
+
+def test_array_selector_on_null_selects_nothing() -> None:
+    assert parse_target("$.a[0]").find({"a": None}) == []

@@ -2,7 +2,7 @@
  "source": "https://github.com/jsonpath-standard/jsonpath-compliance-test-suite (cts.json)",
  "commit": "20ebdcce5008c8a777ee9c80ad853ecf606950b5",
  "license": "BSD-2-Clause, Copyright the JSONPath Compliance Test Suite authors",
- "selection": "every invalid_selector case, plus the valid cases of the groups basic root, name shorthand, wildcard shorthand, multiple selectors, descendant segment, name selector (double and single quotes), index selector, slice selector and filter. subset=false marks a valid RFC 9535 selector this engine refuses on purpose. fails_closed marks a subset selector where jsonpath-ng coerces a scalar or object into a one-item list; the handler must refuse it with nested_target_unwritable_container.",
+ "selection": "every invalid_selector case, plus the valid cases of the groups basic root, name shorthand, wildcard shorthand, multiple selectors, descendant segment, name selector (double and single quotes), index selector, slice selector and filter. subset=false marks a valid RFC 9535 selector this engine refuses on purpose. fails_closed marks a subset selector that is valid RFC 9535 but applies an array selector to an object or a scalar; the engine refuses it with nested_target_unwritable_container because a write-back cannot replace what it would select.",
  "cases": [
   {
    "name": "basic, root",
@@ -157,8 +157,7 @@
    "result": [
     "first",
     "second"
-   ],
-   "jsonpath_ng_selects_nothing": true
+   ]
   },
   {
    "name": "basic, wildcard shorthand, then name shorthand",
