@@ -40,7 +40,20 @@ from decoy_engine.generation.pool._value_pool import (
     construction_floor,
     measured_pool_bytes,
 )
-from decoy_engine.providers_v2 import ProviderRegistry
+from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
+
+
+def _is_stock_string_provider(registry: ProviderRegistry, provider: str) -> bool:
+    """True when `provider` is allowlisted for strings AND the registry resolves it to the stock
+    adapter class, not an override.
+
+    The allowlist names a provider, but `ProviderRegistry.override` can rebind that name to any
+    adapter, so the name alone says nothing about the values built. The resolved adapter's class
+    is compared with the default registration's: a rebound adapter is a different class."""
+    if provider not in C1_PROVIDER_ALLOWLIST:
+        return False
+    stock = get_default_registry().get_adapter(provider)
+    return type(registry.get_adapter(provider)) is type(stock)
 
 
 @dataclass(frozen=True)
@@ -176,11 +189,13 @@ class OocFakerPoolContext:
             return cached
         # Refuse before building when even the construction-peak floor cannot fit: the build
         # holds more than the final pool, so a huge pool_size never allocates a provider. The
-        # string floor applies only to a provider on the native string allowlist; any other
-        # provider gets the type-free floor, since its values may cost less than a str.
+        # string floor applies only when the adapter the registry resolves is the stock string
+        # adapter of an allowlisted provider; any other adapter gets the type-free floor, since
+        # its values may cost less than a str.
         self._check_fits(
             construction_floor(
-                prepared.pool_size, strings=prepared.provider in C1_PROVIDER_ALLOWLIST
+                prepared.pool_size,
+                strings=_is_stock_string_provider(self._registry, prepared.provider),
             )
         )
         pool = self._builder.build(

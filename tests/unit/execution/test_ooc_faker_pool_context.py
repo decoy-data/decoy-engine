@@ -299,6 +299,31 @@ def test_w1e_a_pool_of_ints_that_fits_is_admitted_and_a_string_pool_over_budget_
     assert strings.build_calls == 0
 
 
+def test_w1f_the_floor_follows_the_resolved_adapter_not_the_provider_name(registry):
+    # An allowlisted name rebound to an int adapter must get the type-free floor; the stock
+    # adapter under the same allowance is refused by the string floor before any build.
+    from tests.physical.test_unified_slice_faker import CountingAdapter, rebound_registry
+
+    size = _CFG["pool_size"]
+    assert _PROVIDER in C1_PROVIDER_ALLOWLIST
+    allowance = (
+        construction_floor(size, strings=False) + construction_floor(size, strings=True)
+    ) // 2
+
+    rebound = rebound_registry(CountingAdapter(lambda i: 1000 + i))
+    ctx = OocFakerPoolContext(registry=rebound, job_seed=_JOB_SEED, max_pool_bytes=allowance)
+    pool = ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert ctx.builds == 1
+    assert measured_pool_bytes(pool) <= allowance
+
+    stock_builder = _CountingPoolBuilder(registry)
+    stock = _context(registry, max_pool_bytes=allowance, builder=stock_builder)
+    with pytest.raises(ExecutionError) as exc:
+        stock.get_pool(stock.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert stock_builder.build_calls == 0
+
+
 def test_the_peak_floor_counts_four_pointer_copies_and_a_set_slot():
     # Pins the documented per-value constants: string object, four 8-byte pointers, one
     # 16-byte set slot.
