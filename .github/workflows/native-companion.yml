@@ -311,19 +311,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/lock-env
-        with:
-          extras: "dev"
-      - name: Install stable Rust (companion build only; the core needs none)
-        uses: dtolnay/rust-toolchain@stable
-      - name: Build and install the companion (maturin, same-platform)
-        # Build backends are not in uv.lock: --build-constraint pins maturin inside uv's isolated
-        # build env (.github/build-constraints.txt), the version the wheel jobs pin.
-        run: uv pip install --python "$RUNNER_TEMP/venv/bin/python" --build-constraint .github/build-constraints.txt ./decoy-engine-native
-      # Every test below skips when the companion is absent, so a companion that
-      # builds but fails to load would otherwise leave this job green with nothing run.
-      - name: Assert the companion loads
-        run: python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); print(st); assert st.ok, st"
+      - uses: ./.github/actions/companion-env
       # ENGINE-THREADS-DEFAULT: default thread count against one thread, byte-equal on every
       # route, and the gap9 grant wiring; the per-route cells skip without the companion.
       - name: Thread default and grant parity (companion-present case)
@@ -435,15 +423,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/lock-env
-        with:
-          extras: "dev"
-      - name: Install stable Rust (companion build only; the core needs none)
-        uses: dtolnay/rust-toolchain@stable
-      - name: Build and install the companion (maturin, same-platform)
-        run: uv pip install --python "$RUNNER_TEMP/venv/bin/python" --build-constraint .github/build-constraints.txt ./decoy-engine-native
-      - name: Assert the companion loads
-        run: python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); print(st); assert st.ok, st"
+      - uses: ./.github/actions/companion-env
       - name: Whole tests/parity and tests/unit/execution directories (companion-present case)
         run: |
           pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial" -n 4 --dist loadfile -q --tb=short
@@ -459,17 +439,19 @@ jobs:
   # sanitizer-instrumented, or the linker rejects the ABI mismatch between instrumented and
   # plain std). A crash, a sanitizer report, or an unexpected process exit fails the job.
   companion-fuzz-sanitizer:
-    # Not on a push to main: schedule and dispatch keep it.
-    if: github.event_name != 'push'
+    # Merge-required, so the job itself is unconditional (a skipped job reports success). Its steps
+    # skip on a push to main, where the PR already ran them; schedule and dispatch run them.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Install nightly Rust with rust-src (build-std needs it)
+        if: github.event_name != 'push'
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
       - name: Install cargo-fuzz
+        if: github.event_name != 'push'
         run: cargo install cargo-fuzz --locked
       # +nightly is REQUIRED: decoy-engine-native/rust-toolchain.toml pins stable
       # 1.98.0 for reproducible cdylib builds, which overrides the nightly default
@@ -477,15 +459,18 @@ jobs:
       # flags are nightly-only, so the pin must be overridden per-invocation (the
       # exact form the crate README documents and we verified locally).
       - name: Bounded fuzz campaign over derive_array
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         run: cargo +nightly fuzz run derive_array -- -max_total_time=120
       # The index kernel (Task 2.3) gets its own bounded campaign over the PyO3-free
       # batch::derive_index_array path: same admitted-type array generation as derive_array plus a
       # full-range i64 pool_size that drives both pool guards and the modulo arithmetic between them.
       - name: Bounded fuzz campaign over derive_index
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         run: cargo +nightly fuzz run derive_index -- -max_total_time=120
       - name: Crate tests under AddressSanitizer
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         env:
           RUSTFLAGS: -Zsanitizer=address
@@ -498,12 +483,13 @@ jobs:
       # `--lib`, so a filter would silently miss a newly added parallel test. The unit tests are
       # fast even under `-Zbuild-std`.
       - name: Unit tests under ThreadSanitizer
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         env:
           RUSTFLAGS: -Zsanitizer=thread
         run: cargo +nightly test --lib -Zbuild-std --target x86_64-unknown-linux-gnu
       - name: Upload fuzz artifacts on failure
-        if: failure()
+        if: failure() && github.event_name != 'push'
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-crash-artifacts

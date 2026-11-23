@@ -43,12 +43,18 @@ NATIVE_NAMES = [
     "companion-wheel-macos (3.12)",
     "companion-rust-lint",
     "core-companion-present",
+    "core-companion-wide",
     "companion-fuzz-sanitizer",
     "core-companion-absent",
     "native-changes",
     "companion-wheel-macos-ok",
 ]
-NATIVE_MERGE = [n for n in NATIVE_NAMES if not n.startswith("companion-wheel-macos (")]
+# core-companion-wide runs on push, schedule and dispatch only, so it cannot be a merge check.
+NATIVE_MERGE = [
+    n
+    for n in NATIVE_NAMES
+    if not n.startswith("companion-wheel-macos (") and n != "core-companion-wide"
+]
 CI_NAMES = [
     "packaging-gate",
     "ml-gate",

@@ -456,6 +456,21 @@ def test_gates_expression_must_equal_the_hosted_one() -> None:
     assert has(lanes.marker_findings(t), "M5 gates.sh has no single")
 
 
+def test_a_drifted_marker_in_the_wide_companion_job_is_a_finding() -> None:
+    assert not has(lanes.marker_findings(seeded()), "M7")
+    t = seeded()
+    step = next(
+        st
+        for st in job(t, "native-companion.yml", "core-companion-wide")["steps"]
+        if "pytest" in st.get("run", "")
+    )
+    step["run"] = step["run"].replace(" and not codspeed", "", 1)
+    assert has(lanes.marker_findings(t), "M7")
+    t = seeded()
+    del t.workflows["native-companion.yml"]["jobs"]["core-companion-wide"]
+    assert has(lanes.marker_findings(t), "M7")
+
+
 def _both(par: dict[str, Any], ser: dict[str, Any], extra: str) -> None:
     """Add the same option to both passes: the passes still agree, but tests may be dropped."""
     for step in (par, ser):
