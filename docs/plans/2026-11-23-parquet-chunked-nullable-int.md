@@ -2,18 +2,25 @@ Status: plan
 
 # PARQUET-CHUNKED-NULLABLE-INT: `--chunked` keeps source types and values exact
 
-Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 3 (after Dennis R2). Roadmap row: PARQUET-CHUNKED-NULLABLE-INT (new V1 bug row). Anchors are in this repository (decoy-engine) at `origin/main` `104dfb442` unless marked `C:` (decoy CLI at `origin/main` `95362d16`, which pins `decoy-engine==0.28.3`), `#770:` (engine PR #770, UF-DOMAIN S1, head `3ad186c50`) or `P:` (decoy-platform).
+Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 3.1 (after Codex on revision 3). Roadmap row: PARQUET-CHUNKED-NULLABLE-INT (new V1 bug row). Anchors are in this repository (decoy-engine) at `origin/main` `104dfb442` unless marked `C:` (decoy CLI at `origin/main` `95362d16`, which pins `decoy-engine==0.28.3`), `#770:` (engine PR #770, UF-DOMAIN S1, head `3ad186c50`) or `P:` (decoy-platform).
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN: guarantee, size, design notes, choke point, placement, established solutions), `bugfix.md`, `reuse-first.md`, `testing.md` (test depth, full-suite triggers), `proportionality.md`, `api-and-compatibility.md`, `cross-cutting-concerns.md`, `catalogs/recurring-defects.md` (11 classes), `workspace-and-vcs.md` (commit messages); vault `Decoy-Plan-Contract-and-Defect-Catalog.md` (10 classes). Engine `CLAUDE.md` file-size rule. Engine `CODEMAP.md` "Where Things Go".
 
 Risk: R2 overall. S2 (CLI) is R2: it changes the engine entry of `--chunked`, the bytes of chunked Parquet output, the route label, native intent on the chunked route, and user-facing text. S1 (engine) is R2: frozen contract text and one error-message change; the rest is tests. S3 is R1. Plan review: Dennis, then Codex. Code gate: Codex, then Dennis, for S1 and S2. Full suite before merge: yes for S2 (serialization and output bytes trigger) and S1 (frozen contract trigger).
+
+## Changes from revision 3
+
+- The companion check scope is not widened. `static_native_eligibility` cannot see source schemas or runtime admission, so widening it could refuse a chunked job that would never touch the companion. On `--chunked`, a broken companion falls back to pandas and the label says `pandas`. 4.1, 4.2, 8.1, 10.5 and the explain text say so. AT-C16 and M-C11 now pin that difference. A fail-closed chunked check is follow-up F7.
+- New AT-C17 pins, in a golden, the type of an all-null chunk under hash, truncate, string redact and deterministic categorical.
+- AT-C9 and AT-C1 now pin a Parquet-bytes digest golden for fixtures M and F.
+- Section 6 no longer says every AT is red first. Each control and characterization cell is marked, with the mutation that makes it meaningful (new M-C13 to M-C15 and M-E6).
 
 ## Changes from revision 2
 
 - `--no-native --chunked` also turns off the carry, so the two legs are not equivalent. Sections 4.1, 4.2, 8.1 and 10.5 now say so. AT-C12 gains a cell with a value pandas refuses. S1 narrows the contract's stated exception instead of removing it, and pins the adapter rule with an engine test (AT-E11).
 - A probe shows the `_safe_cast` path is not reached from any input tried. It is now defense in depth: AT-E9 stays, AT-R3 is dropped, and 5.1 and 10.5 are corrected.
 - Section 4.2 lists all user-facing text that becomes false, with an explain-text AT (AT-C15).
-- A broken companion on a native-eligible `--chunked` run now fails closed, as on the plain run (AT-C16).
+- A broken companion on a native-eligible `--chunked` run now fails closed, as on the plain run (AT-C16). Withdrawn in revision 3.1.
 - Section 6 lists every oracle spy and stub site. A new sentry rule refuses a test that patches the oracle, so an old stub cannot become a silent no-op.
 - AT-E4 gains one cell per exception class in the contract text.
 - The LOW items are folded in: L1 in 8.1, L2 in 4.2, L3 in 4.2, L4 in 4.2, L5 in AT-E10, L6 in AT-C9, AT-C10 and AT-C14, and L7 in 4.5.
@@ -136,7 +143,7 @@ Rejected:
 1. With default native intent, `decoy run --chunked` gives one Arrow type per column for the whole run, and each passthrough column is written as the source holds it (section 8.1 lists the exact changes). A passthrough column that a `when:` predicate or a sibling-reading strategy reads still goes through pandas; a value pandas refuses there fails with `chunked_passthrough_value_unrepresentable`, whose message names the column only.
 2. `--no-native --chunked` runs no compiled kernel and carries nothing: every passthrough column goes through pandas. Types and values still match guarantee 1 for every value pandas converts, because `normalize_chunk` takes passthrough columns from the source. A value pandas refuses (probe 3: `time64[ns]` with nanoseconds, dates outside pandas' range) fails the run with a raw, uncoded pyarrow or pandas error that can quote the value. This is the behavior of every `--chunked` run today. `--no-native` is the rollback lever, so this plan records it (F6) and does not change it.
 3. `--native --chunked` stays refused, with true text.
-4. A present but broken companion fails a native-eligible `--chunked` run closed, as on the plain run.
+4. A present but broken companion does not refuse a `--chunked` run. The engine downgrades each table whose kernel fails to load to the oracle leg, and the label says `pandas`. This differs from the plain run, which fails closed. The difference is named in 8.1 and in `decoy explain native` (F7).
 5. The route label of a chunked run says what executed, from the engine's runtime evidence.
 6. Masked values do not change. Hash and Faker tokens stay byte-equal.
 7. After the repin to an engine release with #770, `--chunked` and the plain run give equal values and types for a Parquet source.
@@ -153,7 +160,7 @@ Non-goals (recorded, not blockers):
 - Entry. `_masked_chunks` (`C:src/decoy/cli/run/_execute.py:157`) calls `decoy_engine.run_mask_chunked` with the same config, chunks, table, engine version and key provider, plus `route_evidence_sink=evidence` and, under `--no-native`, `adapter=_PandasOnlyAdapter()`. It still calls `source_schema_and_chunks` for the chunk iterator and the empty-Parquet schema, so `source_schema_and_chunks` stays in the guard's `FACTORY_CALLS`. `run_mask_chunked` takes no `source_schema`. The declared-read rule still holds: `prepared_sources` runs before any reader exists (lines 113 and 170).
 - Disable intent. The native route downgrades to the oracle leg with `reroute_reason="adapter_requested"` when `type(adapter) is not PandasExecutionAdapter` (`src/decoy_engine/execution/native/_dispatch.py:453-463`). The same exact-type test turns the carry off (`is_stock_adapter`, `src/decoy_engine/execution/_chunked_carry.py:52-57`), so on that leg every passthrough column goes through pandas, and the coded diagnosis returns early (`_chunked_carry.py:113` and `:134`). The CLI defines `_PandasOnlyAdapter(PandasExecutionAdapter)` with no body, beside `_masked_chunks`, and passes it when the pre-execution gate resolved `unified_slice_enabled=False` (the value `run_pipeline_kwargs` reads, `C:src/decoy/_native_gate.py:488-499`). `PandasExecutionAdapter` is public and frozen (`docs/frozen-surfaces.md:103`). S1 pins this rule in the contract with an engine test (AT-E11), so the CLI does not rely on unpinned behavior. Follow-up F5 offers an explicit engine keyword in its place.
 - `--native --chunked` stays refused before the run with code `native_require_not_a_candidate`. The text changes for the chunked case only: "--native is not supported with --chunked: the chunked route does not verify compiled-kernel evidence before it publishes. Drop --native; the route label shows whether a compiled kernel ran." The text at `C:src/decoy/_native_gate.py:321-325` ("never routes through the unified slice, so it could never show compiled-kernel evidence") is false after S2. The generate-table case keeps its own text.
-- Broken companion. With default intent, `pre_execution_gate` classifies the companion only for a unified-slice candidate (`C:src/decoy/_native_gate.py:363-364`), and a chunked run is never one. After S2 a chunked run can use compiled kernels, and the engine silently downgrades a table to the oracle when a kernel fails to load (`src/decoy_engine/execution/native/_dispatch.py:563-600`). S2 changes the scope test to `vault_active or not (candidate or chunked) or not static_native_eligibility(config_dict)`. A broken companion then fails a native-eligible chunked run closed with `native_companion_<reason>`, and `--no-native` stays the rollback. The `disable` branch's warning gets the same scope (`candidate or chunked`). `static_native_eligibility` is the unified slice's config-shape test, and it is stricter than what the chunked native route admits (it declines any `when:`), so some chunked jobs the native route would take still degrade silently. That gap is named in 8.1 and in the explain text. It is sound because the scope can only miss jobs, never refuse a job that would not touch the companion.
+- Broken companion. With default intent, `pre_execution_gate` classifies the companion only for a unified-slice candidate (`C:src/decoy/_native_gate.py:363-364`), and a chunked run is never one. S2 keeps that scope. After S2 a chunked run can use compiled kernels, and the engine downgrades a table to the oracle leg when a kernel fails to load (`src/decoy_engine/execution/native/_dispatch.py:563-600`), so the label says `pandas`. A fail-closed check here would need runtime admission evidence: `static_native_eligibility` reads the config only (`C:src/decoy/_native_gate.py:203`), and chunked admission can still decline columns it does not cover, so a config-shape scope could refuse a chunked job that would never touch the companion. That is a function break under the V1 bar. The difference is named in 8.1 and in the explain text, pinned by AT-C16, and recorded as F7.
 - Route label. `_run_chunked_mask` takes an `evidence: list` argument that `execute` owns, and passes it to each `_masked_chunks` call. The engine appends one `NativeRouteEvidence` per table at call time and sets `compiled_kernel_executed` and `pool_select_executed` on that same object as chunks run (`src/decoy_engine/execution/native/_chunk_masking.py:264-267`). After `_run_chunked_mask` returns, every stream is exhausted, so `classify_route(chunked=True, ..., chunked_evidence=evidence)` reads final values. A table ran natively when `compiled_kernel_executed or pool_select_executed`. Tables whose evidence says `reroute_reason == "empty_input"` are left out. Label: `chunked stream (native)` when every remaining table ran natively, `chunked stream (pandas)` when none did or none remain, `chunked stream (mixed)` otherwise. So one empty table and one native table give `native`. `applicable` stays `False` and `state` stays `None`, so the `--json` `native_route` shape keeps its fields and only the label text changes. The CLI reads attributes only and imports nothing from `decoy_engine.execution.native`.
 - Why raw evidence and not `route_summary`: `route_summary` reads an `ExecutionResult.quality_metrics`, and a chunked run has one per chunk only through `chunk_result_sink`, which keeps every chunk's result in a list. That grows with the stream and breaks the bounded-memory promise of `--chunked`. `route_evidence_sink` holds one small object per table.
 - CSV allowlist: `_csv_type_allowed` (`C:src/decoy/cli/io/_targets.py:405-430`) admits `decimal256` with the same text form as `decimal128` (Arrow's decimal-to-string cast). Without it, S2 turns a `decimal256` Parquet to CSV run into a new refusal, and the plain run hits the same refusal after the #770 repin.
@@ -164,7 +171,7 @@ Non-goals (recorded, not blockers):
   - the CSV writer guard replaces `run_mask_pipeline_chunked` with `run_mask_chunked` in `FACTORY_CALLS` (`C:tests/sentry/io_policy/test_csv_writer_guards.py:22-27`) and moves its seed at `:113`; its `_run_chunked_mask` checks (one build per table, no `next()`) do not change.
 - User-facing text that becomes false, each rewritten by S2 and checked by AT-C15:
   - `decoy explain chunked`, `C:src/decoy/cli/explain.py:302`: "Chunked output is byte-identical to a plain run for CSV targets." New text: identical for CSV sources; for Parquet sources, value- and type-equal once the CLI pins an engine with #770.
-  - `decoy explain native`, `C:src/decoy/cli/explain.py:335`: "Refuses up front on --chunked" stays true; `:343-344` "--no-native Force the legacy pandas adapter" is now true for `--chunked` too; `:346-350` "A present-but-broken companion ... refuses closed" becomes true for native-eligible `--chunked` runs with the gap named.
+  - `decoy explain native`, `C:src/decoy/cli/explain.py:335`: "Refuses up front on --chunked" stays true; `:343-344` "--no-native Force the legacy pandas adapter" is now true for `--chunked` too; `:346-350` "A present-but-broken companion ... refuses closed" gets a sentence that on `--chunked` a broken companion falls back to pandas and the route label says `pandas`.
   - `decoy explain substrate`, `C:src/decoy/cli/explain.py:362-377`: "pandas is the only masking substrate ... for both plain and --chunked runs" and the summary line become false. New text names the native chunked route.
   - `decoy run --help` and `docs/cli-reference.md:161`: "(pandas chunked path)" and "(Masking uses the pandas substrate. See: decoy explain substrate.)" (`C:src/decoy/cli/run/__init__.py:72-73`).
   - Docstrings: `C:src/decoy/cli/run/__init__.py:7`, `C:src/decoy/api.py:511`, `_ChunkedQuarantineError` (`C:src/decoy/cli/run/_execute.py:56`, names the oracle), `_ChunkedReportFlagError` (`:76`, "returns no `ExecutionResult`" stays true, and the entry name is updated), `_run_chunked_mask` (`:89-104`, including the parity claim at 93-95, see 5.1), and `classify_route` (`C:src/decoy/_native_gate.py:421-424`).
@@ -185,7 +192,7 @@ Non-goals (recorded, not blockers):
 ### 4.4 Choke points
 
 - Engine entry for CLI chunked masking: `_masked_chunks` is the one factory (existing guard). The new rule refuses the oracle anywhere in CLI source and in CLI test patches. M-C3 turns the seeded cases red.
-- Native intent on the chunked route: `_masked_chunks` is the one place the adapter is chosen; `pre_execution_gate` is the one place the companion is classified. AT-C12 and AT-C16 are the guards; M-C6 and M-C11 must turn them red.
+- Native intent on the chunked route: `_masked_chunks` is the one place the adapter is chosen; `pre_execution_gate` is the one place the companion is classified. AT-C12 is the guard for the adapter (M-C6). AT-C16 pins that the companion check does not reach chunked runs (M-C11).
 - Output assembly on the pandas routes: #770's assembler (its own sentry, `#770:tests/sentry/defects/test_output_assembly_one_path.py`). This plan adds no site.
 
 ### 4.5 Placement
@@ -196,26 +203,26 @@ No new files in `src/` in either repo.
 |---|---|---|
 | AT-E4, AT-E9, AT-E11 | `tests/native/test_chunked_entry_values_schema.py` | oracle against `run_mask_chunked` schema cases |
 | AT-E7, AT-E8, AT-E10 | `#770:tests/parity/test_untouched_columns_keep_source_type.py` | the U1 cells |
-| AT-C1 to AT-C4, AT-C8, AT-C9, AT-C10, AT-C14 | `C:tests/e2e/test_run_chunked_parquet.py` | chunked Parquet e2e |
+| AT-C1 to AT-C4, AT-C8, AT-C9, AT-C10, AT-C14, AT-C17 | `C:tests/e2e/test_run_chunked_parquet.py` | chunked Parquet e2e |
 | AT-C6 e2e cells, AT-C11, AT-C12, AT-C16 e2e cell | `C:tests/e2e/test_run_native.py` | route label and native intent cases |
 | AT-C6 `classify_route` unit cells, AT-C16 unit cell | `C:tests/unit/test_native_gate.py` | the existing `classify_route` and `pre_execution_gate` cases |
 | AT-C7 | `C:tests/sentry/io_policy/test_declared_read_choke_point.py` (engine-entry rules), `C:tests/sentry/io_policy/test_csv_writer_guards.py` (factory) | existing guards |
 | AT-C13 | `C:tests/unit/cli_fmt/test_csv_type_gate.py` | the allowlist rows |
 | AT-C15 | the existing explain-topic tests (`git grep -l "explain" C:tests/e2e`; the builder names the file) | topic text cases |
-| golden schema | `C:tests/e2e/fixtures/chunked_type_matrix.schema.txt` (data file next to the existing e2e fixtures) | read by AT-C9 |
+| goldens | `C:tests/e2e/fixtures/chunked_type_matrix.schema.txt`, `chunked_all_null_masked.schema.txt`, `chunked_parquet_digests.txt` (data files next to the existing e2e fixtures) | read by AT-C1, AT-C9, AT-C17 |
 | AT-R1, AT-R2 | `C:tests/e2e/test_run_chunked_parquet.py` | as above |
 
 Changelog: engine fragment `changelog.d/parquet-chunked-nullable-int.md` (S1) and the CLI `CHANGELOG.md` (S2).
 
 ### 4.6 Design notes
 
-No new structure. S2 changes one call to an existing public entry, chooses the leg through that entry's adapter rule (pinned by S1), widens the companion check's scope by one condition, and reads evidence the engine already records. S1 changes one message. The label rule lives in `classify_route` only.
+No new structure. S2 changes one call to an existing public entry, chooses the leg through that entry's adapter rule (pinned by S1), and reads evidence the engine already records. S1 changes one message. The label rule lives in `classify_route` only.
 
 ## 5. Slices
 
 | Slice | Repo | Content | Depends on | Risk | Test depth |
 |---|---|---|---|---|---|
-| S2 | CLI | `--chunked` calls `run_mask_chunked`; `--no-native` adapter; `--native` text; companion check scope; label from executed evidence; `decimal256` CSV; sentries; golden; user-facing text; CHANGELOG | nothing; works on pin 0.28.3 | R2 | T1 plus the full CLI suite |
+| S2 | CLI | `--chunked` calls `run_mask_chunked`; `--no-native` adapter; `--native` text; label from executed evidence; `decimal256` CSV; sentries; goldens; user-facing text; CHANGELOG | nothing; works on pin 0.28.3 | R2 | T1 plus the full CLI suite |
 | S1 | engine | test cells after #770; narrowed contract text with the adapter rule; value-free `_safe_cast` | #770 merged | R2 | T1 plus the full engine suite |
 | S3 | CLI | plain against chunked parity e2e after the repin | an engine release with #770 | R1 | T1; folds into the repin PR if one is open |
 
@@ -248,7 +255,7 @@ Fixture M (the type matrix) is probe 2's file: passthrough `int8`, `uint16`, `ui
 
 Fixture R is a Parquet source with a hashed `email` and a passthrough `time64[ns]` column holding a value with non-zero nanoseconds, plus a second file with a passthrough `date32` column holding a date outside pandas' range.
 
-"Red on base" is the result on `C:95362d16` (S2, S3) or `104dfb442` (S1, the pre-#770 base). The builder records it before writing the fix.
+"Red on base" is the result on `C:95362d16` (S2, S3) or `104dfb442` (S1, the pre-#770 base). The builder records it before writing the fix. Not every cell is red on base. A cell marked control or characterization is green on base on purpose: it pins behavior the fix must keep. Each one names the mutation in section 7 that turns it red, and that mutation result is its evidence. A cell with no such mutation is reported as a characterization only and does not count as evidence for the fix.
 
 Companion cells (AT-C6 native and mixed, AT-C12 companion cell) need a real `decoy_engine_native`. They run with `VMRUN_LINUX=1` on the Dell in a CLI venv built like `/home/louis/decoy/venv-native-lock` (`uv sync --frozen`, then install `decoy-engine-native`). The report shows `python -c "import decoy_engine_native"` from that venv and a PASSED line for each cell. A SKIPPED line is not a pass, and the gate refuses it.
 
@@ -256,28 +263,29 @@ Companion cells (AT-C6 native and mixed, AT-C12 companion cell) need a real `dec
 
 | AT | Behavior | Red on base |
 |---|---|---|
-| AT-C1 | `--chunked --chunk-size 3` on F, Parquet target: exit 0; `n int64`, `u uint64`, `d date32`, `email string`; `n`, `u`, `d` equal the source; `email` equals the plain run's tokens | exit 3 |
+| AT-C1 | `--chunked --chunk-size 3` on F, Parquet target: exit 0; `n int64`, `u uint64`, `d date32`, `email string`; `n`, `u`, `d` equal the source; `email` equals the plain run's tokens; the sha256 of the published file equals the F entry in `chunked_parquet_digests.txt`, which also records the pyarrow version | exit 3 |
 | AT-C2 | the same, CSV target: exit 0; row 4 `n` is `9007199254740993`, row 2 `u` is `9223372036854775813`, row 3 `u` is `18446744073709551615` | exit non-zero on `u` (raw `ArrowInvalid`), or e-notation for `n` |
 | AT-C3 | chunk sizes 1, 3, 7 and 100 on F: Parquet values and types equal across sizes; CSV bytes equal across sizes | exit 3 or exit non-zero |
 | AT-C4 | chunk 0 all null in `n` (F reversed): exit 0, types as AT-C1 | exit 3 |
 | AT-C5 (control) | `test_run_chunked.py`, `test_run_chunked_parquet.py`, `test_run_chunked_post_scan.py` pass; the post-scan refusal keeps its exit code, reason code and text | green on base |
 | AT-C6 | label, e2e: a native-admissible config with the companion gives `chunked stream (native)`; a config the native route declines (`text_redact` with `ner`) gives `chunked stream (pandas)`; two tables, one of each, give `chunked stream (mixed)`; `--json` `native_route` has `applicable: false`, `state: null` and that label. Unit, `classify_route` with hand-built evidence: admitted but both executed flags false gives `pandas`; one `empty_input` table and one native table give `native`; only `empty_input` tables give `pandas` | `pandas chunked stream` in every case |
 | AT-C7 | sentries: each seeded oracle spelling in CLI source is refused; a seeded `monkeypatch.setattr(decoy_engine, "run_mask_pipeline_chunked", ...)` in a test is refused; a seeded `run_mask_chunked` call outside the gate is refused; the real trees pass | seeds pass; the real trees fail the new rule |
-| AT-C8 (control and new cells) | an empty Parquet source writes a zero-row file with the source schema; a zero-row Parquet source with a REQUIRED column keeps `not null`; an empty CSV source publishes nothing; a failing chunk in a two-table run publishes no target; a Parquet source with a column the config does not declare is refused by the declared-read gate before any read, with its current exit code and reason | green on base, except the REQUIRED cell, which is red if the zero-row file is built from an oracle chunk; the builder records which |
-| AT-C9 | type matrix on M, Parquet target: the published file's `schema.to_string(show_schema_metadata=True)` equals the golden `chunked_type_matrix.schema.txt`; every passthrough column equals the source; no `pandas` key; no field metadata (the metadata canary stays green). At the gate the reviewer also checks the golden against `output_schema(source schema)` with `email` as `string`, so the golden cannot freeze a wrong type | exit 3 (decimal and dictionary chunks differ) |
+| AT-C8 (controls and one new cell) | an empty Parquet source writes a zero-row file with the source schema; a zero-row Parquet source with a REQUIRED column keeps `not null`; an empty CSV source publishes nothing; a failing chunk in a two-table run publishes no target; a Parquet source with a column the config does not declare is refused by the declared-read gate before any read, with its current exit code and reason | control, green on base: empty Parquet (M-C13), empty CSV (M-C13), failing chunk (M-C14), undeclared column (M-C15). The REQUIRED cell is red if the zero-row file is built from an oracle chunk, else control under M-C13; the builder records which |
+| AT-C9 | type matrix on M, Parquet target: the published file's `schema.to_string(show_schema_metadata=True)` equals the golden `chunked_type_matrix.schema.txt`; the file's sha256 equals the M entry in `chunked_parquet_digests.txt`; every passthrough column equals the source; no `pandas` key; no field metadata (the metadata canary stays green). At the gate the reviewer also checks the golden against `output_schema(source schema)` with `email` as `string`, so the golden cannot freeze a wrong type | exit 3 (decimal and dictionary chunks differ) |
 | AT-C10 | type matrix on M, CSV target: exit 0. Every passthrough cell's text equals the golden CSV written once from the source with the CLI CSV writer. The hashed `email` column equals the plain run's `email` column text (tokens, not source values). `decimal256` cells read `1.25` and `3.50` | exit non-zero (`uint64`) |
 | AT-C11 | `--native --chunked` exits with `native_require_not_a_candidate` and the new chunked text; nothing is written; the text does not say the chunked route can never run a kernel | the old text (red on the text check) |
 | AT-C12 | `--no-native --chunked`. Companion cell, native-admissible config: exit 0; each table's evidence has `native_admitted` false, `reroute_reason` `adapter_requested` and both executed flags false; the label is `chunked stream (pandas)`; output bytes equal the default run's. Refused-value cell, fixture R: the default run exits 0 with the column exact; the `--no-native` run exits non-zero, and the report records its exit code and error class (F6 tracks the uncoded error) | companion cell: label is `pandas chunked stream` and no evidence exists; refused-value cell: both runs fail on base, so the default-leg half is red |
 | AT-C13 | the CSV allowlist admits `decimal256` and its text form equals `decimal128`'s for the same values; `float16` and other unlisted types stay refused | `decimal256` refused (pin at `C:tests/unit/cli_fmt/test_csv_type_gate.py:26` moves) |
 | AT-C14 | fixture R with a `when:` on `email` that reads the refused column, carrying a seeded marker in that column: exit non-zero with `chunked_passthrough_value_unrepresentable`; the marker is not in stdout, stderr or `--json`, at default verbosity and with `--verbose` | the oracle raises raw; the marker appears (red) |
 | AT-C15 | `decoy explain chunked`, `native` and `substrate`, and `decoy run --help`: no sentence says pandas is the only substrate for `--chunked`, no "pandas chunked path", no unqualified "byte-identical to a plain run"; each says `--chunked` can use compiled kernels and names the label | the old text (red) |
-| AT-C16 | broken companion: with `_probe_status` returning present but not ok, a native-eligible `--chunked` config exits with `native_companion_<reason>` and writes nothing; `--no-native --chunked` warns and runs; a chunked config that is not native-eligible runs (unit cell on `pre_execution_gate` plus one e2e cell) | the chunked run proceeds silently (red) |
+| AT-C16 | broken companion on `--chunked`: with `_probe_status` returning present but not ok, `pre_execution_gate` does not raise for a chunked config (unit cell); e2e cell with a companion stub whose kernel load fails: exit 0, the label is `chunked stream (pandas)`, output equals the `--no-native` run; `decoy explain native` text names this fallback | control for the gate cell, green on base (M-C11); the label and text halves are red (old label, old text) |
+| AT-C17 | all-null masked chunks: a Parquet source whose chunk 1 is all null in columns masked by hash, truncate, string redact and deterministic categorical; Parquet target: exit 0; the published schema equals the golden `chunked_all_null_masked.schema.txt` (each column `string`) | exit 3 (`null` chunk) |
 
 ### S1 (engine, after #770)
 
 | AT | Behavior | Red on `104dfb442` |
 |---|---|---|
-| AT-E4 | `run_mask_pipeline_chunked` against `run_mask_chunked` at chunk size 2, one cell per contract exception class: (a) F's `n` and `u`: oracle `int64` and `uint64` on every chunk, values exact, `pa.Table.equals` after `concat_tables`; (b) `timestamp[ns]` holding `-2**63`: equal; (c) `list<int64>` with `2**53 + 1`: equal; (d) `time64[ns]` with nanoseconds: oracle raises, `run_mask_chunked` exact; (e) `date32` outside pandas' range: oracle raises, `run_mask_chunked` exact | (a) red: `double`; (b) red: null; (c) control, green on base; (d) and (e) characterization, same on base and after #770 |
+| AT-E4 | `run_mask_pipeline_chunked` against `run_mask_chunked` at chunk size 2, one cell per contract exception class: (a) F's `n` and `u`: oracle `int64` and `uint64` on every chunk, values exact, `pa.Table.equals` after `concat_tables`; (b) `timestamp[ns]` holding `-2**63`: equal; (c) `list<int64>` with `2**53 + 1`: equal; (d) `time64[ns]` with nanoseconds: oracle raises, `run_mask_chunked` exact; (e) `date32` outside pandas' range: oracle raises, `run_mask_chunked` exact | (a) red: `double`; (b) red: null; (c) characterization, green on base, no mutation, kept only to back the contract text; (d) and (e) control, green on base and after #770, made meaningful by M-E6 |
 | AT-E7 | full-frame `run_pipeline`: a `when:` predicate on `s` that reads nullable `n` (`n > 15`) selects the same rows as base, and `n` leaves exact | `n` leaves as `double` |
 | AT-E8 | an all-null `int64` passthrough column leaves as `int64` on the full-frame and sequential routes | `double` |
 | AT-E9 | `_safe_cast` called directly on a narrowing that pyarrow refuses, with a seeded marker value: `ExecutionError` code `chunked_schema_mismatch`; the marker is not in `str(exc)`; `__cause__` and `__context__` are `None` | the marker is in the message |
@@ -316,13 +324,17 @@ Each runs on the final head of its slice, and the report records that head.
 | M-C8 | S2 | `decimal256` dropped from the allowlist | AT-C10, AT-C13 |
 | M-C9 | S2 | the label reads only the first table's evidence | AT-C6 mixed cell |
 | M-C10 | S2 | the old `substrate` topic text is restored | AT-C15 |
-| M-C11 | S2 | the companion check scope drops `or chunked` | AT-C16 |
+| M-C11 | S2 | the companion check scope adds `or chunked` | AT-C16 gate cell |
+| M-C13 | S2 | `write_chunked_output` writes nothing for an empty source | AT-C8 empty cells |
+| M-C14 | S2 | the publish lease commits when a chunk raises | AT-C8 failing-chunk cell |
+| M-C15 | S2 | `_masked_chunks` skips `prepared_sources` | AT-C8 undeclared-column cell |
 | M-C12 | S2 | `empty_input` tables are counted as pandas | AT-C6 unit cell (one empty, one native) |
 | M-E1 | S1 | in #770's assembler, `untouched` is treated as empty | AT-E4 (a), AT-E7, AT-E8, AT-E10 |
 | M-E2 | S1 | the oracle passes `source=None` to the assembler | AT-E4 (a) and (b) |
 | M-E3 | S1 | `_safe_cast` puts `({exc})` back | AT-E9 |
 | M-E4 | S1 | `_safe_cast` raises inside the `except` block | AT-E9 (`__context__`) |
 | M-E5 | S1 | `_dispatch.py:461` uses `isinstance` instead of the exact type test | AT-E11 |
+| M-E6 | S1 | `is_stock_adapter` returns `False` for the stock adapter (carry off) | AT-E4 (d) and (e) |
 
 ## 8. Frozen contracts and byte changes
 
@@ -341,10 +353,10 @@ Parquet sources, default native intent (from probes 2 and 3):
 - The `pandas` schema key is gone, because `run_mask_chunked` yields chunks without it.
 - Columns the config does not declare: unreachable from the CLI. The declared-read gate refuses them before any read, so the engine's `warn` carry never applies (AT-C8).
 - An all-null chunk of a typed passthrough column keeps the column type. Before: `null`, which failed the run.
-- Masked columns pinned to `string` (hash, truncate, string redact, native-admissible deterministic categorical) leave as `string` on every chunk, an empty or all-null chunk included. Before: `null` for such a chunk, which failed a Parquet run.
+- Masked columns pinned to `string` (hash, truncate, string redact, native-admissible deterministic categorical) leave as `string` on every chunk, an empty or all-null chunk included. Before: `null` for such a chunk, which failed a Parquet run. Pinned by the AT-C17 golden.
 - Values pandas refuses (`time64[ns]` with nanoseconds, dates outside pandas' range) now work when nothing reads the column. Before: every run failed with a raw error.
 - Timestamps and floats: no change.
-- Byte stability for a fixed chunk size and pyarrow version still holds. The builder searches `C:tests/e2e` for sha256 pins of chunked Parquet output and lists each moved pin.
+- Byte stability for a fixed chunk size and pyarrow version still holds. It is pinned by a new digest golden, `chunked_parquet_digests.txt`, with the sha256 of the published file for fixtures F and M at chunk size 3 and the pyarrow version (AT-C1, AT-C9). A pyarrow bump that moves a digest updates the golden in the same PR, with the reason. The builder also lists any existing chunked Parquet sha256 pin that moves.
 
 `--no-native --chunked`: the same types and values for every value pandas converts. A value pandas refuses fails the run with a raw, uncoded error that can quote the value, as every `--chunked` run does today (guarantee 2, F6).
 
@@ -359,7 +371,7 @@ Route and intent:
 - The label changes from `pandas chunked stream` to `chunked stream (native)`, `(pandas)` or `(mixed)`, in the summary and in `--json`. `applicable` and `state` keep their values.
 - `--chunked` can run compiled kernels (one thread) by default. `--no-native --chunked` cannot. Values do not change.
 - `--native --chunked` keeps its exit code and reason code; its text changes.
-- A present but broken companion now fails a native-eligible `--chunked` run closed with `native_companion_<reason>`, as on the plain run. A chunked config outside the unified slice's static eligibility (for example one with a `when:`) still degrades to the oracle leg without a refusal; the label then says `pandas`, and `decoy explain native` says so.
+- A present but broken companion does not refuse a `--chunked` run. Each table whose kernel fails to load runs on the oracle leg, and the label says `pandas`. The plain run fails closed in the same case. `decoy explain native` names the difference (AT-C16, F7).
 
 ### 8.2 Engine (S1)
 
@@ -392,7 +404,7 @@ Route and intent:
 | 1 | Value-bearing output | `_safe_cast` message names column and types only; CLI output for the reachable coded error carries no cell value; the uncoded `--no-native` path is recorded as F6 | AT-E9, AT-C14 with seeded markers; AT-C12 records the `--no-native` error class | M-E3, M-E4 |
 | 2 | Cleanup missing on an exit path | N/A: no resource owner added; the CLI publish lease in `write_chunked_output` is unchanged, and AT-C8 checks its failed-chunk exit | AT-C8 (control) | N/A: no new exit path |
 | 3 | State machine and concurrency | evidence is read only after every stream is exhausted, so the executed flags are final when the label is computed | AT-C6, AT-C12 | M-C5 |
-| 4 | Route parity and silent fallback | one schema rule per call (`run_mask_chunked`); the label comes from executed evidence; `--no-native` forces the oracle leg with a recorded reason; a broken companion fails closed on eligible chunked runs | AT-C6, AT-C9, AT-C12, AT-C16, AT-E4, AT-E11 | M-C4, M-C6, M-C9, M-C11, M-E5 |
+| 4 | Route parity and silent fallback | one schema rule per call (`run_mask_chunked`); the label comes from executed evidence; `--no-native` forces the oracle leg with a recorded reason; a broken companion on `--chunked` falls back with a `pandas` label, named in text | AT-C6, AT-C9, AT-C12, AT-C16, AT-E4, AT-E11 | M-C4, M-C6, M-C9, M-C11, M-E5, M-E6 |
 | 5 | Referential integrity | N/A: `--chunked` runs no relationship key check and warns about it (`C:src/decoy/cli/run/_execute.py:258`); S2 does not change which configs it accepts | AT-C5 (control) | N/A: no FK path changes |
 | 6 | Untrusted producer | N/A: no child process, extension or hostile object added; the engine is the producer, and its errors pass through the existing CLI handler | AT-C14 checks that handler's output | N/A: no boundary added |
 | 7 | Check then use on a path (TOCTOU) | N/A: no path is checked or opened by new code | none needed | N/A: no path consumer added |
@@ -409,7 +421,7 @@ The S2 file owner is `write_chunked_output` (`C:src/decoy/cli/io/_targets.py:697
 - success: published after the last chunk (`C:src/decoy/cli/io/_targets.py:748` opens the writer);
 - a chunk raises: nothing published (AT-C8);
 - empty source: zero-row Parquet file with the source schema, nothing for CSV (AT-C8);
-- `--native --chunked`, a broken companion on an eligible config, and the post-scan refusal exit before any write (AT-C11, AT-C16, AT-C5).
+- `--native --chunked` and the post-scan refusal exit before any write (AT-C11, AT-C5). A broken companion is not an exit on `--chunked` (AT-C16).
 
 ### 10.2 Routes
 
@@ -447,7 +459,7 @@ The S2 file owner is `write_chunked_output` (`C:src/decoy/cli/io/_targets.py:697
 | `chunked_leading_null_type` | no: Parquet chunks come from one file schema, and CSV columns are read as `string` | names and types only | none needed |
 | `native_chunk_schema_drift` | no: same reason | names and types only (`src/decoy_engine/execution/native/_chunk_schema.py:130-137`) | none needed |
 | `chunked_route_evidence_inconsistent` | no: raised only by `aggregate_chunked_route_evidence` and the output sink, which the CLI does not call | n/a | none needed |
-| `native_companion_<reason>` | yes, newly on `--chunked` (AT-C16) | the existing plain-run text, reason and remediation only | AT-C16 |
+| `native_companion_<reason>` | no on `--chunked`: the gate scope is unchanged, and a broken companion falls back to pandas with a `pandas` label | n/a | AT-C16 pins the fallback |
 
 - Logs, audit, evidence files, progress: no change.
 
@@ -456,7 +468,7 @@ The S2 file owner is `write_chunked_output` (`C:src/decoy/cli/io/_targets.py:697
 - `run_mask_chunked` with `CarryPlan`, `build_schema_rule` and `normalize_chunk`: the S2 fix.
 - Its exact-type adapter rule (`_dispatch.py:453-463`, `_chunked_carry.py:52-57`): the `--no-native` leg choice, pinned by S1.
 - `NativeRouteEvidence` runtime flags: the label.
-- `pre_execution_gate` and `static_native_eligibility`: the broken-companion check, with one more scope condition.
+- `pre_execution_gate`: the broken-companion check, unchanged in scope (AT-C16).
 - #770's assembler: the plain-route fix and the oracle's per-chunk fix.
 - `output_schema` (`_file_metadata.py`): strips field metadata at write, so `PARQUET:field_id` does not reach files.
 - CLI sentries `test_declared_read_choke_point.py` and `test_csv_writer_guards.py`: extended.
@@ -473,7 +485,7 @@ No new machinery.
 - An oracle stub keeps a test green after the CLI stops calling the oracle. AT-C7's test-patch rule refuses it.
 - A chunked Parquet digest pin moves silently. The builder lists every moved pin, and the golden is the new reference.
 - `decimal256` CSV text differs from `decimal128` for the same value. AT-C13 compares them.
-- The broken-companion scope refuses a job that would not touch the companion. The scope uses the stricter static test, so it can only miss jobs (AT-C16 has a not-eligible cell).
+- A broken companion on `--chunked` goes unnoticed. The label says `pandas` and the explain text names the fallback (AT-C16); F7 tracks a fail-closed check with runtime admission evidence.
 - #770 changes shape before merge. S1 re-anchors on the merged head and reruns red-first on `104dfb442`.
 - The interim window lasts longer than expected. It only affects Parquet sources and is named in the CHANGELOG.
 
@@ -485,3 +497,4 @@ No new machinery.
 - F4: the platform's rollback lever still calls `run_mask_pipeline_chunked` (`P:api/jobs/v2_runner.py:409`). The platform is parked.
 - F5: an explicit engine keyword to force the oracle leg, to replace the CLI adapter subclass, if the owner wants it.
 - F6: coded, value-free errors on the oracle leg (and on the plain run) for values pandas refuses on input (`time64[ns]` with nanoseconds, dates outside pandas' range). Engine row; it also covers the plain run, which fails the same way after #770.
+- F7: fail a `--chunked` run closed on a broken companion, as on the plain run. It needs runtime admission evidence (which tables the chunked native route admitted and which kernel failed to load), not the config-shape `static_native_eligibility`. Engine plus CLI row.
