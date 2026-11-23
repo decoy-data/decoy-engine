@@ -1008,111 +1008,317 @@ no released CLI wrote those files to keep. The strict legacy branch, its
 (`tests/e2e/cli_fmt/test_scan_saved.py:132`, `:158`, `:170`), is the test that
 keeps the refusal.
 
-**S1c.2 (remaining, ~770 lines).** `--config`, `--table` on `scan`,
-`--column-names-file`, `--skip-integrity`, the integrity block, and one route
-through the declaration boundary.
+**S1c.2 (remaining, two parts, ~1 030 lines in all; Revision 8.3).** `--config`,
+`--table` on `scan`, `--column-names-file`, `--skip-integrity`, the integrity
+block, and one route through the declaration boundary. Revision 8.3 re-anchors
+this slice on CLI main `95362d16` and engine main `104dfb442`, and splits it in
+two parts because the one-scan-call work below pushes it past the 800-line
+limit:
 
-Depends on: S1c.1 (merged); the engine release that holds E-S1c and the CLI
-repin to it; `src/decoy/_config_file.py` (`load_config_mapping`, on main);
-`cli/_sources.py::resolved_source_config` (on main). CONFIG-EXPLICIT E1, E2
-and C1 are all on main, so they are no longer open dependencies.
+- **S1c.2a (~360 lines): one gated scan call.** `scan_descriptors` takes the
+  scan capability; the gate `scan_prepared_sources` and the shared `_prepare`
+  helper; `run_scan`, `decoy demo` and `decoy.scan()` routed through the gate;
+  the AT-C8 sentry; the `_layout.py` move. No flag is added and no output
+  changes, except that an engine descriptor refusal on the positional route
+  now exits 1 before any read instead of 3 during the scan.
+- **S1c.2b (~670 lines): the config route.** The four flags, the default-group
+  dispatch for an option-first invocation, the integrity block and hints, the
+  freeze-manifest and release-sentry updates.
 
-**Files.**
-- new `src/decoy/cli/scanning/_config.py` (~110): `--config` loading through
-  `load_config_mapping` (`src/decoy/_config_file.py:83`), the flag-conflict
-  checks, and the call of the gate below with the config's directory as the
-  base. It never reads `sources` or `relationships` out of the YAML mapping
-  itself.
+S1c.2b branches from main after S1c.2a merges. Both are one roadmap row (CLI
+`docs/roadmap/groups/scan.md`, row 27) with two parts.
+
+Depends on: S1c.1 (merged); E-S1c, which is MERGED (engine `92152f328`,
+released in engine v0.28.1 to v0.28.3). CLI main already pins
+`decoy-engine==0.28.3` (`pyproject.toml:153`), so no repin is needed.
+`src/decoy/_config_file.py` (`load_config_mapping` at `:253`,
+`config_refusal` at `:262`) and `cli/_sources.py::resolved_source_config`
+(`:41`) are on main. CONFIG-EXPLICIT E1, E2 and C1 are on main.
+
+**What changed on CLI main since the Revision 8 refit (`4b051065`).**
+- CLI #354 made `src/decoy/cli/scanning/_engine_call.py::scan_descriptors`
+  (`_engine_call.py:55`) the only first-party caller of `scan_sources`.
+  G-ONE-SCAN-CALL (`tests/sentry/scan/test_one_scan_call.py`) enforces it:
+  the walk must find the owner scope exactly as `{"scan_descriptors"}`
+  (`:89`), and the `scan-call-allow` baseline holds only
+  `cli/init.py::_scaffold_from_file` (`:97`), which calls `profile_columns`,
+  not `scan_sources`. `run_scan` (`_multi.py:590`), `_run_single_demo`
+  (`demo.py:159`) and `api.py::scan` (`api.py:743`) all call
+  `scan_descriptors(descriptors, rows=, strategy=, pre_scan=, on_stage=)`.
+- CLI #355 made `decoy.scan()` return the `scan-set/v1` document.
+- CLI #351 added `--detectors` and `--ner-model`; `run_scan` now resolves a
+  `pre_scan` and passes it through `scan_descriptors`.
+- CLI #381 froze the flags and `--json` documents of `decoy scan SOURCES`
+  (`scan _scan` is now `frozen-hidden`). Every visible flag of `scan _scan`
+  must appear in the generated `docs/cli-reference.md`
+  (`tests/sentry/release/test_default_command_flags.py`).
+- `_multi.py` is 655 lines (was 512). `scan.py` is 888 lines, held by the
+  shrink-only `module-size` baseline at `max: 888`. `api.py` no longer imports
+  `_parse_layout`; only `_multi.py::_layout_columns` (`_multi.py:310`) uses it
+  and `_check_layout_columns`.
+
+Because of this, Revision 8's AT-C8 could not hold: it required a gate call
+in the same function as every `scan_sources` call, but after #354 the only
+such call is in `scan_descriptors`, which has no gate and must not grow one
+(a gate inside the shared call would hide which config each caller declared).
+Its REQUIRED list also named `run_scan` and `_run_single_demo` without
+`api.py::scan`, which the old CALLER_NAMED map exempted.
+
+**Decision (option B, Revision 8.3).** Keep `scan_descriptors` as the single
+scan call; G-ONE-SCAN-CALL stays as it is. `scan_descriptors` takes the
+`PreparedDeclaredSources` capability as a required first parameter and reads
+`prepared.scan_declaration` inside. Each caller (`run_scan`,
+`_run_single_demo`, `api.scan`) gets the capability from the gate in the same
+function. AT-C8 is re-specified as two checks: the argument chain inside
+`scan_descriptors`, and the capability at each call site of
+`scan_descriptors`. No CALLER_NAMED entry exempts any caller from AT-C8.
+
+Why option B is sound, checked against the code:
+- The capability can only be built by `prepare_declared_sources`
+  (`PreparedDeclaredSources.__init__` refuses any other token, engine
+  `profile/_declared_columns.py:420` area), and `scan_declaration` raises
+  `TypeError` on a capability not built from `for_scan`
+  (`_declared_columns.py:446`). So a capability parameter cannot be faked by
+  a caller, and a capability from `prepared_sources` (a `for_descriptors`
+  request) fails loudly.
+- The positional route keeps its output. Checked on engine 0.28.3: for a
+  header CSV, a headerless TSV with `column_names`, a Parquet file and a
+  fixed-width file, `scan_set_to_dict(...)["tables"][i]["descriptor"]` is
+  equal whether `scan_sources` gets the raw descriptors or
+  `scan_declaration.descriptors`. `for_scan` opens no data file, so a missing
+  or broken data file still fails during the scan, as today.
+- `scan_sources` accepts the read-only `MappingProxyType` descriptors and an
+  empty `relationship_positions` tuple with empty `relationships`
+  (`_scan_integrity.py::_usable_positions`).
+- One gap in option B, stated and closed: `api.scan` stages a DataFrame to a
+  temp Parquet file before any gate can run, because the gate needs a path.
+  `_stage_source_entry` is in the sentry's `EXTRA_READERS`, so check 1 of
+  G-ONE-DECLARED-READ (a reader called before a gate) still flags `api.scan`.
+  The existing `("api.py", "scan")` CALLER_NAMED entry therefore stays, for
+  check 1 only, with its reason narrowed to "stages the caller's own
+  DataFrame before the scan gate; the stager reads no declared source". The
+  AT-C8 checks never read CALLER_NAMED and have no exemption set of their
+  own, and `("api.py", "scan")` joins REQUIRED, so `api.scan` must hold the
+  gate call and pass both AT-C8 checks. This is not a new exemption: the
+  entry is on main, and the slice removes the scan exemption it used to give.
+
+**Files, S1c.2a.**
+- `src/decoy/cli/scanning/_engine_call.py` (84): new signature
+  `scan_descriptors(prepared: PreparedDeclaredSources, *, rows, strategy,
+  pre_scan=None, integrity=True, on_stage=None)`. Order inside:
+  `check_scan_options(rows, strategy)` first (unchanged: bad options raise
+  before the engine), then an `isinstance(prepared, PreparedDeclaredSources)`
+  check that raises `TypeError` with fixed text, then
+  `declaration = prepared.scan_declaration`, then one call
+  `scan_sources(declaration.descriptors, tables=declaration.tables,
+  relationships=declaration.relationships,
+  relationship_positions=declaration.relationship_positions,
+  integrity=integrity, sample_rows=..., strategy=..., pre_scan=pre_scan)`.
+  The rows and strategy rule, `on_stage` and `ScanRun` are unchanged. The
+  name stays `scan_descriptors`, because G-ONE-SCAN-CALL, CODEMAP rows 53 and
+  60 and the `decoy.scan` docstring name it; the docstring says it scans the
+  declared sources of a scan capability. The `PreparedDeclaredSources` import
+  is under `TYPE_CHECKING` for the annotation and at call time for the check,
+  as the module already does for `scan_sources`. About +15.
 - `src/decoy/cli/_sources.py` (504): one private helper,
-  `_prepare(request_for, config_dict, base_dir, *, passthrough)`, holds the body that
-  `prepared_sources` has today (`_sources.py:116-156`): the reader-side copy
-  through `resolved_source_config` (`_sources.py:41`), the
+  `_prepare(request_for, config_dict, base_dir, *, passthrough)`, holds the
+  body that `prepared_sources` has today (`_sources.py:116-156`): the
+  reader-side copy through `resolved_source_config` (`_sources.py:41`), the
   `prepare_declared_sources` call and the one parameterized exception
   contract. The helper re-raises an exception only when it belongs to the
   caller's narrow `passthrough` tuple; otherwise the existing broad
-  `(OSError, ValueError, DecoyError)` arm relabels it through `_read_refusal`.
+  `(OSError, ValueError, DecoyError)` arm relabels it through `_read_refusal`
+  (`_sources.py:96`), raised after the handler closes as today.
   `prepared_sources` passes `(PipelineValidationError,)`, keeps its documented
   contract that gate refusals pass through unchanged and every read refusal is
   a `PipelineValidationError`, and updates its docstring only to say that the
   implementation is shared. Its existing callers and handlers do not change.
-  `scan_prepared_sources` alone widens that tuple to
-  `(PipelineValidationError, PipelineConfigError, ConfigError)`, because
-  `PipelineConfigError` is both a `DecoyError` and a `ValueError` and the scan
-  route must not relabel its coded refusal as `csv_malformed`.
-  `prepared_sources` and the new gate
-  `scan_prepared_sources(sources_config, *, base_dir, tables)` are thin
-  callers that differ only in the request they build. No second copy of the
-  contract. About +25 net.
-- `src/decoy/cli/demo.py`: `_run_single_demo` (`demo.py:138`) calls
-  `scan_sources` at `demo.py:171` on a descriptor from `csv_file_source`
-  with no gate. It is routed through `scan_prepared_sources` (demo writes its
-  own CSV, so the honest form is the gate, not an exemption), and its
-  `scan_sources` call is fed from `prepared.scan_declaration`. About +5.
-- `src/decoy/cli/scanning/_multi.py` (512): `run_scan` takes `config`,
-  `tables`, `column_names_file` and `skip_integrity`; both routes build a
-  sources mapping (positional: `resolve_sources`; config: `_config.py`) and
-  pass it through `scan_prepared_sources`; the one `scan_sources` call is fed
-  only from `prepared.scan_declaration`. Integrity block renderer and the
-  `relationships` member of the multi envelope. About +90, stays under ~620.
-- `src/decoy/cli/scan.py` (1037, over the ~800 rule): four new options and an
-  optional `SOURCES`. Net change zero or less: `_parse_layout`
-  (`scan.py:224`, 72 lines) moves to new `src/decoy/cli/scanning/_layout.py`.
-  The def keeps the name `_parse_layout`.
-  `decoy.cli.scanning` re-exports it as `parse_layout`; `src/decoy/api.py`
-  imports that public name (`api.py:58` imports `_parse_layout` from
-  `decoy.cli.scan` today). `_multi.py` is inside the same package, so
-  `_layout_columns` keeps the import inside the function and imports directly
-  from `._layout`; it does not traverse `scanning.__init__` during package
-  initialization.
+  The new gate `scan_prepared_sources(sources_config, *, base_dir,
+  tables=None)` builds `DeclarationRequest.for_scan(resolved, tables)` and
+  alone widens the tuple to `(PipelineValidationError, PipelineConfigError,
+  ConfigError)`, because `PipelineConfigError` is both a `DecoyError` and a
+  `ValueError` and must not be relabeled `csv_malformed`. No second copy of
+  the contract. About +25 net.
+- `src/decoy/cli/io/__init__.py`: re-export `scan_prepared_sources` beside
+  `prepared_sources` (`io/__init__.py:29`, `__all__` at `:282`), so the
+  sentry's two gate modules stay symmetrical. +2.
+- `src/decoy/cli/scanning/_multi.py` (655): `run_scan` (`:546`) wraps the
+  positional descriptors from `resolve_sources` (`:246`) as
+  `{"sources": descriptors}`, calls
+  `prepared = scan_prepared_sources(..., base_dir=Path.cwd())` inside the
+  existing pre-read `try` (`:565-580`), and passes `prepared` to
+  `scan_descriptors` (`:590`). A new narrow except arm for
+  `(PipelineConfigError, PipelineValidationError, ConfigError)` saves the
+  coded, fixed refusal and exits `EXIT_USAGE` after the handler closes. The
+  `_layout_columns` function-level import from `decoy.cli.scan` (`:310`)
+  becomes a module-level import from `decoy.cli.scanning._layout`: `_layout.py`
+  imports only `json` and `yaml`, so there is no cycle. About +15.
+- `src/decoy/cli/demo.py`: `_run_single_demo` (`demo.py:128`) builds the same
+  one-table descriptor (`:156-158`), calls
+  `scan_prepared_sources({"sources": descriptors}, base_dir=out_dir)` in the
+  same function, and passes the result to `scan_descriptors` (`:159`). Demo
+  writes its own CSV, so the correct form is the gate, not an exemption. About
+  +4.
+- `src/decoy/api.py`: `scan` (`api.py:672`) calls
+  `prepared = scan_prepared_sources({"sources": descriptors},
+  base_dir=Path.cwd())` after the DataFrame or path branch and before
+  `scan_descriptors` (`:743`), inside the existing `try`/`finally` so the temp
+  file is still removed on a refusal. Import it from `decoy.cli.io` beside
+  `prepared_sources` (`:42-49`). The docstring's `Raises:` gains one line: a
+  descriptor the engine refuses before any row is read raises the engine's
+  coded `PipelineConfigError` (a `ValueError`) or `PipelineValidationError`.
+  The existing `tests/unit/api_scan/` cases pass unchanged: the API usage
+  checks in `resolve_sources` still run first, and `for_scan` opens no data
+  file, so the not-Parquet and repeated-name cases (`test_inputs.py:75-99`)
+  still fail during the scan. About +6.
+- New `src/decoy/cli/scanning/_layout.py` (~85): `_check_layout_columns`
+  (`scan.py:160-199`) and `_parse_layout` (`scan.py:202-236`) move together,
+  with the comment block above them (`scan.py:155-157`). Moving
+  `_parse_layout` alone would make `_layout.py` import `decoy.cli.scan`, which
+  imports `decoy.cli.scanning` at module load (`scan.py:39`), a circular
+  import. Both defs keep their names. Nothing outside `_multi.py` uses them on
+  main (no test, no `api.py` import), so `decoy.cli.scanning` does not
+  re-export them and no public name is added. `scan.py` shrinks by about 83
+  lines, to about 805.
+- `tests/sentry/baselines/module-size.json` and the `module-size` member of
+  `tests/sentry/allowlist-before.json`: lower `src/decoy/cli/scan.py` `max`
+  from 888 to the new line count, the same shrink #381 recorded (930 to 888).
+  S1c.2b's four options must then fit under that lowered count, so 2b moves
+  option help text into `scanning/_help.py` if it needs room.
 - `tests/sentry/baselines/config-load-allow.json` and
   `tests/sentry/allowlist-before.json`: the G-ONE-CONFIG-LOAD site
-  `cli/scan.py::_parse_layout::1` moves. In
+  `cli/scan.py::_parse_layout::1` (`config-load-allow.json:35`,
+  `allowlist-before.json:30`) moves. In
   `tests/sentry/baselines/config-load-allow.json`, record
   `"moved_from": {"cli/scanning/_layout.py::_parse_layout::1":
   "cli/scan.py::_parse_layout::1"}` with the entry text unchanged, so the
   shrink-only ratchet (`tests/sentry/_ratchet.py`) sees a move, not growth.
   `tests/sentry/allowlist-before.json` is the C-G2 snapshot, not a ratchet:
   under its existing `"config-load-allow"` member, rename only the nested key
-  from `cli/scan.py::_parse_layout::1` to
-  `cli/scanning/_layout.py::_parse_layout::1`, keep the value unchanged, and
-  add no `moved_from` member. The new load and gate catches save only the
-  value-free refusal fields and exit integer; emission and `typer.Exit` happen
-  after each handler closes, so no new raise-in-handler exception-context site
-  is expected. The builder still checks the exception-context baseline keys for
-  `run_scan` (`decoy/cli/scanning/_multi.py::run_scan::N`). If an existing
-  ordinal shifts, `tests/sentry/baselines/exception-context.json` records it
-  with `moved_from`, while the `exception-context` member of
-  `allowlist-before.json` renames only the nested key and keeps its value; no
-  baseline or snapshot entry is added.
+  to `cli/scanning/_layout.py::_parse_layout::1`, keep the value unchanged,
+  and add no `moved_from` member. If the reason text says "scan.py is a hot
+  lane", it stays as written; it is the recorded reason, not a location.
+- Exception-context keys: the new gate arm saves only value-free fields and
+  emits after the handler closes, so no new raise-in-handler site is
+  expected. The builder checks the `run_scan` keys
+  (`exception-context.json:86-89`, `allowlist-before.json:106-107`,
+  `decoy/cli/scanning/_multi.py::run_scan::0` and `::1`). If an existing
+  ordinal shifts, `exception-context.json` records it with `moved_from`,
+  while `allowlist-before.json` renames only the nested key and keeps its
+  value; no entry is added. The `test_private_files.py:140` key
+  `cli/scanning/_multi.py::run_scan::write_local_target::1` must not shift;
+  if it does, the builder records the move the way that sentry documents.
 - `tests/sentry/io_policy/test_declared_read_choke_point.py` (270): AT-C8
   (below).
+- `tests/unit/scanning/test_engine_call.py` (71): the six existing tests keep
+  their assertions. Only their first argument changes, from `{}` to a
+  `prepared` fixture built by the real gate:
+  `scan_prepared_sources({"sources": {"t": csv_file_source(tmp_path / "t.csv",
+  has_header=True)}}, base_dir=tmp_path)`. The CSV file need not exist
+  (`for_scan` opens no data file, TE-scan-no-rows). The `engine` fixture keeps
+  patching `decoy_engine.scan_sources` and `scan_set_to_dict`. New unit tests
+  in the same file: T2-call-forwards, T2-call-refuses-mapping,
+  T2-call-refuses-other-capability (table below).
+- `tests/e2e/test_scan_one_call.py`: unchanged. Its `_expected` documents are
+  computed from the raw descriptors; they still match because the recorded
+  descriptor is unchanged (checked above). It is in the T1 selection.
+
+**Files, S1c.2b.**
+- New `src/decoy/cli/scanning/_config.py` (~90): `--config` loading through
+  `load_config_mapping` (`_config_file.py:253`) with the two load-only arms,
+  the flag-conflict checks, and the projection of display labels. It returns
+  the loaded mapping and the config's directory to `run_scan`. It does not
+  call the gate: `run_scan` holds the one gate call for both routes, which
+  keeps AT-C8 check 2 a same-function rule. It never reads `sources` or
+  `relationships` out of the YAML mapping before the gate has validated it.
+- New `src/decoy/cli/scanning/_relationships.py` (~60): the integrity-line
+  renderer and the two hint lines (unchecked relationships, ignored
+  `pre_scan`). It reads only `scan_set_to_dict(detail=False)["relationships"]`
+  and the `ScanDeclaration` counts. It is a separate module so that
+  `_multi.py` stays under 800.
+- `src/decoy/cli/scanning/_multi.py`: `run_scan` takes `config`, `tables`,
+  `column_names_file` and `skip_integrity`. Both routes build a sources
+  mapping (positional: `resolve_sources`; config: `_config.py`) and reach the
+  same `scan_prepared_sources` call; `scan_descriptors(prepared,
+  integrity=not skip_integrity, ...)`. `_multi_payload` (`:412`) fills
+  `relationships` (today `[]` at `:421`) and adds `relationships_unchecked`
+  on the config route only. About +45, to about 715 after 2a.
+- `src/decoy/cli/scan.py`: four new options on `_scan` (`scan.py:338`) and
+  `SOURCES` (`:339`) changes from `...` to `None` (optional, still
+  `exists=True, dir_okay=False, readable=True`). Must stay at or under the
+  `max` that 2a lowered; help text goes to `scanning/_help.py` where needed.
+- `src/decoy/cli/_default_group.py` (`resolve_command`): today it dispatches
+  to the hidden default command only when the first token is not an option
+  (`token.startswith("-")` goes to the group). Checked on CLI main:
+  `decoy scan --has-header a.csv` exits 2 with "No such option:
+  --has-header". So `decoy scan --config p.yaml`, which has no positional,
+  would never reach `_scan`. Change: an option-first token that is not one of
+  the group's own options (only `--help`) also dispatches to the default
+  command, keeping every arg. The group's `no_args_is_help` and
+  `decoy scan --help` are unchanged. This is shared with `decoy validate`,
+  where `decoy validate --fail-on-warning p.yaml` starts to work instead of
+  exiting 2; that is additive and gets the same CHANGELOG line. About +4.
+- `src/decoy/cli/scanning/_help.py`: epilog lines for `--config` (both
+  shapes), `--table`, `--column-names-file`, `--skip-integrity`.
+- Freeze updates from #381:
+  - `tests/sentry/release/test_default_command_flags.py::
+    test_the_named_flags_still_exist`: add `--config`, `--table`,
+    `--column-names-file` and `--skip-integrity` to the frozen scan set, so a
+    later rename is caught.
+  - `docs/cli-reference.md`: regenerate with the command the `test_cli_surface`
+    sentry names (typer pinned `<0.27`, `pyproject.toml:154-162`), so
+    `test_every_flag_is_shown_in_the_reference` stays green.
+  - `docs/release/frozen-surfaces.md`: no row changes. The four flags are
+    visible options of `scan _scan`, which the "Hidden commands and options"
+    row already lists as `frozen-hidden`; no hidden name is added, so
+    `test_hidden_names.py` is unchanged.
+  - `tests/fixtures/release_freeze/json-shapes.json` and
+    `tests/e2e/release_freeze/write_shapes.py`: unchanged. The `scan` entry
+    is the flat single-file document (`write_shapes.py:376`,
+    `scan patients.csv --has-header`), which this slice does not change. The
+    snapshot holds one document per leaf command, so it cannot pin the config
+    envelope; T2-config-envelope pins those keys instead. The builder runs
+    `python -m tests.e2e.release_freeze.write_shapes` and confirms an empty
+    diff.
+  - `CHANGELOG.md`: one line naming the four flags as additions to the frozen
+    `decoy scan` surface, the filled `relationships` member, and the
+    option-first dispatch for `decoy scan` and `decoy validate`.
 - tests: `tests/e2e/cli_fmt/test_scan_config.py` (new),
-  `tests/e2e/cli_fmt/test_scan_multi.py` (positional names-file cases).
-- docs: scan epilog, CLI reference (both `--config` shapes), `CHANGELOG.md`.
+  `tests/e2e/cli_fmt/test_scan_multi.py` (positional names-file cases), the
+  default-group cases beside the existing default-group tests.
+- docs: CLI reference text for both `--config` shapes.
 
 **Behavior.**
-- One route. Positional files and `--config` both produce a sources mapping
-  that goes through `scan_prepared_sources`, then `scan_sources(
-  prepared.scan_declaration.descriptors, tables=...tables,
-  relationships=...relationships, integrity=not skip_integrity)`. The
-  positional route gains no new failure: the engine checks are the ones
-  `scan_sources` already ran, and no data file is opened before the scan.
+- One route. Positional files, `--config`, `decoy demo` and `decoy.scan()`
+  all produce a sources mapping that goes through `scan_prepared_sources` in
+  the calling function, then `scan_descriptors(prepared, ...)`, which feeds
+  `scan_sources` only from `prepared.scan_declaration` (descriptors, tables,
+  relationships, relationship positions). The positional route gains no new
+  failure: the engine checks are the ones `scan_sources` already ran, and no
+  data file is opened before the scan.
 - `--config PATH` and positional `SOURCES` are exclusive; one of them is
   required. With `--config`, `--has-header`, `--no-header`,
   `--column-names`, `--column-names-file`, `--format` and `--layout` are
-  usage errors (the config declares each source's dialect). `--config` uses a
-  manual existence/file check rather than Click `exists=True`: a missing path
-  or directory is a fixed usage refusal and exits 1. `SOURCES` keeps its
-  existing `exists=True, readable=True` declaration, so a missing positional
-  file, an unknown option and other Click parse failures keep Click's existing
-  integer-2 exit.
+  usage errors (the config declares each source's dialect). `--detectors`,
+  `--ner-model`, `--rows`, `--strategy`, `--show-fields` and `--output` keep
+  working with `--config`: they are scan options, not source declarations.
+  `--config` uses a manual existence/file check rather than Click
+  `exists=True`: a missing path or directory is a fixed usage refusal and
+  exits 1. `SOURCES` keeps its existing `exists=True, readable=True`
+  declaration, so a missing positional file, an unknown option and other
+  Click parse failures keep Click's existing integer-2 exit.
+- Bare `decoy scan` (no tokens) keeps the group's existing `no_args_is_help`
+  behavior; this slice does not change it. An invocation that reaches `_scan`
+  with neither input (for example `decoy scan --rows 5`, which the
+  option-first dispatch now routes to `_scan`) exits 1 through the manual
+  "one input required" check.
 - `--table NAME` (repeatable) needs `--config`; it selects and orders the
-  tables, checked by E-S1c before any read. Relationships may name tables
+  tables, checked by `for_scan` before any read. Relationships may name tables
   that are not selected (S1b rule).
 - `--column-names-file PATH` needs `--no-header` and exactly one positional
   CSV, and excludes `--column-names`. The path is made absolute against the
   current directory and becomes the descriptor's `column_names_file`; the
-  engine reads it once (E-S1c).
+  engine reads it once, at the gate, and inlines the names (E-S1c).
 - Relative `path` and `column_names_file` in a config resolve against the
   config file's directory (`resolved_source_config`).
 - `--skip-integrity` needs `--config`. Relationships that the boundary keeps
@@ -1127,106 +1333,179 @@ and C1 are all on main, so they are no longer open dependencies.
   `relationships_unchecked` (an int) only on the `--config` route. Exit code
   unchanged.
 - When `scan_declaration.ignored_keys` holds `pre_scan`, the card prints one
-  hint line that the config's `pre_scan` is not used by `decoy scan` (key name
-  only) (F9).
-- Display (F12, corrected in Revision 8.2): the `ScanDeclaration` holds the
-  resolved reader descriptors, so it is not the source of display labels.
-  After `scan_prepared_sources` has validated the original config mapping,
-  `_multi.py` reads only each selected source's `path` or, when absent, its
-  `type` from that validated original mapping and builds the `paths` map passed
-  to `_table_summary`. The card's and `--json`'s `source` therefore remains the
-  path as written in the config (relative or not), while `scan_sources`
-  receives only the resolved declaration. Positional files keep the path as
-  given. This is display projection, not a second descriptor validator.
+  hint line that the config's `pre_scan` is not used by `decoy scan` and that
+  `--detectors` chooses the detectors (key name only) (F9).
+- Display (F12): the `ScanDeclaration` holds the resolved reader descriptors,
+  so it is not the source of display labels. After `scan_prepared_sources`
+  has validated the original config mapping, `_config.py` reads only each
+  selected source's `path` or, when absent, its `type` from that validated
+  original mapping and builds the `paths` map passed to `_table_summary`. The
+  card's and `--json`'s `source` remains the path as written in the config,
+  while `scan_sources` receives only the resolved declaration. Positional
+  files keep the path as given. This is display projection, not a second
+  descriptor validator.
 - Output: the card, then one integrity line per declared relationship child,
   read from `scan_set_to_dict(detail=False)["relationships"]` only
   (`orders.customer_id -> customers.customer_id: 7 orphan rows (3 keys), 5
   null, parent duplicates 0`; a `~` before counts that are not exact, and the
   status word when the pass did not complete), then the H4 honesty block
   once. `--json` with `--config` always uses the multi envelope, even for
-  one table; `relationships` holds the core's relationship dicts in place of
-  today's empty list (`_multi.py:296`). The flat single-file keys stay only
-  for exactly one positional file (T2-parquet-compat).
-- Exit codes (CLI `src/decoy/cli/exit_codes.py`: `EXIT_USAGE = 1`,
-  `EXIT_WARNINGS = 2`, `EXIT_RUNTIME = 3`): 0 ok; 1 (`EXIT_USAGE`) for manual
-  flag/path checks and boundary refusals (config file not a mapping or not
-  UTF-8, shape, descriptor, dialect, names file, selection, relationship),
-  all before any data row is read; integer 2 for unchanged Click parse errors,
-  an unknown option or a bad choice (`SOURCES` is optional so the config route
-  works; an empty invocation reaches the manual "one input required" check and
-  exits 1);
-  3 for a scan failure (`_multi.py:461`) and for an `OSError` raised while
-  `load_config_mapping` reads an existing config file (`exit_code_for` and
-  `config_refusal` treat that as the environment, not the config). Routing:
-  the config load has two load-only arms: `ConfigFileError` saves
-  `config_refusal(exc)` and exit 1, while `OSError` saves the same value-free
-  refusal and `exit_code_for(exc)` (3). After the selected handler closes, the
-  command emits those saved fields and raises `typer.Exit`, with no attached
-  exception context. The gate separately catches `PipelineConfigError`,
-  `PipelineValidationError` and the dialect `ConfigError`, saves only the
-  coded, fixed refusal, then emits and exits 1 after that handler closes. This
-  narrow arm is required because
+  one table. The flat single-file keys stay only for exactly one positional
+  file (T2-parquet-compat and the frozen `scan` entry in `json-shapes.json`).
+- Exit codes (CLI `src/decoy/cli/exit_codes.py`: `EXIT_USAGE = 1` at `:49`,
+  `EXIT_WARNINGS = 2` at `:56`, `EXIT_RUNTIME = 3` at `:66`): 0 ok; 1
+  (`EXIT_USAGE`) for manual flag/path checks and boundary refusals (config
+  file not a mapping or not UTF-8, shape, descriptor, dialect, names file,
+  selection, relationship), all before any data row is read; integer 2 for
+  unchanged Click parse errors, an unknown option or a bad choice (`SOURCES`
+  is optional so the config route works); 3 for a scan failure (the broad
+  arm at `_multi.py:599-607`) and for an `OSError` raised while
+  `load_config_mapping` reads an existing config file (`exit_code_for` at
+  `exit_codes.py:179` and `config_refusal` treat that as the environment, not
+  the config). Routing: the config load has two load-only arms:
+  `ConfigFileError` (`_config_file.py:82`) saves `config_refusal(exc)` and
+  exit 1, while `OSError` saves the same value-free refusal and
+  `exit_code_for(exc)` (3). After the selected handler closes, the command
+  emits those saved fields and raises `typer.Exit`, with no attached
+  exception context. The gate arm (added in 2a) catches
+  `PipelineConfigError`, `PipelineValidationError` and the dialect
+  `ConfigError`, saves only the coded, fixed refusal, then emits and exits 1
+  after that handler closes. This narrow arm is required because
   `exit_code_for` sends `PipelineConfigError` to 3 (it is not a `ConfigError`
-  and is absent from `usage_error_types()`). The broad scan-time arm
-  (`_multi.py:461`) is unchanged and does not wrap config loading. Integrity
-  findings never change the exit code in V1.
-- AT-C8, which CLI main enforces as G-ONE-DECLARED-READ
-  (`tests/sentry/io_policy/test_declared_read_choke_point.py`): add
-  `scan_sources` to `EXTRA_READERS`, `scan_prepared_sources` to `GATES`, and
-  `("cli/scanning/_multi.py", "run_scan")` and
-  `("cli/demo.py", "_run_single_demo")` to `REQUIRED`. New check: every
-  `scan_sources` call in `src/decoy/` takes as its first argument, and as its
-  `tables=` and `relationships=` keywords when present, an attribute chain
-  rooted at a name bound to a gate call in the same function. The call is
-  recognized in every spelling the sentry's `bindings`/`qualified` helpers
-  resolve: `from decoy_engine import scan_sources`, an `as` alias of it, and
-  the attribute form `decoy_engine.scan_sources` (and
-  `decoy_engine.profiling.scan_sources`). No `CALLER_NAMED` exemption is
-  added. Seeded bypasses that must turn red, one per case: `scan --config`
-  feeding `scan_sources` from the YAML mapping; the gate call deleted from
-  `run_scan`; a second `scan_sources` call fed from `resolve_sources`;
-  `relationships=` fed from the YAML mapping; the aliased import; the
-  attribute form. The real tree, with `demo.py` rerouted, is green.
+  and is absent from `usage_error_types()` at `exit_codes.py:272`). The broad
+  scan-time arm is unchanged and does not wrap config loading or the gate.
+  Integrity findings never change the exit code in V1.
+- `decoy.scan()` keeps its arguments and its return document. A descriptor
+  the engine refuses is now refused at the gate, before any row is read, with
+  the same engine exception class it raised from `scan_sources` before.
 
-**Acceptance tests and named mutations.** Rows marked "landed" are on main
-from S1c.1 and stay green unchanged.
+**AT-C8 (Revision 8.3), in G-ONE-DECLARED-READ**
+(`tests/sentry/io_policy/test_declared_read_choke_point.py`). It works with
+G-ONE-SCAN-CALL, which already proves that `scan_descriptors` is the only
+function that reaches `scan_sources`. AT-C8 adds:
 
-| Test | Asserts | Mutation |
-|---|---|---|
-| T2-multi, T2-header-required, T2-headerless, T2-tsv, T2-collision, T2-atomic, T2-parquet-compat, T2-output-core, T2-output-stream-core, T2-canary, T2-load-bare, T2-schema-reject, T2-stdin-core, T2-stdin-double | landed (S1c.1); must pass unchanged after the route change | the S1c.1 mutations |
-| T2-untagged-refused | landed: a saved scan without `scan_schema` (file or stdin; `fields`, `show`, `diff`) exits 1 with `scan.saved_scan_schema_unsupported`, human and `--json` | M2-legacy-accept: read an untagged dict as a one-table set |
-| G-ONE-SCAN-READER | landed | M-READ-INLINE |
-| T2-config-header | a config CSV source without `has_header` exits 1 before any read | M2-trust-default: accept the schema default |
-| T2-config-sources-only | a file with only `sources:` and `relationships:` scans, runs integrity and exits 0 | M2-full-validate: validate through `PipelineConfig` |
-| T2-config-full | a full pipeline with no `targets` and a `tables` entry that lists only some columns scans and exits 0 | M2-declared-check: prepare with `for_descriptors` |
-| T2-config-shape | a sources-only file with an unknown top-level key, `version: 1`, `version: "2"`, `sources: {a: 5}` and `relationships: [5]` each exit 1 with a coded refusal (no crash guard, no `csv_malformed`) | M2-loose-shape |
-| T2-config-refusal-code | a bad descriptor under `--config` exits 1 with its own engine message and code, and the output does not contain `csv_malformed` or "could not be read" | M2-relabel: let the broad `(OSError, ValueError, DecoyError)` arm catch `PipelineConfigError` |
-| T2-config-mixed | a full pipeline with one source table, one generate table and a relationship between them scans, exits 0, prints the "1 relationship not checked" hint, and `--json` has `relationships_unchecked: 1`; two unchecked relationships use the plural hint; the same with `--skip-integrity` exits 0 with the hint | M2-refuse-mixed: refuse the relationship; M2-no-inflect: always render the plural noun |
-| T2-config-relative | a config in `cfg/` naming `data/a.csv` and `data/h.txt` (names file) scans `cfg/data/a.csv` when run from another directory | M2-cwd: resolve against the current directory |
-| T2-config-display | for that relative-path config, the card and `--json` show `data/a.csv`, not the resolved absolute path; a valid pathless source shows its `type` | M2-display-resolved: build display labels from `scan_declaration.descriptors` |
-| T2-config-select | `--config p.yaml --table t2` profiles only t2; `--table t9` and `--table t2 --table t2` exit 1 before any read | M2-ignore-select; M2-late-select: let `scan_sources` reject (exit 3) |
-| T2-config-flags | `--config` with a positional file, with `--no-header`, `--column-names`, `--column-names-file`, `--format` or `--layout`, with neither `--config` nor a file, and `--config` naming a missing path or directory each exit 1; a missing positional file and an unknown option retain Click's integer-2 exit | M2-merge-flags: let a header flag override the config; M2-click-config: add `exists=True` to `--config` |
-| T2-config-unreadable | an existing config for which `load_config_mapping` raises `OSError` prints only `config_refusal(exc)`, exits 3 through `exit_code_for(exc)`, and does not reach the scan-time crash arm | M2-config-oserror-crash: omit the load-only `OSError` arm; M2-config-oserror-usage: fold it into the `ConfigFileError` arm and hard-code exit 1 |
-| T2-table-needs-config | `--table` and `--skip-integrity` without `--config` exit 1 | M2-silent-flag: ignore the flag |
-| T2-column-names-file | `--no-header --column-names-file h.txt a.csv` profiles the first row as data under the file's names; with `--column-names` or `--has-header`, or with two CSVs, it exits 1; a two-record names file exits 1 with the engine code | M2-drop-names-file |
-| T2-config-boundary (AT-C8) | every seeded bypass and spelling listed above is red; the real tree is green | M2-boundary-bypass: feed `scan_sources` from the raw YAML |
-| T2-integrity | config with one declared relationship over fixtures with known orphans, nulls and parent duplicates: the card line and `--json` show exactly those S1b counts | M2-hide: drop the integrity block |
-| T2-integrity-shapes | a composite key, a parent with two children, and a self-reference each render one line per child with the right counts | M2-first-child-only |
-| T2-skip-integrity | `--skip-integrity`: no integrity lines, `relationships: []`, exit 0; in a sources-only file a relationship naming a missing table still exits 1 | M2-skip-validate: skip relationship validation too |
-| T2-config-envelope | a one-table config emits the multi envelope with `scan_schema` and `relationships` | M2-flat-config |
-| T2-config-canary | a unique canary in every data cell of every table, key columns included: card, `--show-fields`, `--json`, integrity lines, `--output`, stderr and the error path carry no canary; a canary as an invalid descriptor value (`delimiter`) and on a YAML line that fails to parse is not echoed | M2-leak-config, each applied alone: (a) validate the descriptor in the CLI with `TypeAdapter(SourceDescriptor)` and print `exc.errors()`; (b) parse the config with `yaml.safe_load` directly and print the `YAMLError`; (c) put the offending descriptor mapping in the refusal text. Each must turn the test red; (a) may also turn the config-route AST sentry red |
-| T2-demo-gated | `decoy demo` still runs end to end and exits 0 after the reroute (in the T1 selection) | M2-demo-ungated: call `scan_sources` on the raw descriptor (AT-C8 red) |
+- `GATES` gains `scan_prepared_sources` for both modules it already walks
+  (`decoy.cli._sources`, `decoy.cli.io`), so `_gate_lines` counts it by its
+  resolved name, never its spelling, and REQUIRED sees it. A new
+  `SCAN_GATES` subset holds only those two names, for check B.
+- `REQUIRED` gains `("cli/scanning/_multi.py", "run_scan")`,
+  `("cli/demo.py", "_run_single_demo")` and `("api.py", "scan")`.
+- `EXTRA_READERS` gains nothing. `scan_sources` is not added: its one caller
+  is `scan_descriptors`, which takes a capability instead of calling a gate,
+  so check 1 would wrongly flag it. Check A below covers it.
+- Check A, rooted at the capability. In `cli/scanning/_engine_call.py`,
+  function `scan_descriptors`: the `scan_sources` call, found by the resolved
+  name `decoy_engine.scan_sources` (the function-local
+  `from decoy_engine import ...` at `_engine_call.py:65`), takes as its first
+  argument and as its `tables=`, `relationships=` and
+  `relationship_positions=` keywords an attribute chain that starts at either
+  the function's first parameter or a local name whose every assignment in
+  that function is `<first parameter>.scan_declaration`. The first parameter
+  is never reassigned in the function. Each of the four arguments must be
+  present. A missing call, a second call or a different owner function is red
+  (G-ONE-SCAN-CALL reports it too; AT-C8 fails on its own so neither sentry
+  depends on the other being run).
+- Check B, every caller passes a gate result. For every call of
+  `scan_descriptors` in `src/decoy/` outside its own module, in every
+  spelling the sentry's `bindings`/`qualified` helpers resolve
+  (`from decoy.cli.scanning import scan_descriptors`, an `as` alias of it,
+  `from decoy.cli.scanning._engine_call import scan_descriptors`, and the
+  attribute forms `scanning.scan_descriptors` after
+  `from decoy.cli import scanning` and `decoy.cli.scanning.scan_descriptors`
+  after `import decoy.cli.scanning`), the first positional argument is
+  either a scan gate call written inline or a local name whose every
+  assignment in the same function is a call that resolves to a name in the
+  new `SCAN_GATES` set (`scan_prepared_sources` in `decoy.cli._sources` and
+  `decoy.cli.io`). Any other `GATES` name is red here: a `prepared_sources`
+  capability is a `for_descriptors` capability, which `scan_declaration`
+  refuses at run time, and the sentry refuses it first. A
+  parameter, an attribute, a subscript, a name bound by a loop or `with`,
+  or a name with one non-gate assignment is red. A call that passes the
+  capability by keyword (`prepared=`) is checked the same way.
+- Check C, no value reference. A load of `scan_descriptors` that is not the
+  `func` of a call (passed as a value, stored, wrapped in `functools.partial`)
+  outside `scanning/__init__.py`'s re-export is red, so check B cannot be
+  routed around by handing the function to another caller.
+- No exemption set. Checks A, B and C do not read `CALLER_NAMED`, and no new
+  key is added to `CALLER_NAMED`. The existing `("api.py", "scan")` entry
+  covers only check 1 (the stager before the gate) and its reason is narrowed
+  as stated above.
+- Named limits (recurring-defects class 5, listed before building): a call
+  through `getattr`, an alias by assignment (`f = scan_descriptors`, which
+  check C catches as a value reference), `from x import *`, and a gate result
+  that crosses a function boundary (a helper that returns the capability).
+  The last one is red by design: the gate call must sit in the function that
+  calls `scan_descriptors`.
+- Seeded bypasses that must turn red, one per case, in
+  `test_seeded_bypasses_are_detected` (the existing pattern): (1)
+  `scan_descriptors` given the raw `{"sources": ...}` mapping; (2) given a
+  name assigned from `prepared_sources(...)`, the wrong gate; (2b) given a
+  name assigned from a local function named `scan_prepared_sources` that is
+  not the import (the existing "local" seed pattern); (3) the gate
+  call deleted from `run_scan`, so `prepared` is a parameter; (4) `prepared`
+  reassigned from a dict after the gate; (5) the aliased import
+  `scan_descriptors as sd`; (6) the attribute form
+  `scanning.scan_descriptors`; (7) `scan_descriptors` passed as a value; (8)
+  in `scan_descriptors`, `scan_sources` fed from the `descriptors` local of a
+  copied mapping instead of `prepared.scan_declaration`; (9) in
+  `scan_descriptors`, `relationships=` fed from a literal `()`; (10) a
+  function named `scan` in a module named `api.py` that calls
+  `scan_descriptors` on raw descriptors, which must be red although
+  `("api.py", "scan")` is in `CALLER_NAMED`. The real tree is green.
+
+**Acceptance tests and named mutations.** Rows marked "landed" are on main and
+stay green unchanged. The part column says which branch writes the test red
+first.
+
+| Test | Part | Asserts | Mutation |
+|---|---|---|---|
+| T2-multi, T2-header-required, T2-headerless, T2-tsv, T2-collision, T2-atomic, T2-parquet-compat, T2-output-core, T2-output-stream-core, T2-canary, T2-load-bare, T2-schema-reject, T2-stdin-core, T2-stdin-double | landed | must pass unchanged after the route change | the S1c.1 mutations |
+| T2-untagged-refused | landed | a saved scan without `scan_schema` (file or stdin; `fields`, `show`, `diff`) exits 1 with `scan.saved_scan_schema_unsupported`, human and `--json` (`tests/e2e/cli_fmt/test_scan_saved.py:132`, `:140`, `:158`, `:170`) | M2-legacy-accept: read an untagged dict as a one-table set |
+| G-ONE-SCAN-READER, G-ONE-SCAN-CALL | landed | unchanged; the walk still finds the owner as `{"scan_descriptors"}` | M-READ-INLINE; a second `scan_sources` call in `run_scan` |
+| T2-one-call-parity | landed (`tests/e2e/test_scan_one_call.py`), 2a | `decoy scan` documents still equal the pre-refactor engine call for CSV, Parquet and fixed-width cells, and `decoy demo`'s `scan.json` still matches | M2-inline-descriptor: pass `dict(d)` with a default `delimiter` added at the gate wrapper, so the recorded descriptor changes |
+| T2-call-forwards | 2a | with the engine patched, `scan_descriptors(prepared, ...)` passes exactly `declaration.descriptors`, `.tables`, `.relationships`, `.relationship_positions` and `integrity` to `scan_sources`; the six existing `test_engine_call.py` tests pass with only their first argument changed | M2-drop-positions: omit `relationship_positions=` |
+| T2-call-refuses-mapping | 2a | `scan_descriptors({"t": {...}}, rows=1, strategy="head")` raises `TypeError` and the patched engine is not called | M2-accept-mapping: treat a mapping argument as descriptors |
+| T2-call-refuses-other-capability | 2a | a capability from `prepared_sources` (a `for_descriptors` request) raises `TypeError` before the engine is called | M2-any-capability: catch the `TypeError` and scan `{}` |
+| T2-positional-gate-exit | 2a | a positional file whose CLI-built descriptor the engine refuses (seeded through a patched `resolve_sources` that drops `has_header`) exits 1 with the engine code before `scan_sources` runs, not 3 | M2-relabel-positional: route the gate refusal to the broad scan-time arm |
+| T2-api-gated | 2a | `decoy.scan(path)` and `decoy.scan(dataframe)` call the gate once each (spy on `scan_prepared_sources`), return the same documents as before (`tests/unit/api_scan/test_parity.py` unchanged), and a gate refusal from a DataFrame scan still removes the staged temp file | M2-api-ungated: call `scan_descriptors` with a capability from a module-level cache (check B red) |
+| T2-demo-gated | 2a | `decoy demo` still runs end to end and exits 0 after the reroute (in the T1 selection) | M2-demo-ungated: remove the gate call from `_run_single_demo` (AT-C8 REQUIRED and check B red) |
+| T2-config-boundary (AT-C8) | 2a | every seeded bypass (1) to (10), with (2b), is red; the real tree is green | M2-boundary-bypass: feed `scan_sources` from `descriptors` passed beside the capability |
+| T2-layout-move | 2a | the landed fixed-width cases (`tests/e2e/test_scan_formats.py`, `tests/unit/api_scan/test_inputs.py:204` bad layout list) pass unchanged; `import decoy.cli.scanning._layout` does not import `decoy.cli.scan` (checked in a fresh interpreter through `sys.modules`) | M2-layout-cycle: import `_check_layout_columns` from `decoy.cli.scan` inside `_layout.py` |
+| T2-config-first-token | 2b | `decoy scan --config p.yaml` and `decoy scan --json --config p.yaml` reach `_scan` and exit 0; `decoy scan --help` still lists the subcommands; `decoy scan --bogus` exits 2; `decoy validate --fail-on-warning p.yaml` runs the default command | M2-option-dispatch: restore the `not token.startswith("-")` condition |
+| T2-config-header | 2b | a config CSV source without `has_header` exits 1 before any read | M2-trust-default: accept the schema default |
+| T2-config-sources-only | 2b | a file with only `sources:` and `relationships:` scans, runs integrity and exits 0 | M2-full-validate: validate through `PipelineConfig` |
+| T2-config-full | 2b | a full pipeline with no `targets` and a `tables` entry that lists only some columns scans and exits 0 | M2-declared-check: prepare with `for_descriptors` |
+| T2-config-shape | 2b | a sources-only file with an unknown top-level key, `version: 1`, `version: "2"`, `sources: {a: 5}` and `relationships: [5]` each exit 1 with a coded refusal (no crash guard, no `csv_malformed`) | M2-loose-shape |
+| T2-config-refusal-code | 2b | a bad descriptor under `--config` exits 1 with its own engine message and code, and the output does not contain `csv_malformed` or "could not be read" | M2-relabel: let the broad `(OSError, ValueError, DecoyError)` arm catch `PipelineConfigError` |
+| T2-config-mixed | 2b | a full pipeline with one source table, one generate table and a relationship between them scans, exits 0, prints the "1 relationship not checked" hint, and `--json` has `relationships_unchecked: 1`; two unchecked relationships use the plural hint; the same with `--skip-integrity` exits 0 with the hint | M2-refuse-mixed: refuse the relationship; M2-no-inflect: always render the plural noun |
+| T2-config-relative | 2b | a config in `cfg/` naming `data/a.csv` and `data/h.txt` (names file) scans `cfg/data/a.csv` when run from another directory | M2-cwd: resolve against the current directory |
+| T2-config-display | 2b | for that relative-path config, the card and `--json` show `data/a.csv`, not the resolved absolute path; a valid pathless source shows its `type` | M2-display-resolved: build display labels from `scan_declaration.descriptors` |
+| T2-config-select | 2b | `--config p.yaml --table t2` profiles only t2; `--table t9` and `--table t2 --table t2` exit 1 before any read | M2-ignore-select; M2-late-select: let `scan_sources` reject (exit 3) |
+| T2-config-flags | 2b | `--config` with a positional file, with `--no-header`, `--column-names`, `--column-names-file`, `--format` or `--layout`, `decoy scan --rows 5` with neither `--config` nor a file, and `--config` naming a missing path or directory each exit 1; `--config` with `--detectors regex` is accepted; a missing positional file and an unknown option retain Click's integer-2 exit | M2-merge-flags: let a header flag override the config; M2-click-config: add `exists=True` to `--config` |
+| T2-config-unreadable | 2b | an existing config for which `load_config_mapping` raises `OSError` prints only `config_refusal(exc)`, exits 3 through `exit_code_for(exc)`, and does not reach the scan-time crash arm | M2-config-oserror-crash: omit the load-only `OSError` arm; M2-config-oserror-usage: fold it into the `ConfigFileError` arm and hard-code exit 1 |
+| T2-table-needs-config | 2b | `--table` and `--skip-integrity` without `--config` exit 1 | M2-silent-flag: ignore the flag |
+| T2-column-names-file | 2b | `--no-header --column-names-file h.txt a.csv` profiles the first row as data under the file's names; with `--column-names` or `--has-header`, or with two CSVs, it exits 1; a two-record names file exits 1 with the engine code | M2-drop-names-file |
+| T2-integrity | 2b | config with one declared relationship over fixtures with known orphans, nulls and parent duplicates: the card line and `--json` show exactly those S1b counts | M2-hide: drop the integrity block |
+| T2-integrity-shapes | 2b | a composite key, a parent with two children, and a self-reference each render one line per child with the right counts | M2-first-child-only |
+| T2-skip-integrity | 2b | `--skip-integrity`: no integrity lines, `relationships: []`, exit 0; in a sources-only file a relationship naming a missing table still exits 1 | M2-skip-validate: skip relationship validation too |
+| T2-config-envelope | 2b | a one-table config emits the multi envelope; its key set is exactly `command`, `status`, `scan_schema`, `pii_note`, `tables`, `relationships`, `detectors`, `saved`, `relationships_unchecked`; a two-file positional scan's key set is the same without `relationships_unchecked` | M2-flat-config; M2-extra-key: emit `relationships_unchecked` on the positional route too (the positional key-set assertion goes red) |
+| T2-frozen-flags | 2b | `test_default_command_flags.py` lists the four new flags in its frozen scan set and they appear in the regenerated `docs/cli-reference.md`; `json-shapes.json` regenerates with no diff | M2-unlisted-flag: add the options without regenerating the reference (`test_every_flag_is_shown_in_the_reference` red) |
+| T2-config-canary | 2b | a unique canary in every data cell of every table, key columns included: card, `--show-fields`, `--json`, integrity lines, `--output`, stderr and the error path carry no canary; a canary as an invalid descriptor value (`delimiter`) and on a YAML line that fails to parse is not echoed | M2-leak-config, each applied alone: (a) validate the descriptor in the CLI with `TypeAdapter(SourceDescriptor)` and print `exc.errors()`; (b) parse the config with `yaml.safe_load` directly and print the `YAMLError`; (c) put the offending descriptor mapping in the refusal text. Each must turn the test red; (a) may also turn the config-route AST sentry red |
 
 **Frozen-contract effects.** CLI contract (§3.4): `decoy scan` verb
 unchanged; `--config`, `--table`, `--column-names-file` and
-`--skip-integrity` are additive; `SOURCES` becomes optional only when
-`--config` is given. The multi envelope's `relationships` member is filled
-(it was always present and empty). Saved-scan readers accept only
+`--skip-integrity` are additive and join the frozen `scan _scan` surface
+(#381); `SOURCES` becomes optional only when `--config` is given. The multi
+envelope's `relationships` member is filled (it was always present and
+empty). The `decoy.scan()` signature and return document are unchanged.
+`scan_descriptors` is internal (`decoy.cli.scanning`, not `decoy`), so its
+new signature is not a frozen surface. Saved-scan readers accept only
 `scan-set/v1` (pre-GA hard cut, already on main with a CHANGELOG line).
 
 ### S1c.2 build contract
 
-Scope: E-S1c-engine and S1c.2-cli only. The rest of the plan predates the
+Scope: S1c.2a and S1c.2b (CLI). E-S1c is merged; its rows below are kept as
+the record of what the engine guarantees. The rest of the plan predates the
 plan contract and is not restated here.
 
 #### Class table
@@ -1234,15 +1513,16 @@ plan contract and is not restated here.
 | # | Class | Risk here | Closing structure | Sentry or property test | Mutation |
 |---|---|---|---|---|---|
 | 1 | value | a cell value or names-file record reaches the card, `--json`, `--output`, an error or a log | output built only from `scan_set_to_dict(detail=False)`; refusals raised outside handlers with fixed text naming keys | T2-config-canary, TE-scan-value-free, landed T2-canary | M2-leak-config (a), (b), (c); ME-leak (each chosen so it does leak) |
-| 2 | cleanup | a failed scan leaves a partial `--output` or an integrity spill | one atomic write after every table (`_atomic`), S1b spill through LIB L0 | T2-atomic (landed), S1b T5-spill tests | M2-partial: write `--output` before the last table finishes, so a scan failure on table 2 leaves a file; T2-atomic goes red |
-| 3 | state | the CLI edits the prepared descriptors between prepare and scan | `ScanDeclaration` holds deep copies behind `MappingProxyType` | TE-scan-immutable | ME-mutable |
-| 4 | route | positional, config and demo routes reach `scan_sources` by different checks, or two copies of the gate's exception contract drift | one shared `_prepare` helper with a caller-supplied pass-through set behind both gates; every `scan_sources` call fed only from `scan_declaration` | AT-C8 in G-ONE-DECLARED-READ, T2-config-boundary, T2-config-refusal-code, T2-demo-gated | M2-boundary-bypass, M2-relabel, M2-demo-ungated |
-| 5 | referential | a malformed relationship is mislabeled unchecked; a relationship names a table missing from `sources`, or key widths differ; or a valid generate-table relationship is wrongly refused | `_scan_integrity` owns one parse-and-validate core; it parses all entries before the full-pipeline entry point partitions sourceless relationships, while strict `declare` refuses them | T2-skip-integrity, TE-scan-valid, TE-scan-mixed, T2-config-mixed | M2-skip-validate, ME-refuse-mixed, M2-refuse-mixed, ME-raw-partition |
-| 6 | untrusted | config YAML with unknown keys, loosely typed `version`, non-mapping sources or relationships, relative paths or a hostile names file | shape rule from `PipelineConfig.model_fields` with strict type checks; `resolved_source_config`; names file read under file access with the one-record check | T2-config-shape, TE-scan-shape, TE-scan-shape-derived, T2-config-relative, T2-column-names-file | ME-loose-shape, ME-loose-version, ME-hand-list, M2-cwd |
+| 2 | cleanup | a failed scan leaves a partial `--output`, an integrity spill or a staged DataFrame file | one atomic write after every table (`write_local_target`), S1b spill through LIB L0; `api.scan`'s gate call sits inside its existing `try`/`finally` | T2-atomic (landed), S1b T5-spill tests, T2-api-gated | M2-partial: write `--output` before the last table finishes, so a scan failure on table 2 leaves a file; T2-atomic goes red |
+| 3 | state | the CLI edits the prepared descriptors between prepare and scan | `ScanDeclaration` holds deep copies behind `MappingProxyType`; `scan_descriptors` reads them only from the capability | TE-scan-immutable, T2-call-forwards | ME-mutable |
+| 4 | route | positional, config, demo and API routes reach `scan_sources` by different checks, or two copies of the gate's exception contract drift | one scan call (`scan_descriptors`) that takes only a scan capability; one gate call in each caller; one shared `_prepare` helper with a caller-supplied pass-through set | AT-C8 checks A, B, C and REQUIRED in G-ONE-DECLARED-READ; G-ONE-SCAN-CALL; T2-config-boundary, T2-config-refusal-code, T2-demo-gated, T2-api-gated | M2-boundary-bypass, M2-relabel, M2-demo-ungated, M2-api-ungated, M2-accept-mapping |
+| 5 | referential | a malformed relationship is mislabeled unchecked; a relationship names a table missing from `sources`, or key widths differ; or a valid generate-table relationship is wrongly refused | `_scan_integrity` owns one parse-and-validate core (merged in E-S1c); positions travel with the kept relationships | T2-skip-integrity, TE-scan-valid, TE-scan-mixed, T2-config-mixed, T2-call-forwards | M2-skip-validate, ME-refuse-mixed, M2-refuse-mixed, ME-raw-partition, M2-drop-positions |
+| 6 | untrusted | config YAML with unknown keys, loosely typed `version`, non-mapping sources or relationships, relative paths or a hostile names file | shape rule from `PipelineConfig.model_fields` with strict type checks (engine); `resolved_source_config`; names file read under file access with the one-record check | T2-config-shape, TE-scan-shape, TE-scan-shape-derived, T2-config-relative, T2-column-names-file | ME-loose-shape, ME-loose-version, ME-hand-list, M2-cwd |
 | 7 | toctou | the names file changes between the dialect check and the scan read | resolved names are inlined in the capability; the file is read once | TE-scan-names-once | ME-keep-file |
 | 8 | weak | an integrity test passes with zero counts or one child | fixtures with known non-zero orphan, null and duplicate counts and two children | T2-integrity, T2-integrity-shapes | M2-hide, M2-first-child-only |
-| 9 | refactor | extracting `validate_scan_inputs` or moving `_parse_layout` changes behavior | pure moves; existing tests unchanged | TE-scan-parity, landed S1c.1 tests | ME-drift |
-| 10 | frozen | engine API or CLI JSON changes shape | additive export and classmethod only, recorded in `test_public_api.py` and `frozen-surfaces.md`; envelope keys unchanged except the additive `relationships_unchecked` on the `--config` route | TE-scan-not-scan, T2-parquet-compat, T2-config-envelope | M2-extra-key (emit `relationships_unchecked` on the positional route too; the envelope-key snapshot test goes red), M2-flat-config |
+| 9 | refactor | routing through the gate, the new call signature or the `_layout.py` move changes behavior | the recorded descriptor is unchanged (checked on 0.28.3); the layout pair moves whole; existing tests unchanged | T2-one-call-parity, T2-layout-move, the six existing `test_engine_call.py` tests, landed S1c.1 tests | M2-inline-descriptor, M2-layout-cycle |
+| 10 | frozen | engine API or CLI JSON or flags change shape | engine API unchanged by S1c.2; four additive flags recorded in the #381 sentry and reference; envelope keys unchanged except the additive `relationships_unchecked` on the `--config` route | T2-frozen-flags, T2-parquet-compat, T2-config-envelope, `json-shapes.json` | M2-unlisted-flag, M2-extra-key, M2-flat-config |
+| 11 | dispatch | an option-first invocation never reaches the default command, or a real subcommand stops resolving | one rule in `_default_group.py::resolve_command` for both groups | T2-config-first-token | M2-option-dispatch |
 
 #### Enumerations
 
@@ -1250,33 +1530,43 @@ plan contract and is not restated here.
 
 - 0: scan done, integrity findings or not.
 - 1 (`EXIT_USAGE`): a missing `--config` path or invalid manual flag
-  combination; `fields`, `show`, `diff` on an untagged or unknown-major
-  saved scan (landed, `src/decoy/cli/io/_scan_set.py:61`); a usage error from
-  `resolve_sources` or the new flag checks
-  (`src/decoy/cli/scanning/_multi.py:436`); a config file the loader refuses
-  as not UTF-8, not YAML or not a mapping (`src/decoy/_config_file.py:88`);
-  any boundary refusal from `scan_prepared_sources`, through the named except
-  arm.
-- 2: unchanged Click parse behavior: a missing positional `SOURCES`, an
-  unknown option, a bad choice or another Click parameter refusal. The integer
-  is also named `EXIT_WARNINGS`, but scan does not use that warning meaning.
+  combination, including an invocation that reaches `_scan` with no input;
+  `fields`, `show`, `diff` on an untagged or unknown-major saved scan
+  (landed, `src/decoy/cli/io/_scan_set.py:43-65`); a usage error from
+  `resolve_sources`, `resolve_pre_scan` or the new flag checks (the pre-read
+  arm, `src/decoy/cli/scanning/_multi.py:578-580`); a config file the loader
+  refuses as not UTF-8, not YAML or not a mapping (`ConfigFileError`,
+  `src/decoy/_config_file.py:82`); any boundary refusal from
+  `scan_prepared_sources` on any route, through the named gate arm; a model
+  preflight refusal (landed, `_detectors.preflight`).
+- 2: unchanged Click parse behavior: a missing positional file, an unknown
+  option, a bad choice or another Click parameter refusal. The integer is also
+  named `EXIT_WARNINGS`, but scan does not use that warning meaning.
 - 3: a table or the integrity pass fails during the scan
-  (`src/decoy/cli/scanning/_multi.py:469`), the atomic write fails, or the
+  (`src/decoy/cli/scanning/_multi.py:599-607`), the atomic write fails, or the
   config loader raises `OSError` for an existing file (load-only arm,
   `config_refusal` plus `exit_code_for`).
+- `decoy.scan()` has no exit codes: gate refusals propagate as the engine's
+  coded exception, usage errors as `ValueError`, as documented.
 
 ##### Routes
 
-- Positional files: `resolve_sources` (`src/decoy/cli/scanning/_multi.py:145`),
-  then the gate, then `scan_sources`.
-- `--config` sources-only file: `load_config_mapping`, the gate with the
-  config's directory as base, then `scan_sources`.
+- Positional files: `resolve_sources` (`_multi.py:246`), then the gate in
+  `run_scan`, then `scan_descriptors`.
+- `--config` sources-only file: `load_config_mapping` (in `_config.py`), the
+  gate in `run_scan` with the config's directory as base, then
+  `scan_descriptors`.
 - `--config` full pipeline: same as sources-only; other keys ignored;
   relationships with a sourceless end set aside and counted.
-- `decoy demo` (`src/decoy/cli/demo.py:171`): its own CSV, through the same
-  gate.
+- `decoy demo` (`src/decoy/cli/demo.py:128`): its own CSV, through the same
+  gate in `_run_single_demo`.
+- `decoy.scan()` (`src/decoy/api.py:672`): a path through `resolve_sources`
+  or a DataFrame staged to temp Parquet, then the gate in `scan`, then
+  `scan_descriptors`.
 - Saved-scan readers (`fields`, `show`, `diff`): unchanged, through
   `load_scan_set`.
+- `decoy init` (`cli/init.py::_scaffold_from_file`): calls `profile_columns`,
+  not a scan; out of scope, still the one `scan-call-allow` entry.
 
 ##### FK shapes
 
@@ -1295,12 +1585,18 @@ plan contract and is not restated here.
   `--skip-integrity`.
 - Existing options that conflict with `--config`: `--has-header`,
   `--no-header`, `--column-names`, `--format`, `--layout`.
-- `--json` multi envelope keys: `command`, `status`, `scan_schema`,
-  `pii_note`, `tables`, `relationships`, plus `relationships_unchecked` (int)
-  on the `--config` route only.
+- Existing options that keep working with `--config`: `--rows`,
+  `--strategy`, `--detectors`, `--ner-model`, `--show-fields`, `--output`,
+  `--json`, `--quiet`, `--verbose`.
+- `--json` multi envelope keys (`_multi.py:412-424` on main): `command`,
+  `status`, `scan_schema`, `pii_note`, `tables`, `relationships`,
+  `detectors`, `saved`, plus `relationships_unchecked` (int) on the
+  `--config` route only.
 - Integrity line members: parent table and columns, child table and columns,
   `orphan_rows`, `orphan_distinct_keys`, `null_key_rows`,
   `parent_duplicate_excess`, `exact`, `status`.
+- `scan_descriptors` parameters: `prepared` (required), `rows`, `strategy`,
+  `pre_scan`, `integrity`, `on_stage`.
 
 ##### Output surfaces
 
@@ -1310,96 +1606,118 @@ plan contract and is not restated here.
 - `--output FILE` and `--output -`.
 - stderr errors and warnings, and the `--verbose` traceback (opt-in, already
   labeled as possibly holding row data).
+- The `decoy.scan()` return document and its exceptions.
+- `decoy demo`'s `scan.json`.
 
 #### Reuse inventory
 
+- `scan_descriptors` and `core_bytes` (`src/decoy/cli/scanning/_engine_call.py`):
+  the one scan call and saved-scan serializer, extended by one parameter
+  change, not copied.
 - `load_config_mapping` and `config_refusal` (`src/decoy/_config_file.py`):
   the one config reader and its refusal.
 - `resolved_source_config` and `_read_refusal` (`src/decoy/cli/_sources.py`):
   relative paths and coded read refusals.
-- `prepare_declared_sources`, `DeclarationRequest`, `PreparedDeclaredSources`
-  (engine): the one declaration boundary, extended by one classmethod.
-- `_validated`, the selection rules and `_scan_integrity.declare` (engine):
-  extracted into `validate_scan_inputs`, not copied.
+- `prepare_declared_sources`, `DeclarationRequest.for_scan`,
+  `PreparedDeclaredSources.scan_declaration`, `ScanDeclaration` (engine,
+  merged in E-S1c): the one declaration boundary.
 - `resolve_csv_dialect` and `resolve_column_names_file` (engine): the one
   dialect and names-file reader.
 - `scan_set_to_dict(detail=False)` and `RelationshipFacts.to_dict`: the only
   source of what is printed.
 - `write_local_target` (`src/decoy/_atomic.py`): the `--output` write.
 - `exit_code_for`, `usage_error_types` and `EXIT_USAGE`
-  (`src/decoy/cli/exit_codes.py`): the exit map; the new except arm is the
-  one place a `PipelineConfigError` from the gate becomes `EXIT_USAGE`; the
-  load-only `OSError` arm delegates to `exit_code_for` and does not add a map.
+  (`src/decoy/cli/exit_codes.py`): the exit map; the gate arm is the one place
+  a `PipelineConfigError` from the gate becomes `EXIT_USAGE`; the load-only
+  `OSError` arm delegates to `exit_code_for` and does not add a map.
 - `prepared_sources`'s body (`src/decoy/cli/_sources.py:116-156`): becomes
   the shared `_prepare` helper with one parameterized exception contract, not
-  copied. Its `(PipelineValidationError,)` pass-through set preserves
-  `prepared_sources`'s documented behavior; only the scan gate widens it.
-- `_scan_integrity.declare` and `parse_relationship_config` (engine): one
-  relationship parser and declaration core. The new full-pipeline entry point
-  partitions only parsed relationships and shares the existing checks.
-- G-ONE-DECLARED-READ: extended, not a new sentry.
+  copied.
+- `make_default_group` (`src/decoy/cli/_default_group.py`): the one
+  default-command rule, changed in place for both groups.
+- G-ONE-DECLARED-READ and its `_calls.py` helpers: extended, not a new
+  sentry. G-ONE-SCAN-CALL: unchanged.
+- `test_default_command_flags.py` (#381): extended by four names.
 
 #### Placement
 
 | New file | Directory and CODEMAP row | Existing neighbor | Why here |
 |---|---|---|---|
-| CLI `src/decoy/cli/scanning/_config.py` | `src/decoy/cli/scanning/`; CLI `CODEMAP.md:52`, "decoy scan internals" | `scanning/_multi.py` | Scan-specific config coordination, not a second config reader; it calls the root `_config_file` loader. |
-| CLI `src/decoy/cli/scanning/_layout.py` | `src/decoy/cli/scanning/`; CLI `CODEMAP.md:52` | `scanning/_multi.py` | Existing fixed-width scan argument parsing moved out of oversize `scan.py`. |
-| CLI `tests/e2e/cli_fmt/test_scan_config.py` | `tests/e2e/cli_fmt/`; CLI `CODEMAP.md:54`, declared-source checks | `test_scan_multi.py` | Config-route scan behavior at the CLI boundary. |
-| Engine `tests/unit/profile/test_scan_declaration.py` | `tests/unit/profile/`; engine `CODEMAP.md:269`, source readers/profile types | `test_declared_columns.py` | Unit contract for the existing declaration boundary. |
+| CLI `src/decoy/cli/scanning/_layout.py` (2a) | `src/decoy/cli/scanning/`; CLI `CODEMAP.md:53`, "`decoy scan` internals" | `scanning/_multi.py` | Existing fixed-width scan argument parsing moved out of oversize `scan.py`. |
+| CLI `src/decoy/cli/scanning/_config.py` (2b) | `src/decoy/cli/scanning/`; CLI `CODEMAP.md:53` | `scanning/_multi.py` | Scan-specific config coordination, not a second config reader; it calls the root `_config_file` loader. |
+| CLI `src/decoy/cli/scanning/_relationships.py` (2b) | `src/decoy/cli/scanning/`; CLI `CODEMAP.md:53` | `scanning/_detectors.py` (the detector line and `--json` member) | The integrity lines and hints, the same kind of card-and-`--json` member renderer as `_detectors.py`. |
+| CLI `tests/e2e/cli_fmt/test_scan_config.py` (2b) | `tests/e2e/cli_fmt/`; CLI `CODEMAP.md:55`, declared-source checks | `test_scan_multi.py` | Config-route scan behavior at the CLI boundary. |
 
-No new engine source module is added. The CLI root stays frozen at 30 direct
-modules; `scanning/` grows from three to five direct Python modules, below the
-fan-out limit. Imports keep the declared ownership boundary: external callers
-use the `decoy.cli.scanning` facade, while `_multi.py` uses its sibling module
-inside the package.
+The CODEMAP row 53 file list gains `_layout.py`, `_config.py` and
+`_relationships.py` with one-phrase roles, in the part that adds each. The CLI
+root stays frozen at its direct-module count; `scanning/` grows from six to
+nine direct modules, below the fan-out limit of 25
+(`tests/sentry/layout/test_package_fanout.py`). Imports keep the declared
+ownership boundary: other packages use the `decoy.cli.scanning` facade, while
+`_multi.py` imports its sibling modules directly.
 
 #### Acceptance tests red first
 
-The builder writes every new test in the E-S1c and S1c.2 tables first and
-shows it red on the base (engine main for E-S1c, CLI main after the repin for
-S1c.2), then builds. Each named mutation is applied once by hand and must turn
-its test red; the mutations are run on the final head of the branch.
-T2-config-boundary's seeded bypasses are part of the sentry's
-own test file, the existing pattern in `test_seeded_bypasses_are_detected`.
+The builder writes every new test of the part first and shows it red on CLI
+main (`95362d16` or later), then builds. The six existing `test_engine_call.py`
+tests are changed only in their first argument, in the same commit as the
+signature change, and their assertions are not edited. Each named mutation is
+applied once by hand and must turn its test red. The mutations are run on the
+final head of the part's branch, after the last code change, and the report
+records that head (recurring-defects class 9). T2-config-boundary's seeded
+bypasses are part of the sentry's own test file, the existing pattern in
+`test_seeded_bypasses_are_detected`.
 
 #### Frozen contracts
 
-- Engine public API: additive only (`ScanDeclaration`,
-  `DeclarationRequest.for_scan`, `PreparedDeclaredSources.scan_declaration`).
-  No existing signature, message or code changes; `scan_sources` keeps its
-  signature. The engine's frozen-surface manifest lists exports, so the new
-  name is added to its "Scan, profile and detection" row in the same change.
-- CLI contract §3.4: additive flags; envelope keys unchanged except the
-  additive `relationships_unchecked` on the `--config` route. Exit codes
-  follow `exit_codes.py` (1 manual usage/boundary refusal, 3 handled runtime),
-  while unchanged Click parameter refusals use integer 2. Boundary refusals
-  are routed to 1 by a named arm, where the generic map would give 3.
+- Engine public API: no change in S1c.2 (E-S1c's additive names are merged).
+  `scan_sources` keeps its signature.
+- CLI contract §3.4 and the #381 freeze: additive flags, recorded in
+  `test_default_command_flags.py` and the regenerated reference; envelope keys
+  unchanged except the additive `relationships_unchecked` on the `--config`
+  route; the frozen `scan` entry of `json-shapes.json` does not change. Exit
+  codes follow `exit_codes.py` (1 manual usage/boundary refusal, 3 handled
+  runtime), while unchanged Click parameter refusals use integer 2. Boundary
+  refusals are routed to 1 by a named arm, where the generic map would give 3.
+- `decoy.scan()`: signature and return document unchanged; the `Raises:`
+  section gains the engine refusal line.
 - `scan-set/v1`: unchanged; `relationships` was always part of the core.
-- No pin, cap, baseline or allowlist is raised. The CLI engine pin moves only
-  through the normal repin to the E-S1c release.
+- No cap, baseline or allowlist is raised. The `scan.py` `module-size` max
+  goes down. The CLI engine pin does not move.
 
 #### Pre-mortem
 
-- The route change breaks a landed S1c.1 test (an error that was exit 3
-  becomes exit 1). Guard: the gate opens no data file, so only CLI-built
-  descriptors that `scan_sources` would also refuse can fail there; the
-  landed tests are in the T1 selection.
-- A builder routes around the sentry with a `CALLER_NAMED` exemption for
-  `run_scan`. Guard: the plan forbids it, and the gate checks the diff of
-  `test_declared_read_choke_point.py` for new exemptions.
-- The shape rule drifts from `PipelineConfig` when a field is added. Guard:
-  it is derived from `model_fields`, not listed.
-- The names file is read twice and changes between reads. Guard:
-  TE-scan-names-once.
+- The route change breaks a landed test (an error that was exit 3 becomes
+  exit 1). Guard: the gate opens no data file, so only CLI-built descriptors
+  that `scan_sources` would also refuse can fail there; the landed tests are
+  in the T1 selection; T2-positional-gate-exit pins the new code.
+- A builder keeps the old `scan_descriptors(descriptors, ...)` signature and
+  adds a second function for the config route. Guard: G-ONE-SCAN-CALL finds
+  the owner as exactly `{"scan_descriptors"}`, and AT-C8 check A requires the
+  capability parameter.
+- A builder routes around AT-C8 with a `CALLER_NAMED` entry or a helper that
+  returns the capability. Guard: checks A to C never read `CALLER_NAMED`;
+  seed (10) proves it; the gate review diffs `CALLER_NAMED` and expects only
+  the narrowed reason text of the existing `api.py` entry.
+- A builder updates `test_engine_call.py` by weakening its assertions to make
+  the new signature pass. Guard: only the first argument may change; the
+  reviewer diffs the file.
+- The `_layout.py` move reintroduces a cycle or misses the
+  G-ONE-CONFIG-LOAD key. Guard: T2-layout-move; the ratchet `moved_from`
+  entry.
+- `decoy scan --config p.yaml` exits 2 because the group never dispatches an
+  option-first invocation. Guard: the `_default_group.py` change and
+  T2-config-first-token.
+- The new flags land without the #381 records, or `scan.py` grows past its
+  lowered `module-size` max. Guard: T2-frozen-flags; the module-size ratchet;
+  help text goes to `_help.py`.
 - A config refusal is relabelled `csv_malformed` because `PipelineConfigError`
   is also a `ValueError`. Guard: one `_prepare` helper with the narrow arms
   first; T2-config-refusal-code.
 - A valid mixed pipeline cannot be scanned. Guard: set-aside rule,
   TE-scan-mixed, T2-config-mixed.
-- The E-S1c release slips behind other engine work and blocks S1c.2. Guard:
-  E-S1c is small, off the registry chain, and can ride the next scheduled
-  engine release.
+- `_multi.py` passes 800 lines. Guard: the integrity renderer and hints live in
+  `_relationships.py`; the module-size sentry's 800 cap.
 
 ### S1d-cli: replaced by LIB L2 (pointer only)
 
@@ -1723,7 +2041,7 @@ permission helpers, record and manifest hashing.
 | Private spill directory | engine `execution/out_of_core/_scratch.py:26-65` (`engine_scratch_root`, `scratch_root`, `private_dir`: `mkdtemp` plus `chmod`, removed on every exit, policy-checked for caller-named parents; no Windows DACL) | One engine allocator, LIB L0's `protected_scratch_dir` (owner-only DACL on Windows, fail closed). The out-of-core helpers move onto it in L0, and S1b calls it directly; no new temp-dir code here. A caller-named `spill_dir` keeps the ambient-policy rule. | G-ONE-PROTECTED-DIR (LIB L0, mutations M-PATH-MKDIR-INLINE and M-OS-MAKEDIRS-INLINE); T5-spill-dir, T5-spill-default, T5-spill-acl-fail |
 | DuckDB connection | `connect_duckdb` (`_duckdb.py:32`) | reused unchanged | existing |
 | CSV dialect and row reads | CLI-DIALECT Part E's `resolve_csv_dialect` and `read_csv_source`; chunk iteration is only `fileaccess.adapters.pandas.read_csv_chunks` | S1a uses the resolved dialect for the header guard and leading-zero reads; S1b adds only the reader's `columns` projection keyword and never calls pandas | CLI-DIALECT AT-E8 and CONFIG-EXPLICIT AT-E1-9; M5-direct-csv |
-| Config declaration before row reads | engine `prepare_declared_sources` and its opaque `PreparedDeclaredSources` (`profile/_declared_columns.py`); its requests (`for_descriptors` and siblings) all run the every-column check, so none fits a scan | E-S1c adds `DeclarationRequest.for_scan` and `ScanDeclaration` at the same boundary, reusing the `scan_sources` validator (`validate_scan_inputs`); both scan routes go through the CLI gate `scan_prepared_sources` (Revision 8) | AT-C8 as an extension of G-ONE-DECLARED-READ (`tests/sentry/io_policy/test_declared_read_choke_point.py`); M2-boundary-bypass, ME-copy-validator |
+| Config declaration before row reads | engine `prepare_declared_sources` and its opaque `PreparedDeclaredSources` (`profile/_declared_columns.py`); its requests (`for_descriptors` and siblings) all run the every-column check, so none fits a scan | E-S1c adds `DeclarationRequest.for_scan` and `ScanDeclaration` at the same boundary, reusing the `scan_sources` validator (`validate_scan_inputs`); every scan route gets its capability from the CLI gate `scan_prepared_sources` and passes it to the one scan call `scan_descriptors` (Revision 8.3) | AT-C8 checks A to C as an extension of G-ONE-DECLARED-READ, with G-ONE-SCAN-CALL (`tests/sentry/io_policy/test_declared_read_choke_point.py`); M2-boundary-bypass, ME-copy-validator |
 | Table name from a file path | engine `walks/cross_file.py:239` `_table_name_from_source_label` (strips directory and extension, keeps schema-qualified names) | S1c's normalization is a different rule (`[a-z0-9_]`, `t_` prefix, collision refusal) for a different input (positional paths only). One CLI function in `cli/scanning/_multi.py`; not merged with the walk helper, which keeps connector labels verbatim. Recorded as a deliberate second rule. | one site, no registry (cross-cutting rule: no registry for one site) |
 | Safe field record | CLI `scan.py:511` `_safe_field_record` | moves into the engine as part of `ScanSetCore` (S1a); the CLI copy is deleted in S1c | `ScanSetCore`; T1-core-model, T2-canary |
 | Saved-scan reading | `scan.py:383-405` reads file or stdin for `fields`, `show`, `diff` | one path-or-stdin reader, `load_scan_set`; `diff` retains the one-stdin-operand check | G-ONE-SCAN-READER (M-READ-INLINE); T2-stdin-core, T2-stdin-double, T2-untagged-refused (all landed in S1c.1) |
@@ -1754,15 +2072,18 @@ fixtures not counted). A slice over about 800 in total is cut into parts.
 | E-S1c | engine `profiling/scan_set.py` (475) | +~10 |
 | E-S1c | engine `profiling/_scan_integrity.py` | +~20 (shared relationship declaration core) |
 | E-S1c | engine `profile/_declared_columns.py` (431) | +~90, under 530 |
-| S1c.2 | CLI `cli/scanning/_config.py` (new) | ~110 |
-| S1c.2 | CLI `cli/scanning/_multi.py` (512) | +~110, under ~630 |
-| S1c.2 | CLI `cli/scanning/_layout.py` (new) | ~80, moved from `scan.py` |
-| S1c.2 | CLI `cli/_sources.py` (504) | +~25 net (shared `_prepare` helper, two thin gates) |
-| S1c.2 | CLI `cli/demo.py` | +~5 (scan through the gate) |
-| S1c.2 | CLI `api.py` | import line only (`parse_layout` from `decoy.cli.scanning`) |
-| S1c.2 | CLI `tests/sentry/baselines/config-load-allow.json` | one `moved_from` entry, no new key |
-| S1c.2 | CLI `tests/sentry/allowlist-before.json` | rename the nested `_parse_layout` key under `config-load-allow`; value unchanged, no `moved_from` |
-| S1c.2 | CLI `scan.py` (1037 on main) | net 0 or less: `_parse_layout` moves to `_layout.py` |
+| S1c.2a | CLI `cli/scanning/_engine_call.py` (84) | +~15 (capability parameter, type check, forwarded declaration) |
+| S1c.2a | CLI `cli/_sources.py` (504) | +~25 net (shared `_prepare` helper, two thin gates) |
+| S1c.2a | CLI `cli/scanning/_multi.py` (655) | +~15 (gate call and gate arm in `run_scan`) |
+| S1c.2a | CLI `cli/demo.py`, `api.py`, `cli/io/__init__.py` | +~4, +~6, +~2 |
+| S1c.2a | CLI `cli/scanning/_layout.py` (new) | ~85, moved whole from `scan.py` |
+| S1c.2a | CLI `scan.py` (888 on main) | about -83; `module-size` max lowered to the new count |
+| S1c.2a | CLI `tests/sentry/baselines/config-load-allow.json`, `module-size.json`, `allowlist-before.json` | one `moved_from` entry; the `scan.py` max goes down; nested key rename and max change in the snapshot; nothing added |
+| S1c.2b | CLI `cli/scanning/_config.py` (new) | ~90 |
+| S1c.2b | CLI `cli/scanning/_relationships.py` (new) | ~60 |
+| S1c.2b | CLI `cli/scanning/_multi.py` | +~45, about 715 |
+| S1c.2b | CLI `scan.py` | +~35, at or under the max 2a set |
+| S1c.2b | CLI `cli/_default_group.py`, `cli/scanning/_help.py` | +~4, +~15 |
 | S3-engine | engine `profiling/starter_config.py` (new) | ~330 |
 | S3-engine | engine `profiling/_starter_inference.py` (new) | ~170 |
 | S3-engine | engine `profiling/recommendations.py` (about 120) | about 300 after descriptors and the derived compatibility view |
@@ -1785,7 +2106,8 @@ fixtures not counted). A slice over about 800 in total is cut into parts.
 | S1b-engine | engine | ~740 (350 + 350 + 40) | integrity pass, CSV projection at the shared reader, spill through L0 | S1a (branch from it; one release), LIB L0 |
 | S1c.1-cli | CLI | ~620 (360 + 220 + 40) | positional files, header flags, names, card, `--json`, core-only `--output`; T2-multi, header-required, headerless, tsv, collision, atomic, parquet-compat, output-core, output-stream-core | S1a + S1b release and repin, LIB L1b.1, CLI-DIALECT |
 | E-S1c-engine | engine | ~360 (120 + 220 + 20) | `validate_scan_inputs` extraction, one `_scan_integrity` parse-and-declare core for strict and mixed-pipeline entry points, `DeclarationRequest.for_scan` with strict shape and parsed set-aside, `ScanDeclaration`, `scan_declaration`, export, `test_public_api.py` and `frozen-surfaces.md` rows; TE-scan-* | none (branch from engine main); own release |
-| S1c.2-cli | CLI | ~770 (260 net source + 480 + 30) | `--config`, `--table`, `--column-names-file`, `--skip-integrity`, one gated route for positional, config and demo, shared parameterized `_prepare` helper, load-only `OSError` arm, `EXIT_USAGE` gate arm, integrity block and inflected unchecked hint, AT-C8 sentry extension, `_parse_layout` move with ratchet `moved_from` plus snapshot-key rename; T2-config-*, T2-table-needs-config, T2-column-names-file, T2-integrity, T2-integrity-shapes, T2-skip-integrity, T2-config-canary, T2-demo-gated | S1c.1 (merged); E-S1c release and CLI repin |
+| S1c.2a-cli | CLI | ~360 (70 net source + 265 + 25) | `scan_descriptors` takes the scan capability; `scan_prepared_sources` and the shared `_prepare` helper; `run_scan`, demo and `decoy.scan()` gated; gate arm (exit 1); AT-C8 checks A to C and REQUIRED; `_layout.py` move with ratchet `moved_from`, snapshot-key rename and lowered `scan.py` max; T2-call-*, T2-positional-gate-exit, T2-api-gated, T2-demo-gated, T2-config-boundary, T2-layout-move | S1c.1 (merged); E-S1c (merged, engine 0.28.3 already pinned) |
+| S1c.2b-cli | CLI | ~670 (245 + 395 + 30) | `--config`, `--table`, `--column-names-file`, `--skip-integrity`, option-first default-group dispatch, load-only `OSError` arm, integrity block and inflected hints, #381 flag sentry and regenerated reference; T2-config-*, T2-table-needs-config, T2-column-names-file, T2-integrity, T2-integrity-shapes, T2-skip-integrity, T2-frozen-flags, T2-config-canary | S1c.2a merged |
 | S1d-cli | none | 0 | replaced by LIB L2 | |
 | S3-engine.1 | engine | ~650 (470 + 140 + 40) | central detector descriptors and starter decision port, parity fixture and capture script, `scan_baseline` field, placeholder validator and its identity; T3-parity, config-field, placeholder-error-value-free | S1a, CONFIG-EXPLICIT E2 |
 | S3-engine.2 | engine | ~680 (340 + 320 + 20) | `starter_config` builder; T3-valid to T3-cloud-note, key-hash, placeholder | S3-engine.1 |
@@ -1911,3 +2233,56 @@ in full):
 
 
 Revision 8.1 (2026-11-23, Codex plan review of rev 8): exit 2 no longer lists a missing positional `SOURCES` (it is optional; the empty invocation exits 1 through the manual check, as T2-config-flags asserts); M2-partial and M2-extra-key are defined as concrete edits. E-S1c merged at `92152f328` and ships in engine v0.28.1 to v0.28.3, so S1c.2 is buildable on current main.
+## Revision 8.3
+
+Revision 8.3 (2026-11-23, builder stop on S1c.2): touches slice S1c.2 only,
+plus its rows in the sizes, totals and central-registries tables.
+Re-anchored on CLI main `95362d16` and engine main `104dfb442`.
+
+- One scan call (option B). CLI #354 made
+  `cli/scanning/_engine_call.py::scan_descriptors` the only caller of
+  `scan_sources` (G-ONE-SCAN-CALL), so Revision 8's AT-C8 (a gate call in the
+  same function as every `scan_sources` call) could not hold. Now
+  `scan_descriptors` takes the `PreparedDeclaredSources` capability as its
+  required first parameter and feeds `scan_sources` only from
+  `prepared.scan_declaration`, including `relationship_positions`. `run_scan`,
+  `_run_single_demo` and `api.scan` each call `scan_prepared_sources` in the
+  same function. AT-C8 is re-specified as check A (the chain in
+  `scan_descriptors` is rooted at the capability parameter), check B (every
+  caller passes a value returned by the scan gate in the same function; other
+  gates are red), check C (no value reference) and three REQUIRED entries
+  including `api.scan`. Checks A to C read no exemption list. The existing
+  `("api.py", "scan")` CALLER_NAMED entry stays for check 1 only, because the
+  DataFrame must be staged before the gate can run; its reason is narrowed.
+- Option B was checked against the code: the capability cannot be built
+  outside `prepare_declared_sources`, a non-scan capability raises
+  `TypeError`, and on engine 0.28.3 the recorded descriptor is the same for
+  CSV, TSV, Parquet and fixed-width sources whether `scan_sources` gets the
+  raw or the declared descriptors.
+- New finding: the scan default group dispatches only a non-option first
+  token, so `decoy scan --config p.yaml` exits 2 on main (checked:
+  `decoy scan --has-header a.csv` gives "No such option"). S1c.2b changes
+  `_default_group.py::resolve_command` for both groups; T2-config-first-token
+  and M2-option-dispatch guard it.
+- #381 freeze: the four flags join `test_default_command_flags.py`'s frozen
+  scan set; `docs/cli-reference.md` is regenerated; `frozen-surfaces.md`,
+  `test_hidden_names.py` and `json-shapes.json` do not change (the frozen
+  `scan` entry is the flat single-file document). T2-frozen-flags.
+- `_check_layout_columns` and `_parse_layout` move together to
+  `scanning/_layout.py`; moving `_parse_layout` alone is a circular import
+  through `scan.py:39`. No re-export: `api.py` no longer imports it. The
+  `scan.py` `module-size` max goes down with the move.
+- `tests/unit/scanning/test_engine_call.py`: the six tests change only their
+  first argument (a real scan capability built by the gate over a file that
+  need not exist); three new unit tests. `api.scan` keeps its signature and
+  document; its `Raises:` gains the engine refusal line.
+- Split: S1c.2 is now S1c.2a (~360, the gated call) and S1c.2b (~670, the
+  config route), because the added call-site, sentry and freeze work took the
+  single slice past 800. E-S1c is merged and CLI main already pins 0.28.3, so
+  no repin step remains.
+- Kept from Revision 8.1: exit 2 does not list a missing `SOURCES`; an
+  invocation that reaches `_scan` with no input exits 1 through the manual
+  check (bare `decoy scan` keeps the group's help behavior); M2-partial and
+  M2-extra-key stay concrete (M2-extra-key now reddens the exact positional
+  key set in T2-config-envelope, which also lists the `detectors` and `saved`
+  keys added on main); mutations run on each part's final head.
