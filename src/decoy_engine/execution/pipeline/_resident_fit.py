@@ -2,7 +2,9 @@
 
 `lower_bound_bytes` is the strict lower bound on those bytes; `resident_fit_verdict` turns facts
 about one job into a `ResidentFit`; `store_resident_fit` is the single place that gathers the
-facts, refuses, and stamps the verdict on the `RouteDecision`.
+facts, refuses, and stamps the verdict on the `RouteDecision`. Two earlier checks run before the
+route exists, from the same verdict function: `check_pre_read` before a lazy source is read whole,
+and `check_pre_transform` before a resident table is copied for its transforms.
 
 `lower_bound_bytes` is pure: it reads the facts a caller supplies (an in-memory table, or a row
 count and a schema from a Parquet footer) and nothing else. It opens no file, reads no lazy source,
@@ -19,7 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
@@ -300,14 +302,137 @@ def store_resident_fit(
     """`decision` with its resident-fit verdict, or `decision` unchanged when out of scope.
 
     Raises the capacity refusal here, before the route opens an output, a cast run or a spool.
+    The pre-transform verdict (a bound that fell in `[A, H]`) caps a fit at `UNKNOWN`; on a route
+    this check does not price, it is carried on its own.
     """
+    pre_transform = ctx.prepared.pre_transform_fit
     if not _in_scope(ctx, decision):
-        return decision
+        return (
+            decision
+            if pre_transform is None
+            else dataclasses.replace(decision, resident_fit=pre_transform)
+        )
     fit = gather_resident_fit(ctx, decision, additional_resident)
     require_resident_fit(fit)
+    if pre_transform is not None and fit.verdict == FIT:
+        fit = dataclasses.replace(
+            fit, verdict=UNKNOWN, code=reasons.route.NONFK_FULL_FRAME_UNVERIFIED
+        )
     if fit.verdict == UNKNOWN:
         _logger.info("resident fit unverified: %s", fit.code)
     return dataclasses.replace(decision, resident_fit=fit)
+
+
+def _kill_ceiling() -> int | None:
+    """The host or cgroup kill ceiling `H`, or `None` when it cannot be detected."""
+    from decoy_engine.execution import out_of_core
+    from decoy_engine.execution._errors import ExecutionError
+
+    try:
+        return out_of_core.detect_effective_memory_bytes()
+    except ExecutionError as exc:
+        if exc.code != reasons.runtime.OUT_OF_CORE_MEMORY_DETECTION_FAILED:
+            raise
+        return None
+
+
+def check_pre_read(
+    config: dict[str, Any],
+    sources: Mapping[str, pa.Table | LazySource],
+    tables: Iterable[str],
+    *,
+    graph: Any,
+    forced_full_frame: bool = False,
+    kill_ceiling_bytes: int | None = None,
+) -> None:
+    """Refuse before `tables`, lazy Parquet sources about to be read whole, are read.
+
+    Only a strict lower bound from each footer can refuse (rows and schema, no read). The route
+    is not decided yet, so a table is priced at its input bytes; a table forced to full-frame
+    whatever the route (a vault run) also carries its pandas copy. A CSV or fixed-width source
+    has no footer, is not priced, and is read as before. A job with a foreign key is out of scope.
+    """
+    from decoy_engine.config import classify_table_kinds
+
+    kinds = classify_table_kinds(config)
+    if graph.edges or "mask" not in kinds.values():
+        return
+    kill = kill_ceiling_bytes if kill_ceiling_bytes is not None else _kill_ceiling()
+    if kill is None:
+        return
+    specs: list[TableBytesSpec] = []
+    for name in sorted(tables):
+        source = sources.get(name)
+        footer = _footer_or_none(source) if isinstance(source, LazySource) else None
+        if footer is not None:
+            specs.append(
+                lazy_spec(*footer, charge_pandas=forced_full_frame and kinds.get(name) == "mask")
+            )
+    if specs:
+        require_resident_fit(_lower_bound_verdict(lower_bound_bytes(specs), kill, len(specs)))
+
+
+def check_pre_transform(
+    config: Mapping[str, Any],
+    sources: Mapping[str, pa.Table | LazySource],
+    graph: Any,
+    execution_mode: str,
+    kill_ceiling_bytes: int | None = None,
+) -> ResidentFit | None:
+    """Refuse before a resident table is copied to pandas for its transforms.
+
+    For each transform-bearing resident table the strict bound is every resident input byte plus
+    that table's own pandas copy; the largest across the serial loop is judged. `None` when the
+    bound constrains nothing (it is under the admission ceiling) or the job is out of scope
+    (not `auto`, no mask table, or a foreign key). Otherwise the `UNKNOWN` verdict, which
+    `store_resident_fit` folds into the run's final verdict.
+    """
+    from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
+
+    if execution_mode != "auto" or graph.edges:
+        return None
+    resident = {
+        n: resident_spec(t, charge_pandas=False)
+        for n, t in sources.items()
+        if isinstance(t, pa.Table)
+    }
+    targets = sorted(transform_bearing_mask_tables(config) & resident.keys())
+    if not targets:
+        return None
+    kill = kill_ceiling_bytes if kill_ceiling_bytes is not None else _kill_ceiling()
+    if kill is None:
+        return None
+    bound = max(
+        lower_bound_bytes(
+            dataclasses.replace(spec, charge_pandas=name == target)
+            for name, spec in resident.items()
+        )
+        for target in targets
+    )
+    # No static estimate exists yet. Zero lets the ladder answer `FIT` for a bound under `A`,
+    # which here only means "this check constrains nothing".
+    fit = _lower_bound_verdict(bound, kill, len(targets), static_estimate_bytes=0)
+    require_resident_fit(fit)
+    return None if fit.verdict == FIT else fit
+
+
+def _lower_bound_verdict(
+    bound: int, kill: int, table_count: int, *, static_estimate_bytes: int | None = None
+) -> ResidentFit:
+    """The verdict a lower bound alone can give: refused beyond `H`, else unverified.
+
+    Without a static estimate the ladder cannot answer `FIT`, so a bound alone never proves a fit.
+    """
+    return resident_fit_verdict(
+        ResidentFitFacts(
+            table_count=table_count,
+            lower_bound_bytes=bound,
+            static_estimate_bytes=static_estimate_bytes,
+            risk_columns=False,
+            kill_ceiling_bytes=kill,
+            complete=static_estimate_bytes is not None,
+        )
+    )
 
 
 def gather_resident_fit(
@@ -319,15 +444,9 @@ def gather_resident_fit(
 
     Gathers numbers and calls `resident_fit_verdict`; it compares nothing itself.
     """
-    from decoy_engine.execution import out_of_core
-    from decoy_engine.execution._errors import ExecutionError
-
     names = resident_names(ctx, decision)
-    try:
-        kill = out_of_core.detect_effective_memory_bytes()
-    except ExecutionError as exc:
-        if exc.code != reasons.runtime.OUT_OF_CORE_MEMORY_DETECTION_FAILED:
-            raise
+    kill = _kill_ceiling()
+    if kill is None:
         # No ceiling to compare with: the job runs as it did before this check existed.
         return ResidentFit(
             UNKNOWN, reasons.route.NONFK_FULL_FRAME_UNVERIFIED, len(names), 0, 0, 0, 0

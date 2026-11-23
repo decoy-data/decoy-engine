@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine.execution._pipeline_sources import materialize_source
+from decoy_engine.execution.pipeline._resident_fit import check_pre_read
 from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
 from decoy_engine.profile._readers import LazySource
 
@@ -50,6 +51,14 @@ def read_resident_fallback(
     rejected = resident_fallback_tables(config, sources, facts=facts, **run_values)
     if not rejected:
         return facts
+    # Before the whole read: a footer lower bound beyond the kill ceiling refuses with nothing read.
+    check_pre_read(
+        config,
+        sources,
+        rejected,
+        graph=facts.graph,
+        forced_full_frame=run_values.get("vault_writer") is not None,
+    )
     resident = {n: materialize_source(v) if n in rejected else v for n, v in sources.items()}
     if rebuild is None:
         return replace(facts, caller_sources=resident)

@@ -16,10 +16,13 @@ from decoy_engine.execution.pipeline._host import detect_usable_cpus, native_thr
 from decoy_engine.execution.pipeline._resident_fit import (
     ResidentFit,
     TableBytesSpec,
+    check_pre_read,
+    check_pre_transform,
     lazy_spec,
     lower_bound_bytes,
     require_resident_fit,
     resident_spec,
+    store_resident_fit,
 )
 from decoy_engine.execution.pipeline._route_summary import RouteSummary, route_summary
 
@@ -29,6 +32,8 @@ __all__ = [
     "ResidentFit",
     "RouteSummary",
     "TableBytesSpec",
+    "check_pre_read",
+    "check_pre_transform",
     "detect_usable_cpus",
     "lazy_spec",
     "lower_bound_bytes",
@@ -40,4 +45,5 @@ __all__ = [
     "resident_spec",
     "route_summary",
     "select_mount",
+    "store_resident_fit",
 ]
