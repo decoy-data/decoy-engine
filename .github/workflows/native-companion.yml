@@ -311,7 +311,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      # mimesis: tests/parity/test_faker_native_widen.py::test_p5b runs the real Mimesis adapter
+      # on the native lane and importorskips it; this job forbids skips, so the extra must be here.
       - uses: ./.github/actions/companion-env
+        with:
+          extras: "dev mimesis"
       # ENGINE-THREADS-DEFAULT: default thread count against one thread, byte-equal on every
       # route, and the gap9 grant wiring; the per-route cells skip without the companion.
       - name: Thread default and grant parity (companion-present case)
