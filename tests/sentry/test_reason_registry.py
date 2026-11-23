@@ -46,11 +46,6 @@ _FIRST_CODE = "re-raises the registered reason taken from a pydantic error type 
 _KERNEL_REASON = "forwards the ReasonCode a casting kernel returned for the failed cell"
 _DECISION_REASON = "forwards the rejection ReasonCode of the central route decision"
 
-_WHEN_ROW = (
-    "forwards the code a `WHEN_REFUSALS` row holds for the parser refusal; every row value is a "
-    "`reasons.*` constant (pinned by test_when_refusal_rows_are_registry_symbols)"
-)
-
 ADAPTERS: dict[tuple[str, str], str] = {
     # -- F06 declared casting ----------------------------------------------------------------
     ("contracts/_declared_base.py", "DeclaredCastContractError.__init__"): _CTOR,
@@ -124,9 +119,6 @@ ADAPTERS: dict[tuple[str, str], str] = {
         "builds the RECOVERING refusal receipt from the registry symbol "
         "`PUBLICATION_COMMIT_NOT_VISIBLE` as an exact `str` (a CommitReceipt takes no subclass)"
     ),
-    ("execution/_when_gate.py", "_require_closed_grammar"): _WHEN_ROW,
-    ("expressions/_when_parser.py", "validate_envelope_when"): _WHEN_ROW,
-    ("plan/_checks_when.py", "check_when_grammar"): _WHEN_ROW,
     ("execution/_transactional_sink.py", "ParquetTransactionalSink._leave"): (
         "forwards the code of the CommitReceipt the attempt ended with to the sink state table; "
         "the receipt accepts only a registered `decoy` code"
@@ -236,12 +228,57 @@ REGISTRY_HELPERS = frozenset(
 
 Key = tuple[str, str, str, str, str]
 
+# Site-level rule, not a function exemption: in exactly these functions a `code=` value is
+# accepted only as `<name>.config`, `.plan` or `.runtime`, where `<name>` is bound in the same
+# function by `<name> = when_refusal_codes(...)`. Every row value of `WHEN_REFUSALS` is a
+# `reasons.*` symbol (test_when_refusal_rows_are_registry_symbols). Anything else is a violation.
+WHEN_ROW_FUNCTIONS = frozenset(
+    {
+        ("execution/_when_gate.py", "_require_closed_grammar"),
+        ("expressions/_when_parser.py", "validate_envelope_when"),
+        ("plan/_checks_when.py", "check_when_grammar"),
+    }
+)
+_ROW_ATTRS = frozenset({"config", "plan", "runtime"})
+
+
+def _row_bindings(path: Path, function: str) -> frozenset[str]:
+    """Names bound by `<name> = when_refusal_codes(...)` inside `function` of the file."""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    bound: set[str] = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef) and fn.name == function:
+            for node in ast.walk(fn):
+                if (
+                    isinstance(node, ast.Assign)
+                    and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == "when_refusal_codes"
+                ):
+                    bound.add(node.targets[0].id)
+    return frozenset(bound)
+
+
+def _is_when_row_read(site: scan.Site, src: Path) -> bool:
+    if (site.file, site.function) not in WHEN_ROW_FUNCTIONS:
+        return False
+    name, _, attr = site.expr.partition(".")
+    if attr not in _ROW_ATTRS or not name.isidentifier():
+        return False
+    return name in _row_bindings(src / site.file, site.function)
+
 
 _ROUTE_REASON_SLOT = re.compile(r"(^|\.)\w*route_reason$")
 
 
-def _is_violation(site: scan.Site) -> bool:
+def _is_violation(site: scan.Site, src: Path = scan.SRC) -> bool:
     if site.value_class in ("registry", "none"):
+        return False
+    if site.value_class in ("forward", "dynamic") and _is_when_row_read(site, src):
         return False
     if (
         site.arg == "route_reason"
@@ -269,9 +306,11 @@ def _scan(
     return scan.scan(src, HELPER_SINKS if helpers is None else helpers)
 
 
-def violations(sites: list[scan.Site]) -> Counter[Key]:
+def violations(sites: list[scan.Site], src: Path = scan.SRC) -> Counter[Key]:
     return Counter(
-        (s.file, s.function, s.kind, s.family, s.value_class) for s in sites if _is_violation(s)
+        (s.file, s.function, s.kind, s.family, s.value_class)
+        for s in sites
+        if _is_violation(s, src)
     )
 
 
@@ -500,26 +539,55 @@ def test_when_refusal_rows_are_registry_symbols() -> None:
                 assert chain and chain[0] == "reasons" and len(chain) == 3, ast.unparse(kw.value)
 
 
-@pytest.mark.parametrize(
-    ("rel", "forwarded"),
-    [
-        ("execution/_when_gate.py", "code=codes.runtime,"),
-        ("expressions/_when_parser.py", "code=codes.config,"),
-        ("plan/_checks_when.py", "code=codes.plan,"),
-    ],
-)
-def test_an_ad_hoc_literal_at_a_when_boundary_is_still_a_violation(
-    tmp_path: Path, rel: str, forwarded: str
-) -> None:
-    """The adapter entries accept a forwarded row value only: a literal code is still caught."""
+_WHEN_SITES = [
+    ("execution/_when_gate.py", "code=codes.runtime,"),
+    ("expressions/_when_parser.py", "code=codes.config,"),
+    ("plan/_checks_when.py", "code=codes.plan,"),
+]
+
+
+def _when_violations(tmp_path: Path, rel: str, edit: tuple[str, str]) -> Counter[Key]:
     source = (scan.SRC / rel).read_text(encoding="utf-8")
-    assert forwarded in source
+    old, new = edit
+    assert old in source, (rel, old)
     root = tmp_path / "decoy_engine"
     target = root / rel
     target.parent.mkdir(parents=True)
-    target.write_text(source.replace(forwarded, 'code="adhoc_when_literal",', 1))
-    found = [k for k in violations(_scan(root)) if k[0] == rel and k[4] == "literal"]
-    assert found, rel
+    target.write_text(source.replace(old, new))
+    return violations(_scan(root), root)
+
+
+@pytest.mark.parametrize(("rel", "forwarded"), _WHEN_SITES)
+def test_the_real_when_boundaries_are_clean(rel: str, forwarded: str) -> None:
+    assert not [k for k in violations(_scan()) if k[0] == rel]
+
+
+@pytest.mark.parametrize(("rel", "forwarded"), _WHEN_SITES)
+def test_an_ad_hoc_literal_at_a_when_boundary_is_still_a_violation(
+    tmp_path: Path, rel: str, forwarded: str
+) -> None:
+    found = _when_violations(tmp_path, rel, (forwarded, 'code="adhoc_when_literal",'))
+    assert [k for k in found if k[0] == rel and k[4] == "literal"], rel
+
+
+@pytest.mark.parametrize(("rel", "forwarded"), _WHEN_SITES)
+def test_a_when_boundary_bound_from_another_call_is_a_violation(
+    tmp_path: Path, rel: str, forwarded: str
+) -> None:
+    """Mutation (a): the variable is bound from some other call, not `when_refusal_codes`."""
+    found = _when_violations(tmp_path, rel, ("= when_refusal_codes(exc)", "= other_call(exc)"))
+    assert [k for k in found if k[0] == rel], rel
+
+
+@pytest.mark.parametrize(("rel", "forwarded"), _WHEN_SITES)
+def test_a_when_boundary_forwarding_another_dynamic_value_is_a_violation(
+    tmp_path: Path, rel: str, forwarded: str
+) -> None:
+    """Mutation (b): a different dynamic value is forwarded at the code site."""
+    found = _when_violations(tmp_path, rel, (forwarded, "code=other.code,"))
+    assert [k for k in found if k[0] == rel], rel
+    found = _when_violations(tmp_path / "again", rel, (forwarded, "code=exc.code,"))
+    assert [k for k in found if k[0] == rel], rel
 
 
 def test_registry_backed_code_is_clean(tmp_path: Path) -> None:
