@@ -21,8 +21,11 @@ import pytest
 from decoy_engine import reasons, run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine._execution_error import ExecutionError
 from decoy_engine.config import PipelineConfig
-from decoy_engine.contracts.column_shape import ColumnShape, source_facts_of
-from decoy_engine.declared_casting._boundary import native_date_columns
+from decoy_engine.contracts.column_shape import ColumnShape, native_date_shapes, source_facts_of
+from decoy_engine.declared_casting._boundary import (
+    declared_date_shift_columns,
+    plan_column_shapes,
+)
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._pipeline import run_pipeline
@@ -423,6 +426,10 @@ def test_handler_refuses_unlisted_column() -> None:
     with pytest.raises(ExecutionError) as exc2:  # text with no format and no plan entry
         handler.run(text, "d", _seed(), _ctx({}))
     assert exc2.value.code == reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT
+
+
+def native_date_columns(plan: Any) -> dict[tuple[str, str], ColumnShape]:
+    return native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))
 
 
 def test_native_date_columns_come_from_the_plan_shapes(tmp_path: Path) -> None:
