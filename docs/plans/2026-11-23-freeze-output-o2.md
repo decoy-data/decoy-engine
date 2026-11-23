@@ -2,13 +2,20 @@ Status: plan
 
 # FREEZE-OUTPUT O2: a compressed CSV target from a DataFrame gets the frozen codec bytes
 
-Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 2 (Dennis R1: GO-WITH-FIXES, one HIGH). Roadmap row: FREEZE-OUTPUT, item 2 (O2) (CLI `docs/roadmap/groups/run.md`). Anchors marked `C:` are in the CLI repository (decoy) at `origin/main` `95362d16`; anchors marked `E:` are in this repository (decoy-engine) at `origin/main` `26091c834`.
+Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 2.1 (Dennis R1: GO-WITH-FIXES; Dennis R2: GO with two lows). Roadmap row: FREEZE-OUTPUT, item 2 (O2) (CLI `docs/roadmap/groups/run.md`). Anchors marked `C:` are in the CLI repository (decoy) at `origin/main` `95362d16`; anchors marked `E:` are in this repository (decoy-engine) at `origin/main` `26091c834`.
 
 Where this plan lives: the task put it on the engine branch `plan/freeze-output-o2`. The fix is CLI-only (section 2.3: the engine writes no compressed file). The build slice goes to the CLI repository.
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN: guarantee, size, choke point, established solutions), `bugfix.md`, `api-and-compatibility.md` (output bytes are an external contract), `catalogs/recurring-defects.md` (11 classes).
 
 Risk: R2. A small change that moves frozen output bytes of two existing commands and closes a permission leak inside private archives. Plan review: Dennis, then Codex. Code gate: Codex, then Dennis. Full CLI suite before merge: yes (frozen-contract trigger).
+
+## Rev 2.1 changes
+
+| Finding (Dennis R2) | Change | Where |
+|---|---|---|
+| L1: two loose values | The stager and the member mode travel as one named spec: a frozen dataclass `_TargetPrivacy(stage, member_mode)` with two module instances, `PUBLIC_TARGET` and `PRIVATE_TARGET`. `_write_table` takes the spec, so a caller cannot pair the private stager with the public mode | 4.2, 4.3 |
+| L2: sentry limit | The extended sentry's docstring names its limit: a `compression` passed through `**kwargs` (or a dict splat) is not seen | 4.3 |
 
 ## Rev 2 changes
 
@@ -125,14 +132,14 @@ Non-goals:
   ```
 
 - `open_csv_sink(tmp, out_path, *, member_mode: int)`: the keyword is required, so no caller gets a mode by default. `_zip_member` sets `external_attr = (0o100000 | member_mode) << 16`; `_tar_member` sets `mode = member_mode`. Stream codecs have no member and ignore it.
-- `_write_table(data, fmt, path, layout, stage, member_mode)`: `write_table` passes 0o644 with `staged_local_target`; `write_private_table` passes 0o600 with `staged_private_target`. The Arrow branch passes the same `member_mode`. The chunked writer (`C:src/decoy/cli/io/_targets.py:753`) passes 0o644. Two named constants in `_compression.py` (`PUBLIC_MEMBER_MODE`, `PRIVATE_MEMBER_MODE`), so the numbers are in one place.
+- One named spec per trust class in `_targets.py`: a frozen dataclass `_TargetPrivacy` with `stage` (the stager) and `member_mode`, and two module instances, `PUBLIC_TARGET = _TargetPrivacy(staged_local_target, PUBLIC_MEMBER_MODE)` and `PRIVATE_TARGET = _TargetPrivacy(staged_private_target, PRIVATE_MEMBER_MODE)`. `_write_table(data, fmt, path, layout, target: _TargetPrivacy)` replaces its `stage` parameter; `write_table` passes `PUBLIC_TARGET`, `write_private_table` passes `PRIVATE_TARGET`. Both CSV branches open the sink with `target.member_mode` inside `target.stage(path)`, so the stager and the mode cannot be mixed. The chunked writer (`C:src/decoy/cli/io/_targets.py:753`) passes `PUBLIC_MEMBER_MODE`. The two mode numbers are constants in `_compression.py` (`PUBLIC_MEMBER_MODE`, `PRIVATE_MEMBER_MODE`), in one place.
 - `csv_compression` (`C:src/decoy/cli/io/_compression.py:60-80`) loses its only caller and is deleted, with its import at `C:src/decoy/cli/io/_targets.py:42` and its test `test_csv_compression_follows_the_real_name` (`C:tests/unit/cli_fmt/test_compression.py:52`). `_archive_name` stays.
 - `_compression.py` module docstring (`C:src/decoy/cli/io/_compression.py:1-16`): drop "the one place that builds the `compression=` option of the DataFrame writer" and the pandas `compression` dict from the source pattern; say the module is the one suffix table and the one sink every CSV target writes into, DataFrame or Arrow, and that the archive member mode comes from the caller (0600 for private output).
-- Size: about 10 lines changed in `_targets.py`, about 25 deleted and 8 changed in `_compression.py`. New names: two module constants. No new public function.
+- Size: about 20 lines changed in `_targets.py`, about 25 deleted and 8 changed in `_compression.py`. New names: two mode constants, one private dataclass and its two instances. No new public function.
 
 ### 4.3 Choke points
 
-- Codec: one opener, `open_csv_sink`. The sentry `test_the_one_dataframe_to_csv_target_call_is_guarded_in_write_table` (`C:tests/sentry/io_policy/test_csv_frame_choke_point.py:146`) already pins one guarded `to_csv` in `_write_table`. It grows: that call's first argument is the name bound by an enclosing `with open_csv_sink(...) as <name>`, and it has no `compression=` keyword. Seeds that must fail: a `compression=` keyword; a `to_csv(tmp, ...)` outside the block; a `to_csv(tmp, ...)` inside the block that writes to the path, not the sink. A second check walks every `to_csv` call in all of `src/decoy` and fails on any `compression=` keyword. M-1 and M-5 turn them red. The `file_sinks.toml` row for `_write_table` `to_csv` (`C:tests/sentry/io_policy/file_sinks.toml`) is updated to say it writes into the codec sink.
+- Codec: one opener, `open_csv_sink`. The sentry `test_the_one_dataframe_to_csv_target_call_is_guarded_in_write_table` (`C:tests/sentry/io_policy/test_csv_frame_choke_point.py:146`) already pins one guarded `to_csv` in `_write_table`. It grows: that call's first argument is the name bound by an enclosing `with open_csv_sink(...) as <name>`, and it has no `compression=` keyword. Seeds that must fail: a `compression=` keyword; a `to_csv(tmp, ...)` outside the block; a `to_csv(tmp, ...)` inside the block that writes to the path, not the sink. A second check walks every `to_csv` call in all of `src/decoy` and fails on any `compression=` keyword. M-1 and M-5 turn them red. The sentry docstring names its limit: a `compression` passed through `**kwargs` or a dict splat is not seen (accidental-mistake scope, recurring-defects class 5). The `file_sinks.toml` row for `_write_table` `to_csv` (`C:tests/sentry/io_policy/file_sinks.toml`) is updated to say it writes into the codec sink.
 - Member mode: set only in `_zip_member` and `_tar_member`, from the required keyword. The guard is AT-O8, which writes private and public archives through the two public writers and reads the member modes. M-6 and M-7 turn it red.
 
 ### 4.4 Placement
@@ -185,7 +192,7 @@ Each alone on the final head; record the head (class 9).
 | M-3 | `_stream_codec` gzip without `filename=""` | AT-O1, AT-O2 |
 | M-4 | `_zip_member` date set to now | AT-O2 `.zip`, AT-O3 |
 | M-5 | `to_csv(tmp, index=False)` inside the `with open_csv_sink(...)` block | AT-O1, AT-O7 |
-| M-6 | `write_private_table` passes `PUBLIC_MEMBER_MODE` | AT-O8, AT-O2 private goldens |
+| M-6 | `PRIVATE_TARGET` built with `PUBLIC_MEMBER_MODE` | AT-O8, AT-O2 private goldens |
 | M-7 | `_tar_member` ignores `member_mode` and sets 0644 | AT-O8 tar cells |
 | M-8 | `to_csv(sink, index=True)` | AT-O2, AT-O4 |
 
@@ -217,7 +224,7 @@ CLI CHANGELOG entry under the next release with the Breaking lines above. The re
 | 5 Normalized guard scanners | yes | the extended sentry matches `to_csv` as an attribute call; covered shapes: the `compression=` keyword, a write target that is not the `with` name, a call outside the block; a repo-wide keyword check; seeds for each |
 | 6 No reaching into private modules | no | same package |
 | 7 No hidden CI failures | no | no CI change |
-| 8 One input, one trust class per entry point | yes | private and public writes keep their own entry points (`write_private_table`, `write_table`) on one shared core; the member mode follows the entry point, not a caller flag |
+| 8 One input, one trust class per entry point | yes | private and public writes keep their own entry points (`write_private_table`, `write_table`) on one shared core; each entry point passes one named spec (`PUBLIC_TARGET` or `PRIVATE_TARGET`) that pairs its stager and member mode |
 | 9 Mutations on the final head | yes | section 7 |
 | 10 Allowlisted helpers are still checked | yes | `file_sinks.toml` row stays exact `(path, function)` |
 | 11 No raised caps | yes | no cap moves; `_compression.py` shrinks |
