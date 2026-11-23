@@ -117,22 +117,23 @@ GEN_POOL_DRAW_SITES: tuple[DrawSite, ...] = (
 
 # The computed Faker draws (uuid, bounded integer, element choice) have no pool: the value is a pure
 # function of its key. `computed_mask_draw` draws it keyed on the source value under the mask key, or
-# on the row's full-table number under the job seed. Kept in this module, beside the other
-# pool-family faker sites, because `native/` is at its module-count freeze; the protocol appends
-# these after the first catalogue cut, as the catalogue order requires.
+# on the row's full-table number under the job seed. The integer and choice legs take an index
+# (`derive_index`); the uuid leg takes 16 bytes of `derive` (`hash_array(..., truncate=32)`), so
+# each leg has its own site and a native route can reproduce either one with its own primitive.
+# Kept in this module, beside the other pool-family faker sites, because `native/` is at its
+# module-count freeze; the protocol appends these after the first catalogue cut.
 COMPUTED_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.faker_computed_value",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_faker_positional.py::computed_mask_draw#1",
+        call_site="execution/_strategies/_faker_positional.py::computed_mask_draw#3",
         entropy_root="mask_key",
         seed_derivation=(
             "derive_index(mask_key, selection_namespace + '/computed:' + provider, "
-            "canonical(source), pool_size=count)  # int, choice; uuid: "
-            "derive(mask_key, same namespace, canonical(source)).hex()[:32] as 16 bytes"
+            "canonical(source), pool_size=count)"
         ),
-        api_operation="determinism.derive_index -> index in [0, count); uuid: derive -> 16 bytes",
-        call_shape="int: lo + index * step | choice: elements[index] | uuid: RFC 9562 v4 layout",
+        api_operation="determinism.derive_index -> index in [0, count)",
+        call_shape="int: lo + index * step | choice: elements[index]",
         consumes_variable_draws=False,
         identity="source_value",
         null_draw_behavior="null source rows re-emit null and consume no derivation",
@@ -140,7 +141,7 @@ COMPUTED_DRAW_SITES: tuple[DrawSite, ...] = (
         config_fingerprint_source="namespace_registry(namespace)+provider+min/max/step or elements",
         provider_version=_V6,
         notes=(
-            "Deterministic mode of the masking faker strategy on uuid, random_int_range and "
+            "Deterministic mode of the masking faker strategy on random_int_range and "
             "random_choice. The namespace suffix keeps the draw apart from any pool selection "
             "in the same column namespace."
         ),
@@ -148,14 +149,14 @@ COMPUTED_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.faker_computed_position",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_faker_positional.py::computed_mask_draw#2",
+        call_site="execution/_strategies/_faker_positional.py::computed_mask_draw#4",
         entropy_root="job_seed",
         seed_derivation=(
             "derive_index(job_seed, selection_namespace + '/computed:' + provider, "
-            "encode_int(row_offset + i), pool_size=count)  # uuid: derive(...).hex()[:32]"
+            "encode_int(row_offset + i), pool_size=count)"
         ),
-        api_operation="determinism.derive_index -> index in [0, count); uuid: derive -> 16 bytes",
-        call_shape="int: lo + index * step | choice: elements[index] | uuid: RFC 9562 v4 layout",
+        api_operation="determinism.derive_index -> index in [0, count)",
+        call_shape="int: lo + index * step | choice: elements[index]",
         consumes_variable_draws=False,
         identity="global_row_number",
         null_draw_behavior="null source rows re-emit null; the null still consumes its row number",
@@ -163,9 +164,52 @@ COMPUTED_DRAW_SITES: tuple[DrawSite, ...] = (
         config_fingerprint_source="plan.namespace or the table/column default+provider+args",
         provider_version=_V6,
         notes=(
-            "Non-deterministic reuse mode. Keyed on job_seed, not mask_key, because it generates "
-            "values and does not re-identify a source value (same stance as "
-            "mask.faker_nondeterministic)."
+            "Non-deterministic reuse mode on random_int_range and random_choice. Keyed on "
+            "job_seed, not mask_key, because it generates values and does not re-identify a "
+            "source value (same stance as mask.faker_nondeterministic)."
+        ),
+    ),
+    DrawSite(
+        draw_site_id="mask.faker_computed_uuid_value",
+        family="source_keyed_hmac",
+        call_site="execution/_strategies/_faker_positional.py::computed_mask_draw#1",
+        entropy_root="mask_key",
+        seed_derivation=(
+            "derive(mask_key, selection_namespace + '/computed:uuid', canonical(source)).hex()[:32]"
+        ),
+        api_operation="determinism.derive -> 16 bytes, formatted as an RFC 9562 version 4 uuid",
+        call_shape="uuid: version and variant bits set on 16 derived bytes, 8-4-4-4-12 lowercase hex",
+        consumes_variable_draws=False,
+        identity="source_value",
+        null_draw_behavior="null source rows re-emit null and consume no derivation",
+        partitionable=True,
+        config_fingerprint_source="namespace_registry(namespace)+provider",
+        provider_version=_V6,
+        notes=(
+            "Deterministic mode of the masking faker strategy on uuid. Equal sources give equal "
+            "uuids under one mask key. The uuid is the keyed digest, not a random_bytes draw."
+        ),
+    ),
+    DrawSite(
+        draw_site_id="mask.faker_computed_uuid_position",
+        family="source_keyed_hmac",
+        call_site="execution/_strategies/_faker_positional.py::computed_mask_draw#2",
+        entropy_root="job_seed",
+        seed_derivation=(
+            "derive(job_seed, selection_namespace + '/computed:uuid', encode_int(row_offset + i))"
+            ".hex()[:32]"
+        ),
+        api_operation="determinism.derive -> 16 bytes, formatted as an RFC 9562 version 4 uuid",
+        call_shape="uuid: version and variant bits set on 16 derived bytes, 8-4-4-4-12 lowercase hex",
+        consumes_variable_draws=False,
+        identity="global_row_number",
+        null_draw_behavior="null source rows re-emit null; the null still consumes its row number",
+        partitionable=True,
+        config_fingerprint_source="plan.namespace or the table/column default+provider",
+        provider_version=_V6,
+        notes=(
+            "Non-deterministic reuse mode on uuid. Keyed on job_seed, not mask_key, because it "
+            "generates values and does not re-identify a source value."
         ),
     ),
 )

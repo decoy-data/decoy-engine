@@ -48,6 +48,8 @@ from decoy_engine.generation.pool._capacity import unique_capacity_ok
 from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._computed_draw import (
     COMPUTED_NAMESPACE_MARKER,
+    INT64_MAX,
+    INT64_MIN,
     ComputedDrawSpec,
     DrawRefusal,
     choice_from_index,
@@ -83,6 +85,8 @@ from decoy_engine.generation.pool._value_pool import ValuePool
 __all__ = [
     "COMPUTED_NAMESPACE_MARKER",
     "DEFAULT_POOL_SIZE",
+    "INT64_MAX",
+    "INT64_MIN",
     "CacheStats",
     "CardinalityMode",
     "ComputedDrawSpec",

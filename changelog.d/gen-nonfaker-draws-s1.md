@@ -1,3 +1,5 @@
+Breaking: the physical `plan_hash` and `activation_hash` of every unified-slice job change once, because the provider capability matrix gains a `draw` field and the registry fingerprint hashes it. `pipeline_config_hash` does not change, and no output value changes.
+
 ### Added (computed Faker draws on masking, GEN-NONFAKER-DRAWS, 2026-11-23)
 
 A `faker` column with `provider: uuid`, `random_int_range` or `random_choice` now compiles and runs. Before, `compile_plan` refused it with `plan.non_poolable_provider_with_pool_backend`, even though `decoy scan` and `decoy init` write `provider: uuid` for a UUID column. These providers build no pool. The value is drawn from the key: for the source value and namespace in deterministic mode, for the row number under the job seed otherwise. A null source stays null.

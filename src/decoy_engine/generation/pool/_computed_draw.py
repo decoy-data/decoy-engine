@@ -18,7 +18,13 @@ from typing import Any, Literal
 import numpy as np
 import pyarrow as pa
 
-from decoy_engine.providers_v2 import FakerDrawContract, faker_draw_contract
+from decoy_engine.generation.pool._identity import POOL_BUILD_KNOBS
+from decoy_engine.providers_v2 import (
+    FAMILY_INT,
+    FAMILY_UUID,
+    FakerDrawContract,
+    faker_draw_contract,
+)
 
 __all__ = [
     "COMPUTED_NAMESPACE_MARKER",
@@ -38,8 +44,8 @@ Caller = Literal["mask", "faker_type", "provider"]
 RefusalKind = Literal["range", "choice"]
 
 # int64 holds the top value; the pool-size limit of the index kernel is 2**56.
-_INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
 _COUNT_MAX = 2**56
+INT64_MIN, INT64_MAX = -(2**63), 2**63 - 1
 COMPUTED_NAMESPACE_MARKER = "/computed:"
 _HEX = np.frombuffer(b"0123456789abcdef", dtype=np.uint8)
 _SCALARS = (str, int, float, bool)
@@ -98,7 +104,7 @@ def _parse_range(
         return DrawRefusal("range")
     count = (hi - lo) // step + 1
     top = lo + (count - 1) * step
-    if count > _COUNT_MAX or not (_INT64_MIN <= lo <= _INT64_MAX and top <= _INT64_MAX):
+    if count > _COUNT_MAX or not (INT64_MIN <= lo <= INT64_MAX and top <= INT64_MAX):
         return DrawRefusal("range")
     return lo, step, count
 
@@ -146,11 +152,13 @@ def parse_computed_draw(
     if contract is None:
         return None
     args = kwargs or {}
-    if contract.family == "uuid":
+    if contract.family == FAMILY_UUID:
         if args:
+            # uuid takes no argument; it shares the argument-shape refusal of random_choice
+            # (`computed_draw_elements_invalid`) rather than minting a code for one provider.
             return DrawRefusal("choice")
         return ComputedDrawSpec(contract, caller, pa.string())
-    if contract.family == "int":
+    if contract.family == FAMILY_INT:
         parsed = _parse_range(contract, args)
         if isinstance(parsed, DrawRefusal):
             return parsed
@@ -240,10 +248,6 @@ def choice_from_index(index: np.ndarray[Any, Any], elements: Sequence[Any]) -> l
     return chosen
 
 
-# Pool-build knobs that ride in `provider_config` but are not draw arguments.
-_NON_DRAW_KEYS = frozenset({"pool_size", "locale"})
-
-
 def draw_kwargs(provider_config: Mapping[str, Any] | None) -> dict[str, Any]:
     """The draw arguments of a `provider_config`: everything but the pool-build knobs."""
-    return {k: v for k, v in (provider_config or {}).items() if k not in _NON_DRAW_KEYS}
+    return {k: v for k, v in (provider_config or {}).items() if k not in POOL_BUILD_KNOBS}

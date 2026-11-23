@@ -281,6 +281,128 @@ def _handler(plan: Any, frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _handler_ctx(**kw: Any) -> StrategyContext:
+    return StrategyContext(
+        registry=_REG,
+        pool_cache=PoolCache(),
+        relationship_graph=_GRAPH,
+        namespace_registry=_NSREG,
+        job_seed=JOB,
+        mask_key=MASK,
+        current_table="t",
+        **kw,
+    )
+
+
+def _handler_with(plan: Any, frame: pd.DataFrame, **ctx_kw: Any) -> list[Any]:
+    column = plan.seed_envelope.per_table[0][1].per_column[0][1]
+    out, _ = FakerStrategyHandler().run(frame.copy(), "v", column, _handler_ctx(**ctx_kw))
+    return out["v"].tolist()
+
+
+class TestHandlerKeying:
+    """The handler hands each mode the right seed, row number and gate to the draw.
+
+    `mask_key` and `job_seed` differ, the row offset is not zero and a `when:` gate selects
+    rows, so a handler that passes the wrong key or a chunk-local row number changes the output."""
+
+    FRAME = pd.DataFrame({"v": ["alice", "bob", None, "carol", "alice"]})
+    OFFSET = 40
+    # Frame-local positions of the gated rows; the full-table row is OFFSET + position.
+    GATE = np.array([1, 3, 4, 7, 8], dtype=np.int64)
+
+    def test_positional_int_is_the_job_seed_draw_over_the_global_row_number(self) -> None:
+        plan = _plan("random_int_range", INT_KW, deterministic=False)
+        got = _handler_with(plan, self.FRAME, row_offset=self.OFFSET)
+        want = [
+            None
+            if self.FRAME["v"][i] is None
+            else 10
+            + 5
+            * derive_index(
+                JOB, "ns/computed:random_int_range", encode_int(self.OFFSET + i), pool_size=9
+            )
+            for i in range(5)
+        ]
+        assert got == want
+
+    def test_positional_choice_under_a_gate_uses_the_gated_full_table_rows(self) -> None:
+        plan = _plan("random_choice", CHOICE_KW, deterministic=False)
+        got = _handler_with(plan, self.FRAME, row_offset=self.OFFSET, gate_positions=self.GATE)
+        want = [
+            None
+            if self.FRAME["v"][i] is None
+            else CHOICE_KW["elements"][
+                derive_index(
+                    JOB,
+                    "ns/computed:random_choice",
+                    encode_int(self.OFFSET + int(self.GATE[i])),
+                    pool_size=5,
+                )
+            ]
+            for i in range(5)
+        ]
+        assert got == want
+
+    def test_positional_uuid_is_the_job_seed_digest_over_the_global_row_number(self) -> None:
+        plan = _plan("uuid", deterministic=False)
+        got = _handler_with(plan, self.FRAME, row_offset=self.OFFSET)
+        want = [
+            None
+            if self.FRAME["v"][i] is None
+            else str(
+                uuid.UUID(
+                    bytes=derive(JOB, "ns/computed:uuid", encode_int(self.OFFSET + i))[:16],
+                    version=4,
+                )
+            )
+            for i in range(5)
+        ]
+        assert got == want
+
+    @pytest.mark.parametrize(
+        ("provider", "config"),
+        [("random_int_range", INT_KW), ("random_choice", CHOICE_KW)],
+    )
+    def test_deterministic_index_draws_are_the_mask_key_over_the_canonical_source(
+        self, provider: str, config: dict[str, Any]
+    ) -> None:
+        plan = _plan(provider, config, deterministic=True)
+        got = _handler_with(plan, self.FRAME, row_offset=self.OFFSET)
+        count = 9 if provider == "random_int_range" else 5
+        want: list[Any] = []
+        for value in self.FRAME["v"]:
+            if value is None:
+                want.append(None)
+                continue
+            idx = derive_index(
+                MASK,
+                f"ns/computed:{provider}",
+                canonicalize_derive_source(value),
+                pool_size=count,
+            )
+            want.append(
+                10 + 5 * idx if provider == "random_int_range" else CHOICE_KW["elements"][idx]
+            )
+        assert got == want
+
+    def test_deterministic_uuid_is_the_mask_key_digest_over_the_canonical_source(self) -> None:
+        plan = _plan("uuid", deterministic=True)
+        got = _handler_with(plan, self.FRAME, row_offset=self.OFFSET)
+        want = [
+            None
+            if value is None
+            else str(
+                uuid.UUID(
+                    bytes=derive(MASK, "ns/computed:uuid", canonicalize_derive_source(value))[:16],
+                    version=4,
+                )
+            )
+            for value in self.FRAME["v"]
+        ]
+        assert got == want
+
+
 _SOURCES = {
     "string": pa.array(["a", "b", None, "a"], pa.string()),
     "int64": pa.array([1, 2, None, 1], pa.int64()),
@@ -376,7 +498,7 @@ class TestPandasFullFrameMatrix:
                 per_table=(("t", TableSeed(per_column=(("v", column),), per_group=())),),
             )
         )
-        with pytest.raises(Exception, match="reuse"):
+        with pytest.raises(ValueError, match="reuse"):
             _run(plan, pa.array(["a"], pa.string()))
 
 
@@ -562,6 +684,29 @@ class TestChunkedRouting:
         assert auto.schema.field("f").type == whole.schema.field("f").type == arrow
         assert auto.column("f").to_pylist() == whole.column("f").to_pylist()
         assert whole.column("f").to_pylist()[3] is None and whole.column("f")[0].is_valid
+
+    @pytest.mark.parametrize("provider", ["uuid", "random_int_range", "random_choice"])
+    def test_the_native_admission_declines_a_computed_provider_by_name(self, provider) -> None:
+        """Why auto routing falls through: the native faker allowlist has no computed provider."""
+        from decoy_engine.execution.native._dispatch import NodeRouteRecord
+        from decoy_engine.execution.native._real_type_admission import real_type_decline
+        from decoy_engine.execution.native._route_decline_codes import (
+            RouteDeclineCode,
+            column_decline,
+        )
+        from tests.native._chunked_entry_support import TABLE, make_config
+
+        config = {"random_int_range": INT_KW, "random_choice": CHOICE_KW}.get(provider, {})
+        cfg = make_config(self._columns(provider, config, True))
+        node = (NodeRouteRecord(column="f", strategy="faker", route="native_kernel"),)
+        found = real_type_decline(
+            cfg, node, pa.schema([("f", pa.string())]), table=TABLE, profile=None
+        )
+        assert found is not None
+        assert found.record == column_decline(
+            RouteDeclineCode.FAKER_PROVIDER_NOT_NATIVE, TABLE, "f"
+        )
+        assert found.reason == f"faker_provider_not_native:f:{provider}"
 
     @pytest.mark.parametrize("provider", ["uuid", "random_int_range", "random_choice"])
     def test_a_forced_chunked_entry_refuses_before_any_chunk_runs(self, provider) -> None:

@@ -19,6 +19,9 @@ from typing import Any, Final, Literal
 
 __all__ = [
     "FAKER_DRAW_CONTRACTS",
+    "FAMILY_CHOICE",
+    "FAMILY_INT",
+    "FAMILY_UUID",
     "FakerDrawContract",
     "faker_draw_adapter_defaults",
     "faker_draw_contract",
@@ -26,6 +29,9 @@ __all__ = [
 ]
 
 DrawFamily = Literal["uuid", "int", "choice"]
+FAMILY_UUID: Final[DrawFamily] = "uuid"
+FAMILY_INT: Final[DrawFamily] = "int"
+FAMILY_CHOICE: Final[DrawFamily] = "choice"
 
 
 @dataclass(frozen=True)
@@ -53,7 +59,7 @@ FAKER_DRAW_CONTRACTS: Final[tuple[FakerDrawContract, ...]] = (
     FakerDrawContract(
         provider="uuid",
         faker_type="uuid4",
-        family="uuid",
+        family=FAMILY_UUID,
         arguments=(),
         defaults=_frozen({}),
         adapter_defaults=_frozen({}),
@@ -61,7 +67,7 @@ FAKER_DRAW_CONTRACTS: Final[tuple[FakerDrawContract, ...]] = (
     FakerDrawContract(
         provider="random_int_range",
         faker_type="random_int",
-        family="int",
+        family=FAMILY_INT,
         arguments=("min", "max", "step"),
         defaults=_frozen({"min": 0, "max": 9999, "step": 1}),
         adapter_defaults=_frozen({}),
@@ -69,7 +75,7 @@ FAKER_DRAW_CONTRACTS: Final[tuple[FakerDrawContract, ...]] = (
     FakerDrawContract(
         provider="random_choice",
         faker_type="random_element",
-        family="choice",
+        family=FAMILY_CHOICE,
         arguments=("elements",),
         defaults=_frozen({"elements": ("a", "b", "c")}),
         adapter_defaults=_frozen({"elements": ("a", "b", "c")}),

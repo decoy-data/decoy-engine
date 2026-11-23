@@ -56,6 +56,9 @@ from decoy_engine.providers_v2._faker_adapter import (
 )
 from decoy_engine.providers_v2._faker_draw_contracts import (
     FAKER_DRAW_CONTRACTS,
+    FAMILY_CHOICE,
+    FAMILY_INT,
+    FAMILY_UUID,
     FakerDrawContract,
     faker_draw_contract,
 )
@@ -66,6 +69,9 @@ from decoy_engine.providers_v2._registry import (
 
 __all__ = [
     "FAKER_DRAW_CONTRACTS",
+    "FAMILY_CHOICE",
+    "FAMILY_INT",
+    "FAMILY_UUID",
     "AdapterError",
     "BackendAdapter",
     "CapabilityMatrix",

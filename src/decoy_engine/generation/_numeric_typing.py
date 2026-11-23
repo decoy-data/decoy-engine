@@ -44,10 +44,10 @@ import pyarrow as pa
 from decoy_engine.config import generated_arrow_type, reference_root
 from decoy_engine.generation._numeric_derived import derived_uses_as_numbers
 from decoy_engine.generation.kinds import output_arrow_type
+from decoy_engine.generation.pool import INT64_MAX, INT64_MIN
 from decoy_engine.internal.pandas_compat import table_to_pandas_exact_ints
 from decoy_engine.providers_v2 import FAKER_DRAW_CONTRACTS
 
-_INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
 # Stock Faker providers with a bounded integer result; kwarg names and defaults per provider.
 # Anything not listed here stays text, because its range cannot be proven from the config.
 _INT_PROVIDERS: dict[str, tuple[str, str, int, int]] = {
@@ -88,7 +88,7 @@ def sequence_is_plain(col: Mapping[str, Any]) -> bool:
 
 
 def _fits(*values: int) -> bool:
-    return all(_INT64_MIN <= v <= _INT64_MAX for v in values)
+    return all(INT64_MIN <= v <= INT64_MAX for v in values)
 
 
 def _sequence_type(col: Mapping[str, Any], rows: int) -> pa.DataType | None:

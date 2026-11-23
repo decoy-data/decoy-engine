@@ -342,6 +342,12 @@ figures stay out of it, so a lazy and a resident input of the same job on the sa
 hash still covers `facts.budget_bytes`, so it can differ between hosts when no explicit budget is set.
 `pipeline_config_hash` does not move. No schema version moves.
 
+**Pre-GA correction (GEN-NONFAKER-DRAWS S1a, 2026-11-23).** The physical `plan_hash` and `activation_hash` move once
+for every unified-slice job, because `CapabilityMatrix` gains a `draw` field (`pool` or `computed`) and
+`registry_fingerprint()` hashes the dump of every provider's matrix. Both hashes are written to output evidence. No
+other input to the fingerprint changes: with `draw` removed the fingerprint equals the one on the previous main, and a test
+pins that. `pipeline_config_hash` does not move. No schema version moves.
+
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
 stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to

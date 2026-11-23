@@ -1,15 +1,17 @@
 """AT-13 (GEN-NONFAKER-DRAWS): the Faker draw arguments, defaults and method names have one owner.
 
 `providers_v2/_faker_draw_contracts.py` holds one row per computed draw (uuid, bounded integer,
-element choice). Three consumers read it: the Faker adapter (method map and default kwargs), the
-numeric-typing integer table and the computed-draw parser. This guard walks those modules and fails
-on a local alias, accepted-argument name or default for a computed draw, and checks the live
-tables agree with the rows. The two adapter defaults that are not computed draws
-(`synthetic_member_id`, `synthetic_plan_id`) stay adapter-owned.
+element choice). Consumers read it: the Faker adapter (method map and default kwargs), the
+numeric-typing integer table and the computed-draw parser. This guard scans every module under
+`src/decoy_engine`. A string literal that equals a computed provider name or its Faker method name
+is a violation unless the file is on `NAME_OWNER_SITES` (a file that owns a name for a stated reason, not a debt list); the computed-draw
+parser may not also hold an argument name. The live tables are checked against the rows. The two
+adapter defaults that are not computed draws (`synthetic_member_id`, `synthetic_plan_id`) stay
+adapter-owned.
 
 Each rule is shown red against a seeded bypass: a local `random_int` default of 1 in the numeric
-table, a local `random_choice -> random_elements` adapter mapping, and a local `min` default in the
-computed-draw parser.
+table, a local `random_choice -> random_elements` adapter mapping, a local `min` default in the
+computed-draw parser and a bare `"uuid"` comparison in an execution module.
 """
 
 from __future__ import annotations
@@ -32,21 +34,31 @@ SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
 ADAPTER = "providers_v2/_faker_adapter.py"
 NUMERIC = "generation/_numeric_typing.py"
 SPEC = "generation/pool/_computed_draw.py"
-CONSUMERS = (ADAPTER, NUMERIC, SPEC)
+POSITIONAL = "execution/_strategies/_faker_positional.py"
 # Adapter defaults that belong to no computed draw.
 ADAPTER_OWNED_DEFAULTS = frozenset({"synthetic_member_id", "synthetic_plan_id"})
 
+# Files that may hold a computed provider or Faker method name as a literal, and why. Every other
+# module reads the contract (or the registry capability `draw`) instead.
+NAME_OWNER_SITES: dict[str, str] = {
+    "providers_v2/_faker_draw_contracts.py": "the contract rows themselves",
+    "providers_v2/_real_registry.py": "declares each provider's capability row, keyed by name",
+    "connectors/postgres_snapshot.py": "a SQL column type name, not a provider",
+    "profiling/eval/corpus.py": "evaluation corpus labels for detected column kinds",
+    "profiling/recommendations.py": "recommends a provider to the user by its public name",
+    "generation/_bounds.py": "generate-side output width by Faker method name (GEN-NONFAKER-DRAWS S3)",
+    "execution/_mem_estimate_schema.py": "memory estimate by Faker method name (width table)",
+}
 
-def _forbidden() -> dict[str, frozenset[str]]:
-    """The literals each consumer may not hold, derived from the contract rows."""
-    names = {c.faker_type for c in FAKER_DRAW_CONTRACTS}
-    aliases = {c.provider for c in FAKER_DRAW_CONTRACTS if c.provider != c.family}
-    args = {a for c in FAKER_DRAW_CONTRACTS for a in c.arguments}
-    return {
-        ADAPTER: frozenset(names | aliases),
-        NUMERIC: frozenset(names | aliases),
-        SPEC: frozenset(names | aliases | args),
-    }
+
+def _names() -> frozenset[str]:
+    return frozenset(
+        {c.provider for c in FAKER_DRAW_CONTRACTS} | {c.faker_type for c in FAKER_DRAW_CONTRACTS}
+    )
+
+
+def _args() -> frozenset[str]:
+    return frozenset(a for c in FAKER_DRAW_CONTRACTS for a in c.arguments)
 
 
 def _docstring_nodes(tree: ast.AST) -> set[int]:
@@ -60,25 +72,31 @@ def _docstring_nodes(tree: ast.AST) -> set[int]:
 
 
 def violations(sources: dict[str, str]) -> list[str]:
-    """Every string literal in a consumer that restates a contract fact."""
-    forbidden = _forbidden()
+    """Every string literal that restates a contract fact outside an allowed site."""
+    names, args = _names(), _args()
     found: list[str] = []
     for rel, text in sources.items():
         tree = ast.parse(text)
         skip = _docstring_nodes(tree)
+        forbidden = set() if rel in NAME_OWNER_SITES else set(names)
+        if rel == SPEC:
+            forbidden |= args
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
                 and id(node) not in skip
-                and node.value in forbidden[rel]
+                and node.value in forbidden
             ):
                 found.append(f"{rel}:{node.lineno}: restates {node.value!r}")
     return found
 
 
 def _real_sources() -> dict[str, str]:
-    return {rel: (SRC / rel).read_text(encoding="utf-8") for rel in CONSUMERS}
+    return {
+        path.relative_to(SRC).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(SRC.rglob("*.py"))
+    }
 
 
 def test_the_consumers_hold_no_local_contract_literal() -> None:
@@ -119,6 +137,26 @@ class TestSeededBypassesAreSeen:
         sources = _real_sources()
         sources[SPEC] += '\n_LOCAL_DEFAULTS = {"min": 1}\n'
         assert any("'min'" in line for line in violations(sources))
+
+    def test_a_bare_uuid_comparison_in_an_execution_module(self) -> None:
+        sources = _real_sources()
+        sources[POSITIONAL] += '\n_BAD = lambda spec: spec.provider == "uuid"\n'
+        assert any(line.startswith(POSITIONAL) and "'uuid'" in line for line in violations(sources))
+
+    def test_a_new_module_naming_a_provider_is_seen(self) -> None:
+        sources = _real_sources()
+        sources["execution/_new_module.py"] = 'KIND = "random_int_range"\n'
+        assert violations(sources) == ["execution/_new_module.py:1: restates 'random_int_range'"]
+
+    def test_every_allowed_site_exists_and_still_needs_its_entry(self) -> None:
+        sources = _real_sources()
+        for rel in NAME_OWNER_SITES:
+            assert rel in sources
+            names = _names()
+            tree = ast.parse(sources[rel])
+            assert any(isinstance(n, ast.Constant) and n.value in names for n in ast.walk(tree)), (
+                f"{rel} no longer names a computed provider; drop it from NAME_OWNER_SITES"
+            )
 
     def test_a_local_alias_default_in_the_adapter_defaults(self) -> None:
         sources = _real_sources()

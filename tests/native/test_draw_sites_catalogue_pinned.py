@@ -19,7 +19,7 @@ def _digest(value: object) -> str:
 
 
 def test_catalogue_length_and_order_are_unchanged() -> None:
-    assert len(protocol.DRAW_SITES) == len(_ORDERED_IDS) == 44
+    assert len(protocol.DRAW_SITES) == len(_ORDERED_IDS) == 46
     assert [site.draw_site_id for site in protocol.DRAW_SITES] == _ORDERED_IDS
 
 
@@ -75,10 +75,10 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned at the GEN-REL E2 main merge: both changes together.
 # Re-pinned at the GEN-INHERIT E2 main merge: the E-F0 date-shift entry joins the GEN-REL sites.
 # Re-pinned for GEN-WINDOWED-BATCH S2 at the main merge: the windowed_date draw sites moved too.
-# Re-pinned for GEN-NONFAKER-DRAWS S1: mask.faker_computed_value and mask.faker_computed_position
-# appended at the end of the catalogue; gen.pool_nondeterministic and gen.faker_pool_selection carry
+# Re-pinned for GEN-NONFAKER-DRAWS S1: mask.faker_computed_value, mask.faker_computed_position,
+# mask.faker_computed_uuid_value and mask.faker_computed_uuid_position appended at the end of the catalogue; gen.pool_nondeterministic and gen.faker_pool_selection carry
 # the promoted `derive_pool_indices` name in their call sites (metadata only).
-_CATALOGUE_DIGEST = "e868334098ff1f88c92d986967a1d8aa68fa7ee2342a878e788b3fd687373cfa"
+_CATALOGUE_DIGEST = "87208827e73f32b80701e8c0d2caf06d023cdf320a7af0a30322f548c423008a"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -125,6 +125,8 @@ _ORDERED_IDS = [
     "gen.lookup",
     "mask.faker_computed_value",
     "mask.faker_computed_position",
+    "mask.faker_computed_uuid_value",
+    "mask.faker_computed_uuid_position",
 ]
 
 _ENTRY_DIGESTS = [
@@ -171,8 +173,10 @@ _ENTRY_DIGESTS = [
     "abea5ec5c7f29142ce8bf7c344245c68fa73d17eed4cc3633a9129b6a4a74c2c",  # mask.tokenize
     "448b2f19f340635c8e5ae9505271bcf521b1f1a1e08dd48c2392847d20b88cb5",  # gen.distribution
     "853a020843acba06217afc3f99579ab0118fe54ca0b08b5316744425376a95c2",  # gen.lookup
-    "0c14292b54c901fc81a215b8276a03b5cca16bb0ca1a6ab6e74f8a37d3d0feb9",  # mask.faker_computed_value
-    "e8dff280786e63feec3b6c7c7feea7ef56cd363d7adaa15dd100ca6e0d15ea56",  # mask.faker_computed_position
+    "e22123ff56b511b53a0e5530d1e487da9290dd98b9c41effa6130e41a5da9060",  # mask.faker_computed_value
+    "4e3f2dbebab3c3388bf218cffc285c3fe9ed0a53929283c9fc7b3af391b53d36",  # mask.faker_computed_position
+    "b4389c0f85b4922068f795798b8b68386f469f30336e3fa46c376cec9f5d2576",  # mask.faker_computed_uuid_value
+    "e1056e7c7ef8f58361c8ff9fe8c03e3f76aaa956e5f386f0ec2a92d6d3eb5bb0",  # mask.faker_computed_uuid_position
 ]
 
 _MAP_DIGESTS = {

@@ -6,8 +6,10 @@ ordinal `g = ctx.row_offset + i` the value is
 `encode_int` is the integer encoding `derive_index_batch` applies to a uint64 key column,
 so a native route can later reproduce the draw byte for byte.
 
-The key is `job_seed`, never `mask_key`: non-deterministic mode generates fresh synthetic
-values and does not re-identify a source value, so it stays off the secret-derived key.
+The pool selection and the computed positional draw are keyed on `job_seed`, never `mask_key`:
+non-deterministic mode generates fresh synthetic values and does not re-identify a source value,
+so it stays off the secret-derived key. The computed deterministic draw (`computed_mask_draw`)
+is the one function here that takes `mask_key`, and only in deterministic mode.
 """
 
 from __future__ import annotations
@@ -33,7 +35,8 @@ from decoy_engine.generation.pool import (
     int_from_index,
     uuid_from_hex,
 )
-from decoy_engine.kernel._scalar import hash_array
+from decoy_engine.kernel import hash_array
+from decoy_engine.providers_v2 import FAMILY_INT, FAMILY_UUID
 
 _DOMAIN_CODE = reasons.runtime.FAKER_POSITION_OUT_OF_DOMAIN
 _COMPUTED_DOMAIN_CODE = reasons.runtime.COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN
@@ -119,7 +122,7 @@ def computed_mask_draw(
         na_mask = source.isna().to_numpy()
         keyed_ns = computed_selection_namespace(namespace, spec.provider)
         nonnull = source.iloc[np.flatnonzero(~na_mask)]
-        if spec.family == "uuid":
+        if spec.family == FAMILY_UUID:
             if mode == "deterministic":
                 tokens = hash_array(nonnull.tolist(), seed=seed, namespace=keyed_ns, truncate=32)
             else:
@@ -140,7 +143,7 @@ def computed_mask_draw(
                 gate_positions=gate_positions,
                 domain_code=_COMPUTED_DOMAIN_CODE,
             )
-        if spec.family == "int":
+        if spec.family == FAMILY_INT:
             drawn = int_from_index(idx, lo=spec.lo, step=spec.step)
         else:
             drawn = pa.array(choice_from_index(idx, spec.elements), type=spec.output_type)

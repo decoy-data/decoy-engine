@@ -197,6 +197,16 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
     "mask.faker_computed_position": lambda: provider_for("mask.faker_computed_position").draw(
         _JOB, _NS + "/computed:random_choice", b"\x00\x02", pool_size=23
     ),
+    "mask.faker_computed_uuid_value": lambda: (
+        provider_for("mask.faker_computed_uuid_value")
+        .draw(_MK, _NS + "/computed:uuid", b"alice")
+        .hex()[:32]
+    ),
+    "mask.faker_computed_uuid_position": lambda: (
+        provider_for("mask.faker_computed_uuid_position")
+        .draw(_JOB, _NS + "/computed:uuid", b"\x00\x02")
+        .hex()[:32]
+    ),
     "mask.tokenize": lambda: provider_for("mask.tokenize").draw(_MK, _NS, b"alice").hex(),
 }
 
@@ -265,6 +275,8 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "mask.code_set": "39a5ea421300c982f5be9f92e7d0116858035a23de91be98ac64d9ab5a45afd3",
     "mask.date_shift": "6d09a52becbc2be47b141fbaef6417e684f1d543def38adbb356d9d1af1d78dc",
     "mask.faker": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+    "mask.faker_computed_uuid_position": "84326138897dcf80f97f13e60c4382a0da22bf12fec894ebd76979a8f4042a12",
+    "mask.faker_computed_uuid_value": "83ca85f4f5c3b39a1a6e16c30dddb7f159585053c3d2d4a1cb03fe18a8b8ee77",
     "mask.faker_computed_position": "e629fa6598d732768f7c726b4b621285f9c3b85303900aa912017db7617d8bdb",
     "mask.faker_computed_value": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918",
     "mask.faker_nondeterministic": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
@@ -284,5 +296,5 @@ _GOLDEN_OUTPUT: dict[str, str] = {
 }
 
 # Re-captured for DUP-FREEZE E2: the two joint_mask stream providers join the registry.
-# Re-captured for GEN-NONFAKER-DRAWS S1: the two computed-draw providers join the registry.
-_GOLDEN_REGISTRY = "865454397a63dbded3a7d3b6d654f7199f7142e4779811cf6ea3188c4014f270"
+# Re-captured for GEN-NONFAKER-DRAWS S1: the four computed-draw providers join the registry.
+_GOLDEN_REGISTRY = "7187d188604c352a90aba93740bf151a35ba910cec3e53c61d00cfe030fc4f02"
