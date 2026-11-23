@@ -46,7 +46,6 @@ from decoy_engine.execution._gated_string_guard import (
 )
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.expressions._when_parser import (
-    WHEN_MASKED_REFERENCE_CODE,
     Compare,
     InList,
     Not,
@@ -60,6 +59,7 @@ from decoy_engine.expressions._when_parser import (
     render_when,
     when_column_refs,
     when_literals_by_ref,
+    when_refusal_codes,
 )
 
 _log = logging.getLogger(__name__)
@@ -119,16 +119,16 @@ def _require_closed_grammar(expression: object, strategy: str, column: str | Non
             parse_when(expression)  # type: ignore[arg-type]
         return
     except ValidationError as exc:
-        masked = exc.code == WHEN_MASKED_REFERENCE_CODE
+        codes = when_refusal_codes(exc)
     # Raised outside the handler so `__context__` stays empty.
-    if masked:
+    if codes.masked:
         raise StrategyError(
-            code=reasons.runtime.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+            code=codes.runtime,
             strategy=strategy,
             message=f"when expression on column {column!r} reads a `masked.` value; V1 reads originals",
         )
     raise StrategyError(
-        code=reasons.runtime.WHEN_OUTSIDE_CLOSED_GRAMMAR,
+        code=codes.runtime,
         strategy=strategy,
         message=f"when expression on column {column!r} is outside the closed grammar",
     )

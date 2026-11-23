@@ -1385,6 +1385,7 @@ same error code and is never silently dropped. The accepted forms are:
   ``source.`first name` == 'x' ``. A quoted name holds no backtick, backslash or control
   character, and the reserved-name rule below applies to it too. `source` and `masked` are
   prefixes only before a dot: a column named `source` is still read as `source == 'web'`.
+  Spaces around the dot are accepted, as in pandas: `source . status == 'x'` reads `status`.
 - Literals are integers in the int64 range, finite floats, `True`, `False` and
   strings in single or double quotes. A string holds no backslash, no quote
   character and no control character.

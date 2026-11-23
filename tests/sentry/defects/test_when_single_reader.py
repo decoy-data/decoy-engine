@@ -12,26 +12,30 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
 import pyarrow as pa
 import pytest
 
 from decoy_engine.errors import ValidationError
 from decoy_engine.execution._column_access import _READS_UNKNOWN, SURFACE_DECLARATIONS
+from decoy_engine.execution._when_gate import _aliased_frame
 from decoy_engine.expressions._when_parser import alias_reads, parse_when
 from tests.native._chunked_entry_support import make_config, passthrough, redact
 from tests.native._rev9_support import run_entry_below_gate, run_public_below_gate, same_column
 
 _WHEN = SURFACE_DECLARATIONS["surface:when"]
 
-_VALID = {
-    "bare": "x > 4",
-    "two_columns": "left > 0 and right == 'go'",
-    "quoted_dotted": "`a.b` > 4",
-    "quoted_fullwidth": "`ｘ` > 4",
-    "quoted_ligature": "`ﬁle` > 4",
-    "source_bare": "source.x > 4",
-    "source_quoted": "source.`my col` > 4",
-    "literal_holds_a_column_name": "x == 'other'",
+# (predicate, the columns it reads, written by hand: not derived from `when_column_refs`)
+_VALID: dict[str, tuple[str, frozenset[str]]] = {
+    "bare": ("x > 4", frozenset({"x"})),
+    "two_columns": ("left > 0 and right == 'go'", frozenset({"left", "right"})),
+    "quoted_dotted": ("`a.b` > 4", frozenset({"a.b"})),
+    "quoted_fullwidth": ("`\uff58` > 4", frozenset({"\uff58"})),
+    "quoted_ligature": ("`\ufb01le` > 4", frozenset({"\ufb01le"})),
+    "source_bare": ("source.x > 4", frozenset({"x"})),
+    "source_spaced": ("source . x > 4", frozenset({"x"})),
+    "source_quoted": ("source.`my col` > 4", frozenset({"my col"})),
+    "literal_holds_a_column_name": ("x == 'other'", frozenset({"x"})),
 }
 _INVALID = {
     "bare_fullwidth": "ｘ > 4",
@@ -43,17 +47,20 @@ _INVALID = {
 }
 
 
-def _evaluator_columns(expr: str) -> frozenset[str]:
+def _evaluator_selects(expr: str, expected: frozenset[str]) -> int:
+    """How many columns `_aliased_frame` takes from a frame holding `expected` and extras."""
     _, aliases = alias_reads(parse_when(expr))
-    return frozenset(read.column for read in aliases.values())
+    frame = pd.DataFrame({c: [1] for c in sorted(expected | {"unrelated"})})
+    return len(_aliased_frame(frame, aliases).columns)
 
 
 @pytest.mark.parametrize("case", _VALID)
-def test_when_declared_reads_equal_the_evaluator_alias_map(case: str) -> None:
-    expr = _VALID[case]
+def test_when_declared_reads_equal_the_hand_written_set_and_the_evaluator(case: str) -> None:
+    expr, expected = _VALID[case]
     access = _WHEN({"name": "s", "strategy": "redact", "when": expr})
     assert not access.reads_unknown
-    assert access.reads == _evaluator_columns(expr)
+    assert access.reads == expected
+    assert _evaluator_selects(expr, expected) == len(expected)
 
 
 def test_when_reads_keep_the_exact_quoted_text() -> None:

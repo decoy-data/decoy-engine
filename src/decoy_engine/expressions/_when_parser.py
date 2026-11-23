@@ -30,6 +30,41 @@ from decoy_engine.errors import DecoyError, ValidationError
 WHEN_OUTSIDE_GRAMMAR_CODE = reasons.config.WHEN_OUTSIDE_CLOSED_GRAMMAR
 WHEN_MASKED_REFERENCE_CODE = reasons.config.WHEN_MASKED_REFERENCE_UNSUPPORTED
 
+
+@dataclass(frozen=True)
+class WhenRefusalCodes:
+    """One parser refusal, as each boundary reports it. `masked` selects the boundary's message."""
+
+    config: str
+    plan: str
+    runtime: str
+    masked: bool = False
+
+
+# The one mapping from a parser refusal code (`ValidationError.code`) to the code each boundary
+# raises: the config field validator, the plan compile check, the runtime gate and the envelope
+# check. A boundary reads its code from here (`when_refusal_codes`), never from its own
+# comparison, so a new refusal is one row. Pinned by tests/sentry/defects/test_when_refusal_codes.py.
+WHEN_REFUSALS: dict[str, WhenRefusalCodes] = {
+    WHEN_OUTSIDE_GRAMMAR_CODE: WhenRefusalCodes(
+        config=reasons.config.WHEN_OUTSIDE_CLOSED_GRAMMAR,
+        plan=reasons.plan.WHEN_OUTSIDE_CLOSED_GRAMMAR,
+        runtime=reasons.runtime.WHEN_OUTSIDE_CLOSED_GRAMMAR,
+    ),
+    WHEN_MASKED_REFERENCE_CODE: WhenRefusalCodes(
+        config=reasons.config.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+        plan=reasons.plan.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+        runtime=reasons.runtime.WHEN_MASKED_REFERENCE_UNSUPPORTED,
+        masked=True,
+    ),
+}
+
+
+def when_refusal_codes(exc: ValidationError) -> WhenRefusalCodes:
+    """The boundary codes for a `parse_when` refusal; any other code reads as outside the grammar."""
+    return WHEN_REFUSALS.get(exc.code or "", WHEN_REFUSALS[WHEN_OUTSIDE_GRAMMAR_CODE])
+
+
 _GRAMMAR_PATH = Path(__file__).parent / "when_grammar.lark"
 _PARSER = lark.Lark(
     _GRAMMAR_PATH.read_text(encoding="utf-8"),
@@ -325,20 +360,20 @@ def validate_envelope_when(envelope: Any) -> None:
                     parse_when(when)
                 continue
             except ValidationError as exc:
-                masked = exc.code == WHEN_MASKED_REFERENCE_CODE
+                codes = when_refusal_codes(exc)
             path = f"tables.{table}.columns.{column}.when"
-            if masked:
+            if codes.masked:
                 raise ValidationError(
                     f"the when predicate of table {table!r} column {column!r} reads a `masked.` "
                     "value; V1 reads original values only",
                     path=path,
-                    code=WHEN_MASKED_REFERENCE_CODE,
+                    code=codes.config,
                 )
             raise ValidationError(
                 f"the when predicate of table {table!r} column {column!r} is outside the "
                 "closed grammar",
                 path=path,
-                code=WHEN_OUTSIDE_GRAMMAR_CODE,
+                code=codes.config,
             )
 
 
@@ -445,6 +480,7 @@ __all__ = [
     "RESERVED_NAMES",
     "WHEN_MASKED_REFERENCE_CODE",
     "WHEN_OUTSIDE_GRAMMAR_CODE",
+    "WHEN_REFUSALS",
     "BoolOp",
     "Compare",
     "InList",
@@ -452,6 +488,7 @@ __all__ = [
     "WhenExpr",
     "WhenPhase",
     "WhenRead",
+    "WhenRefusalCodes",
     "alias_reads",
     "parse_when",
     "parse_when_cached",
@@ -461,4 +498,5 @@ __all__ = [
     "validate_plan_when",
     "when_column_refs",
     "when_literals_by_ref",
+    "when_refusal_codes",
 ]
