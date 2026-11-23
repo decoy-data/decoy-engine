@@ -21,15 +21,22 @@ real-subprocess spawn/classify machinery this module does not touch.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from decoy_engine.execution import _isolated_worker
+from decoy_engine.execution._isolated_commit import stage_sources
 from decoy_engine.execution._pipeline import run_pipeline
+from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.profile._readers import LazySource
+from tests.native._rev9_type_catalogue import CATALOGUE
 
 _N = 30
 
@@ -44,7 +51,7 @@ def _write_source(tmp_path: Path, table: pa.Table, name: str) -> str:
     return str(p)
 
 
-def _fk_config(tmp_path: Path) -> tuple[dict[str, Any], dict[str, str]]:
+def _fk_config(tmp_path: Path) -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
     """A small pure-mask FK job whose strategies the out-of-core compat gate
     admits -- mirrors `test_out_of_core_routing.py`'s `_fk_ooc_config`,
     duplicated locally per this test package's existing per-file convention
@@ -90,7 +97,10 @@ def _fk_config(tmp_path: Path) -> tuple[dict[str, Any], dict[str, str]]:
             }
         ],
     }
-    manifest = {"parent": parent_path, "child": child_path}
+    manifest = {
+        name: {"path": path, "format": "parquet"}
+        for name, path in (("parent", parent_path), ("child", child_path))
+    }
     return config, manifest
 
 
@@ -104,7 +114,9 @@ class TestLoadSourcesLazyScope:
         path = tmp_path / "t.parquet"
         pq.write_table(pa.table({"a": [1, 2, 3]}), path)
 
-        loaded = _isolated_worker._load_sources({"t": str(path)}, lazy=True)
+        loaded = _isolated_worker._load_sources(
+            {"t": {"path": str(path), "format": "parquet"}}, lazy=True
+        )
 
         assert isinstance(loaded["t"], LazySource)
         # Cheap Parquet-footer metadata read only -- the whole point of
@@ -124,7 +136,9 @@ class TestLoadSourcesLazyScope:
         path = tmp_path / "t.parquet"
         pq.write_table(pa.table({"a": [1, 2, 3]}), path)
 
-        loaded = _isolated_worker._load_sources({"t": str(path)}, lazy=False)
+        loaded = _isolated_worker._load_sources(
+            {"t": {"path": str(path), "format": "parquet"}}, lazy=False
+        )
 
         assert isinstance(loaded["t"], pa.Table)
         assert loaded["t"].num_rows == 3
@@ -145,7 +159,7 @@ class TestIsolatedWorkerStreamsOutOfCore:
         staging_output_dir = tmp_path / "staged"
 
         # Oracle: full_frame over the SAME resident sources, for byte parity.
-        oracle_sources = {name: pq.read_table(path) for name, path in manifest.items()}
+        oracle_sources = {name: pq.read_table(entry["path"]) for name, entry in manifest.items()}
         oracle = run_pipeline(
             config, oracle_sources, engine_version="tb1-worker-test", execution_mode="full_frame"
         )
@@ -203,7 +217,7 @@ class TestIsolatedWorkerStreamsOutOfCore:
         staging_output_dir = tmp_path / "staged"
         payload = {
             "config": config,
-            "sources": {"t": str(path)},
+            "sources": {"t": {"path": str(path), "format": "parquet"}},
             "kwargs": {"engine_version": "tb1-full-frame"},
             "mem_cap_bytes": None,
             "rlimit_kind": "data",
@@ -216,3 +230,142 @@ class TestIsolatedWorkerStreamsOutOfCore:
         assert envelope["quality_metrics"]["execution"]["outputs_streamed"] is False
         assert envelope["staged_tables"] == ["t"]
         assert (staging_output_dir / "t.parquet").exists()
+
+
+# Independent format expectations keep the all-Parquet and all-IPC mutations observable.
+_IPC_TYPES = {
+    "float16",
+    "date64",
+    "time32_s",
+    "timestamp_s",
+    "timestamp_s_tz",
+    "string_view",
+    "binary_view",
+    "decimal32",
+    "decimal64",
+    "month_day_nano_interval",
+    "fixed_size_list",
+    "map",
+    "list_view",
+    "large_list_view",
+    "sparse_union",
+    "dense_union",
+    "dictionary_int",
+    "dictionary_large_string",
+    "dictionary_string_view",
+    "dictionary_float16",
+    "ree_string",
+    "ree_int",
+    "ree_float",
+    "ree_string_view",
+    "json",
+    "uuid",
+    "bool8",
+    "fixed_shape_tensor",
+    "opaque",
+}
+_FIXED = pa.list_(pa.int64(), 2)
+_NESTED = {
+    "struct_fixed": (pa.struct([("f", _FIXED)]), lambda v: {"f": v}),
+    "list_fixed": (pa.list_(_FIXED), lambda v: [v]),
+    "large_list_fixed": (pa.large_list(_FIXED), lambda v: [v]),
+    "fixed_fixed": (pa.list_(_FIXED, 1), lambda v: [v]),
+    "map_fixed": (pa.map_(pa.string(), _FIXED), lambda v: [("k", v)]),
+}
+_CASES = (
+    [(name, null) for name in CATALOGUE for null in (False, True)]
+    + [(name, pos) for name in _NESTED for pos in (0, 1)]
+    + [("empty_struct", 0), ("nested_empty_struct", 0)]
+)
+
+
+@pytest.fixture(params=_CASES, ids=[f"{name}-{pos}" for name, pos in _CASES])
+def staged_case(request, tmp_path):
+    name, pos = request.param
+    if name in CATALOGUE:
+        array = CATALOGUE[name](pos)
+    elif name in _NESTED:
+        dtype, wrap = _NESTED[name]
+        array = pa.array([wrap(None if i == pos else [i, i]) for i in range(3)], dtype)
+    else:
+        array = (
+            pa.array([{}], pa.struct([]))
+            if name == "empty_struct"
+            else pa.array([{"g": {}}], pa.struct([("g", pa.struct([]))]))
+        )
+    table = pa.table({"x": array})
+    manifest = stage_sources(tmp_path, {"t": table})
+    return table, manifest, name in CATALOGUE and name not in _IPC_TYPES
+
+
+def test_staged_source_round_trip(staged_case):
+    table, manifest, _ = staged_case
+    loaded = _isolated_worker._load_sources(manifest, lazy=True)["t"]
+    actual = loaded.to_table() if isinstance(loaded, LazySource) else loaded
+    assert str(actual.schema) == str(table.schema)
+    assert actual.equals(table)
+
+
+def test_staged_source_format(staged_case):
+    table, manifest, parquet = staged_case
+    assert isinstance(manifest["t"], dict)
+    assert arrow_adapter.parquet_holds_type(table.schema.field(0).type) is parquet
+    assert manifest["t"]["format"] == ("parquet" if parquet else "ipc")
+    loaded = _isolated_worker._load_sources(manifest, lazy=True)["t"]
+    assert isinstance(loaded, LazySource if parquet else pa.Table)
+
+
+@pytest.mark.parametrize("lazy", [False, True])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"path": "x", "format": "feather"},
+        {"path": "x"},
+        "x",
+        {"path": 123, "format": "ipc"},
+        {"path": None, "format": "parquet"},
+    ],
+)
+def test_bad_manifest_precedes_reads(monkeypatch, bad, lazy):
+    def unexpected(*args, **kwargs):
+        pytest.fail("source opened before manifest validation")
+
+    monkeypatch.setattr(_isolated_worker, "LazySource", unexpected)
+    monkeypatch.setattr(_isolated_worker.pq, "read_table", unexpected)
+    monkeypatch.setattr(_isolated_worker, "ipc_read_path", unexpected, raising=False)
+    entries = {
+        "a": {"format": "parquet", "path": "a"},
+        "b": {"format": "ipc", "path": "b"},
+        "c": bad,
+    }
+    with pytest.raises(ValueError, match="^Invalid isolated source manifest entry[.]$"):
+        _isolated_worker._load_sources(entries, lazy=lazy)
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux", reason="requires procfs and Linux address-space accounting"
+)
+@pytest.mark.parametrize("kind", ["as", "data"])
+def test_mapped_ipc_under_cap(tmp_path, kind):
+    table = pa.table({"x": pa.array([1] * 8_000_000, pa.date64())})
+    manifest = stage_sources(tmp_path, {"t": table})
+    assert manifest["t"]["format"] == "ipc"
+    script = """
+import json, os, sys
+from pathlib import Path
+from decoy_engine.execution._isolated_memwatch import read_vm_fields
+from decoy_engine.execution._isolated_worker import _load_sources, apply_mem_cap
+
+manifest = json.loads(sys.argv[1])
+kind = sys.argv[2]
+field = "VmSize" if kind == "as" else "VmData"
+size = Path(manifest["t"]["path"]).stat().st_size
+baseline =read_vm_fields(os.getpid(), (field,))[field]
+apply_mem_cap(baseline + (3 * size if kind == "as" else size // 2), kind)
+table = _load_sources(manifest, lazy=True)["t"]
+assert table.num_rows == 8_000_000
+assert table["x"].chunk(0).buffers()[1].size >= 64_000_000
+"""
+    subprocess.run(  # noqa: S603 -- fixed child script and test-owned source
+        [sys.executable, "-c", script, json.dumps(manifest), kind], check=True, timeout=60
+    )
