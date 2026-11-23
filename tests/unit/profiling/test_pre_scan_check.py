@@ -16,7 +16,7 @@ from decoy_engine.profiling import (
     PreScanWarning,
     evaluate_pre_scan,
 )
-from decoy_engine.profiling.pre_scan_check import PreScanFinding
+from decoy_engine.profiling.pre_scan import PreScanFinding
 from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.run_result import Check
 from decoy_engine.support import StrategyKind
@@ -106,7 +106,7 @@ def test_e2_t2_passthrough_is_uncovered() -> None:
 
 
 def test_e2_t2_passthrough_name_is_the_catalog_name() -> None:
-    from decoy_engine.profiling import pre_scan_check
+    from decoy_engine.profiling.pre_scan import _check as pre_scan_check
 
     assert StrategyKind.PASSTHROUGH.value == pre_scan_check._PASSTHROUGH
 

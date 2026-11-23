@@ -63,7 +63,7 @@ from decoy_engine.profiling.bound_baseline import (
     bind_baseline,
     evaluate_drift,
 )
-from decoy_engine.profiling.pre_scan_check import (
+from decoy_engine.profiling.pre_scan import (
     PreScanBlockedError,
     PreScanFailedError,
     PreScanVerdict,
