@@ -77,3 +77,75 @@ def test_the_plan_boundary_lists_exactly_the_set() -> None:
     )
     assert set(ctx.native_date_columns.values()) == TYPED_DATE_SHAPES
     assert len(ctx.native_date_columns) == len(TYPED_DATE_SHAPES)
+
+
+# Every read of TYPED_DATE_SHAPES outside its home file, as (path, enclosing function). The
+# native-date view (shapes minus declared date columns) has one producer, ``native_date_shapes``;
+# a caller that derives it inline would stay green on the literal check above, so any new read
+# must be added here by a reviewer who has checked it is a single-shape test and not that view.
+ALLOWED_TYPED_DATE_READS = frozenset(
+    {
+        ("contracts/strategy_requirements.py", "<module>"),
+        ("plan/checks/_required_settings.py", "column_shape_warnings"),
+        ("transforms/date_preserve.py", "preserve_config_problem"),
+        ("transforms/date_preserve.py", "preserve_set_from_config"),
+    }
+)
+
+
+def _typed_date_reads(rel: str, source: str) -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+
+    def walk(node: ast.AST, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = (
+                child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else scope
+            )
+            if isinstance(child, ast.Name) and child.id == "TYPED_DATE_SHAPES":
+                found.add((rel, scope))
+            walk(child, inner)
+
+    walk(ast.parse(source), "<module>")
+    return found
+
+
+def _unlisted_reads(sources: dict[str, str]) -> set[tuple[str, str]]:
+    reads: set[tuple[str, str]] = set()
+    for rel, text in sources.items():
+        if rel != HOME:
+            reads |= _typed_date_reads(rel, text)
+    return reads - ALLOWED_TYPED_DATE_READS
+
+
+def test_typed_date_shapes_is_read_only_at_allowlisted_sites() -> None:
+    sources = {
+        p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8") for p in SRC.rglob("*.py")
+    }
+    assert not _unlisted_reads(sources)
+    stale = ALLOWED_TYPED_DATE_READS - {
+        r for rel, text in sources.items() for r in _typed_date_reads(rel, text)
+    }
+    assert not stale, f"allowlist entries that no longer read the set: {sorted(stale)}"
+
+
+def test_an_inline_native_date_derivation_in_a_caller_is_red() -> None:
+    """Mutation: the producer's body pasted into a caller (the StrategyContext property)."""
+    path = SRC / "execution/_adapter.py"
+    inline = path.read_text(encoding="utf-8").replace(
+        "return native_date_shapes(self.column_shapes, self.declared_date_columns)",
+        "return {k: v for k, v in self.column_shapes.items()"
+        " if v in TYPED_DATE_SHAPES and k not in self.declared_date_columns}",
+    )
+    assert "TYPED_DATE_SHAPES and k not in" in inline
+    assert _unlisted_reads({"execution/_adapter.py": inline}) == {
+        ("execution/_adapter.py", "native_date_columns")
+    }
+    gate = (SRC / "execution/_chunked_bucket_perturb.py").read_text(encoding="utf-8")
+    gate_inline = gate.replace(
+        "native = native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))",
+        "native = [k for k, v in plan_column_shapes(plan).items() if v in TYPED_DATE_SHAPES]",
+    )
+    assert gate_inline != gate
+    assert _unlisted_reads({"execution/_chunked_bucket_perturb.py": gate_inline}) == {
+        ("execution/_chunked_bucket_perturb.py", "typed_date_columns")
+    }

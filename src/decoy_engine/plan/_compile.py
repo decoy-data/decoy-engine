@@ -242,7 +242,7 @@ def compile_plan(
     # bound (silent-passthrough leak). Config-only; both branches +
     # run_config_only_checks.
     check_top_code_config(config)
-    check_bucket_perturb_config(config)
+    check_bucket_perturb_config(config, column_shapes)
     # Rows 24-26 (silent-passthrough leaks), then the required strategy settings.
     check_categorical_categories(config)
     check_fpe_charset_config(config)
@@ -541,10 +541,10 @@ def run_config_only_checks(
     check_fpe_checksum_scheme(config)
     # Rows 16-20 column refs plus GEN-STRICT E2 generate column checks (one wrapper, as above).
     check_generate_columns(config, default_locale=instance_default_locale)
-    # Row 27 (HC-3a): reject date_shift columns with a missing group_by
-    # (entity-anchor) column ref. Config-only.
+    # Row 27 (HC-3a): reject date_shift columns with a missing group_by column ref.
     check_date_shift_group_by_refs(config)
-    check_date_preserve_values(config, build_column_shapes(config, sources=NO_SOURCES))
+    config_shapes = build_column_shapes(config, sources=NO_SOURCES)
+    check_date_preserve_values(config, config_shapes)
     check_date_shift_window(config)
     # Row 21 (SP-46 / fpe_join_group): validate fpe_join_group declarations.
     # Warnings are discarded here (config-only callers do not build a Plan).
@@ -557,7 +557,7 @@ def run_config_only_checks(
     # Row 28 (HC-3b, 2026-07-17): reject top_code columns with no resolvable
     # bound (silent-passthrough leak). Config-only.
     check_top_code_config(config)
-    check_bucket_perturb_config(config)
+    check_bucket_perturb_config(config, config_shapes)
     # Rows 24-26 (categorical shape, fpe charset, faker provider) and the required strategy
     # settings: config-only, so safe for decoy validate.
     check_categorical_categories(config)
