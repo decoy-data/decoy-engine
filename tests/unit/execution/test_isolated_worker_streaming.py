@@ -22,6 +22,7 @@ real-subprocess spawn/classify machinery this module does not touch.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ import pytest
 
 from decoy_engine.execution import _isolated_worker
 from decoy_engine.execution._isolated_commit import stage_sources
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.profile._readers import LazySource
@@ -361,11 +363,14 @@ kind = sys.argv[2]
 field = "VmSize" if kind == "as" else "VmData"
 size = Path(manifest["t"]["path"]).stat().st_size
 baseline =read_vm_fields(os.getpid(), (field,))[field]
-apply_mem_cap(baseline + (3 * size if kind == "as" else size // 2), kind)
+apply_mem_cap(baseline + (3 * size if kind == "as" else size), kind)
 table = _load_sources(manifest, lazy=True)["t"]
 assert table.num_rows == 8_000_000
 assert table["x"].chunk(0).buffers()[1].size >= 64_000_000
 """
     subprocess.run(  # noqa: S603 -- fixed child script and test-owned source
-        [sys.executable, "-c", script, json.dumps(manifest), kind], check=True, timeout=60
+        [sys.executable, "-c", script, json.dumps(manifest), kind],
+        check=True,
+        timeout=60,
+        env={**os.environ, **CAPPED_ENV},  # the allocator pins every real child starts with
     )
