@@ -45,12 +45,14 @@ _ALL_TRUE = dict.fromkeys(sc.DIMENSIONS, True)
 _SENSITIVE = "a̖ࢗ"
 _ORDERED = "a\u0316\u0897"
 
-# Frozen from the pure-Python hash (SEQ run without the companion, equal to the oracle).
-_CHAIN_A = "f4d83ff00678aafce13e86f111599b897bd1ab09a7f4653ecb9bf6351aeea59e"
-_CHAIN_B_ORPHAN = "3144b3e8b1a34e953d2f1991e12fe4ea7a91b8873aef68d5059c68bbc7a5b37c"
-_CHAIN_C_ORPHAN = "83517d014db7649cc4cc1a40b9459e12c457a9cc7fbaae0a1941c3a28d97952b"
-_SHARED_UNDER_P1 = "9e08d911d4f373a0884476dc73a98c054fc2042973edf0c28632d729d9b33768"
-_SHARED_UNDER_P2 = "a8a02e9e27359dc9fdb17c14acc09cdf50453cca8d5c0cd6af2ea46c8940052f"
+# Frozen from the pure-Python hash (SEQ run without the companion, equal to the oracle). Re-frozen
+# after F13 (#339) moved keyed derivation from the job seed to the admitted secret, which changed
+# every token; native, Python SEQ and the full-frame oracle all give these values.
+_CHAIN_A = "f386170d7979fe129e3749ddec1c483088ed7a4d408193157703a5e9b86fa6d9"
+_CHAIN_B_ORPHAN = "7862bfdf8bcacf27f076a5b2014b38eed3e2017f4a6e57c129c92e45c101a27f"
+_CHAIN_C_ORPHAN = "a25dc20aaee57543e954177d53978602630238942c262d52e587756e7d350d72"
+_SHARED_UNDER_P1 = "18189237cc6a556bd5cd02df6520f27fb598c480714c70c8eb4eb2c8128b28bd"
+_SHARED_UNDER_P2 = "2fe9cba5be5f5d85ac3f6126450ec303c14acd2e1a1e4f76a847103fb4a5dfd1"
 
 
 class RecordingRealKernel:

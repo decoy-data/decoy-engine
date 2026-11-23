@@ -336,6 +336,12 @@ hash and the physical plan hash move for any pipeline that uses `bucketize`, `to
 recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
 `column_shape_required` (plan and runtime) is registered unreleased.
 
+**Pre-GA correction (COMPANION-REDS, 2026-11-23).** The physical `plan_hash` and `activation_hash` of an auto-routed
+no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, unreleased), and its byte
+figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
+hash still covers `facts.budget_bytes`, so it can differ between hosts when no explicit budget is set.
+`pipeline_config_hash` does not move. No schema version moves.
+
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
 stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to
