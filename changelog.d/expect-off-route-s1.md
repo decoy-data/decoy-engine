@@ -12,11 +12,12 @@ The keyed validators (`fk_intact`, `parent_window_respected`, `reconciliation_ho
 parent and child tables in either order. `parent_window_respected` now guesses one date format
 for each column from its first non-null value, so a column that mixes formats gives the same
 verdict at any chunk size. `leak_check` records every column and table it does not check. Each
-skip has a registered code: `leak_check_skip_passthrough`, `leak_check_skip_fk_child`,
-`leak_check_skip_when`, `leak_check_skip_exempt`, `leak_check_skip_missing_column`,
-`leak_check_skip_below_min_rows` and `leak_check_skip_table_not_produced`. A column that
+skip has a registered code: `warning/leak_check_skip_passthrough`, `warning/leak_check_skip_fk_child`,
+`warning/leak_check_skip_when`, `warning/leak_check_skip_exempt`,
+`warning/leak_check_skip_missing_column`, `warning/leak_check_skip_below_min_rows` and
+`warning/leak_check_skip_table_not_produced`. A column that
 `leak_check` names in `columns:` and then skips raises a `QualityWarning`,
-`leak_check_column_not_checked`, in `quality_metrics["validation"]["warnings"]`; the run still
-passes. The new runtime codes are `validator_key_state_over_budget` and
-`validator_source_pairing_mismatch`, raised as `ValidatorStateError`. No route changes in this
+`warning/leak_check_column_not_checked`, in `quality_metrics["validation"]["warnings"]`; the run still
+passes. The new runtime codes are `runtime/validator_key_state_over_budget` and
+`runtime/validator_source_pairing_mismatch`, raised as `ValidatorStateError`. No route changes in this
 slice.
