@@ -20,10 +20,14 @@ from decoy_engine.execution.pipeline._resident_fit import (
     TableBytesSpec,
     input_bytes,
     pandas_bytes,
-    resident_table_bytes,
 )
 
 ROWS = 1000
+
+
+def resident_table_bytes(table: pa.Table) -> int:
+    """The production figure for one table: `resident_spec` priced through `input_bytes`."""
+    return input_bytes([resident_spec(table, charge_pandas=False)])
 
 
 def _lazy(schema: pa.Schema, rows: int = ROWS) -> TableBytesSpec:
@@ -252,3 +256,68 @@ def test_tables_sharing_a_buffer_are_priced_once() -> None:
     assert sum(s.resident_input_bytes or 0 for s in specs) == 24000
     distinct = pa.table({"z": pa.array(range(1000), pa.int64())})
     assert input_bytes([*specs, resident_spec(distinct, charge_pandas=False)]) == 16000
+
+
+def test_overlapping_buffer_views_of_one_allocation_are_priced_as_the_union() -> None:
+    """Two tables over slices of one 8,192-byte allocation that overlap by 4,096 bytes.
+
+    Their start addresses differ, so a start-address key counts 6,144 + 6,144 = 12,288. The
+    bytes the process holds are the union, 8,192. Mutation M-A1: key the dedup by start address.
+    """
+    base = pa.py_buffer(bytearray(8192))
+    low = base.slice(0, 6144)
+    high = base.slice(2048, 6144)
+    tables = [
+        pa.table({"x": pa.Array.from_buffers(pa.uint8(), 6144, [None, buf])}) for buf in (low, high)
+    ]
+    specs = [resident_spec(t, charge_pandas=False) for t in tables]
+    assert [s.resident_input_bytes for s in specs] == [6144, 6144]
+    assert input_bytes(specs) == 8192
+
+
+def test_disjoint_allocations_and_touching_ranges_are_still_summed() -> None:
+    base = pa.py_buffer(bytearray(8192))
+    touching = [
+        pa.table({"x": pa.Array.from_buffers(pa.uint8(), 4096, [None, base.slice(o, 4096)])})
+        for o in (0, 4096)
+    ]
+    assert input_bytes([resident_spec(t, charge_pandas=False) for t in touching]) == 8192
+    one = pa.table({"x": pa.array(range(1000), pa.int64())})
+    two = pa.table({"x": pa.array(range(1000), pa.int64())})
+    assert input_bytes([resident_spec(t, charge_pandas=False) for t in (one, two)]) == 16000
+
+
+def test_the_shared_pandas_columns_are_the_ones_the_transform_frame_really_shares() -> None:
+    """The prediction `resident_spec` prices with matches `to_transform_frame` buffer for buffer.
+
+    An integer column with nulls and a `string[pyarrow]` column come back copied; the other
+    Arrow-backed columns come back over the source chunks. A wrong prediction would uncharge a
+    real copy.
+    """
+    import pandas as pd
+
+    from decoy_engine.execution._transforms_table import to_transform_frame
+
+    frame = pd.DataFrame(
+        {
+            "a": pd.array(range(ROWS), dtype="int64[pyarrow]"),
+            "f": pd.array([1.5, None] * (ROWS // 2), dtype="float64[pyarrow]"),
+            "n": pd.array([1, None] * (ROWS // 2), dtype="int64[pyarrow]"),
+            "u": pd.array(["x"] * ROWS, dtype="large_string[pyarrow]"),
+            "s": pd.array(["x"] * ROWS, dtype="string[pyarrow]"),
+            "p": range(ROWS),
+        }
+    )
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    out = to_transform_frame(table)
+
+    def addresses(chunked: pa.ChunkedArray) -> list[int]:
+        return [b.address for chunk in chunked.chunks for b in chunk.buffers() if b]
+
+    really = {
+        name
+        for name in table.column_names
+        if (backing := getattr(out[name].array, "_pa_array", None)) is not None
+        and addresses(backing) == addresses(table.column(name))
+    }
+    assert resident_spec(table).pandas_shared == frozenset(really) == {"a", "f", "u"}

@@ -52,90 +52,122 @@ class TableBytesSpec:
     """One table's size facts.
 
     `resident_input_bytes` is set for a table already in memory and is `None` for a lazy table,
-    which is priced from rows and schema alone. `buffer_sizes` maps each distinct buffer address
-    of a resident table to its size, so `input_bytes` counts a buffer shared by several tables
-    once. `charge_pandas` is false for a table the run holds but never converts to pandas (a
-    generated table in a mixed job).
+    which is priced from rows and schema alone. `buffer_ranges` holds the `(address, size)` of
+    every physical buffer of a resident table, so `input_bytes` counts the union of the byte
+    ranges: a buffer shared by several tables, or two slices of one allocation that overlap, is
+    counted once. `charge_pandas` is false for a table the run holds but never converts to pandas
+    (a generated table in a mixed job). `pandas_shared` names the columns whose pandas form is
+    the Arrow column itself (an Arrow-backed dtype), which add no bytes to the input union.
     """
 
     rows: int
     schema: pa.Schema
     resident_input_bytes: int | None = None
     charge_pandas: bool = True
-    buffer_sizes: Mapping[int, int] = dataclasses.field(default_factory=dict, compare=False)
+    buffer_ranges: tuple[tuple[int, int], ...] = dataclasses.field(default=(), compare=False)
+    pandas_shared: frozenset[str] = frozenset()
 
 
 def resident_spec(table: pa.Table, *, charge_pandas: bool = True) -> TableBytesSpec:
-    sizes = _buffer_sizes(table)
+    ranges = _buffer_ranges(table)
     return TableBytesSpec(
         rows=table.num_rows,
         schema=table.schema,
-        resident_input_bytes=sum(sizes.values()),
+        resident_input_bytes=union_bytes(ranges),
         charge_pandas=charge_pandas,
-        buffer_sizes=sizes,
+        buffer_ranges=ranges,
+        pandas_shared=_arrow_backed_columns(table),
     )
 
 
-def _buffer_sizes(table: pa.Table) -> dict[int, int]:
-    """Size of each distinct physical buffer under `table`, keyed by its address."""
-    sizes: dict[int, int] = {}
+def union_bytes(ranges: Iterable[tuple[int, int]]) -> int:
+    """Bytes covered by the union of `(address, size)` ranges; overlapping or touching merge."""
+    total = 0
+    end = -1
+    for start, size in sorted(ranges):
+        stop = start + size
+        if start > end:
+            total += size
+            end = stop
+        elif stop > end:
+            total += stop - end
+            end = stop
+    return total
+
+
+def _buffer_ranges(table: pa.Table) -> tuple[tuple[int, int], ...]:
+    """The `(address, size)` of each physical buffer under `table`, at any depth."""
+    ranges: list[tuple[int, int]] = []
     for column in table.columns:
         for chunk in column.chunks:
-            _collect_buffers(chunk, sizes)
-    return sizes
+            _collect_buffers(chunk, ranges)
+    return tuple(ranges)
 
 
-def _collect_buffers(array: pa.Array, sizes: dict[int, int]) -> None:
-    for buffer in array.buffers():
-        if buffer is not None and buffer.size:
-            sizes[buffer.address] = max(sizes.get(buffer.address, 0), buffer.size)
+def _collect_buffers(array: pa.Array, ranges: list[tuple[int, int]]) -> None:
+    ranges.extend((b.address, b.size) for b in array.buffers() if b is not None and b.size)
     t = array.type
     if pa.types.is_dictionary(t):
-        _collect_buffers(array.dictionary, sizes)
+        _collect_buffers(array.dictionary, ranges)
     elif pa.types.is_struct(t):
         for i in range(t.num_fields):
-            _collect_buffers(array.field(i), sizes)
+            _collect_buffers(array.field(i), ranges)
     elif pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_map(t):
-        _collect_buffers(array.values, sizes)
+        _collect_buffers(array.values, ranges)
+
+
+def _arrow_backed_columns(table: pa.Table) -> frozenset[str]:
+    """Columns `to_transform_frame` hands to pandas as the Arrow column itself.
+
+    A column whose pandas metadata names an Arrow-backed dtype (`int64[pyarrow]`) comes back as
+    `ArrowDtype` over the same chunks, so it adds no bytes. An integer column with nulls is the
+    exception: the transform frame maps it to a nullable numpy-backed dtype, which copies.
+    """
+    meta = table.schema.pandas_metadata
+    if not meta:
+        return frozenset()
+    names: set[str] = set()
+    for entry in meta.get("columns", ()):
+        name = entry.get("field_name")
+        if not str(entry.get("numpy_type", "")).endswith("[pyarrow]"):
+            continue
+        if name not in table.column_names:
+            continue
+        column = table.column(name)
+        if pa.types.is_integer(column.type) and column.null_count > 0:
+            continue
+        names.add(name)
+    return frozenset(names)
 
 
 def lazy_spec(rows: int, schema: pa.Schema, *, charge_pandas: bool = True) -> TableBytesSpec:
     return TableBytesSpec(rows=rows, schema=schema, charge_pandas=charge_pandas)
 
 
-def resident_table_bytes(table: pa.Table) -> int:
-    """The bytes the table's distinct physical buffers hold.
-
-    Arrow counts each buffer once however many arrays, columns, dictionaries or slices point at
-    it (`Table.get_total_buffer_size`, present since pyarrow 14), and a sliced array counts its
-    whole backing buffer, which the process does hold. So the figure never exceeds what the
-    table occupies.
-    """
-    return int(table.get_total_buffer_size())
-
-
 def input_bytes(specs: Iterable[TableBytesSpec]) -> int:
-    """Lazy tables from rows and schema; resident tables by distinct buffer across all of them.
+    """Lazy tables from rows and schema; resident tables by the union of their buffer ranges.
 
-    Tables read from one source or sliced from one table share buffers, so summing each table
-    alone would count a shared buffer twice and break the lower bound.
+    Tables read from one source or sliced from one allocation share bytes, so summing each table
+    alone would count them twice and break the lower bound.
     """
     total = 0
-    distinct: dict[int, int] = {}
+    ranges: list[tuple[int, int]] = []
     for s in specs:
         if s.resident_input_bytes is None:
             total += _lazy_input_bytes(s.rows, s.schema)
-        elif s.buffer_sizes:
-            for address, size in s.buffer_sizes.items():
-                distinct[address] = max(distinct.get(address, 0), size)
+        elif s.buffer_ranges:
+            ranges.extend(s.buffer_ranges)
         else:
             total += s.resident_input_bytes
-    return total + sum(distinct.values())
+    return total + union_bytes(ranges)
 
 
 def pandas_bytes(specs: Iterable[TableBytesSpec]) -> int:
+    """Each charged table's pandas copy, less the columns that share the Arrow buffers."""
     return sum(
-        s.rows * sum(_pandas_cell_bytes(f.type) for f in s.schema) for s in specs if s.charge_pandas
+        s.rows * sum(_pandas_cell_bytes(f.type) for f in s.schema if f.name not in s.pandas_shared)
+        for s in specs
+        if s.charge_pandas
     )
 
 

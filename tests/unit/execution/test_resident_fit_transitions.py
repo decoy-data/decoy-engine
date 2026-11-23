@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -395,6 +396,56 @@ def test_at_c20_a_resident_table_whose_transform_copy_cannot_fit_is_refused_firs
     assert copies == []
 
 
+def _arrow_backed_job(tmp_path: Path, *, shared_strings: bool) -> tuple[dict[str, Any], pa.Table]:
+    """An int64[pyarrow] column plus a low-cardinality string column to redact.
+
+    The transform frame hands an Arrow-backed pandas column the same buffers, so it adds no bytes;
+    a plain `object` string column is a real copy.
+    """
+    strings = [f"value-{i % 9}" for i in range(ROWS)]
+    frame = pd.DataFrame(
+        {
+            "n": pd.array(list(range(ROWS)), dtype="int64[pyarrow]"),
+            "s": pd.array(strings, dtype="large_string[pyarrow]" if shared_strings else "object"),
+        }
+    )
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    cfg = tk.single_table_config(
+        tmp_path,
+        table,
+        transforms=[{"op": "limit", "n": 1}],
+        columns=[{"name": "s", "strategy": "redact"}],
+    )
+    return cfg, table
+
+
+def test_at_c20c_a_pandas_copy_that_shares_the_input_buffers_is_not_charged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutation M-A2: charge the pandas frame in full; the refusal below then fires."""
+    cfg, table = _arrow_backed_job(tmp_path, shared_strings=True)
+    need = rf.input_bytes([resident_spec(table, charge_pandas=False)])
+    assert _lb(table) == need  # every pandas column shares: the bound is the input alone
+    assert 2 * need > need  # the old double charge would exceed the ceiling set next
+    _ceiling(monkeypatch, need)
+    _static(monkeypatch)
+    got = run_pipeline(cfg, {"t": table}, **FULL_FRAME_KW)
+    assert got.outputs["t"].num_rows == 1
+
+
+def test_at_c20c_a_column_that_does_not_share_is_still_charged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, copies: list[str]
+) -> None:
+    cfg, table = _arrow_backed_job(tmp_path, shared_strings=False)
+    need = rf.input_bytes([resident_spec(table, charge_pandas=False)])
+    assert _lb(table) == need + ROWS * 8  # the object column's pointers; `n` shares
+    _ceiling(monkeypatch, need)
+    with pytest.raises(ExecutionError) as caught:
+        run_pipeline(cfg, {"t": table}, **KW)
+    assert caught.value.code == CODE_REFUSED
+    assert copies == []
+
+
 def test_at_c20_a_lazy_fallback_source_is_read_once_then_refused_before_its_copy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, copies: list[str], reads: list[str]
 ) -> None:
@@ -528,7 +579,9 @@ def test_at_c21_the_generated_tables_count_at_input_bytes_only(
     _ceiling(monkeypatch, lazy_full * 50)
     _run_mixed(cfg, sources)
     decision, kwargs = routed[-1]
-    generated = sum(rf.resident_table_bytes(t) for t in kwargs["pregenerated"].values())
+    generated = rf.input_bytes(
+        rf.resident_spec(t, charge_pandas=False) for t in kwargs["pregenerated"].values()
+    )
     assert generated > 0
     assert decision.resident_fit.lower_bound_bytes == lazy_full + generated
     assert decision.resident_fit.table_count == 1

@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry._call_resolution import resolved_call_scopes
+
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
 FORBIDDEN_NAMES = {"gather_resident_fit", "detect_effective_memory_bytes", "_probe"}
@@ -153,25 +155,9 @@ def _calls(source: str, function: str) -> set[str]:
 
 
 def _enclosing_calls(source: str, name: str) -> list[str]:
-    """The function that holds each call to `name`, through plain, aliased or attribute spellings."""
-    tree = ast.parse(source)
-    spellings = {name}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            spellings |= {a.asname for a in node.names if a.name == name and a.asname}
-    found: list[str] = []
-    for fn in ast.walk(tree):
-        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        for call in ast.walk(fn):
-            if not isinstance(call, ast.Call):
-                continue
-            func = call.func
-            if (isinstance(func, ast.Name) and func.id in spellings) or (
-                isinstance(func, ast.Attribute) and func.attr == name
-            ):
-                found.append(fn.name)
-    return found
+    """The immediate function holding each call to `name`; spellings come from the shared
+    resolver (`tests/sentry/_call_resolution.py`): plain, import alias, re-binding, attribute."""
+    return resolved_call_scopes(ast.parse(source), name)
 
 
 def _production_callers(name: str, *, defined_in: Path) -> dict[str, list[str]]:
@@ -198,10 +184,17 @@ def test_g5_store_resident_fit_has_exactly_the_two_pricing_callers() -> None:
         "def f():\n    store_resident_fit(a, b)\n",
         "from x import store_resident_fit as price\ndef f():\n    price(a, b)\n",
         "def f():\n    rf.store_resident_fit(a, b)\n",
+        "def f():\n    price = rf.store_resident_fit\n    price(a, b)\n",
+        "price = store_resident_fit\ndef f():\n    price(a, b)\n",
     ],
 )
 def test_g5_seeded_spellings_are_seen(source: str) -> None:
     assert _enclosing_calls(source, "store_resident_fit") == ["f"]
+
+
+def test_g5_a_call_in_a_nested_function_belongs_to_the_nested_function_only() -> None:
+    source = "def outer():\n    def inner():\n        store_resident_fit(a, b)\n"
+    assert _enclosing_calls(source, "store_resident_fit") == ["inner"]
 
 
 def test_g6_one_transform_preparation_caller_and_the_check_comes_first() -> None:

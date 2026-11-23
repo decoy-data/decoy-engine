@@ -87,8 +87,9 @@ def resident_fallback_tables(
     if not candidates:
         return frozenset()
     if vault_writer is not None:
-        # A vault run is forced to full-frame, and a lazy table gives routing no fit estimate to
-        # lift it onto out-of-core, so every lazy candidate is read whole.
+        # A vault run reads every lazy candidate whole: a lazy table gives routing no fit
+        # estimate, so the fallback charges input bytes only. The full-frame executor may still
+        # choose auto-chunk afterwards.
         return frozenset(candidates)
     kinds = classify_table_kinds(config)
     keep = {name for name in candidates if kinds.get(name) == "mask"}
