@@ -178,6 +178,11 @@ def read_value(raw: bytes | None, accept: Callable[[str], bool]) -> str | None:
     return value
 
 
+def is_pointer_value(value: object) -> bool:
+    """Whether `swap` would write `value`: a caller checks a run id before it stages anything."""
+    return type(value) is str and _encode(value) is not None
+
+
 def _encode(value: str) -> bytes | None:
     """The bytes `swap` writes, or `None` when the reader (`_decode`) would refuse them."""
     try:

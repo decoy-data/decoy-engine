@@ -315,6 +315,10 @@ modules:
     pattern: Git ref compare-and-swap under a lockfile
     source: Git update-ref and refs/files-backend.c (take the lock, compare the old value, write, fsync, rename); PostgreSQL (an fsync failure after a rename leaves the state visible, not known durable)
 
+  - path: src/decoy_engine/publication/_stage.py
+    pattern: Git commit then ref update
+    source: Git update-ref and refs/files-backend.c (the ref moves only after the object is written; a lost swap leaves an unreferenced commit)
+
   - path: src/decoy_engine/publication/_sink_state.py
     pattern: a table-driven finite-state machine
     source: UML state machines and the W3C SCXML state-transition table; java.util.concurrent.FutureTask (state changed under a guard, the task run outside it)

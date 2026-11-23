@@ -159,6 +159,48 @@ the pointer's own file and parent are new. A crash can leave a private pointer s
 `LATEST`; sweeping it is a named limit (V2-LOG). Only `publication/_current.py` may name the label
 (`tests/sentry/test_pointer_label_caller.py`).
 
+## The delivery stage
+
+`DeliveryStage` makes one run folder (`out/<name>/<run-id>/`) and the pointer move together. The
+stage reads only plain data, so `publication` never imports `delivery`: the caller passes
+`StageDecision(deliver, delivered)`, the tables the decision delivers.
+
+- `DeliveryStage.open(out, pointer, run_id, operation_id)` reads the pointer first, then opens a
+  `publication` stage beside the run folder. A pointer that cannot be read (a link, a special
+  file, over 4 KiB) or a stage that cannot open raises `PublicationFailed` (`publication_failed`)
+  before anything is staged. `run_id` must be a value the pointer reader accepts.
+- `stage_path(table, relpath, role="table")` makes the folders and returns the local path to
+  write. `table` is the table the file belongs to; `None` (the post-scan report) is always
+  delivered. `set_vault(VaultBinding)` has `publish_unit` publish the vault create-only before
+  the bind (rule V).
+- `deliver(decision, before_visible, reconcile=None)` removes the staged files of every table
+  the decision does not deliver, takes the pointer lock, compares the pointer with the state read
+  at `open`, calls `before_visible()`, binds the unit with `publish_unit`, then swaps the pointer
+  with that same state. `reconcile(receipt)` runs under the lock with the final receipt and must
+  not raise. An exception or interrupt after the bind may have happened is judged by one pointer
+  re-read (`LATEST` names this run: `uncertain`), reconciled, and raised again.
+- `abort()` removes the stage and never touches the pointer; it is a no-op after `delivered`. A
+  `deliver` after `abort` raises `RuntimeError`.
+
+`DeliveryReceipt(state, cause)` has state `delivered`, `uncertain` (visible, durability unknown;
+counts as delivered) or `nothing`. Every F22 outcome and every pointer result maps to one state:
+
+| Source | Value | State | Cause |
+|---|---|---|---|
+| bind | `published`, `already_committed` | go on to the swap | none |
+| bind | `commit_uncertain` | go on to the swap; at most `uncertain` | `publication_commit_uncertain` |
+| bind | `refused` | `nothing` | F22's code (target occupied, lock timeout or unavailable, vault mismatch or conflict) |
+| bind | `operation_conflict` | `nothing` | `publication_operation_conflict` |
+| bind | `failed` | `nothing` | `publication_failed` |
+| compare, before the bind | pointer moved | `nothing`, nothing bound | `delivery_pointer_moved` |
+| swap | `replaced` | `delivered` | none |
+| swap | `stale` | `nothing`; the bound run folder stays, not current | `delivery_pointer_moved` |
+| swap | `uncertain`, `unknown` | `uncertain` | `publication_commit_uncertain` |
+| swap | `failed`, `conflict` | `nothing` | `publication_failed` |
+
+A vault published for a run that then does not deliver stays on disk. The next run that names
+the same `--vault` path refuses until it is deleted.
+
 ## The vault commit
 
 `VaultWriter.publish(out)` writes the vault as `write` does (private stage, file fsync, exclusive

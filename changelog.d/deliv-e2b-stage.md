@@ -1,0 +1,3 @@
+### Added (delivery stage, DELIV E2b, 2026-11-23)
+
+`decoy_engine.publication` exports `DeliveryStage`, `StageDecision` and `DeliveryReceipt`. A stage opens beside a run folder, collects the run's files, then under the pointer lock binds the unit and swaps `LATEST` with a compare-and-swap on the state read at open. Tables the decision does not deliver are removed first. A moved pointer, a refused bind or a failed swap gives receipt `nothing` with a reason code; a bind or swap whose durability is unknown gives `uncertain`, which counts as delivered. A vault passed with `set_vault` is published create-only before the bind.
