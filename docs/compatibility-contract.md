@@ -887,6 +887,11 @@ only this site moves.
   conversion that calls a required `on_unrepresentable(column)` callback, which must raise, for a
   column pandas cannot hold, instead of leaking pandas' value-quoting error. `widen=True` is not
   available yet.
+  The public chunked oracles `run_mask_chunked` and `run_mask_pipeline_chunked` raise the same
+  coded `ExecutionError` for such a column (`runtime/source_column_unrepresentable` from the
+  first-chunk profile read, `full_frame_value_unrepresentable` from a later chunk) where a raw
+  `ArrowInvalid`, `ArrowTypeError` or `ValueError` used to escape. Catch `ExecutionError` and read
+  `.code`.
   It also includes `generated_table_to_pandas(table)` (2026-11-08): converts a generated
   Arrow table to pandas with every integer column kept as a pandas nullable integer, so
   output written from the frame prints `1` where a plain `to_pandas()` prints `1.0`.

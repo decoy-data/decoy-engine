@@ -10,5 +10,11 @@ reads raise the new `runtime/source_column_unrepresentable`. The post-scan check
 passes a column it did not read. A resident table with such a column used to be profiled as text and
 now fails the profile read the same way.
 
+The public chunked oracles `run_mask_chunked` and `run_mask_pipeline_chunked` used to let the raw
+`ArrowInvalid`, `ArrowTypeError` or `ValueError` escape for such a column. They now raise
+`ExecutionError`: `runtime/source_column_unrepresentable` when the first chunk holds the value (and
+for a uint64-indexed dictionary column, at any chunk), `full_frame_value_unrepresentable` when a later
+chunk does. Callers that caught the raw exception should catch `ExecutionError` and read `.code`.
+
 Experimental: `arrow_to_frame`, `arrow_to_series` and `arrow_to_frame_pair` are exported as experimental names.
 Each takes a required `on_unrepresentable(column)` callback that must raise.
