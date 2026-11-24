@@ -148,23 +148,46 @@ def parquet_writer(txn: StageDir, component: str, schema: pa.Schema, **kwargs: A
     return _FileBacked(writer, fh, txn.display, txn.strict)
 
 
-def _walk(
-    t: pa.DataType, array: pa.Array | None = None
-) -> Iterator[tuple[pa.DataType, pa.Array | None]]:
-    """Visit logical children in the slice, propagating struct validity to each field."""
-    yield t, array
+def _type_children(t: pa.DataType) -> list[pa.DataType]:
+    """The types directly inside `t`: the one place the type checks learn Arrow's nesting rules."""
     if isinstance(t, pa.BaseExtensionType):
-        yield from _walk(t.storage_type, array.storage if array is not None else None)
-    elif pa.types.is_struct(t):
-        children = array.flatten() if array is not None else [None] * t.num_fields
-        for field, child in zip(t, children, strict=True):
-            yield from _walk(field.type, child)
-    elif pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_fixed_size_list(t):
-        yield from _walk(t.value_type, array.flatten() if array is not None else None)
-    elif pa.types.is_map(t):
-        entries = t.field(0)
-        child = array.cast(pa.list_(entries)).flatten() if array is not None else None
-        yield from _walk(entries.type, child)
+        return [t.storage_type]
+    if pa.types.is_dictionary(t):
+        return [t.value_type]
+    if pa.types.is_map(t):
+        return [t.field(0).type]  # the entries struct, whose fields are key and item
+    if pa.types.is_struct(t) or pa.types.is_union(t):
+        return [t.field(i).type for i in range(t.num_fields)]
+    if hasattr(t, "value_type"):  # list, large list, fixed-size list and the list views
+        return [t.value_type]
+    return []
+
+
+def _type_nodes(t: pa.DataType) -> Iterator[pa.DataType]:
+    yield t
+    for child in _type_children(t):
+        yield from _type_nodes(child)
+
+
+def _array_children(t: pa.DataType, array: pa.Array) -> list[pa.Array]:
+    """The slice's children in `_type_children` order, struct validity pushed down; none where
+    child positions do not follow the parent's (dictionary values, union members, list views)."""
+    if isinstance(t, pa.BaseExtensionType):
+        return [array.storage]
+    if pa.types.is_struct(t):
+        return list(array.flatten())
+    if pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_fixed_size_list(t):
+        return [array.flatten()]
+    if pa.types.is_map(t):
+        return [array.cast(pa.list_(t.field(0))).flatten()]
+    return []
+
+
+def _walk(t: pa.DataType, array: pa.Array) -> Iterator[tuple[pa.DataType, pa.Array]]:
+    """Visit the slice's logical children with arrays that line up with its rows."""
+    yield t, array
+    for child_type, child in zip(_type_children(t), _array_children(t, array), strict=False):
+        yield from _walk(child_type, child)
 
 
 _EXACT_SCALARS = frozenset(
@@ -212,46 +235,30 @@ def _parquet_exact(t: pa.DataType) -> bool:
 
 
 def parquet_holds_type(t: pa.DataType) -> bool:
-    return all(_parquet_exact(node) for node, _ in _walk(t))
+    return all(_parquet_exact(node) for node in _type_nodes(t))
 
 
-def _type_children(t: pa.DataType) -> list[pa.DataType]:
-    """Every type directly inside `t`, a dictionary's value type and union members included."""
-    if isinstance(t, pa.BaseExtensionType):
-        return [t.storage_type]
-    if pa.types.is_dictionary(t):
-        return [t.value_type]
-    if pa.types.is_map(t):
-        return [t.key_type, t.item_type]
-    if pa.types.is_struct(t) or pa.types.is_union(t):
-        return [t.field(i).type for i in range(t.num_fields)]
-    if hasattr(t, "value_type"):  # list, large list, fixed-size list and the list views
-        return [t.value_type]
-    return []
-
-
-def _dictionary_in_dictionary(t: pa.DataType, inside: bool) -> bool:
-    if pa.types.is_dictionary(t):
-        if inside:
-            return True
-        inside = True
-    return any(_dictionary_in_dictionary(child, inside) for child in _type_children(t))
+def _storage(t: pa.DataType) -> pa.DataType:
+    return _storage(t.storage_type) if isinstance(t, pa.BaseExtensionType) else t
 
 
 def ipc_holds_type(t: pa.DataType) -> bool:
-    """False for a dictionary anywhere in a dictionary's values: IPC reads it back corrupted."""
-    return not _dictionary_in_dictionary(t, False)
+    """False when a dictionary's values are themselves a dictionary: IPC drops the inner one and
+    reads its indices back as values. A dictionary under a struct, list, map or union is exact."""
+    return not any(
+        pa.types.is_dictionary(node) and pa.types.is_dictionary(_storage(node.value_type))
+        for node in _type_nodes(t)
+    )
 
 
 def _refuse_fixed_list_null(data: pa.Table | pa.RecordBatch) -> None:
     for field, column in zip(data.schema, data.columns, strict=True):
-        if not any(pa.types.is_fixed_size_list(t) for t, _ in _walk(field.type)):
+        if not any(pa.types.is_fixed_size_list(t) for t in _type_nodes(field.type)):
             continue
         chunks = column.chunks if isinstance(column, pa.ChunkedArray) else (column,)
         for chunk in chunks:
             if any(
-                pa.types.is_fixed_size_list(t) and a is not None and a.null_count
-                for t, a in _walk(field.type, chunk)
+                pa.types.is_fixed_size_list(t) and a.null_count for t, a in _walk(field.type, chunk)
             ):
                 raise ParquetFixedListNullError(f"Null fixed-size list in column {field.name!r}.")
 

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 
@@ -401,42 +402,55 @@ def _round_trip(tmp_path, table):
 
 
 def _assert_exact(table, actual):
-    """Equal schema and values, and every chunk keeps its own dictionary, order and indices."""
+    """Equal schema, and every chunk equal down to union tags, dictionaries and float bits."""
     assert actual.schema.equals(table.schema)
     assert str(actual.schema) == str(table.schema)
-    assert _canon(actual.to_pylist()) == _canon(table.to_pylist())
     for name in table.column_names:
         want, got = table.column(name), actual.column(name)
         assert [len(c) for c in got.chunks] == [len(c) for c in want.chunks]
         for w, g in zip(want.chunks, got.chunks, strict=True):
-            assert g.type.equals(w.type)
-            if pa.types.is_dictionary(w.type):
-                # Arrow equality fails NaN against itself, so float dictionaries compare by bits.
-                if not pa.types.is_floating(w.type.value_type):
-                    assert g.dictionary.equals(w.dictionary)
-                assert _bits(g.dictionary) == _bits(w.dictionary)
-                assert g.indices.equals(w.indices)
+            _assert_same(w, g)
 
 
-def _canon(value):
-    """Rows with each float as its bytes, so NaN matches itself and -0.0 differs from +0.0."""
-    if isinstance(value, float):
-        return struct.pack("<d", value)
-    if isinstance(value, dict):
-        return {k: _canon(v) for k, v in value.items()}
-    if isinstance(value, list | tuple):
-        return [_canon(v) for v in value]
-    return value
+def _assert_same(w, g):
+    """`g` holds `w`'s layout and values; floats by bits, since Arrow equality takes -0.0 for +0.0
+    and fails NaN against itself."""
+    t = w.type
+    assert g.type.equals(t)
+    assert len(g) == len(w)
+    if pa.types.is_floating(t):
+        assert _bits(g) == _bits(w)
+    elif pa.types.is_dictionary(t):
+        assert g.indices.equals(w.indices)
+        _assert_same(w.dictionary, g.dictionary)
+    elif pa.types.is_union(t):
+        assert g.type_codes.equals(w.type_codes)
+        if t.mode == "dense":
+            assert g.offsets.equals(w.offsets)
+        for i in range(t.num_fields):
+            _assert_same(w.field(i), g.field(i))
+    elif pa.types.is_struct(t):
+        assert g.is_null().equals(w.is_null())
+        for i in range(t.num_fields):
+            _assert_same(w.field(i), g.field(i))
+    elif pa.types.is_map(t):
+        assert pc.list_value_length(g).equals(pc.list_value_length(w))
+        _assert_same(w.keys, g.keys)
+        _assert_same(w.items, g.items)
+    elif pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_fixed_size_list(t):
+        assert g.is_null().equals(w.is_null())
+        assert pc.list_value_length(g).equals(pc.list_value_length(w))
+        _assert_same(w.flatten(), g.flatten())
+    else:
+        assert g.equals(w)
 
 
 _FLOAT_BITS = {16: pa.int16(), 32: pa.int32(), 64: pa.int64()}
 
 
 def _bits(array):
-    """Values as compared bit for bit; Arrow equality takes -0.0 for +0.0."""
-    if pa.types.is_floating(array.type):
-        return array.view(_FLOAT_BITS[array.type.bit_width]).to_pylist()
-    return array.to_pylist()
+    """Float values as integers of their own width, so every bit counts."""
+    return array.view(_FLOAT_BITS[array.type.bit_width]).to_pylist()
 
 
 def _dict_chunks(dtype, *chunks):
@@ -475,6 +489,19 @@ def _nested_dicts():
         for c in (([0, 1], ["a", "b"]), ([1, 0], ["c", "a"]))
     ]
     return pa.table({"s": pa.chunked_array(structs), "l": pa.chunked_array(lists)})
+
+
+def _over_nested(kind):
+    """A dictionary over a struct or list of dictionaries; both levels change between chunks."""
+    chunks = []
+    for outer, values in (([1, 0, 1], [0.0, 1.5]), ([0, 0, 1], [-0.0, 2.5])):
+        leaf = pa.DictionaryArray.from_arrays(pa.array([1, 0], pa.int8()), pa.array(values))
+        if kind == "struct":
+            middle = pa.StructArray.from_arrays([leaf], names=["d"])
+        else:
+            middle = pa.ListArray.from_arrays(pa.array([0, 1, 2], pa.int32()), leaf)
+        chunks.append(pa.DictionaryArray.from_arrays(pa.array(outer, pa.int32()), middle))
+    return pa.table({"x": pa.chunked_array(chunks)})
 
 
 _DICTIONARY_CASES = {
@@ -539,6 +566,8 @@ _DICTIONARY_CASES = {
         }
     ),
     "dictionaries_in_struct_and_list": _nested_dicts(),
+    "dictionary_over_struct_of_dictionary": _over_nested("struct"),
+    "dictionary_over_list_of_dictionary": _over_nested("list"),
     "string_null_entry": pa.table(
         {
             "x": _dict_chunks(
@@ -589,9 +618,9 @@ def _dict_of_dict():
 _DICT_IN_DICT = {
     "top_level": lambda: _dict_of_dict(),
     "in_struct": lambda: pa.StructArray.from_arrays([_dict_of_dict()], names=["y"]),
+    "in_list": lambda: pa.ListArray.from_arrays(pa.array([0, 1, 3], pa.int32()), _dict_of_dict()),
     "under_struct_values": lambda: pa.DictionaryArray.from_arrays(
-        pa.array([0, 0], pa.int32()),
-        pa.StructArray.from_arrays([_dict_of_dict().dictionary], names=["y"]),
+        pa.array([0, 0], pa.int32()), pa.StructArray.from_arrays([_dict_of_dict()], names=["y"])
     ),
 }
 
@@ -604,3 +633,32 @@ def test_dictionary_in_dictionary_is_refused_before_staging(tmp_path, name):
     assert caught.value.detail == {"column": "x", "kind": "dictionary_in_dictionary"}
     assert "2.0" not in str(caught.value)
     assert list(tmp_path.iterdir()) == []
+
+
+def _floats(raw, width):
+    return pa.array(raw, {16: pa.uint16(), 32: pa.uint32()}[width]).view(
+        {16: pa.float16(), 32: pa.float32()}[width]
+    )
+
+
+def _arm_swap(code):
+    """A sparse union of float64 0.0 and eight zero bytes, set to one arm or the other."""
+    arms = [pa.array([0.0]), pa.array([bytes(8)])]
+    return pa.UnionArray.from_sparse(pa.array([code], pa.int8()), arms, ["f", "b"])
+
+
+_NOT_EXACT = {
+    "union_arm_swap": (_arm_swap(0), _arm_swap(1)),
+    "float32_nan_payloads": (_floats([0x7FC00001], 32), _floats([0x7FC00002], 32)),
+    # Widening to float64 quiets a signaling NaN, so it then matches the quiet one.
+    "float32_signaling_nan": (_floats([0x7F800001], 32), _floats([0x7FC00001], 32)),
+    "float16_signed_zero": (_floats([0x0000], 16), _floats([0x8000], 16)),
+}
+
+
+@pytest.mark.parametrize("name", list(_NOT_EXACT))
+def test_the_exactness_check_tells_close_values_apart(name):
+    want, got = _NOT_EXACT[name]
+    _assert_exact(pa.table({"x": want}), pa.table({"x": want}))
+    with pytest.raises(AssertionError):
+        _assert_exact(pa.table({"x": want}), pa.table({"x": got}))
