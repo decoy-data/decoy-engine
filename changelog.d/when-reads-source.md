@@ -19,5 +19,8 @@ A route that forgets the pre-mask snapshot of a `when:` column fails with the ne
 
 A column that reads a composite's output (`derived` over `email`, written by a
 `composite_name_email` node keyed on `first_name`) now runs after that composite and reads its
-value. Before, it could run first and read the source value. The writer map behind the ordering,
-the `when:` snapshots and the carry's untouched set is now one declaration.
+value. Before, it could run first and read the source value. The `when:` snapshots and the carry's
+untouched set read one write declaration; the ordering reads what dispatch really writes from it.
+A composite that is an FK child writes only its own column, so it adds no edge for the rest of its
+bundle. A column that a `derived` (or other creating) entry adds and a composite also writes is
+created first and then takes the composite's value.

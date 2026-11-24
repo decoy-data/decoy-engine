@@ -399,6 +399,13 @@ def _with_when(access: ColumnAccess, entry: Mapping[str, Any]) -> ColumnAccess:
     return replace(merged, own_target=access.own_target)
 
 
+def creates_own_target(entry: Mapping[str, Any]) -> bool:
+    """Whether a scalar entry writes its own target without reading it, so the column may be
+    absent from the source until the entry runs."""
+    declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
+    return declare is not None and declare(entry).own_target == OWN_TARGET_CREATES
+
+
 def scalar_creating_reads(entry: Mapping[str, Any]) -> frozenset[str]:
     """The sibling columns a scalar entry that creates its own target reads, else empty.
 

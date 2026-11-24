@@ -687,7 +687,7 @@ def test_untouched_columns_agree_with_the_column_access_registry(case: str) -> N
         pytest.skip("a declaration writes unknown columns; no registry set to compare")
     own_masked = {c["name"] for c in columns if c.get("strategy") != "passthrough"}
     expected = frozenset(names) - written - own_masked
-    assert untouched_columns(nodes, names, REG) == expected, case
+    assert untouched_columns(nodes, names) == expected, case
     # The lane's carry candidates are untouched columns that no `when:` entry guards.
     cfg = {"tables": [{"name": "t", "columns": columns}]}
     assert set(passthrough_columns(cfg, table="t", names=names, registry=REG)) <= expected

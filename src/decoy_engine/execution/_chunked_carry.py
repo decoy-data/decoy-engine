@@ -188,29 +188,24 @@ def passthrough_columns(
     ]
 
 
-def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any) -> frozenset[str]:
+def untouched_columns(nodes: Iterable[Any], names: Sequence[str]) -> frozenset[str]:
     """The columns of a table no work node changes. The node-side twin of
     `passthrough_columns` for the full-frame and sequential adapters, which hold work nodes
-    rather than the config: it asks the same `handler_written_columns` registry about an entry
-    rebuilt from each node's plan slice, so a column a handler writes beyond the node's own
-    (a composite's canonical outputs) is touched here as it is there. A passthrough node, `when:`
-    or not, leaves its column as the source held it; every other node masks its own columns."""
-    from decoy_engine.execution._runner import node_entry
+    rather than the config. Each node's writes come from `node_written_columns`, the write
+    declaration the `when:` snapshot set reads too, so a column a handler writes beyond the
+    node's own (a composite's canonical outputs) is touched here as it is there. A passthrough
+    node, `when:` or not, leaves its own column as the source held it."""
+    from decoy_engine.execution._runner import node_written_columns
 
-    entries: list[dict[str, Any]] = []
-    masked: set[str] = set()
+    touched: set[str] = set()
     for node in nodes:
-        entry = node_entry(node)
-        if entry is None:  # a composite FK group: every column is masked
-            masked |= set(node.columns)
-            continue
-        entries.append(entry)
-        if node.kind != "scalar" or node.strategy != "passthrough":
-            masked |= set(node.columns)
-    written = handler_written_columns(entries, registry)
-    if written is None:  # a handler writes columns no declaration can name: nothing is untouched
-        return frozenset()
-    return frozenset(names) - written - masked
+        written, unknown = node_written_columns(node)
+        if unknown:  # a handler writes columns no declaration can name: nothing is untouched
+            return frozenset()
+        if node.kind == "scalar" and node.strategy == "passthrough":
+            written -= set(node.columns)
+        touched |= written
+    return frozenset(names) - touched
 
 
 def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]]:

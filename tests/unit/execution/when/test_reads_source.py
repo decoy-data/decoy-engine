@@ -567,3 +567,94 @@ def test_a_derived_column_waits_for_the_composite_that_writes_its_driver() -> No
     emails = out.column("email").to_pylist()
     assert emails != table.column("email").to_pylist()  # the composite did mask email
     assert out.column("a_summary").to_pylist() == [e + "!" for e in emails]
+
+
+def _run_name_email(plan: Any, table: pa.Table, graph: Any, *columns: str) -> pa.Table:
+    """`run_single` with `nm` bound to each named column of `t`."""
+    from decoy_engine.execution import PandasExecutionAdapter
+    from decoy_engine.providers_v2 import get_default_registry
+    from decoy_engine.relationships._namespace import NamespaceBinding, NamespaceRegistry
+
+    bindings = (NamespaceBinding("nm", tuple(("t", (c,)) for c in columns)),)
+    return (
+        PandasExecutionAdapter()
+        .run_single(
+            plan,
+            table,
+            registry=get_default_registry(),
+            relationship_graph=graph,
+            namespace_registry=NamespaceRegistry(bindings=bindings),
+        )
+        .output
+    )
+
+
+def test_an_fk_resolved_composite_adds_no_edge_for_the_bundle_it_never_writes() -> None:
+    """`first_name` is an FK child of `a_summary`, so dispatch resolves it through the parent map
+    and its composite handler never writes `email`. `a_summary` reads `email`; counting the
+    composite as an `email` writer added the reverse edge and a false `cyclic_work_ordering`
+    (Codex delta on e7c3fd587, finding 1)."""
+    from decoy_engine.relationships._graph import (
+        OrphanPolicy,
+        RelationshipEdge,
+        RelationshipGraph,
+    )
+
+    edge = RelationshipEdge("t", ("a_summary",), "t", ("first_name",), "nm", OrphanPolicy.PRESERVE)
+    graph = RelationshipGraph(edges=(edge,), ordering=())
+    plan = _seed_plan(
+        [
+            ("first_name", _composite_seed()),
+            (
+                "a_summary",
+                _seed_of("derived", provider_config=(("expression", 'concat(email, "!")'),)),
+            ),
+        ]
+    )
+    n = 4
+    emails = [f"u{i}@x.test" for i in range(n)]
+    table = pa.table(
+        {
+            "first_name": pa.array([f"P{i}" for i in range(n)]),
+            "last_name": pa.array([f"L{i}" for i in range(n)]),
+            "email": pa.array(emails),
+            "a_summary": pa.array([f"P{i}" for i in range(n)]),
+        }
+    )
+    out = _run_name_email(plan, table, graph, "first_name")
+    assert out.column("email").to_pylist() == emails  # no composite handler ran
+    assert out.column("a_summary").to_pylist() == [e + "!" for e in emails]
+    # Every child value is an existing parent key, so it maps to the parent's output.
+    assert out.column("first_name").to_pylist() == out.column("a_summary").to_pylist()
+
+
+@pytest.mark.parametrize(
+    ("created", "read"),
+    [("email", "last_name"), ("last_name", "email")],
+    ids=["created-sorts-before-composite", "created-sorts-after-composite"],
+)
+def test_a_column_created_before_the_composite_that_overwrites_it(created: str, read: str) -> None:
+    """`created` is not in the source: a derived entry creates it from `read`, and the composite
+    keyed on `first_name` also writes it. The handler needs the column to exist, so the creator
+    runs first and the coherent bundle overwrites its value. Ordering the composite first
+    because the creator reads a bundle column raised `composite_output_column_missing` (Codex
+    delta on e7c3fd587, finding 2); `last_name` sorts after `first_name`, so only an edge, not
+    name order, puts its creator first."""
+    from decoy_engine.relationships._graph import RelationshipGraph
+
+    plan = _seed_plan(
+        [
+            ("first_name", _composite_seed()),
+            (
+                created,
+                _seed_of("derived", provider_config=(("expression", f'concat({read}, "!")'),)),
+            ),
+        ]
+    )
+    n = 4
+    source = [f"R{i}" for i in range(n)]
+    table = pa.table({"first_name": pa.array([f"F{i}" for i in range(n)]), read: pa.array(source)})
+    out = _run_name_email(plan, table, RelationshipGraph(edges=(), ordering=()), "first_name")
+    assert out.column(read).to_pylist() != source  # the composite ran
+    # It ran after the creator, so the bundle's value is the final value of the column.
+    assert not any(v.endswith("!") for v in out.column(created).to_pylist())

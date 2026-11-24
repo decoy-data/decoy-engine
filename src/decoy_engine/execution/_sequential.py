@@ -526,9 +526,7 @@ def run_sequential(
                     table_from_pandas_keeping_source_types(
                         frames[table],
                         src_schema,
-                        untouched_columns(
-                            nodes_by_table.get(table, ()), src_schema.names, registry
-                        ),
+                        untouched_columns(nodes_by_table.get(table, ()), src_schema.names),
                         [c for (t, c) in ctx.native_date_columns if t == table],
                     ),
                     faker_pin,
