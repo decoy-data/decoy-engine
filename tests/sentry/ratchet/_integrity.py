@@ -1,0 +1,320 @@
+"""Registry integrity rules for the shrink-only ratchet (stdlib only).
+
+``tests/sentry/_ratchet.py`` loads this file by path (``_integrity()`` there), so a copy of the
+checker extracted from a base commit loads only its own helper. Every rule returns finding
+strings that carry ids, paths, keys and numbers from the repo's own files, never file content
+or exception text. A read of the base tree that fails raises ``BaseReadError``; the caller turns
+it into one finding, because treating an unreadable file as an empty one would let a guard
+vanish silently.
+"""
+
+from __future__ import annotations
+
+import ast
+import subprocess
+from collections.abc import Callable, Iterable
+from pathlib import Path, PurePosixPath
+from types import ModuleType
+
+MANIFEST = "tests/sentry/test_sentry_manifest.py"
+DECISION_TABLES = ("retired", "retired_files", "checker_change")
+
+
+class BaseReadError(Exception):
+    """A file or list of the base commit could not be read; ``what`` names it."""
+
+    def __init__(self, what: str) -> None:
+        super().__init__(what)
+        self.what = what
+
+
+def _git(root: Path, what: str, *args: str) -> bytes:
+    res = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "-C", str(root), *args],  # noqa: S607
+        capture_output=True,
+    )
+    if res.returncode != 0:
+        raise BaseReadError(what)
+    return res.stdout
+
+
+def resolve_commit(root: Path, ref: str) -> str | None:
+    """The commit sha ``ref`` names, or ``None`` when no such commit exists."""
+    res = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],  # noqa: S607
+        capture_output=True,
+        text=True,
+    )
+    return res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else None
+
+
+class BaseTree:
+    """One checked listing of the base commit, so "absent" is proven and never a read failure."""
+
+    def __init__(self, root: Path, sha: str) -> None:
+        self.root, self.sha = root, sha
+        raw = _git(root, "the base tree listing", "ls-tree", "-r", "-t", "-z", "--full-tree", sha)
+        self.types: dict[str, str] = {}
+        for entry in raw.split(b"\0"):
+            if not entry:
+                continue
+            meta, _, path = entry.partition(b"\t")
+            self.types[path.decode("utf-8", "surrogateescape")] = meta.split(b" ")[1].decode()
+
+    def files(self) -> Iterable[str]:
+        return (p for p, kind in self.types.items() if kind == "blob")
+
+    def has_file(self, path: str) -> bool:
+        return self.types.get(path) == "blob"
+
+    def read(self, path: str) -> str | None:
+        """Text of ``path`` at the base, ``None`` when the listing omits it, else it must read."""
+        kind = self.types.get(path)
+        if kind is None:
+            return None
+        if kind != "blob":
+            raise BaseReadError(path)
+        try:
+            return _git(self.root, path, "cat-file", "blob", f"{self.sha}:{path}").decode("utf-8")
+        except (BaseReadError, UnicodeDecodeError):
+            raise BaseReadError(path) from None
+
+    def require(self, path: str) -> str:
+        text = self.read(path)
+        if text is None:
+            raise BaseReadError(path)
+        return text
+
+
+def safe_path(path: object, baseline_dir: str) -> bool:
+    """A plain relative path with at least one component below ``baseline_dir``."""
+    if not isinstance(path, str) or not path or "\\" in path:
+        return False
+    pure = PurePosixPath(path)
+    prefix = PurePosixPath(baseline_dir).parts
+    return (
+        str(pure) == path
+        and not pure.is_absolute()
+        and ".." not in pure.parts
+        and pure.parts[: len(prefix)] == prefix
+        and len(pure.parts) > len(prefix)
+    )
+
+
+def registry_present(base_rows: int, head_exists: bool, head_rows: int) -> list[str]:
+    """The registry file must exist and keep at least one row when the base had rows."""
+    if base_rows and not head_exists:
+        return ["registry file is missing; the base registry listed sentries"]
+    if base_rows and not head_rows:
+        return ["registry has no [[sentry]] rows; the base registry listed sentries"]
+    return []
+
+
+def closed_keys(
+    doc: dict[str, object],
+    allowed: frozenset[str],
+    problem: Callable[[object], str | None],
+) -> list[str]:
+    """Unknown row keys and malformed decision tables. Unknown top-level tables are ignored."""
+    out: list[str] = []
+    rows = doc.get("sentry", [])
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            out.append("registry: a [[sentry]] row is not a table")
+            continue
+        out += [
+            f"{row.get('id', '?')}: unknown registry key {k}" for k in sorted(set(row) - allowed)
+        ]
+    for table in DECISION_TABLES:
+        rows_ = doc.get(table, {})
+        if not isinstance(rows_, dict):
+            out.append(f"registry: [{table}] must be a table of dated decision strings")
+            continue
+        for name, decision in sorted(rows_.items()):
+            why = problem(decision)
+            if why:
+                out.append(f"{table} {name}: {why}")
+    return out
+
+
+def decisions(doc: dict[str, object]) -> dict[str, dict[str, str]]:
+    """``{table: {name: decision string}}``; non-string values are left to ``closed_keys``."""
+    out: dict[str, dict[str, str]] = {}
+    for table in DECISION_TABLES:
+        rows = doc.get(table, {})
+        out[table] = (
+            {k: v for k, v in rows.items() if isinstance(v, str)} if isinstance(rows, dict) else {}
+        )
+    return out
+
+
+def fresh(
+    head: dict[str, str], base: dict[str, str], problem: Callable[[object], str | None]
+) -> set[str]:
+    """Names of valid decisions at head whose name is not in the base table."""
+    return {name for name, text in head.items() if name not in base and problem(text) is None}
+
+
+def new_decisions(
+    head: dict[str, dict[str, str]],
+    base: dict[str, dict[str, str]],
+    approvals: dict[str, dict[str, str]],
+    base_approvals: dict[str, dict[str, str]],
+) -> list[str]:
+    """Report lines for every decision row at head whose name is not at base."""
+    out = [
+        f"decision {table} {name}: {text}"
+        for table in DECISION_TABLES
+        for name, text in sorted(head[table].items())
+        if name not in base[table]
+    ]
+    out += [
+        f"decision approved_growth {sid} {key}: {text}"
+        for sid, rows in sorted(approvals.items())
+        for key, text in sorted(rows.items())
+        if key not in base_approvals.get(sid, {})
+    ]
+    return out
+
+
+def new_baseline_findings(tree: BaseTree, created_in: dict[str, str]) -> list[str]:
+    """A baseline file new in the diff needs a non-empty ``created_in`` (``{path: value}``)."""
+    return [
+        f"{path}: new baseline has no created_in"
+        for path, value in sorted(created_in.items())
+        if not tree.has_file(path) and not value.strip()
+    ]
+
+
+def transfer_findings(
+    r: ModuleType,
+    donors: dict[str, dict[str, object]],
+    successors: dict[str, dict[str, object]],
+    per_site: bool,
+) -> tuple[list[str], list[str]]:
+    """Match every successor key to one removed donor's key; each ``(donor, key)`` pair once.
+
+    ``donors`` are removed ids without a fresh retirement, ``successors`` the ids new in the
+    diff. A key with no free donor is new, a key with two free donors is ambiguous, a matched key
+    may not loosen a bound against its donor, and every donor with an inventory must supply at
+    least one key. With ``per_site`` the unmatched ``permitted::`` keys fall back to ``r.growth``.
+    """
+    if not donors:
+        return [], []
+    holders: dict[str, list[str]] = {}
+    for did, entries in donors.items():
+        for key in entries:
+            holders.setdefault(key, []).append(did)
+    spent: set[tuple[str, str]] = set()
+    supplied: set[str] = set()
+    unmatched: set[str] = set()
+    loosened: set[str] = set()
+    out: list[str] = []
+    for sid in sorted(successors):
+        for key in sorted(successors[sid]):
+            free = [d for d in holders.get(key, []) if (d, key) not in spent]
+            if len(free) > 1:
+                out.append(f"replacement or split: key {key} has more than one removed donor")
+            elif free:
+                spent.add((free[0], key))
+                supplied.add(free[0])
+                if r.max_raised(successors[sid][key], donors[free[0]][key]):
+                    loosened.add(key)
+            else:
+                unmatched.add(key)
+    report: list[str] = []
+    if per_site and unmatched:
+        left = frozenset(k for d, e in donors.items() for k in e if (d, k) not in spent)
+        grown, rekeyed = r.growth(frozenset(unmatched), left, True)
+        report = [f"replacement: re-keyed permitted site {s} (review the message)" for s in rekeyed]
+        sites = set(rekeyed)
+        supplied |= {d for d, e in donors.items() if any(r.permit_site(k) in sites for k in e)}
+        unmatched = set(grown)
+    ids = ", ".join(sorted(donors))
+    if unmatched:
+        out.append(f"replacement or split of {ids} adds key(s): {', '.join(sorted(unmatched))}")
+    if loosened:
+        out.append(
+            f"replacement or split of {ids} raised or dropped max for key(s): "
+            f"{', '.join(sorted(loosened))}"
+        )
+    out += [
+        f"{d}: removed from the registry without a fresh [retired] decision or a key moved to a new sentry"
+        for d in sorted(donors)
+        if donors[d] and d not in supplied
+    ]
+    return out, report
+
+
+def outside_sentries(text: str) -> list[str] | None:
+    """``OUTSIDE_SENTRIES`` read by ``ast`` (never imported), or ``None`` if it is not a literal."""
+    for node in ast.parse(text).body:
+        targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
+        if any(isinstance(t, ast.Name) and t.id == "OUTSIDE_SENTRIES" for t in targets):
+            value = getattr(node, "value", None)
+            if isinstance(value, (ast.Tuple, ast.List)) and all(
+                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts
+            ):
+                return [e.value for e in value.elts]  # type: ignore[attr-defined]
+            return None
+    return None
+
+
+def _is_sentry_glob(path: str) -> bool:
+    parts = PurePosixPath(path).parts
+    return (
+        parts[:2] == ("tests", "sentry") and parts[-1].startswith("test_") and path.endswith(".py")
+    )
+
+
+def _sentry_set(files: Iterable[str], manifest: str | None) -> set[str] | None:
+    outside = [] if manifest is None else outside_sentries(manifest)
+    if outside is None:
+        return None
+    return {f for f in files if _is_sentry_glob(f)} | set(outside)
+
+
+def sentry_file_findings(root: Path, tree: BaseTree, retired_files: set[str]) -> list[str]:
+    """Sentry test files of the base tree that are gone at head without a rename or retirement."""
+    head_manifest = root / MANIFEST
+    base_set = _sentry_set(tree.files(), tree.read(MANIFEST))
+    if base_set is None:
+        raise BaseReadError(MANIFEST)
+    base_set = {p for p in base_set if tree.has_file(p)}
+    head_files = (
+        p.relative_to(root).as_posix() for p in (root / "tests" / "sentry").rglob("test_*.py")
+    )
+    head_set = _sentry_set(
+        head_files, head_manifest.read_text(encoding="utf-8") if head_manifest.is_file() else None
+    )
+    if head_set is None:
+        return [f"{MANIFEST}: OUTSIDE_SENTRIES is not a literal tuple of strings"]
+    head_set = {p for p in head_set if (root / p).is_file()}
+    gone = sorted(base_set - head_set)
+    if not gone:
+        return []
+    renamed = _renames(root, tree.sha)
+    return [
+        f"{path}: sentry test file was removed without a rename inside the sentry set "
+        "or a fresh [retired_files] decision"
+        for path in gone
+        if path not in retired_files and renamed.get(path) not in head_set
+    ]
+
+
+def _renames(root: Path, sha: str) -> dict[str, str]:
+    raw = _git(root, "the rename list", "diff", "-M", "--name-status", "-z", sha, "HEAD").split(
+        b"\0"
+    )
+    out: dict[str, str] = {}
+    i = 0
+    while i < len(raw) and raw[i]:
+        status = raw[i].decode()
+        if status.startswith("R") and i + 2 < len(raw):
+            out[raw[i + 1].decode("utf-8", "surrogateescape")] = raw[i + 2].decode(
+                "utf-8", "surrogateescape"
+            )
+            i += 3
+        else:
+            i += 2
+    return out

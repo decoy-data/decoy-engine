@@ -15,9 +15,10 @@ from tests.sentry.layout._layout import (
     ratchet_verdict,
     section,
 )
-from tests.sentry.layout._ratchet_cases import MAX_VALUE_CASES
+from tests.sentry.layout._ratchet_cases import BASELINE_PATH_CASES, MAX_VALUE_CASES
 
 __all__ = [
+    "BASELINE_PATH_CASES",
     "FANOUT_TERMS",
     "MAX_VALUE_CASES",
     "SIZE_TERMS",

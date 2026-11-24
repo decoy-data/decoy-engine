@@ -3,8 +3,11 @@
 # when keys are added. An entry may list `approved_growth` rows (exact key plus a dated owner
 # decision, `owner YYYY-MM-DD <text>`); only a listed key may be added without failing.
 # A new sentry adds its row here in the slice that introduces it.
-# Engine has no plan-format baseline yet; the F29 reason baseline is frozen by
-# tests/sentry/test_reason_baseline_frozen.py and stays outside this registry.
+# The F29 reason baseline is registered below and also frozen by
+# tests/sentry/test_reason_baseline_frozen.py.
+# A row takes only `id`, `baseline` and `approved_growth`; any other key fails the ratchet.
+# Removing a sentry or deleting a sentry test file needs a dated owner decision in the tables at
+# the end of this file (`[retired]` by id, `[retired_files]` by path). Builders never write them.
 
 [[sentry]]
 id = "f29-reason-baseline"
@@ -276,3 +279,11 @@ baseline = "tests/sentry/baselines/faker-pool-size-one-resolver.json"
 [[sentry]]
 id = "faker-native-allowlist-total"
 baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
+
+# Owner decisions, each `"<id or path>" = "owner YYYY-MM-DD <reason of 15+ chars>"`. Printed by
+# `ratchet_check.py` as `decision` lines. A name already on the merge base does not count again.
+[retired]
+
+[retired_files]
+
+[checker_change]
