@@ -1,8 +1,8 @@
-Status: plan (revision 5, 2026-11-24; section 14 applies Dennis R1 to the source-read boundary of section 13)
+Status: plan (revision 6, 2026-11-24, ready for build after Dennis R2, sections 14 and 15)
 
 # DATE-SHIFT-TYPED: `date_shift` on `date32` and zoned `timestamp` sources runs native, on the typed values
 
-Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: DATE-SHIFT-TYPED (group mask, 1.0), from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`) and the COLUMN-SHAPE-RULE row 19 follow-on (E1b merged in engine #751). Five slices over two repos after revision 5: S1b-1, S1b-2, S1-CLI, S1 (#790) and S2 (section 14.11). Depends on UF-DOMAIN S1 (`plan/uf-domain`, the one output assembler with its `arrow_columns` input).
+Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: DATE-SHIFT-TYPED (group mask, 1.0), from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`) and the COLUMN-SHAPE-RULE row 19 follow-on (E1b merged in engine #751). Five slices over two repos after revision 6: S1b-1, S1b-2, S1-CLI, S1 (#790) and S2 (section 14.11). Depends on UF-DOMAIN S1 (`plan/uf-domain`, the one output assembler with its `arrow_columns` input).
 
 Anchors: a path with no prefix is under `src/decoy_engine/` in this repository (decoy-engine). Read at engine `origin/main` `70881ad79` (0.28.3). Line numbers are at that head. Arrow behavior was probed with the engine venv (pyarrow 24.0.0).
 
@@ -398,6 +398,8 @@ Dennis R1 on revision 4 (`8428fc973`) was GO-WITH-FIXES: 0 BLOCKER, 4 HIGH, 6 ME
 
 Probes for this section ran once with the engine venv (`python -I`, pyarrow 24.0.0, pandas 2.3.3). Base for S1b: `origin/main` at `4bc582d0a`.
 
+Section 14 includes the revision 6 corrections summarized in section 15. Engine line references in both sections use `origin/main` at `4bc582d0a` unless another head is named.
+
 ### 14.1 H4 decision: widen dates and times to a lossless pandas type, no tokens
 
 Choice: Dennis option (b), extended to time columns. WITHHOLD and its tokens are removed from the plan.
@@ -431,7 +433,7 @@ Module: `internal/pandas_compat.py` (unchanged). Names (L1: `source_frame` clash
 
 `widen=True` is allowed only for read-only consumers (profile, scan, fidelity, verification). Execution callers keep `widen=False`: they write frames back to Arrow, and `pa.Table.from_pandas` of a widened `date32` column gives `timestamp[ms]`, not `date32` (probed), which would change the output type. On those routes an unconvertible column stays a coded error, as guarantee 6 says.
 
-Algorithm:
+S1b-1 ships the conversion entry points with widening disabled. S1b-2 adds widening, paired widening and attrs as follows.
 
 1. Try `table.to_pandas(...)` once. On success set `widened_columns = {}` and return.
 2. On `ValueError` or `ArrowInvalid` (a `ValueError` subclass), leave the handler and probe each column alone. `OverflowError` is still caught for safety but is not claimed by any test (14.8, M2).
@@ -446,23 +448,32 @@ Public export (H2): `arrow_to_frame`, `arrow_to_series`, `arrow_to_frame_pair` a
 
 From `git grep` at `origin/main` `4bc582d0a` over `src/decoy_engine/**/*.py`, then read site by site. Comment and docstring hits are dropped (`config/_fixed_width.py:13`, `_chunked_fk_runtime.py:112`, `_fk_keys.py:434`, `_mask_group_c.py:530-531`, `_numeric_typing.py:412`, `pandas_compat.py:88`, `profile/_csv_reader.py:530`, `_fixed_width_reader.py:12-181`, `_readers.py:382`, `_readers_csv.py:40`).
 
+S1b-1 routes all sites 1-13 with `widen=False`. Sites 1-7 use the profile coded callback, sites 8-9 use the fail-closed callbacks in 14.4, and sites 10-13 keep their listed callbacks. S1b-2 switches only sites 1-9 to `widen=True`.
+
 | # | Site at `4bc582d0a` | Converts | S1b slice | Disposition |
 |---|---|---|---|---|
-| 1 | `profile/_readers.py:414` `to_frame` | whole local source | S1b-2 | `arrow_to_frame(widen=True)`, profile callback |
-| 2 | `profile/_readers.py:495` | empty table from schema | S1b-2 | same |
-| 3 | `profile/_readers.py:499` head frame | sample batches | S1b-2 | same |
-| 4 | `profile/_readers_resident.py:20`, `:25`, `:29` `_frame_of` | resident sources; already has the string cast and `from_arrays` fallback (Codex V1-3 and V1-4 are on main) | S1b-2 | body deleted; calls `arrow_to_frame(widen=True)` |
-| 5 | `profile/_cloud_readers.py:270` S3, `:391` GCS `to_frame` | whole Parquet object | S1b-2 | `pq.read_table(io.BytesIO(...))` then `arrow_to_frame(widen=True)` |
-| 6 | `execution/_chunked_profile.py:45`, `:171` | first chunk, empty schema table | S1b-2 | `arrow_to_frame(widen=True)` |
-| 7 | `execution/_pipeline_finalize.py:186`, `:187` fidelity | source, output | S1b-2 | `arrow_to_frame_pair(widen=True)` |
-| 8 | `execution/pipeline/_post_scan.py:285-286`, `:435-436` | source, output | S1b-1 | `arrow_to_frame_pair`, fail-closed callback (14.4) |
-| 9 | `verification/postmask/_column_facts.py:209` `_series` | source, output batches | S1b-1 | `arrow_to_series`, fail-closed callback (14.4) |
+| 1 | `profile/_readers.py:414` `to_frame` | whole local source | S1b-1, then S1b-2 | `arrow_to_frame`, profile callback |
+| 2 | `profile/_readers.py:495` | empty table from schema | S1b-1, then S1b-2 | same |
+| 3 | `profile/_readers.py:499` head frame | sample batches | S1b-1, then S1b-2 | same |
+| 4 | `profile/_readers_resident.py:20`, `:25`, `:29` `_frame_of` | resident sources; already has the string cast and `from_arrays` fallback (Codex V1-3 and V1-4 are on main) | S1b-1, then S1b-2 | body deleted; calls `arrow_to_frame` |
+| 5 | `profile/_cloud_readers.py:270` S3, `:391` GCS `to_frame` | whole Parquet object | S1b-1, then S1b-2 | `pq.read_table(io.BytesIO(...))` then `arrow_to_frame` |
+| 6 | `execution/_chunked_profile.py:45`, `:171` | first chunk, empty schema table | S1b-1, then S1b-2 | `arrow_to_frame` |
+| 7 | `execution/_pipeline_finalize.py:186`, `:187` fidelity | source, output | S1b-1, then S1b-2 | `arrow_to_frame_pair` |
+| 8 | `execution/pipeline/_post_scan.py:285-286`, `:435-436` | source, output | S1b-1, then S1b-2 | `arrow_to_frame_pair`, fail-closed callback (14.4) |
+| 9 | `verification/postmask/_column_facts.py:209`, `:341-344` | source and output, one column at a time | S1b-1, then S1b-2 | `arrow_to_frame_pair` per aligned batch pair, otherwise output-only `arrow_to_series` (14.4) |
 | 10 | `execution/pipeline/_source_types.py:60` | stored index columns | S1b-1 | `arrow_to_frame(widen=False)`, coded callback |
 | 11 | `execution/_unified_slice_evidence.py:218` | empty masked column | S1b-1 | `arrow_to_series`, coded callback |
 | 12 | `execution/native/_date_shift_ext.py:209`, `_bucket_perturb_ext.py:100`, `:277`, `_operator_step.py:279`, `out_of_core/_bucket_native.py:263`, `out_of_core/_mask_group_c.py:537` | string-typed kernel arrays | S1b-1 | `arrow_to_series`, coded callback |
 | 13 | `internal/pandas_compat.py:95`, `:101` | `to_pandas_fk_safe` (10 callers) and `generated_table_to_pandas` | S1b-1 | choke point body. `to_pandas_fk_safe(table, cols, *, table_name)` |
 | 14 | `profile/_cloud_readers.py:145`, `:318`, `:438` | CSV text | allowlist | reason: text parse, no Arrow temporal conversion |
 | 15 | `fileaccess/adapters/pandas.py:23`, `:28`, `:37`, `:44` | file-access guard wrappers | allowlist | reason: wrappers; their `src/` callers are scanned |
+
+#### consumer fixes (S1b-2)
+
+| Consumer at `4bc582d0a` | Rule | Red cell |
+|---|---|---|
+| `profiling/sentinels.py:133` (`_to_date`), `:160` | First executable statement: `if isinstance(v, pd.Timestamp) and not 1 <= v.year <= 9999: return None`. A Timestamp subclasses datetime, so the check precedes the datetime branch. Apply the same check to `ts` before `ts.to_pydatetime()` at line 160. | Revert the first guard and R2-H4 raises. For the parsed branch, supply an out-of-range Timestamp as the parse result and spy on conversion: expect zero calls to `to_pydatetime`. Removing the second guard must fail this assertion even if the exception handler returns None. |
+| `profiling/_distributions.py:114-115` | For each endpoint `X` (`coerced.min()` and `coerced.max()`), replace `X.date().isoformat()` with `f"{X.year:04d}-{X.month:02d}-{X.day:02d}"`. | Profile a column with both endpoints in year 10000. Assert the exact min and max strings. Restoring either Python date conversion fails this cell. |
 
 Allowlist count: 7 at `4bc582d0a`. The ratchet baseline is the count the guard measures on the S1b-1 base, recorded in the guard file with that SHA. It may only go down (M6). A change that adds an entry or raises the count fails the guard; lowering it means editing the recorded count in the same diff that removes the site. The count is never set to fit S1b's own sites: S1b-1 routes its sites, it does not allowlist them.
 
@@ -482,15 +493,17 @@ Allowlist count on #790 after rebase: 7, the same as main. The guard runs on #79
 
 Post-scan (site 8) and post-mask (site 9) never inspect a stand-in for a value.
 
-- They call `arrow_to_frame_pair` / `arrow_to_series` with `widen=True`. A widened date or time is the real value, so identity and distinct checks still inspect it.
+- S1b-1 uses `widen=False` on both gates. S1b-2 passes `widen=True` to the same conversion calls.
+- At `verification/postmask/_column_facts.py:341-344`, when `src_batch is not None and c in compared`, use `src_f, out_f = arrow_to_frame_pair(src_batch.select([c]), out_batch.select([c]), on_unrepresentable=<postmask fail-closed>, widen=True)` in S1b-2. Take `src_f[c]` and `out_f[c]` for identity and reuse the output series for the output tally. Otherwise use `arrow_to_series(out_batch.column(c), widen=True, on_unrepresentable=<postmask fail-closed>)`. S1b-1 uses the same branches with widening disabled. A widened date or time is the real value, so identity and distinct checks still inspect it.
 - `arrow_to_frame_pair` widens the union of the columns widened on either side, on both sides (M3). Without it, a source `date32` at year 10000 widens to `datetime64[ms]` while the in-range output stays `datetime.date` objects, and pandas `==` across the two is always False, which reads as "changed" and passes an identity check that should fail.
 - Any column that cannot be converted goes to a fail-closed callback. Post-mask sets `identity_error` and `distinct_error` on that column's tally (`_column_facts.py:179-180`) to the new registered reason `postmask_column_not_inspectable`, and the gate result fails. Post-scan raises the new registered reason `post_scan_column_not_inspectable` naming table and column. Neither returns a pass for that column.
 
 ### 14.5 Rules and guard for widened columns
 
-- Rule W1: no code in `profile/`, `profiling/`, `quality/`, `verification/` or `execution/pipeline/_post_scan.py` casts to nanosecond time (`datetime64[ns]`, `M8[ns]`, `timedelta64[ns]` on a widened column, `.as_unit("ns")`, `pd.to_datetime(..., unit=...)` without `errors="coerce"`). The guard (14.7) adds these spellings for those packages.
-- Rule W2: `profile_columns` reads `widened_columns(df)` and sets the existing inferred type from the Arrow type (`date` for `date32`/`date64`, `time` for `time64`), not from the pandas dtype. `FieldStats` gains `source_arrow_type: str | None` in `VALUE_FREE_FIELDS` (an Arrow type string carries no value). It replaces the `source_value_unrepresentable` flag of 13.5; there is no special redaction rule, because the values are real and the normal date rules apply.
-- Rule W3: `widened_columns` must survive every frame operation between a reader and its consumer. The R1 cells (14.8) list them. Where an operation drops `attrs` (pandas `concat` of frames with different `attrs`), the consumer re-reads it from the reader's frame before the operation.
+- Rule W1 covers `profile/`, `profiling/`, `quality/`, `verification/`, `execution/pipeline/_post_scan.py`, `detection/`, `walks/`, `generation/_fidelity_gate.py` and `internal/pandas_compat.py` outside the conversion choke-point functions. Ban `.date()`, `.to_pydatetime(`, `.dt.date`, `.dt.to_pydatetime`, `.strftime(`, `.dt.strftime`, `.tz_localize(`, `.tz_convert(`, `pd.cut(` and `pd.date_range(`. Keep the existing ns-cast checks for `datetime64[ns]`, `M8[ns]`, `timedelta64[ns]`, `.as_unit("ns")` and `pd.to_datetime(..., unit=...)` without `errors="coerce"`.
+- After the 14.3 consumer fixes, measure remaining W1 hits and record each in `[widened]` in `tests/sentry/source_read/allowlist.toml` with its site, operation, reason and measured count. Each count can only go down. Known entries include `profiling/_distributions.py:78` (`pd.cut` on numeric inputs only) and `internal/pandas_compat.py:55` (timezone operations on tz-aware inputs only). Record the surviving range-guarded sentinel calls at their exact sites too. The seven source-read exceptions in 14.3 have their own ratchet.
+- Rule W2: for widened columns, `profile_columns` copies the original type string from `widened_columns(df)` into `FieldStats.source_arrow_type: str | None` in `VALUE_FREE_FIELDS`. Keep dtype-based inference: widened dates infer `date` and widened times infer `mixed` under the closed set at `profiling/types.py:72`.
+- Rule W3: preserve attrs on the reader-to-consumer operations in 14.8. At the engine base, no site at 4bc582d0a concatenates reader frames; the R1 mixed-attrs cell records the pandas behavior.
 
 ### 14.6 Deletion and reason code (L3)
 
@@ -506,9 +519,9 @@ Post-scan (site 8) and post-mask (site 9) never inspect a stand-in for a value.
 | R1 unit tests | `tests/unit/internal/test_arrow_to_frame.py` |
 | R2 integration | `tests/integration/source_read/test_unrepresentable_values.py` (new sub-package) |
 | R3 profile cells | existing `tests/profiling/` value-redaction suite |
-| CLI guard | `tests/sentry/test_source_read_boundary.py` in the CLI repo, or its sentry sub-package if one exists at the slice base |
+| CLI guard | `tests/sentry/source_read/test_boundary.py` in the CLI repo |
 
-Shapes: as 13.6, plus the W1 ns-cast spellings for the listed packages, plus `S3` and `GCS` real-caller mutations (14.8 R4).
+Shapes: as 13.6, plus all W1 operations and paths in 14.5, plus `S3` and `GCS` real-caller mutations (14.8 R4).
 
 ### 14.8 Acceptance test changes
 
@@ -516,16 +529,21 @@ Shapes: as 13.6, plus the W1 ns-cast spellings for the listed packages, plus `S3
   - Callback cells (S1b-1): `date32` year 10000 with `widen=False` calls the callback with the column name; the coded error has `__cause__ is None`, `__context__ is None` and `__suppress_context__`; `str`, `repr` and the formatted traceback carry no `10000`, `2932897` or `-768`.
   - `time64[ns]` cell: `ArrowInvalid` path, same assertions (M2).
   - Widen cells (S1b-2): `date32` at days -1000000, 2932897 and 2**31-1, `date64` past 9999, and `time64[ns]` with nanoseconds, each single and repeated with a null: the result is `datetime64[ms]` or `timedelta64[ns]` with exact values, other columns equal their own conversion, `widened_columns` names the Arrow type. Stored index `stored_id`, a `timestamp[ns, Europe/London]` column and the range index are kept.
-  - `attrs` cells (M4): `iloc[:n]`, column selection, `sample(n, random_state=0)` and `reset_index()` keep `widened_columns`; `concat` of two frames with the same `attrs` keeps it; `concat` with different `attrs` drops it (pandas 2.3.3 behavior, asserted so a pandas change is seen), which is why W3 re-reads.
+  - `attrs` cells (M4): `iloc[:n]`, column selection, `sample(n, random_state=0)` and `reset_index()` keep `widened_columns`; `concat` of two frames with the same `attrs` keeps it; `concat` with different `attrs` drops it (pandas 2.3.3 behavior, asserted so a pandas change is seen).
   - Pair cell: source year-10000, output in range: both sides of `arrow_to_frame_pair` are `datetime64[ms]` and `==` is True on unchanged rows.
   - Mutations: `from_arrays` rebuild (index cell red); widen every date column instead of failing ones only (in-range dtype cell red); pair without the union (pair cell red); drop `from None` (context cell red).
   - The revision-4 `OverflowError` mutation is dropped. No `to_pandas` call on these types raises `OverflowError` at pandas 2.3.3 and pyarrow 24 (dates raise `ValueError`, `time64[ns]` raises `ArrowInvalid`). The only `OverflowError` seen is Python-object conversion (`to_pylist`, or `pd.ArrowDtype` then `astype(str)`: `date value out of range`), which is outside the choke point (14.9).
 - R2 additions:
-  - H3 (S1b-1): a year-10000 `date32` column in post-scan and in post-mask. With the output equal to the source on that column, the gate fails on identity, so a widened value is really inspected. With a monkeypatched converter that makes the column unconvertible, the gate fails closed with `post_scan_column_not_inspectable` / `postmask_column_not_inspectable`. Neither cell can return a pass. Mutation: a callback that returns a passing tally turns the second cell red.
-  - H4 (S1b-2), one assertion per consumer for a year-10000 `date32` column: `profile_columns` gives inferred type `date` and `source_arrow_type == "date32[day]"`; `walk_dataframe` runs the date detectors, not the string ones, and raises no free-text advisory; the `scan_set` models receive a `datetime64[ms]` column; the fidelity snapshot classifies the column as datetime, not categorical. Mutation: drop W2 (inferred type taken from the pandas dtype) turns the profile cell red.
+  - Routing cell (S1b-1): exercise the site inventory with the source-read guard enabled. Restoring a bare read at any routed site must fail the guard. A year-10000 profile read must reach the profile coded callback. In S1b-2 the same profile read must complete (R2-H4).
+  - R2-H3 (S1b-1): run both gates on a real scalar `date32` year-10000 column. With widening disabled, post-scan fails with `post_scan_column_not_inspectable` and post-mask fails with `postmask_column_not_inspectable`. Returning a pass or exposing a raw conversion exception fails the cell.
+  - R2-H3 (S1b-2): unchanged year-10000 dates must now fail identity, proving the widened values were inspected. For the fail-closed cell use a real `list<date32>` containing year 10000 through both gates and assert the same two coded failures as S1b-1. Fixtures of type `struct<x: date32>` and `dictionary<int32, date32>` with that date also reach the callback. Returning a passing tally fails the nested-date cell.
+  - R2 aligned post-mask (S1b-2): compare one batch of source `date32` values `[year 10000, d1..dn]` and output `[null, d1..dn]` with n positive and all shared dates in range. Assert `identical_rows == n`. Converting each side independently turns this cell red.
+  - R2-H4 (S1b-2): profile a widened date column containing year 10000 and the in-range sentinel 1970-01-01. Assert `fs.source_arrow_type == "date32[day]"` and `fs.inferred_type == "date"`. Assert profiling completes without raising, `fs.sentinels` contains the expected sentinel and `fs.distribution` contains the expected date bins and endpoints. Reverting the first sentinel guard in 14.3 turns this cell red. Dropping W2 fails the source type assertion. A separate widened `time64[ns]` cell with a non-zero nanosecond asserts `inferred_type == "mixed"`.
+  - Other H4 consumers: `walk_dataframe` runs the date detectors and raises no free-text advisory, `scan_set` models receive a `datetime64[ms]` column, and the fidelity snapshot classifies it as datetime.
+
   - W1: a mutation adding `.astype("datetime64[ns]")` in `profiling/_distributions.py` turns the R2 profile cell red (`OutOfBoundsDatetime` with the date in its text) and the guard red.
 - R3: replaced. The redaction cells assert that a widened column follows the normal date rules in both `include_values` modes, and that `source_arrow_type` passes the value-free type walk.
-- R4 (M4): real-caller mutations for both S3 and GCS: restoring `pd.read_parquet(io.BytesIO(...))` in either `to_frame` turns the guard red. Plus a seeded bypass for each W1 spelling.
+- R4 (M4): real-caller mutations for both S3 and GCS: restoring `pd.read_parquet(io.BytesIO(...))` in either `to_frame` turns the guard red. In S1b-2 seed each W1 spelling and each added scope, including a non-choke-point function in pandas_compat.py. Each unlisted hit fails the guard. Adding a second hit at an allowed site or raising its recorded count must also fail.
 
 ### 14.9 Exception text and the F31 split (M1)
 
@@ -553,30 +571,51 @@ CLI sites, as given by the orchestrator at `decoy` `95362d16`:
 
 The local `decoy` checkout's `origin/main` shows the same sites at `api.py:665`, `_sources.py:469` and `_targets.py:541`, plus `cli/gen/_fit.py:48` `pd.read_csv` (CSV text, allowlist with reason). The slice re-measures at its base.
 
-New slice S1-CLI: route the three sites through the exported `arrow_to_frame` (`read_file` becomes `pq.read_table` then `arrow_to_frame`), with callbacks that raise the CLI's coded errors (`widen=True` only for `report` and `init`, which are read-only). Add the CLI guard that mirrors the engine guard, with its own measured ratchet. Gate the CLI re-pin to the S1b-1 engine release on this slice. R2-CLI cells: `decoy init`, `report`, `unmask` and `tokenize` on a Parquet file with a year-10000 date: coded error or a correct result, and no `10000` in stdout, stderr or the job record.
+S1-CLI routes all three sites through the exported `arrow_to_frame` with `widen=False` and CLI coded callbacks. In `read_file`, use `pq.read_table` then `arrow_to_frame`. Re-pin to the S1b-1 engine release. Place the CLI guard at the path in 14.7 with its own measured ratchet. Restoring a bare conversion at any of the three sites must fail that guard.
+
+R2-CLI exercises `init`, `report`, `unmask` and `tokenize` on a year-10000 Parquet file. Assert the report lists the file as missing, `report --require-data` exits non-zero, and neither output stream nor the job record contains `10000`. Enable widening prematurely on the report route and the missing-file assertion fails. For init, unmask and tokenize assert a coded error or correct result and no `10000` in stdout, stderr or the job record.
 
 ### 14.11 Slices and size (replaces 13.9)
 
-| Slice | Repo, base | Content | Lines (estimate) |
+| Slice | Repo, base | Content and acceptance gate | Lines (estimate) |
 |---|---|---|---|
-| S1b-1 | engine, `main` | choke point with required callback; every engine site routed (sites 8 to 13) with coded or fail-closed callbacks; `to_pandas_fk_safe(table_name)`; deletion (14.6); new reasons `postmask_column_not_inspectable`, `post_scan_column_not_inspectable`; public export and compatibility entry; guard and ratchet; R1 callback cells, R2 execution and H3 cells, R4 | about 450-500 |
-| S1b-2 | engine, `main` after S1b-1 | `widen=True` and `arrow_to_frame_pair` widening; `widened_columns` attrs; profile, resident, chunked-profile, cloud and fidelity readers (sites 1 to 7); `FieldStats.source_arrow_type` and W2; W1 guard spellings; R1 widen and attrs cells, R2 profile, scan and H4 cells, R3 | about 400 |
-| S1-CLI | CLI, `main` after the S1b-1 engine release | three CLI sites, CLI guard, R2-CLI cells, engine re-pin | about 250 |
-| S1 (#790) | engine, rebased on `main` after S1b-2 | the typed date-shift work; drop `profile/_frame.py` and the diagnosis calls; D1 to D3 (R5) | delta about +100 / -60 |
-| S2 | engine | as section 5 | as section 5 |
+| S1b-1 | engine, `main` | Route sites 1-13 with `widen=False` and the 14.3 callbacks. Ship the conversion API, compatibility entry, reason codes, 14.6 deletion, source-read guard and ratchet. Run R1 callback, R2 execution and real scalar fail-closed H3 cells, and R4 source-read mutations. | about 520-580 |
+| S1b-2 | engine, after S1b-1 | Switch sites 1-9 to `widen=True`. Add widening, attrs, paired widening, W1, W2 and the 14.3 consumer fixes. Run R1 widen, attrs and pair cells, R2 H3 identity, nested failure, aligned batch and H4 cells, R3 redaction and R4 W1 seeds. | about 430-460 |
+| S1-CLI | CLI, after S1b-1 engine release | Route three sites with `widen=False`, re-pin the engine, run the CLI guard and R2-CLI cells. | about 250 |
+| S1 (#790) | engine, rebase on S1b-2 | Drop `profile/_frame.py` and diagnosis calls. Run D1 to D3 (R5). | delta about +100 / -60 |
+| S2 | engine, after rebased #790 | as section 5 | as section 5 |
 
-S1b-1 and S1b-2 each go to `main`, not stacked. S1-CLI runs in parallel with S1b-2 once S1b-1 is released. If S1b-1 or S1b-2 passes 650 lines, the builder stops and reports.
+Land S1b-1 first. Run S1b-2 and S1-CLI in parallel, then rebase #790 on S1b-2, then proceed to S2. Check the diff against each slice base. Above the 650-line stop limit, stop and report.
 
-### 14.12 Not resolved here
+### 14.12 Resolution and follow-ups
 
-- H3 asked that a year-10000 date column in post-scan and post-mask give a closed, coded failure. With option (b) that column converts losslessly, so the checks inspect it and the gate fails only when the data fails. The fail-closed path is kept for columns that cannot be converted, but no real Arrow type reaches it today, so its R2 cell uses a monkeypatched converter. If the owner wants any widened column to fail the gate too, that is one callback change in S1b-1.
-- The CLI line numbers differ between the orchestrator's `95362d16` and the local `origin/main`; S1-CLI re-measures at its base.
+1. Resolved under the V1 bar: both gates inspect widened columns. In S1b-2, an unchanged widened date fails identity. A real nested date that cannot convert fails closed with the registered reason. The two R2-H3 cells in 14.8 distinguish these outcomes.
+2. S1-CLI re-measures CLI line numbers at its base. After the S1b-2 engine release, enable widening for report and init with a one-line read-only caller policy change. Update the R2-CLI cell for that release: the same file is present in the report, `--require-data` succeeds for that fixture and init reads it. Execution callers retain `widen=False`.
+
+## 15. Revision 6 (2026-11-24, after Dennis R2)
+
+| Finding | Build rule and evidence |
+|---|---|
+| V1 H-A | S1b-2 fixes both profiling consumers in 14.3. R2-H4 exercises the full profile. W1 seeds and the measured allowlist in 14.5 cover the operations that can fail on widened inputs. |
+| V1 H-B | Deliver fail-closed routing before widening. Run the scalar H3 cell against S1b-1 and the identity cell against S1b-2. The slice bases, size estimates and stop limit are in 14.11. |
+| V1 H-C | Convert each aligned pair together at site 9. Independent conversions lose the unchanged rows counted by the R2 batch cell. |
+| V1 M-a | W2 records only the source type. The date and time cells in 14.8 check the existing inference contract. |
+| V1 M-b | The nested-date H3 cell exercises the real S1b-2 failure path. Section 14.12 records the accepted V1 decision. |
+| V2-LOG L-a | The R1 mixed-attrs cell checks pandas concat behavior. Section 14.5 records the absence of a reader-frame concat at the base. |
+| V2-LOG L-b | Defer dictionary-date widening. The V1 profile callback cell below pins current behavior. |
+| V2-LOG L-c | The CLI guard and its bare-conversion mutation belong at the single CLI path in 14.7. |
+| V1 L-d | The pre-widening report cell in 14.10 checks missing data, the required-data exit code and value-free output. |
+
+rev 6: Dennis R2 (GO-WITH-FIXES, 3 HIGH / 2 MED / 4 LOW) written in; plan passes to build.
 
 ## Deferred (V2-LOG)
 
 - **V2-LOG: sequential keeps typed dates in Arrow (option B for B4).** Sequential would keep an admitted typed `date32` column as Arrow, and `date_shift_column` would return Arrow instead of `to_pylist()`, so an out-of-range date becomes a quarantined row as on the unified slice. Deferred because the sequential frame is pandas end to end: the table is converted before any strategy runs and `to_pylist()` cannot hold year 10000, so the change touches the sequential frame model, not one strategy. V1 takes option A (coded job failure) instead.
 - **V2-LOG: the coded error keeps the original in `__context__`** (added 2026-11-24 after Codex a2). `raise ... from None` in `_pipeline_full_frame.py` hides the pandas exception from the printed traceback but leaves it on `__context__`, where a caller that walks the chain can still read the value text. V1 threat model (accidental leaks) is met because no V1 path prints or logs `__context__`; clearing it is hardening for V2, with option B.
-- **V2-LOG — sentry completeness.** The one-arithmetic AST sentry scans `execution/**/*.py`, so it catches the realistic bypass of restoring arithmetic in `_strategies/_date_shift.py` (`origin/main` lines 358-405), but it does not scan `transforms/`, where the approved `shift_typed_days` choke point lives (`transforms/date_shift.py:1-10`). Extending the scanner to distinguish the one allowed transform function from a second transform implementation is completeness hardening for V2; it does not change the V1 guard or verdict.
+- **V2-LOG: sentry completeness.** The one-arithmetic AST sentry scans `execution/**/*.py`, so it catches the realistic bypass of restoring arithmetic in `_strategies/_date_shift.py` (`origin/main` lines 358-405), but it does not scan `transforms/`, where the approved `shift_typed_days` choke point lives (`transforms/date_shift.py:1-10`). Extending the scanner to distinguish the one allowed transform function from a second transform implementation is completeness hardening for V2; it does not change the V1 guard or verdict.
 - **V2-LOG: Python-object conversion of source values** (added 2026-11-24, revision 4; corrected in revision 5, see 14.9). `to_pylist` and `as_py` raise `OverflowError: date value out of range` (no year in the text); `to_numpy().tolist()` returns the day number; `str(array)`, Arrow casts to string and `strftime` print the date; Arrow kernel errors quote values. The guard covers Arrow-to-pandas conversion and pandas file reads only. Exception text at sinks belongs to F31 `render_failure`; extending the guard to Python-object conversion needs a type-aware rule and is V2 hardening.
 - **V2-LOG: deliberate evasion of the source-read guard** (added 2026-11-24, revision 4). `getattr(t, "to_pandas")`, `eval` and `importlib` spellings are out of the guard's listed shapes (recurring-defects #5 scope).
 - **V2-LOG: cloud CSV through the one CSV reader** (added 2026-11-24, revision 4). The three `pd.read_csv` calls in `profile/_cloud_readers.py` stay allowlisted in section 13. Routing them through `_csv_reader._read_csv_rows` removes three allowlist entries.
+
+- **V2-LOG: temporal inference drift.** An in-range `date32` profiles as `mixed`, while a widened one profiles as `date`. Scan-diff reports a drift when one row crosses year 9999. For V2 derive inferred_type from the Arrow schema for every temporal column. Acceptance: profiling the same date32 schema on either side of that boundary yields the same inferred type and no type drift.
+- **V2-LOG: dictionary date widening.** In V1 a failing `dictionary<*, date32|date64>` reaches the profile coded callback. Parameterize the V1 callback cell with both dictionary value types and year 10000, checking the column name and value-free coded error. For V2, widening these columns should preserve their dates and pass the same endpoint checks as plain dates.
