@@ -30,99 +30,148 @@ Revised after plan review round 1 (2026-11-24); owner decisions are recorded at 
 
 ## Problem
 
-`_source_identity` in `src/decoy_engine/verification/postmask/residual_pii.py` (lines 240-274)
-wraps the whole comparison in `try: ... except Exception: return None`. None also means "not
-comparable": the table or column is missing, row counts differ, or no row has both sides present.
-So a comparison that raised looks the same as a column with nothing to compare. The caller builds
-`ColumnFacts` with no `identity_error`, and no error finding is written. A leak check that crashed
-reports as a clean check.
+PR #784 reached round 3 at engine head `224a0102d`. All Part 1 references use that head.
+Source paths start at `src/decoy_engine/`. Bare post-mask filenames are in
+`verification/postmask/`. Bare test filenames are in `tests/unit/detection_verification/`.
 
-## What already exists (do not rebuild)
-
-- `ColumnFacts.identity_error: str | None` in `postmask/_column_facts.py`.
-- `residual_pii_findings` already emits a severity `"error"` finding when `fact.identity_error`
-  is set and the configured strategy is not in `_NO_OP_BY_DESIGN`. Message: "column matched
-  {det!r} but the source comparison raised {err} (see job log); a leak cannot be ruled out."
-  `_blocked.py` maps a residual `"error"` row to `_CHECK_ERROR`, so the verdict blocks.
-- The batch path (`_column_facts.column_facts`, which the production runner uses) already catches
-  with the `passes_through(exc)` re-raise guard and sets `tallies[c].error = type(exc).__name__`.
-  The production path is already fail-closed.
-- `postscan/test_residual_pii_hint_gated.py::test_identity_error_is_still_an_error` covers the
-  facts path.
-
-The gap is the frame path only: `check_residual_pii` -> `_frame_column_facts` (line 183) ->
-`_source_identity`. Only tests call it today, but it is the parity oracle for the batch path
-(`postscan/test_column_facts.py:109` calls `_source_identity` directly). An oracle that hides a
-raise can make a broken batch path look correct, and a future direct caller inherits the hole.
-
-## Guarantee
-
-- When the source comparison for a column raises, the frame path produces one residual finding
-  with severity `"error"` for that column (unless its strategy is in `_NO_OP_BY_DESIGN`). It is
-  the same finding the batch path produces for the same fault.
-- The message names the exception class only. It holds no cell value and no exception message
-  text.
-- An exception for which `passes_through` returns True still propagates.
-- The not-comparable cases still return None and produce no error finding.
-
-Non-goals: `policy_validation.py::_check_one_column` has the same broad catch (baseline entry
-`policy_validation.py::_check_one_column::unguarded::0`). It is out of scope; owner decision Q6 makes it a separate R1 row. No change to
-the batch path, the verdict mapping or the finding schema.
+- **V1.** A passthrough entry hides a failed comparison on a sibling that a joint mask writes.
+  The same exemption applies when the writer set is unknown. Verification also misses child
+  keys that execution rewrites. See `residual_pii.py:513-531`, `_column_facts.py:455-469`,
+  `execution/_column_access.py:175-179` and `execution/_chunked_carry.py:242-250`.
+- **V1.** Frame and batch identity counts disagree on lists with nulls and reordered maps.
+  The batch path converts Arrow to pandas. The shared helper freezes dicts in insertion order.
+  Its pandas `map` can round adjacent large integers in a nullable object column to the same
+  float. See `_column_facts.py:209-212,238-268,377-381` and `residual_pii.py:175-190`.
+- **V1.** A surviving email under `hash` already grades `fail`. An unknown source distinct
+  count can turn it into `error` because the overrides differ before the base grade is applied.
+  The verdict then reports a check error instead of a detected failure.
+  See `residual_pii.py:299-300,360-367,462-468,555-574` and `_blocked.py:5-8`.
+- **DESIGN.** Verification imports execution's private writer helper and adds its own set of named
+  columns. Execution already resolves handler outputs and cascade targets.
+  See `_column_facts.py:33,455-469` and `execution/_chunked_carry.py:184-199,225-250`.
 
 ## Design
 
-1. Remove the `try`/`except` from `_source_identity`. Keep its explicit `return None` branches. A
-   raise now leaves the function. Change the docstring: it raises when the comparison fails, and
-   the caller turns that into `identity_error`. Drop "Must never raise".
-2. In `_frame_column_facts`, wrap the one call:
-   `except Exception as exc: if passes_through(exc): raise; identity_error = type(exc).__name__`.
-   Pass `identity_error` into `ColumnFacts`. This matches the batch path in `_column_facts.py`.
-3. Remove the entry
-   `decoy_engine/verification/postmask/residual_pii.py::_source_identity::unguarded::0` from
-   `tests/sentry/baselines/post-scan-pass-through.json`. The new handler is guarded, so the sentry
-   does not list it. A shrink is allowed.
-4. The parity test keeps working: on success `_source_identity` returns the same tuple.
+1. **One writer rule.** Export `written_columns_by_table` from `decoy_engine.execution`.
+   Return a set of column names per table, or `None` when any write target is unknown.
+   An empty set means that execution knows there are no writers. Use the run's resolved
+   declarations, provider registry and relationship edges. Include direct writes, conditional
+   targets, joint or composite outputs, transform targets and every component of a cascade child
+   key. A parent key used only for lookup is a read. Expand a wildcard against a known schema.
+   If it cannot be bounded, mark that table unknown. Execution's carry and untouched-column
+   decisions must consume this rule. Keep their route-specific read and eligibility checks.
+   See `execution/__init__.py:128`, `execution/_column_access.py:175-179,233-250,520-532`
+   and `execution/_chunked_carry.py:177-202,225-250,261-271`.
 
-Choke point: the post-scan pass-through sentry (`tests/sentry/post_scan/test_post_scan_choke_points.py`)
-already fails any broad handler in post-scan code without the `passes_through` guard. Mutation:
-delete `if passes_through(exc): raise` in `_frame_column_facts`; the sentry must go red.
+   Remove verification's `masked_columns` and its private execution import. Use only the public
+   query for write ownership. A passthrough entry exempts a column only when its table has a
+   known writer set that excludes the column. Apply that decision before the detector split and
+   before grading identity. With no hit, report a failed comparison once for a possible writer.
+   A known unwritten column stays quiet without a hit. With a hit, retain the existing comparison
+   error for every non-exempt column. See `_column_facts.py:33,455-469` and
+   `residual_pii.py:509-537,575-591`.
 
-Size: `residual_pii.py` is 574 lines; the change is about +6 and -3 lines. No new public names.
-Files: `residual_pii.py`, `post-scan-pass-through.json`, one test file, CHANGELOG.
+2. **One equality rule.** Compare aligned Arrow arrays in one implementation. Feed batch slices
+   directly to it. Thread the source Arrow schema into the frame adapter. Construct source arrays
+   from the original cells with the declared field type before pandas can infer floats. Use that
+   type for same-type output. Preserve genuine output type changes, including list-to-scalar
+   masks. For existing frame-only callers, use a lossless source dtype when it identifies the
+   type. Accept an explicit schema for ambiguous object columns such as maps. Treat an ambiguous
+   or lossy conversion as a comparison failure. Never use pandas `map` or a float intermediate
+   for identity. See `residual_pii.py:127-132,175-194`, `_column_facts.py:209-215,248-281,371-386`
+   and `test_residual_pii_source_compare.py:313-332`.
+
+   Exclude a row if either top-level cell is null or floating NaN. Within a container, null
+   equals null and NaN equals NaN. A nested null differs from a NaN or a present value.
+   Compare lists by length and position, structs by declared field name, and maps by their
+   key/value pairs in any order. Preserve pair multiplicity. Apply these rules recursively.
+   Compare integers exactly, including adjacent 64-bit values. A list differs from a scalar.
+   Use the same equivalence for source distinct counts, across the whole source column and
+   independent of batch boundaries. Keep the batch distinct pass bounded and spillable.
+   See `_column_facts.py:238-281,325-337,396-418`, `profiling/_scan_integrity.py:552` and
+   `postscan/test_column_facts.py:255-262`.
+
+3. **One grading rule.** Factor the complete known-count grade into one function. Run it once
+   for a known source count. For an unknown count, run it for each possible count class.
+   With comparable rows, 1 and 2 represent the constant and varied cases at the current cutoff.
+   Evaluate the base grade, gated detector rule, escalation and severity ordering on every run.
+   Compare only the final severities. If they agree, emit that severity once with a message
+   supported in both cases. If they differ, emit one value-free `error`. A failed output count
+   leaves a known source count intact. See `residual_pii.py:299-300,385-405,534-579` and
+   `_column_facts.py:397-418`.
+
+Keep comparison and count failures separate. Discard partial identity counts on comparison
+failure. Record the exception class only. Propagate exceptions selected by `passes_through`.
+Missing input, unequal row counts and zero comparable rows supply no identity evidence.
+See `residual_pii.py:178-194,252-268,535-537` and `_column_facts.py:360-386,405-418`.
+Keep the finding schema and verdict mapping. Policy validation remains a separate slice
+(owner decision Q6 below). See `residual_pii.py:580-592` and `_blocked.py:5-8`.
+
+### Placement
+
+| Concern | Location and precedent |
+|---|---|
+| Writer rule and public query | Reuse execution's writer declarations and export through its package API. Add no flat execution module. See `execution/_column_access.py:520`, `execution/__init__.py:128` and `CODEMAP.md:39,107`. |
+| Arrow comparison and grading | Replace the current comparison in `_column_facts.py:238-281`. Keep grading at `residual_pii.py:534-579`. See `CODEMAP.md:129`. |
+| Property test and regressions | Extend `postscan/test_column_facts.py:102`, `test_residual_pii_source_compare.py:335` and `postscan/test_column_suite_on_facts.py:414`. Hypothesis is in the dev extra at `pyproject.toml:182-192`. |
 
 ## Failure modes
 
-| Failure | Today | After PM-1 |
+| Failure or input | Required result | Current decision site |
 |---|---|---|
-| Comparison raises (a cell type whose `==` raises) | No finding, reads clean | One `"error"` finding, verdict blocks |
-| `KeyboardInterrupt` or `SystemExit` in the comparison | Propagates (a `BaseException`, not caught) | Propagates, unchanged |
-| `MemoryError` or another `Exception` that `passes_through` does not re-raise | Swallowed into None | `identity_error` finding, the same as the batch path |
-| Table or column missing, row counts differ, nothing comparable | None | Unchanged |
-| Strategy is `passthrough` and comparison raises | No finding | No error finding (operator chose no-op), unchanged rule |
+| Comparison fails on a joint sibling, FK child or possible wildcard target with its own passthrough entry | One blocking error, even without a detector hit | `residual_pii.py:513-531`, `execution/_chunked_carry.py:244-250` |
+| Comparison fails on a proven passthrough | No comparison error. A detector hit keeps its normal info grade | `residual_pii.py:436-444,513-537` |
+| Typed conversion or comparison fails after an earlier batch succeeded | Clear partial identity counts for that column. Other columns finish. Propagate pass-through exceptions | `_column_facts.py:378-390,410-412`, `residual_pii.py:180-194` |
+| Source missing, unequal lengths, or no comparable rows | No comparison error. Preserve detector-only grading | `residual_pii.py:252-268,534-537` |
+| Nested nulls, reordered keys, NaN or adjacent large integers | Both paths return the same reference counts | `_column_facts.py:238-268`, `residual_pii.py:175-190` |
+| Source count fails after comparison succeeded | Keep identity counts. Equal final grades stand. Different final grades give one error | `residual_pii.py:538-579` |
+| Output count alone fails | Grade with the known source count | `_column_facts.py:400-404`, `postscan/test_column_suite_on_facts.py:508` |
 
-## Acceptance tests (red before)
+## Acceptance tests
 
-In the existing `tests/unit/detection_verification/test_residual_pii_source_compare.py` (216
-lines).
+Run both real entry points for the round 3 regressions. Use independent expected results.
+The current harness and comparison fields are at `test_residual_pii_source_compare.py:286-320`.
 
-- `test_frame_path_comparison_raise_is_error_finding` (red before): one object column whose output
-  cells are e-mail strings, so the detector fires, and whose source cells are objects with an
-  `__eq__` that raises `TypeError`. Do not monkeypatch `pd.Series.__eq__` globally. Call
-  `check_residual_pii`. Assert exactly one finding for the column, severity `"error"`, message
-  contains `"TypeError"`, and no source or output cell value appears in the message.
-- `test_frame_path_passes_through_exception_propagates` (red before): raise a class that
-  `passes_through` returns True for; assert it propagates.
-- `test_frame_and_facts_paths_agree_on_identity_error` (red before): the same faulty input through
-  `_frame_column_facts` and through `column_facts`; assert `ColumnFacts.identity_error` is equal,
-  and that `residual_pii_findings` gives the same severity and message. The builder may instead add
-  this case to the parity test at `test_column_suite_on_facts.py:136`.
-- `test_not_comparable_still_quiet`: row counts differ; assert no `"error"` finding. It passes
-  before and after, and pins that None keeps its meaning.
-- The post-scan sentry passes with the shrunk baseline.
+- **Writer regressions.** Add a passthrough entry for the joint mask's `zip` sibling. Inject
+  a comparison failure with no detector hit. Require exactly one `error` for `zip`. Repeat
+  for an FK child key and an unknown wildcard writer. Repeat with a detector hit. Check the
+  public query directly for every component of a composite child key and for a read-only parent.
+  Keep a sibling table with a proven passthrough quiet. Removing the cascade union or letting
+  passthrough win before lookup must fail these tests. See `test_residual_pii_source_compare.py:356-400`
+  and `execution/_chunked_carry.py:242-250`.
+- **Equality regressions.** An unchanged `[1, null]` counts as one comparable, identical row.
+  Reverse a dict's insertion order under a declared map type and under a struct type.
+  Both rows stay identical. For nullable object integers, compare `[2**60, None]` with
+  `[2**60 + 1, None]`. Expect one comparable row and zero identical rows on each path.
+  Keep the existing list-to-scalar case. Restoring pandas `map` must fail the integer case.
+  See `_column_facts.py:238-268` and `test_residual_pii_source_compare.py:313-332`.
+- **Grading regressions.** Use unchanged hash output with an email hit. Run the same facts with
+  source count 1, count 2 and a failed count. Expect one `fail` in all three runs. Repeat with
+  a faker case whose final grades differ. Expect one `error` for the failed count. Pin gated
+  hits and an output-only count failure. Comparing intermediate overrides must fail the hash
+  test. See `residual_pii.py:462-468,538-574` and `postscan/test_column_suite_on_facts.py:414-437,508-520`.
+- **Property test.** Use Hypothesis to generate a declared Arrow schema and paired source and
+  output rows. Generate recursive lists, structs and maps with nested nulls, reordered keys,
+  NaNs and exact large integers. Include equal pairs and single-leaf changes. Feed Python
+  object cells to the frame adapter and typed Arrow arrays to the batch adapter. Vary source
+  and output batch boundaries independently. Compute expected facts from the original rows with
+  a plain recursive reference that calls no production comparison, conversion or count helper.
+  Assert that both paths match its comparable rows, identical rows, source distinct count and
+  failure flags. Compare findings too. See `pyproject.toml:189-192`,
+  `postscan/test_column_facts.py:102,150` and `test_residual_pii_source_compare.py:286-320,335-354`.
+- **Failure and boundary guards.** Inject a fault at the shared Arrow comparator. Check
+  propagation, column isolation, missing input, row mismatch and class-only messages on both
+  paths. Seed the exception with a cell value and assert it never appears in the finding.
+  Pin the public import and run the layer checks, including a fresh import of each package first.
+  Execution already imports postmask. Restoring the private verification import or removing
+  the pass-through guard must fail the corresponding guard. See `_column_facts.py:33,378-386`,
+  `execution/pipeline/_post_scan.py:53`, `test_residual_pii_source_compare.py:248-273` and
+  `tests/sentry/post_scan/test_post_scan_choke_points.py:84-109`.
 
-Test depth: T0 the touched test file and the post-scan sentry; T1 impact selection for
-`verification/postmask`. No escalation trigger. Mutation run: the leak-check rule applies, so run
-mutations on `_frame_column_facts` and `_source_identity`.
+Run the focused tests and post-scan sentry first. Then run impact tests for execution and
+postmask. Record red-before results against `224a0102d` and repeat the listed mutations on the
+final implementation head. See `postscan/test_column_facts.py:102`,
+`test_residual_pii_source_compare.py:335` and `tests/sentry/post_scan/test_post_scan_choke_points.py:84`.
 
 # Part 2. RATCHET-GROWTH
 
