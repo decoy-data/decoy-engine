@@ -6,10 +6,9 @@ value. The error text of pandas and Arrow quotes the cell, so it is never shown.
 sequential and chunked routes keep `full_frame_value_unrepresentable`. Profile, scan and fidelity
 reads raise the new `runtime/source_column_unrepresentable`. The post-scan check raises
 `runtime/post_scan_column_not_inspectable`, and the post-mask check marks the column with
-`runtime/postmask_column_not_inspectable` and reports it as an error finding, so neither check
+`runtime/postmask_column_not_inspectable` and reports it as an error finding, even for a column with no configured strategy, so neither check
 passes a column it did not read. A resident table with such a column used to be profiled as text and
 now fails the profile read the same way.
 
 `arrow_to_frame`, `arrow_to_series` and `arrow_to_frame_pair` are exported as experimental names.
-Each takes a required `on_unrepresentable(column)` callback that must raise. A source-read guard
-test fails on any other `to_pandas` call or `pandas.read_*` use outside the counted allowlist.
+Each takes a required `on_unrepresentable(column)` callback that must raise.

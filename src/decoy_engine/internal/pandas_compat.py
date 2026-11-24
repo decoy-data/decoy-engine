@@ -104,8 +104,7 @@ def arrow_to_frame(
 
     A column pandas cannot hold calls `on_unrepresentable(column)` after the conversion's own
     handler has closed, so the coded error it raises carries no pandas or Arrow text (which
-    quotes the value). Code outside this module never calls `to_pandas` itself; the guard in
-    `tests/sentry/source_read` fails on a bare call.
+    quotes the value). Code outside this module does not call `to_pandas` itself.
     """
     _no_widening(widen)
     failed = None

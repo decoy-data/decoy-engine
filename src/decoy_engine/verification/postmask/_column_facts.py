@@ -32,7 +32,6 @@ from decoy_engine import reasons
 from decoy_engine._execution_error import ExecutionError, postmask_not_inspectable
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
 from decoy_engine.internal.pandas_compat import (
-    arrow_to_frame_pair,
     arrow_to_series,
     exact_int_types_mapper,
 )
@@ -204,6 +203,8 @@ class _Tally:
     identical: int = 0
     same_bytes: bool = True
     error: str | None = None
+    # True when the output column itself could not be read (no detectors, no values).
+    unreadable: bool = False
     # detector id -> [hits, non-null values, threshold, name hint]
     detectors: dict[str, list[float | bool]] | None = None
     values: _ValueTally | None = None
@@ -217,35 +218,37 @@ def _output_series(
 ) -> pd.Series:
     """The output column as a series, with the identity tally run against the source when the
     column is compared. The dtype comes from the schema, so a null in one batch cannot retype an
-    integer column. A column pandas cannot hold raises the `postmask_column_not_inspectable` error."""
+    integer column. An output column pandas cannot hold raises the
+    `postmask_column_not_inspectable` error. A source column it cannot hold only marks the tally,
+    so the output is still read and its detectors still run."""
+    out_s = _read(out_batch, column)
     if src_batch is None or tally.error is not None:
-        index = out_batch.schema.get_field_index(column)
-        return arrow_to_series(
-            out_batch.column(index),
-            on_unrepresentable=postmask_not_inspectable,
-            types_mapper=exact_int_types_mapper,
-            name=column,
-        )
-    # One pair, converted together, so one rule covers both sides.
-    src_f, out_f = arrow_to_frame_pair(
-        _one_column(src_batch, column),
-        _one_column(out_batch, column),
-        on_unrepresentable=postmask_not_inspectable,
-        types_mapper=exact_int_types_mapper,
-    )
+        return out_s
     try:
-        _add_identity(tally, src_f[column], out_f[column])
+        src_s = _read(src_batch, column)
+    except ExecutionError as exc:
+        if exc.code != _NOT_INSPECTABLE_CODE:
+            raise
+        tally.error = exc.code
+        return out_s
+    try:
+        _add_identity(tally, src_s, out_s)
     except Exception as exc:
         # One column that cannot be compared (a list or map cell, say) must not take the other
         # columns down with it.
         if passes_through(exc):
             raise
         tally.error = type(exc).__name__
-    return out_f[column]
+    return out_s
 
 
-def _one_column(batch: pa.RecordBatch, column: str) -> pa.Table:
-    return pa.Table.from_batches([batch.select([column])]).replace_schema_metadata(None)
+def _read(batch: pa.RecordBatch, column: str) -> pd.Series:
+    return arrow_to_series(
+        batch.column(batch.schema.get_field_index(column)),
+        on_unrepresentable=postmask_not_inspectable,
+        types_mapper=exact_int_types_mapper,
+        name=column,
+    )
 
 
 def _aligned(
@@ -377,7 +380,7 @@ def column_facts(
         pairs = ((None, b) for b in out_read.read(wanted, batch_rows))
     for src_batch, out_batch in pairs:
         for c in wanted:
-            if tallies[c].error == _NOT_INSPECTABLE_CODE:
+            if tallies[c].unreadable:
                 continue  # a batch already showed this column cannot be read
             try:
                 out_s = _output_series(
@@ -387,6 +390,7 @@ def column_facts(
                 if exc.code != _NOT_INSPECTABLE_CODE:
                     raise
                 tallies[c].error = exc.code
+                tallies[c].unreadable = True
                 continue
             _add_detectors(tallies[c], out_s, c)
             values = tallies[c].values

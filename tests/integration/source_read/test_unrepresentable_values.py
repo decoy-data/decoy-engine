@@ -96,3 +96,26 @@ def test_post_mask_facts_mark_the_column_not_inspectable(tmp_path: Path) -> None
     )
     assert report["error_count"] >= 1
     assert "10000" not in str(report) and "2932897" not in str(report)
+
+
+def test_unconfigured_not_inspectable_output_column_is_one_error_finding(tmp_path: Path) -> None:
+    """No configured strategy, no detectors: the column still must not read as clean."""
+    config: dict[str, Any] = {"version": 2, "tables": [{"name": "t", "columns": []}]}
+    src = from_table("t", pa.table({"id": [1, 2, 3]}))
+    out = from_table("t", _TABLE)
+    report = run_post_mask_tables(
+        {"t": src}, {"t": out}, config=config, keys=(), scratch=tmp_path, memory_limit="512MB"
+    )
+    errors = [f for f in report["residual_pii"] if f["severity"] == "error" and f["column"] == "d"]
+    assert len(errors) == 1
+    assert "postmask_column_not_inspectable" in errors[0]["message"]
+    assert "10000" not in str(report)
+
+
+def test_a_source_only_failure_still_runs_the_output_detectors(tmp_path: Path) -> None:
+    emails = pa.array(["a@example.com", "b@example.com", "c@example.com"])
+    out = from_table("t", pa.table({"e": emails}))
+    src = from_table("t", pa.table({"e": _TABLE.column("d")}))
+    fact = column_facts(src, out, ["e"], scratch=tmp_path, memory_limit="512MB")["e"]
+    assert fact.identity_error == reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+    assert fact.detectors  # the output column was still read and checked
