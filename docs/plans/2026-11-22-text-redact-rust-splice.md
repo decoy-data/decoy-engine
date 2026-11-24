@@ -1,10 +1,10 @@
-Status: plan (revision 1, 2026-11-22)
+Status: plan (revision 2, 2026-11-24, re-anchored to cb06f318e)
 
 # TEXT-REDACT-RUST-SPLICE: text_redact detects and splices spans in Rust, over Arrow, on every native route
 
 Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: TEXT-REDACT-RUST-SPLICE (CLI `docs/roadmap/groups/mask.md:32`, group mask, 1.0.x, not started): "reusing detect and splice in text_mask.rs ... Output bytes do not change." V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`, line 68 and rank 10). Engine only. The CLI gets the change through its next engine pin bump.
 
-Anchors: a path with no prefix is under `src/decoy_engine/` in decoy-engine. `crate/` is the Rust crate `decoy-engine-native/src/`. Read at engine `origin/main` `70881ad79` (0.28.3). Line numbers are at that head.
+Anchors: a path with no prefix is under `src/decoy_engine/` in decoy-engine. `crate/` is the Rust crate `decoy-engine-native/src/`. Read at engine `origin/main` `70881ad79` (0.28.3) for revision 1; revision 2 re-checked every citation at `cb06f318e`. Line numbers are at `cb06f318e`. The crate and the text_redact Python modules did not change between the two heads; only `_chunked_evidence.py` line numbers moved.
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `performance.md`, `api-and-compatibility.md`, `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md` ("Where things go").
 
@@ -39,7 +39,7 @@ Parity of the last row against `native_text_redact(label_token=False)`: 0 mismat
 
 - (a) the `label_token` form, where each span becomes `[REDACTED:<detector_id>]`;
 - (b) an Arrow boundary, so the 1.1 us `to_pylist` and the list rebuild go away;
-- (c) a route label that says Rust ran. `executed_backend` (`execution/native/_chunked_evidence.py:116`) reports `arrow_python` for text_redact and text_mask, because their step returns `ran=None` (`_operator_step.py:347` comment). After this row, Rust does all the work for eligible cells, so `arrow_python` would understate the route.
+- (c) a route label that says Rust ran. `executed_backend` (`execution/native/_chunked_evidence.py:120`) reports `arrow_python` for text_redact and text_mask, because their step returns `ran=None` (`_operator_step.py:343` returns `StepResult(out, None)`; the text_mask comment at `:352` says the same). After this row, Rust does all the work for eligible cells, so `arrow_python` would understate the route.
 
 ### Overlap with RUST-DATE-TEXT (1.2)
 
@@ -81,13 +81,13 @@ Non-goals: full-Unicode cells and multi-thread splitting (RUST-DATE-TEXT, 1.2); 
 
 | Route | Entry | After this row |
 |---|---|---|
-| unified slice | `_operator_step.py:343` `native_text_redact` | same call, new body |
+| unified slice | `_operator_step.py:343` `native_text_redact` | same call, new body; `StepResult(out, ran)` |
 | chunked native | same step | same |
 | sequential | `_sequential_native_ops.py:474` | same |
 | out-of-core | `out_of_core/_text_redact_native.py:224` | same |
 | pandas full frame (native declined) | `TextRedactHandler.run` | unchanged (oracle) |
 
-One function body changes, so the four native routes move together. No route-specific code.
+One function body changes, so the four native routes move together. There are three call sites: the step (unified slice and chunked), the sequential caller and the out-of-core caller. Each one unpacks the new `(array, ran)` return (section 5.3). No other route-specific code.
 
 ### 4.2 Exit paths of the new call
 
@@ -99,7 +99,7 @@ One function body changes, so the four native routes move together. No route-spe
 | E4 | non-null cell that is not ASCII-safe | Rust marks it declined; the Python path runs for that cell only |
 | E5 | eligible cell | Rust output |
 | E6 | Rust boundary error (catalog mismatch, unknown id, length mismatch, unsupported array type) | a coded error from the boundary, mapped through the existing translation in `_text_redact_kernel.py`; never a silent fallback |
-| E7 | output length or null mask differs from the input | the existing `_checked_batch` guard pattern raises |
+| E7 | output length, type or null mask differs from the input | a check in the `_checked_batch` pattern (`_operator_step.py:210`) raises; the out-of-core caller keeps its own type and length check (`out_of_core/_text_redact_native.py:224-238`) |
 
 ### 4.3 Codes
 
@@ -164,13 +164,27 @@ A new pyfunction in `crate/text_mask.rs`: `text_span_splice(values, *, detector_
 3. If `declined` has any true value: take the declined cells with `pc.filter`, run today's Python fallback on them only (the code at `_kernels_scalar.py:183`), and put them back with `pc.replace_with_mask`.
 4. Return the output with `ran=True`.
 
-`native_text_redact` returns a `(array, ran)` pair. The four callers pass `ran` into `StepResult` or into their route evidence; today they hard-code `None`.
+`native_text_redact` returns a `(array, ran)` pair, where `ran` is true when at least one `text_span_splice` call ran. Each caller unpacks it:
+
+- Step (`_operator_step.py:343`): `return StepResult(out, ran)` in place of `StepResult(out, None)`. The unified slice then sets `evidence.compiled_kernel_executed` when `ran` is true (`physical/_shadow_operators.py:422`). The chunked path does the same at `native/_chunk_masking.py:263-273`. On `ran=False` that branch now also marks the column `kernel_idle` and changes the `counted` test that feeds `kernel_calls`. S1 checks that `kernel_calls` for a companion-absent text_redact column stays what it is today, and adds that case to AT-5.
+- Sequential (`_sequential_native_ops.py:470-476`): unpack and pass `ran` into the `NativeResult` the decision reads. The decision reports `self.backend if ran else _NO_KERNEL_RAN` (`_sequential_native_decisions.py:73`, `:101-108`), so the sequential route needs no new rule.
+- Out-of-core (`out_of_core/_text_redact_native.py:224`): unpack before the existing `isinstance(out, pa.Array)`, type and length check, which stays. The route's evidence counts `native_calls` and reports `self.backend if ran else _NO_BACKEND_RAN` (`:113-119`). S1 increments `native_calls` only when `ran` is true, so a companion-absent run keeps its current label. The module docstring "no fallback and no catch" stays true: the per-cell decline is inside `native_text_redact`, not in this caller.
 
 `native_text_mask` takes the same shape in S2, where `plan_native_splice` (`execution/native/_text_mask_native_splice.py`) already decides that a config is the redact and passthrough shape.
 
 ### 5.4 Route label
 
-`OperatorSpec` for `text_redact` and `text_mask` (`_operator_registry.py:162`, `:173`): `planned_backend=RUST_COMPANION`, `positive_kernel_evidence=True`, `required_kernel=None` (the operator still runs without the companion). `executed_backend` then gives `rust_companion` when `ran` is true and `arrow_python` when it is false, with no new rule. The chunked fold `merge_executed_backend` (`_chunked_evidence.py:128`) already keeps `rust_companion` if any chunk ran Rust.
+`OperatorSpec` for `text_redact` and `text_mask` (`_operator_registry.py:162`, `:173`): `planned_backend=RUST_COMPANION`, `required_kernel=None` (the operator still runs without the companion), and `positive_kernel_evidence` stays `False`.
+
+Revision 1 set `positive_kernel_evidence=True`. That is wrong: on the unified slice that flag raises `UnifiedSliceInvariantError` when no compiled kernel ran (`execution/_unified_slice_evidence.py:50-53`, `:125-133`). A companion-absent run (E1), an unsupported detector list (E2) and an all-non-ASCII column would then fail instead of running on the Python path, which breaks guarantees 5 and 6. The value-dependent kernels `bucket_perturb`, `date_shift` and `group_key` already use `planned_backend=RUST_COMPANION` with the flag `False`; text_redact and text_mask follow them.
+
+With these values:
+
+- Unified slice: `kernel_idle` is `planned != ARROW_PYTHON and not evidence.compiled_kernel_executed` (`_unified_slice_evidence.py:136`), so `executed_backend` (`_chunked_evidence.py:120`) gives `rust_companion` when any batch ran Rust and `arrow_python` when none did.
+- Chunked: `kernel_idle` comes from `StepResult.ran` being false (`_chunk_masking.py:263-273`). The fold `merge_executed_backend` (`_chunked_evidence.py:130`) keeps `rust_companion` if any chunk ran Rust.
+- Sequential and out-of-core: section 5.3.
+
+`_COMPANION_STRATEGIES` (`_chunked_evidence.py:59`) is derived from the registry, so it picks up both strategies with no edit.
 
 Consistency with ROUTE-LABEL-TRUTH: that plan reads the executed backend per column from these same fields and adds the decline record. This row changes only the spec values and the `ran` evidence.
 
@@ -181,9 +195,10 @@ Consistency with ROUTE-LABEL-TRUTH: that plan reads the executed backend per col
 | `SpanOut` core and `text_span_splice` | `decoy-engine-native/src/text_mask.rs` (341 lines, about +90) | native crate, by kernel | `text_redact/` |
 | bridge protocol for `text_span_splice` | `execution/native/_text_mask_native_splice.py` (`SpliceKernel`) | "Native companion bridge", fan-out freeze at 55 | no new module |
 | `native_text_redact` body | `execution/native/_kernels_scalar.py` (384 lines, about +30) | same | - |
-| spec values | `execution/_operator_registry.py` | "Pipeline spine and routes" | two field edits |
+| spec values | `execution/_operator_registry.py` (312 lines) | "Pipeline spine and routes" | one field edit per spec |
+| caller unpacking | `execution/native/_operator_step.py` (569 lines), `execution/_sequential_native_ops.py` (593 lines), `execution/out_of_core/_text_redact_native.py` (251 lines) | same | a few lines each; all stay under the 600-line limit |
 | tests | `tests/unit/execution/native/test_text_span_splice.py`; Rust tests in `text_mask.rs` | "Unit tests" | `tests/unit/execution/native/` |
-| docs | `docs/` route table rows for text_redact and text_mask; changelog fragment | docs | no `Breaking:` line |
+| docs | `docs/` route table rows for text_redact and text_mask; changelog fragment `changelog.d/text-redact-rust-splice.md` | docs | no `Breaking:` line: `native_text_redact` is private, so the signature sentry (#763, `tests/sentry/release/test_public_signatures.py`) does not see its new return; the new pyfunction is additive |
 
 No new Python module. `execution/native/` stays at its freeze.
 
@@ -229,7 +244,7 @@ No new Python module. `execution/native/` stays at its freeze.
 | AT-2 | Batch and thread invariance: one column at batch sizes 1, 7, 65,536 and whole, `native_threads` 1 and 4; outputs equal | no `text_span_splice` today | S1 |
 | AT-3 | Arrow boundary: `string` and `large_string` in; nulls stay null in place; empty and all-null arrays; output type `pa.string()`; an `int64` array raises `unsupported_type` | no entry today | S1 |
 | AT-4 | text_mask bytes unchanged on the new core: existing text_mask native-splice tests plus a redact and passthrough corpus through `text_span_splice` | no entry today | S1 (core), S2 (wired) |
-| AT-5 | Executed backend: with the companion, `rust_companion` for text_redact on the unified slice, chunked, sequential and out-of-core routes; without it, `arrow_python`; an all-non-ASCII column gives `arrow_python` | always `arrow_python` today | S1 (text_redact), S2 (text_mask) |
+| AT-5 | Executed backend: with the companion, `rust_companion` for text_redact on the unified slice, chunked, sequential and out-of-core routes; without it, `arrow_python` and no `UnifiedSliceInvariantError`; an all-non-ASCII column gives `arrow_python`; `kernel_calls` for a companion-absent chunked column equals today's value | always `arrow_python` today | S1 (text_redact), S2 (text_mask) |
 | AT-6 | A forced catalog-version mismatch, a bool `catalog_version` and an unknown detector id each raise their coded error and do not fall back to Python | no entry today | S1 |
 | AT-7 | Non-ASCII decline: output equals the oracle; no cell text appears in any warning, error or log record; the mapped error has no cause or context | no entry today | S1 |
 | AT-8 | Rust unit tests: `label_token` replacement per index; `SpanOut::Verbatim` keeps the span; ties on (start, length) keep requested order | no `SpanOut` today | S1 |
@@ -246,6 +261,7 @@ No new Python module. `execution/native/` stays at its freeze.
 | M5 | `executed_backend` reads `planned_backend` and ignores `ran` | AT-5 (companion-absent case) |
 | M6 | text_mask builds `Replace(token)` for a verbatim detector | AT-4 |
 | M7 | Build the output with `pa.array` from a Python list | AT-9 |
+| M8 | Set `positive_kernel_evidence=True` on the text_redact spec | AT-5 (companion-absent unified slice) |
 
 ## 10. Byte changes
 
@@ -254,7 +270,7 @@ None. AT-1 is the proof. The changelog fragment says the text_redact and text_ma
 ## 10a. Frozen contracts
 
 - `docs/compatibility-contract.md` freezes masked output bytes for shipped strategies. This row keeps them (AT-1).
-- The companion ABI version moves (a new pyfunction). The bridge's skew check already turns an old companion into E1, so an engine with a stale wheel stays correct and slow.
+- Companion ABI: revision 1 bumped the ABI string. Revision 2 does not. `text_span_splice` is a new symbol, and the loader finds it with `getattr` the way `load_text_redact_kernel` finds `text_redact_candidates` today (`_text_redact_kernel.py:110-140`). An old companion without the symbol is E1, so an engine with a stale wheel stays correct and slow. No existing pyfunction changes its signature: `text_mask_detect_splice` keeps its signature until S2 deletes it, and the S2 caller probes for `text_span_splice` first. This also avoids a collision with FPE-CHECKSUM-NATIVE, which takes `decoy-native-abi-4` (`origin/plan/fpe-checksum-native`). CODE-SET-NATIVE (`origin/plan/code-set-native`) names no ABI change. If the S1 reviewer finds a rule that any new pyfunction needs a bump, S1 takes the next free number after whatever is on main at merge time (abi-4 if FPE-CHECKSUM-NATIVE has not merged, else abi-5) and runs the engine repin checklist.
 - The backend vocabulary (`rust_companion`, `arrow_python`) is unchanged; only which value text_redact and text_mask report changes. Additive for consumers that read the label.
 
 ## 10b. Pre-mortem
@@ -269,8 +285,8 @@ None. AT-1 is the proof. The changelog fragment says the text_redact and text_ma
 
 | Slice | Content | Size | Gate |
 |---|---|---|---|
-| S1 | Rust `SpanOut` core, `text_span_splice`, Rust tests; `native_text_redact` on the new entry with decline scatter; `ran` threaded through the four callers; text_redact spec label; AT-1 to AT-3, AT-5 to AT-9; companion ABI bump and the engine repin checklist | M: about 250 lines Rust and Python, 300 lines tests | Codex and Dennis; T2 on the native and text_redact selection with the companion built |
-| S2 | `native_text_mask` redact and passthrough configs on `text_span_splice`; delete the `text_mask_detect_splice` list wrapper; text_mask spec label; AT-4, AT-5 for text_mask; docs route table | S: about 80 lines, 120 lines tests | Codex |
+| S1 | Rust `SpanOut` core, `text_span_splice`, Rust tests; `native_text_redact` on the new entry with decline scatter; `(array, ran)` unpacked in the step, sequential and out-of-core callers; text_redact spec `planned_backend` (flag stays `False`); AT-1 to AT-3, AT-5 to AT-9, M1 to M5, M7, M8; symbol probe, no ABI bump (section 10a) | M: about 270 lines Rust and Python, 320 lines tests, about one builder-day | Risk R2 (native boundary plus route evidence). Codex and Dennis; T2 on the native and text_redact selection with the companion built |
+| S2 | `native_text_mask` redact and passthrough configs on `text_span_splice`; delete the `text_mask_detect_splice` list wrapper; text_mask spec label; AT-4, AT-5 for text_mask; docs route table | S: about 80 lines, 120 lines tests, under one builder-day | Risk R2 (frozen text_mask bytes). Codex |
 
 Both slices fit before the 2026-12-15 engine-gap deadline.
 
