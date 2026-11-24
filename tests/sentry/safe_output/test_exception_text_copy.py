@@ -17,7 +17,6 @@ Messages name site keys only (file, function, rule), never the copied text.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -34,56 +33,21 @@ BASELINE = _baseline_sources.baseline_path(SENTRY_ID)
 AUDIT_PARITY = 100
 
 
-def _pinned() -> dict[str, int]:
-    doc = json.loads(BASELINE.read_text(encoding="utf-8"))
-    return {k: int(v["max"]) for k, v in doc["entries"].items()}
-
-
-def verdict(live: dict[str, int], pinned: dict[str, int]) -> list[str]:
-    """Value-free differences between the live census and the pinned one."""
-    out = [
-        f"new or grown site {k} (live {n}, pinned {pinned.get(k, 0)})"
-        for k, n in live.items()
-        if n > pinned.get(k, 0)
-    ]
-    out += [
-        f"shrunk or removed site {k} (live {live.get(k, 0)}, pinned {n}): lower the baseline"
-        for k, n in pinned.items()
-        if live.get(k, 0) < n
-    ]
-    return out
-
-
 def _total(counts: dict[str, int], bucket: str) -> int:
     return sum(n for k, n in counts.items() if k.startswith(f"{bucket}::"))
 
 
-def test_engine_copies_match_baseline() -> None:
-    assert verdict(census(scan_tree(SRC)), _pinned()) == []
+# Live-versus-pinned equality for this sentry is owned by the registered check in
+# tests/sentry/test_baseline_registry.py (the source is in tests/sentry/_baseline_sources.py).
+# The merge-base ratchet then refuses a raised max or a new key.
 
 
 def test_audit_bucket_matches_the_historical_census() -> None:
     live = census(scan_tree(SRC))
     assert _total(live, "audit") == AUDIT_PARITY
-    assert _total(_pinned(), "audit") == AUDIT_PARITY
 
 
-def test_extra_bucket_is_pinned_apart() -> None:
-    live = census(scan_tree(SRC))
-    assert _total(live, "extra") == _total(_pinned(), "extra")
-    assert _total(live, "extra") > 0  # the SFTP `last_exc` alias is one of them
-
-
-# ---- the pin cannot move up or sideways -------------------------------------------------------
-
-
-def test_verdict_fails_on_growth_swap_and_unlowered_shrink() -> None:
-    a, b = "audit::a.py::f::str(exc)::raise", "audit::b.py::g::str(exc)::raise"
-    assert verdict({a: 2}, {a: 1}) != []
-    assert verdict({a: 1, b: 1}, {a: 1}) != []
-    assert verdict({a: 1}, {a: 1, b: 1}) != []  # shrink without lowering
-    assert verdict({b: 1}, {a: 1}) != []  # equal count, swapped site
-    assert verdict({a: 1}, {a: 1}) == []
+# ---- the pin cannot move up or sideways (merge-base ratchet) -------------------------------------------------------
 
 
 def test_merge_base_ratchet_catches_a_raised_pin_and_a_site_swap() -> None:
@@ -121,6 +85,12 @@ def test_seed_fires(form: str) -> None:
     copies = scan_source(SEEDS[form])
     assert form in {c.form for c in copies}
     assert {c.bucket for c in copies} == {"audit"}
+
+
+@pytest.mark.parametrize("name", ["exc", "err", "e", "error", "ex", "exception", "cause", "inner"])
+def test_parameter_name_entry(name: str) -> None:
+    (copy,) = scan_source(f"def f({name}):\n    return str({name})\n")
+    assert (copy.binding, copy.bucket) == ("param", "audit")
 
 
 def test_parameter_bindings_fire() -> None:
@@ -167,6 +137,16 @@ def test_alias_of_an_exception_binding_is_an_extra_copy() -> None:
         "raise",
     )
     assert copy.key == "extra::<memory>::f::f{exc}::raise"
+
+
+def test_annotated_alias_is_an_extra_copy() -> None:
+    src = (
+        "def f(items):\n    saved = None\n    try:\n        return items()\n"
+        "    except ValueError as exc:\n        saved: Exception = exc\n"
+        "    return str(saved)\n"
+    )
+    (copy,) = scan_source(src)
+    assert (copy.bucket, copy.binding, copy.form) == ("extra", "alias", "str(exc)")
 
 
 def test_alias_of_a_plain_name_is_not_a_copy() -> None:
@@ -264,6 +244,7 @@ def test_log_entry(name: str) -> None:
 def test_typed_lists_match_the_rule_sets() -> None:
     from tests.sentry.safe_output import _copies
 
+    assert {"exc", "err", "e", "error", "ex", "exception", "cause", "inner"} == _copies.PARAM_NAMES
     assert set(ATTRS) == _copies.TEXT_ATTRS
     assert set(TRACEBACKS) == _copies.TRACEBACK
     assert set(TERMINALS) == _copies.TERMINAL

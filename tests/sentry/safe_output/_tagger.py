@@ -144,6 +144,20 @@ def own_nodes(scope: ast.AST) -> list[ast.AST]:
     return own
 
 
+def ordered_assignments(own: list[ast.AST]) -> list[ast.Assign | ast.AnnAssign | ast.AugAssign]:
+    """Plain, annotated and augmented assignments of a scope, in source order."""
+    return sorted(
+        (n for n in own if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign))),
+        key=lambda n: (n.lineno, n.col_offset),
+    )
+
+
+def assign_target_names(node: ast.Assign | ast.AnnAssign | ast.AugAssign) -> list[str]:
+    """The plain names an assignment binds (`a = b = x`, `a: T = x`, `a += x`)."""
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return [t.id for t in targets if isinstance(t, ast.Name)]
+
+
 def tainted_names(own: list[ast.AST], risky: frozenset[str]) -> frozenset[str]:
     """Names assigned from a risky expression, in source order, one pass.
 
@@ -153,14 +167,9 @@ def tainted_names(own: list[ast.AST], risky: frozenset[str]) -> frozenset[str]:
     expression-only check cannot see because `stderr_tail` is not a risky name.
     """
     tainted: set[str] = set()
-    assigns = sorted(
-        (n for n in own if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign))),
-        key=lambda n: (n.lineno, n.col_offset),
-    )
-    for node in assigns:
+    for node in ordered_assignments(own):
         if node.value is None:
             continue
         if risky_in(node.value, risky | tainted):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            tainted |= {t.id for t in targets if isinstance(t, ast.Name)}
+            tainted |= set(assign_target_names(node))
     return frozenset(tainted)

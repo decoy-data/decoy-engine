@@ -27,7 +27,12 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
-from tests.sentry.safe_output._tagger import format_builtin, own_nodes
+from tests.sentry.safe_output._tagger import (
+    assign_target_names,
+    format_builtin,
+    ordered_assignments,
+    own_nodes,
+)
 
 PARAM_NAMES = frozenset({"exc", "err", "e", "error", "ex", "exception", "cause", "inner"})
 TEXT_ATTRS = frozenset(
@@ -158,21 +163,19 @@ def _form(node: ast.AST, bound: dict[str, str]) -> tuple[str, str] | None:
 def _aliases(scope: ast.AST, bound: dict[str, str]) -> dict[str, str]:
     """Names assigned straight from an exception binding of this scope: `last_exc = exc`.
 
-    Bounded on purpose: one scope, plain `name = bound_name` assignments in source order (so a
+    Bounded on purpose: one scope, plain or annotated `name = bound_name` assignments in source order (so a
     chain of aliases resolves), no flow through calls or containers. Seeded only by this
     module's own bindings (handler names and exception-like parameters).
     """
     own = own_nodes(scope)
     known = set(bound) | {n.name for n in own if isinstance(n, ast.ExceptHandler) and n.name}
     found: dict[str, str] = {}
-    assigns = sorted(
-        (n for n in own if isinstance(n, ast.Assign)), key=lambda n: (n.lineno, n.col_offset)
-    )
-    for node in assigns:
+    for node in ordered_assignments(own):
+        # AE4 is narrower than the tagger: only a direct name (`last = exc`, `last: E = exc`).
         if isinstance(node.value, ast.Name) and node.value.id in known | set(found):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id not in bound:
-                    found[target.id] = "alias"
+            for name in assign_target_names(node):
+                if name not in bound:
+                    found[name] = "alias"
     return found
 
 
