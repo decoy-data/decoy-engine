@@ -1,4 +1,4 @@
-Status: plan (revision 6, 2026-11-24; S1 only with a bounded memo, S2 to re-plan)
+Status: plan (revision 7, 2026-11-24; S1 build-ready, S2 to re-plan)
 
 # CODE-SET-NATIVE: code_set masks once per distinct value on the handler routes, with a bounded memo
 
@@ -8,7 +8,18 @@ Source anchor: engine main `9f7bb1f4a`. Every file this plan touches is unchange
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `performance.md`, `security.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md`.
 
-Risk: R2 (masking output on every handler route). Plan review history: Dennis r1 GO-WITH-FIXES, Codex r1 NO-GO, codex-fix to rev 4, Codex r2 NO-GO, Opus rework to rev 5, Codex r3 NO-GO, owner split to rev 6 (S1 goes ahead, S2 re-plans). Code gate: Codex and Dennis.
+Risk: R2 (masking output on every handler route). Plan review history: Dennis r1 GO-WITH-FIXES, Codex r1 NO-GO, codex-fix to rev 4, Codex r2 NO-GO, Opus rework to rev 5, Codex r3 NO-GO, owner split to rev 6 (S1 goes ahead, S2 re-plans), Codex S1 review NO-GO (one V1, three test findings), rev 7 applies all four. No further plan round; S1 is build-ready. Code gate: Codex and Dennis.
+
+## Changes in revision 7
+
+Codex reviewed rev 6 (S1 only) at `00ac54ac2`: NO-GO with one V1 finding and three test findings. Rev 7 applies all four as Codex wrote them. The owner closed plan review here: S1 is build-ready, and the code gate checks the build against the acceptance tests and mutations below.
+
+| Codex S1 finding | Resolution in rev 7 |
+|---|---|
+| 1 V1: the local `key` keeps the previous string alive while the next `str(value)` is built. Two rows, each a list holding one 16 MiB ASCII string: base peak 36.01 MiB, planned loop 52.01 MiB, and `MemoryError` on the second row with 56 MiB headroom, though the memo stored zero entries | 5.1 step 6: release `key` after the store decision on both the fresh-success and fresh-failure paths, before the iterator advances or the output column is assigned. AT-5 (b) adds the zero-entry two-16-MiB-keys case; its peak must match the base. New mutation M10 |
+| 2 V2-LOG: AT-5 passes the unbounded mutant, because `str(value) is value` for prebuilt strings | AT-5 (a) uses built-in `bytes` cells, so `str(value)` builds a fresh 4 KiB key, and a fresh frame per run, because the handler replaces the column. M9 is an AT-6 (iii) kill only |
+| 3 V2-LOG: AT-1 asks for an Arrow schema the base cannot produce on the mixed-object fixture | AT-1 (a) compares pandas values, original object types, dtype, evidence and ordered row errors. Arrow schemas are compared only where the output converts; where the base conversion raises, the test asserts the same exception |
+| 4 V2-LOG: AT-6 cannot detect a memo that reopens | AT-6 (v): `a` and `b` stored with spare bytes left, an oversized `c` closes the memo, then a short repeated `d` that would fit the spare bytes; both `d` rows call the scalar function. New mutation M11 |
 
 ## Changes in revision 6
 
@@ -138,6 +149,7 @@ Per non-missing cell:
 3. If `key in failed`: `reason = failed[key]`. Otherwise run today's `try` block unchanged with `key` as the first argument. On success: store if open (step 5), append, set `masked_any`, continue. On a `PlanCompileError` with a code not in `_PER_VALUE_CODE_SET_ERRORS`: re-raise, as today. On a per-value code: `reason = f"code_set could not mask this value ({exc.code})"` (verbatim), store it in `failed` if open (step 5).
 4. One row-error site for both the memo hit and the fresh failure: append `RowError(column=column, row_index=i, trigger="mask_error", reason=reason)` and append `value` (this row's own object).
 5. Store rule: `size = sys.getsizeof(key)`. If `memo_open` and `len(done) + len(failed) < _MEMO_MAX_ENTRIES` and `memo_bytes + size <= _MEMO_MAX_KEY_BYTES`, insert and add `size` to `memo_bytes`. Otherwise set `memo_open = False` and do not insert. Once closed, the memo stays closed for this call, so the check is one boolean test per later new value.
+6. Release `key` after the store decision on both the fresh-success and fresh-failure paths (`del key` or rebind it), before the iterator advances or the output column is assigned. The base loop passes `str(value)` straight into the call, so it never holds two keys at once; without this step the loop holds the previous key while the next `str(value)` is built, and a column of keys too large for the memo raises `MemoryError` where the base completes.
 
 The memo stores only keys and the values `apply_code_set` returned or the reason text. Outputs are corpus codes and reasons are short fixed text, so the entry cap bounds them. Keys are the variable-size part, so the byte cap counts keys. Both dicts share one entry count and one byte counter.
 
@@ -169,13 +181,13 @@ Pinned surfaces: secret-material census, draw-site catalogue, F29 reason invento
 | 3 | State and concurrency | memo dicts and counters | locals of one `run` call; caps are read-only module constants | AT-1 (two calls, two namespaces, two corpora) | M3 |
 | 4 | Route parity and silent fallback | four handler routes; the scalar fallback past a cap | every route runs the same loop; the fallback is the base scalar call, so over-cap output is the base output | AT-1, AT-6 | M7, M8 |
 | 5 | Referential integrity | code_set payloads on FK-bearing tables | handler output is unchanged per value, so joins across rows and runs keep their codes | AT-1 (repeats split across chunks give equal codes) | M1 |
-| 6 | Untrusted producer | customer column contents, including long or many distinct strings | memory added by the memo is capped by named constants; no customer value reaches a message | AT-5 | M8, M9 |
+| 6 | Untrusted producer | customer column contents, including long or many distinct strings | memory added by the memo is capped by named constants; the loop holds at most one unstored key; no customer value reaches a message | AT-5, AT-6 (iii) | M8, M9, M10 |
 | 7 | Check then use | the cap check against the insert | check and insert happen in the same step with the same `size`; the counter only grows | AT-6 (byte cap at exact boundary) | M9 |
 | 8 | Weak tests | value parity passes before the change | call counts (AT-2, AT-6), the perf ratio (AT-4) and the memory bound (AT-5) carry fail-before or mutation kills | AT-2, AT-4, AT-5, AT-6 | M7, M8 |
 | 9 | Refactor drift | the handler loop gains a memo and one row-error site | golden outputs captured on the base head, under three pandas option sets; gen loop untouched | AT-1 | M1, M6 |
 | 10 | Frozen contract drift | full-frame handler output and error text (section 10) | the memo returns what the scalar call returned for the same key; the fallback is the scalar call; reason f-string kept verbatim | AT-1, AT-6 | M2, M8 |
 | 12 | Error precedence | fatal and per-value errors | first occurrence calls the unchanged scalar function in row order | AT-2 | M7 |
-| 11 | Unbounded resource growth | memo size on a high-cardinality column | entry and byte caps, then scalar fallback | AT-5, AT-6 | M8, M9 |
+| 11 | Unbounded resource growth | memo size on a high-cardinality column; a key held past its row | entry and byte caps, a memo that stays closed, then scalar fallback; `key` released after the store decision | AT-5, AT-6 | M8 to M11 |
 
 Recurring-defect catalog: no new validation grammar, persisted type or scanner. The new caps are not raised caps: they are new limits on an internal cache, and passing them only falls back to today's path. No exception context is added (the memo stores strings). No value text is added to any log or message. Mutations run on the final head of the slice, head recorded.
 
@@ -185,11 +197,11 @@ AT-1 parity passes on the base head by design. AT-2, AT-4, AT-5 and AT-6 carry t
 
 | ID | Test | Fail-before or kill |
 |---|---|---|
-| AT-1 | Golden parity against the base handler, captured on the S1 base head. Two boundaries. (a) At `CodeSetHandler.run`: one object column with `"1"`, `1`, `1.0`, `True`, `None`, `NaN`, `pd.NA`, a lone-surrogate string, and repeats of each; a float column; Int64 with NA; boolean extension; category; datetime64 with NaT; non-empty all-null; zero rows; shipped `icd10` plus one more shipped corpus; namespaces `cs`, another, and absent; `chapter_preserve` false and true, with an absent chapter and a sole-member bucket interleaved and repeated, plus a missing row and a success. Two handler calls in one process with different namespaces and corpora (M3). Gen mode on the same columns. (b) Route entries (full frame, chunked oracle with two chunks that split repeats, nested, sequential) with text columns only, `chapter_preserve` false, mask mode, since the chunked oracle declines numeric, gen and `chapter_preserve` shapes. Compare outputs, the full `RowError` list (index, column, trigger, reason, order), the original failed object per row, evidence in `ctx.code_set_corpora`, pandas dtype and `pa.Table.from_pandas` schema. Run under default pandas options, `mode.string_storage="pyarrow"` and `future.infer_string=True` | M1, M2, M3, M6 |
+| AT-1 | Golden parity against the base handler, captured on the S1 base head. Two boundaries. (a) At `CodeSetHandler.run`: one object column with `"1"`, `1`, `1.0`, `True`, `None`, `NaN`, `pd.NA`, a lone-surrogate string, and repeats of each; a float column; Int64 with NA; boolean extension; category; datetime64 with NaT; non-empty all-null; zero rows; shipped `icd10` plus one more shipped corpus; namespaces `cs`, another, and absent; `chapter_preserve` false and true, with an absent chapter and a sole-member bucket interleaved and repeated, plus a missing row and a success. Two handler calls in one process with different namespaces and corpora (M3). Gen mode on the same columns. (b) Route entries (full frame, chunked oracle with two chunks that split repeats, nested, sequential) with text columns only, `chapter_preserve` false, mask mode, since the chunked oracle declines numeric, gen and `chapter_preserve` shapes. Compare the returned pandas values, the original object type per failed row, pandas dtype, evidence in `ctx.code_set_corpora` and the ordered `RowError` list (index, column, trigger, reason). Compare the `pa.Table.from_pandas` schema only where the base output converts. Where the base conversion raises (the mixed-object chapter fixture keeps both `1` and `"1"` and raises `ArrowTypeError`), assert the memo output raises the same exception. Run under default pandas options, `mode.string_storage="pyarrow"` and `future.infer_string=True` | M1, M2, M3, M6 |
 | AT-2 | Spy on `apply_code_set` inside the handler, default caps. Mask mode: exactly one call per distinct `str(value)` of non-missing cells, in first-occurrence order; zero calls for zero rows and for all-missing input. A column whose first non-null value triggers E4 raises the same exception class, code and message as base at the same call. Fatal precedence: a chapter corpus under a lone-surrogate namespace, with an absent-chapter row first and a valid draw second, records the same row errors as base before the same raise. A lone-surrogate namespace with all-missing input succeeds with zero calls (as base). Gen mode: one call per non-missing row (unchanged) | one call per row today; M7 |
 | AT-4 | `perf` marker: 200,000 rows, 2,000 distinct codes, object column, `CodeSetHandler.run` end to end, mask mode, base loop and memo in the same process on the same sample. Require a ratio of at least 15x (ratio only, as the default gate runs `perf`). The PR records the measured ratio and the Dell numbers | about 1x today; M7 |
-| AT-5 | Codex reproduction, default caps: 24,000 distinct strings of 4 KiB each in an object column, mask mode, shipped `icd10`, `chapter_preserve` false. The handler completes and its output equals the base output. Under `tracemalloc`, the peak of the memo run minus the peak of the base run on the same input is at most `_MEMO_MAX_KEY_BYTES` plus 2 MiB slack (dict tables and counters). No process memory limit is set, so the test does not depend on the host | unbounded memo adds about 96 MiB; M8, M9 |
-| AT-6 | Equal output under and over the caps, with call counts. Column `[a, b, c, a, b, c, d, d]` with `a` and `c` valid codes, `b` a per-value failure (absent chapter under `chapter_preserve`) and `d` valid, with `a`, `b` and `c` of equal length so their `getsizeof` is equal. (i) Default caps: 4 calls. (ii) `_MEMO_MAX_ENTRIES = 2` by monkeypatch: `a` and `b` stored, the memo closes at `c`; calls are `a, b, c, c, d, d` (6). (iii) `_MEMO_MAX_KEY_BYTES` set to exactly `getsizeof(a) + getsizeof(b)`: same calls as (ii), proving the boundary is inclusive and a failed key counts toward bytes. (iv) Both caps at 0: one call per non-missing row. In every case the output, the `RowError` list and failed objects equal the base handler's | M8 (calls drop to 4 in ii to iv), M9 (iii calls drop) |
+| AT-5 | Memory bound, default caps, mask mode, shipped `icd10`, `chapter_preserve` false, under `tracemalloc`. No process memory limit is set, so the test does not depend on the host. (a) 24,000 distinct built-in `bytes` cells of 4 KiB each in an object column, so `str(value)` builds a fresh 4 KiB key per row. Each run (base and memo) gets a fresh frame, because the handler replaces the column. The handler completes, its output equals the base output, and the memo run's peak minus the base run's peak is at most `_MEMO_MAX_KEY_BYTES` plus 2 MiB slack (dict tables and counters). (b) Zero-entry case: two rows, each a list holding one 16 MiB ASCII string, so neither key fits the byte cap and the memo stores nothing. The memo run's peak matches the base peak (within 1 MiB) and both rows return the base codes | (a) unbounded memo adds about 96 MiB; (b) about +16 MiB without step 6; M8, M10 |
+| AT-6 | Equal output under and over the caps, with call counts. Column `[a, b, c, a, b, c, d, d]` with `a` and `c` valid codes, `b` a per-value failure (absent chapter under `chapter_preserve`) and `d` valid, with `a`, `b` and `c` of equal length so their `getsizeof` is equal. (i) Default caps: 4 calls. (ii) `_MEMO_MAX_ENTRIES = 2` by monkeypatch: `a` and `b` stored, the memo closes at `c`; calls are `a, b, c, c, d, d` (6). (iii) `_MEMO_MAX_KEY_BYTES` set to exactly `getsizeof(a) + getsizeof(b)`: same calls as (ii), proving the boundary is inclusive and a failed key counts toward bytes. (iv) Both caps at 0: one call per non-missing row. (v) Spare bytes: column `[a, b, c, d, d]` with `_MEMO_MAX_KEY_BYTES` set to `getsizeof(a) + getsizeof(b) + getsizeof(d)`, so spare bytes remain after `a` and `b`; `c` is an oversized string whose `getsizeof` passes the spare bytes, so the memo closes at `c`; `d` is short and would fit the spare bytes. Both `d` rows call the scalar function (5 calls). In every case the output, the `RowError` list and failed objects equal the base handler's | M8 (calls drop to 4 in ii to iv), M9 (iii calls drop), M11 (v drops to 4 calls) |
 
 Existing code_set tests (pin, swap, mismatch, evidence, quarantine, `when:` preflight) stay green unchanged.
 
@@ -203,7 +215,9 @@ Existing code_set tests (pin, swap, mismatch, evidence, quarantine, `when:` pref
 | M6 | apply the memo in gen mode | AT-1 gen case |
 | M7 | remove the memo hit path (call per row) | AT-2, AT-4 |
 | M8 | remove both caps (unbounded memo) | AT-5 (peak), AT-6 (call counts) |
-| M9 | drop the byte cap, or stop counting failed keys toward it | AT-5 (peak), AT-6 (iii) |
+| M9 | drop the byte cap, or stop counting failed keys toward it | AT-6 (iii) |
+| M10 | keep `key` bound across iterations (skip step 6) | AT-5 (b) |
+| M11 | let the memo reopen after closing (keep trying to store later, smaller keys) | AT-6 (v) |
 
 M4 and M5 belonged to S2 and go to its re-plan.
 
@@ -224,8 +238,10 @@ M4 and M5 belonged to S2 and go to its re-plan.
 
 | Slice | Content | Size | Risk | Gate |
 |---|---|---|---|---|
-| S1 | Bounded handler memo (5.1), AT-1, AT-2, AT-4, AT-5, AT-6, M1 to M3, M6 to M9. Docs and CHANGELOG line | half a builder-day plus gate | R2 | Codex and Dennis; T1 code_set tests plus F29 and census sentries (expected zero delta) |
+| S1 (build-ready) | Bounded handler memo (5.1), AT-1, AT-2, AT-4, AT-5, AT-6, M1 to M3, M6 to M11. Docs and CHANGELOG line | half a builder-day plus gate | R2 | Codex and Dennis; T1 code_set tests plus F29 and census sentries (expected zero delta) |
 | S2 | re-plan | - | - | - |
+
+S1 build evidence: the S1 build PR must show each acceptance test red, then green (AT-1 by its mutations, since its parity passes on base), and must show M8 and M9 red. Codex reviews the code against those gates.
 
 ### S2: re-plan
 
