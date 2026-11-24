@@ -24,9 +24,7 @@ def format_error_reason(strategy: str) -> str:
 
     A strategy with no entry is an invariant error: the caller asked for a reason nobody owns.
     """
-    try:
-        return _REASONS[strategy]
-    except KeyError:
-        raise LookupError(
-            f"no format-error reason is registered for strategy {strategy!r}"
-        ) from None
+    reason = _REASONS.get(strategy)
+    if reason is None:
+        raise LookupError(f"no format-error reason is registered for strategy {strategy!r}")
+    return reason
