@@ -155,7 +155,7 @@ class SubsetStageScope:
             resident_fn=resident_fn,
             root=root,
             batch_rows=_BATCH_ROWS,
-            max_bytes=resolve_temp_disk_budget(),
+            max_bytes=resolve_temp_disk_budget(root.parent),
             stem=_STEM,
             open_fn=open_fn,
         )

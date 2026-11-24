@@ -165,7 +165,7 @@ module = "decoy_engine/execution/_pipeline_route_exec.py"
 function = "resolve_temp_disk_budget"
 sink = "shutil.disk_usage"
 ordinal = 0
-rule = "`default_ooc_temp_root()`, `tempfile.gettempdir()`"
+rule = "the `root` argument: `fileaccess.scratch_root()` or the parent of the run's own scratch root"
 owner = "cam"
 reason = "free-disk probe on the engine's own temp filesystem"
 
@@ -267,7 +267,7 @@ module = "decoy_engine/execution/out_of_core/_budget.py"
 function = "temp_disk_bytes"
 sink = "Path.exists"
 ordinal = 0
-rule = "scratch root the out-of-core runner created (`tempfile.mkdtemp`) or `tempfile.gettempdir()`"
+rule = "scratch root the out-of-core runner created or `fileaccess.scratch_root()`"
 owner = "cam"
 reason = "disk-budget accounting over the engine's own spill space"
 
@@ -276,7 +276,7 @@ module = "decoy_engine/execution/out_of_core/_budget.py"
 function = "temp_disk_bytes"
 sink = "os.walk"
 ordinal = 0
-rule = "scratch root the out-of-core runner created (`tempfile.mkdtemp`) or `tempfile.gettempdir()`"
+rule = "scratch root the out-of-core runner created or `fileaccess.scratch_root()`"
 owner = "cam"
 reason = "disk-budget accounting over the engine's own spill space"
 
@@ -285,7 +285,7 @@ module = "decoy_engine/execution/out_of_core/_budget.py"
 function = "temp_disk_bytes"
 sink = "os.path.getsize"
 ordinal = 0
-rule = "scratch root the out-of-core runner created (`tempfile.mkdtemp`) or `tempfile.gettempdir()`"
+rule = "scratch root the out-of-core runner created or `fileaccess.scratch_root()`"
 owner = "cam"
 reason = "disk-budget accounting over the engine's own spill space"
 
@@ -294,7 +294,7 @@ module = "decoy_engine/execution/out_of_core/_budget.py"
 function = "_nearest_existing_ancestor"
 sink = "Path.exists"
 ordinal = 0
-rule = "scratch root the out-of-core runner created (`tempfile.mkdtemp`) or `tempfile.gettempdir()`"
+rule = "scratch root the out-of-core runner created or `fileaccess.scratch_root()`"
 owner = "cam"
 reason = "disk-budget accounting over the engine's own spill space"
 
@@ -303,7 +303,7 @@ module = "decoy_engine/execution/out_of_core/_budget.py"
 function = "check_disk_spill_preflight"
 sink = "shutil.disk_usage"
 ordinal = 0
-rule = "scratch root the out-of-core runner created (`tempfile.mkdtemp`) or `tempfile.gettempdir()`"
+rule = "scratch root the out-of-core runner created or `fileaccess.scratch_root()`"
 owner = "cam"
 reason = "disk-budget accounting over the engine's own spill space"
 

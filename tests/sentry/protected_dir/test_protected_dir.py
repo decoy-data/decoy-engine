@@ -30,7 +30,13 @@ CATEGORIES = frozenset(
 # Protected-root rows allowed outside the allocator. Every engine row directory goes through it,
 # so this is empty and only the allocator may own a protected_root row.
 PENDING_L0_2: tuple[str, ...] = ()
-_CREATOR_NAMES = ("mkdir", "makedirs", "mkdtemp", "TemporaryDirectory")
+# `mkstemp` and `NamedTemporaryFile` make a file in a directory that already exists.
+_FILE_ONLY = frozenset({"tempfile.mkstemp", "tempfile.NamedTemporaryFile"})
+_CREATOR_NAMES = (
+    "mkdir",
+    "makedirs",
+    *(n.rsplit(".", 1)[-1] for n in sorted(sinks.TEMP_CREATORS - _FILE_ONLY)),
+)
 
 
 def _creating_sinks() -> frozenset[str]:
