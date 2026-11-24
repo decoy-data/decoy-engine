@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._fdtree import _close
+from decoy_engine.fileaccess._link import CREATOR_KEY, LINK_UNSUPPORTED, link_noclobber_at
 from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
     FileSeal,
@@ -37,7 +38,7 @@ __all__ = ["PROBE_NAME", "StageClaim", "claim_file_at", "probe_claim", "seal_at"
 
 PROBE_NAME = ".decoy-claim-probe"  # a claim probe's name in the unit stage; removed at once
 _SLOT_PROBE = "probe"
-_CREATOR_KEY = "fileaccess.stage"  # the denial key `_output` uses for a bad name given to a creator
+_CREATOR_KEY = CREATOR_KEY
 _FINAL_MODE = 0o600
 _PROBE_START_MODE = 0o644
 _OPEN_FINAL = _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.CLOEXEC | _osflags.NONBLOCK
@@ -102,7 +103,6 @@ def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> Fil
     both files untouched. After the link the source name is removed and the final name is
     checked and tightened (`_tighten`); on any failure the final name this call made is removed.
     Errors keep no path, name or OS text and carry no context."""
-    from decoy_engine.fileaccess import _durable  # `_durable` imports `_output`, which imports us
 
     validate_component(src_name, _CREATOR_KEY)
     validate_component(dst_name, _CREATOR_KEY)
@@ -111,7 +111,7 @@ def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> Fil
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT))
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise FileAccessUnavailable("only a plain, singly linked file can be claimed")
-    _durable.link_noclobber_at(src_fd, src_name, dst_fd, dst_name)
+    link_noclobber_at(src_fd, src_name, dst_fd, dst_name)
     seal: FileSeal | None = None
     code = 0
     try:
@@ -124,7 +124,7 @@ def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> Fil
         return seal
     with contextlib.suppress(OSError):
         os.unlink(dst_name, dir_fd=dst_fd)
-    if code in _durable._LINK_UNSUPPORTED or code == errno.ENOTSUP:
+    if code in LINK_UNSUPPORTED or code == errno.ENOTSUP:
         raise LinkUnsupported(code)
     raise FileAccessUnavailable("the file could not be claimed")
 

@@ -11,12 +11,15 @@ carries its own registry entry.
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
+import sys
 from pathlib import Path
 
 from decoy_engine.fileaccess import _durable, _osflags
 from decoy_engine.fileaccess._fdtree import _close
+from decoy_engine.fileaccess._link import link_noclobber_at, raise_link_error
 from decoy_engine.fileaccess._output import (
     STAGE_PREFIX,
     _call,
@@ -107,9 +110,19 @@ def _publish_durable_dir(stage: Path, held: HeldStage, target: Path) -> None:
 
 def link_noclobber_beside(staged: Path, target: Path) -> None:
     """Link `staged` to `target`, both names in one folder, without replacing `target`: the
-    ambient exclusive publish, through the one link primitive (never a path-form `os.link`)."""
-    parent_fd = _open_dir(target.parent)
+    ambient exclusive publish. A backend with descriptor links goes through the one primitive;
+    one without (Windows, or an `os.link` with no `dir_fd`) takes the plain two-path call, and
+    both answer through `raise_link_error`."""
+    if sys.platform != "win32" and os.link in os.supports_dir_fd:
+        parent_fd = _open_dir(target.parent)
+        try:
+            link_noclobber_at(parent_fd, staged.name, parent_fd, target.name)
+        finally:
+            _close(parent_fd)
+        return
+    code = 0
     try:
-        _durable.link_noclobber_at(parent_fd, staged.name, parent_fd, target.name)
-    finally:
-        _close(parent_fd)
+        os.link(staged, target)
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    raise_link_error(code)

@@ -147,6 +147,8 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ),
     # A bounded read over its cap; the publisher maps its own reads to a refusal first.
     ("decoy_engine.fileaccess._types", "LeafTooLarge", reasons.decoy.PUBLICATION_FAILED),
+    # A target that cannot hard-link or ignores chmod (DL1): a delivery claim fails at open.
+    ("decoy_engine.fileaccess._types", "LinkUnsupported", reasons.decoy.PUBLICATION_FAILED),
     ("decoy_engine.publication._current", "PointerUnreadable", reasons.decoy.PUBLICATION_FAILED),
     (
         "decoy_engine.verification.postmask._route_guard",

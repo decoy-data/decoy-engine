@@ -45,6 +45,7 @@ __all__ = [
     "LOCK_ERRORS",
     "MAX_COUNT",
     "OPERATION_ID_PATTERN",
+    "OPTIONAL_ROLES",
     "ROLES",
     "UNITS",
     "UNIT_IMMUTABLE_DIRECTORY",
@@ -80,6 +81,9 @@ Role = Literal["table", "quarantine", "report"]
 UNIT_IMMUTABLE_DIRECTORY: Final[Unit] = "immutable_directory/v1"
 UNITS: Final[tuple[str, ...]] = get_args(Unit)
 ROLES: Final[tuple[str, ...]] = get_args(Role)
+# Roles whose member may be absent from a delivered unit: a quarantine run with no rows writes no
+# sidecar. Every other member is required, and `StagedMember.omit` refuses it.
+OPTIONAL_ROLES: Final[tuple[str, ...]] = ("quarantine",)
 _OUTCOMES: Final[tuple[str, ...]] = get_args(Outcome)
 
 OPERATION_ID_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"

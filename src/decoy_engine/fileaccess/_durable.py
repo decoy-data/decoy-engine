@@ -24,6 +24,7 @@ from typing import Literal, NoReturn, TypeVar
 
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validate_component
+from decoy_engine.fileaccess._link import link_noclobber_at
 from decoy_engine.fileaccess._output import (
     _CREATOR_KEY,
     _DIR_FLAGS,
@@ -55,12 +56,6 @@ T = TypeVar("T")
 # that the entry is lost (PostgreSQL `fsync_fname_ext` tolerates EBADF and EINVAL; ENOTSUP is added
 # because FUSE and Darwin report it for a directory fsync). Any other errno is fatal.
 _DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
-# A link failing with one of these means the file system cannot hard-link here (EPERM: FAT and
-# some FUSE and SMB mounts; EOPNOTSUPP and ENOTSUP: no link support; ENOSYS: no `linkat`; EXDEV:
-# another device), not that the name is taken. Every caller maps them to `LinkUnsupported`.
-_LINK_UNSUPPORTED = frozenset(
-    {errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS, errno.EXDEV}
-)
 FD_STAGED_LABELS = DURABLE_LABELS | DURABLE_REPLACE_LABELS  # staged through a held parent fd
 _POLL_S = 0.05
 _CHUNK = 1 << 16
@@ -351,32 +346,6 @@ def discard_stage_at(dir_fd: int, name: str) -> None:
         os.unlink(name, dir_fd=dir_fd)
     except OSError:
         pass
-
-
-def link_noclobber_at(src_dir_fd: int, src_name: str, dst_dir_fd: int, dst_name: str) -> None:
-    """The one no-clobber hard link: the file system decides whether `dst_name` is taken. Both
-    names are validated components beneath held directories and the link never follows a symlink.
-
-    Raises `FileExistsError` for a taken name, `LinkUnsupported` for `_LINK_UNSUPPORTED` (or a
-    backend whose `os.link` has no descriptor form) and an errno-only `OSError` for anything
-    else; no path, name or OS text rides along."""
-    validate_component(src_name, _CREATOR_KEY)
-    validate_component(dst_name, _CREATOR_KEY)
-    code = 0
-    try:
-        os.link(
-            src_name, dst_name, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=False
-        )
-    except OSError as exc:
-        code = exc.errno or errno.EIO
-    except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend
-        code = errno.ENOSYS
-    if code == errno.EEXIST:
-        raise FileExistsError(errno.EEXIST, "output exists")
-    if code in _LINK_UNSUPPORTED:
-        raise LinkUnsupported(code)
-    if code:
-        raise OSError(code, os.strerror(code))
 
 
 def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> None:

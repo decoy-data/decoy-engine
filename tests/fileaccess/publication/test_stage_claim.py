@@ -351,26 +351,49 @@ def test_ambient_cleanup_failure_after_the_link_warns_and_keeps_the_leaf(
         txn.publish()
 
 
-def test_an_ambient_publish_on_a_backend_without_a_descriptor_link_is_the_named_limit(
+def test_an_ambient_publish_on_a_backend_without_a_descriptor_link_still_publishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """V1 is POSIX: a backend whose `os.link` takes no descriptors (Windows) refuses cleanly."""
+    """Windows has no `dir_fd` for `os.link`: the plain two-path call must carry the publish."""
+    real = os.link
+    seen: list[set[str]] = []
 
-    def no_descriptors(src: Any, dst: Any, **kwargs: Any) -> None:
-        raise NotImplementedError("no descriptor form on this backend")
+    def path_only(src: Any, dst: Any, **kwargs: Any) -> None:
+        seen.append(set(kwargs))
+        if kwargs:
+            raise NotImplementedError("no descriptor form on this backend")
+        real(src, dst)
 
-    monkeypatch.setattr(os, "link", no_descriptors)
+    monkeypatch.setattr(os, "link", path_only)
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset(os.supports_dir_fd - {real}))
     txn, target, _ = _ambient_txn(tmp_path)
-    with pytest.raises(LinkUnsupported) as caught:
+    txn.publish()
+    assert seen == [set()] and target.read_bytes() == b"sidecar\n"
+    assert _litter(tmp_path) == []
+
+
+@pytest.mark.parametrize("code", [errno.EEXIST, *UNSUPPORTED])
+def test_the_path_form_maps_errnos_like_the_descriptor_form(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    def refuse(src: Any, dst: Any, **kwargs: Any) -> None:
+        raise OSError(code, SECRET)
+
+    monkeypatch.setattr(os, "link", refuse)
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset())
+    txn, target, _ = _ambient_txn(tmp_path)
+    want = FileExistsError if code == errno.EEXIST else LinkUnsupported
+    with pytest.raises(want) as caught:
         txn.publish()
-    assert caught.value.errno == errno.ENOSYS and caught.value.__context__ is None
+    assert SECRET not in str(caught.value) and caught.value.__context__ is None
     monkeypatch.undo()
-    txn.abort()
+    if code != errno.EEXIST:
+        txn.abort()
     assert not target.exists() and _litter(tmp_path) == []
 
 
-def test_only_link_noclobber_at_calls_os_link_in_fileaccess() -> None:
-    """One link site: the sentinel against a second raw link in the package."""
+def test_only_the_two_registered_sites_call_os_link_in_fileaccess() -> None:
+    """Two link sites: the descriptor primitive and the ambient two-path arm. A third is a finding."""
     root = Path(fileaccess_pkg.__file__).parent
     sites: list[tuple[str, str]] = []
     for source in sorted(root.rglob("*.py")):
@@ -382,4 +405,7 @@ def test_only_link_noclobber_at_calls_os_link_in_fileaccess() -> None:
                 is_link = isinstance(node, ast.Attribute) and node.attr == "link"
                 if is_link and isinstance(node.value, ast.Name) and node.value.id == "os":
                     sites.append((source.name, fn.name))
-    assert sites == [("_durable.py", "link_noclobber_at")]
+    assert sites == [
+        ("_link.py", "link_noclobber_at"),
+        ("_local_chain.py", "link_noclobber_beside"),
+    ]

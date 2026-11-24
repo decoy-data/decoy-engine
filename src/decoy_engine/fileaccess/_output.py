@@ -38,6 +38,8 @@ from decoy_engine.fileaccess import _fdtree, _openat2, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
+from decoy_engine.fileaccess._link import CREATOR_KEY as _CREATOR_KEY
+from decoy_engine.fileaccess._link import link_noclobber_at
 from decoy_engine.fileaccess._stage_claim import StageClaim, parent_identity_of
 from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
@@ -73,8 +75,6 @@ CREATES_PARENTS: frozenset[str] = frozenset(STAGE_PREFIX) - {"vault"}
 
 T = TypeVar("T")
 
-# Denial key for a bad name given straight to a creator; it names the capability, never the name.
-_CREATOR_KEY = "fileaccess.stage"
 
 _NOFOLLOW_CLOEXEC = _osflags.NOFOLLOW | _osflags.CLOEXEC
 _FILE_CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _NOFOLLOW_CLOEXEC
@@ -420,7 +420,7 @@ class RootedOutputTxn(_StageDir):
                     raise
             else:
                 try:
-                    _durable.link_noclobber_at(parent, state.stage_name, parent, self._leaf)
+                    link_noclobber_at(parent, state.stage_name, parent, self._leaf)
                 except FileExistsError:
                     _discard(state)
                     raise

@@ -155,10 +155,13 @@ def test_a_member_that_was_claimed_cannot_be_omitted(run: Run) -> None:
         member.omit()
 
 
-def test_an_omitted_required_member_is_not_silent(run: Run) -> None:
-    """Omission is the sink's explicit call; a reservation nobody completed still fails."""
+@pytest.mark.parametrize(("role", "table"), [("table", "a"), ("report", None)])
+def test_a_required_member_cannot_be_omitted(run: Run, role: str, table: Any) -> None:
+    """Omission is for optional roles only; a required file cannot vanish behind `delivered`."""
     stage = run.open()
-    stage.reserve("a", "a.csv")
+    member = stage.reserve(table, "a.csv", role)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        member.omit()
     assert deliver(stage, StageDecision(True, frozenset({"a"}))) == DeliveryReceipt(
         "nothing", FAILED
     )

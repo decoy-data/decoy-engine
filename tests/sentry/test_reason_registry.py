@@ -547,7 +547,6 @@ def test_ci_collects_the_registry_guards() -> None:
 # `decoy.unexpected_error` (retry advice `unknown`), never with a guessed meaning. Adding a code
 # is a reviewed registry addition; this list may only shrink.
 UNCLASSIFIED: dict[str, str] = {
-    "LinkUnsupported": "an errno-only OSError from the file-access link; DeliveryStage.open turns it into publication_failed with the errno name",
     "DecoyError": "the root class; a subclass without an identity is unclassified, not this",
     "VaultClientConfigError": "a Vault client-construction error raised by the CLI helper before any run; fixed value-free text",
     "SecretClosedError": "an internal invariant breach (a closed secret buffer was used); not a user-facing failure",

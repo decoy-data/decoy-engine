@@ -41,6 +41,7 @@ from decoy_engine.publication._publish import failed_receipt, publish_unit
 from decoy_engine.publication._types import (
     DEFAULT_LOCK_TIMEOUT_S,
     LOCK_ERRORS,
+    OPTIONAL_ROLES,
     CommitReceipt,
     Outcome,
     PublicationFailed,
@@ -368,6 +369,8 @@ class DeliveryStage:
         self._require_open()
         if m.state != "reserved" or m.seal is not None:
             raise RuntimeError("only a reserved member can be omitted")
+        if m.member.role not in OPTIONAL_ROLES:
+            raise ValueError("a required member cannot be omitted")
         m.state = "omitted"
 
     def staged_path(self, table: str) -> Path:
