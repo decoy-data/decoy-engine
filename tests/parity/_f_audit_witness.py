@@ -14,7 +14,7 @@ independently recomputed value therefore cannot reproduce the column even though
 value is deterministic and equal to the unmarked one. That is the same marking-kernel discipline
 the D-audit uses for the masking kernels.
 
-`DeterministicIndexSpy` observes the deterministic pool-index entry (`_sampler._derive_pool_indices`
+`DeterministicIndexSpy` observes the deterministic pool-index entry (`_sampler.derive_pool_indices`
 and `PoolSampler._deterministic`) with record-and-delegate wrappers, so a mutant that reaches it
 still runs the real body while the audit counts the call.
 """
@@ -229,7 +229,7 @@ class _CountingKernel:
 class DeterministicIndexSpy:
     """Counts entries to the deterministic pool-index derivation, never replacing its behavior.
 
-    `index_entries` counts `_derive_pool_indices` (the real lookup `_deterministic` calls) and
+    `index_entries` counts `derive_pool_indices` (the real lookup `_deterministic` calls) and
     `deterministic_calls` counts `PoolSampler._deterministic`; `compiled_calls` and
     `reference_calls` count which kernel then ran. Generation must leave all four at zero.
     """
@@ -250,7 +250,7 @@ class DeterministicIndexSpy:
 
     def install(self, mp: pytest.MonkeyPatch) -> DeterministicIndexSpy:
         spy = self
-        real_indices = _sampler._derive_pool_indices
+        real_indices = _sampler.derive_pool_indices
         real_det = PoolSampler._deterministic
         real_compiled = _sampler.compiled_index_kernel
         real_reference = _sampler.reference_index_kernel
@@ -282,7 +282,7 @@ class DeterministicIndexSpy:
 
             mp.setattr(_plan_entry, "run_generation", scoped_run)
 
-        mp.setattr(_sampler, "_derive_pool_indices", indices)
+        mp.setattr(_sampler, "derive_pool_indices", indices)
         mp.setattr(PoolSampler, "_deterministic", deterministic)
         mp.setattr(_sampler, "compiled_index_kernel", compiled)
         mp.setattr(_sampler, "reference_index_kernel", reference)

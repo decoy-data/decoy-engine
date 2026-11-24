@@ -19,7 +19,7 @@ def _digest(value: object) -> str:
 
 
 def test_catalogue_length_and_order_are_unchanged() -> None:
-    assert len(protocol.DRAW_SITES) == len(_ORDERED_IDS) == 42
+    assert len(protocol.DRAW_SITES) == len(_ORDERED_IDS) == 46
     assert [site.draw_site_id for site in protocol.DRAW_SITES] == _ORDERED_IDS
 
 
@@ -75,7 +75,10 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned at the GEN-REL E2 main merge: both changes together.
 # Re-pinned at the GEN-INHERIT E2 main merge: the E-F0 date-shift entry joins the GEN-REL sites.
 # Re-pinned for GEN-WINDOWED-BATCH S2 at the main merge: the windowed_date draw sites moved too.
-_CATALOGUE_DIGEST = "ff53846b4c0d6e289d8ad8d695e43a0caea80a18533619d5e7f524c564590ff7"
+# Re-pinned for GEN-NONFAKER-DRAWS S1: mask.faker_computed_value, mask.faker_computed_position,
+# mask.faker_computed_uuid_value and mask.faker_computed_uuid_position appended at the end of the catalogue; gen.pool_nondeterministic and gen.faker_pool_selection carry
+# the promoted `derive_pool_indices` name in their call sites (metadata only).
+_CATALOGUE_DIGEST = "87208827e73f32b80701e8c0d2caf06d023cdf320a7af0a30322f548c423008a"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -120,6 +123,10 @@ _ORDERED_IDS = [
     "mask.tokenize",
     "gen.distribution",
     "gen.lookup",
+    "mask.faker_computed_value",
+    "mask.faker_computed_position",
+    "mask.faker_computed_uuid_value",
+    "mask.faker_computed_uuid_position",
 ]
 
 _ENTRY_DIGESTS = [
@@ -148,7 +155,7 @@ _ENTRY_DIGESTS = [
     "c5a8c289a8a94d363e365084d2148580330cdccdc27d4144bc983f482ddaab17",  # gen.null_probability
     "fc5e96755c56b1f7e9ce4aa51d224dd3f3b0902e7ba55255f6c877dec13e5d35",  # gen.distribution_snapshot
     "ee9e6455a43a920d72e77cf6f7c843a86912152573ffde62a8652c98ec19d876",  # gen.pool_deterministic
-    "64a2a8b88ba7657a760d89c136230a79182a89ef1cfd99b088cd13fc5c69f9ac",  # gen.pool_nondeterministic
+    "010ea3080d253b49d1f8e41b0ba57b90044e9c0661f1bf7fb20e5fe39996ba83",  # gen.pool_nondeterministic
     "5508629296e713d4cda31e2cefe194f311df6be2ae5a65347b28e87d7bdffe3f",  # gen.composite_build_pool
     "1b7a80122a1415d8db205339ae13be155654245bd097b7b3dcd4d77f46890245",  # gen.faker_unique_retry
     "931a64ec2c34e8a8fba15a40515bfd857eee935fd30dc23c5cc2f2db6c1c7694",  # gen.categorical_unique
@@ -161,11 +168,15 @@ _ENTRY_DIGESTS = [
     "5e6fa8311c566b1ffeb9e2d8496d76ee0bb91b37827e074b587384b90b9c3328",  # gen.derive_context
     "7f1198095c8c582ff3d9e340712005d1afa7d6d6198887418f8e33b93bfffa03",  # mask.formula
     "ab83162c11f2c4dbe9ca55d9c2e90f288f472fb41eb843b9284c4fa4ad71d609",  # gen.faker_pool_build
-    "bc47a0a423b34fc0ebdc2dca30eadf3e9c47ad29713a63937844fe48d7d57d81",  # gen.faker_pool_selection
+    "4736a911a58cc800aa1f8a80414addd6958d5df3d7635d436a0a44a448327703",  # gen.faker_pool_selection
     "e49b4f3e3eeb2f621368bb10b751a73087ba63f4d4b4794f0ed49418af92858f",  # mask.faker_nondeterministic
     "abea5ec5c7f29142ce8bf7c344245c68fa73d17eed4cc3633a9129b6a4a74c2c",  # mask.tokenize
     "448b2f19f340635c8e5ae9505271bcf521b1f1a1e08dd48c2392847d20b88cb5",  # gen.distribution
     "853a020843acba06217afc3f99579ab0118fe54ca0b08b5316744425376a95c2",  # gen.lookup
+    "e22123ff56b511b53a0e5530d1e487da9290dd98b9c41effa6130e41a5da9060",  # mask.faker_computed_value
+    "4e3f2dbebab3c3388bf218cffc285c3fe9ed0a53929283c9fc7b3af391b53d36",  # mask.faker_computed_position
+    "b4389c0f85b4922068f795798b8b68386f469f30336e3fa46c376cec9f5d2576",  # mask.faker_computed_uuid_value
+    "e1056e7c7ef8f58361c8ff9fe8c03e3f76aaa956e5f386f0ec2a92d6d3eb5bb0",  # mask.faker_computed_uuid_position
 ]
 
 _MAP_DIGESTS = {
