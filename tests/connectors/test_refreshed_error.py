@@ -70,29 +70,44 @@ def test_a_kind_outside_the_table_reads_as_unexpected_and_keeps_the_class(
     assert MARK not in f"{out!s} {out!r} {out.args!r}"
 
 
-def test_raised_after_the_handler_the_fresh_error_has_no_chain() -> None:
+def _seeded_with_a_chain(exc: BaseException) -> BaseException:
+    exc.__cause__ = ValueError(f"cause {MARK}")
+    exc.__context__ = KeyError(f"context {MARK}")
+    exc.add_note(f"note {MARK}")
+    return exc
+
+
+def _assert_unchained(fresh: BaseException) -> None:
+    assert fresh.__cause__ is None and fresh.__context__ is None
+    assert not getattr(fresh, "__notes__", [])
+    assert MARK not in f"{fresh!s} {fresh!r} {fresh.args!r}"
+
+
+def test_the_fresh_error_is_unchained_before_and_after_it_is_raised() -> None:
     from decoy_engine.fileaccess import classified_failure
 
     def reraise() -> None:
         try:
-            raise PermanentError(f"sdk text {MARK}", kind="not_found")
+            raise _seeded_with_a_chain(PermanentError(f"sdk text {MARK}", kind="not_found"))
         except PermanentError as exc:
             fresh = _refreshed(exc, "S3")
+        _assert_unchained(fresh)
         raise fresh from None
 
     with pytest.raises(PermanentError) as ei:
         reraise()
-    assert ei.value.__cause__ is None and ei.value.__context__ is None
+    _assert_unchained(ei.value)
     assert ei.value.__suppress_context__ is True
 
     def reclassify() -> None:
         try:
-            raise MemoryError(MARK)
+            raise _seeded_with_a_chain(MemoryError(MARK))
         except MemoryError as exc:
             result = classified_failure(exc)
         assert result is not None and result.fresh is not None
+        _assert_unchained(result.fresh)
         raise result.fresh from None
 
     with pytest.raises(MemoryError) as mi:
         reclassify()
-    assert mi.value.__cause__ is None and mi.value.__context__ is None
+    _assert_unchained(mi.value)

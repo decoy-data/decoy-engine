@@ -432,12 +432,33 @@ def test_the_chain_walker_keeps_its_bounds() -> None:
     assert typed_memory_member(a) is None and not is_memory_failure(RuntimeError("x"))
     b.__cause__ = member
     assert typed_memory_member(a) is member and is_memory_failure(a)
-    head: BaseException = member
-    for _ in range(20):
+
+
+def _wrapped(member: BaseException, depth: int) -> BaseException:
+    """`member` under `depth` plain wrappers: it is link number `depth + 1` from the head."""
+    head = member
+    for _ in range(depth):
         nxt = RuntimeError("n")
         nxt.__cause__ = head
         head = nxt
-    assert typed_memory_member(head) is None and not is_memory_failure(head)
+    return head
+
+
+def test_the_walker_reads_sixteen_links_and_no_more() -> None:
+    from decoy_engine.fileaccess import typed_memory_member
+
+    sixteenth, seventeenth = MemoryError("sixteenth"), MemoryError("seventeenth")
+    assert typed_memory_member(_wrapped(sixteenth, 15)) is sixteenth
+    assert typed_memory_member(_wrapped(seventeenth, 16)) is None
+
+
+def test_the_walker_prefers_the_context_link_over_the_cause_link() -> None:
+    from decoy_engine.fileaccess import typed_memory_member
+
+    cause, context = pa.ArrowMemoryError("cause"), MemoryError("context")
+    outer = RuntimeError("outer")
+    outer.__cause__, outer.__context__ = cause, context
+    assert typed_memory_member(outer) is context
 
 
 def test_a_keyboard_interrupt_around_memory_error_is_typed_memory() -> None:
@@ -501,3 +522,53 @@ def test_an_errno_error_whose_constructor_refuses_the_errno_form_becomes_a_plain
     assert result is not None and result.kind == "typed_memory"
     assert type(result.fresh) is OSError and result.fresh.errno == errno.ENOMEM
     assert MARK not in _all_text(result.fresh)
+
+
+_COLD_CLASSIFY = """
+import sys
+{prelude}
+import decoy_engine.fileaccess as fa
+from decoy_engine.execution import _isolated_common as c
+loaded_before = "duckdb" in sys.modules
+print("LOADED_BEFORE", loaded_before)
+got = (
+    fa.classified_failure(MemoryError("m")).kind,
+    fa.classified_failure(ValueError("digital envelope routines m")).kind,
+    c.is_memory_failure(ValueError("digital envelope routines m")),
+    c.is_memory_failure(MemoryError("m")),
+    c.is_memory_failure(ValueError("plain")),
+    fa.classified_failure(ValueError("plain")),
+)
+print("GOT", got)
+print("LOADED_AFTER", "duckdb" in sys.modules)
+"""
+
+
+def _cold(prelude: str) -> dict[str, str]:
+    import subprocess
+    import sys
+
+    out = subprocess.run(  # noqa: S603 - fixed argv, test-owned source
+        [sys.executable, "-c", _COLD_CLASSIFY.format(prelude=prelude)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    return {line.split(" ", 1)[0]: line.split(" ", 1)[1] for line in out.stdout.splitlines()}
+
+
+_COLD_GOT = "('typed_memory', 'text_memory', True, True, False, None)"
+
+
+def test_classification_never_imports_a_module_on_the_failure_path() -> None:
+    """A capped worker has no headroom to load DuckDB when its first failure is classified."""
+    seen = _cold("")
+    assert seen["GOT"] == _COLD_GOT
+    assert seen["LOADED_AFTER"] == seen["LOADED_BEFORE"]
+
+
+def test_classification_works_when_duckdb_cannot_be_loaded() -> None:
+    seen = _cold("sys.modules['duckdb'] = None")
+    assert seen["GOT"] == _COLD_GOT
