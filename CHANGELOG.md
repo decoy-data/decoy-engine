@@ -15,6 +15,145 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - both residual-PII checks report a source comparison that raised on a column the run may write, even when no detector fires on it. One writer query (`decoy_engine.plan.column_access.written_columns_by_table`) names the written columns per table: each entry's own target, joint_mask siblings, composite bundles, `derive` targets and every FK child key column. `run_pipeline` asks it once, over the run's own graph and registry, and the post-scan reads that answer. A passthrough column is exempt from the source comparison only when the query proves no other writer owns it, so a passthrough on a joint_mask sibling, an FK child key or a table with an unknown writer is now compared. Both checks compare and count list, map and struct cells in one form, so a list never equals its one element and a constant list counts as one value on either path.
 - a source distinct count that failed is no longer read as a varied source. The column is graded as both a constant and a varied source; when the two final grades differ the finding is an error, and when they agree that grade stands, so unchanged hash output with an email hit stays `fail`.
 
+## [0.28.4] - 2026-11-23
+
+### Breaking for consumers
+
+- columns no rule changes are written exactly as stored in the source on every route (decimal and nullable int columns, and all-null or zero-row columns, keep their type, and a float NaN stays NaN instead of becoming null). Carried text still leaves as `string` while it fits 32-bit offsets, as before.
+- person name, email, phone and address faker providers (and the synthetic account, member and plan ids) now run on the native and chunked routes; an empty or all-null chunked output column, and a deterministic column over an all-null or empty int/bool source on any route, is typed string, and a non-string custom provider under one of these names fails on the chunked route.
+- a faker column with no pool_size now runs on the native and chunked routes; an empty or all-null chunked output column is typed string, a non-string custom person_first_name or person_last_name provider now fails on the chunked route but still reroutes on the unified slice, an out-of-core job whose faker pools exceed the pool budget now fails before the run starts, and `PoolCache` now charges each pool its measured bytes (string object sizes plus array slots) instead of a character-count estimate, so it evicts or raises `pool_exceeds_cache_budget` at different pool sizes, and `estimate_pool_bytes` is removed in favour of `measured_pool_bytes`.
+- `nested` `provider_config.target` accepts only a closed RFC 9535 subset, so `compile_plan` and `run_config_only_checks` now refuse with the new reason `plan.nested_target_unsupported` what used to compile: `$..x` and `$..*`, `,` unions, a target without `$` (including `($.a).b`), dot-quoted names, backtick selectors, `|`, `&` and `where`, `$['*']`, a slice step below 1, leading-zero and `-0` integers and integers beyond plus or minus 2^53 - 1 in an index or in a slice start, end or step (`$[01:]`, `$[-0:]`, `$[9007199254740992:]`), a quoted name with an invalid escape (`$['a\\qb']`), a raw control character or a raw unpaired surrogate inside quotes, `wherenot` and other words after a name, blank space outside a quoted name, member names with `-` or `@` or a leading digit, unquoted bracket names (`$[a]`, `$.a[b]`), a dot before a bracket (`$.x.[0]`, `$.[0]`, `$.a.[*]`), parentheses (`$.a.(b)`) and `$.$`; quoted-name escapes are now decoded per RFC 9535 2.3.1.2, so `$['a\nb']` selects the key `a` newline `b` and `$['a\'b']` selects `a'b` (they selected nothing); `.*` on any array, at any depth (`$.a.*`, `$.*.a`, `$.*.*`, `$[*].*`), now selects its items (it selected nothing); an array selector (`[*]`, an index, a slice, or `.*[0]` over objects) applied to an object, a scalar or an empty container (`$[5]` on `{"a":1}`, `$[0]` on `{}`, `$[*].a` on `5`, `"s"` or `{}`) used to pass the cell through and now fails the run with `nested_target_unwritable_container`; `$[-5]` on a 3-item array used to raise `IndexError` and now selects nothing; `nested_jsonpath_path_overlap` is no longer raised; the `jsonpath-ng` requirement is removed
+- `bucket_perturb` on a text column with no `date_format` is now refused at compile (`column_shape_required`); before, the engine guessed the format from the column. Set `date_format`, or read the column as a date.
+- `bucketize` and `top_code` on text need an F06 numeric declaration, and a decimal under `bucketize` has a 15-digit, integer-width bound.
+- an engine older than this release refuses a `distribution-snapshot/v1` or `/v2` snapshot that holds `cell_format.char_class`, and refuses a pinned plan whose stored `cell_format` holds it, with `statistical_cell_format_invalid`; upgrade the engine or refit with the old one
+- a plain run now gives an untouched list, large list, fixed-size list, struct or map column its source type, not an inferred one.
+- removed the public names `LicenseError`, `LicenseExpiredError`, `FlagPauseSignal`, `get_default_executor` and `VALIDATION_CODES` from `decoy_engine`; use `decoy_engine.reasons.config` for codes and `select_execution_adapter` for the adapter
+
+### Changed (one output assembler, UF-DOMAIN S1, 2026-11-22)
+
+The full-frame, sequential and unified-slice routes now build output through one function,
+`table_from_pandas_keeping_source_types`. It takes the source table, writes each untouched column
+from the source Arrow column, and converts only the masked columns from pandas. Before, a
+`decimal(12,2)` column that no rule changed came back as `decimal(3,2)`, a nullable `int64`
+as `float64` on those routes, while the chunked route kept the source type. All routes now agree. The function checks that the frame still has the source's row
+count, index and column order, and raises an `ExecutionError` (`runtime/output_assembly_rows_changed` or `runtime/output_assembly_columns_mismatch`) before any output exists if it does not. A carried `Int64` or `string` column keeps its pandas dtype hint.
+
+### Added (pre-scan coverage verdict, PRE-SCAN-RUN E2, 2026-11-21)
+
+`decoy_engine.profiling.evaluate_pre_scan(config, core)` decides which flagged source columns a pipeline leaves unmasked: a column with no rule, a `passthrough` rule, or a rule gated by `when:` is uncovered, and a mask table the scan did not cover is a `not_scanned` finding. The `PreScanVerdict` holds names only and builds the `pre_scan` run result check. `PreScanBlockedError` and `PreScanFailedError` map to `pre_scan.uncovered_pii_blocked` and `pre_scan.profile_failed` in the reason adapter. No run calls it yet; the run-start step ships in the CLI.
+
+### Changed (faker providers run native, FAKER-NATIVE-WIDEN, 2026-11-23)
+
+`person_name`, `person_full_name`, `person_email`, `person_phone`, `address_street`,
+`address_city`, `address_state`, `address_zip`, `synthetic_account_number`,
+`synthetic_member_id` and `synthetic_plan_id` join `person_first_name` and `person_last_name` on the
+native route. Output values do not change. All four CLI templates now run their faker columns
+native, and a deterministic faker column with a namespace and one of these providers is admitted on
+the out-of-core route.
+
+### Added (when: reference prefixes and quoted names, WHEN-READS-SOURCE S1, 2026-11-22)
+
+A `when:` column can now be written `source.<name>`, which means the same as the bare name
+(the original value). A name with a dot or another character outside letters, digits and `_`
+is written in backticks, for example `` `a.b` == 'x' ``. `masked.<name>` is reserved: it is
+refused with the new error type `when_masked_reference_unsupported`, because V1 reads original
+values only. Every predicate that worked before selects the same rows.
+
+The new reason codes are `config/when_masked_reference_unsupported`,
+`plan/when_masked_reference_unsupported` and `runtime/when_masked_reference_unsupported`.
+
+### Changed (faker without pool_size runs native, FAKER-DEFAULT-POOL, 2026-11-22)
+
+A faker column that leaves out `pool_size` now takes the default of 10,000 on every route, the same
+as the full-frame run. Output values do not change. Default `person_first_name` and
+`person_last_name` columns run on the native route, and tables of 100,000 rows or more run chunked
+instead of full frame. `chunked_strategy_conditions_unmet` no longer names `pool_size`. The
+out-of-core pool budget error no longer lists the provider, pool size or byte counts.
+The out-of-core pool budget now counts the measured size of each built pool, not 4,096 bytes per
+value, so a job with many default pools no longer fails for a reservation its pools do not use.
+The out-of-core run also refuses a pool before building it when the builder's construction peak
+(the strings plus four pointer copies and a distinct-count set) cannot fit the budget.
+
+### Fixed (physical plan hash no longer depends on the input form, COMPANION-REDS, 2026-11-23)
+
+The physical plan hash of a no-FK job covered the stored resident-fit verdict with its byte figures. Those figures come from the host memory ceiling and from how the table was priced (a lazy source by its Parquet footer, a resident one by its Arrow size), so the same job got a different `plan_hash` and `activation_hash` for a lazy source against a resident one on one host. The hash now covers the verdict and its code only. On the same host, a lazy and a resident input of the same job now give the same `plan_hash`. The hash still covers `budget_bytes`, which comes from the host memory when no explicit budget is set, so it can differ between hosts. Against release 0.28.3 the physical plan hash of no-FK full-frame pipelines changes once, because the verdict and its code join the hash (#767 is unreleased) and the byte figures stay out.
+
+### Added (publication members, DELIV E2f, 2026-11-22)
+
+`publish_unit` takes `members=[Member(path, role), ...]` beside `tables=`. A member can sit in a nested folder, be a CSV or fixed-width table, or have the role `quarantine` or `report`. In the `decoy-publication/v1` descriptor, `rows` is now `null` for every member that is not a `.parquet` table (the key stays required), and the path rule is shared by writer and reader: at most 8 components, no duplicate, no path that is a folder of another, no reserved name.
+
+The publisher now refuses a stage that holds any entry no member names (a stray file, a link, a special file, an empty folder). `StageDir` gains `open_subdir` and `entries`, which never follow a link; `open_subdir` gives a read-only view.
+
+A reader older than this release that meets a unit with `rows: null`, a `quarantine` or `report` member, or a nested path cannot load its descriptor and treats the folder as occupied, so it refuses and never overwrites the unit. Rerunning the same run id on such a reader refuses; a new run id is unaffected.
+
+Contract entry: "Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23)" in `docs/compatibility-contract.md`.
+
+### Changed (nested target grammar, NESTED-FREEZE, 2026-11-23)
+
+A `nested` target is `$` followed by `.name`, `.*`, `['name']`, `[*]`, `[index]` or `[start:end:step]`. One function, `decoy_engine._nested_json.parse_target`, reads it for the plan check and the handler, and `TargetPath.find` evaluates it, so what a target selects no longer depends on a JSONPath library (jsonpath-ng 1.8 and 1.16 disagreed on an array selector applied to an object). A target outside the subset fails at compile and in `decoy validate` with the position and the form found, under the new reason `plan/nested_target_unsupported`. No shipped doc, example, CLI or platform config used a refused form.
+
+The overlap warning `nested_jsonpath_path_overlap` is no longer raised: no subset target can match a path and its prefix.
+
+The engine no longer imports jsonpath-ng, so the requirement, its mypy override and its NOTICE line are gone.
+
+### Changed (bucket_perturb stops detecting formats, COLUMN-SHAPE-RULE E2, 2026-11-22)
+
+`bucket_perturb` no longer detects a date format from the cells. A text column needs `provider_config.date_format`, and a `nested` child of `bucket_perturb` needs it too. A CSV or fixed-width column with none is refused by `decoy validate`. A Parquet, database or Arrow column is refused at compile when it holds text. A caller that reaches the strategy with no format on a column the plan does not list as a date stops with `bucket_perturb_requires_date_format`. `apply_bucket_perturb` takes `date_format` as a required argument.
+
+`bucket_perturb` now runs on a column that is already a date (Parquet, DuckDB, a database or an Arrow table) with no `date_format`, and the output keeps the date type. A date column shifts as a calendar date, so `0001` and `9999` dates work; a position that would leave years 1 to 9999 is a row error. A typed date and the same date as ISO text in one namespace get the same position. A `date_format` set on a date column is not used, and compile adds the warning `column_shape_format_unused`. `preserve_values` needs no `date_format` on a date column. A timestamp, number, boolean or decimal column is refused at compile with `column_shape_mismatch`. The new reason `plan/column_shape_required` is pending.
+
+### Added (a job with no foreign keys is refused before it can run out of memory, NONFK-OOM, 2026-11-22)
+
+Under `auto`, a job with no foreign keys that stays on the full-frame route is now priced before
+the route opens an output. If the input plus one pandas copy of it is larger than the memory the
+host or cgroup allows, or a measured probe clears that ceiling by the calibration band, the run
+stops with `runtime/nonfk_full_frame_capacity_exceeded`. This is a capacity code, so `decoy run`
+exits 5. A job between 85% of the ceiling and the ceiling still runs as before. The verdict is
+stored on the route decision (`RouteDecision.resident_fit`) using `route/nonfk_full_frame_fits`,
+`route/nonfk_full_frame_probe_fits` and `route/nonfk_full_frame_unverified`. A lazy source is
+priced from its Parquet footer; the CLI's own whole read of a source is not covered here.
+`execution_mode="full_frame"` is never priced.
+
+### Changed (numeric strategies read the column shape, COLUMN-SHAPE-RULE E3, 2026-11-21)
+
+`bucketize` and `top_code` no longer read numbers out of text on their own. A CSV, fixed-width or string column needs an F06 declaration (`logical_type: integer` with a `parse_format`; `bucketize` also takes a `decimal` of at most 15 digits). Without one, plan compile refuses it with `plan/column_shape_required`. A handler that meets a column the plan does not list as typed refuses with `runtime/column_shape_required`. Typed integer and float sources run with no declaration, as before.
+
+A column the strategy cannot compute exactly is refused at compile with `plan/column_shape_mismatch`: a date, timestamp, boolean or other type under `bucketize` or `top_code`; any decimal under `top_code`; a decimal under `bucketize` with more than 15 digits, a negative scale or a width that is not an integer from 1 to 10^15. Today these run with wrong buckets or fail at run time. `fpe` is refused on typed float, decimal, date, timestamp and boolean columns; text and integer columns run as before. A `nested` child has no declaration of its own, so a `bucketize` child of `nested` is refused with `plan/column_shape_required`.
+
+The F06 proof now admits `top_code` on a declared integer and `bucketize` on a declared decimal with an integer width. `bucketize` takes its width from one contract, `contracts/bucketize_width.py`, shared by the handler, the compile check and the shape rule.
+
+Adding the recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
+
+Plans record a shape for every `bucketize`, `top_code` and `fpe` column, so the plan and physical plan hashes of pipelines that use them change once. The reasons `plan/column_shape_required` and `runtime/column_shape_required` are pending; `plan/column_shape_mismatch` comes from the date slice.
+
+### Added (digit-only text columns generate digit strings, FIT-CODES-TEXT, 2026-11-22)
+
+A fitted `freetext` column whose non-blank cells are all ASCII digits (`0` to `9`) now records
+`cell_format.char_class: "digits"`, in both `distribution-snapshot/v1` and `/v2`. The sampler
+draws digit strings at the fitted lengths for such a column, leading zeros included, in place of
+lorem words. The member is one fixed token and holds no source value, so the redacted fit writes
+it for flagged columns too. A snapshot without the member generates the same bytes as before.
+Unicode digits (`٣`, `５`, `²`) do not count.
+
+### Added (public signature sentry, SIGNATURE-SENTRY E1, 2026-11-22)
+
+A test now compares the public signatures with the newest release tag. A change to a frozen or experimental name that breaks a caller (a parameter removed, moved or made required, a default changed, an object removed) fails unless a `Breaking:` line in a `changelog.d` fragment names the object and, for a parameter, the parameter, in backticks. The tool is `griffelib`, a dev dependency, so nothing in the wheel changes.
+
+`decoy_engine.plan` exports `NO_SOURCES` (frozen) and `SourceFacts` (experimental), so a caller of `compile_plan` can build its required `sources` argument from a public path. The 0.28.3 notes now list the `compile_plan` and `VaultWriter` signature breaks that release carried without a line.
+
+### Fixed (nested passthrough columns keep their type, CHUNKED-STRUCT, 2026-11-21)
+
+`run_mask_pipeline_chunked` no longer raises `unhashable type: 'dict'` on a source with a struct,
+list or map column that passes through, and a null-only chunk no longer breaks the concatenation.
+An untouched nested column now keeps its source field type on every pandas rebuild route: an int32
+struct field no longer widens, a large or fixed-size list no longer becomes `list`, and an all-null
+column no longer becomes `null`. A table whose columns are all untouched maps or nested types keeps
+its row count instead of raising `ArrowInvalid`.
+
+### Removed (dead public names, FREEZE-SURFACE E-DEAD, 2026-11-22)
+
+Five names had no caller in the engine. `LicenseError`, `LicenseExpiredError` and `FlagPauseSignal` are deleted. `get_default_executor` and its cache are deleted. `VALIDATION_CODES` leaves `decoy_engine.__all__`; the internal `validation_result.CODES` stays for its internal users. The `run_paused` reason code is unchanged.
+
 ## [0.28.3] - 2026-11-22
 
 ### Breaking for consumers

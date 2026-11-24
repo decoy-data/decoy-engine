@@ -1,7 +1,0 @@
-Breaking: `bucket_perturb` on a text column with no `date_format` is now refused at compile (`column_shape_required`); before, the engine guessed the format from the column. Set `date_format`, or read the column as a date.
-
-### Changed (bucket_perturb stops detecting formats, COLUMN-SHAPE-RULE E2, 2026-11-22)
-
-`bucket_perturb` no longer detects a date format from the cells. A text column needs `provider_config.date_format`, and a `nested` child of `bucket_perturb` needs it too. A CSV or fixed-width column with none is refused by `decoy validate`. A Parquet, database or Arrow column is refused at compile when it holds text. A caller that reaches the strategy with no format on a column the plan does not list as a date stops with `bucket_perturb_requires_date_format`. `apply_bucket_perturb` takes `date_format` as a required argument.
-
-`bucket_perturb` now runs on a column that is already a date (Parquet, DuckDB, a database or an Arrow table) with no `date_format`, and the output keeps the date type. A date column shifts as a calendar date, so `0001` and `9999` dates work; a position that would leave years 1 to 9999 is a row error. A typed date and the same date as ISO text in one namespace get the same position. A `date_format` set on a date column is not used, and compile adds the warning `column_shape_format_unused`. `preserve_values` needs no `date_format` on a date column. A timestamp, number, boolean or decimal column is refused at compile with `column_shape_mismatch`. The new reason `plan/column_shape_required` is pending.
