@@ -138,12 +138,11 @@ row. That residual risk is intentionally cushioned by SPILL_OVERHEAD (2.0) and
 DISK_SAFETY_MARGIN (1.25) on top, and by the runtime `check_temp_disk_budget`
 backstop -- the estimate does not need to be exact, only conservative.
 
-TEMP-ROOT LOW: `default_ooc_temp_root()` reads `tempfile.gettempdir()` once at
+TEMP-ROOT LOW: `default_ooc_temp_root()` is `fileaccess.scratch_root()`, read once at
 call time; a job that later re-points `TMPDIR` between this preflight and the
-runner's protected scratch directory could check a different mount than it spills to. In
-practice `run_out_of_core_route` reads the same `default_ooc_temp_root()` for
-its runtime budget, so both agree unless the environment mutates underneath
-them mid-dispatch -- documented, not defended against.
+runner's scratch arena could check a different mount than it spills to. The route's
+runtime budget reads the same function, so both agree unless the environment
+mutates underneath them mid-dispatch -- documented, not defended against.
 """
 
 from __future__ import annotations
@@ -151,7 +150,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -511,14 +509,14 @@ def predict_ooc_disk_bytes(
 
 def default_ooc_temp_root() -> Path:
     """Where the out-of-core runner's scratch directory lands absent an
-    explicit `temp_dir` (`run_fk_out_of_core`'s own default, a `protected_scratch_dir`
-    under the same `tempfile.gettempdir()` root). Single source of
+    explicit `temp_dir` (`run_fk_out_of_core`'s own default, an arena under
+    `fileaccess.scratch_root()`). Single source of
     truth so this module's preflight and `_pipeline_route_exec.run_out_of_core_
     route`'s runtime-budget threading check the SAME filesystem -- two guards
     silently checking two different mounts could disagree on whether disk is
     sufficient. See the module docstring's TEMP-ROOT LOW note.
     """
-    return Path(tempfile.gettempdir())
+    return fileaccess.scratch_root()
 
 
 def _config_target_dirs(config: dict[str, Any]) -> list[tuple[str, Path]]:

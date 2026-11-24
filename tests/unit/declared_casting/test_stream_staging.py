@@ -23,6 +23,11 @@ class _Run:
         return SimpleNamespace(table=pa.Table.from_batches([batch]))
 
 
+def _NO_CAP(_root: Path) -> int | None:
+    """The resolver the runner hands in; these cases set their own cap or none."""
+    return None
+
+
 def _lazy(tmp_path: Path) -> Any:
     from decoy_engine.profile._readers import LazySource
 
@@ -51,7 +56,7 @@ def test_staged_copy_lives_under_the_callers_temp_dir_and_is_removed(tmp_path: P
 
     root = tmp_path / "caller-root"
     seen: dict[str, Any] = {}
-    out = run_staged(_fn(seen), _call(tmp_path, seen, temp_dir=root), 1000)
+    out = run_staged(_fn(seen), _call(tmp_path, seen, temp_dir=root), 1000, _NO_CAP)
     assert out == "ok" and seen["existed"]
     assert root in seen["path"].parents
     assert root.is_dir() and not any(root.iterdir()), "only the staging dir is removed"
@@ -65,7 +70,10 @@ def test_staged_copy_counts_against_the_temp_disk_budget(tmp_path: Path) -> None
     seen: dict[str, Any] = {}
     with pytest.raises(ExecutionError) as info:
         run_staged(
-            _fn(seen), _call(tmp_path, seen, temp_dir=root, temp_disk_budget_bytes=1024), 1000
+            _fn(seen),
+            _call(tmp_path, seen, temp_dir=root, temp_disk_budget_bytes=1024),
+            1000,
+            _NO_CAP,
         )
     assert str(info.value.code) == "out_of_core_temp_disk_exceeded"
     assert "path" not in seen, "the route never ran over an over-budget copy"
@@ -77,7 +85,7 @@ def test_budget_applies_without_a_caller_temp_dir(tmp_path: Path) -> None:
     from decoy_engine.execution._errors import ExecutionError
 
     with pytest.raises(ExecutionError) as info:
-        run_staged(_fn({}), _call(tmp_path, {}, temp_disk_budget_bytes=1024), 1000)
+        run_staged(_fn({}), _call(tmp_path, {}, temp_disk_budget_bytes=1024), 1000, _NO_CAP)
     assert str(info.value.code) == "out_of_core_temp_disk_exceeded"
 
 
@@ -125,7 +133,7 @@ def _staged_bytes(tmp_path: Path) -> int:
         seen["bytes"] = Path(sources["t"].path).stat().st_size
         return "ok"
 
-    run_staged(measure, _call(tmp_path, seen), 1000)
+    run_staged(measure, _call(tmp_path, seen), 1000, _NO_CAP)
     return int(seen["bytes"])
 
 
@@ -144,6 +152,7 @@ def test_staged_copy_and_spill_share_one_budget(tmp_path: Path, caller_temp_dir:
             _spilling_fn(seen, spill),
             _call(tmp_path, seen, temp_disk_budget_bytes=budget, **extra),
             1000,
+            _NO_CAP,
         )
     assert str(info.value.code) == "out_of_core_temp_disk_exceeded"
     assert seen["root"] in seen["staged"].parents, "the spill root holds the staged copy"
@@ -162,6 +171,7 @@ def test_staged_copy_and_spill_within_one_budget_run(tmp_path: Path, caller_temp
         _spilling_fn(seen, staged // 2),
         _call(tmp_path, seen, temp_disk_budget_bytes=4 * staged, **extra),
         1000,
+        _NO_CAP,
     )
     assert out == "ok"
     assert seen["root"] in seen["staged"].parents
@@ -197,7 +207,7 @@ def test_a_table_name_never_places_the_staged_copy(tmp_path: Path, hostile: str)
         return "ok"
 
     call = {"cast_run": _NamedRun(name), "plan": object(), "sources": {name: _lazy(tmp_path)}}
-    assert run_staged(fn, {**call, "temp_dir": caller}, 1000) == "ok"
+    assert run_staged(fn, {**call, "temp_dir": caller}, 1000, _NO_CAP) == "ok"
     assert seen["root"] in seen["staged"].parents, seen
     assert seen["outside"] == sorted([str(tmp_path / "src.parquet"), str(seen["staged"])]), seen
     assert not list(caller.parent.glob("x.typed.parquet")) and not list(elsewhere.iterdir())
@@ -208,7 +218,7 @@ def test_characterization_staged_file_name_and_mode(tmp_path: Path) -> None:
     from decoy_engine.declared_casting._stream import run_staged
 
     seen: dict[str, Any] = {}
-    run_staged(_fn(seen), _call(tmp_path, seen), 1000)
+    run_staged(_fn(seen), _call(tmp_path, seen), 1000, _NO_CAP)
     assert seen["path"].name == "s0000.typed.parquet"
 
 

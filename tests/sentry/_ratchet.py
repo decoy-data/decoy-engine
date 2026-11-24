@@ -8,13 +8,13 @@ findings; an empty list means the ratchet holds. Baseline keys compare exactly, 
 compare by count per site (see ``growth``). An entry that carries a numeric ``max`` may keep
 or lower it, never raise or drop it (see ``max_raised``). A key of the form
 ``<file>.py::<qualname>::<name>`` key of a ``REHOME_BY_BINDING`` sentry may also move 1:1 to a new
-entry that declares ``moved_from`` when the old site is gone from the source (see ``rehomes``).
+entry that declares ``moved_from`` when the old site is gone from the source (see ``_rehome.rehomes``).
 Messages carry ids, paths and keys only.
 """
 
 from __future__ import annotations
 
-import ast
+import importlib.util
 import json
 import re
 import subprocess
@@ -22,11 +22,8 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
+from types import ModuleType
+from typing import Any
 
 REGISTRY = "scripts/dev/sentry_registry.toml"
 BASELINE_DIR = "tests/sentry/baselines"
@@ -44,6 +41,43 @@ REKEY_PER_SITE = frozenset({"validation-name-messages"})
 REHOME_BY_BINDING = frozenset({"secret-material-census", "gcs-call-kwargs"})
 
 
+# The registry row schema of this repo; a key outside it fails (``closed_keys``).
+ROW_KEYS = frozenset({"id", "baseline", "approved_growth"})
+_HELPERS: dict[Path, ModuleType] = {}
+
+
+def _helper(name: str) -> ModuleType:
+    """A helper module beside this file, loaded by path so an extracted copy of the checker uses
+    its own helpers and never the head's."""
+    path = Path(__file__).resolve().parent / "ratchet" / f"{name}.py"
+    if path not in _HELPERS:
+        spec = importlib.util.spec_from_file_location(f"_ratchet{name}_{len(_HELPERS)}", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        _HELPERS[path] = mod
+    return _HELPERS[path]
+
+
+def _integrity() -> ModuleType:
+    return _helper("_integrity")
+
+
+@dataclass(frozen=True)
+class Registry:
+    """A registry that passed ``load_side``; ``_check`` reads only these validated fields."""
+
+    paths: dict[str, str]
+    approvals: dict[str, dict[str, str]]
+    baselines: dict[str, Baseline]
+    rows: int
+    decisions: dict[str, dict[str, str]]
+    names: dict[str, set[str]]
+    report: list[str]
+
+
 @dataclass(frozen=True)
 class Baseline:
     sentry_id: str
@@ -52,22 +86,29 @@ class Baseline:
     reasons: dict[str, object]
 
 
-def parse_registry(text: str) -> tuple[dict[str, str], list[str]]:
-    """Return ``{id: path}`` and findings for duplicate ids or shared paths."""
-    rows = tomllib.loads(text).get("sentry", [])
+def parse_registry(doc: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+    """``{id: path}`` and findings for duplicate ids, shared paths or unsafe paths.
+
+    Every row's path is checked, including the row of a duplicated id, so a duplicate cannot
+    hide an unsafe path. ``doc`` must have passed ``validate_registry``.
+    """
     out: dict[str, str] = {}
+    by_path: dict[str, list[str]] = {}
     findings: list[str] = []
-    for row in rows:
-        sid, path = row.get("id", ""), row.get("baseline", "")
+    for row in doc.get("sentry", []):
+        sid, path = row["id"], row["baseline"]
         if sid in out:
             findings.append(f"registry: sentry id {sid} appears twice")
         out[sid] = path
-    for path in sorted({p for p in out.values()}):
-        ids = sorted(i for i, p in out.items() if p == path)
+        by_path.setdefault(path, []).append(sid)
+    for path in sorted(by_path):
+        ids = sorted(set(by_path[path]))
         if len(ids) > 1:
             findings.append(f"registry: two sentries ({', '.join(ids)}) share baseline {path}")
-        if not path.startswith(BASELINE_DIR + "/"):
-            findings.append(f"registry: baseline {path} is outside {BASELINE_DIR}/")
+        if not _integrity().safe_path(path, BASELINE_DIR):
+            findings.append(
+                f"registry: baseline {path} is outside {BASELINE_DIR}/ or not a plain relative path"
+            )
     return out, findings
 
 
@@ -82,7 +123,7 @@ def _decision_ok(decision: object) -> bool:
     return True
 
 
-def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
+def parse_approvals(doc: dict[str, Any]) -> tuple[dict[str, dict[str, str]], list[str]]:
     """``{sentry id: {key: decision}}`` from ``approved_growth`` rows, and findings for bad rows.
 
     A row is ``{ key, decision }``; the key compares exactly (no glob or prefix) and the decision
@@ -90,7 +131,7 @@ def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
     """
     out: dict[str, dict[str, str]] = {}
     findings: list[str] = []
-    for row in tomllib.loads(text).get("sentry", []):
+    for row in doc.get("sentry", []):
         sid = row.get("id", "")
         for item in row.get("approved_growth", []):
             key = item.get("key") if isinstance(item, dict) else None
@@ -99,25 +140,72 @@ def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
                 findings.append(f"{sid}: approved_growth row has no key")
             elif _GLOB_CHARS & set(key):
                 findings.append(f"{sid}: approved_growth key {key} is a pattern; list exact keys")
-            elif not _decision_ok(decision):
+            elif decision_problem(decision):
                 findings.append(
                     f"{sid}: approved_growth for {key} needs a decision "
-                    "'owner YYYY-MM-DD <text of 10+ chars>'"
+                    f"'owner YYYY-MM-DD <reason of {MIN_REASON}+ chars>'"
                 )
+            elif key in out.get(sid, {}):
+                findings.append(f"{sid}: approved_growth key {key} appears twice")
             else:
                 out.setdefault(sid, {})[key] = decision
     return out, findings
 
 
+def decision_problem(decision: object) -> str | None:
+    """Why ``decision`` is not an acceptable owner decision, or ``None`` when it is."""
+    if not _decision_ok(decision):
+        return f"needs a decision 'owner YYYY-MM-DD <reason of {MIN_REASON}+ chars>'"
+    if weak_reason(str(decision).split(" ", 2)[2]):
+        return f"reason is empty, a placeholder or under {MIN_REASON} chars"
+    return None
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("duplicate key")
+        out[key] = value
+    return out
+
+
 def parse_baseline(text: str) -> Baseline:
-    data = json.loads(text)
-    entries = data.get("entries", {})
-    return Baseline(
-        str(data.get("sentry_id", "")),
-        str(data.get("created_in", "")),
-        frozenset(entries),
-        entries,
+    """A baseline document with exact types and no coercion; any deviation raises ``ValueError``.
+
+    An object with a string ``sentry_id`` and an ``entries`` object whose values are objects with a
+    string ``reason``; optional ``category`` and ``moved_from`` are strings, ``max`` and ``min`` are
+    exact integers (a boolean is not one), and ``created_in``, when present, is a string. A
+    duplicate JSON key at any depth is refused.
+    """
+    data = json.loads(text, object_pairs_hook=_no_duplicate_keys)
+    if not isinstance(data, dict):
+        raise ValueError("not a baseline document")
+    sentry_id, entries, created = (
+        data.get("sentry_id"),
+        data.get("entries"),
+        data.get("created_in", ""),
     )
+    if (
+        not isinstance(sentry_id, str)
+        or not isinstance(entries, dict)
+        or not isinstance(created, str)
+    ):
+        raise ValueError("wrong type in a baseline header")
+    for entry in entries.values():
+        if not isinstance(entry, dict) or not isinstance(entry.get("reason"), str):
+            raise ValueError("an entry needs a string reason")
+        if any(f in entry and not isinstance(entry[f], str) for f in ("category", "moved_from")):
+            raise ValueError("category and moved_from are strings")
+        if any(f in entry and type(entry[f]) is not int for f in ("max", "min")):
+            raise ValueError("max and min are integers")
+    return Baseline(sentry_id, created, frozenset(entries), entries)
+
+
+def weak_reason(text: str) -> bool:
+    """True when a reason is empty, a placeholder or under ``MIN_REASON`` chars (one predicate)."""
+    text = text.strip()
+    return len(text) < MIN_REASON or text.lower().strip(".!") in PLACEHOLDERS
 
 
 def reason_findings(path: str, base: Baseline) -> list[str]:
@@ -125,8 +213,7 @@ def reason_findings(path: str, base: Baseline) -> list[str]:
     for key in sorted(base.keys):
         entry = base.reasons[key]
         reason = entry.get("reason") if isinstance(entry, dict) else None
-        text = reason.strip() if isinstance(reason, str) else ""
-        if len(text) < MIN_REASON or text.lower().strip(".!") in PLACEHOLDERS:
+        if weak_reason(reason if isinstance(reason, str) else ""):
             out.append(
                 f"{path}: reason for {key} is empty, a placeholder or under {MIN_REASON} chars"
             )
@@ -142,11 +229,6 @@ def _git_show(root: Path, ref: str, rel: str) -> str | None:
     return res.stdout if res.returncode == 0 else None
 
 
-def _base_entries(root: Path, ref: str, path: str) -> dict[str, object]:
-    text = _git_show(root, ref, path)
-    return parse_baseline(text).reasons if text is not None else {}
-
-
 def _max_of(entry: object) -> int | None:
     value = entry.get("max") if isinstance(entry, dict) else None
     return value if isinstance(value, int) else None
@@ -158,7 +240,7 @@ def max_raised(head: object, base: object) -> bool:
     return old is not None and (new is None or new > old)
 
 
-def _permit_site(key: str) -> str | None:
+def permit_site(key: str) -> str | None:
     """``<file>::<site>`` of a ``permitted::<file>::<site>::<digest>`` key, else ``None``."""
     kind, _, rest = key.partition("::")
     site, sep, digest = rest.rpartition("::")
@@ -182,13 +264,13 @@ def growth(
     def by_site(keys: frozenset[str]) -> dict[str, list[str]]:
         sites: dict[str, list[str]] = {}
         for key in keys:
-            site = _permit_site(key)
+            site = permit_site(key)
             if site is not None:
                 sites.setdefault(site, []).append(key)
         return sites
 
     head_sites, base_sites = by_site(head), by_site(base)
-    grown = {k for k in head - base if _permit_site(k) is None}
+    grown = {k for k in head - base if permit_site(k) is None}
     rekeyed: list[str] = []
     for site, keys in sorted(head_sites.items()):
         old = base_sites.get(site, [])
@@ -199,154 +281,176 @@ def growth(
     return frozenset(grown), rekeyed
 
 
-def _find_defs(node: ast.AST, part: str) -> list[ast.AST]:
-    """Every def or class named ``part`` under ``node``, looking inside if/try/with/for blocks."""
-    found: list[ast.AST] = []
-    todo = list(ast.iter_child_nodes(node))
-    while todo:
-        child = todo.pop(0)
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if child.name == part:
-                found.append(child)
-            continue
-        todo.extend(ast.iter_child_nodes(child))
-    return found
-
-
-def _qualname_nodes(tree: ast.AST, qualname: str) -> list[ast.AST]:
-    nodes: list[ast.AST] = [tree]
-    for part in qualname.split("."):
-        nodes = [d for n in nodes for d in _find_defs(n, part)]
-    return nodes
-
-
-def _mentions(n: ast.AST, name: str) -> bool:
-    """True when ``n`` binds or reads ``name``: a closure that only reads it still holds the site."""
-    if isinstance(n, ast.arg):
-        return n.arg == name
-    if isinstance(n, ast.Name):
-        return n.id == name
-    if isinstance(n, ast.Attribute):
-        return n.attr == name
-    if isinstance(n, ast.alias):
-        return (n.asname or n.name.partition(".")[0]) == name
-    if isinstance(n, ast.MatchMapping):
-        return n.rest == name
-    # def, class, except-as, match capture, type-param and any later form that names itself.
-    return getattr(n, "name", None) == name
-
-
-def _site_parts(key: str) -> tuple[str, str, str] | None:
-    """Split ``<file>::<qualname>::<name>`` with an optional all-digit ``::<ordinal>`` suffix."""
-    parts = key.split("::")
-    if len(parts) == 4 and parts[3].isdigit():
-        parts = parts[:3]
-    return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
-
-
-def site_gone(root: Path, key: str, base_ref: str) -> bool:
-    """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
-
-    ``<file>`` is relative to ``src/``. Proof by AST: the qualified def or class is missing, or it
-    is present but neither binds nor reads ``name`` (``_mentions``) in any same-named def. A
-    qualname part that is not an identifier (``<lambda>``) is never proven. A missing file proves it only
-    when the file existed at ``base_ref``. A key of another shape, an unresolvable path, or a
-    file that never existed is "not proven" and returns false.
-    """
-    parts = _site_parts(key)
-    if parts is None or not parts[0].endswith(".py") or not parts[2].isidentifier():
-        return False
-    file, qualname, name = parts
-    if not all(q.isidentifier() for q in qualname.split(".")):
-        return False
-    path = root / "src" / file
-    if not path.is_file():
-        return _git_show(root, base_ref, f"src/{file}") is not None
-    nodes = _qualname_nodes(ast.parse(path.read_text(encoding="utf-8")), qualname)
-    return not any(_mentions(n, name) for node in nodes for n in ast.walk(node))
-
-
-def rehomes(
-    root: Path,
-    base_ref: str,
-    grown: frozenset[str],
-    head_entries: dict[str, object],
-    lost: dict[str, object],
-) -> tuple[frozenset[str], list[str]]:
-    """Split ``grown`` into declared 1:1 moves of ``lost`` keys, and the rest.
-
-    A grown key is a move only when its entry names the old key in ``moved_from`` and that old
-    key was lost from this baseline, is proven gone (``site_gone``), carries no numeric ``max``,
-    ends in the same bound name, and is named by no other entry. Anything else stays growth.
-    """
-    claims: dict[str, list[str]] = {}
-    for key in grown:
-        entry = head_entries.get(key)
-        old = entry.get("moved_from") if isinstance(entry, dict) else None
-        if isinstance(old, str):
-            claims.setdefault(old, []).append(key)
-    remaining = set(grown)
-    report: list[str] = []
-    for old, keys in sorted(claims.items()):
-        old_parts, new_parts = _site_parts(old), _site_parts(keys[0])
-        same_name = old_parts is not None and new_parts is not None and old_parts[2] == new_parts[2]
-        if len(keys) != 1 or not same_name or old not in lost or _max_of(lost[old]) is not None:
-            continue
-        if site_gone(root, old, base_ref):
-            remaining.discard(keys[0])
-            report.append(f"re-homed {old} -> {keys[0]} (declared in moved_from; old site gone)")
-    return frozenset(remaining), report
-
-
 def _fmt(keys: frozenset[str]) -> str:
     return ", ".join(sorted(keys))
 
 
-def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
+def schema_waivers(raw: str | None) -> tuple[frozenset[tuple[str, str]], list[str]]:
+    """Exact ``(id, field)`` pairs from a JSON list of pairs; ``None`` means no waiver input.
+
+    Only ``ratchet_check.py --schema-waiver-env`` (the extracted base checker) passes the
+    ``RATCHET_SCHEMA_WAIVER`` value here; the head run never reads the environment.
+    """
+    if raw is None:
+        return frozenset(), []
+    try:
+        pairs = json.loads(raw)
+        if isinstance(pairs, list) and all(
+            isinstance(p, list) and len(p) == 2 and all(isinstance(x, str) for x in p)
+            for p in pairs
+        ):
+            return frozenset((p[0], p[1]) for p in pairs), []
+    except ValueError:
+        pass
+    return frozenset(), ["RATCHET_SCHEMA_WAIVER is not a JSON list of [id, field] pairs"]
+
+
+def check(
+    root: Path, base_ref: str, waiver_input: str | None = None
+) -> tuple[list[str], list[str]]:
     """Return ``(findings, report_lines)`` for the tree at ``root`` against ``base_ref``."""
-    reg_file = root / REGISTRY
-    head, findings = parse_registry(
-        reg_file.read_text(encoding="utf-8") if reg_file.exists() else ""
-    )
-    approvals, approval_findings = parse_approvals(
-        reg_file.read_text(encoding="utf-8") if reg_file.exists() else ""
-    )
+    helper = _integrity()
+    sha = helper.resolve_commit(root, base_ref)
+    if sha is None:
+        return [f"base commit not found: {base_ref}"], []
+    try:
+        return _check(root, helper.BaseTree(root, sha), helper, waiver_input)
+    except helper.BaseReadError as exc:
+        return [f"cannot read {exc.what} from the {exc.side} commit"], []
+    except Exception:
+        return ["cannot complete the check: the registry or a baseline holds unexpected input"], []
+
+
+def load_side(
+    side: Any,
+    helper: ModuleType,
+    base_names: dict[str, set[str]] | None = None,
+    waivers: frozenset[tuple[str, str]] = frozenset(),
+) -> tuple[Registry | None, list[str]]:
+    """The one loader for the HEAD and the BASE registry: the only place a side's input is read
+    and validated, and it never collapses or overwrites an input silently.
+
+    ``side`` is a ``helper.Side``. Both sides enumerate the baseline folder and open the registry
+    and every row's baseline through the same ``helper`` functions, then check shape, duplicate
+    ids and paths, closed row keys, decision tables, approvals, each baseline (exact types, the
+    ``sentry_id`` matching its row, reasons of real length), approvals against that side's own
+    inventory, and orphan baseline files. A present empty registry fails on either side. Any
+    finding on the base raises ``BaseReadError``, because a base that is not a clean registry
+    cannot anchor a comparison; on HEAD the findings are reported.
+    """
+    is_base = side.name == "base"
+
+    def unreadable(path: str, message: str) -> list[str]:
+        if is_base:
+            raise helper.BaseReadError(path)
+        return [message]
+
+    try:
+        text = helper.open_input(side, REGISTRY)
+    except helper.InputReadError:
+        return None, unreadable(
+            REGISTRY, f"registry: {REGISTRY} cannot be read as UTF-8 text (a regular file)"
+        )
+    if text is not None and not text.strip():
+        return None, unreadable(REGISTRY, f"registry: {REGISTRY} is empty")
+    if text is None and not is_base:
+        return None, [f"registry: {REGISTRY} is missing"]
+    doc, problems = helper.validate_registry(text or "")
+    if problems:
+        unreadable(REGISTRY, "")  # raises on the base
+        return None, [f"registry: {REGISTRY} {p}" for p in problems]
+    paths, findings = parse_registry(doc)
+    approvals, approval_findings = parse_approvals(doc)
     findings += approval_findings
-    base_text = _git_show(root, base_ref, REGISTRY)
-    base_reg = parse_registry(base_text)[0] if base_text is not None else {}
-    report: list[str] = []
-
-    on_disk = {p.relative_to(root).as_posix() for p in (root / BASELINE_DIR).glob("*.json")}
-    for path in sorted(on_disk - set(head.values())):
-        findings.append(f"{path}: baseline file is not registered in {REGISTRY}")
-
-    loaded: dict[str, Baseline] = {}
-    for sid, path in sorted(head.items()):
-        file = root / path
-        if not file.exists():
-            findings.append(f"{sid}: registry points at {path} but there is no baseline file")
+    dec = helper.decisions(doc)
+    fresh_fields = (
+        helper.fresh(dec["checker_change"], base_names["checker_change"], decision_problem)
+        if base_names is not None
+        else set()
+    )
+    usable = frozenset(w for w in waivers if w[1] in fresh_fields)
+    schema, report = helper.closed_keys(doc, ROW_KEYS, decision_problem, usable)
+    findings += schema
+    try:
+        listed: set[str] | None = set(helper.list_entries(side, BASELINE_DIR))
+    except helper.InputReadError as exc:
+        listed = None
+        findings += unreadable(
+            exc.what, f"{exc.what} cannot be listed or is a link or special file ({side.name})"
+        )
+    blame = REGISTRY if findings else None  # the path a base failure names
+    baselines: dict[str, Baseline] = {}
+    for row in doc.get("sentry", []):  # every row, so a duplicate id cannot hide a diagnostic
+        sid, path = row["id"], row["baseline"]
+        if not helper.safe_path(path, BASELINE_DIR):
             continue
-        loaded[sid] = base = parse_baseline(file.read_text(encoding="utf-8"))
-        if base.sentry_id != sid:
-            findings.append(
-                f"{path}: sentry_id {base.sentry_id!r} does not match registry id {sid}"
-            )
-        findings += reason_findings(path, base)
-        findings += [
-            f"{sid}: stale approved_growth, {key} is not in {path}"
-            for key in sorted(set(approvals.get(sid, {})) - base.keys)
-        ]
+        broken = f"{sid}: baseline {path} cannot be read or is not a baseline file"
+        try:
+            got = helper.open_input(side, path)
+            if got is None and listed is not None and path in listed:
+                raise helper.InputReadError(path, side.name)  # listed, then gone
+            if got is not None:
+                parsed = parse_baseline(got)
+        except (helper.InputReadError, ValueError, RecursionError):
+            findings += unreadable(path, broken)
+            continue
+        before = len(findings)
+        if got is None:
+            findings.append(f"{sid}: registry points at {path} but there is no baseline file")
+        else:
+            baselines[sid] = parsed
+            if parsed.sentry_id != sid:
+                findings.append(
+                    f"{path}: sentry_id {parsed.sentry_id!r} does not match registry id {sid}"
+                )
+            findings += reason_findings(path, parsed)
+            findings += [
+                f"{sid}: stale approved_growth, {key} is not in {path}"
+                for key in sorted(set(approvals.get(sid, {})) - parsed.keys)
+            ]
+        if len(findings) > before and blame is None:
+            blame = path
+    registered = {row["baseline"] for row in doc.get("sentry", [])}
+    orphans = sorted((listed or set()) - registered)
+    findings += [f"{path}: baseline file is not registered in {REGISTRY}" for path in orphans]
+    if findings and is_base:
+        raise helper.BaseReadError(blame or orphans[0])
+    rows = len(doc.get("sentry", []))
+    registry = Registry(paths, approvals, baselines, rows, dec, helper.table_names(doc), report)
+    return registry, findings
+
+
+def _check(
+    root: Path, tree: Any, helper: ModuleType, waiver_input: str | None
+) -> tuple[list[str], list[str]]:
+    base_reg_loaded, _ = load_side(helper.Side("base", root, tree), helper)
+    assert base_reg_loaded is not None  # a base problem raised
+    waived, waiver_findings = schema_waivers(waiver_input)
+    head_side = helper.Side("head", root)
+    head_reg, findings = load_side(head_side, helper, base_reg_loaded.names, waived)
+    findings += waiver_findings
+    if head_reg is None:
+        return findings, []
+    head, approvals, loaded = head_reg.paths, head_reg.approvals, head_reg.baselines
+    base_reg = base_reg_loaded.paths
+    findings += helper.registry_present(base_reg_loaded.rows, head_reg.rows)
+    fresh = {
+        t: helper.fresh(head_reg.decisions[t], base_reg_loaded.names[t], decision_problem)
+        for t in head_reg.decisions
+    }
+    report: list[str] = helper.new_decisions(
+        head_reg.decisions, base_reg_loaded.names, approvals, base_reg_loaded.approvals
+    )
+    report += head_reg.report
+
+    findings += helper.new_baseline_findings(
+        tree, {head[s]: b.created_in for s, b in loaded.items()}
+    )
 
     removed = set(base_reg) - set(head)
-    # A key a replacement keeps must keep its max too, or a rename would launder a raised max.
-    old_entries: dict[str, list[object]] = {}
-    for s in removed:
-        for key, entry in _base_entries(root, base_ref, base_reg[s]).items():
-            old_entries.setdefault(key, []).append(entry)
-    old_union = frozenset(old_entries)
-    new_union: frozenset[str] = frozenset()
-    replaced_raised: set[str] = set()
-    union_ids = set(removed)
+    # Every base baseline, retired ids included, was already read by ``load_side``.
+    donors = {s: base_reg_loaded.baselines[s].reasons for s in sorted(removed - fresh["retired"])}
+    successors: dict[str, dict[str, object]] = {}
     for sid, base in sorted(loaded.items()):
         path = head[sid]
         report.append(f"{sid}: {len(base.keys)} key(s) in {path}")
@@ -354,14 +458,21 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
             if base_reg[sid] != path:
                 findings.append(f"{sid}: baseline moved from {base_reg[sid]} to {path}")
                 continue
-            old = _base_entries(root, base_ref, path)
+            old = base_reg_loaded.baselines[sid].reasons
             grown, rekeyed = growth(base.keys, frozenset(old), sid in REKEY_PER_SITE)
             report += [
                 f"{sid}: re-keyed permitted site {site} (review the message)" for site in rekeyed
             ]
             if grown and sid in REHOME_BY_BINDING:
                 lost = {k: e for k, e in old.items() if k not in base.keys}
-                grown, moved = rehomes(root, base_ref, grown, base.reasons, lost)
+                grown, moved = _helper("_rehome").rehomes(
+                    tree,
+                    grown,
+                    base.reasons,
+                    lost,
+                    _max_of,
+                    lambda p: helper.open_input(head_side, p),
+                )
                 report += [f"{sid}: {line}" for line in moved]
             approved = grown & frozenset(approvals.get(sid, {}))
             report += [
@@ -378,27 +489,15 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
             if raised:
                 findings.append(f"{sid}: max raised or dropped for key(s): {', '.join(raised)}")
         elif removed:
-            new_union |= base.keys
-            union_ids.add(sid)
-            replaced_raised |= {
-                k
-                for k in base.keys & old_union
-                if any(max_raised(base.reasons[k], old) for old in old_entries[k])
-            }
+            successors[sid] = base.reasons
         else:
             # Newly registered in this diff: the one way a first inventory is admitted.
             report.append(f"{sid}: first inventory, {len(base.keys)} key(s), review required")
-    grown, rekeyed = growth(new_union, old_union, union_ids <= REKEY_PER_SITE)
-    report += [
-        f"replacement: re-keyed permitted site {site} (review the message)" for site in rekeyed
-    ]
-    if removed and grown:
-        findings.append(
-            f"replacement or split of {_fmt(frozenset(removed))} adds key(s): {_fmt(grown)}"
-        )
-    if replaced_raised:
-        findings.append(
-            f"replacement or split of {_fmt(frozenset(removed))} raised or dropped max for"
-            f" key(s): {_fmt(frozenset(replaced_raised))}"
-        )
+    only_rekey = (set(donors) | set(successors)) <= REKEY_PER_SITE
+    transfer, rekeyed_report = helper.transfer_findings(
+        sys.modules[__name__], donors, successors, only_rekey, removed
+    )
+    findings += transfer
+    report += rekeyed_report
+    findings += helper.sentry_file_findings(root, tree, fresh["retired_files"])
     return findings, report
