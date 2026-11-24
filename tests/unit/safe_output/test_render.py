@@ -247,3 +247,43 @@ def test_long_registered_message_is_cut_with_a_marker(registered: None) -> None:
     text = render_failure(_RegisteredError("x" * 600)).text
     assert text == "x" * _render.MAX_MESSAGE_LEN + _render.TRUNCATED_MARKER
     assert render_failure(_RegisteredError("x" * 500)).text == "x" * 500
+
+
+@pytest.mark.parametrize(
+    "ok", ["data/in.csv", "/var/data/in.csv", "C:\\data\\in.csv", "out dir/x.parquet"]
+)
+def test_path_slot_keeps_a_local_path(ok: str) -> None:
+    assert SafeText.template("in {p}", paths={"p": ok}).text == f"in {ok}"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        f"https://user:{_CANARY}@host/x.parquet",
+        f"user:{_CANARY}@host/x",
+        f"s3://bucket/key?X-Amz-Signature={_CANARY}",
+        f"data.csv?token={_CANARY}",
+        f"postgresql://u:{_CANARY}@h/db",
+        f"file:///tmp/{_CANARY}",
+    ],
+)
+def test_path_slot_withholds_a_credential_bearing_locator(bad: str) -> None:
+    text = SafeText.template("in {p}", paths={"p": bad}).text
+    assert text == "in <withheld>" and _CANARY not in text
+
+
+def test_production_uncoded_registered_error_keeps_its_message() -> None:
+    from decoy_engine.transforms._ff1 import Ff1Error
+
+    assert render_failure(Ff1Error("tweak length is fixed")).text == "tweak length is fixed"
+    assert "decoy_engine.transforms._ff1.Ff1Error" in _render.VALUE_FREE_CLASSES
+
+
+def test_production_coded_registered_error_prints_its_summary_not_its_text() -> None:
+    from decoy_engine.errors import FpeChecksumError
+
+    exc = FpeChecksumError(f"checksum {_CANARY}")
+    text = render_failure(exc).text
+    assert _CANARY not in text
+    assert text == reason_from_exception(exc).summary
+    assert "decoy_engine.errors.FpeChecksumError" in _render.VALUE_FREE_CLASSES

@@ -33,3 +33,13 @@ def test_the_phase_envelope_wire_form_is_the_same_mapping() -> None:
 def test_the_phase_envelope_still_refuses_an_unknown_identity() -> None:
     with pytest.raises(phase.PhaseContractError, match="unknown reason identity"):
         phase._reason_wire(ReasonRef("post_scan", "no_such_code"))
+
+
+def test_unknown_reason_error_does_not_echo_the_rejected_input() -> None:
+    from decoy_engine import reasons
+    from decoy_engine.safe_output import render_failure
+
+    with pytest.raises(reasons.UnknownReasonError) as excinfo:
+        reasons.get_reason("runtime", "https://user:DECOY_CANARY_F31_7Q4Z@host")
+    assert "DECOY_CANARY_F31_7Q4Z" not in str(excinfo.value)
+    assert "DECOY_CANARY_F31_7Q4Z" not in render_failure(excinfo.value).text

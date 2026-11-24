@@ -9,7 +9,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 
-from tests.sentry.safe_output._tagger import SINK_RISKY, own_nodes, tainted_names
+from tests.sentry.safe_output._tagger import RISKY_NAMES, SINK_RISKY, own_nodes, tainted_names
 
 # Exception names the tagger's list leaves out; `except ... as NAME` bindings are added per scope.
 EXC_NAMES = frozenset({"exception", "cause", "inner", "boom"})
@@ -22,9 +22,13 @@ AUDIT_VALUE_NAMES = frozenset(
         "frame", "stderr", "stdout",
     }
 )  # fmt: skip
-_TYPE_ONLY_CALLS = frozenset({"type", "len", "int", "float", "bool", "id", "hex"})
+# Only these calls drop a value's text: the type of it, and a count or truth value of it.
+# `int(x)`, `float(x)` and `str(x)` keep it (`int(row["pin"])` prints the pin).
+_TYPE_ONLY_CALLS = frozenset({"type", "len", "bool"})
+# The audit tags `x.password` and `self.value` by the attribute name, whatever `x` is.
+VALUE_ATTRS = frozenset(n.lower() for n in RISKY_NAMES | AUDIT_VALUE_NAMES)
 
-_SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
 
 def exposes(value: ast.AST, names: frozenset[str]) -> bool:
@@ -42,6 +46,8 @@ def exposes(value: ast.AST, names: frozenset[str]) -> bool:
                 continue
         if isinstance(node, ast.Attribute) and node.attr == "__class__":
             continue
+        if isinstance(node, ast.Attribute) and node.attr.lower() in VALUE_ATTRS:
+            return True
         if isinstance(node, ast.Name) and node.id in names:
             return True
         pending.extend(ast.iter_child_nodes(node))
@@ -60,7 +66,7 @@ def _wide_taint(own: list[ast.AST], risky: frozenset[str]) -> frozenset[str]:
                 value, targets = node.value, list(node.targets)
             elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
                 value, targets = node.value, [node.target]
-            elif isinstance(node, (ast.For, ast.AsyncFor)):
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
                 value, targets = node.iter, [node.target]
             elif isinstance(node, ast.withitem) and node.optional_vars is not None:
                 value, targets = node.context_expr, [node.optional_vars]
@@ -74,13 +80,21 @@ def _wide_taint(own: list[ast.AST], risky: frozenset[str]) -> frozenset[str]:
 def iter_scopes(tree: ast.AST) -> Iterator[tuple[ast.AST, list[ast.AST], frozenset[str]]]:
     """Each scope with its own nodes and the names that count as risky inside it.
 
-    The risky set is the tagger's sink names, the exception names, the scope's own `except`
-    bindings and every name assigned from one of those (one pass, same bound as the tagger).
+    The risky set is the tagger's sink names, the exception and audit value names, the scope's own
+    `except` bindings and every name bound from one of those (to a fixpoint). A nested function,
+    class or lambda inherits the set of the scopes around it, because it can read their bindings.
     """
-    for scope in ast.walk(tree):
-        if not isinstance(scope, _SCOPES):
-            continue
+
+    def visit(
+        scope: ast.AST, inherited: frozenset[str]
+    ) -> Iterator[tuple[ast.AST, list[ast.AST], frozenset[str]]]:
         own = own_nodes(scope)
         bound = {n.name for n in own if isinstance(n, ast.ExceptHandler) and n.name}
-        risky = SINK_RISKY | EXC_NAMES | AUDIT_VALUE_NAMES | bound
-        yield scope, own, risky | tainted_names(own, risky) | _wide_taint(own, risky)
+        risky = SINK_RISKY | EXC_NAMES | AUDIT_VALUE_NAMES | bound | inherited
+        full = risky | tainted_names(own, risky) | _wide_taint(own, risky)
+        yield scope, own, full
+        for child in own:
+            if isinstance(child, _NESTED):
+                yield from visit(child, full)
+
+    yield from visit(tree, frozenset())

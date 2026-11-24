@@ -51,7 +51,8 @@ def get_reason(namespace: str, code: str) -> ReasonSpec:
     try:
         return _registry.get(namespace, code)
     except KeyError:
-        raise UnknownReasonError(f"unknown reason {namespace}/{code}") from None
+        # Fixed text: a rejected namespace or code is caller input and can carry a secret.
+        raise UnknownReasonError("unknown reason identity") from None
 
 
 def require_known(ref: ReasonRef) -> ReasonSpec:

@@ -15,6 +15,7 @@ raise sites only; a host or CLI sink is held to ``SafeText`` by its own sentry.
 from __future__ import annotations
 
 import os
+import re
 import string
 from collections.abc import Mapping
 from typing import final
@@ -114,6 +115,15 @@ class SafeText:
         return cls(text, _token=_TOKEN)
 
 
+# A local display path has no scheme (a one-letter drive is not one), no userinfo and no query:
+# those are the parts of a locator that carry credentials and signatures.
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+:")
+
+
+def _is_local_path(value: str) -> bool:
+    return not (_SCHEME.match(value) or "://" in value or "@" in value or "?" in value)
+
+
 def _slot_text(kind: str, value: object) -> str:
     if kind == "count":
         if type(value) is not int or value < 0:
@@ -123,7 +133,7 @@ def _slot_text(kind: str, value: object) -> str:
         if isinstance(value, os.PathLike):
             value = os.fspath(value)
         ok = isinstance(value, str) and 0 < len(value) <= MAX_PATH_LEN and value.isprintable()
-        return value if ok and isinstance(value, str) else _WITHHELD
+        return value if ok and isinstance(value, str) and _is_local_path(value) else _WITHHELD
     approved = approve_name(value)
     return approved if approved is not None else _WITHHELD
 
@@ -153,6 +163,7 @@ VALUE_FREE_CLASSES: frozenset[str] = frozenset(
         "decoy_engine.execution.native._crypto_ext.FpeConfigError",
         "decoy_engine.execution.native._pool_quality.PoolQualityError",
         "decoy_engine.execution.pipeline._cgroup.CgroupMappingError",
+        "decoy_engine.fileaccess._types.FileAccessReadError",
         "decoy_engine.fileaccess._types.FileAccessUnavailable",
         "decoy_engine.fileaccess._types.LeafTooLarge",
         "decoy_engine.fileaccess._types.LockTimeout",
@@ -169,7 +180,6 @@ VALUE_FREE_CLASSES: frozenset[str] = frozenset(
         "decoy_engine.publication._types.PublicationRefused",
         "decoy_engine.reasons._identity.UnknownReasonError",
         "decoy_engine.secret_providers.vault.VaultClientConfigError",
-        "decoy_engine.subset._errors.SubsetBudgetExceededError",
         "decoy_engine.transforms._ff1.Ff1Error",
         "decoy_engine.transforms.windowed_date.WindowedDateError",
         "decoy_engine.transforms.windowed_date.WindowedDateParentAnchorNullError",

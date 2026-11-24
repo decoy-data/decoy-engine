@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.safe_output._alias_cases import ALIAS_IDS, forms
+from tests.sentry.safe_output._resolve import aliases, last, names_class, qualified
 from tests.sentry.safe_output._scopes import exposes, iter_scopes
 from tests.sentry.safe_output._tagger import risky_in
 
@@ -65,17 +67,6 @@ _PRIVATE = frozenset({"_mint", "_TOKEN"})
 _CONSTRUCTORS = frozenset({"const", "template"})
 
 
-def _aliases(tree: ast.AST) -> frozenset[str]:
-    """Local names bound to `SafeText` by an import (`from ... import SafeText as ST`)."""
-    types = {"SafeText"}
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            types |= {
-                a.asname or a.name for a in node.names if a.name.rpartition(".")[2] == "SafeText"
-            }
-    return frozenset(types)
-
-
 def _private_reference(node: ast.AST) -> bool:
     """`_mint` anywhere, or `_TOKEN` taken from the renderer module (other modules own a `_TOKEN`)."""
     if isinstance(node, ast.Attribute):
@@ -97,19 +88,19 @@ def _private_reference(node: ast.AST) -> bool:
 
 
 def literal_findings(source: str, rel_path: str) -> list[str]:
-    """Every `SafeText` construction in `source` that is not a literal or an approved slot."""
-    tree = ast.parse(source)
-    in_render = rel_path.endswith(_RENDER_MODULE)
-    risky: frozenset[str] = frozenset().union(*(r for _, _, r in iter_scopes(tree)))
-    types = _aliases(tree)
+    """Every `SafeText` construction in `source` that is not a literal or an approved slot.
 
-    def is_safe_text(node: ast.AST) -> bool:
-        """The expression names the class: `SafeText`, an alias, or `<module>.SafeText`."""
-        if isinstance(node, ast.Name):
-            return node.id in types
-        return isinstance(node, ast.Attribute) and (
-            node.attr == "SafeText" or (isinstance(node.value, ast.Name) and node.attr in types)
-        )
+    Names resolve through the shared resolver (imports, rebindings, qualified names). Any
+    `.const` or `.template` call outside the renderer is checked whatever its receiver is, so a
+    stored `SafeText` instance or a rebound classmethod cannot dodge the literal rule.
+    """
+    tree = ast.parse(source)
+    in_render = rel_path == _RENDER_MODULE
+    risky: frozenset[str] = frozenset().union(*(r for _, _, r in iter_scopes(tree)))
+    known = aliases(tree)
+
+    def is_safe_text(node: ast.expr) -> bool:
+        return names_class(node, known, "SafeText")
 
     direct = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     found: list[str] = []
@@ -120,22 +111,26 @@ def literal_findings(source: str, rel_path: str) -> list[str]:
         if isinstance(node, ast.Attribute) and is_safe_text(node.value):
             if node.attr in _CONSTRUCTORS and id(node) not in direct:
                 found.append(f"{where}: SafeText.{node.attr} used other than as a direct call")
-        if isinstance(node, ast.Call) and is_safe_text(node.func) and not in_render:
+        if not isinstance(node, ast.Call):
+            continue
+        if is_safe_text(node.func) and not in_render:
             found.append(f"{where}: SafeText(...) built directly")
         if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
+            isinstance(node.func, ast.Name)
             and node.func.id == "getattr"
             and node.args
             and is_safe_text(node.args[0])
         ):
             found.append(f"{where}: getattr on SafeText")
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            func = node.func
-            if is_safe_text(func.value) and func.attr == "const":
+        target = qualified(node.func, known)
+        tail = node.func.attr if isinstance(node.func, ast.Attribute) else last(target)
+        if tail in _CONSTRUCTORS and (
+            isinstance(node.func, ast.Attribute) or "SafeText" in target.split(".")
+        ):
+            if tail == "const":
                 if len(node.args) != 1 or node.keywords or not _is_str_literal(node.args[0]):
                     found.append(f"{where}: const takes one string literal")
-            elif is_safe_text(func.value) and func.attr == "template":
+            else:
                 found += [f"{where}: {m}" for m in _template_findings(node, risky)]
     return found
 
@@ -227,3 +222,32 @@ def test_sentry_passes_a_clean_construction(source: str) -> None:
 
 def test_the_renderer_may_mint() -> None:
     assert literal_findings("def f(t):\n    return SafeText._mint(t)\n", _RENDER_MODULE) == []
+
+
+@pytest.mark.parametrize(("prelude", "expr"), forms("SafeText"), ids=ALIAS_IDS)
+def test_every_alias_of_safe_text_is_checked(prelude: str, expr: str) -> None:
+    bad = f"{prelude}def f(row):\n    return {expr}.const(row[0])\n"
+    good = f"{prelude}def f():\n    return {expr}.const('fixed')\n"
+    assert literal_findings(bad, "scratch/_x.py")
+    assert literal_findings(good, "scratch/_x.py") == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(row):\n    s = SafeText.const('a')\n    return s.const(row[0])\n",
+        "def f(row):\n    return make().template('x {n}', counts={'n': int(row['pin'])})\n",
+        "def f(account):\n    return SafeText.template('c {a}', names={'a': account.password})\n",
+        "def f(row):\n    return SafeText.template('c {a}', names={'a': [p for p in row][0]})\n",
+        "def f(x):\n    return SafeText.template('n {n}', counts={'n': int(x)})\n",
+    ],
+    ids=["stored_instance", "other_receiver", "value_attribute", "comprehension", "int_conversion"],
+)
+def test_sentry_catches_a_value_through_another_route(source: str) -> None:
+    assert literal_findings(source, "scratch/_x.py")
+
+
+def test_private_exemption_needs_the_full_renderer_path() -> None:
+    src = "def f(t):\n    return SafeText._mint(t)\n"
+    assert literal_findings(src, _RENDER_MODULE) == []
+    assert literal_findings(src, "other/" + _RENDER_MODULE)

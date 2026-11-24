@@ -19,46 +19,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests.sentry.safe_output._resolve import aliases as _aliases
+from tests.sentry.safe_output._resolve import qualified as _qualified
+
 SRC = Path(__file__).parents[2] / "src" / "decoy_engine"
 PROFILE = SRC / "profile"
 HELPER = "_lazy_identity.py"
 BASE_MODULE = "_readers.py"
 _BATCH_METHODS = {"iter_batches", "open_batches"}
-
-
-def _aliases(tree: ast.AST) -> dict[str, str]:
-    """Local name -> dotted target, from imports and plain `X = Y` rebinding."""
-    aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for a in node.names:
-                aliases[a.asname or a.name.split(".")[0]] = (
-                    a.name if a.asname else a.name.split(".")[0]
-                )
-        elif isinstance(node, ast.ImportFrom):
-            prefix = "." * node.level + (node.module or "")
-            for a in node.names:
-                aliases[a.asname or a.name] = f"{prefix}.{a.name}"
-        elif (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and isinstance(node.value, (ast.Name, ast.Attribute))
-        ):
-            target = _qualified(node.value, aliases)
-            if target:
-                aliases[node.targets[0].id] = target
-    return aliases
-
-
-def _qualified(node: ast.expr, aliases: dict[str, str]) -> str:
-    """The dotted target a Name or Attribute chain refers to, through the module's aliases."""
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        head = _qualified(node.value, aliases)
-        return f"{head}.{node.attr}" if head else ""
-    return ""
 
 
 def _is(qualified: str, name: str) -> bool:

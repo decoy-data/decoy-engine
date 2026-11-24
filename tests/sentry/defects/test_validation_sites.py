@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 import decoy_engine
 from tests.sentry.safe_output import RISKY_NAMES, risky_in
+from tests.sentry.safe_output._resolve import aliases, last
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
@@ -365,24 +366,10 @@ def _local_binds(func: ast.AST, producers: Producers) -> dict[str, str]:
 
 def _rule_error_names(tree: ast.AST) -> set[str]:
     """Local names that refer to ``ConfigRuleError``: import aliases and plain re-bindings."""
-    names = {"ConfigRuleError"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            names |= {a.asname for a in node.names if a.name == "ConfigRuleError" and a.asname}
-    grew = True
-    while grew:
-        grew = False
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and _last_name(node.value) in names
-                and node.targets[0].id not in names
-            ):
-                names.add(node.targets[0].id)
-                grew = True
-    return names
+    known = aliases(tree)
+    return {"ConfigRuleError"} | {
+        n for n, target in known.items() if last(target) == "ConfigRuleError"
+    }
 
 
 def message_findings(

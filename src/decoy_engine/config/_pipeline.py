@@ -528,12 +528,13 @@ class PipelineConfig(BaseModel):
         target_paths = {
             os.path.normpath(t.path) for t in self.targets.values() if isinstance(t, FileTarget)
         }
-        for src in self.sources.values():
+        for source_name, src in self.sources.items():
             if not isinstance(src, FileSource):
                 continue
             if os.path.normpath(src.path) in target_paths:
+                # Name the source, never its locator: a path can carry credentials.
                 raise ConfigRuleError(
-                    f"subset input {src.path!r} is also a mask target of this pipeline; "
+                    f"subset input of source {source_name!r} is also a mask target of this pipeline; "
                     "subsetting runs BEFORE masking (subset-then-mask), it cannot consume "
                     "masked output"
                 )

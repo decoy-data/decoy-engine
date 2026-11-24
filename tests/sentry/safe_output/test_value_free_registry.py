@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from decoy_engine.safe_output._render import VALUE_FREE_CLASSES
+from tests.sentry.safe_output._alias_cases import ALIAS_IDS, forms
 from tests.sentry.safe_output._registry_rule import (
     Admission,
     analyze,
@@ -134,7 +135,7 @@ def test_special_methods_walk_catches_a_value() -> None:
         "    def __str__(self):\n        return f'G {self.code}'\n"
     )
     sources = {"m": src}
-    assert special_method_findings(sources, "m", "E") == []  # a self attribute is the raise's
+    assert special_method_findings(sources, "m", "E")  # the audit tags `x.value` by attribute name
     assert special_method_findings(sources, "m", "F")
     assert special_method_findings(sources, "m", "G") == []
 
@@ -218,3 +219,44 @@ def test_rule_sees_every_call_that_builds_a_class(source: str) -> None:
     assert "E" in adm.bad
     if "class A" in source:
         assert "A" in adm.bad
+
+
+@pytest.mark.parametrize(("prelude", "expr"), forms("E"), ids=ALIAS_IDS)
+def test_every_alias_of_a_class_is_checked(prelude: str, expr: str) -> None:
+    src = f"class E(Exception): pass\n{prelude}def f(row):\n    raise {expr}(row)\n"
+    assert "E" in _admission(m=src).bad
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class E(Exception): pass\ndef f(row):\n    return lambda: E(row)\n",
+        "class E(Exception): pass\ndef make(detail):\n    x = E(detail)\n    return x\n"
+        "def f(cell):\n    raise make(cell)\n",
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as failure:\n"
+        "        def inner():\n            raise E(failure)\n        inner()\n",
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as failure:\n"
+        "        h = lambda: E(failure)\n        raise h()\n",
+        "class E(Exception): pass\ndef f(row):\n    raise E(int(row['pin']))\n",
+        "class E(Exception): pass\ndef f(account):\n    raise E(account.password)\n",
+        "class E(Exception): pass\ndef f(row):\n    parts = [p for p in row]\n    raise E(parts)\n",
+        "class E(Exception): pass\ndef f(row):\n    raise E(float(row))\n",
+    ],
+    ids=[
+        "lambda",
+        "returned_local_with_tainted_caller",
+        "closure_over_except_name",
+        "lambda_over_except_name",
+        "int_conversion",
+        "value_attribute",
+        "comprehension_target",
+        "float_conversion",
+    ],
+)
+def test_rule_follows_captured_and_converted_values(source: str) -> None:
+    assert "E" in _admission(m=source).bad
+
+
+def test_rule_still_admits_a_count_and_a_type() -> None:
+    src = "class E(Exception): pass\ndef f(row):\n    raise E(f'{len(row)} rows of {type(row).__name__}')\n"
+    assert "E" not in _admission(m=src).bad

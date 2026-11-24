@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tests.sentry.safe_output._exc_copies import copy_lines
+from tests.sentry.safe_output._resolve import aliases, last, qualified
 from tests.sentry.safe_output._scopes import exposes, iter_scopes
 from tests.sentry.safe_output._tagger import risky_in
 
@@ -51,8 +52,9 @@ def read_sources(root: Path) -> dict[str, str]:
     return out
 
 
-def _callee(call: ast.Call) -> str:
-    return ast.unparse(call.func).split(".")[-1]
+def _callee(call: ast.Call, known: dict[str, str]) -> str:
+    """The class or function a call names, through the file's import aliases and rebindings."""
+    return last(qualified(call.func, known))
 
 
 def _passes_code(call: ast.Call) -> bool:
@@ -69,10 +71,32 @@ def _message_exprs(call: ast.Call) -> list[ast.expr]:
     return [*call.args, *(k.value for k in call.keywords if k.arg not in _SKIP_KW)]
 
 
+def _returned_calls(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
+    """Calls a function returns, directly or through a local (`x = E(detail); return x`)."""
+    local: dict[str, ast.Call] = {}
+    for node in ast.walk(fn):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+        ):
+            local[node.targets[0].id] = node.value
+    out: list[ast.Call] = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Return):
+            if isinstance(node.value, ast.Call):
+                out.append(node.value)
+            elif isinstance(node.value, ast.Name) and node.value.id in local:
+                out.append(local[node.value.id])
+    return out
+
+
 def analyze(sources: Mapping[str, str]) -> Admission:
     trees = {module: ast.parse(text) for module, text in sources.items()}
+    known = {module: aliases(tree) for module, tree in trees.items()}
     classes: dict[str, list[str]] = defaultdict(list)
-    returns: dict[str, list[ast.Call]] = defaultdict(list)
+    returns: dict[str, list[tuple[ast.Call, str]]] = defaultdict(list)
     takes_code: set[str] = set()
     for module, tree in trees.items():
         for node in ast.walk(tree):
@@ -86,38 +110,34 @@ def analyze(sources: Mapping[str, str]) -> Admission:
                     for a in params
                 ):
                     takes_code.add(node.name)
-                returns[node.name].extend(
-                    sub.value
-                    for sub in ast.walk(node)
-                    if isinstance(sub, ast.Return) and isinstance(sub.value, ast.Call)
-                )
+                returns[node.name].extend((c, module) for c in _returned_calls(node))
 
     def owners_of(name: str, seen: frozenset[str] = frozenset()) -> set[str]:
         """Every class a function can return, following factories that return factories."""
         found: set[str] = set()
-        for r in returns.get(name, []):
-            callee = _callee(r)
+        for r, module in returns.get(name, []):
+            callee = _callee(r, known[module])
             if callee in classes:
                 found.add(callee)
             elif callee not in seen and callee in returns:
                 found |= owners_of(callee, seen | {name})
         return found
 
-    def resolve(call: ast.Call) -> tuple[set[str], bool]:
+    def resolve(call: ast.Call, module: str) -> tuple[set[str], bool]:
         """(the classes the call can build, whether a reason code is passed)."""
-        name = _callee(call)
+        name = _callee(call, known[module])
         if name in classes:
             return {name}, _passes_code(call)
         coded = (
             _passes_code(call)
-            or any(_passes_code(r) for r in returns.get(name, []))
+            or any(_passes_code(r) for r, _ in returns.get(name, []))
             or (name in takes_code and bool(call.args or call.keywords))
         )
         return owners_of(name), coded
 
     bad: set[str] = set()
     uncoded: set[str] = set()
-    for tree in trees.values():
+    for module, tree in trees.items():
         copies = copy_lines(tree)
         raised = {id(n.exc) for n in ast.walk(tree) if isinstance(n, ast.Raise) and n.exc}
         for scope, own, risky in iter_scopes(tree):
@@ -132,7 +152,7 @@ def analyze(sources: Mapping[str, str]) -> Admission:
                 exprs = _message_exprs(node)
                 if not exprs:
                     continue
-                owners, coded = resolve(node)
+                owners, coded = resolve(node, module)
                 if not owners:
                     continue
                 if not coded and id(node) in raised:

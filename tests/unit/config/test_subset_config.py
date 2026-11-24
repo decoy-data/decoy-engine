@@ -156,3 +156,23 @@ def test_no_subset_block_is_unaffected(tmp_path) -> None:
     config["sources"]["customers"]["has_header"] = True
     validated = PipelineConfig.model_validate(config)
     assert validated.subset is None
+
+
+_LOCATOR = "https://user:DECOY_CANARY_F31_7Q4Z@host/data.parquet"
+
+
+def test_collision_message_names_the_source_never_its_locator(tmp_path) -> None:
+    from decoy_engine.safe_output import render_failure
+
+    config = _base_config(tmp_path)
+    config["sources"]["customers"]["path"] = _LOCATOR
+    config["targets"]["customers"]["path"] = _LOCATOR
+    config = _with_subset(config)
+    with pytest.raises(Exception) as excinfo:
+        PipelineConfig.model_validate(config)
+    assert "DECOY_CANARY_F31_7Q4Z" not in str(excinfo.value)
+    assert "'customers'" in str(excinfo.value)
+    rule_errors = [e["ctx"]["error"] for e in excinfo.value.errors() if "ctx" in e]  # type: ignore[attr-defined]
+    assert rule_errors
+    for err in rule_errors:
+        assert "DECOY_CANARY_F31_7Q4Z" not in render_failure(err).text
