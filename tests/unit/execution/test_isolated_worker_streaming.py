@@ -410,7 +410,18 @@ def _assert_exact(table, actual):
             assert g.type.equals(w.type)
             if pa.types.is_dictionary(w.type):
                 assert g.dictionary.equals(w.dictionary)
+                assert _bits(g.dictionary) == _bits(w.dictionary)
                 assert g.indices.equals(w.indices)
+
+
+_FLOAT_BITS = {16: pa.int16(), 32: pa.int32(), 64: pa.int64()}
+
+
+def _bits(array):
+    """Values as compared bit for bit; Arrow equality takes -0.0 for +0.0."""
+    if pa.types.is_floating(array.type):
+        return array.view(_FLOAT_BITS[array.type.bit_width]).to_pylist()
+    return array.to_pylist()
 
 
 def _dict_chunks(dtype, *chunks):
@@ -436,6 +447,11 @@ _DICTIONARY_CASES = {
                 pa.dictionary(pa.int32(), pa.string()),
                 ([0, None, 1], ["a", "b"]),
                 ([0, 1, None, 2], ["c", "a", "d"]),
+            ),
+            "e": _dict_chunks(
+                pa.dictionary(pa.int32(), pa.string()),
+                ([None, 0, 0], ["x"]),
+                ([0, None, 1, 0], ["y", "z"]),
             ),
             "f": pa.chunked_array([[[1, 2], [3, 4], [5, 6]], [[7, 8]] * 4], _DICT_FIXED),
         }
@@ -464,6 +480,15 @@ _DICTIONARY_CASES = {
                 pa.dictionary(pa.int32(), pa.string(), ordered=True),
                 ([0, 1], ["b", "c"]),
                 ([0, 1], ["c", "b"]),
+            )
+        }
+    ),
+    "float_signed_zero": pa.table(
+        {
+            "x": _dict_chunks(
+                pa.dictionary(pa.int32(), pa.float64()),
+                ([0, 0], [0.0]),
+                ([0, 0], [-0.0]),
             )
         }
     ),

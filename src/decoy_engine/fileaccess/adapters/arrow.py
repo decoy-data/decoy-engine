@@ -21,11 +21,40 @@ def _strict(handle: FileHandle) -> bool:
     return bool(getattr(handle, "strict", True))
 
 
+# Custom metadata on the empty batch `ipc_write_exact` puts between chunks; no staged chunk has any.
+_SEPARATOR = {b"decoy.isolated.separator": b"1"}
+
+
+def ipc_write_exact(writer: _FileBacked, table: pa.Table) -> None:
+    """Write `table` to an IPC stream so every chunk's dictionaries reach it bit for bit."""
+    # The writer skips a dictionary equal to the last one sent, and Arrow equality takes -0.0
+    # for +0.0; an empty-dictionary separator makes every chunk send its own.
+    empty = [pa.nulls(0, field.type) for field in table.schema]
+    separator = pa.RecordBatch.from_arrays(empty, schema=table.schema)
+    for index, batch in enumerate(table.to_batches()):
+        if index:
+            writer.write_batch(separator, custom_metadata=_SEPARATOR)
+        writer.write_batch(batch)
+
+
+def _stream_chunks(reader: pa.ipc.RecordBatchStreamReader) -> list[pa.RecordBatch]:
+    chunks: list[pa.RecordBatch] = []
+    while True:
+        try:
+            item = reader.read_next_batch_with_custom_metadata()
+        except StopIteration:
+            return chunks
+        meta = item.custom_metadata
+        if meta is None or dict(meta) != _SEPARATOR:
+            chunks.append(item.batch)
+
+
 def ipc_read_path(handle: FileHandle) -> pa.Table:
     """Read a staged IPC stream; the returned Arrow buffers retain the mapped private file."""
     with guarded("isolated.sources", True, pa.memory_map, handle.library_path(), "r") as source:
         reader = guarded("isolated.sources", True, pa.ipc.open_stream, source)
-        return guarded("isolated.sources", True, reader.read_all)
+        chunks = guarded("isolated.sources", True, _stream_chunks, reader)
+        return pa.Table.from_batches(chunks, schema=reader.schema)
 
 
 def read_table(handle: FileHandle, **kwargs: Any) -> pa.Table:

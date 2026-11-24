@@ -170,7 +170,7 @@ def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, di
             component = f"s{index:04d}.arrow"
             # The stream format carries each chunk's own dictionary; the file format allows one.
             with arrow_adapter.ipc_new_stream(stage, component, table.schema) as writer:
-                writer.write_table(table)
+                arrow_adapter.ipc_write_exact(writer, table)
         manifest[name] = {"path": str(work_root / component), "format": fmt}
     return manifest
 
