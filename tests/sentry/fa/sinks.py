@@ -65,6 +65,7 @@ EXACT: frozenset[str] = frozenset(
         "logging.handlers.WatchedFileHandler",
         "pyarrow.OSFile",
         "pyarrow.memory_map",
+        "decoy_engine.fileaccess.adapters.arrow.ipc_read_path",
         "pyarrow.input_stream",
         "pyarrow.output_stream",
         "pyarrow.create_memory_map",
