@@ -53,8 +53,9 @@ def resolve_edge_directions(
             raise SubsetConfigError(
                 code=reasons.config.SUBSET_DANGLING_NOT_ACKNOWLEDGED,
                 message="disabling upward traversal on an edge can orphan child FKs "
-                f"(edges: {dangling!r}); set allow_dangling=True on the FanOutPolicy to "
-                "acknowledge this explicitly, or leave the edge direction as 'both'/'upward'",
+                f"(edges: {dangling!r}); add `allow dangling` to the subset block "
+                "(YAML: `allow_dangling: true`; Python: `FanOutPolicy(allow_dangling=True)`) to "
+                "accept orphaned child rows, or set the edge direction to 'both' or 'upward'",
             )
     return directions
 
