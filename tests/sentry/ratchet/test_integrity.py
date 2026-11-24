@@ -7,6 +7,7 @@ Sentry ids, keys and decisions are synthetic. The decision rows written here liv
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -575,22 +576,73 @@ def test_a_checker_change_name_on_the_base_with_a_non_string_value_is_not_fresh(
     assert "a: unknown registry key bypass" in res.stdout + res.stderr
 
 
-def _glob_literal_sites() -> list[str]:
-    """Every call that passes the sentry glob literal as an argument, under tests and scripts."""
-    import ast
+GLOB = "test_*.py"
+# test_gate_pins asks "does this directory hold any test file", which is not membership.
+GLOB_EXEMPT = ("tests/sentry/test_gate_pins.py", "test_every_pinned_path_exists_and_is_a_test")
 
-    sites = []
-    for top in ("tests", "scripts"):
-        for path in sorted((_ROOT / top).rglob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Call) and any(
-                    isinstance(a, ast.Constant) and a.value == "test_*.py" for a in node.args
-                ):
-                    sites.append(path.relative_to(_ROOT).as_posix())
+
+def _glob_sites(sources: dict[str, str]) -> list[tuple[str, str, str]]:
+    """``(file, enclosing function, call text)`` of every call that passes the sentry glob literal
+    as a positional or keyword argument."""
+    sites: list[tuple[str, str, str]] = []
+
+    def walk(node: ast.AST, path: str, func: str) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            func = node.name
+        if isinstance(node, ast.Call):
+            args = [*node.args, *(k.value for k in node.keywords)]
+            if any(isinstance(a, ast.Constant) and a.value == GLOB for a in args):
+                sites.append((path, func, ast.unparse(node)))
+        for child in ast.iter_child_nodes(node):
+            walk(child, path, func)
+
+    for path, text in sorted(sources.items()):
+        walk(ast.parse(text), path, "")
     return sites
 
 
+def _unexempt(sites: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """Drop the one exempt call; a second call of any shape, even in that function, stays."""
+    kept, seen = [], False
+    for site in sites:
+        if site[:2] == GLOB_EXEMPT and not seen and "rglob" in site[2]:
+            seen = True
+        else:
+            kept.append(site)
+    return kept
+
+
 def test_no_second_sentry_membership_predicate_exists() -> None:
-    # test_gate_pins asks "does this directory hold any test file", which is not membership.
-    assert sorted(set(_glob_literal_sites()) - {"tests/sentry/test_gate_pins.py"}) == []
+    sources = {
+        p.relative_to(_ROOT).as_posix(): p.read_text(encoding="utf-8")
+        for top in ("tests", "scripts")
+        for p in (_ROOT / top).rglob("*.py")
+    }
+    assert _unexempt(_glob_sites(sources)) == []
+
+
+EXEMPT_FUNC = "def test_every_pinned_path_exists_and_is_a_test():\n"
+
+
+def test_guard_sees_the_keyword_form_of_the_glob() -> None:
+    seeded = {"tests/x.py": 'def f(root):\n    return root.rglob(pattern="test_*.py")\n'}
+    assert _unexempt(_glob_sites(seeded)) != []
+
+
+def test_guard_sees_a_second_glob_in_the_exempt_file() -> None:
+    gate_pins = GLOB_EXEMPT[0]
+    seeded = {
+        gate_pins: EXEMPT_FUNC
+        + '    t.rglob("test_*.py")\n\ndef other(t):\n    t.rglob("test_*.py")\n'
+    }
+    assert [s[1] for s in _unexempt(_glob_sites(seeded))] == ["other"]
+
+
+def test_guard_sees_a_second_glob_in_the_exempt_function() -> None:
+    seeded = {GLOB_EXEMPT[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n    t.glob("test_*.py")\n'}
+    assert len(_unexempt(_glob_sites(seeded))) == 1
+
+
+def test_guard_accepts_the_one_exempt_call() -> None:
+    seeded = {GLOB_EXEMPT[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n'}
+    assert _unexempt(_glob_sites(seeded)) == []
