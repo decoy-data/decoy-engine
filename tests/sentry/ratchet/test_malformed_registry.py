@@ -7,17 +7,25 @@ may print a traceback.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from tests.sentry.ratchet.test_integrity import _commit, _red_from, _run_from
+from tests.sentry.ratchet.test_integrity import (
+    _commit,
+    _new_field,
+    _red_from,
+    _run_env,
+    _run_from,
+)
 from tests.sentry.test_ratchet_check import (
     REG,
     A,
     _approve,
     _assert_red,
     _baseline,
+    _git,
     _grow,
     _registry,
     _run,
@@ -127,6 +135,24 @@ MALFORMED: tuple[tuple[str, str, str], ...] = (
         "a: baseline tests/sentry/baselines/dir cannot be read or is not a baseline file",
     ),
     (
+        "duplicate id, first baseline missing",
+        '[[sentry]]\nid = "a"\nbaseline = "tests/sentry/baselines/gone.json"\n\n' + ROW,
+        "a: registry points at tests/sentry/baselines/gone.json but there is no baseline file",
+    ),
+    (
+        "approval key twice",
+        ROW
+        + "approved_growth = [\n"
+        + f'  {{ key = "m::f", decision = "{GOOD_DECISION}" }},\n'
+        + '  { key = "m::f", decision = "owner 2026-11-23 another reason that is long" },\n]\n',
+        "a: approved_growth key m::f appears twice",
+    ),
+    (
+        "path component too long",
+        f'[[sentry]]\nid = "a"\nbaseline = "tests/sentry/baselines/{"x" * 300}.json"\n',
+        "a: baseline tests/sentry/baselines/",
+    ),
+    (
         "approval padded placeholder",
         ROW
         + 'approved_growth = [{ key = "m::n", decision = "owner 2026-11-24 TODO..........." }]\n',
@@ -201,3 +227,128 @@ def test_a_duplicate_id_does_not_hide_an_unsafe_path(repo: Path) -> None:
     assert res.returncode == 1, res.stdout + res.stderr
     assert "sentry id a appears twice" in res.stderr
     assert f"baseline {bad} is outside" in res.stderr
+
+
+# --- A1 round 2: every baseline rule runs on both sides -----------------------------------------
+
+GOOD = _baseline("a", ["m::f", "m::g"])
+ENTRY = '{"reason": "reviewed on 2026-11-04, tracked for removal"}'
+BAD_BASELINES: tuple[tuple[str, str, str], ...] = (
+    ("wrong sentry_id", _baseline("other", ["m::f", "m::g"]), "sentry_id 'other' does not match"),
+    ("one-char reason", _baseline("a", ["m::f", "m::g"], reason="x"), "reason for m::f is empty"),
+    ("no entries field", '{"sentry_id": "a", "created_in": "S0"}', "cannot be read or is not a"),
+    ("entries is a list", '{"sentry_id": "a", "entries": []}', "cannot be read or is not a"),
+    (
+        "duplicate entry key",
+        f'{{"sentry_id": "a", "created_in": "S0", "entries": {{"m::f": {ENTRY}, "m::f": {ENTRY}}}}}',
+        "cannot be read or is not a",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "body, needle", [c[1:] for c in BAD_BASELINES], ids=[c[0] for c in BAD_BASELINES]
+)
+def test_a_bad_head_baseline_gives_its_own_diagnostic(repo: Path, body: str, needle: str) -> None:
+    _write(repo, A, body)
+    res = _run(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Traceback" not in res.stderr
+    assert needle in res.stderr, res.stderr
+
+
+@pytest.mark.parametrize("body", [c[1] for c in BAD_BASELINES], ids=[c[0] for c in BAD_BASELINES])
+def test_a_bad_base_baseline_fails_closed_even_when_head_fixes_it(repo: Path, body: str) -> None:
+    _write(repo, A, body)
+    base = _commit(repo, "bad base baseline")
+    _write(repo, A, GOOD)
+    res = _run_from(repo, base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Traceback" not in res.stderr
+    assert res.stderr.count("ratchet: FAIL") == 1, res.stderr
+    assert "from the base commit" in res.stderr
+
+
+def _link(repo: Path, rel: str, target: Path) -> None:
+    (repo / rel).unlink()
+    (repo / rel).symlink_to(target)
+
+
+def test_a_head_baseline_symlink_is_refused(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "a.json"
+    outside.write_text(GOOD, encoding="utf-8")
+    _link(repo, A, outside)
+    res = _run(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"a: baseline {A} cannot be read or is not a baseline file" in res.stderr
+
+
+def test_a_head_registry_symlink_is_refused(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "r.toml"
+    outside.write_text(_registry({"a": A}), encoding="utf-8")
+    _link(repo, REG, outside)
+    res = _run(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"registry: {REG} cannot be read as UTF-8 text" in res.stderr
+
+
+def test_a_base_baseline_symlink_fails_closed(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "a.json"
+    outside.write_text(GOOD, encoding="utf-8")
+    _link(repo, A, outside)
+    base = _commit(repo, "symlinked baseline on base")
+    (repo / A).unlink()
+    _write(repo, A, GOOD)
+    res = _run_from(repo, base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert res.stderr.count("ratchet: FAIL") == 1
+    assert f"cannot read {A} from the base commit" in res.stderr
+
+
+def test_a_tracked_empty_base_registry_is_not_an_absent_one(repo: Path) -> None:
+    _write(repo, REG, "")
+    base = _commit(repo, "empty registry on base")
+    _write(repo, REG, _registry({"a": A}))
+    res = _run_from(repo, base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert res.stderr.count("ratchet: FAIL") == 1
+    assert f"cannot read {REG} from the base commit" in res.stderr
+
+
+def test_an_absent_base_registry_admits_a_first_inventory(repo: Path) -> None:
+    _git(repo, "rm", "-q", REG)
+    base = _commit(repo, "no registry on base")
+    _write(repo, REG, _registry({"a": A}))
+    res = _run_from(repo, base)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "first inventory" in res.stdout
+
+
+def test_a_malformed_base_with_an_active_waiver_still_fails_closed(repo: Path) -> None:
+    _write(repo, REG, _registry({"a": A}) + 'bypass = "yes"\n')
+    base = _commit(repo, "unknown field on base")
+    _new_field(repo, with_decision=True)
+    res = _run_env(repo, json.dumps([["a", "bypass"]]), base=base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"cannot read {REG} from the base commit" in res.stderr
+
+
+def test_unexpected_input_is_one_finding_not_a_traceback(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.sentry import _ratchet
+
+    def boom(*_args: object) -> None:
+        raise RuntimeError("seeded")
+
+    monkeypatch.setattr(_ratchet, "_check", boom)
+    findings, _ = _ratchet.check(repo, "HEAD")
+    assert findings == [
+        "cannot complete the check: the registry or a baseline holds unexpected input"
+    ]

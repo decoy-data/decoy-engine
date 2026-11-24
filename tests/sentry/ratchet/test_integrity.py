@@ -462,13 +462,15 @@ def test_uncommitted_manifest_edit_cannot_restore_an_outside_entry(repo: Path) -
     _red_from(repo, base, f"{OUTSIDE}: sentry test file was removed")
 
 
-def _run_env(repo: Path, waiver: str | None, flag: bool = True) -> subprocess.CompletedProcess[str]:
+def _run_env(
+    repo: Path, waiver: str | None, flag: bool = True, base: str = "HEAD"
+) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k != "RATCHET_SCHEMA_WAIVER"}
     if waiver is not None:
         env["RATCHET_SCHEMA_WAIVER"] = waiver
     extra = ["--schema-waiver-env"] if flag else []
     return subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, str(SCRIPT), "--root", str(repo), "--base", "HEAD", *extra],
+        [sys.executable, str(SCRIPT), "--root", str(repo), "--base", base, *extra],
         capture_output=True,
         text=True,
         env=env,

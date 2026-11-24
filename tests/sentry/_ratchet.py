@@ -8,16 +8,17 @@ findings; an empty list means the ratchet holds. Baseline keys compare exactly, 
 compare by count per site (see ``growth``). An entry that carries a numeric ``max`` may keep
 or lower it, never raise or drop it (see ``max_raised``). A key of the form
 ``<file>.py::<qualname>::<name>`` key of a ``REHOME_BY_BINDING`` sentry may also move 1:1 to a new
-entry that declares ``moved_from`` when the old site is gone from the source (see ``rehomes``).
+entry that declares ``moved_from`` when the old site is gone from the source (see ``_rehome.rehomes``).
 Messages carry ids, paths and keys only.
 """
 
 from __future__ import annotations
 
-import ast
 import importlib.util
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 from collections.abc import Callable
@@ -48,12 +49,12 @@ ROW_KEYS = frozenset({"id", "baseline", "approved_growth"})
 _HELPERS: dict[Path, ModuleType] = {}
 
 
-def _integrity() -> ModuleType:
-    """The integrity helpers beside this file, loaded by path so an extracted copy of the checker
-    uses its own helpers and never the head's."""
-    path = Path(__file__).resolve().parent / "ratchet" / "_integrity.py"
+def _helper(name: str) -> ModuleType:
+    """A helper module beside this file, loaded by path so an extracted copy of the checker uses
+    its own helpers and never the head's."""
+    path = Path(__file__).resolve().parent / "ratchet" / f"{name}.py"
     if path not in _HELPERS:
-        spec = importlib.util.spec_from_file_location(f"_ratchet_integrity_{len(_HELPERS)}", path)
+        spec = importlib.util.spec_from_file_location(f"_ratchet{name}_{len(_HELPERS)}", path)
         if spec is None or spec.loader is None:
             raise ImportError(path)
         mod = importlib.util.module_from_spec(spec)
@@ -61,6 +62,10 @@ def _integrity() -> ModuleType:
         spec.loader.exec_module(mod)
         _HELPERS[path] = mod
     return _HELPERS[path]
+
+
+def _integrity() -> ModuleType:
+    return _helper("_integrity")
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,7 @@ class Registry:
     decisions: dict[str, dict[str, str]]
     names: dict[str, set[str]]
     report: list[str]
+    present: bool
 
 
 @dataclass(frozen=True)
@@ -143,6 +149,8 @@ def parse_approvals(doc: dict[str, Any]) -> tuple[dict[str, dict[str, str]], lis
                     f"{sid}: approved_growth for {key} needs a decision "
                     f"'owner YYYY-MM-DD <reason of {MIN_REASON}+ chars>'"
                 )
+            elif key in out.get(sid, {}):
+                findings.append(f"{sid}: approved_growth key {key} appears twice")
             else:
                 out.setdefault(sid, {})[key] = decision
     return out, findings
@@ -157,11 +165,21 @@ def decision_problem(decision: object) -> str | None:
     return None
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("duplicate key")
+        out[key] = value
+    return out
+
+
 def parse_baseline(text: str) -> Baseline:
-    data = json.loads(text)
-    if not isinstance(data, dict) or not isinstance(data.get("entries", {}), dict):
+    """A baseline document: an object with an ``entries`` object; a duplicate JSON key is refused."""
+    data = json.loads(text, object_pairs_hook=_no_duplicate_keys)
+    if not isinstance(data, dict) or not isinstance(data.get("entries"), dict):
         raise ValueError("not a baseline document")
-    entries = data.get("entries", {})
+    entries = data["entries"]
     created = data.get("created_in")
     return Baseline(
         str(data.get("sentry_id", "")),
@@ -250,105 +268,6 @@ def growth(
     return frozenset(grown), rekeyed
 
 
-def _find_defs(node: ast.AST, part: str) -> list[ast.AST]:
-    """Every def or class named ``part`` under ``node``, looking inside if/try/with/for blocks."""
-    found: list[ast.AST] = []
-    todo = list(ast.iter_child_nodes(node))
-    while todo:
-        child = todo.pop(0)
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if child.name == part:
-                found.append(child)
-            continue
-        todo.extend(ast.iter_child_nodes(child))
-    return found
-
-
-def _qualname_nodes(tree: ast.AST, qualname: str) -> list[ast.AST]:
-    nodes: list[ast.AST] = [tree]
-    for part in qualname.split("."):
-        nodes = [d for n in nodes for d in _find_defs(n, part)]
-    return nodes
-
-
-def _mentions(n: ast.AST, name: str) -> bool:
-    """True when ``n`` binds or reads ``name``: a closure that only reads it still holds the site."""
-    if isinstance(n, ast.arg):
-        return n.arg == name
-    if isinstance(n, ast.Name):
-        return n.id == name
-    if isinstance(n, ast.Attribute):
-        return n.attr == name
-    if isinstance(n, ast.alias):
-        return (n.asname or n.name.partition(".")[0]) == name
-    if isinstance(n, ast.MatchMapping):
-        return n.rest == name
-    # def, class, except-as, match capture, type-param and any later form that names itself.
-    return getattr(n, "name", None) == name
-
-
-def _site_parts(key: str) -> tuple[str, str, str] | None:
-    """Split ``<file>::<qualname>::<name>`` with an optional all-digit ``::<ordinal>`` suffix."""
-    parts = key.split("::")
-    if len(parts) == 4 and parts[3].isdigit():
-        parts = parts[:3]
-    return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
-
-
-def site_gone(root: Path, key: str, tree: Any) -> bool:
-    """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
-
-    ``<file>`` is relative to ``src/``. Proof by AST: the qualified def or class is missing, or it
-    is present but neither binds nor reads ``name`` (``_mentions``) in any same-named def. A
-    qualname part that is not an identifier (``<lambda>``) is never proven. A missing file proves it only
-    when the file existed at the base. A key of another shape, an unresolvable path, or a
-    file that never existed is "not proven" and returns false.
-    """
-    parts = _site_parts(key)
-    if parts is None or not parts[0].endswith(".py") or not parts[2].isidentifier():
-        return False
-    file, qualname, name = parts
-    if not all(q.isidentifier() for q in qualname.split(".")):
-        return False
-    path = root / "src" / file
-    if not path.is_file():
-        return tree.has_file(f"src/{file}")
-    nodes = _qualname_nodes(ast.parse(path.read_text(encoding="utf-8")), qualname)
-    return not any(_mentions(n, name) for node in nodes for n in ast.walk(node))
-
-
-def rehomes(
-    root: Path,
-    tree: Any,
-    grown: frozenset[str],
-    head_entries: dict[str, object],
-    lost: dict[str, object],
-) -> tuple[frozenset[str], list[str]]:
-    """Split ``grown`` into declared 1:1 moves of ``lost`` keys, and the rest.
-
-    A grown key is a move only when its entry names the old key in ``moved_from`` and that old
-    key was lost from this baseline, is proven gone (``site_gone``), carries no numeric ``max``,
-    ends in the same bound name, and is named by no other entry. Anything else stays growth.
-    """
-    claims: dict[str, list[str]] = {}
-    for key in grown:
-        entry = head_entries.get(key)
-        old = entry.get("moved_from") if isinstance(entry, dict) else None
-        if isinstance(old, str):
-            claims.setdefault(old, []).append(key)
-    remaining = set(grown)
-    report: list[str] = []
-    for old, keys in sorted(claims.items()):
-        old_parts, new_parts = _site_parts(old), _site_parts(keys[0])
-        same_name = old_parts is not None and new_parts is not None and old_parts[2] == new_parts[2]
-        if len(keys) != 1 or not same_name or old not in lost or _max_of(lost[old]) is not None:
-            continue
-        if site_gone(root, old, tree):
-            remaining.discard(keys[0])
-            report.append(f"re-homed {old} -> {keys[0]} (declared in moved_from; old site gone)")
-    return frozenset(remaining), report
-
-
 def _fmt(keys: frozenset[str]) -> str:
     return ", ".join(sorted(keys))
 
@@ -385,6 +304,8 @@ def check(
         return _check(root, helper.BaseTree(root, sha), helper, waiver_input)
     except helper.BaseReadError as exc:
         return [f"cannot read {exc.what} from the {exc.side} commit"], []
+    except Exception:
+        return ["cannot complete the check: the registry or a baseline holds unexpected input"], []
 
 
 def guarded(fn: Callable[[], Any], passthrough: type[BaseException]) -> tuple[Any, bool]:
@@ -402,29 +323,43 @@ def guarded(fn: Callable[[], Any], passthrough: type[BaseException]) -> tuple[An
         return None, False
 
 
-Reader = Callable[[str, str], "Baseline | str"]
+Fetch = Callable[[str], "str | None"]  # text of a repo path, ``None`` when absent, else raises
 
 
 def load_side(
-    text: str,
     side: str,
     helper: ModuleType,
-    read_baseline: Reader,
+    fetch: Fetch,
     base_names: dict[str, set[str]] | None = None,
     waivers: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[Registry | None, list[str]]:
-    """The one loader for the HEAD and the BASE registry; nothing else reads a raw document.
+    """The one loader for the HEAD and the BASE registry: the only place a side's input is read
+    and validated, and it never collapses or overwrites an input silently.
 
-    Both sides get the same full validation: shape, duplicate ids and paths, closed row keys,
-    decision tables, approvals, every baseline file, and approvals against that side's own
-    inventory. ``read_baseline(id, path)`` returns the parsed baseline or, on HEAD, a finding
-    text. Any finding on the base raises ``BaseReadError``, because a base that is not a clean
-    registry cannot anchor a comparison; on HEAD the findings are reported.
+    It reads the registry and every baseline row through ``fetch``, and checks shape, duplicate
+    ids, paths and approval keys, closed row keys, decision tables, each baseline (an ``entries``
+    object, the ``sentry_id`` matching its row, reasons of real length) and approvals against that
+    side's own inventory. ``fetch`` returns the text, ``None`` for an absent path, and raises for
+    a symlink, a directory or unreadable bytes. Any finding on the base raises ``BaseReadError``,
+    because a base that is not a clean registry cannot anchor a comparison; on HEAD the findings
+    are reported.
     """
-    doc, problems = helper.validate_registry(text)
-    if problems:
+
+    def fail(path: str) -> list[str]:
         if side == "base":
-            raise helper.BaseReadError(REGISTRY)
+            raise helper.BaseReadError(path)
+        return []
+
+    text, ok = guarded(lambda: fetch(REGISTRY), helper.BaseReadError)
+    if not ok:
+        fail(REGISTRY)
+        return None, [f"registry: {REGISTRY} cannot be read as UTF-8 text (a regular file)"]
+    present = text is not None
+    if side == "base" and present and not text.strip():
+        raise helper.BaseReadError(REGISTRY)  # a tracked but empty registry is not "no base"
+    doc, problems = helper.validate_registry(text or "")
+    if problems:
+        fail(REGISTRY)
         return None, [f"registry: {REGISTRY} {p}" for p in problems]
     paths, findings = parse_registry(doc)
     approvals, approval_findings = parse_approvals(doc)
@@ -439,72 +374,67 @@ def load_side(
     schema, report = helper.closed_keys(doc, ROW_KEYS, decision_problem, usable)
     findings += schema
     baselines: dict[str, Baseline] = {}
-    for sid, path in sorted(paths.items()):
+    for row in doc.get("sentry", []):  # every row, so a duplicate id cannot hide a diagnostic
+        sid, path = row["id"], row["baseline"]
         if not helper.safe_path(path, BASELINE_DIR):
             continue
-        got = read_baseline(sid, path)
-        if isinstance(got, str):
-            findings.append(got)
+        got, ok = guarded(lambda p=path: fetch(p), helper.BaseReadError)
+        if ok and got is None:
+            findings.append(f"{sid}: registry points at {path} but there is no baseline file")
             continue
-        baselines[sid] = got
+        parsed, ok = (
+            guarded(lambda t=got: parse_baseline(t), helper.BaseReadError) if ok else (None, False)
+        )
+        if not ok:
+            fail(path)
+            findings.append(f"{sid}: baseline {path} cannot be read or is not a baseline file")
+            continue
+        baselines[sid] = parsed
+        if parsed.sentry_id != sid:
+            findings.append(
+                f"{path}: sentry_id {parsed.sentry_id!r} does not match registry id {sid}"
+            )
+        findings += reason_findings(path, parsed)
         findings += [
             f"{sid}: stale approved_growth, {key} is not in {path}"
-            for key in sorted(set(approvals.get(sid, {})) - got.keys)
+            for key in sorted(set(approvals.get(sid, {})) - parsed.keys)
         ]
     if findings and side == "base":
         raise helper.BaseReadError(REGISTRY)
     rows = len(doc.get("sentry", []))
-    registry = Registry(paths, approvals, baselines, rows, dec, helper.table_names(doc), report)
+    registry = Registry(
+        paths, approvals, baselines, rows, dec, helper.table_names(doc), report, present
+    )
     return registry, findings
 
 
-def _head_reader(root: Path, helper: ModuleType) -> Reader:
-    def read(sid: str, path: str) -> Baseline | str:
-        file = root / path
-        if not file.exists():
-            return f"{sid}: registry points at {path} but there is no baseline file"
-        got, ok = guarded(
-            lambda: parse_baseline(file.read_text(encoding="utf-8")), helper.BaseReadError
-        )
-        return got if ok else f"{sid}: baseline {path} cannot be read or is not a baseline file"
+def _head_fetch(root: Path) -> Fetch:
+    def fetch(path: str) -> str | None:
+        full = root / path
+        try:
+            mode = os.lstat(full).st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        if not stat.S_ISREG(mode):  # a symlink or a directory is never a registry or baseline
+            raise ValueError("not a regular file")
+        return full.read_text(encoding="utf-8")
 
-    return read
-
-
-def _base_reader(tree: Any, helper: ModuleType) -> Reader:
-    def read(sid: str, path: str) -> Baseline | str:
-        got, ok = guarded(lambda: parse_baseline(tree.require(path)), helper.BaseReadError)
-        if not ok:
-            raise helper.BaseReadError(path)
-        return got
-
-    return read
+    return fetch
 
 
 def _check(
     root: Path, tree: Any, helper: ModuleType, waiver_input: str | None
 ) -> tuple[list[str], list[str]]:
-    reg_file = root / REGISTRY
-    head_text, ok = guarded(
-        lambda: reg_file.read_text(encoding="utf-8") if reg_file.is_file() else "",
-        helper.BaseReadError,
-    )
-    if not ok:
-        return [f"registry: {REGISTRY} cannot be read as UTF-8 text"], []
-    base_reg_loaded, _ = load_side(
-        tree.read(REGISTRY) or "", "base", helper, _base_reader(tree, helper)
-    )
+    base_reg_loaded, _ = load_side("base", helper, tree.read)
     assert base_reg_loaded is not None  # a base problem raised
     waived, waiver_findings = schema_waivers(waiver_input)
-    head_reg, findings = load_side(
-        head_text, "head", helper, _head_reader(root, helper), base_reg_loaded.names, waived
-    )
+    head_reg, findings = load_side("head", helper, _head_fetch(root), base_reg_loaded.names, waived)
     findings += waiver_findings
     if head_reg is None:
         return findings, []
     head, approvals, loaded = head_reg.paths, head_reg.approvals, head_reg.baselines
     base_reg = base_reg_loaded.paths
-    findings += helper.registry_present(base_reg_loaded.rows, reg_file.is_file(), head_reg.rows)
+    findings += helper.registry_present(base_reg_loaded.rows, head_reg.present, head_reg.rows)
     fresh = {
         t: helper.fresh(head_reg.decisions[t], base_reg_loaded.names[t], decision_problem)
         for t in head_reg.decisions
@@ -514,15 +444,14 @@ def _check(
     )
     report += head_reg.report
 
-    on_disk = {p.relative_to(root).as_posix() for p in (root / BASELINE_DIR).glob("*.json")}
-    for path in sorted(on_disk - set(head.values())):
-        findings.append(f"{path}: baseline file is not registered in {REGISTRY}")
-
-    for sid, bl in sorted(loaded.items()):
-        path = head[sid]
-        if bl.sentry_id != sid:
-            findings.append(f"{path}: sentry_id {bl.sentry_id!r} does not match registry id {sid}")
-        findings += reason_findings(path, bl)
+    listed, ok = guarded(
+        lambda: sorted(p.name for p in (root / BASELINE_DIR).glob("*.json")), helper.BaseReadError
+    )
+    if not ok:
+        findings.append(f"{BASELINE_DIR}: the baseline directory cannot be listed")
+    for name in listed or []:
+        if f"{BASELINE_DIR}/{name}" not in set(head.values()):
+            findings.append(f"{BASELINE_DIR}/{name}: baseline file is not registered in {REGISTRY}")
     findings += helper.new_baseline_findings(
         tree, {head[s]: b.created_in for s, b in loaded.items()}
     )
@@ -545,7 +474,9 @@ def _check(
             ]
             if grown and sid in REHOME_BY_BINDING:
                 lost = {k: e for k, e in old.items() if k not in base.keys}
-                grown, moved = rehomes(root, tree, grown, base.reasons, lost)
+                grown, moved = _helper("_rehome").rehomes(
+                    root, tree, grown, base.reasons, lost, _max_of
+                )
                 report += [f"{sid}: {line}" for line in moved]
             approved = grown & frozenset(approvals.get(sid, {}))
             report += [

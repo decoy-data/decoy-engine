@@ -11,6 +11,7 @@ vanish silently.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterable
@@ -72,11 +73,14 @@ class BaseTree:
             side=side,
         )
         self.types: dict[str, str] = {}
+        self.modes: dict[str, str] = {}
         for entry in raw.split(b"\0"):
             if not entry:
                 continue
             meta, _, path = entry.partition(b"\t")
-            self.types[path.decode("utf-8", "surrogateescape")] = meta.split(b" ")[1].decode()
+            name = path.decode("utf-8", "surrogateescape")
+            self.types[name] = meta.split(b" ")[1].decode()
+            self.modes[name] = meta.split(b" ")[0].decode()
 
     def files(self) -> Iterable[str]:
         return (p for p, kind in self.types.items() if kind == "blob")
@@ -89,7 +93,7 @@ class BaseTree:
         kind = self.types.get(path)
         if kind is None:
             return None
-        if kind != "blob":
+        if kind != "blob" or self.modes[path] == "120000":  # a symlink is never read through
             raise BaseReadError(path, self.side)
         try:
             return _git(
@@ -352,7 +356,7 @@ def sentry_file_findings(root: Path, tree: BaseTree, retired_files: set[str]) ->
     head_set = sentry_set(head_tree.files(), head_tree.read(MANIFEST))
     if head_set is None:
         return [f"{MANIFEST}: OUTSIDE_SENTRIES is not a literal tuple of strings"]
-    head_set = {p for p in head_set if head_tree.has_file(p) and (root / p).is_file()}
+    head_set = {p for p in head_set if head_tree.has_file(p) and os.path.isfile(root / p)}
     gone = sorted(base_set - head_set)
     if not gone:
         return []
