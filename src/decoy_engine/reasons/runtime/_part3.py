@@ -56,6 +56,8 @@ __all__ = [
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
     "NONFK_FULL_FRAME_CAPACITY_EXCEEDED",
     "NUMEXPR_REQUIRED",
+    "OUTPUT_ASSEMBLY_COLUMNS_MISMATCH",
+    "OUTPUT_ASSEMBLY_ROWS_CHANGED",
     "POST_SCAN_DISTRIBUTION_DEFERRED",
     "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
     "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
@@ -453,6 +455,18 @@ NONFK_FULL_FRAME_CAPACITY_EXCEEDED = _d(
     "nonfk_full_frame_capacity_exceeded",
     "A job with no foreign keys would hold more memory than this machine can give it.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
+    since=UNRELEASED,
+)
+# Output assembly checks the masked frame against the source it was read from before it writes.
+# Both are engine invariants (no job input can cause them), so there is no retry class to repair.
+OUTPUT_ASSEMBLY_ROWS_CHANGED = _d(
+    "output_assembly_rows_changed",
+    "A masked frame no longer holds the rows of the source it was read from.",
+    since=UNRELEASED,
+)
+OUTPUT_ASSEMBLY_COLUMNS_MISMATCH = _d(
+    "output_assembly_columns_mismatch",
+    "A masked frame no longer holds the columns of the source it was read from, in order.",
     since=UNRELEASED,
 )
 # A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`

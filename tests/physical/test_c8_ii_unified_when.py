@@ -801,6 +801,8 @@ def test_reconstruction_of_a_when_node_without_its_mask_raises() -> None:
         reconstruct_source_shaped_output(
             table="t",
             frame=frame,
+            source=pa.Table.from_pandas(frame, preserve_index=False),
+            untouched=frozenset(),
             masked_table=masked,
             nodes=[_when_node("c == 'a'")],
             when_selected={},
@@ -815,6 +817,8 @@ def test_reconstruction_writes_back_only_the_selected_rows() -> None:
     out = reconstruct_source_shaped_output(
         table="t",
         frame=frame,
+        source=pa.Table.from_pandas(frame, preserve_index=False),
+        untouched=frozenset(),
         masked_table=masked,
         nodes=[_when_node("c == 'a'")],
         when_selected={"n": np.array([True, False, True])},

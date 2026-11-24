@@ -116,6 +116,9 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.validation.finding_review", "ReviewConflictError", "post_scan"),
     ("decoy_engine.validation.finding_review", "ReviewIntegrityOffError", "post_scan"),
     ("decoy_engine.profiling.bound_baseline", "BaselineBindingError", "pre_scan"),
+    ("decoy_engine.profiling.pre_scan._check", "PreScanBlockedError", "pre_scan"),
+    ("decoy_engine.profiling.pre_scan._check", "PreScanFailedError", "pre_scan"),
+    ("decoy_engine.profiling.pre_scan._check", "PreScanWarning", "pre_scan"),
 )
 # File-access failures with one meaning each, by class name (this module imports no family). The
 # publication lock map reads the same table, so a reason change is one edit (F22 reasons).
