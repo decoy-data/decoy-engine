@@ -19,8 +19,14 @@ import ast
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
+from tests.sentry.defects._defect_scan import ModuleIndex, attr_chain, module_name
+
 ROOT = Path(__file__).resolve().parents[4] / "src" / "decoy_engine"
 REJ = "execution/native/_operator_config_rejections.py"
+ADM = "execution/native/_real_type_admission.py"
+CHUNKED = "_fpe_checksum_decline"
 DECISION = "fpe_checksum_rejection"
 ADAPTER = "fpe_checksum_config_rejection"
 FIELD = "checksum_schemes"
@@ -57,11 +63,40 @@ DECISION_CALLERS: dict[Edge, str] = {
 
 # (path, function) -> route context literal passed to the adapter.
 ADAPTER_CALLERS: dict[Edge, str] = {
-    ("execution/native/_real_type_admission.py", "_fpe_checksum_decline"): "payload",
+    (ADM, CHUNKED): "payload",
     ("execution/_sequential_native_ops.py", "_fpe_config_reason"): "<forwarded>",
     ("execution/out_of_core/_fpe_native.py", "decline_reason"): "payload",
     ("execution/physical/_shadow_bindings.py", "execution_binding_for_slice_node"): "payload",
 }
+# The chunked admission wraps the adapter in `_fpe_checksum_decline`; its one caller must let the
+# result govern the table's route.
+CHUNKED_CALLERS: dict[Edge, str] = {(ADM, "real_type_decline"): "chunked decision"}
+
+# Where the scheme and context go. Kinds: `last` = the last positional argument of a call to one
+# of the names; `kw` = the `checksum=` keyword of any call; `arg1` = the second positional
+# argument of the decision; `ctx` = `arg1` plus `context=<the function's own context parameter>`;
+# `ret4` = the fourth item of the returned tuple.
+DELIVERIES: dict[Edge, tuple[str, frozenset[str]]] = {
+    ("execution/_strategies/_fpe.py", "FpeStrategyHandler.run.encrypt_one"): (
+        "last",
+        frozenset({"fpe_encrypt_value"}),
+    ),
+    ("execution/out_of_core/_mask_group_b.py", "fpe_array"): (
+        "last",
+        frozenset({"fpe_encrypt_value"}),
+    ),
+    ("execution/native/_crypto_reference.py", "_ReferenceFpe._run"): (
+        "last",
+        frozenset({"transform"}),
+    ),
+    ("execution/native/_crypto_ext.py", "FpeConfig.from_mapping"): ("kw", frozenset()),
+    ("execution/native/_crypto_ext.py", "FpeConfig._resolve"): ("ret4", frozenset()),
+    ("execution/native/_fpe_route.py", "fpe_config_from_params"): ("kw", frozenset()),
+    ("execution/native/_operator_params.py", "resolve_operator_params"): ("kw", frozenset()),
+    (REJ, ADAPTER): ("ctx", frozenset({DECISION})),
+    ("execution/native/_fpe_ext.py", "_CompiledFpeKernel.run"): ("arg1", frozenset({DECISION})),
+}
+
 # The two sequential admission callers pin the context the shared helper receives.
 CONTEXT_FORWARDERS: dict[Edge, str] = {
     ("execution/_sequential_native_ops.py", "_fpe_admit"): "payload",
@@ -69,22 +104,50 @@ CONTEXT_FORWARDERS: dict[Edge, str] = {
 }
 
 
-def _imports(tree: ast.Module) -> dict[str, str]:
-    """Local name -> imported name, so an `as` alias still resolves to the real function."""
-    out: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                out[alias.asname or alias.name] = alias.name
-    return out
+class Resolver:
+    """Resolves a call's callee through the shared `ModuleIndex` import tables, so an alias, a
+    package re-export or a module attribute still lands on the defining function."""
+
+    def __init__(self, index: ModuleIndex) -> None:
+        self.index = index
+        self.defs: dict[str, set[str]] = {}
+        for path, tree in index.trees.items():
+            self.defs[module_name(path, index.src)] = {
+                n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+
+    def follow(self, mod: str, name: str, depth: int = 0) -> tuple[str, str]:
+        if name in self.defs.get(mod, ()) or depth > 8:
+            return (mod, name)
+        if (mod, name) in self.index.imports:
+            base, original = self.index.imports[(mod, name)]
+            return self.follow(base, original, depth + 1)
+        return (mod, name)
+
+    def module_of(self, mod: str, chain: list[str]) -> str | None:
+        head = chain[0]
+        if (mod, head) in self.index.module_aliases:
+            dotted = self.index.module_aliases[(mod, head)]
+        elif (mod, head) in self.index.imports:
+            base, original = self.index.imports[(mod, head)]
+            dotted = f"{base}.{original}"
+        else:
+            return None
+        dotted = ".".join([dotted, *chain[1:]])
+        return dotted if dotted in self.index.module_paths else None
+
+    def callee(self, mod: str, call: ast.Call) -> tuple[str, str] | None:
+        chain = attr_chain(call.func)
+        if chain is None:
+            return None
+        if len(chain) == 1:
+            return self.follow(mod, chain[0])
+        owner = self.module_of(mod, chain[:-1])
+        return self.follow(owner, chain[-1]) if owner else ("?", chain[-1])
 
 
-def _callee(call: ast.Call, names: dict[str, str]) -> str | None:
-    if isinstance(call.func, ast.Name):
-        return names.get(call.func.id, call.func.id)
-    if isinstance(call.func, ast.Attribute):
-        return names.get(call.func.attr, call.func.attr)
-    return None
+def _mod(rel: str, index: ModuleIndex) -> str:
+    return module_name(index.src / rel, index.src)
 
 
 def _is_str(node: ast.AST | None, value: str) -> bool:
@@ -165,36 +228,251 @@ def scheme_reads(source: str, rel: str) -> Counter[Edge]:
     return out
 
 
-def callers(source: str, rel: str, function: str) -> list[tuple[Edge, str]]:
-    """Calls to `function` as `(edge, context literal)`; a non-literal context reads
-    `<forwarded>` and a missing one `<none>`."""
-    tree = ast.parse(source)
-    names = _imports(tree)
-    out: list[tuple[Edge, str]] = []
+def callers(
+    index: ModuleIndex, rel: str, tree: ast.Module, target: tuple[str, str]
+) -> list[tuple[Edge, str, bool]]:
+    """Calls whose final name is `target`'s, as `(edge, context literal, resolves to target)`.
+    A same-named function elsewhere is listed with `False`, so a private copy is never hidden.
+    A non-literal context reads `<forwarded>` and a missing one `<none>`."""
+    res = Resolver(index)
+    mod = _mod(rel, index)
+    out: list[tuple[Edge, str, bool]] = []
     for scope, node in _scoped(tree):
-        if isinstance(node, ast.Call) and _callee(node, names) == function:
-            ctx = "<none>"
-            for kw in node.keywords:
-                if kw.arg == "context":
-                    ctx = (
-                        str(kw.value.value) if isinstance(kw.value, ast.Constant) else "<forwarded>"
-                    )
-            out.append(((rel, scope), ctx))
+        if not isinstance(node, ast.Call):
+            continue
+        found = res.callee(mod, node)
+        if found is None or found[1] != target[1]:
+            continue
+        ctx = "<none>"
+        for kw in node.keywords:
+            if kw.arg == "context":
+                ctx = str(kw.value.value) if isinstance(kw.value, ast.Constant) else "<forwarded>"
+        out.append(((rel, scope), ctx, found == target))
     return out
 
 
-def context_forwarders(source: str, rel: str) -> list[tuple[Edge, str]]:
+def context_forwarders(index: ModuleIndex, rel: str, tree: ast.Module) -> list[tuple[Edge, str]]:
     """Calls to `_fpe_config_reason` with the literal context they pass."""
-    tree = ast.parse(source)
+    res = Resolver(index)
+    mod = _mod(rel, index)
     out: list[tuple[Edge, str]] = []
     for scope, node in _scoped(tree):
-        if isinstance(node, ast.Call) and _callee(node, {}) == "_fpe_config_reason":
+        if isinstance(node, ast.Call) and res.callee(mod, node) == (mod, "_fpe_config_reason"):
             ctx = "<none>"
             for kw in node.keywords:
                 if kw.arg == "context" and isinstance(kw.value, ast.Constant):
                     ctx = str(kw.value.value)
             out.append(((rel, scope), ctx))
     return out
+
+
+def _tests_of(node: ast.AST) -> bool:
+    """True when the branch taken on a test ends the function: it returns or raises."""
+    return any(
+        isinstance(n, (ast.Return, ast.Raise))
+        for b in getattr(node, "body", ())
+        for n in ast.walk(b)
+    )
+
+
+def _parents(tree: ast.Module) -> dict[ast.AST, ast.AST]:
+    return {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+
+
+def _contains(root: ast.AST, node: ast.AST) -> bool:
+    return any(n is node for n in ast.walk(root))
+
+
+def _loads(expr: ast.AST, names: set[str]) -> bool:
+    return any(
+        isinstance(n, ast.Name) and n.id in names and isinstance(n.ctx, ast.Load)
+        for n in ast.walk(expr)
+    )
+
+
+def _result_governs(tree: ast.Module, call: ast.Call) -> bool:
+    """The call's result decides a route or refusal: it is returned, tested by an `if` whose
+    branch returns or raises, or bound to a name that is. A bare call or an unused binding fails."""
+    parents = _parents(tree)
+    node: ast.AST = call
+    while node in parents:
+        parent = parents[node]
+        if isinstance(parent, ast.Return):
+            return True
+        if isinstance(parent, ast.If) and _contains(parent.test, call):
+            return _tests_of(parent)
+        if isinstance(parent, (ast.Expr, ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+        if isinstance(parent, (ast.Assign, ast.AnnAssign)):
+            targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+            names = {t.id for t in targets if isinstance(t, ast.Name)}
+            fn: ast.AST = parent
+            while fn in parents and not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                fn = parents[fn]
+            for sub in ast.walk(fn):
+                if isinstance(sub, ast.If) and _loads(sub.test, names) and _tests_of(sub):
+                    return True
+                if (
+                    isinstance(sub, ast.Return)
+                    and sub.value is not None
+                    and _loads(sub.value, names)
+                ):
+                    return True
+            return False
+        node = parent
+    return False
+
+
+def ungoverned_calls(
+    index: ModuleIndex, target: tuple[str, str], under: str = "execution/"
+) -> list[Edge]:
+    """Every call of `target` whose result does not govern the outcome."""
+    out: list[Edge] = []
+    for rel, tree in _trees(index):
+        if not rel.startswith(under):
+            continue
+        res = Resolver(index)
+        mod = _mod(rel, index)
+        scopes = {id(n): sc for sc, n in _scoped(tree)}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and (found := res.callee(mod, node)) is not None:
+                if found[1] == target[1] and not _result_governs(tree, node):
+                    out.append((rel, scopes.get(id(node), "")))
+    return out
+
+
+def _trees(index: ModuleIndex) -> list[tuple[str, ast.Module]]:
+    return [(p.relative_to(index.src).as_posix(), t) for p, t in index.trees.items()]
+
+
+def _scheme_expr(node: ast.AST | None, bound: set[str]) -> bool:
+    """The configured scheme itself: a bound name, `.checksum`, a key read, or `<scheme> or None`."""
+    if isinstance(node, ast.Name):
+        return node.id in bound
+    if isinstance(node, ast.Attribute):
+        return node.attr == SCHEME and isinstance(node.ctx, ast.Load)
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+        return _scheme_expr(node.values[0], bound) and all(
+            _scheme_expr(v, bound) or (isinstance(v, ast.Constant) and v.value is None)
+            for v in node.values[1:]
+        )
+    return node is not None and _key_read(node, SCHEME)
+
+
+def _function_scopes(tree: ast.Module) -> set[str]:
+    return {
+        f"{sc}.{n.name}".lstrip(".")
+        for sc, n in _scoped(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _bound_scheme_names(tree: ast.Module, scope: str) -> set[str]:
+    """Names only ever assigned the configured scheme (a key read or the fourth `_resolve()` item)
+    in `scope`, its nested functions and the functions that enclose it. A class field of the same
+    name is not an assignment in that function."""
+    funcs = _function_scopes(tree)
+    good: set[str] = set()
+    bad: set[str] = set()
+    for sc, node in _scoped(tree):
+        if not (
+            sc == scope
+            or sc.startswith(scope + ".")
+            or (scope.startswith(sc + ".") and sc in funcs)
+        ):
+            continue
+        pairs: list[tuple[ast.AST, ast.AST | None]] = []
+        if isinstance(node, ast.Assign):
+            pairs = [(t, node.value) for t in node.targets]
+        elif isinstance(node, ast.AnnAssign):
+            pairs = [(node.target, node.value)]
+        for target, value in pairs:
+            if isinstance(target, ast.Name):
+                (good if _scheme_expr(value, set()) else bad).add(target.id)
+            elif isinstance(target, ast.Tuple) and len(target.elts) == 4:
+                last = target.elts[3]
+                from_resolve = (
+                    isinstance(value, ast.Call)
+                    and isinstance(value.func, ast.Attribute)
+                    and value.func.attr == "_resolve"
+                )
+                if isinstance(last, ast.Name):
+                    (good if from_resolve else bad).add(last.id)
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            bad.add(node.target.id)
+    return good - bad
+
+
+def delivery_violations(
+    index: ModuleIndex, table: dict[Edge, tuple[str, frozenset[str]]]
+) -> list[str]:
+    """Each pinned carrier hands the configured scheme (and context) to its declared destination.
+    `None`, a constant or any other expression in that position is a violation."""
+    problems: list[str] = []
+    trees = dict(_trees(index))
+    for (rel, scope), (kind, names) in sorted(table.items()):
+        tree = trees.get(rel)
+        if tree is None:
+            problems.append(f"{rel}: missing")
+            continue
+        bound = _bound_scheme_names(tree, scope)
+        sites: list[bool] = []
+        for sc, node in _scoped(tree):
+            if sc != scope:
+                continue
+            if kind == "ret4":
+                if isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple):
+                    sites.append(
+                        len(node.value.elts) == 4 and _scheme_expr(node.value.elts[3], bound)
+                    )
+            elif isinstance(node, ast.Call):
+                chain = attr_chain(node.func)
+                final = chain[-1] if chain else None
+                if kind == "kw":
+                    kws = [k for k in node.keywords if k.arg == SCHEME]
+                    sites += [_scheme_expr(k.value, bound) for k in kws]
+                elif final in names and kind == "last":
+                    sites.append(bool(node.args) and _scheme_expr(node.args[-1], bound))
+                elif final in names:
+                    ok = len(node.args) > 1 and _scheme_expr(node.args[1], bound)
+                    if kind == "ctx":
+                        ctx = {k.arg: k.value for k in node.keywords}.get("context")
+                        ok = ok and isinstance(ctx, ast.Name) and ctx.id == "context"
+                    sites.append(ok)
+        if not sites or not all(sites):
+            problems.append(f"{rel}::{scope}: scheme not delivered to its destination")
+    return problems
+
+
+def text_mask_restriction_pinned(source: str) -> bool:
+    """`NATIVE_FPE_DETECTORS` keeps only digit detectors with no checksum scheme (until S3)."""
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id != "NATIVE_FPE_DETECTORS":
+                continue
+            for gen in ast.walk(node.value) if node.value else ():
+                if isinstance(gen, ast.GeneratorExp):
+                    conds = [c for g in gen.generators for i in g.ifs for c in ast.walk(i)]
+                    no_scheme = any(
+                        isinstance(c, ast.Compare)
+                        and isinstance(c.left, ast.Name)
+                        and c.left.id == "checksum"
+                        and isinstance(c.ops[0], ast.Is)
+                        and isinstance(c.comparators[0], ast.Constant)
+                        and c.comparators[0].value is None
+                        for c in conds
+                    )
+                    digits = any(
+                        isinstance(c, ast.Compare)
+                        and isinstance(c.left, ast.Name)
+                        and c.left.id == "charset"
+                        and isinstance(c.ops[0], ast.Eq)
+                        and isinstance(c.comparators[0], ast.Constant)
+                        and c.comparators[0].value == "digits"
+                        for c in conds
+                    )
+                    return no_scheme and digits
+    return False
 
 
 def _sources() -> list[tuple[str, str]]:
@@ -228,33 +506,61 @@ def test_scheme_reads_match_the_pinned_carriers() -> None:
     }
 
 
-def test_decision_callers_are_the_adapter_and_the_wrapper() -> None:
-    found: list[Edge] = []
-    for rel, src in _sources():
+@pytest.fixture(scope="module")
+def index() -> ModuleIndex:
+    return ModuleIndex(ROOT)
+
+
+def _call_sites(index: ModuleIndex, rel_target: str, name: str) -> list[tuple[Edge, str, bool]]:
+    target = (_mod(rel_target, index), name)
+    out: list[tuple[Edge, str, bool]] = []
+    for rel, tree in _trees(index):
         if _under_execution(rel):
-            found += [edge for edge, _ctx in callers(src, rel, DECISION)]
-    assert sorted(found) == sorted(DECISION_CALLERS), sorted(found)
+            out += callers(index, rel, tree, target)
+    return out
 
 
-def test_adapter_callers_are_the_route_sites_with_their_context() -> None:
-    found: dict[Edge, str] = {}
-    dupes: list[Edge] = []
-    for rel, src in _sources():
-        if not _under_execution(rel):
-            continue
-        for edge, ctx in callers(src, rel, ADAPTER):
-            if edge in found:
-                dupes.append(edge)
-            found[edge] = ctx
-    expected = {e: c for e, c in ADAPTER_CALLERS.items()}
+def test_decision_callers_are_the_adapter_and_the_wrapper(index: ModuleIndex) -> None:
+    sites = _call_sites(index, REJ, DECISION)
+    assert sorted(e for e, _c, _x in sites) == sorted(DECISION_CALLERS), sites
+    assert all(exact for _e, _c, exact in sites), "a private copy of the decision"
+
+
+def test_adapter_callers_are_the_route_sites_with_their_context(index: ModuleIndex) -> None:
+    sites = _call_sites(index, REJ, ADAPTER)
+    found = {e: c for e, c, _x in sites}
     # the rejections module itself defines, never calls, the adapter
-    assert found == expected and not dupes, (found, dupes)
+    assert found == ADAPTER_CALLERS and len(found) == len(sites), sites
+    assert all(exact for _e, _c, exact in sites), "a private copy of the adapter"
 
 
-def test_sequential_admission_callers_pin_payload_and_key_context() -> None:
+def test_the_chunked_wrapper_has_one_caller(index: ModuleIndex) -> None:
+    sites = _call_sites(index, ADM, CHUNKED)
+    assert sorted(e for e, _c, _x in sites) == sorted(CHUNKED_CALLERS), sites
+    assert all(exact for _e, _c, exact in sites)
+
+
+def test_every_decision_result_governs_its_route_or_refusal(index: ModuleIndex) -> None:
+    targets = [(REJ, DECISION), (REJ, ADAPTER), (ADM, CHUNKED)]
+    found = {
+        (rel, name): ungoverned_calls(index, (_mod(rel, index), name)) for rel, name in targets
+    }
+    assert found == {t: [] for t in targets}, found
+
+
+def test_the_scheme_and_context_reach_each_destination(index: ModuleIndex) -> None:
+    assert delivery_violations(index, DELIVERIES) == []
+
+
+def test_text_mask_detector_restriction_is_pinned_until_s3() -> None:
+    rel = "execution/native/_text_mask_native_fpe.py"
+    assert text_mask_restriction_pinned((ROOT / rel).read_text(encoding="utf-8"))
+
+
+def test_sequential_admission_callers_pin_payload_and_key_context(index: ModuleIndex) -> None:
     rel = "execution/_sequential_native_ops.py"
-    src = (ROOT / rel).read_text(encoding="utf-8")
-    assert dict(context_forwarders(src, rel)) == CONTEXT_FORWARDERS
+    tree = dict(_trees(index))[rel]
+    assert dict(context_forwarders(index, rel, tree)) == CONTEXT_FORWARDERS
 
 
 # Seeded spellings: each must be seen by the scanner it targets.
@@ -288,16 +594,144 @@ def test_scanner_sees_every_scheme_read_spelling() -> None:
         assert scheme_reads(src, "x.py"), src
 
 
-def test_scanner_resolves_import_aliases_and_counts_a_second_call() -> None:
-    src = (
-        "from m import fpe_checksum_rejection as r\n"
-        "def f():\n    r('c', 'luhn', '0', context='payload')\n"
-        "    r('c', 'luhn', '0', context='payload')\n"
+def _seeded(tmp_path: Path, files: dict[str, str]) -> ModuleIndex:
+    """A throwaway `decoy_engine` tree, so a bypass is scanned without touching real source."""
+    root = tmp_path / "decoy_engine"
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return ModuleIndex(root)
+
+
+_GOOD_ORACLE = (
+    "def f(cfg, v):\n"
+    "    checksum = cfg.get('checksum') or None\n"
+    "    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, checksum)\n"
+)
+_ORACLE_EDGE: dict[Edge, tuple[str, frozenset[str]]] = {
+    ("execution/o.py", "f"): ("last", frozenset({"fpe_encrypt_value"}))
+}
+
+
+def test_delivery_accepts_the_configured_scheme(tmp_path: Path) -> None:
+    index = _seeded(tmp_path, {"execution/o.py": _GOOD_ORACLE})
+    assert delivery_violations(index, _ORACLE_EDGE) == []
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, None)\n",
+        "    checksum = None\n    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, checksum)\n",
+        "    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, 'luhn')\n",
+    ],
+    ids=["none-literal", "rebound-to-none", "constant"],
+)
+def test_delivery_rejects_a_scheme_replaced_before_the_oracle_transform(
+    tmp_path: Path, tail: str
+) -> None:
+    src = "def f(cfg, v):\n    checksum = cfg.get('checksum') or None\n" + tail
+    index = _seeded(tmp_path, {"execution/o.py": src})
+    assert delivery_violations(index, _ORACLE_EDGE)
+
+
+def test_delivery_rejects_a_dropped_context_and_a_missing_destination(tmp_path: Path) -> None:
+    table = {("execution/r.py", "adapter"): ("ctx", frozenset({DECISION}))}
+    ok = (
+        "def adapter(column, cfg, *, context):\n"
+        "    scheme = cfg.get('checksum') or None\n"
+        "    return fpe_checksum_rejection(column, scheme, 'x', context=context)\n"
     )
-    assert callers(src, "x.py", DECISION) == [
-        (("x.py", "f"), "payload"),
-        (("x.py", "f"), "payload"),
-    ]
+    assert delivery_violations(_seeded(tmp_path, {"execution/r.py": ok}), table) == []
+    for bad in (ok.replace("context=context", "context='payload'"), "def adapter():\n    pass\n"):
+        idx = _seeded(tmp_path / "bad", {"execution/r.py": bad})
+        assert delivery_violations(idx, table), bad
+
+
+_DECISION_DEF = "def fpe_checksum_config_rejection(c, p, *, context):\n    return None\n"
+
+
+def _governed_case(tmp_path: Path, body: str) -> list[Edge]:
+    files = {
+        "execution/native/_operator_config_rejections.py": _DECISION_DEF,
+        "execution/native/__init__.py": (
+            "from ._operator_config_rejections import fpe_checksum_config_rejection as adapter\n"
+        ),
+        "execution/route.py": (
+            "from decoy_engine.execution.native import adapter as ask\ndef route(c, p):\n" + body
+        ),
+    }
+    target = (
+        "decoy_engine.execution.native._operator_config_rejections",
+        "fpe_checksum_config_rejection",
+    )
+    return ungoverned_calls(_seeded(tmp_path, files), target)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    return ask(c, p, context='payload')\n",
+        "    r = ask(c, p, context='payload')\n    if r is not None:\n        return r\n    return None\n",
+        "    if ask(c, p, context='payload') is not None:\n        raise ValueError('x')\n",
+    ],
+    ids=["returned", "bound-then-tested", "tested-inline"],
+)
+def test_a_result_that_governs_the_outcome_is_accepted(tmp_path: Path, body: str) -> None:
+    assert _governed_case(tmp_path, body) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    ask(c, p, context='payload')\n    return None\n",
+        "    r = ask(c, p, context='payload')\n    return None\n",
+        "    r = ask(c, p, context='payload')\n    if r is not None:\n        pass\n    return None\n",
+    ],
+    ids=["discarded", "bound-unused", "tested-no-exit"],
+)
+def test_a_discarded_decision_result_is_rejected(tmp_path: Path, body: str) -> None:
+    assert _governed_case(tmp_path, body) == [("execution/route.py", "route")]
+
+
+def test_an_import_alias_and_a_private_copy_are_told_apart(tmp_path: Path) -> None:
+    files = {
+        "execution/native/_operator_config_rejections.py": _DECISION_DEF,
+        "execution/native/__init__.py": (
+            "from ._operator_config_rejections import fpe_checksum_config_rejection\n"
+        ),
+        "execution/a.py": (
+            "from decoy_engine.execution.native import fpe_checksum_config_rejection as r\n"
+            "def f():\n    return r('c', {}, context='payload')\n"
+        ),
+        "execution/b.py": (
+            "def fpe_checksum_config_rejection(c, p, *, context):\n    return None\n"
+            "def g():\n    return fpe_checksum_config_rejection('c', {}, context='payload')\n"
+        ),
+    }
+    index = _seeded(tmp_path, files)
+    target = (
+        "decoy_engine.execution.native._operator_config_rejections",
+        "fpe_checksum_config_rejection",
+    )
+    seen = {
+        e: exact
+        for rel, tree in _trees(index)
+        for e, _c, exact in callers(index, rel, tree, target)
+    }
+    assert seen == {("execution/a.py", "f"): True, ("execution/b.py", "g"): False}
+
+
+def test_the_text_mask_restriction_check_sees_a_dropped_clause() -> None:
+    kept = (
+        "NATIVE_FPE_DETECTORS: frozenset[str] = frozenset(\n"
+        "    d for d, (charset, checksum) in _FPE_CONFIG.items()\n"
+        "    if checksum is None and charset == 'digits'\n)\n"
+    )
+    assert text_mask_restriction_pinned(kept)
+    assert not text_mask_restriction_pinned(kept.replace("checksum is None and ", ""))
+    assert not text_mask_restriction_pinned(kept.replace(" and charset == 'digits'", ""))
 
 
 def test_a_second_read_inside_a_listed_function_changes_the_count() -> None:

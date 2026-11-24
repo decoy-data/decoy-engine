@@ -76,7 +76,10 @@ def _fpe_checksum_decline(config: dict[str, Any], table: str, column: str) -> st
                 continue
             pc = col.get("provider_config")
             if isinstance(pc, dict):
-                return fpe_checksum_config_rejection(column, pc, context="payload")
+                # A raw config may repeat a column; a later declaration can still decline.
+                reason = fpe_checksum_config_rejection(column, pc, context="payload")
+                if reason is not None:
+                    return reason
     return None
 
 
