@@ -457,13 +457,15 @@ def _classify(
     )
 
 
-def _compare_raised(detector_id: str | None, error: str) -> str:
+def _compare_raised(detector_id: str | None, error_class: str) -> str:
     """The message of a failed source comparison: the class name only, as text can carry a value."""
     hit = f"column matched {detector_id!r} but the" if detector_id else "the"
-    return f"{hit} source comparison raised {error} (see job log); a leak cannot be ruled out."
+    return (
+        f"{hit} source comparison raised {error_class} (see job log); a leak cannot be ruled out."
+    )
 
 
-def residual_pii_error(table: str, error: str) -> ResidualPIIFinding:
+def residual_pii_error(table: str, error_class: str) -> ResidualPIIFinding:
     """The finding for a check that could not run on `table` ("" for every table): the error's
     class name and fixed text only, as an error's message can carry a cell value."""
     return ResidualPIIFinding(
@@ -472,7 +474,7 @@ def residual_pii_error(table: str, error: str) -> ResidualPIIFinding:
         detector_id="",
         match_rate=0.0,
         severity="error",
-        message=f"residual_pii check raised {error} (see job log for details)",
+        message=f"residual_pii check raised {error_class} (see job log for details)",
     )
 
 
@@ -494,7 +496,7 @@ def residual_pii_findings(
         for t in config.get("tables") or []
         if isinstance(t, Mapping) and isinstance(t.get("name"), str)
     }
-    findings = [residual_pii_error(t, error) for t, error in (failed_tables or {}).items()]
+    findings = [residual_pii_error(t, cls) for t, cls in (failed_tables or {}).items()]
     for table_name, columns in output_facts.items():
         for col_name, fact in columns.items():
             configured = strategy_by_col.get((table_name, col_name))
