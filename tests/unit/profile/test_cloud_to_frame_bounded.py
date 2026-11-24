@@ -402,6 +402,31 @@ def test_malformed_object_leaves_as_value_free_read_error(
     assert str(info.value) == f"file could not be read: {provider.upper()}"
 
 
+def _marked_cell_parquet() -> bytes:
+    """A file that parses: footer, pages and batches are sound, but one string cell is not
+    UTF-8, so only the conversion to pandas fails, with the cell in the library's text."""
+    cell = b"demo_" + MARKER + b"\xff"
+    offsets = pa.py_buffer(np.array([0, len(cell)], dtype=np.int32).tobytes())
+    column = pa.Array.from_buffers(pa.string(), 1, [None, offsets, pa.py_buffer(cell)])
+    sink = io.BytesIO()
+    pq.write_table(pa.table({"t": column}), sink)
+    return sink.getvalue()
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+@pytest.mark.parametrize("read", ["sample", "to_frame"])
+def test_parquet_cell_conversion_failure_is_value_free(
+    monkeypatch: pytest.MonkeyPatch, provider: str, read: str
+) -> None:
+    # Arrow's `Wrapping <cell> failed` is also how it reports a failed allocation, so the guard
+    # keeps it classifiable as a memory failure, rebuilt around scrubbed text.
+    _serve(monkeypatch, provider, _marked_cell_parquet())
+    with pytest.raises(Exception) as info:
+        _run(_source(provider, "parquet"), read)
+    assert MARKER.decode() not in str(info.value) + repr(info.value)
+    _value_free(info.value)
+
+
 def test_stream_handle_read_all_is_sized() -> None:
     from decoy_engine.fileaccess.adapters.memory import StreamHandle
     from tests._cloud_fakes import Body

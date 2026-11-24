@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import pandas as pd
@@ -165,19 +166,17 @@ def _read_parquet_schema(size: int, fetch: Fetch, provider: str) -> pa.Schema:
 
 def _read_parquet_sample(size: int, fetch: Fetch, provider: str, sample_rows: int) -> pd.DataFrame:
     handle, pf = _parquet(size, fetch, provider)
-    batches = arrow_adapter.iter_batches(handle, pf, batch_size=sample_rows)
-    return head_frame_from_batches(batches, sample_rows, pf.schema_arrow)
+    head = partial(head_frame_from_batches, sample_rows=sample_rows, schema=pf.schema_arrow)
+    return arrow_adapter.collect_batches(handle, pf, head, batch_size=sample_rows)
 
 
 def _read_parquet_frame(size: int, fetch: Fetch, provider: str) -> pd.DataFrame:
-    """The whole object as `pd.read_parquet` would give it, read one column chunk at a time.
-
-    The schema carries the pandas metadata (index, categoricals, timezones) and keeps a file
-    with no row groups valid, where `iter_batches` yields nothing.
-    """
+    """The object as `pd.read_parquet` gives it, one column chunk per request. The schema keeps
+    the pandas metadata (index, categoricals, timezones) and a file with no row groups valid."""
     handle, pf = _parquet(size, fetch, provider)
-    batches = arrow_adapter.iter_batches(handle, pf)
-    return pa.Table.from_batches(batches, schema=pf.schema_arrow).to_pandas()
+    return arrow_adapter.collect_batches(
+        handle, pf, lambda b: pa.Table.from_batches(b, schema=pf.schema_arrow).to_pandas()
+    )
 
 
 def _read_csv_frame(size: int, fetch: Fetch, provider: str, lexeme_columns: Any) -> pd.DataFrame:
