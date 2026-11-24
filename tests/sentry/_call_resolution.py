@@ -44,3 +44,21 @@ def resolved_calls(tree: ast.AST, target: str) -> list[ast.Call]:
             or (isinstance(call.func, ast.Attribute) and call.func.attr == target)
         )
     ]
+
+
+def resolved_call_scopes(tree: ast.AST, target: str) -> list[str]:
+    """The immediate enclosing function (or `<module>`) of each `resolved_calls` hit.
+
+    A call inside a nested function belongs to that function only, not to the one around it.
+    """
+    scope_of: dict[int, str] = {}
+
+    def label(node: ast.AST, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call):
+                scope_of[id(child)] = scope
+            is_def = isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+            label(child, child.name if is_def else scope)
+
+    label(tree, "<module>")
+    return [scope_of[id(call)] for call in resolved_calls(tree, target)]

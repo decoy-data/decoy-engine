@@ -12,7 +12,7 @@
 # the crown-jewel adjacency property that the whole redesign protects, probes
 # the frozen epsilon ceiling, and asserts the direct-carrier path is genuinely
 # pandas/pyarrow-free. The fingerprint CI observes IS the value pinned into the
-# static manifest (src/decoy_engine/quality/dp_provenance.py::_CERTIFIED_STACKS).
+# static manifest (src/decoy_engine/quality/dp_certified_stacks.py::CERTIFIED_ROWS).
 #
 # EXACT PATCHES, NOT FLOATING MINORS (section 3.8). setup-python is pinned to
 # exact CPython patches; a bare "3.11" would admit a moving patch release, but

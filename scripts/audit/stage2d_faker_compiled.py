@@ -6,7 +6,7 @@ strategy actually reach the compiled `derive_index_batch` kernel?
 ~line 86) calls `PoolSampler().sample(...)` for every Faker-strategy mask
 column, on EVERY backend that runs the pandas adapter (full-frame legacy,
 chunked, sequential -- Faker is never admitted to the unified/Rust slice,
-B028). `PoolSampler.sample` -> `_derive_pool_indices`
+B028). `PoolSampler.sample` -> `derive_pool_indices`
 (src/decoy_engine/generation/pool/_sampler.py ~48-152) calls the compiled
 `derive_index_batch` kernel when the native companion is present, falling
 back to a pure-Python reference kernel otherwise.
@@ -78,7 +78,7 @@ def _write_parquet(name: str, table) -> str:
 # ---------------------------------------------------------------------------
 # Instrumentation: wraps the compiled-kernel selector inside THIS subprocess
 # only. `compiled_index_kernel()` is a module-level function looked up by
-# name at call time inside `_derive_pool_indices`, so replacing the module
+# name at call time inside `derive_pool_indices`, so replacing the module
 # attribute here is enough -- no src/ edit, no import-time patch of anything
 # shipped.
 # ---------------------------------------------------------------------------

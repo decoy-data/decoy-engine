@@ -20,6 +20,8 @@ or in cross-sprint contracts §2.3.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import faker as faker_module
 
 from decoy_engine.providers_v2._adapter import CapabilityMatrix
@@ -33,6 +35,7 @@ def _faker_cap(
     poolable: bool = False,
     participates_in_fk_pk: bool = False,
     supported_locales: tuple[str, ...] = ("en_US",),
+    draw: Literal["pool", "computed"] = "pool",
 ) -> CapabilityMatrix:
     """Build a CapabilityMatrix entry for a Faker-backed provider with
     the S4-close defaults: non-deterministic, value-reuse OK, cardinality
@@ -54,6 +57,7 @@ def _faker_cap(
         format_regex=None,
         blocklist_validators=(),
         fallback_behavior="fail_plan_compile",
+        draw=draw,
     )
 
 
@@ -83,11 +87,12 @@ _CATALOG: tuple[CapabilityMatrix, ...] = (
     _faker_cap("address_state", poolable=True),
     _faker_cap("address_zip", poolable=True),
     _faker_cap("address_full", poolable=False),
-    # Generic (4) -- not PII-shaped; not poolable (lorem, uuid, random_*)
+    # Generic (4) -- not PII-shaped. uuid and the random_* draws are computed from the keyed bits
+    # (`draw="computed"`), so no pool is built for them; lorem_text has neither.
     _faker_cap("lorem_text", poolable=False),
-    _faker_cap("uuid", poolable=False),
-    _faker_cap("random_int_range", poolable=False),
-    _faker_cap("random_choice", poolable=False),
+    _faker_cap("uuid", poolable=False, draw="computed"),
+    _faker_cap("random_int_range", poolable=False, draw="computed"),
+    _faker_cap("random_choice", poolable=False, draw="computed"),
     # NOTE: `date_shift_offset` was dropped per cold-read M1.
 )
 
