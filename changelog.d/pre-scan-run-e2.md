@@ -1,0 +1,3 @@
+### Added (pre-scan coverage verdict, PRE-SCAN-RUN E2, 2026-11-21)
+
+`decoy_engine.profiling.evaluate_pre_scan(config, core)` decides which flagged source columns a pipeline leaves unmasked: a column with no rule, a `passthrough` rule, or a rule gated by `when:` is uncovered, and a mask table the scan did not cover is a `not_scanned` finding. The `PreScanVerdict` holds names only and builds the `pre_scan` run result check. `PreScanBlockedError` and `PreScanFailedError` map to `pre_scan.uncovered_pii_blocked` and `pre_scan.profile_failed` in the reason adapter. No run calls it yet; the run-start step ships in the CLI.

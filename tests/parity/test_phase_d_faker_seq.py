@@ -174,8 +174,8 @@ def test_f5a_whole_column_modes_decline(mode: str, monkeypatch: pytest.MonkeyPat
 def test_f5b_a_provider_outside_the_allowlist_declines(
     deterministic: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seed = faker_seed(provider="person_email", deterministic=deterministic)
-    _declines(seed, cells(30), "faker_provider_not_native:f:person_email", monkeypatch)
+    seed = faker_seed(provider="person_dob", deterministic=deterministic)
+    _declines(seed, cells(30), "faker_provider_not_native:f:person_dob", monkeypatch)
 
 
 @pytest.mark.parametrize("deterministic", [True, False])
@@ -263,8 +263,8 @@ def test_the_admit_reasons_are_coded_and_value_free() -> None:
     assert admit("c", string, faker_seed()) is None
     assert admit("c", string, positional_seed()) is None
     assert admit("c", string, positional_seed(None, pool_size=None)) is None
-    assert admit("c", string, faker_seed(provider="person_email")) == (
-        "faker_provider_not_native:c:person_email"
+    assert admit("c", string, faker_seed(provider="person_dob")) == (
+        "faker_provider_not_native:c:person_dob"
     )
     assert admit("c", string, replace(faker_seed(), provider=None)) == (
         "faker_provider_not_native:c:None"
