@@ -373,10 +373,8 @@ def _eval_predicate(
     _require_closed_grammar(expression, strategy, column)
     failed = False
     try:
-        # Audit L1 (2026-06-12): same fallback surfacing as
-        # execution/_transforms._eval_clamped -- pandas silently drops
-        # to the python engine on extension-array dtypes with only an
-        # unmonitored RuntimeWarning.
+        # Audit L1: surface pandas' silent python-engine fallback on extension dtypes, as
+        # execution/_transforms._eval_clamped does.
         with warnings.catch_warnings(record=True) as _caught:
             warnings.simplefilter("always", RuntimeWarning)
             # pandas eval cannot read `source.x` or a quoted name, so it runs on the aliased
@@ -436,11 +434,8 @@ def _eval_predicate(
             ),
         )
 
-    # QA-3 F4 (2026-05-31): accept pandas nullable BooleanDtype too.
-    # The pre-fix check `mask.dtype != bool` rejected `pd.BooleanDtype()`
-    # which arises naturally from Arrow-backed columns and from any
-    # boolean expression over a column with NaN. `is_bool_dtype` covers
-    # both numpy bool and pandas nullable BooleanDtype.
+    # QA-3 F4: accept pandas nullable BooleanDtype too (Arrow-backed columns, NaN in a column);
+    # `is_bool_dtype` covers numpy bool and the nullable dtype.
     if not isinstance(mask, pd.Series) or not pd.api.types.is_bool_dtype(mask.dtype):
         raise StrategyError(
             code=reasons.runtime.WHEN_EXPRESSION_NOT_BOOLEAN,
@@ -461,10 +456,9 @@ def when_source_frame(
     """`df` with every `when:`-read column that some node writes replaced by its pre-mask value.
 
     A `when:` selects rows by the ORIGINAL values it names, whatever earlier nodes masked. The
-    pre-mask copies live in `ctx.group_anchor_snapshots` (built by the route from
+    pre-mask copies live in `ctx.group_anchor_snapshots` (built from
     `_runner.source_snapshot_columns`). A read no node writes still holds its original value in
-    `df`. A route that built no snapshot set, or a set that names a column without a copy, fails
-    closed: reading the live frame would select rows by a masked value.
+    `df`. No snapshot set, a missing copy or an unalignable copy fails closed.
     """
     snapshot_set = ctx.source_snapshot_columns
     try:
@@ -482,7 +476,17 @@ def when_source_frame(
         snapshot = ctx.group_anchor_snapshots.get((table, col))
         if snapshot is None:
             raise _snapshot_missing(strategy, table)
-        src[col] = snapshot.loc[df.index]
+        if not snapshot.index.equals(df.index):
+            # Label lookup is only sound for one-to-one unique labels (a reordered frame).
+            if not (
+                snapshot.index.is_unique
+                and df.index.is_unique
+                and snapshot.index.isin(df.index).all()
+                and len(snapshot) == len(df)
+            ):
+                raise _snapshot_missing(strategy, table)
+            snapshot = snapshot.loc[df.index]
+        src[col] = snapshot
     return src
 
 

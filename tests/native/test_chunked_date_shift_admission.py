@@ -494,9 +494,16 @@ def test_a_when_predicate_on_an_earlier_masked_column_is_admitted_natively() -> 
     # the table is admitted and the native output equals the oracle's.
     config = make_config([ds_col(), {"name": "a", "strategy": "redact"}, passthrough("p")])
     config["tables"][0]["columns"][0]["when"] = "a == 'k'"
-    table = pa.table({"d": _valued().column("d"), "a": ["k"] * 6, "p": list(range(6))})
+    table = pa.table({"d": _valued().column("d"), "a": ["k", "j"] * 3, "p": list(range(6))})
     run = run_one(config, [table])
     assert run.ev[0].native_admitted is True, run.ev[0].reroute_reason
+    from tests.native._c8_i_support import run_public_oracle_below_gate
+
+    want = run_public_oracle_below_gate(config, [table])
+    for name in ("d", "a", "p"):
+        assert [v for t in run.out for v in t.column(name).to_pylist()] == [
+            v for t in want for v in t.column(name).to_pylist()
+        ], name
 
 
 def test_a_when_predicate_keeps_a_table_off_auto_chunk() -> None:

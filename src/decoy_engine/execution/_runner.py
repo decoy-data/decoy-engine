@@ -315,14 +315,44 @@ def source_snapshot_columns(plan: Plan, registry: ProviderRegistry) -> dict[str,
     """Every column snapshotted pre-mask: `source_anchor_columns` plus each `when:`-read column
     that some node writes. A `when:` column no node writes keeps its original value in the live
     frame, so it costs no copy. Both snapshot sites call this in place of `source_anchor_columns`.
+
+    What a node writes comes from `column_access`, the one handler-write declaration (a composite
+    also writes its provider's own output columns, which no config entry names). A node whose
+    writes cannot be named snapshots every column its table's `when:` reads.
     """
     out = {t: frozenset(c) for t, c in source_anchor_columns(plan, registry).items()}
-    written = _writer_node_map(build_work_list(plan, registry))
-    for table, cols in when_read_columns(plan).items():
-        hit = frozenset(c for c in cols if (table, c) in written)
+    reads = when_read_columns(plan)
+    written: dict[str, set[str]] = defaultdict(set)
+    for node in build_work_list(plan, registry):
+        if node.table not in reads:
+            continue
+        names, unknown = _node_written_columns(node, registry)
+        written[node.table] |= reads[node.table] if unknown else names
+    for table, cols in reads.items():
+        hit = cols & written[table]
         if hit:
             out[table] = out.get(table, frozenset()) | hit
     return out
+
+
+def _node_written_columns(node: WorkNode, registry: ProviderRegistry) -> tuple[set[str], bool]:
+    """`(columns the node writes, whether its writes cannot be named)`."""
+    from decoy_engine.execution._adapter import provider_config_to_dict
+    from decoy_engine.execution._column_access import column_access
+
+    names = set(_writer_output_columns(node))
+    seed = node.plan_slice
+    if not isinstance(seed, ColumnSeed):
+        return names, False
+    entry = {
+        "name": node.columns[0],
+        "strategy": seed.strategy,
+        "provider": seed.provider,
+        "coherent_with": list(seed.coherent_with),
+        "provider_config": provider_config_to_dict(seed.provider_config),
+    }
+    access = column_access(entry, registry)
+    return names | access.writes, access.writes_unknown
 
 
 def _writer_output_columns(node: WorkNode) -> tuple[str, ...]:

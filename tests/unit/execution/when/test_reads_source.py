@@ -32,7 +32,7 @@ from tests.native._chunked_entry_support import (
     make_config,
     redact,
 )
-from tests.unit.execution._when_reads_source_support import (
+from tests.unit.execution.when._support import (
     NS,
     changed_rows,
     config_for,
@@ -318,3 +318,201 @@ def test_a_snapshot_set_without_the_running_table_never_reads_the_live_frame(tab
         assert info.value.code == "when_source_snapshot_missing"
     else:
         assert run()[0]["email"].tolist() == ["a", "REDACTED"]
+
+
+# ---------------------------------------------------------------------------
+# Composite writers and duplicate row labels (Codex R2).
+# ---------------------------------------------------------------------------
+
+
+def _seed_plan(per_column: list[tuple[str, ColumnSeed]]) -> Any:
+    from types import SimpleNamespace
+
+    from decoy_engine.plan._types import SeedEnvelope, TableSeed
+
+    return SimpleNamespace(
+        seed_envelope=SeedEnvelope(
+            job_seed=b"\xca\xfe" * 16,
+            per_table=(("t", TableSeed(per_column=tuple(per_column), per_group=())),),
+        )
+    )
+
+
+def _seed_of(strategy: str, **kw: Any) -> ColumnSeed:
+    base: dict[str, Any] = {
+        "namespace": None,
+        "strategy": strategy,
+        "provider": None,
+        "backend_type": "decoy_native",
+        "backend_version": "1",
+        "cardinality_mode": "preserve",
+        "deterministic": False,
+    }
+    return ColumnSeed(**{**base, **kw})
+
+
+def _composite_seed() -> ColumnSeed:
+    return _seed_of(
+        "faker",
+        provider="composite_name_email",
+        namespace="nm",
+        deterministic=True,
+        backend_type="composite",
+        cardinality_mode="reuse",
+    )
+
+
+def test_a_composite_nodes_provider_output_is_snapshotted_for_a_when() -> None:
+    """A lone `composite_name_email` keyed on `first_name` also writes `email`; a later
+    `when: email == 'active'` still selects by the source email (Codex R2, V1)."""
+    from decoy_engine.execution import PandasExecutionAdapter
+    from decoy_engine.execution._runner import source_snapshot_columns
+    from decoy_engine.providers_v2 import get_default_registry
+    from decoy_engine.relationships._graph import RelationshipGraph
+    from decoy_engine.relationships._namespace import NamespaceBinding, NamespaceRegistry
+
+    reg = get_default_registry()
+    plan = _seed_plan(
+        [
+            ("first_name", _composite_seed()),
+            ("zz_target", _seed_of("redact", when="email == 'active'")),
+        ]
+    )
+    assert "email" in source_snapshot_columns(plan, reg).get("t", frozenset())
+    n = 6
+    emails = ["active" if i % 2 == 0 else f"u{i}@x.test" for i in range(n)]
+    table = pa.table(
+        {
+            "first_name": pa.array([f"F{i}" for i in range(n)]),
+            "last_name": pa.array([f"L{i}" for i in range(n)]),
+            "email": pa.array(emails),
+            "zz_target": pa.array([f"t{i}" for i in range(n)]),
+        }
+    )
+    out = (
+        PandasExecutionAdapter()
+        .run_single(
+            plan,
+            table,
+            registry=reg,
+            relationship_graph=RelationshipGraph(edges=(), ordering=()),
+            namespace_registry=NamespaceRegistry(
+                bindings=(NamespaceBinding("nm", (("t", ("first_name",)),)),)
+            ),
+        )
+        .output
+    )
+    assert changed_rows(out, table, "zz_target") == [e == "active" for e in emails]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    ["composite_name_email", "composite_city_state_zip", "composite_person", "composite_address"],
+)
+def test_every_column_a_handler_declares_written_is_snapshotted_when_read(provider: str) -> None:
+    """Property over the declaration: each output column of a composite provider appears in the
+    snapshot set once a `when:` reads it, whether or not the config names it."""
+    from decoy_engine.execution._runner import source_snapshot_columns
+    from decoy_engine.generation.composite._validate import _COMPOSITE_OUTPUT_COLUMNS
+    from decoy_engine.providers_v2 import get_default_registry
+
+    outputs = _COMPOSITE_OUTPUT_COLUMNS[provider]
+    head = _seed_of("faker", provider=provider, namespace="nm", backend_type="composite")
+    for read in outputs:
+        plan = _seed_plan(
+            [(outputs[0], head), ("zz_target", _seed_of("redact", when=f"{read} == 'x'"))]
+        )
+        assert read in source_snapshot_columns(plan, get_default_registry()).get(
+            "t", frozenset()
+        ), (
+            provider,
+            read,
+        )
+
+
+def test_an_unknown_writer_snapshots_every_column_the_table_reads() -> None:
+    from decoy_engine.execution._runner import source_snapshot_columns
+    from decoy_engine.providers_v2 import get_default_registry
+
+    plan = _seed_plan(
+        [
+            ("a", _seed_of("no_such_strategy")),
+            ("zz_target", _seed_of("redact", when="status == 'x'")),
+        ]
+    )
+    assert source_snapshot_columns(plan, get_default_registry()).get("t") == {"status"}
+
+
+def test_duplicate_row_labels_select_by_position_on_the_full_frame_and_chunked_oracle(
+    tmp_path: Path,
+) -> None:
+    """Labels are positional here: the source index `[7, 7]` must not make the snapshot
+    lookup select four rows (Codex R2, V1)."""
+    df = pd.DataFrame({"status": ["h1", "h2"], "email": ["a", "b"]}, index=[7, 7])
+    snap = pd.Series(["active", "idle"], index=df.index, name="status")
+    ctx = _Ctx({"t": frozenset({"status"})}, {("t", "status"): snap})
+    out, _ = run_with_when_gate(
+        RedactHandler(),
+        df,
+        "email",
+        _seed("status == 'active'"),
+        ctx,  # type: ignore[arg-type]
+    )
+    assert out["email"].tolist() == ["REDACTED", "b"]
+    # A snapshot that cannot be aligned fails closed with the coded error.
+    short = pd.Series(["active"], index=[7], name="status")
+    ctx = _Ctx({"t": frozenset({"status"})}, {("t", "status"): short})
+    with pytest.raises(StrategyError) as info:
+        run_with_when_gate(
+            RedactHandler(),
+            df,
+            "email",
+            _seed("status == 'active'"),
+            ctx,  # type: ignore[arg-type]
+        )
+    assert info.value.code == "when_source_snapshot_missing"
+
+
+def test_a_job_whose_source_has_one_row_label_repeated_runs_on_the_oracle_routes(
+    tmp_path: Path,
+) -> None:
+    """Whole job through the public pandas adapter with a duplicated pandas index."""
+    from decoy_engine.execution import PandasExecutionAdapter
+    from decoy_engine.providers_v2 import get_default_registry
+    from decoy_engine.relationships._graph import RelationshipGraph
+    from decoy_engine.relationships._namespace import NamespaceRegistry
+
+    plan = _seed_plan(
+        [
+            ("status", _seed_of("redact")),
+            ("zz_target", _seed_of("redact", when="status == 'active'")),
+        ]
+    )
+    table = pa.table({"status": ["active", "idle"], "zz_target": ["t0", "t1"]})
+    # `to_pandas_fk_safe` yields a RangeIndex; force the duplicate labels the dedupe-free
+    # sources can produce.
+    import decoy_engine.execution._pandas_adapter as adapter_mod
+
+    orig = adapter_mod.to_pandas_fk_safe
+
+    def dup(tbl: Any, cols: Any) -> pd.DataFrame:
+        frame = orig(tbl, cols)
+        frame.index = pd.Index([7] * len(frame))
+        return frame
+
+    adapter_mod.to_pandas_fk_safe = dup
+    try:
+        out = (
+            PandasExecutionAdapter()
+            .run_single(
+                plan,
+                table,
+                registry=get_default_registry(),
+                relationship_graph=RelationshipGraph(edges=(), ordering=()),
+                namespace_registry=NamespaceRegistry(bindings=()),
+            )
+            .output
+        )
+    finally:
+        adapter_mod.to_pandas_fk_safe = orig
+    assert out.column("zz_target").to_pylist() == ["REDACTED", "t1"]

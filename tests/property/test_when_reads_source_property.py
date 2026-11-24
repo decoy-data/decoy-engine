@@ -15,7 +15,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from tests.native._chunked_entry_support import TABLE, hash_col, make_config, redact
-from tests.unit.execution._when_reads_source_support import NS, changed_rows, run_full_frame
+from tests.unit.execution.when._support import NS, changed_rows, run_full_frame
 
 _VALUES = ["a", "b", "c"]
 _NAMES = {"before": ("aa_read", "mm_gated"), "after": ("zz_read", "mm_gated")}
