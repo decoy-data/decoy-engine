@@ -233,7 +233,7 @@ def test_a_duplicate_id_does_not_hide_an_unsafe_path(repo: Path) -> None:
 
 GOOD = _baseline("a", ["m::f", "m::g"])
 ENTRY = '{"reason": "reviewed on 2026-11-04, tracked for removal"}'
-BAD_BASELINES: tuple[tuple[str, str, str], ...] = (
+BROKEN_FILES: tuple[tuple[str, str, str], ...] = (
     ("wrong sentry_id", _baseline("other", ["m::f", "m::g"]), "sentry_id 'other' does not match"),
     ("one-char reason", _baseline("a", ["m::f", "m::g"], reason="x"), "reason for m::f is empty"),
     ("no entries field", '{"sentry_id": "a", "created_in": "S0"}', "cannot be read or is not a"),
@@ -247,7 +247,7 @@ BAD_BASELINES: tuple[tuple[str, str, str], ...] = (
 
 
 @pytest.mark.parametrize(
-    "body, needle", [c[1:] for c in BAD_BASELINES], ids=[c[0] for c in BAD_BASELINES]
+    "body, needle", [c[1:] for c in BROKEN_FILES], ids=[c[0] for c in BROKEN_FILES]
 )
 def test_a_bad_head_baseline_gives_its_own_diagnostic(repo: Path, body: str, needle: str) -> None:
     _write(repo, A, body)
@@ -257,7 +257,7 @@ def test_a_bad_head_baseline_gives_its_own_diagnostic(repo: Path, body: str, nee
     assert needle in res.stderr, res.stderr
 
 
-@pytest.mark.parametrize("body", [c[1] for c in BAD_BASELINES], ids=[c[0] for c in BAD_BASELINES])
+@pytest.mark.parametrize("body", [c[1] for c in BROKEN_FILES], ids=[c[0] for c in BROKEN_FILES])
 def test_a_bad_base_baseline_fails_closed_even_when_head_fixes_it(repo: Path, body: str) -> None:
     _write(repo, A, body)
     base = _commit(repo, "bad base baseline")

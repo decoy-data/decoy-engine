@@ -578,7 +578,7 @@ def test_a_base_checker_change_row_with_a_non_string_value_fails_closed(repo: Pa
 
 GLOB = "test_*.py"
 # test_gate_pins asks "does this directory hold any test file", which is not membership.
-GLOB_EXEMPT = ("tests/sentry/test_gate_pins.py", "test_every_pinned_path_exists_and_is_a_test")
+GATE_PINS_CALL = ("tests/sentry/test_gate_pins.py", "test_every_pinned_path_exists_and_is_a_test")
 
 
 def _glob_sites(sources: dict[str, str]) -> list[tuple[str, str, str]]:
@@ -605,7 +605,7 @@ def _unexempt(sites: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
     """Drop the one exempt call; a second call of any shape, even in that function, stays."""
     kept, seen = [], False
     for site in sites:
-        if site[:2] == GLOB_EXEMPT and not seen and "rglob" in site[2]:
+        if site[:2] == GATE_PINS_CALL and not seen and "rglob" in site[2]:
             seen = True
         else:
             kept.append(site)
@@ -630,7 +630,7 @@ def test_guard_sees_the_keyword_form_of_the_glob() -> None:
 
 
 def test_guard_sees_a_second_glob_in_the_exempt_file() -> None:
-    gate_pins = GLOB_EXEMPT[0]
+    gate_pins = GATE_PINS_CALL[0]
     seeded = {
         gate_pins: EXEMPT_FUNC
         + '    t.rglob("test_*.py")\n\ndef other(t):\n    t.rglob("test_*.py")\n'
@@ -639,12 +639,14 @@ def test_guard_sees_a_second_glob_in_the_exempt_file() -> None:
 
 
 def test_guard_sees_a_second_glob_in_the_exempt_function() -> None:
-    seeded = {GLOB_EXEMPT[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n    t.glob("test_*.py")\n'}
+    seeded = {
+        GATE_PINS_CALL[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n    t.glob("test_*.py")\n'
+    }
     assert len(_unexempt(_glob_sites(seeded))) == 1
 
 
 def test_guard_accepts_the_one_exempt_call() -> None:
-    seeded = {GLOB_EXEMPT[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n'}
+    seeded = {GATE_PINS_CALL[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n'}
     assert _unexempt(_glob_sites(seeded)) == []
 
 
