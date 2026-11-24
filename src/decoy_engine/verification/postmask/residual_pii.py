@@ -66,13 +66,7 @@ from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severit
 # hit on a column masked with one of these is informational, not a
 # warning.
 _PRODUCES_PII_LIKE_VALUES: frozenset[str] = frozenset(
-    {
-        "faker",
-        "formula",
-        "categorical",
-        "reference",
-        "date_shift",
-    }
+    {"faker", "formula", "categorical", "reference", "date_shift"}
 )
 
 # Strategies that DESTROY detector patterns. A surviving hit on a column
@@ -81,14 +75,7 @@ _PRODUCES_PII_LIKE_VALUES: frozenset[str] = frozenset(
 # text_redact replaces matched PII spans with a fixed token; any
 # detector still hitting after text_redact ran is a failure of the
 # detector coverage and must surface as 'fail' (not 'warning').
-_DESTROYS_PATTERN: frozenset[str] = frozenset(
-    {
-        "hash",
-        "redact",
-        "text_redact",
-        "bucketize",
-    }
-)
+_DESTROYS_PATTERN: frozenset[str] = frozenset({"hash", "redact", "text_redact", "bucketize"})
 
 # The destroying strategies that replace a whole cell. text_redact is left out: it replaces
 # matched spans, and the name-hint-only detectors are not in its span set, so a cell can still
@@ -136,6 +123,15 @@ def check_residual_pii(
     from the configured strategy, then the source comparison. The writer query is the one a run
     with this config compiles (`standalone_writes`).
     """
+    schemas = {name: [str(c) for c in df.columns] for name, df in output_frames.items()}
+    try:
+        writes = standalone_writes(config, schemas)
+    except Exception as exc:
+        if passes_through(exc):
+            raise
+        # A relationship that does not build (key lengths that differ) fails the check as the
+        # runner's does, by class name only.
+        return [_check_raised("", type(exc).__name__)]
     facts = {
         table_name: {
             str(col_name): _frame_column_facts(table_name, df, str(col_name), source_frames)
@@ -143,8 +139,7 @@ def check_residual_pii(
         }
         for table_name, df in output_frames.items()
     }
-    schemas = {name: [str(c) for c in df.columns] for name, df in output_frames.items()}
-    return residual_pii_findings(facts, config, writes=standalone_writes(config, schemas))
+    return residual_pii_findings(facts, config, writes=writes)
 
 
 def _frame_column_facts(
@@ -467,6 +462,18 @@ def _compare_raised(detector_id: str | None, error: str) -> str:
     return f"{hit} source comparison raised {error} (see job log); a leak cannot be ruled out."
 
 
+def _check_raised(table: str, error: str) -> ResidualPIIFinding:
+    """The finding for a check that could not run on `table` ("" for every table)."""
+    return ResidualPIIFinding(
+        table=table,
+        column="",
+        detector_id="",
+        match_rate=0.0,
+        severity="error",
+        message=f"residual_pii check raised {error} (see job log for details)",
+    )
+
+
 def residual_pii_findings(
     output_facts: Mapping[str, Mapping[str, ColumnFacts]],
     config: Mapping[str, Any],
@@ -485,17 +492,7 @@ def residual_pii_findings(
         for t in config.get("tables") or []
         if isinstance(t, Mapping) and isinstance(t.get("name"), str)
     }
-    findings: list[ResidualPIIFinding] = [
-        ResidualPIIFinding(
-            table=table,
-            column="",
-            detector_id="",
-            match_rate=0.0,
-            severity="error",
-            message=f"residual_pii check raised {error} (see job log for details)",
-        )
-        for table, error in (failed_tables or {}).items()
-    ]
+    findings = [_check_raised(table, error) for table, error in (failed_tables or {}).items()]
     for table_name, columns in output_facts.items():
         for col_name, fact in columns.items():
             configured = strategy_by_col.get((table_name, col_name))

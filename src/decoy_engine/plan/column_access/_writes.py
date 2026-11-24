@@ -138,17 +138,25 @@ def _leaves_cell(entry: Mapping[str, Any], registry: Any) -> bool:
     return entry.get("strategy") == "passthrough" and PASSTHROUGH_OUTPUT_IS_INPUT
 
 
+# The transform ops that move or drop rows and columns and write no cell. `derive` writes its
+# target. Any other op is unclassified, so its table is `Unknown` until it is added to one side.
+NON_WRITING_OPS: frozenset[str] = frozenset({"filter", "sort", "limit", "dedupe", "drop_column"})
+
+
 def _derive_targets(ops: Iterable[Any]) -> frozenset[str] | None:
-    """Every `derive` target. The other ops move or drop rows and columns and write no cell."""
+    """Every `derive` target, or None when some op is malformed or not a known op."""
     targets: set[str] = set()
     for op in ops:
         if not isinstance(op, Mapping):
             return None
-        if op.get("op") == "derive":
+        kind = op.get("op")
+        if kind == "derive":
             column = op.get("column")
             if not isinstance(column, str):
                 return None
             targets.add(column)
+        elif kind not in NON_WRITING_OPS:
+            return None
     return frozenset(targets)
 
 
