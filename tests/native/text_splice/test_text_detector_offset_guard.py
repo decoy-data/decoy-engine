@@ -19,13 +19,16 @@ from pathlib import Path
 import pytest
 
 from tests.native._c6c_ii_support import NEEDS_TR_KERNEL
-from tests.native._detector_offset_support import (
+from tests.native.text_splice._detector_offset_support import (
     CRATE,
+    LIMIT,
+    LIMIT_EMAIL,
     OVERSIZED_EMAIL,
     SHORT_EMAIL,
     build_tooling_missing,
     build_wheel_dir,
     export_old_core_src,
+    run_old_suites,
     run_snippet,
 )
 
@@ -34,7 +37,7 @@ _NEEDS_BUILD = pytest.mark.skipif(
     reason=f"cannot build the test-limit wheel: {build_tooling_missing()}",
 )
 
-SRC = Path(__file__).resolve().parents[2] / "src"
+SRC = Path(__file__).resolve().parents[3] / "src"
 
 
 @pytest.fixture(scope="module")
@@ -52,13 +55,21 @@ def old_core_src(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return src
 
 
+@pytest.fixture(scope="module")
+def old_core_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp("old-core-tests")
+    if export_old_core_src(root, include_tests=True) is None:
+        pytest.skip("the pre-S0 commit is not in this checkout's history")
+    return root
+
+
 _DIRECT_EXPORTS = f"""
 from decoy_engine_native import _kernel as k
 ids = k.text_redact_supported_ids()
 version = k.text_redact_catalog_version()
-cands = k.text_redact_candidates([{OVERSIZED_EMAIL!r}, {SHORT_EMAIL!r}], ids, version)
+cands = k.text_redact_candidates([{OVERSIZED_EMAIL!r}, {SHORT_EMAIL!r}, {LIMIT_EMAIL!r}], ids, version)
 splice = k.text_mask_detect_splice(
-    [{OVERSIZED_EMAIL!r}, {SHORT_EMAIL!r}], ids, [False] * len(ids), "<X>", False, version
+    [{OVERSIZED_EMAIL!r}, {SHORT_EMAIL!r}, {LIMIT_EMAIL!r}], ids, [False] * len(ids), "<X>", False, version
 )
 print(json.dumps({{"cands": cands, "splice": splice, "email": ids.index("email")}}))
 """
@@ -68,8 +79,8 @@ print(json.dumps({{"cands": cands, "splice": splice, "email": ids.index("email")
 def test_at3_both_legacy_exports_decline_an_oversized_cell(limit_wheel: Path) -> None:
     got = run_snippet(_DIRECT_EXPORTS, wheel_dir=limit_wheel, core_src=SRC)
     email = got["email"]
-    assert got["cands"] == [None, [[email, 0, len(SHORT_EMAIL)]]]
-    assert got["splice"] == [None, "<X>"]
+    assert got["cands"] == [None, [[email, 0, len(SHORT_EMAIL)]], [[email, 0, LIMIT]]]
+    assert got["splice"] == [None, "<X>", "<X>"]
 
 
 _OLD_CORE_CALLS = f"""
@@ -118,6 +129,24 @@ def test_at11_old_core_with_new_wheel_keeps_oversized_email_redacted(
     assert got["redact_oracle_calls"] == 1
     assert got["mask"] == ["<X>", None, "<X>"]
     assert got["mask_oracle_calls"] == 1
+
+
+@_NEEDS_BUILD
+def test_at11_old_core_suites_pass_on_a_production_limit_wheel(
+    tmp_path: Path, old_core_root: Path
+) -> None:
+    """The production half of AT-11: ordinary cells behave the same under the featureless wheel."""
+    wheel = build_wheel_dir(tmp_path, features=None)
+    done = run_old_suites(
+        old_core_root,
+        wheel_dir=wheel,
+        tests=[
+            "tests/native/test_c6c_ii_text_redact_rust.py",
+            "tests/native/test_c6b_ii_b_text_mask_splice.py",
+        ],
+    )
+    assert done.returncode == 0, (done.stdout + done.stderr)[-3000:]
+    assert "passed" in done.stdout and "skipped" not in done.stdout.splitlines()[-1]
 
 
 @_NEEDS_BUILD
