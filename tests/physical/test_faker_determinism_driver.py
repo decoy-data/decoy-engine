@@ -28,6 +28,8 @@ from typing import Any
 
 import pytest
 
+from tests.sentry.ratchet import is_sentry_glob
+
 ENGINE_ROOT = Path(__file__).resolve().parents[2]
 HARNESS_DIR = ENGINE_ROOT / "scripts" / "faker-determinism"
 
@@ -445,7 +447,8 @@ def _physical_lines(path: Path) -> int:
 def test_output_lock_sentries_are_split_and_bounded() -> None:
     # The manifest is a glob (tests/sentry/**/test_*.py), so a sentry is registered by
     # existing under that glob, not by being listed by path.
-    globbed = {p.name for p in (ENGINE_ROOT / "tests" / "sentry").rglob("test_*.py")}
+    found = (p.relative_to(ENGINE_ROOT).as_posix() for p in (ENGINE_ROOT / "tests").rglob("*"))
+    globbed = {Path(p).name for p in found if is_sentry_glob(p)}
     for name in _LOCK_SENTRIES:
         path = _DEPENDENCY_SENTRIES / name
         assert path.is_file(), name
