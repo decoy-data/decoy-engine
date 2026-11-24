@@ -324,7 +324,7 @@ The tokenizer-specific `tests/native/test_chunked_entry_rev9_read.py::test_predi
 
 ## Write and ordering model
 
-**Invariant.** Every config that runs today keeps byte-identical output. Only configs that raise today get new behavior.
+**Invariant.** FK lookups keep today's output for every config that runs today: the same parent versions and the same parent-map caching. Outside FK lookups, a config that runs today changes output only in the named source-read fixes this row exists for: tests 1, 5 and 14 (a `when` or Faker step that reads a stale source value now reads the committed value). Each is a CHANGELOG Fixed line. Configs that raise today may get new behavior.
 
 This model governs the remaining S2 ordering work. The baseline is engine `42436c973`.
 Execution paths below are relative to `src/decoy_engine/execution/`.
