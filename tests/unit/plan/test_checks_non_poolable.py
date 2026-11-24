@@ -21,12 +21,24 @@ def _cfg(columns: list[dict]) -> dict:
 
 
 class TestNonPoolableProviderWithPoolBackend:
-    def test_faker_uuid_rejected(self):
-        cfg = _cfg([{"name": "device_id", "strategy": "faker", "provider": "uuid"}])
+    def test_faker_address_full_rejected(self):
+        cfg = _cfg([{"name": "home", "strategy": "faker", "provider": "address_full"}])
         with pytest.raises(PlanCompileError) as exc:
             check_non_poolable_provider_with_pool_backend(cfg)
         assert exc.value.code == "non_poolable_provider_with_pool_backend"
-        assert "device_id" in exc.value.message
+        assert "home" in exc.value.message
+
+    def test_faker_lorem_text_rejected_until_it_pools(self):
+        cfg = _cfg([{"name": "notes", "strategy": "faker", "provider": "lorem_text"}])
+        with pytest.raises(PlanCompileError) as exc:
+            check_non_poolable_provider_with_pool_backend(cfg)
+        assert exc.value.code == "non_poolable_provider_with_pool_backend"
+
+    @pytest.mark.parametrize("provider", ["uuid", "random_int_range", "random_choice"])
+    def test_faker_computed_draw_is_not_a_pool_refusal(self, provider):
+        # A computed draw builds no pool, so poolable=False is not a reason to refuse it.
+        cfg = _cfg([{"name": "device_id", "strategy": "faker", "provider": provider}])
+        check_non_poolable_provider_with_pool_backend(cfg)  # no raise
 
     def test_faker_poolable_provider_passes(self):
         cfg = _cfg([{"name": "email", "strategy": "faker", "provider": "person_email"}])
@@ -47,8 +59,11 @@ class TestNonPoolableProviderWithPoolBackend:
         check_non_poolable_provider_with_pool_backend(cfg)  # no raise
 
 
-class TestBrokenTemplateShapesRejected:
-    """The three shipped-template column shapes the audit found DOA."""
+class TestShippedTemplateShapesCompile:
+    """The three shipped-template column shapes the audit found dead on arrival (2026-06-12).
+
+    They were refused at compile because a faker uuid column built a pool. A uuid is a computed
+    draw now, so the same shapes compile and run (GEN-NONFAKER-DRAWS)."""
 
     @pytest.mark.parametrize(
         "column",
@@ -64,10 +79,8 @@ class TestBrokenTemplateShapesRejected:
             {"name": "device_id", "strategy": "faker", "provider": "uuid"},  # gdpr
         ],
     )
-    def test_template_shape_rejected_at_compile(self, column):
-        with pytest.raises(PlanCompileError) as exc:
-            check_non_poolable_provider_with_pool_backend(_cfg([column]))
-        assert exc.value.code == "non_poolable_provider_with_pool_backend"
+    def test_template_shape_compiles(self, column):
+        run_config_only_checks(_cfg([column]))
 
 
 class TestRunConfigOnlyChecks:
@@ -120,7 +133,7 @@ class TestRunConfigOnlyChecks:
         assert exc.value.code == "unknown_provider"
 
     def test_raises_on_non_poolable_pool_backend(self):
-        cfg = _cfg([{"name": "device_id", "strategy": "faker", "provider": "uuid"}])
+        cfg = _cfg([{"name": "home", "strategy": "faker", "provider": "address_full"}])
         with pytest.raises(PlanCompileError) as exc:
             run_config_only_checks(cfg)
         assert exc.value.code == "non_poolable_provider_with_pool_backend"

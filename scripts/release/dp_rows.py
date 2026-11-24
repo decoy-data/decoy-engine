@@ -1,4 +1,4 @@
-"""How a DP certified row is computed, and how release prep writes it into `_CERTIFIED_STACKS`.
+"""How a DP certified row is computed, and how release prep writes it into `quality/dp_certified_stacks.py`.
 
 One fact lives here: a certified row is `compute_lock_fingerprint` over a distribution set. Two
 profiles earn a row per engine release:
@@ -216,10 +216,10 @@ def cli_rows(
 
 def _body(lines: list[str], key: str) -> tuple[int, int, int]:
     """(first line of the set body, one past its last, line of the decoy-cli marker)."""
-    head = f'(CERTIFIED_PLATFORM, "{key}"): frozenset('
+    head = f'"{key}": frozenset('
     starts = [i for i, ln in enumerate(lines) if ln.strip() == head]
     if len(starts) != 1:
-        raise DpRowError(f"_CERTIFIED_STACKS has no single {key} row set")
+        raise DpRowError(f"dp_certified_stacks has no single {key} row set")
     begin = starts[0] + 2
     end = next((i for i in range(begin, len(lines)) if lines[i].strip() == "}"), -1)
     marks = [i for i in range(begin, end) if lines[i].lstrip().startswith(CLI_BLOCK_MARK)]
@@ -268,7 +268,7 @@ def plan_rows(
     candidates: list[Path],
     allow_delta: list[str],
 ) -> str:
-    """The new text of dp_provenance.py with this release's rows, or a `DpRowError`."""
+    """The new text of dp_certified_stacks.py with this release's rows, or a `DpRowError`."""
     py = lock_profile_python(root)
     key = f"{py}.final"
     closure = base_closure(root, py, shutil.which("uv"))

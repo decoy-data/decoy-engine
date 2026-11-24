@@ -9,7 +9,7 @@ Two rules, both AST scans over ``src/decoy_engine``:
 2. Validator messages. A ``raise ValueError(<message>)`` in a module that defines a reachable
    public model must not interpolate a data value. The converter trusts validator text only for
    ``ConfigRuleError``, so each message is classified (the risky-name policy is
-   ``test_log_interpolation``'s) as fixed, name-only, value-bearing or unclassified. A call result
+   ``tests/sentry/safe_output``) as fixed, name-only, value-bearing or unclassified. A call result
    or opaque local is unclassified unless it comes straight from a producer function whose
    returns are classified and folded into the digest. Value-bearing, unclassified and plain
    ``ValueError`` sites must be zero. Each ``ConfigRuleError`` message is pinned by
@@ -34,7 +34,7 @@ import pytest
 from pydantic import BaseModel
 
 import decoy_engine
-from tests.sentry.test_log_interpolation import RISKY_NAMES, _risky_in
+from tests.sentry.safe_output import RISKY_NAMES, risky_in
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
@@ -281,7 +281,7 @@ def classify(msg: ast.expr | None, parts: list[ast.expr] | None = None) -> str:
     parts = _interpolated(msg) if parts is None else parts
     if not parts:
         return "fixed"
-    if any(_risky_in(p, RISKY_NAMES) for p in parts):
+    if any(risky_in(p, RISKY_NAMES) for p in parts):
         return "value-bearing"
     roots = set().union(*(_roots(p) for p in parts))
     return "name-only" if roots <= STRUCTURAL_ROOTS else "unclassified"

@@ -315,7 +315,7 @@ def test_faker_vault_column_is_unbound(tmp_path: Path) -> None:
 
 
 def test_faker_non_poolable_provider_never_compiles(tmp_path: Path) -> None:
-    """`uuid` is a real registered Faker provider with `poolable=False`
+    """`address_full` is a real registered Faker provider with `poolable=False`
     (`_provider_class.py`'s python_only class); `check_non_poolable_provider_
     with_pool_backend` (`plan/_checks.py`) already rejects this combination
     at PLAN COMPILE, before `execution_binding_for_slice_node` ever runs --
@@ -325,7 +325,7 @@ def test_faker_non_poolable_provider_never_compiles(tmp_path: Path) -> None:
 
     source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
     with pytest.raises(PlanCompileError, match="non_poolable_provider_with_pool_backend"):
-        _plan_for(tmp_path, source, [_faker_column(provider="uuid")])
+        _plan_for(tmp_path, source, [_faker_column(provider="address_full")])
 
 
 def test_faker_non_poolable_provider_hand_built_node_is_unbound(tmp_path: Path) -> None:

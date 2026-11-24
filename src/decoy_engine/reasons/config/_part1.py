@@ -199,7 +199,7 @@ _d = _catalog.config("ValidationError")
 WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
     "when_masked_reference_unsupported",
     "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
 

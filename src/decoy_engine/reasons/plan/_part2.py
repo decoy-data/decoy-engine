@@ -6,6 +6,10 @@ from decoy_engine.reasons import _catalog
 from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 
 __all__ = [
+    "COMPUTED_DRAW_ELEMENTS_INVALID",
+    "COMPUTED_DRAW_MODE_UNSUPPORTED",
+    "COMPUTED_DRAW_NAMESPACE_RESERVED",
+    "COMPUTED_DRAW_RANGE_INVALID",
     "DERIVED_BOUNDS_INVERTED",
     "DERIVED_CYCLIC_REFERENCE",
     "DERIVED_EXPRESSION_MISSING",
@@ -119,6 +123,18 @@ __all__ = [
 
 _d = _catalog.plan("PlanCompileError")
 
+COMPUTED_DRAW_ELEMENTS_INVALID = _d(
+    "computed_draw_elements_invalid", "Computed draw elements invalid.", since=UNRELEASED
+)
+COMPUTED_DRAW_MODE_UNSUPPORTED = _d(
+    "computed_draw_mode_unsupported", "Computed draw mode unsupported.", since=UNRELEASED
+)
+COMPUTED_DRAW_NAMESPACE_RESERVED = _d(
+    "computed_draw_namespace_reserved", "Computed draw namespace reserved.", since=UNRELEASED
+)
+COMPUTED_DRAW_RANGE_INVALID = _d(
+    "computed_draw_range_invalid", "Computed draw range invalid.", since=UNRELEASED
+)
 DERIVED_BOUNDS_INVERTED = _d("derived_bounds_inverted", "Derived bounds inverted.")
 DERIVED_CYCLIC_REFERENCE = _d("derived_cyclic_reference", "Derived cyclic reference.")
 DERIVED_EXPRESSION_MISSING = _d("derived_expression_missing", "Derived expression missing.")
@@ -241,7 +257,7 @@ JOINT_MASK_REFERENCE_NOT_FOUND = _d(
     "joint_mask_reference_not_found", "Joint mask reference not found."
 )
 NESTED_TARGET_UNSUPPORTED = _d(
-    "nested_target_unsupported", "Nested target unsupported.", since=UNRELEASED
+    "nested_target_unsupported", "Nested target unsupported.", since="1.34.0"
 )
 NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND = _d(
     "non_poolable_provider_with_pool_backend", "Non poolable provider with pool backend."
@@ -307,7 +323,7 @@ VAULT_STRATEGY_UNMASKED = _d("vault_strategy_unmasked", "Vault strategy unmasked
 WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
     "when_masked_reference_unsupported",
     "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
 WHEN_STRING_OUTPUT_ON_NUMERIC_UNSUPPORTED = _d(
