@@ -2,26 +2,20 @@ Status: plan
 
 # PREFLIGHT-ARROW-PROFILE: the bounded source profile reads Arrow, so preflight no longer refuses a valid Parquet file whose values pandas cannot hold
 
-Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 2, after Dennis R1 (NO-GO). Roadmap row: PREFLIGHT-ARROW-PROFILE (CLI `docs/roadmap/groups/run.md`, 1.0, function break). Anchors are in this repository (decoy-engine) at `origin/main` `26091c834` unless marked `cli:` (decoy CLI `origin/main` `95362d16`) or `#399:` (CLI PR #399, branch `feat/chunked-run-mask-chunked-s2`).
+Owner: Cam. Author: Opus. Date: 2026-11-23. Revision 3, after Dennis R2. Roadmap row: PREFLIGHT-ARROW-PROFILE (CLI `docs/roadmap/groups/run.md`, 1.0, function break). Anchors are in this repository (decoy-engine) at `origin/main` `26091c834` unless marked `cli:` (decoy CLI `origin/main` `95362d16`) or `#399:` (CLI PR #399, branch `feat/chunked-run-mask-chunked-s2`).
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `bugfix.md`, `reuse-first.md`, `proportionality.md`, `architecture.md`, `cross-cutting-concerns.md`, `testing.md` (test depth), `api-and-compatibility.md`, `catalogs/recurring-defects.md` (11 classes). Engine `CODEMAP.md` "Where Things Go"; `changelog.d/README.md`; engine `CLAUDE.md` (module size goal 600, max 700).
 
-Risk: R2. It changes how every bounded source profile is computed (the input to routing, plan compile and the capacity estimate), moves one module and three schema helpers, and changes where one coded error is raised. No serialization, public-signature or reason-code change. Plan review: Dennis, then Codex. Code gate: Codex, then Dennis. Full suite before merge: yes (shared profile input to every route; moved helpers imported by shared test fixtures).
+Risk: R2. It changes how every bounded source profile is computed (the input to routing, plan compile and the capacity estimate), moves one module and three schema helpers, and changes where one coded error is raised. No serialization, public-signature or reason-code change. Revision 3 caller and sentry census checked on engine origin/main `4bc582d0a`. Plan review: Dennis, then Codex. Code gate: Codex, then Dennis. Full suite before merge: yes (shared profile input to every route; moved helpers imported by shared test fixtures).
 
-## 0. Rev 2 changes
+## 0. Dennis R2 resolutions
 
-| Dennis R1 finding | Fix in rev 2 | Where |
+| Class | Finding | Revision 3 |
 |---|---|---|
-| BLOCKER: pandas `b"pandas"` metadata ignored (index fields become columns; nullable and extension dtypes drift) | The walk drops stored index fields and takes the dtype, the missing rule and the string-length rule from the metadata. The metadata helpers move into `_pandas_meta`, one parse, no copy, no profile-to-execution import. Re-probed: 432 of 432 cells equal | 1.2 Probe E, 3, 6, 8 items 1-2, AT-3b, M-13 to M-16 |
-| BLOCKER, sub-question: does `iter_batches` keep the metadata | Yes, probed: each batch schema, the `from_batches` table and `ParquetFile.schema_arrow` carry the same `b"pandas"` blob as `read_table` | 1.2 Probe E |
-| HIGH: AT-4 spy cannot patch `to_pandas` | Spy `pyarrow.pandas_compat.table_to_dataframe`, `pd.Series.__init__`, `pd.DataFrame.__init__`, `pd.read_parquet`; probed that these catch Table, RecordBatch, ChunkedArray and Array conversion; CSV control kept | 8.1, AT-4 |
-| MEDIUM 1: module size is goal 600 / max 700; `_readers.py` is 591 | `head_table_from_batches` and `ArrowSampleSource` go in a new `profile/_arrow_sample.py`; `_readers.py` shrinks | 8 item 4, 8.3, 11 class 11, 12 |
-| MEDIUM 2: the move breaks the column-shape sentry | `tests/sentry/test_column_shape_classifier.py:34` and `:113-120` and `tests/sentry/baselines/column-shape-classifier.json:17` edited to the new path; `tests/native/test_draw_site_inventory_coverage.py:241` unchanged | 8 item 7, 13 |
-| MEDIUM 3: G-5 confirmed, `full_frame_value_unrepresentable` keeps a value-bearing `__context__` | Folded into S1: the coded error is raised after the handler exits; AT-7 asserts `__context__ is None` and `__cause__ is None` | 3, 6, 8 item 6, AT-7, M-17 |
-| MEDIUM 4: D1 and D5 | Accepted; both follow-up rows tagged 1.0-blocking | 3 G-1, G-4, 15 |
-| LOW: duplicate-name text has three copies | One message helper in `_field_names.py` for `walk_dataframe`, `walk_arrow_table` and `_guards.refuse_duplicate_field_names` | 6.1 (b), 8 item 5, AT-5 |
-| LOW: CLI indirect callers not listed | `cli:src/decoy/cli/tokenize.py:353` and `cli:src/decoy/api.py:621` added | 5 |
-| LOW: zero-row cells missing | Zero-row Parquet and zero-row resident cells in AT-3 and AT-3b | AT-3, AT-3b |
+| V1 | Producer metadata can stop profiling or assign a dtype or index to the wrong column. | Section 8 defines the name lookup and fallback. AT-3c tests malformed input, rename, drop and reorder through the bounded reader. |
+| V1 | A stale import in the chunk schema guard breaks native and forced chunked execution. | Section 5.1 lists the source and test imports, including both schema reads in `check_stored_index`. AT-11 runs the guard. |
+| V2-LOG | Sentries and inventories still name the old sites. | Section 8.4 assigns each entry to the function that owns the call after the move. |
+| V2-LOG | S1 mixed relocation with new behavior. | Section 13 gives the move and the behavior change separate acceptance and mutation gates. |
 
 ## 1. Frame
 
@@ -66,7 +60,7 @@ Probe E (rev 2), the pandas-written corpus. Frames built in pandas with one colu
 
 - Function break: a valid Parquet source is refused at preflight on every run mode. On `--chunked`, the route behind the refusal publishes these values exactly (`#399:` `test_at_c12_default_runs_exact_and_no_native_fails`).
 - The plain Python API run fails with a raw, uncoded pyarrow error from the profile.
-- A leak on the plain run after the fix: Dennis showed `full_frame_value_unrepresentable` keeps the pyarrow error, which quotes the value, as `__context__`. S1 closes it (8 item 6).
+- V2-LOG, exception-chain exposure on the plain run: Dennis showed `full_frame_value_unrepresentable` keeps the pyarrow error, which quotes the value, as `__context__`. S1b closes it (8 item 6).
 
 ## 2. Root cause
 
@@ -81,7 +75,7 @@ Not the cause: `capacity.py`'s narrow catch is correct for a corrupt file, and t
 This row promises:
 
 1. The bounded profile (`residency="bounded"`, the default and the only production mode) of a source whose reader holds Arrow (local Parquet, S3 Parquet, GCS Parquet, a supplied `pa.Table`) computes every `ColumnProfile` field from the Arrow sample with `pyarrow.compute`, with no pandas conversion.
-2. For every column pandas can convert today, including pandas-written Parquet and `pa.Table.from_pandas` tables with any index and any nullable or extension dtype in the Probe E corpus, every `ColumnProfile` and `TableProfile` field equals today's value, and the column list is the same (stored index fields are not columns). The values that move are named in 6.1 and frozen by AT-8 and AT-5.
+2. For columns pandas can convert today with absent or valid, current metadata, including pandas-written Parquet and `pa.Table.from_pandas` tables with any index and any nullable or extension dtype in the Probe E corpus, every `ColumnProfile` and `TableProfile` field equals today's value, and the column list is the same (stored index fields are not columns). The values that move are named in 6.1 and frozen by AT-8 and AT-5.
 3. `estimate_job_capacity`, `estimate_job`, `run_pipeline`'s routing facts and the physical snapshot (every `profile_source` caller, section 5) no longer fail on a `time64[ns]` sub-microsecond value or an out-of-range date in the sample.
 4. A truncated, corrupt or wrong-format source still raises `capacity_source_unprofilable` from `estimate_job_capacity`, and the CLI still reports `capacity.source_unreadable`.
 5. `full_frame_value_unrepresentable` is raised with `__context__` and `__cause__` both None, so no rendering of the error chain carries the value.
@@ -130,6 +124,28 @@ Reuse `arrow_column_profile` as the one column walk, moved into the profile pack
 | Lifecycle fixed-width sample | `pipeline/_lifecycle_inputs.py:83` | unchanged (G-2) |
 | Chunked first-chunk profile | `execution/_chunked_profile.py:36-53` | unchanged (G-4); its import of `arrow_column_profile` moves |
 
+### 5.1 S1a import census
+
+Paths without a `tests/` prefix start at `src/decoy_engine/`. Each row gives the replacement import. Keep unrelated imports in place. The three functions and the nullable dtype set have one definition each in `_pandas_meta/_columns.py`.
+
+| Caller file | Function or call lines on the base | Replacement import |
+|---|---|---|
+| `execution/_transforms.py` | `check_transform_source_schema` (169), `reject_config_references_stored_index` (202) | `from decoy_engine._pandas_meta import stored_index_fields` |
+| `execution/_transforms_table.py` | `null_bearing_int_columns` (59). Replace the qualified call. | `from decoy_engine._pandas_meta import stored_index_fields` |
+| `execution/native/_chunk_schema.py` | `check_stored_index` (62, 64). Replace the local import and check both the expected and incoming schemas. | `from decoy_engine._pandas_meta import stored_index_fields` |
+| `execution/native/_chunked_entry.py` | `_route_chunked` (523, 594) | `from decoy_engine._pandas_meta import stored_index_fields` |
+| `execution/native/_dispatch.py` | `plan_native_route` (471, 475) | `from decoy_engine._pandas_meta import stored_index_fields` |
+| `tests/native/test_unconfigured_passthrough.py` | `test_stored_pandas_index_field_is_dropped_on_the_native_route` (728, 731) | `from decoy_engine._pandas_meta import stored_index_fields` |
+| `profile/_declared_columns.py` | `source_columns`, `_supplied`, `for_chunks`, `checked_stream`, `_checked_chunk`, `checked_loader.load` (105, 234, 414, 485, 488, 508) | `from decoy_engine._pandas_meta import arrow_columns` |
+| `tests/_declared_schema.py` | `declare_rest` (14, 52) | `from decoy_engine._pandas_meta import arrow_columns` |
+| `tests/native/_b8_support.py` | `_declare_columns` (37, 57) | `from decoy_engine._pandas_meta import arrow_columns` |
+| `tests/unit/profile/test_declared_columns.py` | `test_source_columns_reads_header_only` (30, 337) | `from decoy_engine._pandas_meta import arrow_columns` |
+| `execution/_mem_estimate_arrow.py` | `source_nullable_columns` (248, 250), `column_arrow_types` (269, 281) | `from decoy_engine._pandas_meta import pandas_nullable_columns` |
+| `execution/_mem_estimate_schema.py` | `table_size_spec_from_table` (38, 168) | `from decoy_engine._pandas_meta import pandas_nullable_columns` |
+| `tests/unit/execution/test_mem_estimate_nullable_metadata.py` | malformed, deeply nested, missing metadata and field-name fallback tests (17, 233, 239, 243, 254). Keep `classify_column` at its existing import. | `from decoy_engine._pandas_meta import pandas_nullable_columns` |
+
+The moved `arrow_columns` calls its sibling `stored_index_fields` directly. Delete its old local import at `profile/_declared_columns.py:77`. The `arrow_columns=` parameter in `execution/pipeline/_source_types.py:95` and its parity test pass arrays. They do not call the schema helper. The callers of `check_stored_index` and `stored_index_guard` keep their imports from `execution.native._chunk_schema`.
+
 ## 6. Behaviour table
 
 "Bad value" means a `time64[ns]` value with a sub-microsecond part, or a `date32`/`date64` value outside years 1 to 9999.
@@ -142,7 +158,7 @@ Reuse `arrow_column_profile` as the one column walk, moved into the profile pack
 | `profile_source`, supplied `pa.Table`, bad value, no missing value | returns via the text cast | returns, lengths None (6.1 a) |
 | `profile_source`, pandas-written Parquet or `from_pandas` table, any Probe E dtype and index | returns | returns, every field and the column list equal |
 | `profile_source`, zero-row Parquet file or zero-row table | returns | returns, equal |
-| `profile_source`, any other column pandas converts | returns | returns, every field equal |
+| `profile_source`, any other column pandas converts with current metadata | returns | returns, every field equal |
 | `estimate_job_capacity`, bad value in the sample | `capacity_source_unprofilable` | the verdict for the same file with the bad value replaced |
 | `estimate_job_capacity`, truncated or non-Parquet file | `capacity_source_unprofilable` | unchanged |
 | `estimate_job_capacity`, duplicate column names | `capacity_source_unprofilable`, chained `ValueError` naming the columns | same code; the chained message is the shared value-free text (6.1 b) |
@@ -186,27 +202,27 @@ No pandas-metadata type needed a move: Probe E is 432 of 432 equal.
 
 One mechanism: a reader that holds Arrow hands the profile an Arrow sample, and the profile walks it with `pyarrow.compute`, reading the pandas metadata for the facts `to_pandas` would have taken from it.
 
-1. `_pandas_meta/_columns.py` (new, foundation tier, imports only `pyarrow` and `json`). One parse of the `b"pandas"` blob, malformed metadata giving empty results with the catch `pandas_nullable_columns` uses today:
-   - `stored_index_fields(schema) -> set[str]`, moved from `execution/_transforms.py:108`.
-   - `arrow_columns(schema) -> tuple[str, ...]`, moved from `profile/_declared_columns.py:75` (it loses its lazy import of `execution._transforms`).
-   - `pandas_column_dtypes(schema) -> Mapping[str, str]` (new): field name to `numpy_type` for the columns whose pandas dtype is an extension dtype, which is the nullable set (`Int8` to `UInt64`, `Float32`, `Float64`, `boolean`, `string`) plus `period[...]` and `interval[...]`.
-   - `pandas_nullable_columns(schema)`, moved from `execution/_mem_estimate_arrow.py:224` and redefined as the keys of `pandas_column_dtypes` whose value is in the nullable set, so both answers come from one parse.
-   - `_pandas_meta/__init__.py` exports the four; its docstring says it now also holds the per-column facts.
-   Callers change their import in place, with no re-export left behind: `execution/_transforms.py` (169, 202), `_transforms_table.py:58`, `native/_chunked_entry.py:49`, `native/_dispatch.py:471`, `_mem_estimate_arrow.py` (its own uses at 248-281), `_mem_estimate_schema.py:38`, `profile/_declared_columns.py` (105-508); tests `tests/_declared_schema.py:14`, `tests/native/_b8_support.py:37`, `tests/unit/profile/test_declared_columns.py:30`, `tests/unit/execution/test_mem_estimate_nullable_metadata.py:17`, `tests/native/test_unconfigured_passthrough.py:728`.
-2. `profile/_walk_arrow.py` (new) receives `arrow_column_profile` and its helpers (`_normalize`, `_missing_mask`, `_is_pandas_string`, `_dtype_label`, `_INT64_MIN`), moved from `execution/_chunked_profile.py`. Changes on the move:
-   - `arrow_column_profile` gains a keyword `pandas_dtype: str | None = None`. When set: `dtype` is `canonical_dtype_label(pandas_dtype)`; only an Arrow null is missing (no NaN or NaT rule, no float64 widening), as pandas' masked arrays do; string lengths are computed over the valid values when `pandas_dtype == "string"`; a struct storage (interval) counts distinct rows with `Table.group_by(...).aggregate([])`. When None, the function is unchanged, so the first-chunk profile is unchanged.
-   - `walk_arrow_table(table, *, table_name, declared_pk_cols, fk_specs, total_row_count, source_format) -> TableProfile` (new): the duplicate-name check (item 5); the columns are `arrow_columns(table.schema)`; each gets `arrow_column_profile(..., pandas_dtype=pandas_column_dtypes(schema).get(name))`; then the table-level fields exactly as `walk_dataframe` sets them (`row_count = total`, `sampled = total > len(table)`, candidate key only when not sampled, `declared_pk`, `is_fk`, `fk_target`). No `rng`, no PII flag.
+1. In S1a, move the three functions and their constant unchanged. In S1b, add one decoder in `_pandas_meta/_columns.py`. Read `(schema.metadata or {}).get(b"pandas")` once per bounded walk. Avoid `schema.pandas_metadata`, which decodes producer bytes before the caller can check their shape. Expose the profile view through `bounded_column_facts(schema)` in `_pandas_meta/__init__.py`. It returns ordered physical data-field names and the supported dtype hints for those names.
+   - Missing bytes, bad encoding, invalid JSON, excessive nesting or a non-object root give empty metadata. Move the parse and root check from `safe_output/_file_metadata.py:_sanitize_pandas_blob` (202) into `_pandas_meta/_columns.py:decode_pandas_blob`. Reuse `strict_json_loads(raw, max_int_digits=None)` and catch `StrictJsonError` and `RecursionError`. Return None for invalid input so the output sanitizer can still drop the blob. Never raise or report metadata text because of a bad hint. Arrow I/O errors still follow AT-5.
+   - Read `columns` and `index_columns` independently. A missing or non-list section supplies no facts for that section. Ignore non-object column entries. Use a string `field_name` as the physical key, and a string `name` only when the physical key is absent. Never coerce a key, use the display name to rescue a stale physical key, or match by position. Ignore duplicate entries for the same physical key when choosing its dtype.
+   - Walk the current Arrow schema in order. An index entry hides a field only if it is a string equal to a current physical field name. Ignore absent index names, range descriptors and malformed index entries. On rename or drop, discard the old name. A new name without a hint gets the ordinary Arrow profile. After reorder, surviving hints and index flags follow names.
+   - An absent, non-string, unknown or incompatible dtype gives the ordinary Arrow profile for that field. Accept the nullable set moved from `execution/_mem_estimate_arrow.py:213` and the period and interval labels derived from the actual Arrow extension type. For the nullable, period and interval families, require the pair of string values `(pandas_type, numpy_type)` to match a pair from `pairs_for(field.type)` in `_pandas_meta/_descriptors.py:89`. Pass only the matched canonical label to the walk. Never copy arbitrary text from the blob into a profile.
+   - Preserve pandas ArrowDtype hints as well. For example, pandas restores `int64[pyarrow]` with a null as an integer extension column. Falling back to the plain Arrow rule here would report `float64`. Derive the ArrowDtype token from the physical type and compare it exactly to the supplied token. Use the descriptor registry for the physical pandas kind. Keep this input rule in `bounded_column_facts`. The output sanitizer retains its existing set of permitted pairs. For a physical string with the `string[pyarrow]` hint use the restored label `string`. Keep `large_string[pyarrow]` for that distinct physical type. Measure text lengths for restored string dtypes even when their sample contains nulls.
+   - Share decoding and name extraction with the three moved schema helpers. Keep the estimator's existing return type and name-only contract. In particular, `pandas_nullable_columns` can report a declared metadata name absent from the schema, as pinned by `test_field_name_wins_over_name_and_name_is_the_fallback`. Apply physical-field membership and dtype compatibility to the bounded profile view. Preserve valid execution and declaration results. Use the same index reader for `stored_index_fields`, `arrow_columns` and the bounded view. Share the validated column-entry iteration now in `safe_output/_file_metadata.py:_source_entries` (169) through the foundation package. The sanitizer still requires an explicit physical key, keeps its first entry and rebuilds output from allowed schema facts. Keep the estimator’s legacy name fallback and malformed-list behavior in its adapter. Leave its output and trust boundary intact. Run `tests/unit/safe_output/test_file_metadata.py::test_clean_blob_identical`, `test_forged_blob_not_copied` and `test_blob_entries_follow_output_schema`.
+2. `profile/arrow/_walk_arrow.py` (new) receives `arrow_column_profile`, `_normalize` and `_is_pandas_string` from `execution/_chunked_profile.py`. Move `_missing_mask` (291), `_dtype_label` (310) and `_INT64_MIN` (259) to `internal/pandas_compat.py`, beside `canonical_dtype_label`. In the Arrow walk, use `from decoy_engine.internal.pandas_compat import arrow_missing_mask, arrow_dtype_label`. Keep their signatures and bodies in S1a. These functions implement pandas NaT and dtype rules. The timestamp predicates at 295 and 317 would fail `tests/sentry/test_column_shape_classifier.py::test_no_other_module_decides_a_shape_from_an_arrow_predicate` inside `profile/`. Keep that guard and its scope. S1b adds the following behavior:
+   - `arrow_column_profile` gains a keyword `pandas_dtype: str | None = None`. When set: `dtype` is `canonical_dtype_label(pandas_dtype)`; only an Arrow null is missing (no NaN or NaT rule, no float64 widening), as pandas' masked arrays do; string lengths are computed over the valid values when `pandas_dtype == "string"`; restored ArrowDtype strings also keep valid-value lengths; a struct storage (interval) counts distinct rows with `Table.group_by(...).aggregate([])`. When None, the function is unchanged, so the first-chunk profile is unchanged.
+   - `walk_arrow_table(table, *, table_name, declared_pk_cols, fk_specs, total_row_count, source_format) -> TableProfile` (new): the duplicate-name check (item 5); call `names, dtypes = bounded_column_facts(table.schema)` once after checking duplicate physical names; for each name call `arrow_column_profile(..., pandas_dtype=dtypes.get(name))`; then the table-level fields exactly as `walk_dataframe` sets them (`row_count = total`, `sampled = total > len(table)`, candidate key only when not sampled, `declared_pk`, `is_fk`, `fk_target`). Reuse the candidate-key and PK/FK field rules from `profile/_walk.py:_walk_column` (208-240) for both walks. Extract those rules into `profile/_types.py:column_key_fields`. Supply the Arrow statistics and true total before constructing the column. Keep the pandas statistics independent. M-2 through M-5 must fail the explicit AT-3 expectations as well as the parity checks.
 3. Readers: `ParquetFileSource`, `ResidentTableSource`, `S3ParquetSource` and `GcsParquetSource` gain `sample_table(sample_rows) -> pa.Table`, schema metadata kept. The three Parquet readers' `sample_frame` becomes `sample_table(n).to_pandas()`; the resident one keeps `_frame_of` (D4). `_read_parquet_sample` returns the table.
-4. `profile/_arrow_sample.py` (new, about 45 lines): `head_table_from_batches(batches, sample_rows, schema) -> pa.Table` (today's `head_frame_from_batches` without the `to_pandas()`, keeping the schema metadata), and the private `@runtime_checkable` protocol `ArrowSampleSource` (`schema()`, `sample_table(sample_rows)`, contract "exactly n rows, short only at the end"). `_readers.py` keeps `head_frame_from_batches` as a two-line call into it for its `sample_frame` callers, so it shrinks. The public `ProfileSource` protocol does not change.
-5. `_field_names.py` gains `duplicate_names_message(table, names) -> str | None`, the one text (`table {table!r} has {n} duplicated field name(s)`). `walk_dataframe` and `walk_arrow_table` raise `ValueError(message)`; `_guards.refuse_duplicate_field_names` raises its `TransformError(message=...)`. Its module docstring changes from "each boundary keeps its own wording" to "the wording is shared; each boundary keeps its own exception".
-6. `execution/_pipeline_full_frame.py`: `_raise_if_source_value_unrepresentable` becomes `_unrepresentable_source_column(resident_sources, graph, exc) -> tuple[str, str] | None`, still called inside the handler, returning the offending table and column instead of raising. The caller at `:229-231` keeps the bare `raise` when it is None, and otherwise raises the same `ExecutionError` (same code, same message text) after the `except` block ends, so Python sets no `__context__`. `from None` alone is not enough: it sets `__suppress_context__` but keeps `__context__`.
-7. `profile/_source.py`, `_profile_one_source`, bounded branch: `isinstance(reader, ArrowSampleSource)` picks `walk_arrow_table(reader.sample_table(n), ...)`; any other reader keeps `sample_frame` plus `walk_dataframe`. `_nested_capable_schema` uses the same protocol in place of its four-class `isinstance` list. `execution/_chunked_profile.py` imports `arrow_column_profile` from `decoy_engine.profile._walk_arrow` and drops it from `__all__`. Renamed-path edits: `tests/native/test_chunked_entry_rev9_profile.py:78` and `tests/native/test_chunked_entry_rev9_catalogue.py:17` (import line); `tests/sentry/test_column_shape_classifier.py:34` (the `observed_shape` caller row becomes `profile/_walk_arrow.py`); `:113-120` (the planted-caller probe path becomes `profile/_walk_arrow.py`); `tests/sentry/baselines/column-shape-classifier.json:17` (key `observed_shape::profile/_walk_arrow.py`). `tests/native/test_draw_site_inventory_coverage.py:241` stays as it is: `execution/_chunked_profile.py` still exists and is still in its inventory.
+4. `profile/arrow/_arrow_sample.py` (new, about 45 lines): `head_table_from_batches(batches, sample_rows, schema) -> pa.Table` (today's `head_frame_from_batches` without the `to_pandas()`, keeping the schema metadata), and the private `@runtime_checkable` protocol `ArrowSampleSource` (`schema()`, `sample_table(sample_rows)`, contract "exactly n rows, short only at the end"). Keep the existing `head_frame_from_batches` signature as a compatibility wrapper around the table helper and `to_pandas()`. Import the table helper into `_readers.py` for the local reader and the scan probe in section 8.4. The public `ProfileSource` protocol does not change.
+5. `_field_names.py` gains `duplicate_names_message(table, names) -> str | None`, using the existing `repeated_names` function and the text (`table {table!r} has {n} duplicated field name(s)`). `walk_dataframe` and `walk_arrow_table` raise `ValueError(message)`; `_guards.refuse_duplicate_field_names` raises its `TransformError(message=...)`. Its module docstring changes from "each boundary keeps its own wording" to "the wording is shared; each boundary keeps its own exception".
+6. `execution/_pipeline_full_frame.py`: `_raise_if_source_value_unrepresentable` becomes `_unrepresentable_source_column(resident_sources, graph, exc) -> tuple[str, str] | None`, still called inside the handler, returning the offending table and column instead of raising. The caller at `:229-231` keeps the bare `raise` when it is None, and otherwise raises the same `ExecutionError` (same code, same message text) after the `except` block ends. Initialize the optional offending column before the try. On success continue the route with its original step. Raise only when the diagnostic returned a column. `from None` alone is not enough: it sets `__suppress_context__` but keeps `__context__`.
+7. `profile/_source.py`, `_profile_one_source`, bounded branch: `isinstance(reader, ArrowSampleSource)` picks `walk_arrow_table(reader.sample_table(n), ...)`; any other reader keeps `sample_frame` plus `walk_dataframe`. Preserve the existing effective sample size, the CSV extra-row probe and the final `row_count_exact` from `reader.row_count()`. `_nested_capable_schema` uses the same protocol in place of its four-class `isinstance` list. Section 8.4 covers the import and sentry changes.
 
 `capacity.py`, the CLI preflight and every reason code are unchanged.
 
 ### 8.1 Choke point
 
-Rule: the bounded profile of an Arrow-holding reader never converts to pandas. It is enforced by construction in `_profile_one_source`, the one bounded profile site. Guard: AT-4. `pa.Table.to_pandas` and the other Arrow `to_pandas` methods cannot be monkeypatched (immutable extension types), so the spy wraps the functions they reach. Probed: `pyarrow.pandas_compat.table_to_dataframe` catches `Table.to_pandas` and `RecordBatch.to_pandas`; `pd.Series.__init__` catches `ChunkedArray.to_pandas` and `Array.to_pandas`. The spy also wraps `pd.DataFrame.__init__` and `pd.read_parquet`, and requires zero calls. A CSV control cell must record at least one call. The mutation that must turn it red: M-1. A new Arrow reader is caught by the extended conformance sentry (AT-10).
+Rule: the bounded profile of an Arrow-holding reader never converts to pandas. It is enforced by construction in `_profile_one_source`, the one bounded profile site. Guard: AT-4. `pa.Table.to_pandas` and the other Arrow `to_pandas` methods cannot be monkeypatched (immutable extension types), so the spy wraps the functions they reach. Probed: `pyarrow.pandas_compat.table_to_dataframe` catches `Table.to_pandas` and `RecordBatch.to_pandas`; `pd.Series.__init__` catches `ChunkedArray.to_pandas` and `Array.to_pandas`. The spy also wraps `pd.DataFrame.__init__` and `pd.read_parquet`, and requires zero calls. A CSV control cell must record at least one call. The mutation that must turn it red: M-1. AT-10 checks each reader that defines `sample_table`.
 
 ### 8.2 Design notes
 
@@ -214,9 +230,28 @@ Rule: the bounded profile of an Arrow-holding reader never converts to pandas. I
 - Dependency direction: profile and execution both import `_pandas_meta`; no new profile-to-execution edge, and one lazy profile-to-execution import goes away.
 - House style: typed keywords, no flag argument (the reader's type picks the walk; the metadata picks the dtype rule), comments say why.
 
-### 8.3 Size
+### 8.3 Size and imports
 
-New source files: `_pandas_meta/_columns.py` (about 80 lines, about 45 moved), `profile/_walk_arrow.py` (about 230, about 150 moved), `profile/_arrow_sample.py` (about 45, about 20 moved). Changed: `_readers.py` (about -20, ends near 571), `_readers_resident.py` +5, `_cloud_readers.py` +12, `_source.py` +10 -8, `_chunked_profile.py` -150, `_transforms.py` -4, `_mem_estimate_arrow.py` -30, `_declared_columns.py` -6, `_field_names.py` +10, `_guards.py` +2 -3, `_walk.py` +1 -4, `_pipeline_full_frame.py` +6 -3, four import-only source edits. Every file ends under 600. Tests: 1 new file, about 12 changed (imports, two `match=` strings, the sentry rows, the contract matrix, the coverage sentry). Public names added: none. A build past about 350 added source lines net stops and explains.
+Use `profile/arrow/` for the Arrow walk and sample contract. The base has 20 direct Python files in `profile/`. Expose `arrow_column_profile` through `decoy_engine.profile.arrow` for execution and its tests. Keep the top-level engine API and the existing `ProfileSource` protocol stable. Inside the profile package expose the sampling and table-walk helpers through that same subpackage. Keep the Arrow walk independent of reader modules to avoid an import cycle.
+
+Budget about 230 lines for `profile/arrow/_walk_arrow.py`, 45 for `profile/arrow/_arrow_sample.py` and 100 for `_pandas_meta/_columns.py`. Net additions exclude the existing column profiler and schema helpers. Check the actual counts in each slice. Keep every cap and allowlist at or below its base size.
+
+### 8.4 Sentry and census edits
+
+| Slice and file | Exact edit and check |
+|---|---|
+| S1a, `execution/_chunked_profile.py:109,329`, `tests/native/test_chunked_entry_rev9_profile.py:78`, `tests/native/test_chunked_entry_rev9_catalogue.py:17` | Import `arrow_column_profile` from `decoy_engine.profile.arrow`. Drop it from the old module's `__all__`. Keep `walk_one_table` in execution. Run `test_arrow_column_profile_equals_the_pandas_profile_field_for_field` and `test_type_catalogue_profile_matches_or_pandas_refuses`. |
+| S1a, `tests/sentry/test_column_shape_classifier.py:34,113,120` | Replace the `observed_shape` caller path with `profile/arrow/_walk_arrow.py`. In `test_the_sentry_catches_a_planted_caller`, plant that path, create its parents and expect that same path. Run it and `test_only_the_named_files_call_the_classifier`. |
+| S1a, `tests/sentry/baselines/column-shape-classifier.json:17` | Rename `observed_shape::execution/_chunked_profile.py` to `observed_shape::profile/arrow/_walk_arrow.py`. |
+| S1a, `.importlinter:49` and `tests/sentry/baselines/import-layers.json:71` | Delete the retired `decoy_engine.profile._declared_columns -> decoy_engine.execution._transforms` ignore and its `layers::` key. Run `tests/sentry/layout/test_import_layers.py::test_the_layer_contract_is_kept`. |
+| S1a, `tests/native/test_draw_site_inventory_coverage.py:241` | Keep the existing path. The functions that use the random seed stay in `execution/_chunked_profile.py`. Run `test_static_scan_finds_no_uncatalogued_draw_site`. |
+| S1b, `tests/sentry/defects/test_lossless_int_columns.py:30,61` | In both the `to_pandas_fk_safe` and `fk_columns_for_table` caller tuples replace `_raise_if_source_value_unrepresentable` with `_unrepresentable_source_column`. Preserve the file, reasons and both caller counts. Run `test_only_allowlisted_functions_call_the_helper`. |
+| S1b, `tests/sentry/baselines/lossless-int-columns.json:17,41` | Make that same function-name substitution in both keys. The calls remain inside the diagnostic helper. |
+| S1b, `tests/fixtures/f29/producer-inventory.json:156`, `tests/sentry/baselines/f29-producer-inventory.json:401` | Move the single producer row to `run_full_frame_route` and its actual raise line. Record the existing registry expression `reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE` and its `registry` classification. Replace the baseline key with `execution/_pipeline_full_frame.py::run_full_frame_route::kw::reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE`. Keep the row count and code coverage. Keep the registered identity and its frozen reason baseline. Run `tests/unit/test_reason_registry.py::test_every_producer_resolves` and AT-7 to check the actual emitting function and code. |
+| S1b, `tests/unit/profiling/test_scan_set.py:99,109` | In `test_bounded_head_reads_one_batch`, patch `_readers.head_table_from_batches` where `ParquetFileSource.sample_table` looks it up. Annotate the spy result as `pa.Table`. Keep the consumed-row counter and both bounds. |
+| S1b, `tests/sentry/file_access_registry.toml:1114` | Keep the existing entry. The ParquetFile open stays in `profile/_cloud_readers.py::_read_parquet_sample`. Run `tests/sentry/test_file_access_boundary.py::test_registry_has_no_stale_entries`. |
+
+For each changed baseline run `tests/sentry/test_baseline_registry.py::test_source_matches_its_registered_baseline` on the corresponding ID. Replace live and recorded keys together. Never increase a ceiling or add an exception. The F31 `docs/plans/evidence/2026-11-24-f31-audit/engine-sites.json` is a dated audit of another head. Keep that evidence intact.
 
 ## 9. Acceptance tests
 
@@ -226,20 +261,33 @@ Fixtures: `T_NS` = 4 rows, `t: time64[ns]` with `3_600_000_000_000 + 987_654_321
 
 - AT-1 (red on base). `estimate_job_capacity` on `T_NS` and both `D_FAR` files returns `NOT_APPLICABLE` and does not raise. FK cell: the parent/child pair of `tests/unit/execution/test_capacity_estimate_job.py` (`_ooc_config`, `low_threshold`) with a `T_NS` column on the parent gives the same verdict and `needed_bytes` as the pair with that bad value replaced by `1000`.
 - AT-2 (red on base). `profile_source` on each fixture as local Parquet: column `t` has `dtype="object"`, `null_count=0`, `distinct_count=4`, lengths None, `sampled=False`, and the `shape` of the same column with the bad value replaced. A 5-row cell with a null at row 1 gives `null_count=1`, `distinct_count=4`.
-- AT-3 (green on base on purpose, except the marked cells). Parity: for every `tests/native/_rev9_profile_cases.py` case, every `tests/native/_rev9_type_catalogue.py` entry with and without a null, and list, struct and map columns, the bounded `profile_source` result through a local Parquet file (where Parquet stores the type) and through a supplied `pa.Table`, with total = sample and total = 10 x sample, equals `walk_dataframe(reader.sample_frame(n), ...)` field by field, with the same column list. The oracle is `walk_dataframe`, unchanged. Extra cells: a zero-row Parquet file and a zero-row `pa.Table` of the catalogue schema; a 25,000-row file with 4,000-row row groups (F-7); a two-table config profiled in one call (F-11); declared PK and FK columns. Plan cells: `plan_to_yaml(compile_plan(...))` equal for the redact, hash, truncate and faker configs of test 20. Red on base: the Probe D cells where base raised, asserted to return.
-- AT-3b (red on base for the reader cells: base already matches itself, so the red is a test-first run of `walk_arrow_table` without the metadata rules, recorded in the builder report; green on base on purpose for the oracle side). Parity over the Probe E corpus, field by field and column list, against `walk_dataframe(reader.sample_frame(n), ...)`: dtypes `Int8`/`16`/`32`/`64`, `UInt8`/`16`/`32`/`64`, `boolean`, `string`, `string[pyarrow]`, `Float32`, `Float64`, categorical unordered and ordered, tz-aware timestamps, `period[M]`, `interval`; each with and without a null; RangeIndex, named index, filtered index; full and zero rows; written with `df.to_parquet` and read through `ParquetFileSource`, the S3 and GCS fakes, and built with `pa.Table.from_pandas` through `ResidentTableSource`. Plus: a `Float64`-metadata column holding a NaN; a table whose metadata names a column that is absent (malformed metadata, the walk falls back to the Arrow rule); plan cells for a `when:` numeric check and `check_null_bearing_int_unsupported` over the `Int64` with-null table, equal to base.
+- AT-3 (green on base on purpose, except the marked cells). Parity: for every `tests/native/_rev9_profile_cases.py` case, every `tests/native/_rev9_type_catalogue.py` entry with and without a null, and list, struct and map columns, the bounded `profile_source` result through a local Parquet file (where Parquet stores the type) and through a supplied `pa.Table`, with total = sample and total = 10 x sample, equals `walk_dataframe(reader.sample_frame(n), ...)` field by field, with the same column list. The oracle is `walk_dataframe`, unchanged. Extra cells: a zero-row Parquet file and a zero-row `pa.Table` of the catalogue schema; a 25,000-row file with 4,000-row row groups (F-7); a two-table config profiled in one call (F-11); declared PK and FK columns. Besides comparing both walks, assert the known total, sampled flag, candidate-key flag, PK flag and FK target for empty, complete and capped samples. Plan cells: `plan_to_yaml(compile_plan(...))` equal for the redact, hash, truncate and faker configs of test 20. Red on base: the Probe D cells where base raised, asserted to return.
+- AT-3b (red on base for the reader cells: base already matches itself, so the red is a test-first run of `walk_arrow_table` without the metadata rules, recorded in the builder report; green on base on purpose for the oracle side). Parity over the Probe E corpus, field by field and column list, against `walk_dataframe(reader.sample_frame(n), ...)`: dtypes `Int8`/`16`/`32`/`64`, `UInt8`/`16`/`32`/`64`, `boolean`, `string`, `string[pyarrow]`, `Float32`, `Float64`, categorical unordered and ordered, tz-aware timestamps, `period[M]`, `interval`; each with and without a null; RangeIndex, named index, filtered index; full and zero rows; written with `df.to_parquet` and read through `ParquetFileSource`, the S3 and GCS fakes, and built with `pa.Table.from_pandas` through `ResidentTableSource`. Plus: a `Float64`-metadata column holding a NaN; plan cells for a `when:` numeric check and `check_null_bearing_int_unsupported` over the `Int64` with-null table, equal to base.
+- AT-3b also adds `test_arrowdtype_metadata_matches_pandas` in `tests/unit/profile/test_arrow_bounded_profile.py`. Construct columns with `pd.ArrowDtype` for int64, double, bool, string, large string, binary, date32 and timestamp. Include a null, a repeated value and a distinct value. Check both local Parquet and resident tables against the current pandas walk, including dtype, counts and string lengths. Run M-13 against these cells.
+- AT-3c. Add `test_bounded_profile_uses_current_field_names` in `tests/unit/profile/test_arrow_bounded_profile.py`. Parameterize each cell below over resident, local Parquet and the S3 and GCS fakes. Keep the original blob with `replace_schema_metadata` after each schema operation. Check the bytes on the reader sample. For a missing blob, check that the key is absent. Call `profile_source` and compare the ordered columns and every profile field with an independently built clean control. Run the pandas walk on the clean control. Strip metadata for a wholly plain control. For mixed controls, create a fresh frame with the expected plain and nullable dtypes, physical order and index. Never ask pandas to interpret the damaged fixture.
+
+  | Cell ID | Input and expected profile |
+  |---|---|
+  | `malformed-blob` | Missing key, invalid UTF-8, truncated JSON, deeply nested JSON, scalar and list roots. All physical columns appear in order with ordinary Arrow statistics. |
+  | `malformed-section` | Give `columns` a null or object value. Valid stored index names still apply. Give `index_columns` a scalar string equal to a real field name. That field remains visible and valid dtype hints still apply. |
+  | `malformed-entry` | Mix a valid nullable sibling with non-object entries, a non-string key, an unhashable dtype, an unknown dtype containing a canary string, duplicate hints and a forged `("unicode", "string")` hint on an integer field. Give the ambiguous field a plain int8 physical type and conflicting plain and nullable hints. Invalid or ambiguous hints have no effect. Assert the canary is absent from the returned profile. Include an index range descriptor and a non-string index item. |
+  | `renamed` | Rename nullable `a` to `new_a` and stored index `k` to `new_k`. Retain both stale keys and a valid nullable sibling. Report both new fields with Arrow semantics. Also set the stale entry's display name to `new_a` to catch accidental fallback. |
+  | `dropped` | Drop the first nullable field and a stored index field. Retain their entries. Neither appears. The next physical field retains its own dtype, null count and length statistics. |
+  | `reordered` | Swap two int8 fields, one plain and one nullable, both with nulls. Move a stored index between them. Keep the original metadata order. Omit only the index. Assert the new physical order, `float64` for the plain field and `Int8` for the nullable field. |
+
+- In `tests/unit/profile/test_arrow_bounded_profile.py::test_bounded_walk_decodes_metadata_once`, count calls to `_pandas_meta._columns.decode_pandas_blob` during one `walk_arrow_table` call on a wide table with a stored index and several nullable fields. Expect one call. In S1b, repeat the lookup inside the per-column loop and require this test to fail (M-23).
 - AT-4 (red on base). Conversion spy (8.1): `profile_source` over a local Parquet, a fake S3 Parquet, a fake GCS Parquet and a supplied `pa.Table` (each also with pandas metadata) records zero calls to `pyarrow.pandas_compat.table_to_dataframe`, `pd.Series.__init__`, `pd.DataFrame.__init__` and `pd.read_parquet`. A CSV control cell records at least one.
 - AT-5 (green on base on purpose, except the message cell). `estimate_job_capacity` raises `ExecutionError` `capacity_source_unprofilable` for a truncated Parquet file, a CSV file declared `parquet`, and a Parquet file with two columns named `a`. Message cell (red on base): the chained `ValueError` text equals `table 't' has 1 duplicated field name(s)`, and `walk_dataframe`, `walk_arrow_table` and `refuse_duplicate_field_names` give that same text for the same names.
 - AT-6 (red on base for the row-0 and row-9,999 cells). An 80,001-row `time64[ns]` file with the bad value at row 0, 9,999, 10,000 and 80,000: every `estimate_job_capacity` call returns a verdict; `profile_source` gives `row_count=80_001`, `row_count_exact=True`, `sampled=True`, and `null_count` and `distinct_count` over exactly the first 10,000 rows (asserted against `pyarrow.compute` over `table.slice(0, 10_000)`).
-- AT-7 (red on base). `run_pipeline` with the `T_NS` and `D_FAR` sources as `LazySource`, with and without `resident_fallback=True`, and as resident `pa.Table`s, raises `ExecutionError` `full_frame_value_unrepresentable`; `exc.__context__ is None`, `exc.__cause__ is None`; `"".join(traceback.format_exception(exc))` holds no digit string of the bad value. File: beside the existing `full_frame_value_unrepresentable` tests (`git grep -l full_frame_value_unrepresentable tests`).
+- AT-7 (red on base). `run_pipeline` with the `T_NS` and `D_FAR` sources as `LazySource`, with and without `resident_fallback=True`, and as resident `pa.Table`s, raises `ExecutionError` `full_frame_value_unrepresentable`; `exc.__context__ is None`, `exc.__cause__ is None`; `"".join(traceback.format_exception(exc))` holds no digit string of the bad value. Add `test_full_frame_error_has_no_exception_chain` in `tests/unit/execution/test_full_frame_value_unrepresentable.py`.
 - AT-8 (red on base). The frozen value 6.1 (a): a supplied `pa.Table` with sub-µs `time64[ns]` values and no null, and one with year-10183 dates and no null, profile with lengths None; `dtype`, `null_count`, `distinct_count` and `shape` equal base.
 - AT-9 (red on base). `S3ParquetSource` and `GcsParquetSource` over the `T_NS` bytes (fakes of `tests/unit/profile/test_duplicate_header_readers.py`): `sample_table(n)` equals the local `ParquetFileSource.sample_table(n)`, schema metadata included, and `profile_source` returns the AT-2 column.
-- AT-10 (red on base). `tests/unit/profile/test_sample_frame_contract.py` gains a `SAMPLE_TABLE_MATRIX` ("exactly n rows, short only at the end", metadata kept) for the four `sample_table` readers; `tests/sentry/profiling/test_profile_source_contract_coverage.py` gains the same owned-class walk for `sample_table`, with a seeded class that must be caught.
-- AT-11 (green on base on purpose). `tests/native/test_chunked_entry_rev9_profile.py`, `tests/native/test_chunked_entry_rev9_catalogue.py` and `tests/sentry/test_column_shape_classifier.py` pass after the move with only the named path edits; the F-13 tests pass with only their import line changed.
+- AT-10 (red on base). `tests/unit/profile/test_sample_frame_contract.py` gains a `SAMPLE_TABLE_MATRIX` ("exactly n rows, short only at the end", metadata kept) for the four `sample_table` readers; `tests/sentry/profiling/test_profile_source_contract_coverage.py` gains a method-name argument on the existing `owned_readers` scanner. Parameterize `test_every_reader_is_in_the_conformance_matrix` and `test_a_reader_missing_from_the_matrix_is_caught` for both methods.
+- AT-11 (green on base on purpose). Include `tests/native/test_composite_admission.py::test_unrelated_schema_metadata_changes_are_not_stored_index_drift`. `tests/native/test_chunked_entry_rev9_profile.py`, `tests/native/test_chunked_entry_rev9_catalogue.py` and `tests/sentry/test_column_shape_classifier.py` pass after the move with only the named path edits; the F-13 tests pass with only their import line changed.
 
 ## 10. Mutations
 
-Each alone on the final head; each must turn the named test red. Record the head (class 9).
+Run each mutation alone on the final S1b head. Record the failing test and SHA. Section 13 gives the separate S1a mutations.
 
 | ID | Mutation | Red |
 |---|---|---|
@@ -261,6 +309,11 @@ Each alone on the final head; each must turn the named test red. Record the head
 | M-16 | the struct distinct count for interval removed | AT-3b interval cells |
 | M-17 | the full-frame error is raised inside the handler again | AT-7 `__context__` asserts |
 | M-18 | `walk_dataframe` keeps its own duplicate-name text | AT-5 message cell |
+| M-19 | In `bounded_column_facts`, zip metadata entries to schema fields by position | AT-3c reordered and dropped |
+| M-20 | Let a JSON decode error escape | AT-3c malformed-blob |
+| M-21 | Fall back to the display name when an explicit physical name disappeared | AT-3c renamed |
+| M-22 | Accept a string hint without checking the Arrow type | AT-3c malformed-entry |
+| M-23 | Decode the blob again for each column in `walk_arrow_table` | `test_bounded_walk_decodes_metadata_once` |
 
 ## 11. Class tables
 
@@ -268,17 +321,17 @@ dev-rules `catalogs/recurring-defects.md`:
 
 | Class | This row |
 |---|---|
-| 1 anchored validation | n/a, no pattern |
-| 2 strict types | n/a, `ColumnProfile` serialization unchanged |
+| 1 anchored validation | match dtype hints by exact equality with the supported label for the physical type |
+| 2 strict types | item 1 checks producer JSON types before lookup. AT-3c covers wrong types |
 | 3 exception context | 8 item 6 removes the value-bearing `__context__`; AT-7 asserts both links None; M-17 |
 | 4 versioned read models | n/a |
 | 5 guard scanners | AT-10 walks classes by `__dict__` like its sibling; covered shape: a class whose own body defines `sample_table` |
-| 6 private imports | new edges only into the foundation tier (`profile -> _pandas_meta`, `execution -> _pandas_meta`), which `tests/sentry/layout/test_import_layers.py:55` already lists; `_chunked_profile -> profile._walk_arrow` replaces its existing `profile._walk` edge pattern; one lazy `profile -> execution._transforms` import is removed |
+| 6 private imports | schema imports go into the foundation tier (`profile -> _pandas_meta`, `execution -> _pandas_meta`), which `tests/sentry/layout/test_import_layers.py:55` already lists; execution imports the column profiler through `decoy_engine.profile.arrow`; one lazy `profile -> execution._transforms` import is removed |
 | 7 hidden CI failures | n/a |
 | 8 trust classes | n/a |
 | 9 mutations on the final head | section 10 |
 | 10 allowlisted helpers | n/a |
-| 11 raised caps | module size goal 600, max 700 (`tests/sentry/test_module_size.py`): `_readers.py` goes from 591 to about 571; every new module is under 250; no census entry added. `profile/` goes from 20 to 22 modules, under the 25-module fan-out cap (`tests/sentry/baselines/package-fanout.json`); `_pandas_meta/` from 2 to 3. No pin moves |
+| 11 raised caps | module size goal 600, max 700 (`tests/sentry/test_module_size.py`): `_readers.py` goes from 591 to about 571; every new module is under 250; no census grows. The new `profile/arrow/` subpackage keeps the direct Python file count in `profile/` at 20, under the 25-module fan-out cap (`tests/sentry/baselines/package-fanout.json`); `_pandas_meta/` from 2 to 3. No pin moves |
 
 Plan contract catalog (vault `Decoy-Plan-Contract-and-Defect-Catalog.md`, 10 classes):
 
@@ -289,7 +342,7 @@ Plan contract catalog (vault `Decoy-Plan-Contract-and-Defect-Catalog.md`, 10 cla
 | 3 | State machine and concurrency | N/A: no shared state; the walk is a pure function of the sample and never draws from `rng` | AT-3 two-table cell | N/A: no transition added |
 | 4 | Route parity and silent fallback | one dispatch in `_profile_one_source`; every `profile_source` caller gets the same walk; no fallback to pandas on error | AT-3, AT-3b, AT-4 | M-1, M-7, M-8 |
 | 5 | Referential integrity | PK and FK flags set by the wrapper exactly as `walk_dataframe` sets them | AT-3 PK/FK cell, AT-1 FK cell | M-5 |
-| 6 | Untrusted producer | the `b"pandas"` blob is producer-written: one parse in `_pandas_meta`, malformed input gives empty results, never an exception | AT-3b malformed-metadata cell; the moved malformed tests in `test_mem_estimate_nullable_metadata.py` | M-13 |
+| 6 | Untrusted producer | the `b"pandas"` blob is producer-written: one parse in `_pandas_meta`, invalid sections or hints give no facts at their own scope, per item 1 | AT-3c; the existing malformed tests in `test_mem_estimate_nullable_metadata.py` | M-19 to M-22 |
 | 7 | Check then use on a path (TOCTOU) | N/A: the same readers open the same paths once, as today | none needed | N/A: no new check-then-open |
 | 8 | Weak tests and overclaimed evidence | each AT records red or green on `26091c834`; parity uses `walk_dataframe` as an unchanged oracle; AT-3b corpus carries real pandas metadata (the test-20 corpus has none); the 20,000 claim in `#399` was re-measured | builder report with base SHA and red output | each mutation names its AT |
 | 9 | Behavior-preserving refactor drift | `arrow_column_profile` with `pandas_dtype=None` is the moved body; helpers moved with their tests | AT-11, AT-3 | M-10, M-11 |
@@ -298,7 +351,7 @@ Plan contract catalog (vault `Decoy-Plan-Contract-and-Defect-Catalog.md`, 10 cla
 ### 11.1 Frozen contracts
 
 - Public API: no name or signature changes. `ProfileSource` is unchanged; the Arrow sample is a separate private protocol.
-- `Profile` and `ColumnProfile` serialization (`profile_to_json`, `profile_hash`): no field added; every value equal for columns pandas converts, pandas-written input included (AT-3, AT-3b), so plan bytes and profile hashes do not move.
+- `Profile` and `ColumnProfile` serialization (`profile_to_json`, `profile_hash`): no field added; every value equal for the valid-input parity matrices, pandas-written input included (AT-3, AT-3b), so plan bytes and profile hashes do not move.
 - Reason registry: no code added; `capacity_source_unprofilable`, `full_frame_value_unrepresentable` and `duplicate_source_field_names` keep their meaning and message text.
 - Byte changes: none to any output file.
 
@@ -352,13 +405,13 @@ N/A: the profile records `is_fk` and `fk_target` from config as before (AT-3 PK/
 
 - Errors: the raw pyarrow profile error goes away on these paths; the full-frame error loses its chained context; the duplicate-name `ValueError` text changes (6.1 b).
 - CLI stdout, `--json` and exit codes: per section 6 (13.1 cells).
-- Returned profiles and plans: equal for columns pandas converts (AT-3, AT-3b).
+- Returned profiles and plans: equal for the valid-input parity matrices (AT-3, AT-3b). AT-3c specifies producer-metadata fallback.
 - Logs, audit, evidence, progress: N/A, unchanged; the profile writes none.
 
 ### 11.3 Reuse inventory
 
 - `arrow_column_profile` and its helpers, moved, with one keyword added.
-- `stored_index_fields`, `arrow_columns`, `pandas_nullable_columns`, moved into `_pandas_meta`; the new `pandas_column_dtypes` shares their parse.
+- `stored_index_fields`, `arrow_columns`, `pandas_nullable_columns`, moved into `_pandas_meta`; `bounded_column_facts` reads both index and dtype facts from one decode.
 - `ParquetFile.iter_batches` and `_read_parquet_sample` for the sample.
 - `_field_names.repeated_names` for the duplicate-name scan; the guard's existing text.
 - `canonical_dtype_label` (`internal/pandas_compat`) for the dtype label; `observed_shape` for `shape`.
@@ -370,11 +423,12 @@ N/A: the profile records `is_fk` and `fk_target` from config as before (AT-3 PK/
 | File | Directory | CODEMAP "Where Things Go" row | Sits beside |
 |---|---|---|---|
 | `_columns.py` (new) | `src/decoy_engine/_pandas_meta/` | foundation packages (`src/decoy_engine/_<name>/`) | `_descriptors.py`, the per-type facts |
-| `_walk_arrow.py` (new) | `src/decoy_engine/profile/` | "Source readers, profile types" | `_walk.py`, its pandas twin |
-| `_arrow_sample.py` (new) | `src/decoy_engine/profile/` | "Source readers, profile types" | `_readers.py` |
+| `__init__.py` (new) | `src/decoy_engine/profile/arrow/` | "Source readers, profile types" | imports the subpackage functions and protocol |
+| `_walk_arrow.py` (new) | `src/decoy_engine/profile/arrow/` | "Source readers, profile types" | `_walk.py`, its pandas twin |
+| `_arrow_sample.py` (new) | `src/decoy_engine/profile/arrow/` | "Source readers, profile types" | `_readers.py` |
 | `test_arrow_bounded_profile.py` (new) | `tests/unit/profile/` | tests in `tests/unit/profile/` | `test_bounded_profiling.py` |
 | `preflight-arrow-profile.md` (new) | `changelog.d/` | "Changelog fragments" | the other fragments |
-| `CODEMAP.md` (edit) | root | n/a | row 107: the Arrow column profile is in `profile/_walk_arrow.py`; row 126: add `_walk_arrow.py` and `_arrow_sample.py`; the `_pandas_meta` row adds per-column facts |
+| `CODEMAP.md` (edit) | root | n/a | row 107: the Arrow column profile is in `profile/arrow/_walk_arrow.py`; row 126: add `_walk_arrow.py` and `_arrow_sample.py`; the `_pandas_meta` row adds per-column facts |
 
 Changelog fragment, `changelog.d/preflight-arrow-profile.md`:
 
@@ -401,11 +455,14 @@ No `Breaking:` line: no public name or signature changes.
 
 | Slice | Repo | Content | Size | Risk |
 |---|---|---|---|---|
-| S1 | engine | Section 8 in full (items 1-7), AT-1 to AT-11 with AT-3b, M-1 to M-18, the renamed-path sentry edits, changelog fragment, CODEMAP rows | about 330 source lines changed (about 215 moved), about 500 test lines; about 30 files, most of them one import line | R2 |
+| S1a | engine | Move the existing Arrow column profiler, its private helpers and the three schema functions. Update imports, the column-shape sentry, import-layer entries and CODEMAP. Keep callable signatures, helper behavior and reader dispatch unchanged. | About 200 source lines relocated, 15 caller files, mostly import edits. | R1 |
+| S1b | engine | Add metadata handling, the bounded Arrow walk, reader methods, shared duplicate-name message and full-frame error handling. Update the remaining sentries, CODEMAP and changelog. | About 150 new source lines plus reader edits and about 550 test lines. | R2 |
 | S2 | engine | Release: compile the fragment with `scripts/release/stamp_release.py`, bump to the next patch version, tag | release files only | R2 (established release path) |
 | S3 | CLI | Repin to the S2 release per the engine repin checklist (compat, fences, FROZEN, doc, `PIN_PREFIX`, Dockerfile ARG, catalog); test and doc changes in 13.1 | pin files plus about 120 test lines; no CLI source logic change | R1 |
 
-S1 is one slice: the helper move, the walk, the reader methods and the error-chain fix share the same tests (AT-7 needs the profile fix to reach the full-frame error on a `LazySource`). If the gate wants it smaller, the only clean cut is S1a = item 1 alone (the `_pandas_meta` move, pure refactor, AT-11 F-13 cells), merged first. S3 needs `#399` merged first (D3).
+Merge S1a first. Run AT-11, including the named schema, chunk guard and parity tests in sections 5.1 and 8.4. On the final S1a head, seed each move regression separately. Return an empty set from `stored_index_fields` and require `test_source_columns_reads_header_only` to fail. In `_chunk_schema.check_stored_index`, replace the lookup on the incoming schema with an empty set and require `tests/native/test_composite_admission.py::test_unrelated_schema_metadata_changes_are_not_stored_index_drift` to fail. Its two schemas have the same stored index and different metadata bytes, so it reaches both lookups. Change the non-null integer label in `internal/pandas_compat.py:arrow_dtype_label` and require `test_arrow_column_profile_equals_the_pandas_profile_field_for_field` to fail. Restore each mutation and record the SHA.
+
+On the final S1b head run AT-1 through AT-11, including AT-3b, AT-3c and the full suite. Run M-1 through M-23 separately and record the test failure and SHA for each. S2 follows S1b. S3 needs S2 and CLI #399.
 
 ### 13.1 S3, CLI test and doc changes
 
@@ -421,12 +478,12 @@ S1 is one slice: the helper move, the walk, the reader methods and the error-cha
 - A parity cell differs on a type the probes did not cover (a pyarrow 25 type, or a pandas extension dtype outside Probe E). Any new difference fails AT-3 or AT-3b; the type is fixed in `_walk_arrow.py` or listed in 6.1 with an owner call.
 - Mac or Windows pandas differs. CI pins `pandas<3`; the oracle runs on the same host, so a host difference shows as a parity failure.
 - pandas 3 changes the default string dtype. The metadata rule follows `numpy_type`, and AT-3b computes its oracle on the installed pandas, so the upgrade shows as a parity failure, not a silent change.
-- A builder makes a parity cell pass by editing the oracle. A diff to `walk_dataframe` beyond the item 5 message call is out of scope and the gate refuses it.
+- A builder makes a parity cell pass by editing the oracle. Keep the existing pandas statistics as the independent oracle. Check any shared profile assembly against the base output in AT-3 before either walk uses it.
 
 ## 15. Open decisions
 
 - D1. A plain `decoy run` of these sources still exits 3 after this row. Recommended (accepted by Dennis R1): accept for this row, and open the follow-up row "run plain-route passthrough columns without pandas" tagged 1.0-blocking, since the plain run is the default path.
-- D2. Also ship the CLI-only fallback (skip capacity pricing on `--chunked`)? Recommended: no. After S1 the refusal is gone at its source on every path.
+- D2. Also ship the CLI-only fallback (skip capacity pricing on `--chunked`)? Recommended: no. After S1b the refusal is gone at its source on every path.
 - D3. Land the CLI test flip in a separate PR after `#399` and the S2 release, or fold it into `#399`? Recommended: a separate PR. The wrong "20,000-row" sentence in `#399` is corrected to 10,000 in `#399` before it merges.
 - D4. Remove `ResidentTableSource._frame_of`'s text-cast fallback? Recommended: no, not in this row. It still serves `to_frame` and `sample_frame`; the D5 row decides it.
 - D5. One follow-up row for `decoy scan` / `init` and the chunked first-chunk profile (G-4)? Recommended (accepted by Dennis R1): yes, tagged 1.0-blocking, because scan and init raise a raw `ValueError` containing the year on a valid Parquet file (`profiling/scan_set.py:339`).
