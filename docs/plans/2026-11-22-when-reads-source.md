@@ -337,7 +337,7 @@ A write means a column whose cells dispatch may replace, including writes limite
 
 | Selected operation | Writes and reads |
 | --- | --- |
-| FK resolution, checked first | Writes exactly the child tuple. Source inputs are the original child tuple and the original parent tuple, each in its own table. The masked input is the final parent tuple. Pair original and final parent keys by row. See `_pandas_adapter.py:633–634`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
+| FK resolution, checked first | Read the child key visible at the FK's dispatch rank. Write exactly the child tuple. For the parent map, pair each original parent key with its final key from the same row. Use the current parent column where no snapshot exists. See `_pandas_adapter.py:533–566` and `:633–634`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
 | Scalar | Writes its target. A nested handler writes back its outer column. A multi-column `joint_mask` writes exactly its configured outputs. Its mask key reads source. A scalar `date_shift` with `group_by` needs the original group key in its table. Supply the aligned snapshot at `_strategies/_date_shift.py:190`. See `_column_access.py:347` and `_strategies/_joint_mask.py:119`. |
 | Creating scalar | Writes its target and can introduce it. Take masked drivers from the strategy declaration. This covers `derived`, `derived_aggregate`, `grouped_series`, `windowed_date` and `group_key`. See `_column_access.py:339` and `_column_access.py:409`. |
 | Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity and the deterministic source key. See `_column_access.py:266`, `_runner.py:113–115` (grouping), `_runner.py:127–136` (construction) and `_strategies/_composite.py:130`. |
@@ -395,8 +395,8 @@ hash. Today registration records `node.columns` and sampling looks up only table
 without changing its null positions. That lookup can return stale Arrow integers.
 Attach the exact Arrow data to the source version at full-frame and sequential registration
 (`_pandas_adapter.py:245`, `_sequential.py:426`). A whole replacement supplies its own
-values. For a partial commit, keep the exact source integers on untouched rows and the
-writer's typed values on selected rows. Apply Faker's gate positions to that assembled
+values. Start a partial commit from the preceding exact version. Replace only the
+selected rows with the writer's typed values. Apply Faker's gate positions to that assembled
 input. Preserve nulls and integer width without a float round trip.
 
 Keep `order_work` returning ordered `WorkNode` objects. Out-of-core preflight passes them
@@ -488,20 +488,29 @@ first kill the specified mutation, then restore it. Run the same tests green on 
     zip as the joint dispatch key. Now the creator unlocks the bundle before zip runs.
     Expect the joint surname. A fixed bundle priority fails the second run.
 14. **V1** `test_faker_uses_committed_nullable_integer`. Give deterministic Faker a
-    nullable Arrow int64 target with adjacent source keys above 2**53. An earlier joint
-    mask writes that target as a secondary output on selected non-null rows. Use a
-    distinct integer replacement and leave a large source key and a null untouched.
-    Keep the null positions identical. Compare Faker with a Faker-only run on the exact
-    expected Arrow overlay, using the same seed and namespace. Choose keys whose oracle
-    outputs distinguish replacement, stale source and rounded source. Also run with
-    Faker gated to all non-null positions. Put a null between two selected rows.
-15. **V1** `test_chunk_releases_saved_outputs`. Run the chunked oracle on two chunks
-    with different keys and gate matches. Force a multi-output handler to save a column
+    nullable Arrow int64 target with adjacent source keys above 2**53. Before Faker,
+    run two gated joint masks that write the target as a secondary output. Give each
+    mask a distinct integer and a disjoint set of non-null rows. Build the Faker-only
+    oracle on an exact Arrow array. It holds the first integer on the first mask's rows
+    and the second integer on the second mask's rows. Leave a large source key and a
+    null untouched. Compare every Faker output with the oracle at the same seed and
+    namespace. Choose keys that give distinct outputs for each replacement, the stale
+    source and the rounded source. Repeat with Faker gated to all non-null positions.
+    Put the null between two selected rows.
+15. **V1** `test_chunk_releases_saved_outputs`. Public chunk preflight rejects joint
+    masks and composites. Supply the multi-output fixture after preflight, directly to
+    `_chunked_oracle._oracle_masked`. Use two chunks with different keys and gate
+    matches. Force the handler to save a column
     until its last commit. Observe the actual saved buffers with weak references.
     Keep both returned chunks alive. Check the first chunk's temporary buffers are
     collectible before supplying chunk two. Check the second chunk's after it returns.
     Compare both outputs with their separate full-frame oracles. Retaining the buffers
     on the shared adapter must fail the lifetime check.
+16. **V1** `test_fk_preserves_state_written_by_joint_mask`. Start the child FK
+    `state` at `original`. Have an earlier joint mask write `PA` to `state`.
+    Use a parent key distinct from both values and set the orphan policy to `PRESERVE`.
+    Assert that `run_single` returns `PA` in the child's `state` at `d74afd71c`.
+    Reading the child from source would return `original`.
 
 ### Placement and removal
 
