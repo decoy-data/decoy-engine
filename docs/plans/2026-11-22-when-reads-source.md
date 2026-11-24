@@ -332,41 +332,51 @@ This revision governs S2 where sections 1 and 3 describe ordering. Code referenc
 Compile each work node with one function, `resolve_dispatch(node, graph)`. It returns the selected
 operation, its table, outputs, creatable targets, masked inputs and source inputs. Resolve the
 whole work list once. Both the dispatcher and the scheduler call this function or consume its
-cached result. Dispatch selects the handler and commits its outputs through that result.
+cached result. Use that result to evaluate the handler and to commit each output column.
 A write means a column whose cells dispatch may replace, including writes limited to selected rows.
 
 | Selected operation | Writes and reads |
 | --- | --- |
-| FK resolution, checked first | Writes exactly the child tuple. Reads original child keys and final parent keys. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
-| Scalar | Writes its target. A nested handler writes back its outer column. A multi-column `joint_mask` writes exactly its configured outputs. Its mask key reads source. See `_column_access.py:347` and `_strategies/_joint_mask.py:119`. |
+| FK resolution, checked first | Writes exactly the child tuple. Source inputs are the original child tuple and the original parent tuple, each in its own table. The masked input is the final parent tuple. Pair original and final parent keys by row. See `_pandas_adapter.py:633–634`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
+| Scalar | Writes its target. A nested handler writes back its outer column. A multi-column `joint_mask` writes exactly its configured outputs. Its mask key reads source. A scalar `date_shift` with `group_by` needs the original group key in its table. Supply the aligned snapshot at `_strategies/_date_shift.py:190`. See `_column_access.py:347` and `_strategies/_joint_mask.py:119`. |
 | Creating scalar | Writes its target and can introduce it. Take masked drivers from the strategy declaration. This covers `derived`, `derived_aggregate`, `grouped_series`, `windowed_date` and `group_key`. See `_column_access.py:339` and `_column_access.py:409`. |
-| Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity and the deterministic source key. See `_column_access.py:266`, `_runner.py:119` and `_strategies/_composite.py:130`. |
+| Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity and the deterministic source key. See `_column_access.py:266`, `_runner.py:113–115` (grouping), `_runner.py:127–136` (construction) and `_strategies/_composite.py:130`. |
 | Passthrough | Writes nothing. A gate may still read its predicate. See `_strategies/_passthrough.py:24`. |
-| Unknown writer | May write any column of its own table. Use one table-scoped wildcard. An unsupported handler still raises its existing error. See `_column_access.py:385` and `_runner.py:411`. |
+| Unknown writer | May write any column of its own table. Use one table-scoped wildcard. An unsupported handler still raises its existing error. See `_column_access.py:385` for the declaration, `_runner.py:411` for wildcard lookup and `_pandas_adapter.py:410–415` for the error. |
 
 ### Final values and dependencies
 
-Choose the final writer for each (table, column) before building edges. FK resolution owns its
-child key. A generated bundle owns its outputs over a separate creating scalar. A known writer
-takes precedence over a wildcard. For equivalent-priority overlaps, preserve explicit seed
-declaration order, with the later operation final. Preserve the declared order of successive
-partial writes so rows skipped by the last gate retain the previous value. Never use spelling
-to decide ownership. The sorted ready queue at `_runner.py:550` may break independent ties.
+Build a list of writers for each (table, column). FK resolution takes final priority on its child key.
+A bundle takes priority over a separate creating scalar on a shared output. Known writers take
+priority over table wildcards. Break ties by explicit seed declaration order. The later writer
+wins on rows where both write. Record the seed position before grouping composites or sorting
+ready nodes. A grouped bundle takes the position of its first seed member (`_runner.py:112–136`).
 
-For an unconditional owner, exclude the shadowed cells from the earlier operation's commit.
-Still execute its configured validation, gate and handler against isolated output columns.
-Preserve its warnings and row errors. Only committed outputs count when building value edges.
-This lets a shadowed creator evaluate even if its drivers depend indirectly on the bundle.
-It also lets an FK overwrite one bundle field while other fields keep their generated values.
+Evaluate each handler once when its input versions are ready. Collect its output values and
+selected row positions in isolation. The gate reads its predicate from the source. Preserve preflight, validation, warnings and row errors.
+Use a separate commit step for each output column. Start with the source column or its admitted
+empty target. Each partial commit overlays its selected rows on the preceding version.
+An unconditional replacement supplies a whole version without waiting for the preceding commit.
+Keep earlier versions until every consumer has read them, including later writers of the same column.
 
-For every masked input, add an edge from its final writer to the consumer. A read-modify-write
-of the same target reads the preceding version. Include possible wildcard writes in that table.
-A source-only input reads its snapshot or untouched source and adds no value edge.
-Use the same lookup for every component of every FK parent tuple. Build or cache the masked
-parent map only after those writers finish. An unwritten column adds no writer edge.
-Use the same graph at compile and execution. Reject a cycle of required value or FK edges
-at compile time with `cyclic_work_ordering`, before dispatch. Keep both directions of a true
-dependency. For example, two live derived outputs that require each other's final value cycle.
+A masked sibling read waits for the final version of that column. A handler that transforms its
+own target waits for the version just before its write. For example, a later unconditional
+`truncate(last_name)` reads the bundle's generated surname (`_strategies/_truncate.py:115–121`).
+A replacement that never reads its target can skip an unused prior version. Its earlier handler
+still runs. Resolve every component of an FK's final parent tuple before caching the parent map.
+An unwritten input uses the source version. Source reads add no writer edges. Supply required
+anchor snapshots before evaluation, including the original group key for `date_shift`.
+
+For a gated derived `state` followed by a gated joint write to `city` and `state`, evaluate
+the joint handler from its source key. Commit its selected cities over the source cities.
+Evaluate the derived handler using that final city column. Commit derived states first.
+Overlay the joint handler's saved states on its selected rows. Ordering the two state commits
+adds no dependency between the handler evaluations.
+
+Use the same version dependencies at compile time and execution. Include table wildcards in
+writer lookup. The sorted ready queue at `_runner.py:550` may order independent steps.
+Reject a cycle of required inputs at compile time with `cyclic_work_ordering`. Two live
+derived outputs that each need the other's final value still form such a cycle.
 
 Separate column existence from value order. After source snapshots and before dispatch,
 allocate each admitted missing creator target as an index-aligned, typed nullable column.
@@ -386,8 +396,10 @@ first kill the specified mutation, then restore it. Run the same tests green on 
    coherent group. Derive summary from email plus "!". Every summary must equal the output
    email plus "!" and differ from the source email plus "!".
 2. **V1** `test_fk_reads_final_bundle_surname`. Derive last_name from an unrelated input.
-   Also generate it in the bundle. Match a_ref to the original surname. Assert each child
-   equals its final generated parent and differs from the intermediate derived value.
+   Also generate it in the bundle. Use distinct original surnames. Permute their order in a_ref.
+   Assert each child equals the generated surname for its original parent key and differs
+   from the intermediate derived value. Using final keys on both sides of the parent map
+   must fail that assertion.
 3. **V1** `test_fk_child_bypasses_derived_creator`. Resolve email from first_name while
    its configured derived expression reads an unrelated column. Matching keys must yield
    email equal to masked first_name. The bundle must still generate last_name.
@@ -407,6 +419,32 @@ first kill the specified mutation, then restore it. Run the same tests green on 
    then z_ref. Rename all associated references, hold seeds and namespace fixed, undo the
    output rename and compare every column and row. Both runs must match the parent oracle.
 
+8. **V1** `test_overlapping_derived_and_joint_gates`. Declare derived `state = concat(city, "!")`
+   first. Then declare a joint mask on `city` that writes both city and state. Use two source
+   flags and four rows. Use a single-row reference with a distinct joint city and state.
+   Assert success. On the derived-only row, expect source city plus "!" as state.
+   On the joint-only row and the overlap row, expect the joint state. On the fourth row,
+   expect source state. Expect joint city exactly where the joint gate matched.
+   Adding a handler-order edge from derived to joint makes this run fail with a false cycle.
+9. **V1** `test_truncate_reads_generated_surname`. Run the bundle alone for a fixed-seed
+   oracle. Then declare the same bundle first and unconditional head truncate on last_name
+   second, with length three. Use source surnames whose first three characters differ from
+   the oracle prefixes on every row. Assert each output surname equals the generated prefix.
+   Dropping the bundle's surname before truncate reads it exposes the source prefix.
+10. **V1** `test_equal_priority_writer_spelling_swap`. Use two unconditional joint masks.
+    Give each its own single-row reference with distinct values for a shared output.
+    Let one write its dispatch column and the shared column. Let the other write its own
+    dispatch column and the shared column. Declare z_first before a_second. Then swap
+    the dispatch names in the seeds, input and reference schemas. Keep seed order, keys,
+    namespace and reference values fixed. Undo the output rename. Assert identical rows
+    in both runs and the second reference's value on every shared cell. Sorting tied
+    writers by name makes the reverse lexical case fail.
+11. **V1** `test_date_shift_uses_original_group_key`. Use an ungated grouped date_shift.
+    Get expected dates with the group key untouched. Mask that key to one value and run
+    again with the same seed. Use source groups with distinct oracle shifts. Assert the
+    masked key is constant and all dates match the oracle. Dropping the group snapshot
+    fails the run. Using the masked key gives the wrong dates.
+
 ### Placement and removal
 
 | Existing location | Builder change |
@@ -414,5 +452,7 @@ first kill the specified mutation, then restore it. Run the same tests green on 
 | `_column_access.py:266` | Keep the surface registry. Remove coherent group names from composite writes. Resolve operations and their writes here. Reuse the provider's canonical or configured outputs. |
 | `_runner.py:356`, `_runner.py:382`, `_runner.py:449`, `_runner.py:470`, `_runner.py:527` | Delete the conservative and dispatch write views, creator probe, composite overwrite scan, skipped driver edges and special FK scans. Build one writer index from resolved operations. |
 | `_pandas_adapter.py:375`, `_when_gate.py:582`, `_strategies/_joint_mask.py:47` | Dispatch the resolved operation. Use its outputs for write-back and gated stitching. Remove the separate gated-output hook. |
-| `_runner.py:329`, `_chunked_carry.py:202` | Feed snapshot and carry from the same resolved writes. For a wildcard, snapshot every predicate input and disable carry in its table. |
+| `_runner.py:329`, `_chunked_carry.py:202` | Use resolved writes for predicate snapshots and for full-frame and sequential type preservation. A wildcard covers every predicate input in its table. |
+| `_chunked_carry.py:176`, `_column_access.py:527` | Feed the same write declaration into `passthrough_columns`. Replace the entry-based write union in `handler_written_columns`. Pass resolved writes to both `carried_columns` and `plan_carry` through this path. A wildcard disables carry for its table. |
+| `_chunked_carry.py:228–245` (chunk-carry guard) | Exercise the planner and stock chunk lane with an unconfigured source field. Have the shared declaration report it as a bundle output. Assert both carry decisions exclude it and the chunk output keeps its generated value. Assert an unread, untouched control is carried. Spy on the shared declaration during carry planning so a parallel union with the same result also fails. Bypassing the shared declaration at line 176 must turn the guard red. |
 | `tests/unit/execution/when/test_reads_source.py:572` | Extend the existing acceptance tests. Guard the commit boundary with a generated bundle containing an undeclared key. Removing the key check must turn the guard red. |
