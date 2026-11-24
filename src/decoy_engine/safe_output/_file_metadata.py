@@ -27,7 +27,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine._canonical import StrictJsonError, strict_json_loads
-from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY, column_metadata, pairs_for
+from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY, column_entries, column_metadata, pairs_for
 
 __all__ = [
     "HANDLED_PREDICATES",
@@ -169,10 +169,8 @@ def _pandas_version() -> str | None:
 def _source_entries(columns: object) -> dict[str, dict[str, Any]]:
     """The source `columns` entry per field name, first one wins."""
     out: dict[str, dict[str, Any]] = {}
-    if isinstance(columns, list):
-        for entry in columns:
-            if isinstance(entry, dict) and isinstance(entry.get("field_name"), str):
-                out.setdefault(entry["field_name"], entry)
+    for field, entry in column_entries(columns):
+        out.setdefault(field, entry)
     return out
 
 

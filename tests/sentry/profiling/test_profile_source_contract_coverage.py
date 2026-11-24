@@ -15,13 +15,17 @@ import types
 
 import pytest
 
-from tests.unit.profile.test_sample_frame_contract import READER_MATRIX
+from tests.unit.profile.test_sample_frame_contract import READER_MATRIX, SAMPLE_TABLE_MATRIX
 
 ROOTS = ("decoy_engine.profile", "decoy_engine.profiling")
 
 
-def owned_readers(modules: list[types.ModuleType]) -> set[str]:
-    """Classes whose own body defines `sample_frame`, named `module.Class`. Protocols are
+# Each reader method with the conformance matrix that must list every class defining it.
+MATRICES = {"sample_frame": READER_MATRIX, "sample_table": SAMPLE_TABLE_MATRIX}
+
+
+def owned_readers(modules: list[types.ModuleType], method: str = "sample_frame") -> set[str]:
+    """Classes whose own body defines `method`, named `module.Class`. Protocols are
     interfaces, not readers."""
     found: set[str] = set()
     for module in modules:
@@ -29,7 +33,7 @@ def owned_readers(modules: list[types.ModuleType]) -> set[str]:
             if (
                 inspect.isclass(obj)
                 and obj.__module__ == module.__name__
-                and "sample_frame" in obj.__dict__
+                and method in obj.__dict__
                 and not getattr(obj, "_is_protocol", False)
             ):
                 found.add(f"{module.__name__}.{obj.__name__}")
@@ -46,19 +50,20 @@ def _scanned_modules() -> list[types.ModuleType]:
     return modules
 
 
-def test_every_reader_is_in_the_conformance_matrix() -> None:
-    assert owned_readers(_scanned_modules()) == set(READER_MATRIX)
+@pytest.mark.parametrize("method", sorted(MATRICES))
+def test_every_reader_is_in_the_conformance_matrix(method: str) -> None:
+    assert owned_readers(_scanned_modules(), method) == set(MATRICES[method])
 
 
-def test_a_reader_missing_from_the_matrix_is_caught() -> None:
+@pytest.mark.parametrize("method", sorted(MATRICES))
+def test_a_reader_missing_from_the_matrix_is_caught(method: str) -> None:
     module = types.ModuleType("seeded_module")
-
-    class Seeded:
-        def sample_frame(self, sample_rows: int) -> None: ...
-
+    Seeded = type("Seeded", (), {method: lambda self, sample_rows: None})
     Seeded.__module__ = module.__name__
     module.Seeded = Seeded  # type: ignore[attr-defined]
-    assert owned_readers([module]) - set(READER_MATRIX) == {"seeded_module.Seeded"}
+    assert owned_readers([module], method) - set(MATRICES[method]) == {"seeded_module.Seeded"}
+    other = next(m for m in MATRICES if m != method)
+    assert owned_readers([module], other) == set()  # a class is judged by the method it defines
 
 
 def test_a_re_export_is_not_a_second_definition() -> None:

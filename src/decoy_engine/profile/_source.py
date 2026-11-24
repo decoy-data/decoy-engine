@@ -54,6 +54,7 @@ from decoy_engine.profile._readers import (
 from decoy_engine.profile._readers_resident import ResidentTableSource
 from decoy_engine.profile._types import Profile, Relationship, TableProfile
 from decoy_engine.profile._walk import walk_dataframe
+from decoy_engine.profile.arrow import ArrowSampleSource, walk_arrow_table
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -205,13 +206,7 @@ def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
 
     Only Parquet and resident tables can; reading a CSV or fixed-width schema infers types
     from the file, which the bounded profile avoids."""
-    from decoy_engine.profile._cloud_readers import GcsParquetSource, S3ParquetSource
-
-    if isinstance(
-        reader, (ResidentTableSource, ParquetFileSource, S3ParquetSource, GcsParquetSource)
-    ):
-        return reader.schema()
-    return None
+    return reader.schema() if isinstance(reader, ArrowSampleSource) else None
 
 
 def _profile_one_source(
@@ -266,16 +261,18 @@ def _profile_one_source(
         effective_sample_rows = sample_rows
 
     row_count = reader.row_count()
-    # The profiled frame is parsed from exactly the cap, so no later row can change a
+    # The profiled sample is read with exactly the cap, so no later row can change a
     # column's inferred type. An estimated row count (CSV) can undershoot the sample, so
-    # when the cap is filled a second read asks for one row more. That frame is only
+    # when the cap is filled a second read asks for one row more. That read is only
     # counted, never profiled. An exact count already says the source is larger.
-    sample_df = reader.sample_frame(effective_sample_rows)
-    proven_total = len(sample_df)
+    arrow_reader = reader if isinstance(reader, ArrowSampleSource) else None
+    read_sample = arrow_reader.sample_table if arrow_reader else reader.sample_frame
+    sample = read_sample(effective_sample_rows)
+    proven_total = len(sample)
     if (
         not row_count.exact
         and proven_total == effective_sample_rows
-        and has_row_beyond(reader.sample_frame, effective_sample_rows)
+        and has_row_beyond(read_sample, effective_sample_rows)
     ):
         proven_total = effective_sample_rows + 1
     # Clamp the reported total to at least the rows actually sampled so a
@@ -284,17 +281,28 @@ def _profile_one_source(
     # (Parquet/fixed_width) already dominate the sample, so this is a no-op
     # for them.
     effective_total = max(row_count.value, proven_total)
-    table = walk_dataframe(
-        sample_df,
-        table_name=table_name,
-        declared_pk_cols=declared_pk_cols,
-        fk_specs=fk_specs,
-        sample_rows=effective_sample_rows,
-        rng=rng,
-        total_row_count=effective_total,
-        arrow_schema=_nested_capable_schema(reader),
-        source_format=source_format,
-    )
+    if arrow_reader is not None:
+        # A reader that holds Arrow is never converted to pandas on this path.
+        table = walk_arrow_table(
+            sample,
+            table_name=table_name,
+            declared_pk_cols=declared_pk_cols,
+            fk_specs=fk_specs,
+            total_row_count=effective_total,
+            source_format=source_format,
+        )
+    else:
+        table = walk_dataframe(
+            sample,
+            table_name=table_name,
+            declared_pk_cols=declared_pk_cols,
+            fk_specs=fk_specs,
+            sample_rows=effective_sample_rows,
+            rng=rng,
+            total_row_count=effective_total,
+            arrow_schema=None,
+            source_format=source_format,
+        )
     return replace(table, row_count_exact=row_count.exact)
 
 

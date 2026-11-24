@@ -49,13 +49,20 @@ def test_a_large_resident_table_is_never_converted_whole(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     converted: list[int] = []
-    real = _readers_resident._frame_of
+    sampled: list[int] = []
+    real_sample = _readers_resident.ResidentTableSource.sample_table
 
     def counting(table: pa.Table) -> Any:
         converted.append(table.num_rows)
-        return real(table)
+        raise AssertionError("the bounded profile converts no resident table to pandas")
+
+    def sampling(self: Any, sample_rows: int) -> pa.Table:
+        out = real_sample(self, sample_rows)
+        sampled.append(out.num_rows)
+        return out
 
     monkeypatch.setattr(_readers_resident, "_frame_of", counting)
+    monkeypatch.setattr(_readers_resident.ResidentTableSource, "sample_table", sampling)
     big = pa.table({"x": list(range(50_000))})
     profile = profile_source(
         _config(tmp_path), sample_rows=SAMPLE, seed=1, supplied_sources={"s": big}
@@ -63,7 +70,7 @@ def test_a_large_resident_table_is_never_converted_whole(
     s = _table_of(profile, "s")
     assert s.row_count == 50_000
     assert s.row_count_exact is True
-    assert converted == [SAMPLE]
+    assert (converted, sampled) == ([], [SAMPLE])
 
 
 def test_a_supplied_file_handle_goes_through_the_parquet_reader(

@@ -34,7 +34,7 @@ class ResidentTableSource:
     """`ProfileSource` over a table the caller holds in memory and no descriptor describes.
 
     The count and schema come from the table; the bounded sample is sliced before any pandas
-    conversion, so a large resident table is never copied whole to profile it.
+    conversion (the profile reads the slice as Arrow and never converts it), so a large resident table is never copied whole to profile it.
     """
 
     table: pa.Table
@@ -45,8 +45,11 @@ class ResidentTableSource:
     def schema(self) -> pa.Schema:
         return self.table.schema
 
+    def sample_table(self, sample_rows: int) -> pa.Table:
+        return self.table.slice(0, sample_rows)
+
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return _frame_of(self.table.slice(0, sample_rows))
+        return _frame_of(self.sample_table(sample_rows))
 
     def to_frame(self) -> pd.DataFrame:
         return _frame_of(self.table)

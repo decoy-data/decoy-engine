@@ -49,9 +49,10 @@ from decoy_engine.profile._fixed_width_reader import (
 from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
+from decoy_engine.profile.arrow._arrow_sample import head_table_from_batches
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence, Sized
 
 # Fallback bounded sample size when a caller asks for a full scan
 # (sample_rows=None) under residency="bounded" -- see profile_source. A full
@@ -405,10 +406,13 @@ class ParquetFileSource(_PolicyBound):
     def schema(self) -> pa.Schema:
         return self._lazy().schema
 
-    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return head_frame_from_batches(
+    def sample_table(self, sample_rows: int) -> pa.Table:
+        return head_table_from_batches(
             self._lazy().iter_batches(sample_rows), sample_rows, self._lazy().schema
         )
+
+    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
+        return self.sample_table(sample_rows).to_pandas()
 
     def to_frame(self) -> pd.DataFrame:
         return self._lazy().to_table().to_pandas()
@@ -461,7 +465,7 @@ class FixedWidthFileSource(_PolicyBound):
 PROOF_READ_ERRORS: tuple[type[Exception], ...] = (pd.errors.ParserError, UnicodeDecodeError)
 
 
-def has_row_beyond(read_sample: Callable[[int], pd.DataFrame], n: int) -> bool:
+def has_row_beyond(read_sample: Callable[[int], Sized], n: int) -> bool:
     """Whether the source holds a row after the first `n`.
 
     The one end-of-source proof read. It answers that question only: its frame is counted
@@ -477,26 +481,9 @@ def has_row_beyond(read_sample: Callable[[int], pd.DataFrame], n: int) -> bool:
 def head_frame_from_batches(
     batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema
 ) -> pd.DataFrame:
-    """Collect batches until `sample_rows` rows are gathered, as a DataFrame.
-
-    Stops reading as soon as the row target is met, so an arbitrarily large
-    source yields only `<= sample_rows` decoded rows. An empty source returns
-    an empty frame carrying the schema's columns (so the walker still emits one
-    ColumnProfile per column).
-    """
-    collected: list[pa.RecordBatch] = []
-    gathered = 0
-    for batch in batches:
-        collected.append(batch)
-        gathered += batch.num_rows
-        if gathered >= sample_rows:
-            break
-    if not collected:
-        return schema.empty_table().to_pandas()
-    table = pa.Table.from_batches(collected)
-    if table.num_rows > sample_rows:
-        table = table.slice(0, sample_rows)
-    return table.to_pandas()
+    """`head_table_from_batches` as a DataFrame; an empty source gives an empty frame that
+    carries the schema's columns."""
+    return head_table_from_batches(batches, sample_rows, schema).to_pandas()
 
 
 # ---------------------------------------------------------------------

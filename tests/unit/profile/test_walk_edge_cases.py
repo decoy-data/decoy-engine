@@ -28,7 +28,7 @@ class TestDuplicateColumnGuard:
 
     def test_duplicate_column_names_raise_value_error(self) -> None:
         df = pd.DataFrame([[1, 2], [3, 4]], columns=["a", "a"])
-        with pytest.raises(ValueError, match="duplicate column names"):
+        with pytest.raises(ValueError, match=r"table 't' has 1 duplicated field name\(s\)"):
             walk_dataframe(
                 df,
                 table_name="t",
@@ -38,9 +38,9 @@ class TestDuplicateColumnGuard:
                 rng=_rng(),
             )
 
-    def test_error_message_lists_duplicates(self) -> None:
+    def test_error_message_counts_duplicates_without_naming_them(self) -> None:
         df = pd.DataFrame([[1, 2, 3, 4]], columns=["a", "b", "a", "b"])
-        with pytest.raises(ValueError, match=r"\['a', 'b'\]"):
+        with pytest.raises(ValueError, match=r"^table 't' has 2 duplicated field name\(s\)$"):
             walk_dataframe(
                 df,
                 table_name="t",

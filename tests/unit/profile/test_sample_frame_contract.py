@@ -151,6 +151,18 @@ READER_MATRIX: dict[str, Callable[[Env, int], ProfileSource]] = {
 }
 READERS = sorted(READER_MATRIX)
 
+# The readers that hold Arrow and hand the bounded profile a `pa.Table` (`sample_table`).
+SAMPLE_TABLE_MATRIX: dict[str, Callable[[Env, int], ProfileSource]] = {
+    name: READER_MATRIX[name]
+    for name in (
+        "decoy_engine.profile._readers.ParquetFileSource",
+        "decoy_engine.profile._readers_resident.ResidentTableSource",
+        f"{_CLOUD}.S3ParquetSource",
+        f"{_CLOUD}.GcsParquetSource",
+    )
+}
+TABLE_READERS = sorted(SAMPLE_TABLE_MATRIX)
+
 
 @pytest.mark.parametrize("reader", READERS)
 def test_at0a_short_source_returns_every_row(env: Env, reader: str) -> None:
@@ -162,6 +174,33 @@ def test_at0a_wide_source_returns_exactly_the_rows_asked_for(env: Env, reader: s
     source = READER_MATRIX[reader](env, 25_000)
     assert len(source.sample_frame(10_000)) == 10_000
     assert len(source.sample_frame(10_001)) == 10_001
+
+
+@pytest.mark.parametrize("reader", TABLE_READERS)
+def test_at10_sample_table_short_source_returns_every_row(env: Env, reader: str) -> None:
+    table = SAMPLE_TABLE_MATRIX[reader](env, 3).sample_table(5)  # type: ignore[attr-defined]
+    assert isinstance(table, pa.Table)
+    assert table.num_rows == 3
+
+
+@pytest.mark.parametrize("reader", TABLE_READERS)
+def test_at10_sample_table_returns_exactly_the_rows_asked_for(env: Env, reader: str) -> None:
+    source = SAMPLE_TABLE_MATRIX[reader](env, 25_000)
+    assert source.sample_table(10_000).num_rows == 10_000  # type: ignore[attr-defined]
+    assert source.sample_table(10_001).num_rows == 10_001  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("reader", TABLE_READERS)
+def test_at10_sample_table_keeps_the_schema_metadata(env: Env, reader: str) -> None:
+    source = SAMPLE_TABLE_MATRIX[reader](env, 25_000)
+    assert source.sample_table(7).schema.metadata == source.schema().metadata  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("reader", TABLE_READERS)
+def test_at10_sample_frame_is_sample_table_converted(env: Env, reader: str) -> None:
+    source = SAMPLE_TABLE_MATRIX[reader](env, 50)
+    frame = source.sample_frame(20)
+    assert frame.equals(source.sample_table(20).to_pandas())  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize("kind", ["s3", "gcs"])

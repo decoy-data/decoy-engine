@@ -31,11 +31,16 @@ import random
 import pandas as pd
 import pyarrow as pa
 
-from decoy_engine._field_names import repeated_names
+from decoy_engine._field_names import duplicate_names_message
 from decoy_engine.contracts.column_shape import ColumnShape, classify_column, is_nested_type
 from decoy_engine.internal.pandas_compat import canonical_dtype_label
 from decoy_engine.profile._pii import detect_pii_classes
-from decoy_engine.profile._types import ColumnProfile, PIIClass, TableProfile
+from decoy_engine.profile._types import (
+    ColumnProfile,
+    PIIClass,
+    TableProfile,
+    column_key_fields,
+)
 
 
 def walk_dataframe(
@@ -100,14 +105,11 @@ def walk_dataframe(
     # auto-suffixes on read_csv but accepts duplicates on hand-constructed
     # DataFrames. Without this guard, df[duplicate_col] would return a
     # DataFrame instead of a Series and downstream .isna().sum() would
-    # raise TypeError. Match the slice-1 invariant style (clean ValueError
-    # at the boundary, named in the message).
-    dupes = sorted(repeated_names(str(c) for c in df.columns))
-    if dupes:
-        raise ValueError(
-            f"walk_dataframe: DataFrame for table {table_name!r} has duplicate "
-            f"column names {dupes!r}; column names must be unique."
-        )
+    # raise TypeError. The text is the shared value-free one: a header is
+    # producer-controlled, so it is counted, never named.
+    message = duplicate_names_message(table_name, (str(c) for c in df.columns))
+    if message is not None:
+        raise ValueError(message)
 
     # Resolve PII tags before walking columns (slice 3). Pre-scan runs once
     # on the full DataFrame, not per-column. When run_pii_detection is
@@ -204,19 +206,13 @@ def _walk_column(
             avg_length = float(str_lens.mean())
             max_length = int(str_lens.max())
 
-    declared_pk = name in declared_pk_cols
-    is_fk = name in fk_specs
-    fk_target = fk_specs.get(name)
-
-    # is_candidate_key_sampled is True only when full-scan AND distinct == row_count
-    # AND there is at least one row. H6 invariant; the row_count > 0 guard
-    # avoids the vacuous-truth case where an empty table would otherwise be
-    # marked candidate-key (0 distinct == 0 rows is not a useful signal for
-    # the planner). ColumnProfile.__post_init__ also rejects (sampled=True
-    # AND is_candidate_key_sampled=True), so this and-chain is the only path
-    # that can return True.
-    is_candidate_key_sampled = (
-        not sampled and row_count > 0 and distinct_count is not None and distinct_count == row_count
+    keys = column_key_fields(
+        name,
+        row_count=row_count,
+        distinct_count=distinct_count,
+        sampled=sampled,
+        declared_pk_cols=declared_pk_cols,
+        fk_specs=fk_specs,
     )
 
     return ColumnProfile(
@@ -228,10 +224,10 @@ def _walk_column(
         null_count=null_count,
         distinct_count=distinct_count,
         sampled=sampled,
-        is_candidate_key_sampled=is_candidate_key_sampled,
-        declared_pk=declared_pk,
-        is_fk=is_fk,
-        fk_target=fk_target,
+        is_candidate_key_sampled=keys.is_candidate_key_sampled,
+        declared_pk=keys.declared_pk,
+        is_fk=keys.is_fk,
+        fk_target=keys.fk_target,
         pii_class=pii_class,
         avg_length=avg_length,
         max_length=max_length,
