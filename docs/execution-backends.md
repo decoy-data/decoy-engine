@@ -211,7 +211,7 @@ Masked nullable integer columns under `truncate` or `categorical` can fail with
 
 These run their own Python handler by design, not the generic fallback:
 
-- `code_set`: no native kernel on any route. It remaps each value through a required corpus
+- `code_set`: no native kernel on any route. On the handler routes in mask mode it masks once per distinct value, up to a memory cap (65,536 entries or 8 MiB of key text), then falls back to one call per value. It remaps each value through a required corpus
   state table (a keyed corpus lookup), which no per-value Arrow/Rust kernel carries today, so it
   runs its dedicated Python handler everywhere; backlog: kernelize as a named-Arrow dict-map that
   threads the corpus. Its chunked and out-of-core support is this same mask-mode handler, admitted
