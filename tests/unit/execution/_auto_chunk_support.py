@@ -320,3 +320,19 @@ def spy_lanes(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
             ac, "run_auto_chunk", wrap("auto_chunk.run_auto_chunk", ac.run_auto_chunk)
         )
     return calls
+
+
+def fixed_list_job(
+    tmp_path: Path, dtype: pa.DataType, values: list, clean_cell: list, *, redact: bool = False
+) -> tuple[dict[str, Any], dict[str, pa.Table]]:
+    table = pa.table({"x": pa.array(values, dtype)})
+    profile = pa.table({"x": pa.array([clean_cell if v is None else v for v in values], dtype)})
+    columns = [pass_col("x")]
+    if redact:
+        email = pa.array([f"u{i}@example.test" for i in range(len(values))])
+        table = table.append_column("email", email)
+        profile = profile.append_column("email", email)
+        columns.append(redact_col("email"))
+    return make_cfg(columns, path=write_source(profile, tmp_path / "profile.parquet")), {
+        TABLE: table
+    }

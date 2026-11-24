@@ -59,6 +59,7 @@ __all__ = [
     "NUMEXPR_REQUIRED",
     "OUTPUT_ASSEMBLY_COLUMNS_MISMATCH",
     "OUTPUT_ASSEMBLY_ROWS_CHANGED",
+    "PARQUET_FIXED_LIST_NULL",
     "POST_SCAN_DISTRIBUTION_DEFERRED",
     "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
     "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
@@ -506,6 +507,15 @@ GENERATION_PROVIDER_FAILED = _d(
     "generation_provider_failed",
     "A provider column could not be generated.",
     since="1.32.0",
+)
+
+_d = _catalog.runtime("ParquetFixedListNullError")
+PARQUET_FIXED_LIST_NULL = _d(
+    "parquet_fixed_list_null",
+    "Parquet cannot store a null fixed-size list cell.",
+    phases=(Phase.MASK, Phase.FINALIZE, Phase.PUBLISH, Phase.UNKNOWN),
+    retry=RetryClass.NEVER,
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("ValidatorStateError")
