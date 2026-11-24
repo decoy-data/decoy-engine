@@ -32,6 +32,17 @@ Revisions 1 to 4 tried to build a new native operator, an Arrow front for the ha
 
 Also removed with the native cut: the census rehome, the draw-catalogue re-pin, the operator snapshot, the `_requirements.py` and `_chunked_entry.py` size moves, evidence-route parity, assembly policy and the unified retry boundary. This row now changes no sentry baseline, census, catalogue digest or size ceiling.
 
+### Open after Codex round 3 (rev 5, NO-GO; review-round cap reached, owner direction needed)
+
+Codex round 3 reviewed rev 5 at `8873326ee`. It confirmed the `double[pyarrow]` fix and the S1 value semantics, and found four V1 items. None is fixed in this revision.
+
+1. S1: an unbounded memo keeps every distinct input string alive. A column of many long distinct strings can raise `MemoryError` where the base loop completes. Proposed fix: cap retained key bytes and entries, then fall back to the scalar call; qualify guarantee 1.
+2. S2: route selection sees `ctx.caller_sources` only, so a loader-backed job (`source_loader` with `source_loader_schemas`) gets an empty proof and a forced run refuses a supported text job. Proposed fix: feed the existing `SourceFacts.schemas` into admission and recheck the resolved schema in runner preflight.
+3. S2: `capacity.py` and `_job_estimate.py` call `out_of_core_admission` without the proof, so capacity and estimates disagree with execution. Proposed fix: pass the same facts, keep the result uncertain where no schema exists, and put the proof behind the out-of-core package interface.
+4. S2: declared casting rebuilds the table and drops metadata before pandas conversion, so the raw-schema proof can refuse a valid job; and the public out-of-core runner enters `run_staged` before `run_preflight`, so staging can start before the refusal. Proposed fix: prove on the post-cast schema and run the check before the staging arena opens.
+
+Non-blocking items from round 3 (fixture boundaries for AT-1 to AT-3, one row-error producer, nonempty `large_string` width note, AT-3 file placement) go in with the fix revision.
+
 ## 1. Frame
 
 `code_set` remaps a code (ICD-10, MCC) to another real code from a pinned corpus. In mask mode the output is a pure function of `str(value)`, the config, the mask key, the namespace and the pinned corpus record (`transforms/code_set.py:262`, `_pick_mask` at `:465`, chapter path `_apply_chapter_preserve`). `row_index` is read only in gen mode.
@@ -152,16 +163,19 @@ Pinned surfaces: secret-material census, draw-site catalogue, F29 reason invento
 
 ## 7. Defect classes
 
-| # | Class | Where | Structure that closes it | Proof | Mutation |
+| # | Class | Where it applies | Structure that closes it | Proof | Mutation that must turn it red |
 |---|---|---|---|---|---|
-| 1 | Route parity, two interpretations of one value | out-of-core vs full frame | admit only columns the full-frame converter proves are text | AT-3 | M4, M5 |
-| 2 | Memo key wider than the function input | handler | key is `str(value)`, the exact first argument | AT-1 | M1 |
-| 3 | Memo keeps row-specific data | failed rows | memo stores only the reason; the row's own object and index are used | AT-1 | M2 |
-| 4 | State outliving its scope | memo dicts | locals of one `run` call | AT-1 | M3 |
-| 5 | Error precedence change | fatal and per-value errors | first occurrence calls the unchanged scalar function in row order | AT-2 | M7 |
-| 6 | Weak test (value parity passes before the change) | speed | call counts and the perf ratio carry fail-before | AT-2, AT-4 | M7 |
-| 7 | Silent mid-run abort | forced out-of-core | refusal in preflight, before temp root | AT-3 | M5 |
-| 8 | Gen-mode drift | gen loop | memo only in mask mode | AT-1 | M6 |
+| 1 | Value-bearing output | memoized `RowError` reasons; S2 refusal message | the memo stores the existing code-only reason string; the S2 message names table and column only. Existing value-bearing loader and E4 text is out of scope (candidate row CODE-SET-CORPUS-TEXT-HYGIENE) | AT-1 (reason equality), AT-3 (refusal text has no value) | M2 |
+| 2 | Cleanup missing on an exit path | none added: the memo is two local dicts, S2 reads only a schema | no new handle, file or key parameter | n/a | n/a |
+| 3 | State and concurrency | memo dicts | locals of one `run` call; no module or context state | AT-1 (two namespaces, two corpora) | M3 |
+| 4 | Route parity and silent fallback | out-of-core vs full frame; handler routes | out-of-core admits only columns the full-frame converter proves are text, and `None` facts reject; handler routes run the oracle loop | AT-1, AT-3 | M4, M5 |
+| 5 | Referential integrity | code_set payload on an out-of-core FK candidate | admission unchanged except the text proof; FK keys are not code_set inputs here | AT-3 (FK candidate job) | M4 |
+| 6 | Untrusted producer | schema metadata from a customer file | the metadata is applied by the same converter the oracle uses; failure to convert proves nothing | AT-3 (b), (d) | M4 |
+| 7 | Check then use | the out-of-core proof is on the schema, the run reads batches | the proof reads `source.schema`, the same cached schema preflight already reads for the faker check and that the stream is read under; batches that disagree with their own source schema are an existing reader concern, not changed here | AT-3 (a) two batches | M5 |
+| 8 | Weak tests | value parity passes before the change | call counts (AT-2) and the perf ratio (AT-4) carry fail-before; AT-3 (a), (b) fail on main | AT-2, AT-3, AT-4 | M7 |
+| 9 | Refactor drift | the handler loop gains a memo | golden outputs captured on the base head, under three pandas option sets; gen loop untouched | AT-1 | M1, M6 |
+| 10 | Error precedence | fatal and per-value errors | first occurrence calls the unchanged scalar function in row order | AT-2 | M7 |
+| 11 | Silent mid-run abort | forced out-of-core | refusal in preflight, before temp root | AT-3 | M5 |
 
 Recurring-defect catalog: no new validation grammar, persisted type, scanner or raised cap. No exception context is added (the memo stores strings). No value text is added to any log or message. Mutations run on the final head of each slice, head recorded.
 
