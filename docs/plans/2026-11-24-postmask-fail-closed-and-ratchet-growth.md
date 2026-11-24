@@ -342,7 +342,8 @@ Changes:
     decision Q7: required for new baselines only, no back-fill.
   - `new_decisions(base, head)`: every decision row at head and not at base, for the report.
 - Load the helper relative to `_ratchet.py`. Resolve the commit once. Build one checked
-  `git ls-tree -r -z --full-tree <sha>` inventory. Treat an optional base path as absent only
+  `git ls-tree -r -t -z --full-tree <sha>` inventory (`-t` lists directories, so a
+  directory at the checker path is seen and fails as the wrong type rather than as absent). Treat an optional base path as absent only
   after a successful listing omits it. A listed path must have the expected type and read
   successfully. A registry row naming a missing baseline fails. Fail on listing, blob read,
   decoding or parse errors. Apply this to the registry, baselines, manifest and source lookups.
@@ -654,7 +655,11 @@ Starts after RG-E3 merges, so the CLI ports reviewed code.
   on JSON rows and forbid it on other kinds. Keep `approved_growth` optional for all kinds.
   Use this one schema in both the checker and registry tests. Keep the consumer-to-loader
   check (`test_baseline_registry.py:96-103,291-314`). Update the CLI fixture row writers
-  (`test_ratchet_check.py:46-47,180,483,561`) to emit a valid kind.
+  (`test_ratchet_check.py:46-47,180,483,561`) to emit a valid kind. Also update
+  `tests/sentry/cli_text/test_error_emitter_ratchet.py:22`: its row needs `kind = "from_scan"` for
+  the pass cases at `:68` and `:73`. `tests/sentry/test_lint_debt.py:50` copies the checker into a
+  scratch tree; copy `_integrity.py` with it so the scratch checker can load `safe_path`.
+  Test: a directory at `scripts/dev/ratchet_check.py` in the base tree fails the gate.
   Pin the shared case table byte for byte (`layout/test_vendored_files.py:44-48`).
 - `tests/sentry/_ratchet.py` (342 lines): load the helper by path; call it from `check()`; replace
   `startswith`.
@@ -673,7 +678,8 @@ Starts after RG-E3 merges, so the CLI ports reviewed code.
 Port the RG-E1 and RG-E3 behavior cases. Use valid CLI rows in the shared fixtures.
 
 - `test_live_cli_registry_kinds_and_consumers_pass` (pin). Run the CLI checker on the live
-  registry, including JSON and recomputed rows (`scripts/dev/sentry_registry.toml:7-17`).
+  registry, including JSON rows (`scripts/dev/sentry_registry.toml:7-17`, kind definitions and a
+  JSON row) and recomputed rows (`:91-94`).
 - `test_cli_integrity_rejects_invalid_kind_or_consumer` (red-before). Run the checker
   on a missing or unknown kind, a missing JSON consumer and a consumer on a recomputed row.
 - `test_new_baseline_without_created_in_fails` is a CLI pin (`_ratchet.py:274-275`).
