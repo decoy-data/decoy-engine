@@ -1,4 +1,14 @@
-Status: plan (revision 2.6, 2026-11-24, after Dennis review round 2).
+Status: plan (revision 2.7, 2026-11-24, after the fourth Codex NO-GO on the created-column preflight).
+
+**Changes in revision 2.7**
+
+- **V1, HIGH.** The `when:` absent-column check moves into the one step that takes a table's pre-mask snapshots, on the real masking frame, before the table's first handler. The executor preflight and `begin_table` are removed.
+- **V1, HIGH.** It checks only gates that dispatch evaluates (scalar and passthrough). FK children and composites run as on main.
+- **V1, MEDIUM.** It reads the converted frame's column labels, so derive targets, dropped columns and pandas-labelled fields are handled without predicting a schema. A read missing from the table no longer resolves to a stored index whose name matches the internal alias `_wN` (disclosed in H). Otherwise how a gate reads a stored pandas index field is not changed; that stays as on main and is logged as follow-up FU-27a (rounds 5 and 6 showed any conversion change there breaks working jobs).
+- **V1.** The refusal follows each route's documented failure contract; no new delivery guarantee is claimed.
+- **Ratchet.** `masking_frame` is removed; no new `lossless-int-columns` key, no owner question.
+
+The "Revision 2.7" section at the end takes precedence over earlier text on these points.
 
 **Changes in revision 2.6**
 
@@ -1291,3 +1301,304 @@ about 80 (`masking_frame`, `snapshot_rows`, read fields). Tests gain the oracle 
 copied) and four sentries. Review: Codex then Dennis on the S2a head. Test scope: T0 per edit,
 T1 plus the named tests and sentries per commit, T3 at the merge head diffed against the saved
 main baseline (the shared conftest change triggers it).
+
+## Revision 2.7 (2026-11-24). One check for `when:` on a column the input lacks
+
+This section supersedes every earlier statement about the created-column refusal, the conversion
+point and `begin_table`. Code anchors are at the #783 head `efcee5ffd`.
+
+### Why a new design
+
+The Codex delta review of `efcee5ffd` was the fourth NO-GO in one class: the created-column
+preflight. Two draft designs for this revision also failed review:
+
+- An executor preflight on declared columns (draft 1). It needed its own schema resolver, and the
+  resolver could pick a different source or a different column set than the one masked.
+- A rule at the pre-read declaration boundary (draft 2). It had to predict the masked input's
+  columns from descriptors, supplied schemas and transform expressions. Each prediction was wrong
+  in a case main runs (a descriptor that differs from the resident table, `derive d = abs(id)`,
+  a derive-then-drop target), and it still could not see actual-input drift.
+
+Both drafts tried to predict the input. The input is known exactly at one point: when a table's
+masking frame exists and its pre-mask snapshots are taken, before its first handler. Revision 2.7
+checks there and nowhere else, and it uses the sink contract the engine already documents for
+any later-table refusal.
+
+What main does: the gate reads the live frame when the gated node runs. A name absent from the
+frame raises `when_expression_error` at that point. A name that a creator node wrote earlier in
+work order is read from the created values. The only case revision 2.7 changes is that second
+one. Conversion is not changed, so every column label the gate could read from the converted
+frame on main it can still read, with the same values. One accidental read is lost; see
+"Internal alias collision" below.
+
+### Design
+
+**Invariant P.** On every pandas route, before the first handler for a table runs, every column
+that an evaluated gate on that table names must be a column label of that table's masking frame
+after conversion (the same conversion as main, exact-integer retyping included) and before any
+node runs. Otherwise the run raises `when_expression_error`
+with a message that names the table only. There is one implementation of this check and it runs
+where the table's snapshots are taken.
+
+#### A. One predicate for "the gate is evaluated"
+
+- `resolve_operation` (`work_order/operations.py:126`) sets `gated = True` only for kinds
+  `"scalar"` and `"passthrough"` with a `when`. Dispatch evaluates the gate only on that path
+  (`_pandas_adapter._dispatch_mask_node`: FK resolve at `:388`, composite handler at `:402`, else
+  `run_with_when_gate`). FK children and composites get `gated = False`, as dispatch treats them
+  on main.
+- Add `gate_reads(op) -> frozenset[str]` in `work_order/when_reads.py`: the names the op's `when`
+  reads when `op.gated`, else empty.
+- `source_snapshot_columns` (`_runner.py:333`) takes gate reads from `gate_reads` only.
+- `lossless_int_columns` keeps the plan-wide `when_read_columns` (ingestion typing, as on main).
+- No config-level classifier is added. The check runs after compile, on `op.gated`.
+
+#### B. The check lives in the snapshot step
+
+Add `take_source_snapshots(order, snapshot_cols, table, frame) ->
+dict[tuple[str, str], pd.Series]` in `work_order/rows.py`. `snapshot_cols` is
+`source_snapshot_columns(order)`, computed once per order by the caller. The function:
+
+1. computes `input_names = set(frame.columns)`: the data-column labels pandas produced when it
+   converted the table, before any node runs. These are the labels the gate reads on main
+   (pandas metadata can label a Parquet field `foo` as `logical`, and main evaluates
+   `logical > 0`). Conversion is unchanged from main, so these are exactly the names main's gate
+   could read before the first node;
+2. computes `missing = union(gate_reads(op) for ops of table) - input_names` over **all**
+   evaluated gate reads (not only the snapshotted ones) and raises `when_expression_error` when
+   `missing` is not empty;
+3. returns the pre-mask copies for `snapshot_cols.get(table, ())` that are in the frame. The map
+   is sparse: a gate column no node writes is not copied (`_runner.py:355`).
+
+Both sites that fill `ctx.group_anchor_snapshots` call it. The separate FK parent-key copies
+(`_pandas_adapter.py:259`, `_sequential.py:435`) and their eviction lifetime are unchanged.
+The sites are:
+
+- Full-frame (`_pandas_adapter.py:216`): for every table in `frames`, after conversion and before
+  the node loop. All tables are checked before any node is dispatched, and `run` returns no output
+  on an exception. Any route that masks through `adapter.run` reaches it: the chunked oracle per
+  chunk (`_chunked_oracle.py:448`) and a split's remaining full-frame group
+  (`_pipeline_multi_table.py:424`). A dispatched split table or the resident auto-chunk lane
+  reaches it only when it falls to the oracle; on native code it follows the native rule below.
+  A zero-chunk oracle stream builds no frame and masks nothing, as on main.
+- Sequential (`_sequential.py:445`): per loaded table, before that table's node loop. This also
+  covers the physical driver (`physical/drivers/_sequential.py:69`), which calls
+  `run_sequential`.
+
+`reject_when_on_created`, `WorkOrderRun.begin_table`, the `input_columns` idea and any schema
+resolver are deleted. `WorkOrderRun.__init__(order)` is unchanged.
+
+The frame is the converted masking frame. `table.to_pandas()` moves stored index fields to the
+index and `positional_frame` (part D) replaces it. Exact-integer retyping can assign a nullable
+integer stored index back as a column, or over a data column with the same pandas label
+(`_fk_keys.py:340`, `internal/pandas_compat.py:109`). That is main's behavior, B accepts what
+the frame holds, and the check neither adds nor removes those reads. See FU-27a.
+Derive targets are frame columns, dropped columns are not, and a column the source holds counts
+even when a column node later overwrites it. No schema is predicted.
+
+#### C. Sink and stream contract (unchanged, now stated for this refusal)
+
+- Full-frame `run`: atomic. It raises before returning any output.
+- `run_sequential` with a `TransactionalSink` (the pipeline's sink type,
+  `_pipeline_context.py:107`): commit on success, abort on any exception. `write` may already have
+  staged earlier tables, but nothing is published.
+- `run_sequential` with a plain callable sink: the documented non-transactional contract
+  (`_sequential.py` module docstring, "Sink contract"): "a per-table guard rejection on a later
+  table leaves the tables emitted so far already delivered ... A durable consumer MUST treat an
+  exception as discard everything emitted for this run." This refusal is a per-table guard
+  rejection. Main raised the same code for an absent gate column at the same point in the run
+  (when the gated node ran), so no config that main refused is refused later than on main.
+- Chunked streams: a refusal on chunk N leaves chunks 1 to N-1 yielded, as for any per-chunk
+  refusal on main. The refused chunk is not masked or yielded.
+- Native routes do not use this code. Their outcome for these plans stays as on the branch's
+  route sweep, which pins it as characterization.
+
+No route gains a zero-delivery guarantee it did not have. Revision 2.7 does not claim one.
+
+#### D. Ratchet: no new key, no owner question
+
+- Delete `masking_frame` (`_fk_keys.py:465`). Call `to_pandas_fk_safe` directly at the two main
+  sites (`_pandas_adapter.py::PandasExecutionAdapter.run`, `_sequential.py::run_sequential`).
+- Share only the index step: `positional_frame(frame) -> tuple[pd.DataFrame, pd.Index]` in
+  `work_order/rows.py`.
+- Restore `tests/sentry/baselines/lossless-int-columns.json` to origin/main byte for byte.
+  Restore the live allowlist in `tests/sentry/defects/test_lossless_int_columns.py:54`. Update the
+  call inventory in `tests/native/test_column_access_surfaces.py:290` and any spy that patches
+  `masking_frame`. Move `tests/unit/execution/when/test_positional_rows.py:19` to
+  `positional_frame`.
+- `scripts/dev/ratchet_check.py` exits 0 against origin/main. No `approved_growth` row.
+
+
+
+#### E. Compile-once allowlist is registered
+
+`tests/sentry/defects/test_compile_once.py` is new on this branch. Name its dict `ALLOWED` and
+register it through the sentry registry's normal process: a `[[sentry]]` row in
+`scripts/dev/sentry_registry.toml`, a baseline `tests/sentry/baselines/compile-once.json`, and an
+`InCode` source in the baseline-source table. The ratchet reports a first inventory.
+
+#### F. `snapshot_rows` owns the row checks
+
+- `gated_context` (`_when_gate.py:547`, built through `_exact_int_sources.py:113`) carries
+  `source_row_count`, the length of the full frame the gate ran on. An ungated reader passes the
+  current frame length on each call, because the executor shares one context across tables.
+- `snapshot_rows(ctx, table, column, expected_len, misaligned)` checks
+  `len(snapshot) == ctx.source_row_count` before `.iloc[positions]`, then
+  `len(selected) == expected_len`. A mismatch raises `misaligned(misaligned_message(table))`.
+- The three readers (`_when_gate.py:482`, `_joint_mask.py:69`, date_shift) pass their own error
+  factory, keep their own codes, and drop their own comparisons.
+
+#### G. Public import
+
+Any module that keeps importing `ColumnSeed` for this work imports it from `decoy_engine.plan`.
+
+#### Internal alias collision (disclosed change)
+
+The evaluator renames each gate read to an internal alias `_w0`, `_w1`, ...
+(`expressions/_when_parser.py:451`) and evaluates on a frame built under those aliases. On main
+the masking frame kept the stored index, so a read missing from the frame resolved to the index
+through pandas name lookup whenever its generated alias matched the stored index name, however
+the predicate spelled the read. Codex reproduced this with a stored index `_w0` = [1, 2, 0] and
+both `when: "_w0 > 0"` and `when: "idx > 0"` (no `idx` column). #783 already replaced the index
+with a `RangeIndex` for positional rows (accepted in revision 2.x), and B refuses the name because
+it is not a frame column. An index with any other name was not readable on main (a stored `idx` raised
+`when_expression_error`). Preserving the fallback would let a misspelled column select rows
+from an unrelated index. Keeping this read would mean keeping the stored index on the gate frame
+only for names that collide with an internal alias, which is not a supported surface. The
+revision keeps the refusal and discloses it in H. The failure is loud, before any dispatch, with
+no data loss and no leak.
+
+#### FU-27a. Stored index fields read by a gate (follow-up, not in #783)
+
+On main and at #783, a gate on a stored pandas index name raises `when_expression_error` when the
+index has no null, reads the index values when it has a null and is selected for exact-integer
+conversion, and reads the index values in place of a data column whose pandas label equals the
+index's physical name (a possible mask miss). This slice leaves all three as they are. Codex
+rounds 5 and 6 showed that filtering stored index fields out of exact conversion breaks an
+ungated `date_shift` grouped by a stored index and loses exactness for a same-label data field.
+The fix needs its own plan: separate exact handler inputs from gate-readable values, and take a
+same-label gate value from the Arrow field behind the label. Log it as a V1 candidate row for the
+owner to slot. It is not a regression from #783.
+
+#### H. Changelog
+
+Replace the created-column sentence in `changelog.d/when-reads-source.md:19` with: "On the
+pandas routes, a `when:` on a masked column must name columns the table holds before masking
+starts (source columns and `derive` targets). For a config that passes the existing declaration
+and stored-index checks (which can refuse first with their own codes), a name that only a masking
+column creates fails with `when_expression_error` before that table is masked. Main raised the
+same error when the creating column ran after the gated one, and read the created values when it
+ran before. On main, a read missing from the table could resolve to a stored pandas index when the
+engine's internal alias for that read (`_w0`, `_w1`, ...) matched the index name. It now fails
+with `when_expression_error`. If the gate should read index values, materialize them as a data
+column and use that column's name in `when:`. A
+`when:` on an FK child column or a composite bundle is not evaluated, as on main, and those jobs
+run as before. The refusal follows each route's existing failure contract: a transactional sink
+publishes nothing, and a plain callable sink or a chunk stream may already hold earlier tables or
+chunks."
+
+### Failure modes
+
+| Mode | Defense | Test |
+|---|---|---|
+| Refusing a node whose gate dispatch never evaluates | A | AT-27a, AT-27b |
+| Checking a predicted schema instead of the real input | B uses the converted frame's labels | AT-27d, AT-27e |
+| Changing conversion breaks a working job | conversion untouched | AT-27d |
+| Sparse snapshot map breaks a valid job | B uses `.get` | AT-27c control |
+| A second check site drifts from the first | B: one function, both snapshot sites | AT-27c |
+| Refusal after a handler of the same table ran | B runs before the node loop | AT-27c |
+| Delivery outside the stated contract | C | AT-27f |
+| Ratchet key or allowlist drift | D | AT-27h |
+| Allowlist escapes the registry | E | AT-27i |
+| Reader skips a row check, or `.iloc` raises first | F | AT-27j |
+
+### Acceptance tests
+
+Each test names a mutation that must turn it red.
+
+- **AT-27a `test_gate_evaluated_matches_dispatch`.** For scalar, passthrough, single FK child and
+  composite (built-in and caller-registered provider), each with a `when` that compiles:
+  `op.gated` equals what a dispatch spy on predicate evaluation records. A composite FK member
+  with a configured `when` compiles into a `GroupSeed` (`plan/_seed_envelope.py:66`): assert a
+  group operation, `gated` False, and zero predicate evaluations. Mutation: `gated` true for
+  every `ColumnSeed` with `when`.
+- **AT-27b `test_gate_not_evaluated_on_fk_and_composite_runs_as_main`.** An FK child and an
+  admissible composite bundle, each with a `when` naming a column only a masking column creates,
+  through `run_pipeline` full-frame and sequential. No error; output equals main. Mutation:
+  `take_source_snapshots` reads every `ColumnSeed.when` instead of `gate_reads`.
+- **AT-27c `test_absent_gate_column_refused_before_table_handlers`.** One table. An ungated node
+  that sorts first in the verified work order, a creator of `c`, and a scalar gate reading `c`.
+  Spy at node-dispatch entry (`_dispatch_mask_node`). Full-frame `adapter.run`, `run_sequential`
+  and the physical driver: `when_expression_error` and zero dispatches. Control: the same plan
+  with `c` in the source succeeds on each. A second control redacts `z` when the untouched source
+  column `n > 0` (empty snapshot map) and succeeds. Mutation: delete the check from
+  `take_source_snapshots` (the first node is then dispatched).
+- **AT-27d `test_gate_names_match_main_conversion`.** Main-parity cases on both direct
+  executors, each with an ungated first node. (1) Stored index `idx` `Int64` `[1, 2, 0]`, gate
+  `idx > 0`: `when_expression_error`, zero dispatches. (2) A real input column `idx`: the gate
+  reads source values. (3) Sequential: a Parquet field `foo` with pandas label `logical` = [1, 0],
+  gate `logical > 0`: row 0 only is masked. (4) Fields `z, foo`, `foo` nullable `Int64`
+  `[1, None, 0]` labelled `logical`, gate `foo > 0`: row 0 only. (5) Ungated `date_shift` grouped
+  by a stored integer index `g = [1, 1, 2]` succeeds. Cases 1 to 5 assert the same outcome as
+  origin/main. (6) Disclosed change: stored index `_w0` = [1, 2, 0], `when: "_w0 > 0"`:
+  `when_expression_error`, zero dispatches. Mutations: check against Arrow `schema.names`
+  (case 3 fails; case 4 stays a physical-name parity control); filter stored index fields out
+  of exact conversion (case 5 fails).
+- **AT-27e `test_transform_and_overwrite_inputs_are_readable`.** (1) `derive d = abs(id)` then a
+  gate `d > 1`: the matching rows are masked. (2) Source `x` = [4, -1, 3, -2], a masking column
+  overwrites `x` with values that cross zero, and a gate `x > 0` on another column selects rows 0
+  and 2 (from the source `x`, asserted directly). (3) Derive `d` then drop `d`, gate on `d`:
+  refused before dispatch. (4) A gate on a dropped source column: refused before dispatch. Cases
+  3 and 4 also assert, with a spy, that `take_source_snapshots` raised, so an earlier admission
+  error can not satisfy them. Mutation: compute readable names from the config instead of the
+  input table.
+- **AT-27f `test_refusal_follows_sink_contract`.** Two tables; `a` valid, `b` refused.
+  `run_sequential` with a `TransactionalSink`: abort called, commit not called, nothing
+  published. With a plain callable sink: `a` delivered, `b` not, error raised (the documented
+  contract). Full-frame `run`: no output. Stream: single table, ungated creator of `k`, a gate
+  reading `k`; chunk 1 has `k` as a source column, chunk 2 omits it. One yield, then
+  `when_expression_error`, and zero dispatches for chunk 2. Mutations: catch the refusal per
+  table and continue; run the check only on the first chunk.
+- **AT-27h ratchet.** `scripts/dev/ratchet_check.py --base origin/main` exits 0; the
+  `lossless-int-columns` sentry passes on main's keys. Mutation: route conversion through a
+  forwarding helper.
+- **AT-27i compile-once registry.** The registry tests find `ALLOWED` as a registered source.
+  Mutation: add a site to `ALLOWED` without the baseline.
+- **AT-27j `test_snapshot_rows_raises_reader_code`.** Corrupt the predicate reader's full
+  snapshot. Through a gated `joint_mask`: a valid selection of 2 rows out of 4 passes; a snapshot
+  one row short raises the reader's code when the gate selects early positions and when it
+  selects the last position; never `IndexError`. Gated `date_shift` uses a direct handler fixture,
+  because compilation refuses `group_by` with `when` (`plan/_checks_date_shift.py:215`).
+  Mutation: compare the snapshot with `expected_len` instead of `source_row_count`.
+
+### Revision 2.6 text this supersedes
+
+- Builder list item 3 "Add `masking_frame`, route both conversions through it" and the
+  `masking_frame` paragraph under "Index handling (V1-3, D1, L2)". Replaced by D.
+- Every use of `begin_table` and the per-table preflight. Replaced by B.
+- "A `when:` that names a column an earlier node creates ... still fails" (section 3 non-goals
+  and the changelog). Replaced by A, B and H.
+
+### What the #783 builder changes (adds to revision 2.6's list)
+
+On `feat/when-reads-source-s2`, new commits on top of `efcee5ffd`, no rebase, no force-push:
+
+1. `work_order/operations.py`: `gated` only for scalar and passthrough. `gate_reads` in
+   `when_reads.py`; `source_snapshot_columns` uses it.
+2. `work_order/rows.py`: `take_source_snapshots` with the absent-column check against the
+   converted frame's columns and a sparse-safe snapshot lookup; both
+   `group_anchor_snapshots` sites (`_pandas_adapter.py:216`, `_sequential.py:445`) call it.
+3. Delete `reject_when_on_created`, `begin_table` and their call sites. Delete `when_reads.py`
+   if only `gate_reads` remains and move `gate_reads` next to `ResolvedOperation`.
+4. Delete `masking_frame`; direct `to_pandas_fk_safe` at the two main sites; `positional_frame`;
+   restore the baseline JSON, the live allowlist, the call inventory, spies and the moved test.
+5. Register `ALLOWED` in `test_compile_once.py` as a sentry with its baseline.
+6. `source_row_count` on the gated context; `snapshot_rows` owns both checks with a per-reader
+   error factory.
+7. Changelog fragment per H.
+8. AT-27a to AT-27j, each mutation run and recorded red in the PR body.
+
+Size: about 110 source lines removed (`masking_frame`, `begin_table`, `reject_when_on_created`,
+reader checks) and 40 to 60 added. Tests add about 220 lines. Test scope: T0 per edit, T1 plus
+AT-27a to AT-27j and the sentries per commit, T3 at the merge head against the saved main
+baseline (the sentry registry and baselines are a trigger). Review: Codex on the S2a head.
