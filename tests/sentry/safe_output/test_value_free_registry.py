@@ -137,3 +137,51 @@ def test_special_methods_walk_catches_a_value() -> None:
     assert special_method_findings(sources, "m", "E") == []  # a self attribute is the raise's
     assert special_method_findings(sources, "m", "F")
     assert special_method_findings(sources, "m", "G") == []
+
+
+_FINDING_REVIEW_SHAPE = """
+class E(Exception): pass
+def f(config):
+    problems = None
+    try:
+        parse(config)
+    except PipelineConfigError as err:
+        problems = config_problems_text(err)
+    if problems:
+        raise E(f"rejected ({problems})")
+"""
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        _FINDING_REVIEW_SHAPE,
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as e:\n"
+        "        pass\n    raise E(e)\n",
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as e:\n"
+        "        t = str(e)\n    raise E('x ' + t)\n",
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as e:\n"
+        "        t = e.args\n    raise E(t)\n",
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as e:\n"
+        "        a = getattr(e, 'msg')\n        b = a\n    raise E(b)\n",
+        "class E(Exception): pass\ndef f(token):\n    raise E(describe(token))\n",
+    ],
+    ids=[
+        "finding_review_shape",
+        "except_name_raised",
+        "str_of_except_name",
+        "args_of_except_name",
+        "getattr_then_chain",
+        "audit_value_name_through_call",
+    ],
+)
+def test_rule_drops_a_class_raised_with_text_derived_from_a_caught_exception(source: str) -> None:
+    assert "E" in _admission(m=source).bad
+
+
+def test_rule_allows_the_type_of_a_caught_exception() -> None:
+    src = (
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as e:\n"
+        "        name = type(e).__name__\n    raise E('failed: ' + name)\n"
+    )
+    assert "E" not in _admission(m=src).bad

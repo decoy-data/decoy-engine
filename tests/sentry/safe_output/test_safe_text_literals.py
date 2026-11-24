@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.sentry.safe_output._scopes import iter_scopes
+from tests.sentry.safe_output._scopes import exposes, iter_scopes
 from tests.sentry.safe_output._tagger import risky_in
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
@@ -51,7 +51,7 @@ def _template_findings(call: ast.Call, risky: frozenset[str]) -> list[str]:
         for key, value in zip(kw.value.keys, kw.value.values, strict=True):
             keys.add(ast.literal_eval(key))  # type: ignore[arg-type]
             hits = risky_in(value, risky)
-            if hits:
+            if hits or exposes(value, risky):
                 found.append(
                     f"slot {ast.literal_eval(key)!r} takes a tagged value {sorted(set(hits))}"
                 )  # type: ignore[arg-type]

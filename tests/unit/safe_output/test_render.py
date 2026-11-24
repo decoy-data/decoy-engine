@@ -222,3 +222,18 @@ def test_template_slot_misuse_is_a_programming_error(literal: str, kwargs: dict)
 
 def test_template_slot_value_braces_are_not_reformatted() -> None:
     assert SafeText.template("c {a}", names={"a": "{b}"}).text == "c {b}"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [reasons.decoy.UNEXPECTED_ERROR, reasons.decoy.UNREGISTERED_REASON, reasons.config.UNTAGGED],
+    ids=["unexpected_error", "unregistered_reason", "untagged"],
+)
+def test_generic_reasons_do_not_count_as_coded(
+    registered: None, monkeypatch: pytest.MonkeyPatch, reason: reasons.ReasonCode
+) -> None:
+    monkeypatch.setattr(
+        _render, "reason_from_exception", lambda exc: ReasonRecord.for_reason(reason)
+    )
+    assert render_failure(_RegisteredError("kept message")).text == "kept message"
+    assert render_failure(ValueError(_CANARY)).text == "ValueError"

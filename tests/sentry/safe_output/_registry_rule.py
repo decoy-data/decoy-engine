@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tests.sentry.safe_output._exc_copies import copy_lines
-from tests.sentry.safe_output._scopes import iter_scopes
+from tests.sentry.safe_output._scopes import exposes, iter_scopes
 from tests.sentry.safe_output._tagger import risky_in
 
 CODE_KW = frozenset({"code", "reason"})
@@ -126,7 +126,7 @@ def analyze(sources: Mapping[str, str]) -> Admission:
                     continue
                 if not coded:
                     uncoded.add(cls)
-                if near_copy or any(risky_in(e, risky) for e in exprs):
+                if near_copy or any(risky_in(e, risky) or exposes(e, risky) for e in exprs):
                     bad.add(cls)
     return Admission(
         classes={k: tuple(v) for k, v in classes.items()},
@@ -156,6 +156,6 @@ def special_method_findings(sources: Mapping[str, str], module: str, class_name:
             for ret in own:
                 if isinstance(ret, ast.Return) and ret.value is not None:
                     hits = risky_in(ret.value, risky)
-                    if hits:
+                    if hits or exposes(ret.value, risky):
                         found.append(f"{module}.{class_name}.{scope.name}: {sorted(set(hits))}")
     return found
