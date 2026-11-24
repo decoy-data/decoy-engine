@@ -25,7 +25,7 @@ from decoy_engine.execution.native._text_redact_kernel import (
     load_text_span_splice,
 )
 from tests.native._c6c_ii_support import ELIGIBLE_TEXTS, INELIGIBLE_TEXTS, oracle_text_redact
-from tests.native._detector_offset_support import (
+from tests.native.text_splice._detector_offset_support import (
     OVERSIZED_EMAIL,
     SHORT_EMAIL,
     build_tooling_missing,
