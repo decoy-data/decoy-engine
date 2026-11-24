@@ -1,0 +1,24 @@
+{
+ "sentry_id": "output-assembly-one-path",
+ "created_in": "UF-DOMAIN-S1",
+ "entries": {
+  "execution/_mixed_fk_bridge.py::_write_back_fk_column": {
+   "reason": "UF-DOMAIN S1: converts one FK key column to read back its resolved Arrow type; the stitch writes that column, not a table"
+  },
+  "execution/_transforms_table.py::_apply_ops": {
+   "reason": "UF-DOMAIN S1: infers the schema of the columns a transform derives; no table is built"
+  },
+  "execution/_unified_slice_admission.py::cheap_admission": {
+   "reason": "UF-DOMAIN S1: the admission-only round trip that checks the frame converts as the oracle would; the result is compared, never published"
+  },
+  "execution/pipeline/_lifecycle_inputs.py::_read_csv": {
+   "reason": "UF-DOMAIN S1: reads a source sample (input)"
+  },
+  "execution/pipeline/_lifecycle_inputs.py::_read_fixed_width": {
+   "reason": "UF-DOMAIN S1: reads a source sample (input)"
+  },
+  "execution/pipeline/_source_types.py::table_from_pandas_keeping_source_types": {
+   "reason": "UF-DOMAIN S1: the one assembler"
+  }
+ }
+}
