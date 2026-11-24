@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import compile_plan, declared_columns
+from decoy_engine._pandas_meta import arrow_columns
 from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution._output_projection import known_output_columns
@@ -27,7 +28,7 @@ from decoy_engine.profile import (
     profile_source,
     source_columns,
 )
-from decoy_engine.profile._declared_columns import DeclarationInput, arrow_columns
+from decoy_engine.profile._declared_columns import DeclarationInput
 from tests._declared_schema import declare_rest
 
 MARK_A, MARK_B = "zz_marker_a", "zz_marker_b"

@@ -2,13 +2,19 @@
 `b"pandas"` footer blob for each Arrow type.
 
 Native admission reads `PLAIN_PAIRS` and `COLUMN_INDEX_ENTRY` to decide which source metadata it
-can prove an identity conversion for. The output sanitizer (`safe_output`) reads `pairs_for` and
+can prove an identity conversion for. Profile and execution read the stored-index and nullable
+column facts from `_columns`. The output sanitizer (`safe_output`) reads `pairs_for` and
 `column_metadata` to rebuild the blob of an output file from the output schema alone. Each keeps
 its own policy; this package holds only the facts. Imports only `pyarrow`.
 """
 
 from __future__ import annotations
 
+from decoy_engine._pandas_meta._columns import (
+    arrow_columns,
+    pandas_nullable_columns,
+    stored_index_fields,
+)
 from decoy_engine._pandas_meta._descriptors import (
     COLUMN_INDEX_ENTRY,
     PLAIN_PAIRS,
@@ -16,4 +22,12 @@ from decoy_engine._pandas_meta._descriptors import (
     pairs_for,
 )
 
-__all__ = ["COLUMN_INDEX_ENTRY", "PLAIN_PAIRS", "column_metadata", "pairs_for"]
+__all__ = [
+    "COLUMN_INDEX_ENTRY",
+    "PLAIN_PAIRS",
+    "arrow_columns",
+    "column_metadata",
+    "pairs_for",
+    "pandas_nullable_columns",
+    "stored_index_fields",
+]
