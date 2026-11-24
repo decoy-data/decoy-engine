@@ -222,7 +222,7 @@ def sequential_fk(tmp: Path, mp: pytest.MonkeyPatch, ctx: dict[str, Any]) -> dic
     from tests.unit.execution.test_isolated_worker_streaming import _fk_config
 
     cfg, manifest = _fk_config(tmp)
-    sources = {name: pq.read_table(path) for name, path in manifest.items()}
+    sources = {name: pq.read_table(entry["path"]) for name, entry in manifest.items()}
     out = tmp / "seq_out"
     res = run_pipeline(
         cfg,
@@ -239,7 +239,7 @@ def out_of_core_fk(tmp: Path, mp: pytest.MonkeyPatch, ctx: dict[str, Any]) -> di
     from tests.unit.execution.test_isolated_worker_streaming import _fk_config
 
     cfg, manifest = _fk_config(tmp)
-    sources = {name: ctx["lazy"](Path(path)) for name, path in manifest.items()}
+    sources = {name: ctx["lazy"](Path(entry["path"])) for name, entry in manifest.items()}
     out = tmp / "ooc_out"
     res = run_pipeline(
         cfg,

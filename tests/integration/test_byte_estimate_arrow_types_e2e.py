@@ -311,7 +311,6 @@ _REFUSED_WITH_ESTIMATE_OFF = frozenset(
         "map",
         "dense_union",
         "sparse_union",
-        "fixed_size_list",
         "fixed_shape_tensor",
         "dictionary_float16",
         "ree_string_view",

@@ -11,6 +11,7 @@ optional GCS + SFTP installs). List + open + write semantics; no DataFrame
 conversion at the connector layer.
 """
 
+from decoy_engine.connectors._clients import refreshed_error
 from decoy_engine.connectors.object_store import (
     GCSObjectStore,
     ObjectStore,
@@ -50,4 +51,5 @@ __all__ = [
     "SFTPFileSink",
     "SFTPFileSource",
     "Version",
+    "refreshed_error",
 ]
