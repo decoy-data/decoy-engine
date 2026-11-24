@@ -1,7 +1,7 @@
 """`StageDir.claim_from` and `seal_of` on every stage implementor, and the link primitive (AT-66).
 
 The strict and ambient output stages and the scratch arena share one claim (`_stage_claim`) and
-one no-clobber link (`_durable.link_noclobber_at`); the ambient exclusive publish and the durable
+one no-clobber link (`_output.link_noclobber_at`); the ambient exclusive publish and the durable
 vault publish call that same link.
 """
 
@@ -408,6 +408,6 @@ def test_only_the_two_registered_sites_call_os_link_in_fileaccess() -> None:
                 if is_link and isinstance(node.value, ast.Name) and node.value.id == "os":
                     sites.append((source.name, fn.name))
     assert sites == [
-        ("_link.py", "link_noclobber_at"),
         ("_local_chain.py", "link_noclobber_beside"),
+        ("_output.py", "link_noclobber_at"),
     ]

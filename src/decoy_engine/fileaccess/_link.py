@@ -1,8 +1,9 @@
 """The one no-clobber hard link and its errno map, a leaf under every caller that links.
 
 Pattern: Maildir delivery and git `finalize_object_file`: `link(2)` places a finished file and the
-file system decides whether the name is taken. `link_noclobber_at` is the descriptor form (two
-validated components beneath held directories, never following a symlink). `raise_link_error` is
+file system decides whether the name is taken. `_output.link_noclobber_at` is the descriptor form (two
+validated components beneath held directories, never following a symlink; the dir_fd call lives
+there with the other descriptor sites). `raise_link_error` is
 the one errno map: the ambient arm that has no descriptor form (Windows, or a backend whose
 `os.link` takes no `dir_fd`) calls the plain two-path `os.link` itself and maps its errno here, so
 both forms answer the same way. Errors keep only their errno.
@@ -13,11 +14,9 @@ from __future__ import annotations
 import errno
 import os
 
-from decoy_engine.fileaccess import _osflags
-from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._types import LinkUnsupported
 
-__all__ = ["CREATOR_KEY", "link_noclobber_at", "raise_link_error"]
+__all__ = ["CREATOR_KEY", "LINK_UNSUPPORTED", "raise_link_error"]
 
 CREATOR_KEY = "fileaccess.stage"  # the denial key for a bad name given straight to a creator
 # A link failing with one of these means the file system cannot hard-link here (EPERM: FAT and
@@ -37,27 +36,3 @@ def raise_link_error(code: int) -> None:
         raise LinkUnsupported(code)
     if code:
         raise OSError(code, os.strerror(code))
-
-
-def link_noclobber_at(src_dir_fd: int, src_name: str, dst_dir_fd: int, dst_name: str) -> None:
-    """Link `src_name` to `dst_name` without replacing it. Raises `FileExistsError` for a taken
-    name, `LinkUnsupported` for `LINK_UNSUPPORTED` (or a backend whose `os.link` has no descriptor
-    form) and an errno-only `OSError` for anything else."""
-    validate_component(src_name, CREATOR_KEY)
-    validate_component(dst_name, CREATOR_KEY)
-    code = errno.ENOSYS  # Windows has no descriptor form: the ambient arm links by path
-    if not _osflags.WINDOWS:
-        code = 0
-        try:
-            os.link(
-                src_name,
-                dst_name,
-                src_dir_fd=src_dir_fd,
-                dst_dir_fd=dst_dir_fd,
-                follow_symlinks=False,
-            )
-        except OSError as exc:
-            code = exc.errno or errno.EIO
-        except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend
-            code = errno.ENOSYS
-    raise_link_error(code)

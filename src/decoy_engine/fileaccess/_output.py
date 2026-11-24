@@ -39,7 +39,7 @@ from decoy_engine.fileaccess._component import validate_component, validate_publ
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
 from decoy_engine.fileaccess._link import CREATOR_KEY as _CREATOR_KEY
-from decoy_engine.fileaccess._link import link_noclobber_at
+from decoy_engine.fileaccess._link import raise_link_error
 from decoy_engine.fileaccess._stage_claim import StageClaim, parent_identity_of
 from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
@@ -175,8 +175,32 @@ def _open_existing_dir(parent_fd: int, name: str) -> int:
     return _call(os.open, name, _DIR_FLAGS, dir_fd=parent_fd)
 
 
+def set_mode_fd(fd: int, mode: int) -> None:
+    """The one `fchmod` on a held file descriptor, errno only on failure."""
+    _call(os.fchmod, fd, mode)
+
+
 def _restore_always(fd: int) -> None:
-    _call(os.fchmod, fd, 0o600)
+    set_mode_fd(fd, 0o600)
+
+
+def link_noclobber_at(src_dir_fd: int, src_name: str, dst_dir_fd: int, dst_name: str) -> None:
+    """Link `src_name` to `dst_name` without replacing it, both validated components beneath held
+    directories, never following a symlink. Raises `FileExistsError` for a taken name,
+    `LinkUnsupported` for the errnos in `LINK_UNSUPPORTED` (or a backend whose `os.link` has no
+    descriptor form, answered as ENOSYS) and an errno-only `OSError` for anything else."""
+    validate_component(src_name, _CREATOR_KEY)
+    validate_component(dst_name, _CREATOR_KEY)
+    code = 0
+    try:
+        os.link(
+            src_name, dst_name, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=False
+        )
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend
+        code = errno.ENOSYS
+    raise_link_error(code)
 
 
 def _restore_missing_owner_bits(fd: int) -> None:

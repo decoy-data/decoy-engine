@@ -18,11 +18,12 @@ from pathlib import Path
 
 from decoy_engine.fileaccess import _durable, _osflags
 from decoy_engine.fileaccess._fdtree import _close
-from decoy_engine.fileaccess._link import link_noclobber_at, raise_link_error
+from decoy_engine.fileaccess._link import raise_link_error
 from decoy_engine.fileaccess._output import (
     STAGE_PREFIX,
     _call,
     _mark_publication_stage,
+    link_noclobber_at,
     make_parent_dir_at,
     make_stage_dir_at,
 )

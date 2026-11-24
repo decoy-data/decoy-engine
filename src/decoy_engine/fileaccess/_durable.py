@@ -24,7 +24,6 @@ from typing import Literal, NoReturn, TypeVar
 
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validate_component
-from decoy_engine.fileaccess._link import link_noclobber_at
 from decoy_engine.fileaccess._output import (
     _CREATOR_KEY,
     _DIR_FLAGS,
@@ -34,6 +33,7 @@ from decoy_engine.fileaccess._output import (
     _close,
     _open_existing_dir,
     _restore_missing_owner_bits,
+    link_noclobber_at,
 )
 from decoy_engine.fileaccess._types import (
     CommitUncertain,
@@ -346,6 +346,16 @@ def discard_stage_at(dir_fd: int, name: str) -> None:
         os.unlink(name, dir_fd=dir_fd)
     except OSError:
         pass
+
+
+def _unlink_at(dir_fd: int, name: str) -> int:
+    """Remove `name` beneath the held `dir_fd` (a name the caller already validated). Returns 0 or
+    the errno that stopped it."""
+    try:
+        os.unlink(name, dir_fd=dir_fd)
+    except OSError as exc:
+        return exc.errno or errno.EIO
+    return 0
 
 
 def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> None:

@@ -22,10 +22,9 @@ import stat
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._fdtree import _close
-from decoy_engine.fileaccess._link import CREATOR_KEY, LINK_UNSUPPORTED, link_noclobber_at
+from decoy_engine.fileaccess._link import CREATOR_KEY, LINK_UNSUPPORTED
 from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
     FileSeal,
@@ -73,39 +72,29 @@ def seal_at(dir_fd: int, name: str) -> FileSeal | None:
 def _tighten(dst_fd: int, dst_name: str, before: os.stat_result) -> tuple[FileSeal | None, int]:
     """Open the final name, require the claimed inode with one link, set `0o600` on that
     descriptor and read it back. Returns the seal, or `None` and the errno that stopped it
-    (`EINVAL` for a refusal that is not an OS failure, `ENOTSUP` for a mode that did not hold)."""
-    from decoy_engine.fileaccess._durable import _open_leaf_at  # lazy: _durable imports _output
+    (`EINVAL` for a refusal that is not an OS failure, `ENOTSUP` for a mode that did not hold).
+    The descriptor primitives live in `_durable` and `_output`, which import this module, so they
+    are imported where used."""
+    from decoy_engine.fileaccess._durable import _open_leaf_at
+    from decoy_engine.fileaccess._output import set_mode_fd
 
     fd = -1
-    if not _osflags.WINDOWS:  # the descriptor arm; Windows claims through the ambient arm
-        try:
-            fd = _open_leaf_at(dst_fd, dst_name)
-            now = os.fstat(fd)
-            same = (now.st_dev, now.st_ino) == (before.st_dev, before.st_ino)
-            if not (stat.S_ISREG(now.st_mode) and same and now.st_nlink == 1):
-                return None, errno.EINVAL
-            os.fchmod(fd, _FINAL_MODE)
-            held = os.fstat(fd)
-            if stat.S_IMODE(held.st_mode) != _FINAL_MODE:
-                return None, errno.ENOTSUP
-            return _seal_of_stat(held), 0
-        except OSError as exc:
-            return None, exc.errno or errno.EIO
-        finally:
-            if fd >= 0:
-                _close(fd)
-    return None, errno.ENOSYS
-
-
-def _unlink_at(dir_fd: int, name: str) -> int:
-    """Remove `name` beneath the held `dir_fd`. Returns 0 or the errno that stopped it."""
-    if not _osflags.WINDOWS:
-        try:
-            os.unlink(name, dir_fd=dir_fd)
-        except OSError as exc:
-            return exc.errno or errno.EIO
-        return 0
-    return errno.ENOSYS
+    try:
+        fd = _open_leaf_at(dst_fd, dst_name)
+        now = os.fstat(fd)
+        same = (now.st_dev, now.st_ino) == (before.st_dev, before.st_ino)
+        if not (stat.S_ISREG(now.st_mode) and same and now.st_nlink == 1):
+            return None, errno.EINVAL
+        set_mode_fd(fd, _FINAL_MODE)
+        held = os.fstat(fd)
+        if stat.S_IMODE(held.st_mode) != _FINAL_MODE:
+            return None, errno.ENOTSUP
+        return _seal_of_stat(held), 0
+    except OSError as exc:
+        return None, exc.errno or errno.EIO
+    finally:
+        if fd >= 0:
+            _close(fd)
 
 
 def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> FileSeal:
@@ -119,6 +108,9 @@ def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> Fil
 
     validate_component(src_name, _CREATOR_KEY)
     validate_component(dst_name, _CREATOR_KEY)
+    from decoy_engine.fileaccess._durable import _unlink_at
+    from decoy_engine.fileaccess._output import link_noclobber_at
+
     before = _lstat_at(src_fd, src_name)
     if before is None:
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT))
@@ -179,13 +171,13 @@ class StageClaim:
 def _start_probe(fd: int) -> int:
     """Set the probe file to 0644 on its descriptor and read it back; close it. Returns 0 or the
     errno that says this file system does not hold a chmod."""
-    code = errno.ENOSYS
+    from decoy_engine.fileaccess._output import set_mode_fd
+
+    code = 0
     try:
-        if not _osflags.WINDOWS:
-            code = 0
-            os.fchmod(fd, _PROBE_START_MODE)
-            if stat.S_IMODE(os.fstat(fd).st_mode) != _PROBE_START_MODE:
-                code = errno.ENOTSUP
+        set_mode_fd(fd, _PROBE_START_MODE)
+        if stat.S_IMODE(os.fstat(fd).st_mode) != _PROBE_START_MODE:
+            code = errno.ENOTSUP
     except OSError as exc:
         code = exc.errno or errno.EIO
     finally:

@@ -30,7 +30,7 @@ capability_creators = [
   "decoy_engine/fileaccess/_output.py::create_output_file_at",
   "decoy_engine/fileaccess/_durable.py::discard_stage_at",
   "decoy_engine/fileaccess/_durable.py::publish_exclusive_durable",
-  "decoy_engine/fileaccess/_link.py::link_noclobber_at",
+  "decoy_engine/fileaccess/_output.py::link_noclobber_at",
   "decoy_engine/fileaccess/_stage_claim.py::claim_file_at",
   "decoy_engine/fileaccess/_stage_claim.py::seal_at",
   "decoy_engine/fileaccess/_durable.py::publish_replace_durable",
