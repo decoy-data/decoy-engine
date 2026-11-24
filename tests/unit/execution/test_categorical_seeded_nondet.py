@@ -67,6 +67,7 @@ class _Ctx:
     job_seed: bytes = MK
     current_table: str = "t"
     gate_positions: Any = None
+    source_snapshot_columns: Any = field(default_factory=dict)
     row_errors: list[Any] = field(default_factory=list)
 
 

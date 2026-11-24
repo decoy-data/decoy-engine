@@ -54,6 +54,7 @@ def test_truncate_reads_generated_surname() -> None:
     assert out.column("last_name").to_pylist() == [s[:3] for s in oracle]
 
 
+@pytest.mark.serial
 def test_date_shift_uses_original_group_key() -> None:
     """11. A grouped `date_shift` shifts by the ORIGINAL group key even when an earlier node masks
     that key to one value."""

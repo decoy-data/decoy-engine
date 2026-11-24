@@ -111,7 +111,7 @@ def test_the_ranked_commit_covers_the_secondary_output(aux_declared: None) -> No
 # ---------------------------------------------------------------------------
 
 # (path, enclosing function) allowed to call each raw reader.
-_ALLOWED: dict[str, set[tuple[str, str]]] = {
+_PINNED_CALLERS: dict[str, set[tuple[str, str]]] = {
     "declared_access": {
         ("_column_access.py", "column_access"),
         ("work_order/operations.py", "resolve_operation"),
@@ -147,7 +147,7 @@ def _callers(name: str) -> set[tuple[str, str]]:
     return found
 
 
-@pytest.mark.parametrize("name", sorted(_ALLOWED))
+@pytest.mark.parametrize("name", sorted(_PINNED_CALLERS))
 def test_raw_write_declaration_lookups_are_pinned(name: str) -> None:
     """A new caller of a raw declaration reader fails here until it is pinned with its reason."""
-    assert _callers(name) <= _ALLOWED[name]
+    assert _callers(name) <= _PINNED_CALLERS[name]

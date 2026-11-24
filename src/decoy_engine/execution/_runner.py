@@ -289,7 +289,7 @@ def when_columns_of(whens: Iterable[object]) -> frozenset[str]:
         if not isinstance(when, str):
             continue
         try:
-            cols.update(read.column for read in when_column_refs(parse_when_cached(when)))
+            cols |= {read.column for read in when_column_refs(parse_when_cached(when))}
         except ValidationError:
             continue
     return frozenset(cols)
