@@ -83,6 +83,8 @@ declared integers, `date_shift` anchors, `top_code` columns and `group_key` sibl
 `NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
 that passes through is written as `int64` instead of `double`.
 
+**Pre-GA additive name with VALIDATE-SUBSET-EDGES E1 (2026-11-24).** `decoy_engine.subset.drop_subset_block(config) -> dict` returns the run config with its `subset` block set to `None`, or the input dict itself when it has no block. `split_subset_config` now also refuses a bad `subset.edge_directions` entry (`subset_unknown_edge`, `subset_dangling_not_acknowledged`) before any read; no reason code, schema or config key changes, and a config that passed before passes now.
+
 **Pre-GA additive name with GEN-CATALOG GC3-E (2026-11-17).** `decoy_engine.code_set_catalog() -> dict[str, str]` returns each shipped code set name with its one-line description, in name order, read from the engine registry. It returns a new dict per call and reads no corpus file. No reason code, schema, config key or exit code changes.
 
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
