@@ -21,6 +21,9 @@ from decoy_engine.generation.pool._runtime_pool_size import resolve_runtime_pool
 # resolve an unset `scale` to the same default.
 DEFAULT_POOL_SCALE = 2.0
 
+# `provider_config` keys that shape the pool build, not the provider call or a computed draw.
+POOL_BUILD_KNOBS = frozenset({"pool_size", "locale"})
+
 PoolIdentity = tuple[str, str, str, bytes, int]
 
 
@@ -55,7 +58,7 @@ def resolve_faker_pool_identity(
     try:
         pool_size = effective_pool_size(plan_pool_size, cfg)
         locale = cfg.get("locale")
-        build_config = {k: v for k, v in cfg.items() if k not in ("pool_size", "locale")}
+        build_config = {k: v for k, v in cfg.items() if k not in POOL_BUILD_KNOBS}
         identity = builder.identity_for(
             provider,
             size=pool_size,
