@@ -188,7 +188,7 @@ compile.
 
 Any change to `uv.lock` that moves the certified profile, and any engine
 version bump, needs a new row. Release prep writes them; nobody edits
-`_CERTIFIED_STACKS` by hand.
+`quality/dp_certified_stacks.py` by hand.
 
 1. In the `decoy` repo, re-derive `requirements-certified.txt` for the new
    release and keep the last certified file as the base.

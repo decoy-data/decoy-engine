@@ -44,11 +44,11 @@ partitionable.
 
 ## Summary
 
-- 42 catalogued draw sites (plus 43 mirror call sites: the pandas substrate,
+- 46 catalogued draw sites (plus 43 mirror call sites: the pandas substrate,
   the out-of-core batched path, the delegation handlers, and the 9 identifier
   provider adapters).
-- 23 partitionable, 19 not.
-- Family breakdown: `source_keyed_hmac` 16, `numpy_pcg64` 10, `faker_seed_instance`
+- 27 partitionable, 19 not.
+- Family breakdown: `source_keyed_hmac` 20, `numpy_pcg64` 10, `faker_seed_instance`
   5, `python_mt19937` 7, `per_row_reseed` 2, `per_group_stream` 1,
   `gen_derive_context` 1.
 - GP2 (2026-09-17) added `gen.faker_pool_build` / `gen.faker_pool_selection`: a
@@ -93,7 +93,7 @@ both named honestly in the catalog's `entropy_root` field.
 
 ---
 
-## Family: source_keyed_hmac (16 sites)
+## Family: source_keyed_hmac (20 sites)
 
 The HMAC/HKDF digest IS the pseudo-randomness. There is no RNG object and no
 stream position. Every site keys on the source value (or, for `code_set` in
@@ -198,6 +198,30 @@ value pool. The selection re-keys onto `mask_key`; the pool BUILD stays on `job_
 `mask.faker_nondeterministic`. Non-deterministic `unique`, `match_source_cardinality` and
 `scale_source_cardinality` still draw whole-column from `np.random.default_rng` off
 `job_seed` through `PoolSampler` (`gen.pool_nondeterministic`) and are not partitionable.
+
+### mask.faker_computed_value
+`execution/_strategies/_faker_positional.py::computed_mask_draw`. The masking `faker`
+strategy, deterministic mode, on `random_int_range` and `random_choice`. These providers
+have no pool: the value is a pure function of its key. Row value is
+`derive_index(mask_key, selection_namespace + '/computed:' + provider, canonical(source),
+pool_size=count)`, mapped to `lo + index * step` or `elements[index]`. A null source
+re-emits null and consumes no derivation. Partitionable by source value.
+
+### mask.faker_computed_position
+Same function, non-deterministic reuse mode on `random_int_range` and `random_choice`.
+Keyed on `job_seed` and `encode_int(row_offset + i)` with the same index mapping. The key
+is `job_seed`, not `mask_key`: the mode generates values and does not re-identify a source
+value. A null row keeps its row number. Partitionable by global row number.
+
+### mask.faker_computed_uuid_value
+Same function, deterministic mode on `uuid`. Takes 16 bytes of
+`derive(mask_key, selection_namespace + '/computed:uuid', canonical(source))` and sets the
+RFC 9562 version 4 and variant bits. Equal sources give equal uuids under one mask key.
+Partitionable by source value.
+
+### mask.faker_computed_uuid_position
+Same function, non-deterministic reuse mode on `uuid`. Keyed on `job_seed` and
+`encode_int(row_offset + i)`, same uuid formatting. Partitionable by global row number.
 
 ### mask.faker_nondeterministic
 `execution/_strategies/_faker.py:114`. Position-keyed on `job_seed`, for non-deterministic
@@ -606,7 +630,7 @@ The `unit_float_from_bits53(raw_u64)` primitive extracts the upper 53 bits of a
 FULL 64-bit value (`(raw_u64 >> 11) / 2**53`), matching NumPy's own `random()`
 construction and always `< 1.0` (the all-ones input maps to `(2**53 - 1) / 2**53`).
 
-Registry: exactly one provider per catalogued `draw_site_id` (42 sites; 23
+Registry: exactly one provider per catalogued `draw_site_id` (46 sites; 27
 partitionable, 19 not). An import-time invariant fails if the registry drifts
 from `DRAW_SITES`.
 
@@ -647,6 +671,10 @@ from `DRAW_SITES`.
 | mask.date_shift                   | source_keyed_hmac   | yes           | seed_protocol_v7 |
 | mask.faker                        | source_keyed_hmac   | yes           | seed_protocol_v7 |
 | mask.faker_nondeterministic       | source_keyed_hmac   | yes           | seed_protocol_v7 |
+| mask.faker_computed_value         | source_keyed_hmac   | yes           | seed_protocol_v7 |
+| mask.faker_computed_position      | source_keyed_hmac   | yes           | seed_protocol_v7 |
+| mask.faker_computed_uuid_value    | source_keyed_hmac   | yes           | seed_protocol_v7 |
+| mask.faker_computed_uuid_position | source_keyed_hmac   | yes           | seed_protocol_v7 |
 | mask.fpe                          | source_keyed_hmac   | yes           | seed_protocol_v7 |
 | mask.group_key                    | source_keyed_hmac   | yes           | seed_protocol_v7 |
 | mask.hash                         | source_keyed_hmac   | yes           | seed_protocol_v7 |

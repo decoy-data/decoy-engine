@@ -17,6 +17,7 @@ __all__ = [
     "CHECKSUM_INVALID",
     "CODE_SET_GEN_REQUIRES_NAMESPACE",
     "COLUMN_SHAPE_REQUIRED",
+    "COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN",
     "CONFIG_REFERENCES_STORED_INDEX",
     "DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED",
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED",
@@ -135,7 +136,7 @@ CODE_SET_GEN_REQUIRES_NAMESPACE = _d(
 COLUMN_SHAPE_REQUIRED = _d(
     "column_shape_required",
     "A strategy reads numbers or dates from text and the plan lists no declaration for the column.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED = _d(
     "date_preserve_values_with_group_by_unsupported",
@@ -234,7 +235,7 @@ WHEN_EXPRESSION_NOT_BOOLEAN = _d("when_expression_not_boolean", "When expression
 WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
     "when_masked_reference_unsupported",
     "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
 
@@ -366,6 +367,11 @@ CATEGORICAL_POSITION_OUT_OF_DOMAIN = _d(
 
 _d = _catalog.runtime("decoy_engine.execution._strategies._faker_positional")
 
+COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN = _d(
+    "computed_draw_position_out_of_domain",
+    "Computed draw position out of domain.",
+    since=UNRELEASED,
+)
 FAKER_POSITION_OUT_OF_DOMAIN = _d("faker_position_out_of_domain", "Faker position out of domain.")
 
 _d = _catalog.runtime("decoy_engine.execution._strategies._fpe")
@@ -455,19 +461,19 @@ NONFK_FULL_FRAME_CAPACITY_EXCEEDED = _d(
     "nonfk_full_frame_capacity_exceeded",
     "A job with no foreign keys would hold more memory than this machine can give it.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
-    since=UNRELEASED,
+    since="1.34.0",
 )
 # Output assembly checks the masked frame against the source it was read from before it writes.
 # Both are engine invariants (no job input can cause them), so there is no retry class to repair.
 OUTPUT_ASSEMBLY_ROWS_CHANGED = _d(
     "output_assembly_rows_changed",
     "A masked frame no longer holds the rows of the source it was read from.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 OUTPUT_ASSEMBLY_COLUMNS_MISMATCH = _d(
     "output_assembly_columns_mismatch",
     "A masked frame no longer holds the columns of the source it was read from, in order.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 # A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
 # (a publication outcome) would name the wrong stage.

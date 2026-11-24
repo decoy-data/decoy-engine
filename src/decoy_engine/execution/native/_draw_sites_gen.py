@@ -280,7 +280,7 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="gen.pool_nondeterministic",
         family="numpy_pcg64",
-        call_site="generation/pool/_sampler.py::_derive_pool_indices#1",
+        call_site="generation/pool/_sampler.py::derive_pool_indices#1",
         entropy_root="job_seed",
         seed_derivation='np.random.default_rng(int.from_bytes(seed, "big"))',
         api_operation="numpy.random.default_rng(seed_int).integers / .permutation",

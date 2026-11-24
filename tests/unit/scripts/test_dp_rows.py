@@ -20,7 +20,7 @@ from _fragment_repo import GIT, REPO
 from scripts.release import dp_rows
 from scripts.release import stamp_release as sr
 
-PROVENANCE = "src/decoy_engine/quality/dp_provenance.py"
+PROVENANCE = "src/decoy_engine/quality/dp_certified_stacks.py"
 VERSION = "0.29.0"
 CLI_VERSION = "9.8.7"
 UV = shutil.which("uv")

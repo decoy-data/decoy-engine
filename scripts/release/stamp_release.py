@@ -19,7 +19,7 @@ the docs/reasons.md anchor, empties `PENDING_SUMMARY_EDITS`, writes the minor's 
 only), rebuilds consumer-contract.json and recaptures the v2 release pin. `--registry-minor` may
 only restate the automatic minor of an identity release.
 
-It also writes the DP certified rows (`scripts/release/dp_rows.py`) into `_CERTIFIED_STACKS`: the
+It also writes the DP certified rows (`scripts/release/dp_rows.py`) into `quality/dp_certified_stacks.py`: the
 dev/CI row from `uv.lock` at `--version`, and one CLI-profile row per `--cli-pins` file at
 `--version` and `--cli-version`, each at the top of its block. `--cli-pins-base` is the previous
 certified pin file: every pin file must parse as plain `name==version` lines, and every candidate
@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 FRAGMENT_DIR = "changelog.d"
-DP_PROVENANCE = "src/decoy_engine/quality/dp_provenance.py"
+DP_PROVENANCE = "src/decoy_engine/quality/dp_certified_stacks.py"
 REGISTRY_PATHS = (
     "src/decoy_engine/reasons",
     "tests/fixtures/f29",
