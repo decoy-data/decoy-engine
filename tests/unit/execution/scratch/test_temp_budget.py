@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import tempfile
 from collections import namedtuple
+from contextlib import ExitStack
 from pathlib import Path
 
 import pyarrow as pa
@@ -93,11 +95,14 @@ def test_route_budget_follows_temp_dir(
     assert seen["temp_disk_budget_bytes"] == 900
 
 
-def test_direct_runner_call_derives_the_cap_from_its_arena_parent(
-    tmp_path: Path, measured: list[Path], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.skipif(sys.platform == "win32", reason="ScratchArena.fresh() is POSIX-only until S1w")
+@pytest.mark.parametrize("supplied", [False, True])
+def test_direct_runner_call_measures_the_arena_itself(
+    tmp_path: Path, measured: list[Path], monkeypatch: pytest.MonkeyPatch, supplied: bool
 ) -> None:
     from decoy_engine.execution._errors import ExecutionError
     from decoy_engine.execution.out_of_core import run_fk_out_of_core
+    from decoy_engine.fileaccess import ScratchArena
     from tests.unit.execution.test_pipeline_route_exec_ooc_memory_preflight import (
         _edge,
         _graph,
@@ -110,13 +115,26 @@ def test_direct_runner_call_derives_the_cap_from_its_arena_parent(
     )
     where = tmp_path / "explicit"
     where.mkdir()
-    with pytest.raises(ExecutionError):
-        run_fk_out_of_core(
-            _tiny_plan(),
-            {"parent": pa.table({"id": ["p1", "p2"]}), "child": pa.table({"parent_id": ["p1"]})},
-            registry=_tiny_registry(),
-            relationship_graph=_graph(_edge("parent", "child")),
-            temp_dir=where,
-            config={},
-        )
-    assert measured == [where]
+    extra: dict[str, object] = {"temp_dir": where}
+    arena = None
+    with ExitStack() as stack:
+        if supplied:
+            # An adopted or private mount point: its parent may be on another device.
+            arena = stack.enter_context(ScratchArena.fresh(under=where))
+            extra = {"_arena": arena}
+        with pytest.raises(ExecutionError):
+            run_fk_out_of_core(
+                _tiny_plan(),
+                {
+                    "parent": pa.table({"id": ["p1", "p2"]}),
+                    "child": pa.table({"parent_id": ["p1"]}),
+                },
+                registry=_tiny_registry(),
+                relationship_graph=_graph(_edge("parent", "child")),
+                config={},
+                **extra,  # type: ignore[arg-type]
+            )
+        assert len(measured) == 1 and measured[0] != where
+        assert measured[0].parent == where, "the arena root, not its parent"
+        if arena is not None:
+            assert measured[0] == Path(arena.local_path())

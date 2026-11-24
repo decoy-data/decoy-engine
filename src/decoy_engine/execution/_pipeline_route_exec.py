@@ -16,9 +16,7 @@ re-decide).
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable, Mapping
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -34,6 +32,7 @@ from decoy_engine.execution._residency_warning import (
     residency_quality_warning,
 )
 from decoy_engine.execution._sequential import run_sequential
+from decoy_engine.execution.out_of_core._budget import resolve_temp_disk_budget
 from decoy_engine.fileaccess import scratch_root
 
 if TYPE_CHECKING:
@@ -53,27 +52,6 @@ __all__ = [
     "run_out_of_core_route",
     "run_sequential_route",
 ]
-
-
-# OOC-D: the runtime temp-disk cap (`_budget.check_temp_disk_budget`, enforced
-# inside `run_fk_out_of_core` at each table boundary) is sized off free disk
-# at dispatch time, not the whole free amount -- concurrent processes/jobs on
-# the same host are also writing to the same filesystem, so reserving a slice
-# rather than claiming 100% of what `shutil.disk_usage` reports right now
-# leaves headroom for exactly that concurrent writer. Matches the spirit of
-# `_budget.py`'s own conservative-fraction conventions (`_HOST_RAM_FRACTION`
-# etc.) applied to disk instead of memory.
-_TEMP_DISK_SAFETY_FRACTION = 0.9
-
-
-def resolve_temp_disk_budget(root: Path) -> int | None:
-    """The runtime temp-disk cap: a safety fraction of the free space at `root`, the directory
-    the run spills under, or `None` when the count is undetectable (the cap is then left unset
-    rather than newly blocking a job the route would otherwise have run)."""
-    try:
-        return int(shutil.disk_usage(root).free * _TEMP_DISK_SAFETY_FRACTION)
-    except OSError:
-        return None
 
 
 def execution_telemetry(

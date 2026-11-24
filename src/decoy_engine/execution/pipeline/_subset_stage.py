@@ -22,7 +22,7 @@ from decoy_engine.declared_casting import stage_typed_sources
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._chunked_input import check_opened, source_facts
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution._pipeline_route_exec import resolve_temp_disk_budget
+from decoy_engine.execution.out_of_core._budget import resolve_temp_disk_budget
 from decoy_engine.execution.out_of_core._scratch import engine_scratch_root
 from decoy_engine.execution.pipeline._sample import approximate_columns
 from decoy_engine.profile import LazySource, Profile, TableProfile
