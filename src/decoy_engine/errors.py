@@ -451,20 +451,17 @@ class FixedWidthParseError(DecoyError):
     """Raised when a fixed-width data file cannot be parsed against its
     `FixedWidthLayout` column-spec (S4, engine-finish-open-ended program).
 
-    Covers three fail-closed cases: a record shorter than a column's
-    `start + width` extent (row-width mismatch), a sliced value that
-    cannot cast to its column's declared type, and a line whose bytes are
-    not valid UTF-8. None of them truncates, coerces or replaces the bad
+    Covers three fail-closed cases: a record shorter than a column's `start + width` extent
+    (row-width mismatch), a sliced value that cannot cast to its column's declared type, and a
+    line whose bytes are not valid UTF-8. None of them truncates, coerces or replaces the bad
     input -- all raise here instead. Per the row-error framework's convention (see
-    `RowErrorsFailedError`), the message never embeds the offending
-    cell value -- only the file path, 1-based line number, and column
-    name -- since the file being parsed may itself carry the PII this
-    is a masking product for. Every raise in
-    `profile._fixed_width_reader` happens after its `except` block has
-    exited (the handler records only safe position data), so the caught
-    `ValueError`, `TypeError` or `UnicodeDecodeError` -- whose own text or
-    `.object` embeds the raw value -- is never attached as `__cause__` or
-    `__context__`, even if someone later inspects the raised exception.
+    `RowErrorsFailedError`), the message never embeds the offending cell value -- only the file
+    path, 1-based line number, and column name -- since the file being parsed may itself carry
+    the PII this is a masking product for. Every raise in `profile._fixed_width_reader` happens
+    after its `except` block has exited (the handler records only safe position data), so the
+    caught `ValueError`, `TypeError` or `UnicodeDecodeError` -- whose own text or `.object`
+    embeds the raw value -- is never attached as `__cause__` or `__context__`, even if someone
+    later inspects the raised exception.
     """
 
 
@@ -477,6 +474,12 @@ class FixedWidthRecordOverlongError(FixedWidthParseError):
     """
 
     code: str = reasons.runtime.FIXED_WIDTH_RECORD_OVERLONG
+
+
+class ParquetFixedListNullError(DecoyError):
+    """Parquet cannot round-trip a null fixed-size list cell."""
+
+    code: str = reasons.runtime.PARQUET_FIXED_LIST_NULL
 
 
 class FixedWidthWriteError(DecoyError):
@@ -586,6 +589,7 @@ __all__ = [
     "MaskKeyDerivationError",
     "MaskKeyRequiredError",
     "PKDuplicatesError",
+    "ParquetFixedListNullError",
     "PipelineValidationError",
     "RowErrorsFailedError",
     "UnknownFKColumnError",

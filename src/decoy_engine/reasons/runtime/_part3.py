@@ -59,6 +59,7 @@ __all__ = [
     "NUMEXPR_REQUIRED",
     "OUTPUT_ASSEMBLY_COLUMNS_MISMATCH",
     "OUTPUT_ASSEMBLY_ROWS_CHANGED",
+    "PARQUET_FIXED_LIST_NULL",
     "POST_SCAN_DISTRIBUTION_DEFERRED",
     "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
     "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
@@ -67,6 +68,7 @@ __all__ = [
     "RECORD_KIND_RESERVED",
     "SCAN_SOURCE_FAILED",
     "SCRATCH_ACL_FAILED",
+    "SCRATCH_ROOT_UNUSABLE",
     "SCRATCH_UNSAFE",
     "SHUFFLE_REQUIRES_NAMESPACE",
     "SORT_ASCENDING_LENGTH_MISMATCH",
@@ -423,6 +425,16 @@ _d = _catalog.runtime("ProtectedDirUnsafe")
 
 SCRATCH_UNSAFE = _d("scratch_unsafe", "Scratch unsafe.", since="1.7.0")
 
+_d = _catalog.runtime("ScratchRootUnusable")
+
+SCRATCH_ROOT_UNUSABLE = _d(
+    "scratch_root_unusable",
+    "The directory a temp variable names cannot hold scratch files.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
+)
+
 _d = _catalog.runtime("RecordError")
 
 RECORD_CORRUPT = _d("record_corrupt", "Record corrupt.", since="1.20.0")
@@ -506,6 +518,15 @@ GENERATION_PROVIDER_FAILED = _d(
     "generation_provider_failed",
     "A provider column could not be generated.",
     since="1.32.0",
+)
+
+_d = _catalog.runtime("ParquetFixedListNullError")
+PARQUET_FIXED_LIST_NULL = _d(
+    "parquet_fixed_list_null",
+    "Parquet cannot store a null fixed-size list cell.",
+    phases=(Phase.MASK, Phase.FINALIZE, Phase.PUBLISH, Phase.UNKNOWN),
+    retry=RetryClass.NEVER,
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("ValidatorStateError")

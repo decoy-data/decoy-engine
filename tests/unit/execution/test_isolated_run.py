@@ -109,7 +109,8 @@ payload_path = Path(sys.argv[1])
 with open(payload_path, encoding="utf-8") as fh:
     payload = json.load(fh)
 
-sources = {name: pq.read_table(path) for name, path in (payload.get("sources") or {}).items()}
+from decoy_engine.execution._isolated_worker import _load_sources
+sources = _load_sources(payload.get("sources") or {}, lazy=False)
 result = run_pipeline(payload["config"], sources, **payload["kwargs"])
 
 staging_output_dir = Path(payload["staging_output_dir"])
