@@ -1,0 +1,2524 @@
+file	line	class	admitted	reason
+_arrow_types.py	38	TypeError	n	not a project class
+_arrow_types.py	149	AssertionError	n	not a project class
+_arrow_types.py	228	ArrowInvalid	n	not a project class
+_arrow_types.py	236	failed	n	not a project class
+_canonical/_json.py	151	CanonicalJsonError	y	admitted
+_canonical/_json.py	154	CanonicalJsonError	y	admitted
+_canonical/_json.py	358	StrictJsonError	y	admitted
+_canonical/_json.py	360	StrictJsonError	y	admitted
+_canonical/_json.py	362	StrictJsonError	y	admitted
+_canonical/_json.py	366	StrictJsonError	y	admitted
+_canonical/_json.py	417	StrictJsonError	y	admitted
+_canonical/_strict_spec.py	71	SpecRefusedError	y	admitted
+_nested_json/_target.py	102	TypeError	n	not a project class
+_opaque.py	37	TypeError	n	not a project class
+_progress_events.py	41	ValueError	n	not a project class
+_progress_events.py	53	ValueError	n	not a project class
+_progress_events.py	129	ValueError	n	not a project class
+_progress_events.py	131	ValueError	n	not a project class
+_progress_events.py	135	ValueError	n	not a project class
+_progress_events.py	137	ValueError	n	not a project class
+_progress_events.py	140	ValueError	n	not a project class
+_progress_events.py	168	ValueError	n	not a project class
+_progress_events.py	173	ValueError	n	not a project class
+_progress_events.py	175	ValueError	n	not a project class
+_progress_events.py	179	ValueError	n	not a project class
+_progress_events.py	206	ValueError	n	not a project class
+_progress_events.py	214	ValueError	n	not a project class
+_progress_events.py	252	ValueError	n	not a project class
+_progress_events.py	256	ValueError	n	not a project class
+_progress_events.py	258	ValueError	n	not a project class
+_progress_events.py	260	ValueError	n	not a project class
+_progress_events.py	271	ValueError	n	not a project class
+_progress_events.py	295	ValueError	n	not a project class
+_progress_events.py	385	ValueError	n	not a project class
+_progress_events.py	401	ValueError	n	not a project class
+_progress_events.py	416	ValueError	n	not a project class
+_progress_events.py	565	ValueError	n	not a project class
+_progress_events.py	578	KeyError	n	not a project class
+_reference_date.py	39	PinnedModeError	y	admitted
+_reference_date.py	44	PinnedModeError	y	admitted
+_value_free.py	132	TypeError	n	not a project class
+_value_free.py	134	TypeError	n	not a project class
+_value_free.py	139	TypeError	n	not a project class
+_value_free.py	204	TypeError	n	not a project class
+_value_free.py	206	TypeError	n	not a project class
+checksums.py	366	ValueError	n	not a project class
+checksums.py	396	ValueError	n	not a project class
+config/_csv_dialect.py	117	ConfigError	y	admitted
+config/_declared_casting.py	38	_raise	n	not a project class
+config/_declared_casting.py	45	PydanticCustomError	n	not a project class
+config/_declared_casting.py	55	PydanticCustomError	n	not a project class
+config/_declared_casting.py	56	PydanticCustomError	n	not a project class
+config/_declared_casting.py	65	PydanticCustomError	n	not a project class
+config/_declared_casting.py	78	PydanticCustomError	n	not a project class
+config/_declared_casting.py	82	_raise	n	not a project class
+config/_declared_casting.py	93	PydanticCustomError	n	not a project class
+config/_fixed_width.py	139	ConfigRuleError	y	admitted
+config/_fixed_width.py	142	ConfigRuleError	y	admitted
+config/_generate_options.py	582	PipelineValidationError	n	a raise of this class is tagged or near a copy
+config/_generate_options.py	585	PipelineValidationError	n	a raise of this class is tagged or near a copy
+config/_generate_type_checks.py	408	PipelineValidationError	n	a raise of this class is tagged or near a copy
+config/_global_settings.py	140	ConfigRuleError	y	admitted
+config/_global_settings.py	199	ConfigRuleError	y	admitted
+config/_namespaces.py	31	PydanticCustomError	n	not a project class
+config/_override.py	57	PipelineConfigError	y	admitted
+config/_override.py	69	from_problems	n	not a project class
+config/_parse.py	31	from_problems	n	not a project class
+config/_parse.py	45	from_problems	n	not a project class
+config/_parse.py	55	from_problems	n	not a project class
+config/_parse.py	67	from_problems	n	not a project class
+config/_pipeline.py	193	PydanticCustomError	n	not a project class
+config/_pipeline.py	227	ConfigRuleError	y	admitted
+config/_pipeline.py	234	ConfigRuleError	y	admitted
+config/_pipeline.py	256	from_exception_data	n	not a project class
+config/_pipeline.py	286	ConfigRuleError	y	admitted
+config/_pipeline.py	308	ConfigRuleError	y	admitted
+config/_pipeline.py	315	ConfigRuleError	y	admitted
+config/_pipeline.py	321	ConfigRuleError	y	admitted
+config/_pipeline.py	364	ConfigRuleError	y	admitted
+config/_pipeline.py	403	from_exception_data	n	not a project class
+config/_pipeline.py	426	from_exception_data	n	not a project class
+config/_pipeline.py	456	from_exception_data	n	not a project class
+config/_pipeline.py	486	from_exception_data	n	not a project class
+config/_pipeline.py	502	from_exception_data	n	not a project class
+config/_pipeline.py	523	ConfigRuleError	y	admitted
+config/_pipeline.py	535	ConfigRuleError	y	admitted
+config/_post_scan.py	57	PydanticCustomError	n	not a project class
+config/_post_scan.py	64	PydanticCustomError	n	not a project class
+config/_post_scan.py	71	PydanticCustomError	n	not a project class
+config/_post_scan.py	73	PydanticCustomError	n	not a project class
+config/_post_scan.py	113	inactive	n	not a project class
+config/_post_scan.py	115	inactive	n	not a project class
+config/_post_scan.py	117	inactive	n	not a project class
+config/_post_scan.py	119	inactive	n	not a project class
+config/_post_scan.py	122	inactive	n	not a project class
+config/_post_scan.py	124	inactive	n	not a project class
+config/_pre_scan.py	40	PydanticCustomError	n	not a project class
+config/_pre_scan.py	44	PydanticCustomError	n	not a project class
+config/_pre_scan.py	55	PydanticCustomError	n	not a project class
+config/_pre_scan.py	109	PydanticCustomError	n	not a project class
+config/_scan_baseline.py	50	PydanticCustomError	n	not a project class
+config/_sources.py	148	PydanticCustomError	n	not a project class
+config/_sources.py	159	ConfigRuleError	y	admitted
+config/_sources.py	163	ConfigRuleError	y	admitted
+config/_sources.py	185	PydanticCustomError	n	not a project class
+config/_sources.py	194	PydanticCustomError	n	not a project class
+config/_sources.py	197	ConfigRuleError	y	admitted
+config/_subset.py	47	ConfigRuleError	y	admitted
+config/_subset.py	54	ConfigRuleError	y	admitted
+config/_subset.py	60	ConfigRuleError	y	admitted
+config/_subset.py	66	ConfigRuleError	y	admitted
+config/_subset.py	73	ConfigRuleError	y	admitted
+config/_subset_run.py	30	PipelineValidationError	n	a raise of this class is tagged or near a copy
+config/_subset_run.py	39	PipelineValidationError	n	a raise of this class is tagged or near a copy
+config/_tables.py	219	PydanticCustomError	n	not a project class
+config/_tables.py	335	from_exception_data	n	not a project class
+config/_tables.py	415	from_exception_data	n	not a project class
+config/_tables.py	435	from_exception_data	n	not a project class
+config/_tables.py	442	ConfigRuleError	y	admitted
+config/_tables.py	447	ConfigRuleError	y	admitted
+config/_tables.py	452	ConfigRuleError	y	admitted
+config/_tables.py	457	ConfigRuleError	y	admitted
+config/_tables.py	475	ConfigRuleError	y	admitted
+config/_targets.py	63	ConfigRuleError	y	admitted
+config/_targets.py	67	ConfigRuleError	y	admitted
+config/_targets.py	158	TypeError	n	not a project class
+config/_validators.py	132	ConfigRuleError	y	admitted
+config/_validators.py	139	ConfigRuleError	y	admitted
+config/policy/_expand.py	288	from_exception_data	n	not a project class
+config/policy/_policy.py	79	PydanticCustomError	n	not a project class
+config/policy/_policy.py	127	PydanticCustomError	n	not a project class
+config/policy/_policy.py	150	PydanticCustomError	n	not a project class
+config/policy/_precedence.py	82	AssertionError	n	not a project class
+config/policy/_selectors.py	90	_refuse	n	not a project class
+config/policy/_selectors.py	93	_refuse	n	not a project class
+config/policy/_selectors.py	96	_refuse	n	not a project class
+config/policy/_selectors.py	99	_refuse	n	not a project class
+config/policy/_selectors.py	102	_refuse	n	not a project class
+config/policy/_selectors.py	104	_refuse	n	not a project class
+config/policy/_selectors.py	108	_refuse	n	not a project class
+connectors/_clients.py	184	PermanentError	y	admitted
+connectors/_postgres_session.py	110	ValueError	n	not a project class
+connectors/_postgres_session.py	156	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/_postgres_session.py	215	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/_postgres_session.py	235	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/_postgres_session.py	237	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/_postgres_session.py	242	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/_postgres_session.py	268	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/_postgres_session.py	293	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/object_store.py	121	PermanentError	y	admitted
+connectors/object_store.py	162	PermanentError	y	admitted
+connectors/postgres_catalog.py	64	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_catalog.py	72	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_catalog.py	75	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_catalog.py	85	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_catalog.py	92	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_catalog.py	108	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_catalog.py	142	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_snapshot.py	194	ValueError	n	not a project class
+connectors/postgres_snapshot.py	200	ValueError	n	not a project class
+connectors/postgres_snapshot.py	250	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_snapshot.py	255	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_snapshot.py	309	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_snapshot.py	314	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_snapshot.py	372	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_snapshot.py	391	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/postgres_snapshot.py	394	PostgresSnapshotError	n	a raise of this class is tagged or near a copy
+connectors/s3.py	231	source_changed	n	not a project class
+connectors/s3.py	246	source_changed	n	not a project class
+connectors/sftp.py	112	ValueError	n	not a project class
+connectors/sftp.py	165	_wrap_sftp_error	n	not a project class
+connectors/sftp.py	189	PermanentError	y	admitted
+connectors/sftp.py	301	_wrap_sftp_error	n	not a project class
+connectors/sftp.py	309	_wrap_sftp_error	n	not a project class
+connectors/sftp.py	327	_wrap_sftp_error	n	not a project class
+connectors/sftp.py	368	_wrap_sftp_error	n	not a project class
+connectors/sftp.py	381	_wrap_sftp_error	n	not a project class
+connectors/sftp.py	386	_wrap_sftp_error	n	not a project class
+context.py	399	ValueError	n	not a project class
+contracts/_declared_base.py	56	violation	n	not a project class
+contracts/_declared_base.py	77	violation	n	not a project class
+contracts/_declared_base.py	90	violation	n	not a project class
+contracts/_declared_base.py	113	violation	n	not a project class
+contracts/_declared_formats.py	51	violation	n	not a project class
+contracts/_declared_formats.py	70	violation	n	not a project class
+contracts/_declared_formats.py	92	violation	n	not a project class
+contracts/_declared_formats.py	101	violation	n	not a project class
+contracts/_declared_formats.py	106	violation	n	not a project class
+contracts/_declared_formats.py	111	violation	n	not a project class
+contracts/_declared_formats.py	143	violation	n	not a project class
+contracts/_declared_formats.py	160	violation	n	not a project class
+contracts/_declared_formats.py	170	violation	n	not a project class
+contracts/_declared_formats.py	182	violation	n	not a project class
+contracts/_declared_formats.py	192	violation	n	not a project class
+contracts/_declared_formats.py	236	violation	n	not a project class
+contracts/_declared_formats.py	239	violation	n	not a project class
+contracts/_declared_formats.py	243	violation	n	not a project class
+contracts/_declared_formats.py	252	violation	n	not a project class
+contracts/_declared_formats.py	260	violation	n	not a project class
+contracts/_declared_formats.py	266	violation	n	not a project class
+contracts/_declared_formats.py	298	violation	n	not a project class
+contracts/_declared_formats.py	317	violation	n	not a project class
+contracts/_declared_formats.py	336	violation	n	not a project class
+contracts/_declared_formats.py	390	violation	n	not a project class
+contracts/_declared_formats.py	428	DeclaredCastContractError	n	a raise of this class is tagged or near a copy
+contracts/_declared_formats.py	435	DeclaredCastContractError	n	a raise of this class is tagged or near a copy
+contracts/declared_casting.py	71	violation	n	not a project class
+contracts/declared_casting.py	83	violation	n	not a project class
+contracts/declared_casting.py	92	violation	n	not a project class
+contracts/declared_casting.py	98	violation	n	not a project class
+contracts/declared_casting.py	110	DeclaredCastContractError	n	a raise of this class is tagged or near a copy
+contracts/declared_casting.py	112	DeclaredCastContractError	n	a raise of this class is tagged or near a copy
+contracts/declared_casting.py	164	violation	n	not a project class
+contracts/declared_casting.py	170	violation	n	not a project class
+contracts/declared_casting.py	178	violation	n	not a project class
+contracts/declared_casting.py	193	violation	n	not a project class
+contracts/declared_casting.py	223	DeclaredCastContractError	n	a raise of this class is tagged or near a copy
+contracts/distribution_snapshot.py	95	ValueError	n	not a project class
+contracts/distribution_snapshot.py	107	ValueError	n	not a project class
+contracts/distribution_snapshot.py	110	ValueError	n	not a project class
+contracts/distribution_snapshot.py	126	ValueError	n	not a project class
+contracts/distribution_snapshot.py	141	ValueError	n	not a project class
+contracts/distribution_snapshot.py	150	ValueError	n	not a project class
+contracts/distribution_snapshot.py	154	ValueError	n	not a project class
+contracts/distribution_snapshot.py	156	ValueError	n	not a project class
+contracts/strategy_requirements.py	53	ValueError	n	not a project class
+contracts/strategy_requirements.py	55	ValueError	n	not a project class
+data_discovery.py	113	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+data_discovery.py	120	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+data_discovery.py	124	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+data_discovery.py	131	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+data_discovery.py	135	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+data_discovery.py	228	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+data_discovery.py	230	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+data_discovery.py	264	DiscoverySqlError	n	a raise of this class is tagged or near a copy
+declared_casting/_boundary.py	477	DeclaredCastRouteError	y	admitted
+declared_casting/_boundary.py	495	DeclaredCastValueError	y	admitted
+declared_casting/_catalog.py	284	DeclaredCastContractError	n	a raise of this class is tagged or near a copy
+declared_casting/_catalog.py	328	ValueError	n	not a project class
+declared_casting/_catalog.py	464	DeclaredCastContractError	n	a raise of this class is tagged or near a copy
+declared_casting/_counts.py	61	ValueError	n	not a project class
+declared_casting/_counts.py	65	ValueError	n	not a project class
+declared_casting/_eligibility.py	286	DeclaredCastRouteError	y	admitted
+declared_casting/_eligibility.py	337	DeclaredCastRouteError	y	admitted
+declared_casting/_eligibility.py	354	DeclaredCastRouteError	y	admitted
+declared_casting/_eligibility.py	374	DeclaredCastRouteError	y	admitted
+declared_casting/_quarantine_codec.py	41	TypeError	n	not a project class
+declared_casting/_quarantine_codec.py	66	ValueError	n	not a project class
+declared_casting/_quarantine_local.py	61	OSError	n	not a project class
+declared_casting/_quarantine_local.py	206	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	211	ValueError	n	not a project class
+declared_casting/_quarantine_local.py	224	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	298	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	341	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	415	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	424	ValueError	n	not a project class
+declared_casting/_quarantine_local.py	429	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	442	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	444	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	454	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	464	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	466	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	489	ValueError	n	not a project class
+declared_casting/_quarantine_local.py	492	_qerror	n	not a project class
+declared_casting/_quarantine_local.py	516	_qerror	n	not a project class
+declared_casting/_quarantine_protocol.py	67	TypeError	n	not a project class
+declared_casting/_stream.py	95	ExecutionError	n	a raise of this class is tagged or near a copy
+declared_casting/_stream.py	245	AssertionError	n	not a project class
+delivery/_plan.py	68	PipelineConfigError	y	admitted
+delivery/_plan.py	76	PipelineConfigError	y	admitted
+delivery/_plan.py	83	PipelineConfigError	y	admitted
+delivery/_plan.py	85	PipelineConfigError	y	admitted
+delivery/resume/_fingerprint.py	98	TypeError	n	not a project class
+delivery/resume/_fingerprint.py	100	ValueError	n	not a project class
+delivery/resume/_fingerprint.py	102	ValueError	n	not a project class
+delivery/resume/_plan.py	41	ValueError	n	not a project class
+delivery/resume/_plan.py	43	ValueError	n	not a project class
+delivery/resume/_plan.py	102	ResumeRefusedError	y	admitted
+delivery/resume/_plan.py	107	ResumeRefusedError	y	admitted
+delivery/resume/_plan.py	109	ResumeRefusedError	y	admitted
+delivery/resume/_plan.py	115	ResumeRefusedError	y	admitted
+delivery/resume/_plan.py	125	ResumeRefusedError	y	admitted
+delivery/resume/_records.py	195	ValueError	n	not a project class
+detection/_model_status.py	150	ModelUnavailableError	y	admitted
+detection/_model_status.py	168	ValueError	n	not a project class
+detection/_model_status.py	173	ValueError	n	not a project class
+detection/_model_status.py	186	ValueError	n	not a project class
+detection/_model_status.py	203	ValueError	n	not a project class
+detection/_model_status.py	207	ValueError	n	not a project class
+detection/_ner_rate.py	144	ValueError	n	not a project class
+detection/name_hints/loader.py	119	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	128	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	139	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	145	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	151	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	173	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	180	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	187	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	193	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	197	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	203	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	209	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/name_hints/loader.py	223	NameHintLoaderError	n	a raise of this class is tagged or near a copy
+detection/ner.py	284	NerUnavailableError	y	admitted
+detection/ner.py	292	NerUnavailableError	y	admitted
+detection/ner.py	298	NerUnavailableError	y	admitted
+detection/ner.py	306	NerUnavailableError	y	admitted
+detection/ner.py	435	ValueError	n	not a project class
+determinism/_derive.py	205	DeterminismError	y	admitted
+determinism/_derive.py	210	DeterminismError	y	admitted
+determinism/_derive.py	292	DeterminismError	y	admitted
+determinism/_derive.py	297	DeterminismError	y	admitted
+determinism/_derive.py	350	DeterminismError	y	admitted
+determinism/_derive.py	359	DeterminismError	y	admitted
+determinism/_hkdf.py	36	ValueError	n	not a project class
+determinism/_hkdf.py	38	ValueError	n	not a project class
+determinism/_hkdf.py	56	ValueError	n	not a project class
+determinism/_hkdf.py	85	ValueError	n	not a project class
+determinism/_seeds.py	46	_width_error	n	not a project class
+determinism/_seeds.py	69	ValueError	n	not a project class
+execution/_adapter.py	96	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_adapter.py	359	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_adapter.py	569	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_chunked.py	281	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked.py	287	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked.py	352	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked.py	367	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked.py	548	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked.py	564	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_bucket_perturb.py	203	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_chunked_bucket_perturb.py	225	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_bucket_perturb.py	284	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_bucket_perturb.py	338	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_carry.py	153	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_categorical.py	78	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_categorical.py	122	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_code_set.py	173	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_code_set.py	201	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_code_set.py	249	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_dgrn.py	90	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_dgrn.py	98	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_dgrn.py	120	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_dgrn.py	144	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_fk.py	219	error	n	not a project class
+execution/_chunked_fk_dtype.py	123	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_fk_dtype.py	197	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_fk_dtype.py	210	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_fk_runtime.py	181	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_group_key.py	320	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_group_key.py	354	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_input.py	263	lazy_source_changed	n	not a project class
+execution/_chunked_input.py	277	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_oracle.py	410	AssertionError	n	not a project class
+execution/_chunked_oracle.py	488	RowErrorsFailedError	y	admitted
+execution/_chunked_output_sink.py	175	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_output_sink.py	225	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_output_sink.py	234	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_output_sink.py	373	_mismatch	n	not a project class
+execution/_chunked_output_sink.py	384	_mismatch	n	not a project class
+execution/_chunked_output_sink.py	484	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_chunked_output_sink.py	590	_mismatch	n	not a project class
+execution/_chunked_preresolved.py	73	_misaligned	n	not a project class
+execution/_chunked_preresolved.py	89	_misaligned	n	not a project class
+execution/_chunked_preresolved.py	94	_misaligned	n	not a project class
+execution/_chunked_preresolved.py	113	_misaligned	n	not a project class
+execution/_chunked_text_mask.py	105	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_text_mask.py	152	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_chunked_when_guard.py	70	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_exact_int_sources.py	168	GenerationError	n	a raise of this class is tagged or near a copy
+execution/_fk_keys.py	212	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_fk_keys.py	278	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_fk_keys.py	472	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_fk_resolve.py	168	orphan_fk_violation_error	n	not a project class
+execution/_gated_string_guard.py	85	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_gated_string_guard.py	123	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_governor.py	414	AssertionError	n	not a project class
+execution/_governor.py	494	ValueError	n	not a project class
+execution/_governor.py	496	ValueError	n	not a project class
+execution/_governor.py	506	ValueError	n	not a project class
+execution/_governor.py	517	ValueError	n	not a project class
+execution/_governor.py	522	ValueError	n	not a project class
+execution/_governor.py	530	ValueError	n	not a project class
+execution/_guards.py	59	TransformError	n	a raise of this class is tagged or near a copy
+execution/_guards.py	112	loader_table_undeclared	n	not a project class
+execution/_guards.py	126	declared_table_dropped	n	not a project class
+execution/_guards.py	196	null_bearing_int_error	n	not a project class
+execution/_guards.py	225	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_isolated_commit.py	227	ValueError	n	not a project class
+execution/_isolated_common.py	215	OSError	n	not a project class
+execution/_isolated_common.py	228	OSError	n	not a project class
+execution/_isolated_memwatch.py	80	FieldMissing	y	admitted
+execution/_isolated_memwatch.py	83	FieldMissing	y	admitted
+execution/_isolated_run.py	221	ValueError	n	not a project class
+execution/_isolated_run.py	299	ValueError	n	not a project class
+execution/_isolated_run.py	305	ValueError	n	not a project class
+execution/_isolated_run.py	424	ValueError	n	not a project class
+execution/_isolated_worker.py	233	SystemExit	n	not a project class
+execution/_mem_estimate.py	125	ValueError	n	not a project class
+execution/_mem_estimate.py	132	ValueError	n	not a project class
+execution/_mem_estimate.py	138	ValueError	n	not a project class
+execution/_mem_estimate.py	143	ValueError	n	not a project class
+execution/_mem_estimate.py	160	ValueError	n	not a project class
+execution/_mem_estimate.py	197	AssertionError	n	not a project class
+execution/_mem_estimate.py	419	ValueError	n	not a project class
+execution/_mem_estimate.py	421	ValueError	n	not a project class
+execution/_mem_estimate.py	437	ValueError	n	not a project class
+execution/_mem_estimate.py	535	ValueError	n	not a project class
+execution/_mem_estimate.py	563	ValueError	n	not a project class
+execution/_mem_estimate.py	565	ValueError	n	not a project class
+execution/_mem_estimate.py	571	AssertionError	n	not a project class
+execution/_mem_estimate_arrow.py	207	TypeError	n	not a project class
+execution/_mem_estimate_schema.py	268	ValueError	n	not a project class
+execution/_mixed_admission.py	152	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	174	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	184	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	190	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	199	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	205	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	212	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	225	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	244	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	276	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	285	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	292	MixedDeclineError	y	admitted
+execution/_mixed_admission.py	299	MixedDeclineError	y	admitted
+execution/_mixed_fk_bridge.py	149	orphan_fk_violation_error	n	not a project class
+execution/_mixed_fk_bridge.py	240	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_output_projection.py	128	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pandas_adapter.py	149	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pandas_adapter.py	407	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pandas_adapter.py	417	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pandas_adapter.py	423	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_auto_chunk.py	83	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_auto_chunk.py	134	_mismatch	n	not a project class
+execution/_pipeline_auto_chunk.py	138	_mismatch	n	not a project class
+execution/_pipeline_auto_chunk.py	170	_mismatch	n	not a project class
+execution/_pipeline_auto_chunk.py	270	AssertionError	n	not a project class
+execution/_pipeline_auto_chunk.py	498	DeclaredCastRouteError	y	admitted
+execution/_pipeline_context.py	338	ValueError	n	not a project class
+execution/_pipeline_finalize.py	445	ValidatorFailedError	y	admitted
+execution/_pipeline_finalize.py	447	RowErrorsFailedError	y	admitted
+execution/_pipeline_full_frame.py	82	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_generate_mask.py	199	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_generate_mask.py	414	RuntimeError	n	not a project class
+execution/_pipeline_mixed_route.py	162	AssertionError	n	not a project class
+execution/_pipeline_multi_table.py	348	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_route_dispatch.py	83	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_route_exec.py	555	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_routing.py	235	seq_ineligible	n	not a project class
+execution/_pipeline_routing.py	240	seq_ineligible	n	not a project class
+execution/_pipeline_routing.py	249	seq_ineligible	n	not a project class
+execution/_pipeline_routing.py	260	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_routing.py	386	ooc_ineligible	n	not a project class
+execution/_pipeline_routing.py	391	ooc_ineligible	n	not a project class
+execution/_pipeline_routing.py	396	ooc_ineligible	n	not a project class
+execution/_pipeline_routing.py	486	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_routing.py	535	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_routing.py	551	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_sources.py	176	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_pipeline_sources.py	183	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_planner.py	180	ValueError	n	not a project class
+execution/_positional_keys.py	33	GenerationError	n	a raise of this class is tagged or near a copy
+execution/_positional_keys.py	40	GenerationError	n	a raise of this class is tagged or near a copy
+execution/_positional_keys.py	46	GenerationError	n	a raise of this class is tagged or near a copy
+execution/_probe.py	143	ValueError	n	not a project class
+execution/_probe.py	145	ValueError	n	not a project class
+execution/_probe.py	181	ValueError	n	not a project class
+execution/_probe.py	183	ValueError	n	not a project class
+execution/_probe.py	383	ValueError	n	not a project class
+execution/_probe.py	388	ValueError	n	not a project class
+execution/_probe.py	391	ValueError	n	not a project class
+execution/_probe.py	519	ValueError	n	not a project class
+execution/_probe.py	521	ValueError	n	not a project class
+execution/_probe.py	526	AssertionError	n	not a project class
+execution/_probe_scale.py	108	ValueError	n	not a project class
+execution/_probe_scale.py	110	ValueError	n	not a project class
+execution/_probe_scale.py	112	ValueError	n	not a project class
+execution/_row_error_summary.py	69	ValueError	n	not a project class
+execution/_row_error_summary.py	71	ValueError	n	not a project class
+execution/_row_error_summary.py	73	ValueError	n	not a project class
+execution/_row_error_summary.py	114	ValueError	n	not a project class
+execution/_row_error_summary.py	121	ValueError	n	not a project class
+execution/_row_error_summary.py	123	ValueError	n	not a project class
+execution/_runner.py	492	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_sequential.py	303	ValueError	n	not a project class
+execution/_sequential.py	498	RowErrorsFailedError	y	admitted
+execution/_sequential_composite_chain.py	82	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_sequential_native.py	394	AssertionError	n	not a project class
+execution/_sequential_native.py	539	AssertionError	n	not a project class
+execution/_sequential_native.py	587	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_sequential_native.py	602	AssertionError	n	not a project class
+execution/_sequential_native.py	603	fail_closed	n	not a project class
+execution/_sequential_native.py	623	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_sequential_native.py	654	AssertionError	n	not a project class
+execution/_sequential_native.py	665	AssertionError	n	not a project class
+execution/_sequential_native.py	666	fail_closed	n	not a project class
+execution/_sequential_native_group_key.py	76	AssertionError	n	not a project class
+execution/_sequential_native_group_key.py	82	AssertionError	n	not a project class
+execution/_sequential_native_ops.py	324	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_sequential_native_ops.py	498	AssertionError	n	not a project class
+execution/_sequential_order.py	57	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/__init__.py	97	TypeError	n	not a project class
+execution/_strategies/__init__.py	99	TypeError	n	not a project class
+execution/_strategies/__init__.py	102	TypeError	n	not a project class
+execution/_strategies/__init__.py	105	TypeError	n	not a project class
+execution/_strategies/__init__.py	108	TypeError	n	not a project class
+execution/_strategies/__init__.py	111	TypeError	n	not a project class
+execution/_strategies/__init__.py	134	TypeError	n	not a project class
+execution/_strategies/_bucket_perturb.py	63	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_bucket_perturb.py	72	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_bucket_perturb.py	115	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_bucket_perturb.py	126	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_bucketize.py	79	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	95	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	114	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	143	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	155	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	161	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	173	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	217	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	229	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	239	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_categorical.py	256	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_code_set.py	154	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_composite.py	48	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_composite.py	57	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_composite.py	100	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_composite.py	113	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_composite.py	138	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_date_shift.py	113	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_date_shift.py	149	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_date_shift.py	161	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_date_shift.py	167	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_date_shift.py	192	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_date_shift.py	215	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_derived.py	84	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_derived.py	113	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_faker.py	67	ValueError	n	not a project class
+execution/_strategies/_fpe.py	130	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_fpe.py	141	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_fpe.py	150	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_fpe.py	242	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_fpe.py	251	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_hash.py	67	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_joint_mask.py	89	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_joint_mask.py	108	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_ner_config.py	92	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_orphan.py	123	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_orphan.py	132	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_shuffle.py	62	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_text_mask.py	254	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_text_mask.py	264	text_mask_unsupported_pair_error	n	not a project class
+execution/_strategies/_tokenize.py	97	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_tokenize.py	107	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_tokenize.py	148	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_tokenize.py	158	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_tokenize.py	176	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_tokenize.py	224	_vault_error	n	not a project class
+execution/_strategies/_tokenize.py	235	_vault_error	n	not a project class
+execution/_strategies/_tokenize.py	239	_vault_error	n	not a project class
+execution/_strategies/_top_code.py	161	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_top_code.py	336	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_top_code.py	383	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_top_code.py	446	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_top_code.py	457	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_truncate.py	77	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_truncate.py	93	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/_truncate.py	101	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	142	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	152	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	160	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	247	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	274	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	357	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	422	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_handler.py	468	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_strategies/nested/_leaves.py	56	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_substrate.py	30	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_substrate.py	41	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_substrate.py	54	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/_transactional_sink.py	176	ValueError	n	not a project class
+execution/_transactional_sink.py	369	ValueError	n	not a project class
+execution/_transforms.py	177	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	222	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	240	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	245	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	257	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	280	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	289	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	295	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	305	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	319	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	328	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	336	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	347	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	352	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	368	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms.py	389	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms_gate.py	63	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/_transforms_table.py	73	TransformError	n	a raise of this class is tagged or near a copy
+execution/_transforms_table.py	89	TransformError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice.py	108	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice.py	118	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice.py	272	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice.py	376	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice_evidence.py	78	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice_evidence.py	86	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice_evidence.py	109	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice_evidence.py	119	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice_evidence.py	130	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice_evidence.py	169	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_unified_slice_when.py	93	UnifiedSliceInvariantError	n	a raise of this class is tagged or near a copy
+execution/_when_gate.py	124	_closed_grammar_error	n	not a project class
+execution/_when_gate.py	413	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_when_gate.py	430	StrategyError	n	a raise of this class is tagged or near a copy
+execution/_when_gate.py	445	StrategyError	n	a raise of this class is tagged or near a copy
+execution/capacity.py	332	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/capacity.py	479	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/__init__.py	38	AttributeError	n	not a project class
+execution/native/_bucket_perturb_ext.py	144	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_bucket_perturb_ext.py	184	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_bucket_perturb_ext.py	189	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_bucket_perturb_ext.py	196	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_bucket_perturb_ext.py	202	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_bucket_perturb_ext.py	249	AssertionError	n	not a project class
+execution/native/_capabilities.py	566	KeyError	n	not a project class
+execution/native/_categorical_ext.py	67	AssertionError	n	not a project class
+execution/native/_categorical_ext.py	106	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_categorical_ext.py	111	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_categorical_ext.py	118	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_categorical_ext.py	124	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_categorical_ext.py	178	AssertionError	n	not a project class
+execution/native/_chunk_masking.py	176	AssertionError	n	not a project class
+execution/native/_chunk_masking.py	187	AssertionError	n	not a project class
+execution/native/_chunk_masking.py	239	fpe_fail_closed_error	n	not a project class
+execution/native/_chunk_masking.py	276	AssertionError	n	not a project class
+execution/native/_chunk_masking.py	339	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_chunk_masking.py	381	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_chunk_masking.py	418	AssertionError	n	not a project class
+execution/native/_chunk_schema.py	66	_drift	n	not a project class
+execution/native/_chunk_schema.py	109	_drift	n	not a project class
+execution/native/_chunk_schema.py	122	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_chunk_schema.py	133	_drift	n	not a project class
+execution/native/_chunked_entry.py	104	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_chunked_entry.py	263	AssertionError	n	not a project class
+execution/native/_chunked_entry.py	373	RowErrorsFailedError	y	admitted
+execution/native/_chunked_evidence.py	222	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_chunked_evidence.py	241	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_chunked_evidence.py	252	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_chunked_pools.py	38	AssertionError	n	not a project class
+execution/native/_chunked_schema_rule.py	319	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/native/_crypto_ext.py	172	FpeConfigError	y	admitted
+execution/native/_crypto_ext.py	178	FpeConfigError	y	admitted
+execution/native/_crypto_ext.py	344	MaskKeyRequiredError	y	admitted
+execution/native/_crypto_ext.py	425	_translate_compiled_kernel_error	n	not a project class
+execution/native/_crypto_ext.py	447	CryptoExtensionUnavailableError	y	admitted
+execution/native/_crypto_ext.py	457	CryptoExtensionUnavailableError	y	admitted
+execution/native/_crypto_ext.py	463	CryptoExtensionUnavailableError	y	admitted
+execution/native/_crypto_ext.py	505	CryptoExtensionUnavailableError	y	admitted
+execution/native/_crypto_ext.py	513	CryptoExtensionUnavailableError	y	admitted
+execution/native/_date_shift_ext.py	121	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_date_shift_ext.py	126	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_date_shift_ext.py	131	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_date_shift_ext.py	137	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_date_shift_ext.py	181	AssertionError	n	not a project class
+execution/native/_determinism_protocol.py	146	KeyError	n	not a project class
+execution/native/_draw_site_providers.py	247	RuntimeError	n	not a project class
+execution/native/_draw_site_providers.py	271	KeyError	n	not a project class
+execution/native/_draw_site_providers.py	287	RuntimeError	n	not a project class
+execution/native/_faker_positional_admission.py	114	PlanCompileError	n	a raise of this class is tagged or near a copy
+execution/native/_fpe_ext.py	135	AssertionError	n	not a project class
+execution/native/_fpe_ext.py	157	_translate_compiled_fpe_error	n	not a project class
+execution/native/_fpe_ext.py	178	CryptoExtensionUnavailableError	y	admitted
+execution/native/_fpe_ext.py	186	CryptoExtensionUnavailableError	y	admitted
+execution/native/_fpe_ext.py	192	CryptoExtensionUnavailableError	y	admitted
+execution/native/_fpe_ext.py	226	CryptoExtensionUnavailableError	y	admitted
+execution/native/_fpe_ext.py	233	CryptoExtensionUnavailableError	y	admitted
+execution/native/_fpe_ext.py	265	StrategyError	n	a raise of this class is tagged or near a copy
+execution/native/_fpe_route.py	52	AssertionError	n	not a project class
+execution/native/_group_key_ext.py	158	_translate_compiled_raw_hex_kernel_error	n	not a project class
+execution/native/_group_key_ext.py	194	CryptoExtensionUnavailableError	y	admitted
+execution/native/_group_key_ext.py	204	CryptoExtensionUnavailableError	y	admitted
+execution/native/_group_key_ext.py	210	CryptoExtensionUnavailableError	y	admitted
+execution/native/_group_key_ext.py	224	CryptoExtensionUnavailableError	y	admitted
+execution/native/_group_key_ext.py	253	CryptoExtensionUnavailableError	y	admitted
+execution/native/_group_key_ext.py	261	CryptoExtensionUnavailableError	y	admitted
+execution/native/_group_key_kernel.py	107	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_group_key_kernel.py	112	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_group_key_kernel.py	120	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_group_key_kernel.py	216	AssertionError	n	not a project class
+execution/native/_index_ext.py	150	_translate_compiled_index_kernel_error	n	not a project class
+execution/native/_index_ext.py	189	CryptoExtensionUnavailableError	y	admitted
+execution/native/_index_ext.py	199	CryptoExtensionUnavailableError	y	admitted
+execution/native/_index_ext.py	205	CryptoExtensionUnavailableError	y	admitted
+execution/native/_index_ext.py	219	CryptoExtensionUnavailableError	y	admitted
+execution/native/_index_ext.py	250	CryptoExtensionUnavailableError	y	admitted
+execution/native/_index_ext.py	258	CryptoExtensionUnavailableError	y	admitted
+execution/native/_kernels_keyed.py	56	StrategyError	n	a raise of this class is tagged or near a copy
+execution/native/_kernels_scalar.py	118	StrategyError	n	a raise of this class is tagged or near a copy
+execution/native/_kernels_scalar.py	127	StrategyError	n	a raise of this class is tagged or near a copy
+execution/native/_kernels_scalar.py	133	StrategyError	n	a raise of this class is tagged or near a copy
+execution/native/_kernels_scalar.py	244	AssertionError	n	not a project class
+execution/native/_kernels_scalar.py	368	text_mask_fail_closed_error	n	not a project class
+execution/native/_kernels_scalar.py	371	text_mask_unsupported_pair_error	n	not a project class
+execution/native/_operator_params.py	271	AssertionError	n	not a project class
+execution/native/_operator_params.py	301	AssertionError	n	not a project class
+execution/native/_operator_params.py	316	AssertionError	n	not a project class
+execution/native/_operator_step.py	110	AssertionError	n	not a project class
+execution/native/_operator_step.py	129	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_operator_step.py	173	AssertionError	n	not a project class
+execution/native/_operator_step.py	194	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_operator_step.py	202	AssertionError	n	not a project class
+execution/native/_operator_step.py	220	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_operator_step.py	225	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_operator_step.py	239	GenerationError	n	a raise of this class is tagged or near a copy
+execution/native/_operator_step.py	296	AssertionError	n	not a project class
+execution/native/_operator_step.py	395	AssertionError	n	not a project class
+execution/native/_operator_step.py	417	AssertionError	n	not a project class
+execution/native/_operator_step.py	476	AssertionError	n	not a project class
+execution/native/_pool_quality.py	346	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	356	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	367	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	378	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	401	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	412	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	427	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	441	PoolQualityError	y	admitted
+execution/native/_pool_quality.py	453	PoolQualityError	y	admitted
+execution/native/_route_decline_codes.py	76	ValueError	n	not a project class
+execution/native/_route_diagnostics.py	198	RowErrorsFailedError	y	admitted
+execution/native/protocol/providers_base.py	48	ValueError	n	not a project class
+execution/native/protocol/providers_base.py	119	DrawSiteProtocolError	y	admitted
+execution/native/protocol/providers_base.py	136	NotImplementedError	n	not a project class
+execution/native/protocol/providers_base.py	162	ValueError	n	not a project class
+execution/native/protocol/providers_base.py	186	ValueError	n	not a project class
+execution/native/protocol/providers_base.py	189	ValueError	n	not a project class
+execution/native/protocol/providers_base.py	234	DrawSiteProtocolError	y	admitted
+execution/native/protocol/providers_mask.py	131	ValueError	n	not a project class
+execution/native/protocol/providers_mask.py	175	ValueError	n	not a project class
+execution/out_of_core/_batch_join.py	122	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_batch_join.py	128	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_batch_join.py	134	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_batch_join.py	237	AssertionError	n	not a project class
+execution/out_of_core/_batch_join.py	306	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_batch_join.py	338	orphan_fk_violation_error	n	not a project class
+execution/out_of_core/_batch_join.py	344	AssertionError	n	not a project class
+execution/out_of_core/_batch_join.py	405	AssertionError	n	not a project class
+execution/out_of_core/_batch_join.py	486	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_batch_join.py	531	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_bucket_native.py	154	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_bucket_native.py	162	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_bucket_native.py	221	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_bucket_native.py	255	AssertionError	n	not a project class
+execution/out_of_core/_bucket_native.py	286	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	222	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	381	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	386	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	464	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	469	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	474	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	504	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	547	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_budget.py	596	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_capacity_eval.py	512	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_categorical_native.py	150	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_categorical_native.py	158	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_categorical_native.py	218	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_duckdb.py	91	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	168	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	173	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	188	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	251	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	261	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	273	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	282	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	293	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	311	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	334	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_external_sort.py	503	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_native.py	164	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_native.py	172	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_native.py	182	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_native.py	213	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_native.py	222	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_native.py	236	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_native.py	280	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_pool.py	98	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_pool.py	141	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_faker_pool.py	159	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_fpe_native.py	143	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_fpe_native.py	151	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_fpe_native.py	209	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_fpe_native.py	224	fpe_fail_closed_error	n	not a project class
+execution/out_of_core/_fpe_native.py	227	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_hash_native.py	83	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_hash_run.py	200	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_hash_run.py	208	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_join.py	72	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_join.py	78	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_join.py	86	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_join.py	124	orphan_fk_violation_error	n	not a project class
+execution/out_of_core/_join.py	284	AssertionError	n	not a project class
+execution/out_of_core/_join.py	336	_unrepresentable	n	not a project class
+execution/out_of_core/_join.py	447	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_join.py	479	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_join.py	551	_dtype_unsupported	n	not a project class
+execution/out_of_core/_join.py	561	_dtype_unsupported	n	not a project class
+execution/out_of_core/_join.py	567	_dtype_unsupported	n	not a project class
+execution/out_of_core/_join.py	568	_dtype_unsupported	n	not a project class
+execution/out_of_core/_mask.py	82	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask.py	94	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask.py	101	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask.py	207	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask.py	229	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask.py	244	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask.py	287	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask.py	295	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	112	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	116	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	138	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	157	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	199	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	208	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	327	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	337	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	346	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	375	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	380	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_b.py	439	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	172	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	289	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	299	text_mask_unsupported_pair_error	n	not a project class
+execution/out_of_core/_mask_group_c.py	364	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	390	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	430	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	439	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	446	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_mask_group_c.py	519	StrategyError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_memory_estimate.py	126	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_memory_estimate.py	136	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_multi_parent.py	85	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_multi_parent.py	126	AssertionError	n	not a project class
+execution/out_of_core/_multi_parent.py	129	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_null_int_guard.py	60	null_bearing_int_error	n	not a project class
+execution/out_of_core/_payload_store.py	156	AssertionError	n	not a project class
+execution/out_of_core/_payload_store.py	217	AssertionError	n	not a project class
+execution/out_of_core/_payload_store.py	244	AssertionError	n	not a project class
+execution/out_of_core/_preflight.py	57	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_preflight.py	81	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_preflight.py	88	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_relation.py	97	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_relation.py	102	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_relation.py	107	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_relation.py	130	AssertionError	n	not a project class
+execution/out_of_core/_relation.py	205	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_relation.py	210	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_relation.py	294	AssertionError	n	not a project class
+execution/out_of_core/_relation.py	299	AssertionError	n	not a project class
+execution/out_of_core/_relation.py	373	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_reorder_budget.py	138	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_reorder_budget.py	173	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_reorder_budget.py	185	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_reorder_budget.py	190	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_reorder_budget.py	197	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_reorder_budget.py	293	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_rewrite_pass.py	340	orphan_fk_violation_error	n	not a project class
+execution/out_of_core/_route_policy.py	84	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_route_policy.py	89	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_route_policy.py	190	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_route_policy.py	241	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_driver.py	417	orphan_fk_violation_error	n	not a project class
+execution/out_of_core/_stream_driver_support.py	206	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_driver_support.py	216	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join.py	153	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join.py	159	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join.py	165	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join.py	247	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	260	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	303	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	353	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	416	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	446	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	501	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	574	AssertionError	n	not a project class
+execution/out_of_core/_stream_join.py	627	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join.py	636	AssertionError	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	88	_contiguity_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	91	_contiguity_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	100	_contiguity_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	115	_contiguity_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	247	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	273	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	280	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	300	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	312	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	344	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	359	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	367	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	376	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	391	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	450	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_cursors.py	470	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_cursors.py	476	_row_alignment_error	n	not a project class
+execution/out_of_core/_stream_join_plan.py	132	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	139	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	144	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	160	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	171	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	200	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	210	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	220	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_stream_join_plan.py	256	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_mask_native.py	180	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_mask_native.py	188	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_mask_native.py	245	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_mask_native.py	265	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_redact_native.py	160	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_redact_native.py	168	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_redact_native.py	219	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_text_redact_native.py	231	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_validate_batch.py	284	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/out_of_core/_validate_batch.py	316	ValidatorFailedError	y	admitted
+execution/out_of_core/_vault_collect.py	72	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/physical/_compiler.py	272	AssertionError	n	not a project class
+execution/physical/_compiler.py	339	AssertionError	n	not a project class
+execution/physical/_compiler.py	381	AssertionError	n	not a project class
+execution/physical/_shadow_batch_runner.py	152	ShadowDifference	y	admitted
+execution/physical/_shadow_batch_runner.py	165	ShadowDifference	y	admitted
+execution/physical/_shadow_batch_runner.py	188	ShadowDifference	y	admitted
+execution/physical/_shadow_batch_runner.py	231	ShadowDifference	y	admitted
+execution/physical/_shadow_batch_runner.py	236	ShadowDifference	y	admitted
+execution/physical/_shadow_batch_runner.py	258	ShadowDifference	y	admitted
+execution/physical/_shadow_batch_runner.py	290	AssertionError	n	not a project class
+execution/physical/_shadow_batch_runner.py	292	AssertionError	n	not a project class
+execution/physical/_shadow_batch_runner.py	300	AssertionError	n	not a project class
+execution/physical/_shadow_batch_runner.py	334	PoolBuildFailed	n	a raise of this class is tagged or near a copy
+execution/physical/_shadow_batch_runner.py	343	ShadowDifference	y	admitted
+execution/physical/_shadow_bindings.py	295	AssertionError	n	not a project class
+execution/physical/_shadow_context.py	158	ValueError	n	not a project class
+execution/physical/_shadow_context.py	160	ValueError	n	not a project class
+execution/physical/_shadow_coordinator.py	192	ShadowDifference	y	admitted
+execution/physical/_shadow_coordinator.py	265	AssertionError	n	not a project class
+execution/physical/_shadow_coordinator.py	277	ShadowDifference	y	admitted
+execution/physical/_shadow_coordinator.py	281	ShadowDifference	y	admitted
+execution/physical/_shadow_coordinator.py	286	ShadowDifference	y	admitted
+execution/physical/_shadow_diff_codes.py	225	ValueError	n	not a project class
+execution/physical/_shadow_fk.py	84	ShadowDifference	y	admitted
+execution/physical/_shadow_fk.py	140	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	184	AssertionError	n	not a project class
+execution/physical/_shadow_full_frame.py	213	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	228	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	233	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	238	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	243	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	248	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	266	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	277	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	282	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	297	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	314	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	324	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	330	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	335	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	354	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	360	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	372	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	376	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	380	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	384	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	388	ShadowDifference	y	admitted
+execution/physical/_shadow_full_frame.py	392	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	148	AssertionError	n	not a project class
+execution/physical/_shadow_generation.py	150	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	193	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	198	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	201	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	209	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	215	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	219	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	233	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	250	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	254	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	282	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	295	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	300	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	307	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	311	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	317	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	328	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	335	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	370	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	375	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	380	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	385	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	399	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	403	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	407	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	411	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	415	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	419	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	423	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	428	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	435	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	441	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	446	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	459	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	463	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	467	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	471	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	473	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	477	ShadowDifference	y	admitted
+execution/physical/_shadow_generation.py	481	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	156	AssertionError	n	not a project class
+execution/physical/_shadow_mixed.py	223	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	254	_as_shadow_difference	n	not a project class
+execution/physical/_shadow_mixed.py	263	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	278	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	286	_as_shadow_difference	n	not a project class
+execution/physical/_shadow_mixed.py	304	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	315	_as_shadow_difference	n	not a project class
+execution/physical/_shadow_mixed.py	333	_as_shadow_difference	n	not a project class
+execution/physical/_shadow_mixed.py	343	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	347	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	357	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	361	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	365	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	369	ShadowDifference	y	admitted
+execution/physical/_shadow_mixed.py	371	ShadowDifference	y	admitted
+execution/physical/_shadow_operators.py	202	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	207	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	209	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	212	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	214	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	218	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	224	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	228	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	230	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	233	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	235	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	239	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	244	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	250	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	254	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	269	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	274	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	281	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	288	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	290	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	292	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	294	AssertionError	n	not a project class
+execution/physical/_shadow_operators.py	347	ShadowDifference	y	admitted
+execution/physical/_shadow_operators.py	401	ShadowDifference	y	admitted
+execution/physical/_shadow_operators.py	418	fpe_fail_closed_error	n	not a project class
+execution/physical/_shadow_operators.py	427	AssertionError	n	not a project class
+execution/pipeline/_cgroup.py	105	CgroupMappingError	y	admitted
+execution/pipeline/_cgroup.py	127	CgroupMappingError	y	admitted
+execution/pipeline/_cgroup.py	140	CgroupMappingError	y	admitted
+execution/pipeline/_host.py	60	CgroupMappingError	y	admitted
+execution/pipeline/_host.py	80	_unreadable	n	not a project class
+execution/pipeline/_host.py	93	_unreadable	n	not a project class
+execution/pipeline/_host.py	97	_unreadable	n	not a project class
+execution/pipeline/_host.py	102	_unreadable	n	not a project class
+execution/pipeline/_host.py	116	_unreadable	n	not a project class
+execution/pipeline/_host.py	121	_unreadable	n	not a project class
+execution/pipeline/_lifecycle.py	204	ValueError	n	not a project class
+execution/pipeline/_lifecycle.py	357	ValueError	n	not a project class
+execution/pipeline/_lifecycle.py	397	ValueError	n	not a project class
+execution/pipeline/_lifecycle_generate.py	58	ValueError	n	not a project class
+execution/pipeline/_lifecycle_inputs.py	72	ValueError	n	not a project class
+execution/pipeline/_lifecycle_inputs.py	118	ValueError	n	not a project class
+execution/pipeline/_lifecycle_inputs.py	158	ValueError	n	not a project class
+execution/pipeline/_post_scan_distribution.py	63	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/pipeline/_post_scan_distribution.py	78	ExecutionError	n	a raise of this class is tagged or near a copy
+execution/pipeline/_resident_fit.py	263	nonfk_full_frame_capacity_error	n	not a project class
+execution/pipeline/_source_types.py	119	_rows_changed	n	not a project class
+execution/pipeline/_source_types.py	123	_rows_changed	n	not a project class
+execution/pipeline/_source_types.py	136	_columns_mismatch	n	not a project class
+execution/pipeline/_stream.py	155	_refusal	n	not a project class
+execution/pipeline/_stream.py	174	_refusal	n	not a project class
+execution/pipeline/_stream.py	177	_refusal	n	not a project class
+execution/pipeline/_stream.py	189	_refusal	n	not a project class
+execution/pipeline/_stream.py	192	_refusal	n	not a project class
+execution/pipeline/_stream.py	227	_refusal	n	not a project class
+execution/pipeline/_stream.py	229	_refusal	n	not a project class
+execution/pipeline/_stream.py	233	_refusal	n	not a project class
+execution/pipeline/_stream.py	240	_refusal	n	not a project class
+execution/pipeline/_stream.py	251	_refusal	n	not a project class
+execution/pipeline/_stream.py	257	_refusal	n	not a project class
+execution/pipeline/_subset_stage.py	169	SubsetInternalError	n	a raise of this class is tagged or near a copy
+execution/pipeline/_subset_stage.py	262	ExecutionError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	118	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	135	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	156	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	171	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	185	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	240	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	490	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_lark_parser.py	540	ValidationError	n	a raise of this class is tagged or near a copy
+expressions/_when_parser.py	183	_RejectError	y	admitted
+expressions/_when_parser.py	185	_RejectError	y	admitted
+expressions/_when_parser.py	187	_RejectError	y	admitted
+expressions/_when_parser.py	196	_RejectError	y	admitted
+expressions/_when_parser.py	201	_RejectError	y	admitted
+expressions/_when_parser.py	214	_RejectError	y	admitted
+expressions/_when_parser.py	218	_RejectError	y	admitted
+expressions/_when_parser.py	300	_reject	n	not a project class
+expressions/_when_parser.py	303	_reject	n	not a project class
+expressions/_when_parser.py	306	_reject	n	not a project class
+expressions/_when_parser.py	308	_reject	n	not a project class
+expressions/_when_parser.py	310	_reject	n	not a project class
+expressions/_when_parser.py	364	_envelope_refusal	n	not a project class
+expressions/_when_parser.py	397	_reject	n	not a project class
+expressions/_when_parser.py	401	_reject	n	not a project class
+fileaccess/_ambient_tree.py	60	deny	n	not a project class
+fileaccess/_component.py	31	deny	n	not a project class
+fileaccess/_component.py	42	deny	n	not a project class
+fileaccess/_durable.py	178	OSError	n	not a project class
+fileaccess/_durable.py	181	LeafTooLarge	y	admitted
+fileaccess/_durable.py	234	CommitUncertain	y	admitted
+fileaccess/_durable.py	243	LockUnavailable	y	admitted
+fileaccess/_durable.py	255	LockUnavailable	y	admitted
+fileaccess/_durable.py	287	LockUnavailable	y	admitted
+fileaccess/_durable.py	290	LockTimeout	y	admitted
+fileaccess/_durable.py	316	OSError	n	not a project class
+fileaccess/_durable.py	323	LeafTooLarge	y	admitted
+fileaccess/_durable.py	371	FileExistsError	n	not a project class
+fileaccess/_durable.py	373	OSError	n	not a project class
+fileaccess/_durable.py	395	OSError	n	not a project class
+fileaccess/_durable.py	465	FileAccessUnavailable	y	admitted
+fileaccess/_durable.py	491	FileAccessUnavailable	y	admitted
+fileaccess/_durable.py	520	FileAccessUnavailable	y	admitted
+fileaccess/_durable.py	523	TypeError	n	not a project class
+fileaccess/_durable.py	539	FileAccessUnavailable	y	admitted
+fileaccess/_entry.py	40	FileAccessUnavailable	y	admitted
+fileaccess/_entry.py	64	TypeError	n	not a project class
+fileaccess/_entry.py	302	TypeError	n	not a project class
+fileaccess/_errors.py	183	read_error	n	not a project class
+fileaccess/_fdtree.py	89	OSError	n	not a project class
+fileaccess/_local.py	173	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	176	deny	n	not a project class
+fileaccess/_local.py	276	OSError	n	not a project class
+fileaccess/_local.py	305	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	338	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	387	cls	n	not a project class
+fileaccess/_local.py	405	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	425	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	430	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	433	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	451	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	472	FileExistsError	n	not a project class
+fileaccess/_local.py	542	LockUnavailable	y	admitted
+fileaccess/_local.py	547	deny	n	not a project class
+fileaccess/_local.py	549	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	554	FileAccessUnavailable	y	admitted
+fileaccess/_local.py	564	FileAccessUnavailable	y	admitted
+fileaccess/_openat2.py	57	OSError	n	not a project class
+fileaccess/_openat2.py	59	OSError	n	not a project class
+fileaccess/_openat2.py	68	OSError	n	not a project class
+fileaccess/_openat2.py	87	OSError	n	not a project class
+fileaccess/_output.py	87	OSError	n	not a project class
+fileaccess/_output.py	103	OSError	n	not a project class
+fileaccess/_output.py	232	OSError	n	not a project class
+fileaccess/_output.py	295	FileAccessUnavailable	y	admitted
+fileaccess/_output.py	327	FileAccessUnavailable	y	admitted
+fileaccess/_output.py	330	TypeError	n	not a project class
+fileaccess/_output.py	356	FileAccessUnavailable	y	admitted
+fileaccess/_output.py	359	deny	n	not a project class
+fileaccess/_output.py	361	FileAccessUnavailable	y	admitted
+fileaccess/_output.py	388	FileAccessUnavailable	y	admitted
+fileaccess/_output.py	404	FileAccessUnavailable	y	admitted
+fileaccess/_output.py	406	FileAccessUnavailable	y	admitted
+fileaccess/_output.py	472	deny	n	not a project class
+fileaccess/_output.py	519	deny	n	not a project class
+fileaccess/_output.py	541	deny	n	not a project class
+fileaccess/_output.py	584	deny	n	not a project class
+fileaccess/_preopened.py	35	deny	n	not a project class
+fileaccess/_preopened.py	41	deny	n	not a project class
+fileaccess/_preopened.py	49	deny	n	not a project class
+fileaccess/_preopened.py	53	deny	n	not a project class
+fileaccess/_private.py	42	OSError	n	not a project class
+fileaccess/_private.py	54	OSError	n	not a project class
+fileaccess/_protected_dir.py	118	OSError	n	not a project class
+fileaccess/_protected_dir.py	198	OSError	n	not a project class
+fileaccess/_protected_dir.py	242	OSError	n	not a project class
+fileaccess/_protected_dir.py	314	OSError	n	not a project class
+fileaccess/_reclaim.py	57	ValueError	n	not a project class
+fileaccess/_reclaim.py	59	NotImplementedError	n	not a project class
+fileaccess/_rooted.py	189	deny	n	not a project class
+fileaccess/_rooted.py	264	FileAccessUnavailable	y	admitted
+fileaccess/_rooted.py	269	FileAccessUnavailable	y	admitted
+fileaccess/_rooted.py	283	deny	n	not a project class
+fileaccess/_rooted.py	292	deny	n	not a project class
+fileaccess/_rooted.py	298	deny	n	not a project class
+fileaccess/_rooted.py	305	deny	n	not a project class
+fileaccess/_rooted.py	312	deny	n	not a project class
+fileaccess/_rooted.py	319	deny	n	not a project class
+fileaccess/_rooted.py	331	deny	n	not a project class
+fileaccess/_scratch.py	178	OSError	n	not a project class
+fileaccess/_scratch.py	199	FileAccessUnavailable	y	admitted
+fileaccess/_scratch.py	215	FileAccessUnavailable	y	admitted
+fileaccess/_scratch.py	276	FileAccessUnavailable	y	admitted
+fileaccess/_scratch.py	280	deny	n	not a project class
+fileaccess/_scratch.py	326	FileAccessUnavailable	y	admitted
+fileaccess/_scratch.py	333	FileAccessUnavailable	y	admitted
+fileaccess/_scratch.py	351	FileAccessUnavailable	y	admitted
+fileaccess/_scratch.py	364	TypeError	n	not a project class
+fileaccess/_scratch.py	376	TypeError	n	not a project class
+fileaccess/_scratch_reports.py	31	ValueError	n	not a project class
+fileaccess/_scratch_reports.py	47	ValueError	n	not a project class
+fileaccess/_scratch_reports.py	98	ValueError	n	not a project class
+fileaccess/_stage_walk.py	55	FileAccessUnavailable	y	admitted
+fileaccess/_stage_walk.py	58	FileAccessUnavailable	y	admitted
+fileaccess/_types.py	106	ValueError	n	not a project class
+fileaccess/adapters/memory.py	27	UnsupportedOperation	n	not a project class
+fileaccess/adapters/serial.py	63	OSError	n	not a project class
+generation/_budget_ledger.py	109	ValueError	n	not a project class
+generation/_budget_ledger.py	113	GenerationBudgetExceeded	y	admitted
+generation/_column_streams.py	85	ValueError	n	not a project class
+generation/_column_streams.py	326	ValueError	n	not a project class
+generation/_dob_anchor.py	35	DecoyError	y	admitted
+generation/_dob_anchor.py	40	DecoyError	y	admitted
+generation/_dob_anchor.py	63	TypeError	n	not a project class
+generation/_dob_anchor.py	65	TypeError	n	not a project class
+generation/_dob_anchor.py	67	ValueError	n	not a project class
+generation/_dob_anchor.py	69	ValueError	n	not a project class
+generation/_dob_anchor.py	71	ValueError	n	not a project class
+generation/_fidelity_gate.py	140	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/_grouped_windowed_generators.py	98	WindowedDateError	y	admitted
+generation/_grouped_windowed_generators.py	110	WindowedDateParentAnchorNullError	y	admitted
+generation/_pinned_anchor.py	31	PinnedModeError	y	admitted
+generation/_pinned_compile.py	135	PinnedModeError	y	admitted
+generation/_pinned_compile.py	188	PinnedModeError	y	admitted
+generation/_pinned_compile.py	195	PinnedModeError	y	admitted
+generation/_pinned_compile.py	200	PinnedModeError	y	admitted
+generation/_pinned_compile.py	205	PinnedModeError	y	admitted
+generation/_pinned_compile.py	213	_relational_refusal	n	not a project class
+generation/_pinned_compile.py	224	_relational_refusal	n	not a project class
+generation/_pinned_compile.py	225	PinnedModeError	y	admitted
+generation/_pinned_compile.py	227	PinnedModeError	y	admitted
+generation/_pinned_compile.py	232	PinnedModeError	y	admitted
+generation/_pinned_compile.py	237	PinnedModeError	y	admitted
+generation/_pinned_compile.py	246	PinnedModeError	y	admitted
+generation/_pinned_compile.py	322	PinnedModeError	y	admitted
+generation/_pinned_compile.py	343	PinnedModeError	y	admitted
+generation/_pinned_compile.py	375	PinnedModeError	y	admitted
+generation/_pinned_execute.py	64	PinnedModeError	y	admitted
+generation/_pinned_execute.py	69	PinnedModeError	y	admitted
+generation/_pinned_execute.py	89	PinnedModeError	y	admitted
+generation/_pinned_execute.py	114	GenerationError	n	a raise of this class is tagged or near a copy
+generation/_pinned_execute.py	123	PinnedModeError	y	admitted
+generation/_pinned_execute.py	142	PinnedModeError	y	admitted
+generation/_pinned_execute.py	147	PinnedModeError	y	admitted
+generation/_pinned_execute.py	154	PinnedModeError	y	admitted
+generation/_pinned_execute.py	160	PinnedModeError	y	admitted
+generation/_pinned_execute.py	170	PinnedModeError	y	admitted
+generation/_pinned_plan.py	142	PinnedModeError	y	admitted
+generation/_pinned_plan.py	157	TypeError	n	not a project class
+generation/_pinned_plan.py	163	TypeError	n	not a project class
+generation/_pinned_plan.py	166	ValueError	n	not a project class
+generation/_pinned_plan.py	176	TypeError	n	not a project class
+generation/_pinned_plan.py	189	TypeError	n	not a project class
+generation/_pinned_plan.py	192	ValueError	n	not a project class
+generation/_pinned_plan.py	226	PinnedModeError	y	admitted
+generation/_plan_entry.py	92	TypeError	n	not a project class
+generation/_plan_entry.py	108	TypeError	n	not a project class
+generation/_plan_entry.py	121	TypeError	n	not a project class
+generation/_plan_entry.py	207	TypeError	n	not a project class
+generation/_statistical_column.py	69	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/_statistical_column.py	82	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/_streamed.py	151	ValueError	n	not a project class
+generation/_streamed.py	156	ValueError	n	not a project class
+generation/_streamed.py	252	GenerationUnboundedError	y	admitted
+generation/_streamed.py	278	GenerationBudgetExceeded	y	admitted
+generation/_streamed.py	333	GenerationBudgetExceeded	y	admitted
+generation/_streamed.py	408	GenerationBudgetExceeded	y	admitted
+generation/_streamed.py	574	GenerationBudgetExceeded	y	admitted
+generation/_synthesize_derived.py	137	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/_window_admission.py	99	GenerationAdmissionError	y	admitted
+generation/_window_admission.py	347	GenerationWindowError	y	admitted
+generation/_window_admission.py	358	GenerationAdmissionError	y	admitted
+generation/composite/_address.py	89	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_address.py	171	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_address.py	180	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_city_state_zip.py	48	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_city_state_zip.py	115	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	100	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	110	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	115	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	122	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	135	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	160	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	268	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_custom.py	277	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_generator.py	73	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_generator.py	103	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_generator.py	110	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_name_email.py	111	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_name_email.py	123	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_name_email.py	209	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_name_email.py	218	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_person.py	124	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_person.py	136	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_person.py	233	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_person.py	242	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_provider.py	97	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_provider.py	194	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_provider.py	203	CompositeError	n	a raise of this class is tagged or near a copy
+generation/composite/_validate.py	82	PlanCompileError	n	a raise of this class is tagged or near a copy
+generation/composite/_validate.py	96	PlanCompileError	n	a raise of this class is tagged or near a copy
+generation/composite/_validate.py	118	PlanCompileError	n	a raise of this class is tagged or near a copy
+generation/composite/_validate.py	130	PlanCompileError	n	a raise of this class is tagged or near a copy
+generation/composite/_validate.py	141	PlanCompileError	n	a raise of this class is tagged or near a copy
+generation/kinds/_categorical.py	68	GenerationError	n	a raise of this class is tagged or near a copy
+generation/kinds/_lookup.py	282	ValueError	n	not a project class
+generation/kinds/_output_type.py	230	ExecutionError	n	a raise of this class is tagged or near a copy
+generation/kinds/_provider.py	87	GenerationError	n	a raise of this class is tagged or near a copy
+generation/kinds/_provider.py	121	ProviderError	y	admitted
+generation/kinds/_provider.py	141	ProviderError	y	admitted
+generation/pool/_builder.py	191	PoolCapacityError	y	admitted
+generation/pool/_cache.py	104	PoolCapacityError	y	admitted
+generation/pool/_canonicalize.py	75	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_canonicalize.py	92	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_canonicalize.py	105	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_errors.py	82	TypeError	n	not a project class
+generation/pool/_errors.py	116	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_events.py	72	ValueError	n	not a project class
+generation/pool/_events.py	74	ValueError	n	not a project class
+generation/pool/_events.py	76	ValueError	n	not a project class
+generation/pool/_events.py	80	TypeError	n	not a project class
+generation/pool/_events.py	86	TypeError	n	not a project class
+generation/pool/_pool_adapter.py	80	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_pool_adapter.py	141	ProviderError	y	admitted
+generation/pool/_pool_adapter.py	153	ProviderError	y	admitted
+generation/pool/_sampler.py	93	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	98	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	103	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	109	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	253	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	265	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	296	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	331	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	363	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	404	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	413	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	471	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	478	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	489	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_sampler.py	497	GenerationError	n	a raise of this class is tagged or near a copy
+generation/pool/_validate.py	148	PoolCapacityError	y	admitted
+generation/pool/_validate.py	160	PoolCapacityError	y	admitted
+generation/pool/_validate.py	204	PoolCapacityError	y	admitted
+generation/relational/_aggregate.py	131	ValueError	n	not a project class
+generation/relational/_cardinality.py	144	GenerationError	n	a raise of this class is tagged or near a copy
+generation/relational/_cardinality.py	163	_infeasible	n	not a project class
+generation/relational/_cardinality.py	170	GenerationError	n	a raise of this class is tagged or near a copy
+generation/relational/_cardinality.py	183	GenerationError	n	a raise of this class is tagged or near a copy
+generation/relational/_cardinality.py	290	GenerationError	n	a raise of this class is tagged or near a copy
+generation/relational/_inherit.py	82	ValueError	n	not a project class
+generation/relational/_parent_lookup.py	90	GenerationError	n	a raise of this class is tagged or near a copy
+generation/relational/_parent_lookup.py	110	GenerationError	n	a raise of this class is tagged or near a copy
+generation/relational/_self_reference.py	56	ValueError	n	not a project class
+generation/statistical/_cell_format.py	82	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_degenerate.py	34	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_fanout.py	62	ValueError	n	not a project class
+generation/statistical/_fanout.py	99	DistributionSnapshotError	y	admitted
+generation/statistical/_fanout.py	109	DistributionSnapshotError	y	admitted
+generation/statistical/_fanout.py	150	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_fanout.py	159	_invalid	n	not a project class
+generation/statistical/_fanout.py	162	_invalid	n	not a project class
+generation/statistical/_fanout.py	164	_invalid	n	not a project class
+generation/statistical/_fanout.py	166	_invalid	n	not a project class
+generation/statistical/_fanout.py	170	_invalid	n	not a project class
+generation/statistical/_fanout.py	173	_invalid	n	not a project class
+generation/statistical/_fanout.py	175	_invalid	n	not a project class
+generation/statistical/_fanout.py	178	_invalid	n	not a project class
+generation/statistical/_fanout.py	180	_invalid	n	not a project class
+generation/statistical/_fanout.py	182	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_fanout.py	270	ValueError	n	not a project class
+generation/statistical/_fanout.py	295	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_sample.py	254	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_sample.py	424	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_sample.py	530	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_snapshot_io.py	32	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	189	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	197	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	204	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	210	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	291	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	338	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	360	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	388	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	414	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	424	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	439	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	461	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	476	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	487	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	507	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	524	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	537	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	552	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	565	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/statistical/_spec.py	579	StatisticalSpecError	n	a raise of this class is tagged or near a copy
+generation/synthesize.py	395	ValueError	n	not a project class
+generation/window.py	90	GenerationWindowError	y	admitted
+generation/window.py	94	GenerationWindowError	y	admitted
+generation/window.py	223	GenerationWindowError	y	admitted
+generation/window.py	240	GenerationWindowError	y	admitted
+generation/window.py	296	GenerationWindowError	y	admitted
+generation/window.py	313	GenerationAdmissionError	y	admitted
+generation/window.py	354	GenerationWindowTimeoutError	y	admitted
+generation/window.py	374	GenerationWindowTimeoutError	y	admitted
+generators/_formula.py	65	GenerationError	n	a raise of this class is tagged or near a copy
+generators/columns.py	455	ValueError	n	not a project class
+generators/columns.py	464	ValueError	n	not a project class
+generators/derivation.py	89	ValueError	n	not a project class
+generators/derivation.py	157	RuntimeError	n	not a project class
+generators/derivation.py	162	RuntimeError	n	not a project class
+generators/derivation.py	202	RuntimeError	n	not a project class
+generators/derivation.py	310	RuntimeError	n	not a project class
+generators/derivation.py	370	RuntimeError	n	not a project class
+internal/crypto.py	97	ValueError	n	not a project class
+internal/env_flags.py	69	EnvFlagError	y	admitted
+internal/faker_setup.py	74	ValueError	n	not a project class
+internal/faker_setup.py	76	TypeError	n	not a project class
+internal/faker_setup.py	109	TypeError	n	not a project class
+internal/faker_setup.py	112	ValueError	n	not a project class
+internal/memory_limit.py	21	ValueError	n	not a project class
+io/bounded_reader.py	122	ValueError	n	not a project class
+io/bounded_reader.py	128	ValueError	n	not a project class
+io/bounded_reader.py	192	UnsupportedColumnType	y	admitted
+io/bounded_reader.py	200	UnsupportedColumnType	y	admitted
+io/bounded_reader.py	210	UnsupportedColumnType	y	admitted
+io/bounded_reader.py	218	UnsupportedColumnType	y	admitted
+io/bounded_reader.py	257	RowExceedsMaxRowBytes	y	admitted
+io/bounded_reader.py	341	CsvRecordExceedsMaxRowBytes	y	admitted
+io/bounded_reader.py	343	CsvMalformed	y	admitted
+io/bounded_reader.py	348	CsvMalformed	y	admitted
+io/bounded_reader.py	374	CsvMalformed	y	admitted
+io/bounded_reader.py	380	CsvRecordExceedsMaxRowBytes	y	admitted
+io/bounded_reader.py	382	CsvMalformed	y	admitted
+io/csv_framer.py	85	ValueError	n	not a project class
+io/csv_framer.py	144	CsvRecordTooLarge	y	admitted
+io/csv_framer.py	171	CsvRecordTooLarge	y	admitted
+io/csv_framer.py	178	CsvUnterminatedQuote	y	admitted
+keyprovider.py	148	MaskSecretError	y	admitted
+keyprovider.py	153	WeakMaskSecret	y	admitted
+keyprovider.py	245	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+keyprovider.py	249	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+phase.py	181	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	203	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	206	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	208	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	216	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	221	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	234	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	251	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	256	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	262	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	265	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	267	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	276	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	279	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	285	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	295	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	302	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	316	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	330	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	339	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	363	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	385	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	389	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	392	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	396	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	430	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	434	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	461	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	463	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	465	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	476	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	484	PhaseContractError	n	a raise of this class is tagged or near a copy
+phase.py	526	PhaseContractError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	87	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	134	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	185	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	245	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	272	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	351	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	362	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	384	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	424	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	509	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	522	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	548	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	640	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks.py	684	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_bucket_perturb.py	41	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_bucket_perturb.py	50	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_bucketize.py	78	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_bucketize.py	92	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_categorical.py	87	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_categorical.py	102	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_correctness.py	140	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_correctness.py	195	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_correctness.py	206	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_correctness.py	222	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_correctness.py	233	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	131	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	161	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	172	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	188	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	214	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	264	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	398	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	404	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_date_shift.py	416	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_declared_casting.py	103	_fail	n	not a project class
+plan/_checks_declared_casting.py	112	_fail	n	not a project class
+plan/_checks_declared_casting.py	119	_fail	n	not a project class
+plan/_checks_declared_casting.py	137	_fail	n	not a project class
+plan/_checks_declared_casting.py	145	_fail	n	not a project class
+plan/_checks_declared_casting.py	151	_fail	n	not a project class
+plan/_checks_declared_casting.py	170	_fail	n	not a project class
+plan/_checks_declared_casting.py	186	_fail	n	not a project class
+plan/_checks_declared_casting.py	204	_fail	n	not a project class
+plan/_checks_declared_casting.py	223	_fail	n	not a project class
+plan/_checks_declared_casting.py	231	_fail	n	not a project class
+plan/_checks_declared_casting.py	238	_fail	n	not a project class
+plan/_checks_declared_casting.py	249	_fail	n	not a project class
+plan/_checks_declared_casting.py	271	_fail	n	not a project class
+plan/_checks_derived_aggregate.py	84	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_derived_aggregate.py	95	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_derived_aggregate.py	115	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	99	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	123	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	166	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	175	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	188	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	199	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	212	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp.py	579	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp_carrier.py	149	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp_carrier.py	263	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp_carrier.py	278	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp_carrier.py	290	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp_carrier.py	321	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_dp_carrier.py	336	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_faker.py	54	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_fpe.py	100	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_fpe.py	108	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_fpe.py	114	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_fpe_join.py	127	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_fpe_join.py	141	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_fpe_join.py	162	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_fpe_join.py	179	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_group_key.py	75	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_group_key.py	95	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_grouped_series.py	84	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_grouped_series.py	119	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_grouped_series.py	156	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	53	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	63	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	73	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	153	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	188	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	206	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	228	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	252	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	273	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_top_code.py	284	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_truncate.py	77	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_truncate.py	91	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_truncate.py	102	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_when.py	46	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_when.py	81	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_when.py	97	_when_refusal_error	n	not a project class
+plan/_checks_windowed_date.py	88	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_windowed_date.py	100	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_checks_windowed_date.py	123	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_generation.py	277	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_generation.py	442	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_generation.py	472	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_pool_size.py	39	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_seed.py	68	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_seed.py	79	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_seed.py	91	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_seed.py	100	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_seed_envelope.py	165	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_seed_envelope.py	207	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_seed_envelope.py	291	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize.py	86	ValueError	n	not a project class
+plan/_serialize.py	339	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize.py	362	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize.py	372	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize.py	412	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize_declared.py	53	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize_declared.py	64	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize_declared.py	98	_bad_shapes	n	not a project class
+plan/_serialize_declared.py	105	_bad_shapes	n	not a project class
+plan/_serialize_declared.py	111	_bad_shapes	n	not a project class
+plan/_serialize_declared.py	116	_bad_shapes	n	not a project class
+plan/_serialize_declared.py	133	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize_declared.py	139	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_serialize_declared.py	148	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/_types.py	231	ValueError	n	not a project class
+plan/_types.py	237	ValueError	n	not a project class
+plan/_types.py	240	ValueError	n	not a project class
+plan/checks/_config_json.py	49	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/checks/_formula_types.py	147	_refusal	n	not a project class
+plan/checks/_generate_columns.py	110	_located	n	not a project class
+plan/checks/_generate_columns.py	239	_refusal	n	not a project class
+plan/checks/_generate_columns.py	250	_refusal	n	not a project class
+plan/checks/_generate_columns.py	253	_refusal	n	not a project class
+plan/checks/_generate_columns.py	299	_refusal	n	not a project class
+plan/checks/_generate_columns.py	376	_refusal	n	not a project class
+plan/checks/_generate_columns.py	409	_refusal	n	not a project class
+plan/checks/_generate_columns.py	480	_refusal	n	not a project class
+plan/checks/_generate_columns.py	489	_refusal	n	not a project class
+plan/checks/_generate_columns.py	491	_refusal	n	not a project class
+plan/checks/_generate_columns.py	501	_refusal	n	not a project class
+plan/checks/_generate_columns.py	510	_refusal	n	not a project class
+plan/checks/_generate_columns.py	533	_refusal	n	not a project class
+plan/checks/_generate_providers.py	41	_refusal	n	not a project class
+plan/checks/_generate_providers.py	46	_refusal	n	not a project class
+plan/checks/_generate_providers.py	48	_refusal	n	not a project class
+plan/checks/_generate_providers.py	50	_refusal	n	not a project class
+plan/checks/_generate_providers.py	52	_refusal	n	not a project class
+plan/checks/_generate_providers.py	55	_refusal	n	not a project class
+plan/checks/_lookup_tables.py	125	_lookup_refusal	n	not a project class
+plan/checks/_lookup_tables.py	141	_lookup_refusal	n	not a project class
+plan/checks/_lookup_tables.py	167	_lookup_refusal	n	not a project class
+plan/checks/_lookup_tables.py	175	_lookup_refusal	n	not a project class
+plan/checks/_lookup_tables.py	192	_lookup_refusal	n	not a project class
+plan/checks/_lookup_tables.py	202	_lookup_refusal	n	not a project class
+plan/checks/_lookup_tables.py	248	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/checks/_lookup_tables.py	268	_lookup_refusal	n	not a project class
+plan/checks/_nested_target.py	41	_located	n	not a project class
+plan/checks/_relationship_keys.py	74	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/checks/_required_settings.py	257	PlanCompileError	n	a raise of this class is tagged or near a copy
+plan/checks/_text_mask_strategy.py	54	_refuse	n	not a project class
+plan/checks/_text_mask_strategy.py	59	_refuse	n	not a project class
+plan/checks/_text_mask_strategy.py	64	_refuse	n	not a project class
+plan/checks/_text_mask_strategy.py	74	_refuse	n	not a project class
+plan/checks/_text_mask_strategy.py	76	_refuse	n	not a project class
+profile/_cloud_readers.py	84	ValueError	n	not a project class
+profile/_cloud_readers.py	174	source_changed	n	not a project class
+profile/_cloud_readers.py	330	NotImplementedError	n	not a project class
+profile/_cloud_readers.py	449	NotImplementedError	n	not a project class
+profile/_cloud_readers.py	457	ValueError	n	not a project class
+profile/_csv_reader.py	93	ConfigError	y	admitted
+profile/_csv_reader.py	112	ConfigError	y	admitted
+profile/_csv_reader.py	139	_names_file_refusal	n	not a project class
+profile/_csv_reader.py	157	_names_file_refusal	n	not a project class
+profile/_csv_reader.py	162	_names_file_refusal	n	not a project class
+profile/_csv_reader.py	181	_names_file_refusal	n	not a project class
+profile/_csv_reader.py	183	_names_file_refusal	n	not a project class
+profile/_csv_reader.py	266	source_refusal	n	not a project class
+profile/_csv_reader.py	276	source_refusal	n	not a project class
+profile/_csv_reader.py	313	source_refusal	n	not a project class
+profile/_csv_reader.py	326	ValueError	n	not a project class
+profile/_csv_reader.py	360	ValueError	n	not a project class
+profile/_csv_reader.py	362	ValueError	n	not a project class
+profile/_csv_reader.py	368	ValueError	n	not a project class
+profile/_csv_reader.py	394	_unreadable	n	not a project class
+profile/_csv_reader.py	420	_unreadable	n	not a project class
+profile/_csv_reader.py	545	TypeError	n	not a project class
+profile/_csv_reader.py	547	ValueError	n	not a project class
+profile/_declared_columns.py	219	source_refusal	n	not a project class
+profile/_declared_columns.py	221	source_refusal	n	not a project class
+profile/_declared_columns.py	223	source_refusal	n	not a project class
+profile/_declared_columns.py	224	AssertionError	n	not a project class
+profile/_declared_columns.py	247	TypeError	n	not a project class
+profile/_declared_columns.py	249	ValueError	n	not a project class
+profile/_declared_columns.py	286	PipelineConfigError	y	admitted
+profile/_declared_columns.py	289	PipelineConfigError	y	admitted
+profile/_declared_columns.py	292	PipelineConfigError	y	admitted
+profile/_declared_columns.py	294	PipelineConfigError	y	admitted
+profile/_declared_columns.py	297	PipelineConfigError	y	admitted
+profile/_declared_columns.py	300	PipelineConfigError	y	admitted
+profile/_declared_columns.py	313	PipelineConfigError	y	admitted
+profile/_declared_columns.py	434	TypeError	n	not a project class
+profile/_declared_columns.py	449	TypeError	n	not a project class
+profile/_declared_columns.py	503	ValueError	n	not a project class
+profile/_fixed_width_reader.py	136	ConfigError	y	admitted
+profile/_fixed_width_reader.py	208	TypeError	n	not a project class
+profile/_fixed_width_reader.py	210	ValueError	n	not a project class
+profile/_fixed_width_reader.py	214	TypeError	n	not a project class
+profile/_fixed_width_reader.py	216	ValueError	n	not a project class
+profile/_fixed_width_reader.py	358	FixedWidthRecordOverlongError	y	admitted
+profile/_fixed_width_reader.py	359	FixedWidthParseError	y	admitted
+profile/_fixed_width_reader.py	381	RuntimeError	n	not a project class
+profile/_fixed_width_reader.py	396	IsADirectoryError	n	not a project class
+profile/_fixed_width_writer.py	239	TypeError	n	not a project class
+profile/_fixed_width_writer.py	242	TypeError	n	not a project class
+profile/_fixed_width_writer.py	244	ValueError	n	not a project class
+profile/_fixed_width_writer.py	252	FixedWidthWriteError	y	admitted
+profile/_fixed_width_writer.py	256	FixedWidthWriteError	y	admitted
+profile/_fixed_width_writer.py	263	FixedWidthWriteError	y	admitted
+profile/_lazy_build.py	49	ValueError	n	not a project class
+profile/_lazy_build.py	59	ValueError	n	not a project class
+profile/_lazy_fixed_width.py	165	ValueError	n	not a project class
+profile/_lazy_fixed_width.py	168	ValueError	n	not a project class
+profile/_lazy_identity.py	39	ValueError	n	not a project class
+profile/_lazy_identity.py	79	lazy_source_changed	n	not a project class
+profile/_lazy_identity.py	88	lazy_source_changed	n	not a project class
+profile/_lazy_identity.py	94	lazy_source_changed	n	not a project class
+profile/_policy_bound.py	20	FileAccessUnavailable	y	admitted
+profile/_readers.py	255	FileAccessUnavailable	y	admitted
+profile/_readers.py	545	NotImplementedError	n	not a project class
+profile/_readers.py	568	NotImplementedError	n	not a project class
+profile/_serialize.py	48	ValueError	n	not a project class
+profile/_serialize.py	203	ValueError	n	not a project class
+profile/_source.py	107	ValueError	n	not a project class
+profile/_source.py	117	ValueError	n	not a project class
+profile/_types.py	114	ValueError	n	not a project class
+profile/_types.py	122	ValueError	n	not a project class
+profile/_types.py	131	ValueError	n	not a project class
+profile/_types.py	136	ValueError	n	not a project class
+profile/_types.py	144	ValueError	n	not a project class
+profile/_types.py	148	ValueError	n	not a project class
+profile/_types.py	156	ValueError	n	not a project class
+profile/_types.py	184	ValueError	n	not a project class
+profile/_types.py	189	ValueError	n	not a project class
+profile/_types.py	225	ValueError	n	not a project class
+profile/_types.py	269	ValueError	n	not a project class
+profile/_walk.py	107	ValueError	n	not a project class
+profiling/_profile_document.py	346	TypeError	n	not a project class
+profiling/_profile_document.py	348	TypeError	n	not a project class
+profiling/_scan_core.py	117	_refuse	n	not a project class
+profiling/_scan_core.py	124	_refuse	n	not a project class
+profiling/_scan_core.py	128	_refuse	n	not a project class
+profiling/_scan_core.py	131	_refuse	n	not a project class
+profiling/_scan_core.py	133	_refuse	n	not a project class
+profiling/_scan_core.py	144	_refuse	n	not a project class
+profiling/_scan_integrity.py	165	PipelineConfigError	y	admitted
+profiling/_scan_integrity.py	212	PipelineConfigError	y	admitted
+profiling/_scan_integrity.py	216	PipelineConfigError	y	admitted
+profiling/_scan_integrity.py	220	PipelineConfigError	y	admitted
+profiling/_scan_integrity.py	305	_missing	n	not a project class
+profiling/_scan_integrity.py	327	_missing	n	not a project class
+profiling/_scan_integrity.py	341	_missing	n	not a project class
+profiling/_scan_integrity.py	392	PipelineConfigError	y	admitted
+profiling/_scan_integrity.py	562	ValueError	n	not a project class
+profiling/_snapshot_values.py	215	ValueError	n	not a project class
+profiling/_snapshot_values.py	501	DistributionSnapshotError	y	admitted
+profiling/_snapshot_values.py	527	DistributionSnapshotError	y	admitted
+profiling/_snapshot_values.py	575	TypeError	n	not a project class
+profiling/_snapshot_values.py	578	TypeError	n	not a project class
+profiling/_snapshot_values.py	582	ValueError	n	not a project class
+profiling/_starter_config.py	114	ValueError	n	not a project class
+profiling/_starter_config.py	120	ValueError	n	not a project class
+profiling/_starter_config.py	155	ValueError	n	not a project class
+profiling/_starter_config.py	213	from_problems	n	not a project class
+profiling/_starter_config.py	352	from_problems	n	not a project class
+profiling/_starter_config.py	377	ValueError	n	not a project class
+profiling/_starter_config.py	424	ValueError	n	not a project class
+profiling/_starter_config.py	448	from_problems	n	not a project class
+profiling/_starter_config.py	454	PipelineConfigError	y	admitted
+profiling/_starter_config.py	457	from_problems	n	not a project class
+profiling/_value_redaction.py	433	TypeError	n	not a project class
+profiling/bound_baseline.py	89	TypeError	n	not a project class
+profiling/bound_baseline.py	100	from_problems	n	not a project class
+profiling/bound_baseline.py	112	BaselineBindingError	y	admitted
+profiling/bound_baseline.py	119	BaselineBindingError	y	admitted
+profiling/eval/split.py	181	ImportError	n	not a project class
+profiling/model_pack/_detectors.py	123	ValueError	n	not a project class
+profiling/model_pack/loader.py	149	FileAccessUnavailable	y	admitted
+profiling/model_pack/loader.py	203	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	248	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	256	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	260	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	267	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	282	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	284	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	289	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	294	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	349	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	362	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	368	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	393	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	424	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/loader.py	431	ModelPackLoadError	n	a raise of this class is tagged or near a copy
+profiling/model_pack/provenance.py	118	ValueError	n	not a project class
+profiling/model_pack/provenance.py	160	ValueError	n	not a project class
+profiling/model_pack/provenance.py	165	FileNotFoundError	n	not a project class
+profiling/model_pack/provenance.py	177	ValueError	n	not a project class
+profiling/model_pack/provenance.py	230	ValueError	n	not a project class
+profiling/model_pack/trainer.py	82	ImportError	n	not a project class
+profiling/model_pack/trainer.py	627	FileNotFoundError	n	not a project class
+profiling/model_pack/trainer.py	630	FileNotFoundError	n	not a project class
+profiling/model_pack/trainer.py	634	ValueError	n	not a project class
+profiling/model_pack/trainer.py	638	ValueError	n	not a project class
+profiling/model_pack/trainer.py	645	ValueError	n	not a project class
+profiling/pre_scan/_check.py	183	TypeError	n	not a project class
+profiling/scan_diff.py	177	TypeError	n	not a project class
+profiling/scan_diff.py	243	ValueError	n	not a project class
+profiling/scan_diff.py	263	ValueError	n	not a project class
+profiling/scan_diff.py	287	PydanticCustomError	n	not a project class
+profiling/scan_set.py	179	PipelineConfigError	y	admitted
+profiling/scan_set.py	183	PipelineConfigError	y	admitted
+profiling/scan_set.py	245	PipelineConfigError	y	admitted
+profiling/scan_set.py	248	PipelineConfigError	y	admitted
+profiling/scan_set.py	273	ScanSourceError	n	a raise of this class is tagged or near a copy
+profiling/scan_set.py	284	PipelineConfigError	y	admitted
+profiling/scan_set.py	304	ScanSourceError	n	a raise of this class is tagged or near a copy
+profiling/scan_set_read.py	52	ScanSetReadError	y	admitted
+profiling/scan_set_read.py	54	ScanSetReadError	y	admitted
+profiling/scan_set_read.py	57	ScanSetReadError	y	admitted
+profiling/scan_set_read.py	64	ScanSetReadError	y	admitted
+progress.py	168	ValueError	n	not a project class
+progress.py	528	TypeError	n	not a project class
+providers_v2/_adapter.py	66	ProviderError	y	admitted
+providers_v2/_adapter.py	76	ProviderError	y	admitted
+providers_v2/_adapter.py	88	ProviderError	y	admitted
+providers_v2/_faker_adapter.py	140	AdapterError	n	a raise of this class is tagged or near a copy
+providers_v2/_faker_adapter.py	159	AdapterError	n	a raise of this class is tagged or near a copy
+providers_v2/_faker_adapter.py	182	ProviderError	y	admitted
+providers_v2/_faker_adapter.py	204	ProviderError	y	admitted
+providers_v2/_faker_adapter.py	241	AdapterError	n	a raise of this class is tagged or near a copy
+providers_v2/_registry.py	58	ProviderError	y	admitted
+providers_v2/_registry.py	74	ProviderError	y	admitted
+providers_v2/_registry.py	203	ProviderError	y	admitted
+providers_v2/identifiers/_cusip.py	72	IdentifierError	y	admitted
+providers_v2/identifiers/_cusip.py	136	IdentifierError	y	admitted
+providers_v2/identifiers/_cusip.py	179	ProviderError	y	admitted
+providers_v2/identifiers/_cusip.py	187	ProviderError	y	admitted
+providers_v2/identifiers/_cusip.py	192	ProviderError	y	admitted
+providers_v2/identifiers/_cusip.py	207	ProviderError	y	admitted
+providers_v2/identifiers/_ein.py	138	IdentifierError	y	admitted
+providers_v2/identifiers/_ein.py	184	ProviderError	y	admitted
+providers_v2/identifiers/_ein.py	192	ProviderError	y	admitted
+providers_v2/identifiers/_ein.py	197	ProviderError	y	admitted
+providers_v2/identifiers/_ein.py	212	ProviderError	y	admitted
+providers_v2/identifiers/_iban.py	191	IdentifierError	y	admitted
+providers_v2/identifiers/_iban.py	233	ProviderError	y	admitted
+providers_v2/identifiers/_iban.py	241	ProviderError	y	admitted
+providers_v2/identifiers/_iban.py	246	ProviderError	y	admitted
+providers_v2/identifiers/_iban.py	261	ProviderError	y	admitted
+providers_v2/identifiers/_icd10.py	76	IdentifierError	y	admitted
+providers_v2/identifiers/_icd10.py	116	ProviderError	y	admitted
+providers_v2/identifiers/_icd10.py	124	ProviderError	y	admitted
+providers_v2/identifiers/_icd10.py	129	ProviderError	y	admitted
+providers_v2/identifiers/_icd10.py	144	ProviderError	y	admitted
+providers_v2/identifiers/_locale.py	29	ProviderError	y	admitted
+providers_v2/identifiers/_mrn.py	64	IdentifierError	y	admitted
+providers_v2/identifiers/_mrn.py	120	ProviderError	y	admitted
+providers_v2/identifiers/_mrn.py	128	ProviderError	y	admitted
+providers_v2/identifiers/_mrn.py	133	ProviderError	y	admitted
+providers_v2/identifiers/_mrn.py	155	ProviderError	y	admitted
+providers_v2/identifiers/_ndc.py	70	IdentifierError	y	admitted
+providers_v2/identifiers/_ndc.py	123	ProviderError	y	admitted
+providers_v2/identifiers/_ndc.py	131	ProviderError	y	admitted
+providers_v2/identifiers/_ndc.py	136	ProviderError	y	admitted
+providers_v2/identifiers/_ndc.py	151	ProviderError	y	admitted
+providers_v2/identifiers/_npi.py	72	IdentifierError	y	admitted
+providers_v2/identifiers/_npi.py	115	ProviderError	y	admitted
+providers_v2/identifiers/_npi.py	123	ProviderError	y	admitted
+providers_v2/identifiers/_npi.py	128	ProviderError	y	admitted
+providers_v2/identifiers/_npi.py	143	ProviderError	y	admitted
+providers_v2/identifiers/_pan.py	82	IdentifierError	y	admitted
+providers_v2/identifiers/_pan.py	122	ProviderError	y	admitted
+providers_v2/identifiers/_pan.py	130	ProviderError	y	admitted
+providers_v2/identifiers/_pan.py	135	ProviderError	y	admitted
+providers_v2/identifiers/_pan.py	150	ProviderError	y	admitted
+providers_v2/identifiers/_ssn.py	80	IdentifierError	y	admitted
+providers_v2/identifiers/_ssn.py	89	IdentifierError	y	admitted
+providers_v2/identifiers/_ssn.py	141	ProviderError	y	admitted
+providers_v2/identifiers/_ssn.py	151	ProviderError	y	admitted
+providers_v2/identifiers/_ssn.py	156	ProviderError	y	admitted
+providers_v2/identifiers/_ssn.py	171	ProviderError	y	admitted
+providers_v2/identifiers/_validate.py	52	PlanCompileError	n	a raise of this class is tagged or near a copy
+providers_v2/mimesis/__init__.py	25	ImportError	n	not a project class
+providers_v2/mimesis/_adapter.py	98	ProviderError	y	admitted
+providers_v2/mimesis/_adapter.py	178	AdapterError	n	a raise of this class is tagged or near a copy
+providers_v2/mimesis/_adapter.py	185	AdapterError	n	a raise of this class is tagged or near a copy
+providers_v2/mimesis/_adapter.py	213	AdapterError	n	a raise of this class is tagged or near a copy
+providers_v2/mimesis/_adapter.py	237	ProviderError	y	admitted
+providers_v2/mimesis/_adapter.py	268	ProviderError	y	admitted
+publication/_current.py	132	RuntimeError	n	not a project class
+publication/_current.py	135	ValueError	n	not a project class
+publication/_current.py	152	ValueError	n	not a project class
+publication/_descriptor.py	119	ValueError	n	not a project class
+publication/_members.py	63	ValueError	n	not a project class
+publication/_members.py	76	ValueError	n	not a project class
+publication/_members.py	78	ValueError	n	not a project class
+publication/_members.py	110	OSError	n	not a project class
+publication/_publish.py	185	TypeError	n	not a project class
+publication/_publish.py	187	TypeError	n	not a project class
+publication/_publish.py	197	ValueError	n	not a project class
+publication/_publish.py	209	ValueError	n	not a project class
+publication/_publish.py	211	ValueError	n	not a project class
+publication/_publish.py	222	ValueError	n	not a project class
+publication/_publish.py	224	ValueError	n	not a project class
+publication/_publish.py	393	ValueError	n	not a project class
+publication/_sink_state.py	201	ValueError	n	not a project class
+publication/_sink_state.py	255	PublicationRefused	y	admitted
+publication/_types.py	115	ValueError	n	not a project class
+publication/_types.py	208	ValueError	n	not a project class
+publication/_types.py	237	CommitUncertain	y	admitted
+publication/_types.py	239	ValueError	n	not a project class
+publication/_types.py	241	PublicationFailed	y	admitted
+publication/_types.py	242	PublicationRefused	y	admitted
+publication/_vault_order.py	163	VaultError	y	admitted
+quality/__init__.py	70	AttributeError	n	not a project class
+quality/carrier_adapter.py	105	CarrierError	y	admitted
+quality/carrier_adapter.py	112	CarrierError	y	admitted
+quality/carrier_adapter.py	121	CarrierError	y	admitted
+quality/carrier_adapter.py	128	CarrierError	y	admitted
+quality/carrier_adapter.py	134	CarrierError	y	admitted
+quality/carrier_adapter.py	144	CarrierError	y	admitted
+quality/carrier_adapter.py	151	CarrierError	y	admitted
+quality/carrier_adapter.py	275	CarrierError	y	admitted
+quality/carrier_adapter.py	282	CarrierError	y	admitted
+quality/carrier_adapter.py	292	CarrierError	y	admitted
+quality/carrier_adapter.py	305	CarrierError	y	admitted
+quality/carriers.py	297	CarrierError	y	admitted
+quality/carriers.py	302	CarrierError	y	admitted
+quality/carriers.py	314	CarrierError	y	admitted
+quality/carriers.py	327	CarrierError	y	admitted
+quality/carriers.py	332	CarrierError	y	admitted
+quality/carriers.py	341	CarrierError	y	admitted
+quality/carriers.py	348	CarrierError	y	admitted
+quality/carriers.py	353	CarrierError	y	admitted
+quality/carriers.py	360	CarrierError	y	admitted
+quality/carriers.py	373	CarrierError	y	admitted
+quality/carriers.py	390	CarrierError	y	admitted
+quality/carriers.py	397	CarrierError	y	admitted
+quality/carriers.py	402	CarrierError	y	admitted
+quality/carriers.py	419	CarrierError	y	admitted
+quality/carriers.py	426	CarrierError	y	admitted
+quality/carriers.py	455	CarrierError	y	admitted
+quality/carriers.py	460	CarrierError	y	admitted
+quality/carriers.py	465	CarrierError	y	admitted
+quality/carriers.py	480	CarrierError	y	admitted
+quality/dp.py	154	DpError	y	admitted
+quality/dp.py	159	DpError	y	admitted
+quality/dp.py	166	DpError	y	admitted
+quality/dp.py	173	DpError	y	admitted
+quality/dp.py	186	DpError	y	admitted
+quality/dp.py	212	DpError	y	admitted
+quality/dp.py	529	DpBudgetError	y	admitted
+quality/dp_budget.py	142	DpBudgetError	y	admitted
+quality/dp_budget.py	520	AttributeError	n	not a project class
+quality/dp_fit_schema.py	71	CarrierError	y	admitted
+quality/dp_fit_schema.py	79	CarrierError	y	admitted
+quality/dp_fit_schema.py	85	CarrierError	y	admitted
+quality/dp_fit_schema.py	95	CarrierError	y	admitted
+quality/dp_fit_schema.py	104	CarrierError	y	admitted
+quality/dp_fit_schema.py	114	CarrierError	y	admitted
+quality/dp_fit_schema.py	121	CarrierError	y	admitted
+quality/dp_ledger.py	48	ValueError	n	not a project class
+quality/dp_ledger.py	50	ValueError	n	not a project class
+quality/dp_provenance.py	145	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	160	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	357	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	370	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	393	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	402	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	419	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	428	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	433	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	453	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	459	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	465	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	473	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	532	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	539	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_provenance.py	565	ProvenanceError	n	a raise of this class is tagged or near a copy
+quality/dp_session.py	116	_InfeasibleAtEpsQError	n	a raise of this class is tagged or near a copy
+quality/dp_session.py	257	DpBudgetError	y	admitted
+quality/dp_session.py	266	DpBudgetError	y	admitted
+quality/dp_session.py	287	DpBudgetError	y	admitted
+quality/dp_session.py	296	DpBudgetError	y	admitted
+quality/dp_session.py	336	DpBudgetError	y	admitted
+quality/dp_session.py	380	DpBudgetError	y	admitted
+quality/dp_session.py	413	DpBudgetError	y	admitted
+quality/dp_session.py	425	DpBudgetError	y	admitted
+quality/dp_session.py	433	DpBudgetError	y	admitted
+quality/snapshot.py	124	DistributionSnapshotError	y	admitted
+quality/snapshot.py	192	DistributionSnapshotError	y	admitted
+quality/snapshot.py	326	DistributionSnapshotError	y	admitted
+quality/snapshot.py	355	DistributionSnapshotError	y	admitted
+quality/snapshot.py	366	DistributionSnapshotError	y	admitted
+quality/snapshot.py	381	DistributionSnapshotError	y	admitted
+quality/snapshot.py	390	DistributionSnapshotError	y	admitted
+quarantine.py	268	ValueError	n	not a project class
+quarantine.py	482	ValueError	n	not a project class
+quarantine.py	493	RuntimeError	n	not a project class
+quarantine.py	555	ValueError	n	not a project class
+reason_adapter.py	412	TypeError	n	not a project class
+reasons/_identity.py	54	UnknownReasonError	y	admitted
+reasons/_record.py	137	ValueError	n	not a project class
+reasons/_record.py	145	ValueError	n	not a project class
+reasons/_record.py	147	ValueError	n	not a project class
+reasons/_record.py	150	ValueError	n	not a project class
+reasons/_record.py	153	ValueError	n	not a project class
+reasons/_record.py	155	ValueError	n	not a project class
+reasons/_record.py	164	ValueError	n	not a project class
+reasons/_record.py	267	ValueError	n	not a project class
+reasons/_record.py	269	ValueError	n	not a project class
+reasons/_record.py	276	ValueError	n	not a project class
+reasons/_record.py	278	ValueError	n	not a project class
+reasons/_record.py	283	ValueError	n	not a project class
+reasons/_record.py	290	ValueError	n	not a project class
+reasons/_record.py	292	ValueError	n	not a project class
+reasons/_registry.py	44	ValueError	n	not a project class
+records/_codec.py	64	RecordError	y	admitted
+records/_codec.py	80	RecordError	y	admitted
+records/_codec.py	101	RecordError	y	admitted
+records/_codec.py	112	RecordError	y	admitted
+records/_codec.py	158	RecordError	y	admitted
+records/_codec.py	178	RecordError	y	admitted
+records/_codec.py	199	RecordError	y	admitted
+records/_codec.py	204	RecordError	y	admitted
+records/_codec.py	215	RecordError	y	admitted
+records/_codec.py	236	RecordError	y	admitted
+records/_codec.py	238	RecordError	y	admitted
+records/_errors.py	40	ValueError	n	not a project class
+records/_export.py	177	RecordError	y	admitted
+records/_export.py	224	RecordError	y	admitted
+records/_export.py	252	RecordError	y	admitted
+records/_export.py	292	RecordError	y	admitted
+records/_export.py	299	RecordError	y	admitted
+records/_joblog.py	73	RecordError	y	admitted
+records/_joblog.py	79	RecordError	y	admitted
+records/_joblog.py	93	RecordError	y	admitted
+records/_payloads.py	109	PydanticCustomError	n	not a project class
+records/_payloads.py	122	from_exception_data	n	not a project class
+records/_registry.py	57	ValueError	n	not a project class
+records/_registry.py	59	ValueError	n	not a project class
+records/_registry.py	68	ValueError	n	not a project class
+records/_registry.py	70	ValueError	n	not a project class
+records/_registry.py	72	ValueError	n	not a project class
+records/_registry.py	74	ValueError	n	not a project class
+records/_registry.py	80	ValueError	n	not a project class
+records/_registry.py	100	RecordError	y	admitted
+reference_tables/_loader.py	90	FileNotFoundError	n	not a project class
+reference_tables/_loader.py	94	FileNotFoundError	n	not a project class
+reference_tables/_loader.py	118	ValueError	n	not a project class
+reference_tables/_loader.py	124	ValueError	n	not a project class
+reference_tables/_loader.py	131	ValueError	n	not a project class
+reference_tables/_types.py	81	IndexError	n	not a project class
+reference_tables/_types.py	122	ValueError	n	not a project class
+relationships/_graph.py	194	PlanCompileError	n	a raise of this class is tagged or near a copy
+relationships/_graph.py	217	PlanCompileError	n	a raise of this class is tagged or near a copy
+relationships/_graph.py	300	PlanCompileError	n	a raise of this class is tagged or near a copy
+relationships/_graph.py	368	PlanCompileError	n	a raise of this class is tagged or near a copy
+relationships/_graph.py	379	PlanCompileError	n	a raise of this class is tagged or near a copy
+relationships/_graph.py	403	PlanCompileError	n	a raise of this class is tagged or near a copy
+relationships/_graph.py	452	PlanCompileError	n	a raise of this class is tagged or near a copy
+relationships/_namespace.py	153	NamespaceConfigError	y	admitted
+relationships/_namespace.py	318	NamespaceConfigError	y	admitted
+relationships/_namespace.py	397	NamespaceConfigError	y	admitted
+run_result/_build.py	233	ValueError	n	not a project class
+run_result/_build.py	236	ValueError	n	not a project class
+run_result/_model.py	58	ConfigRuleError	y	admitted
+run_result/_model.py	198	ConfigRuleError	y	admitted
+run_result/_outcome.py	37	ValueError	n	not a project class
+run_result/_outcome.py	39	ValueError	n	not a project class
+run_result/_outcome.py	41	ValueError	n	not a project class
+run_result/_outcome.py	56	ValueError	n	not a project class
+run_result/_project.py	85	TypeError	n	not a project class
+run_result/_project.py	87	TypeError	n	not a project class
+run_result/_project.py	139	ValueError	n	not a project class
+run_result/_project.py	174	ValueError	n	not a project class
+safe_output/_event.py	60	ValueError	n	not a project class
+safe_output/_event.py	65	ValueError	n	not a project class
+safe_output/_event.py	70	ValueError	n	not a project class
+safe_output/_event.py	74	ValueError	n	not a project class
+safe_output/_event.py	77	ValueError	n	not a project class
+safe_output/_event.py	79	ValueError	n	not a project class
+safe_output/_event.py	81	ValueError	n	not a project class
+safe_output/_event.py	106	ValueError	n	not a project class
+safe_output/_event.py	108	ValueError	n	not a project class
+safe_output/_event.py	110	ValueError	n	not a project class
+safe_output/_event.py	112	ValueError	n	not a project class
+safe_output/_event.py	115	ValueError	n	not a project class
+safe_output/_event.py	118	ValueError	n	not a project class
+safe_output/_event.py	122	ValueError	n	not a project class
+safe_output/_file_metadata.py	154	TypeError	n	not a project class
+sdk.py	260	PermanentError	y	admitted
+secret_providers/_buffer.py	80	TypeError	n	not a project class
+secret_providers/_cache.py	64	ValueError	n	not a project class
+secret_providers/_errors.py	49	with_traceback	n	not a project class
+secret_providers/_local.py	82	MissingMaskSecret	y	admitted
+secret_providers/_local.py	92	IsADirectoryError	n	not a project class
+secret_providers/_local.py	118	KeptFileFailure	y	admitted
+secret_providers/_local.py	119	MissingMaskSecret	y	admitted
+secret_providers/_preflight.py	128	MaskSecretError	y	admitted
+secret_providers/_preflight.py	216	AssertionError	n	not a project class
+secret_providers/_preflight.py	276	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+secret_providers/_preflight.py	280	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+secret_providers/_preflight.py	371	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+secret_providers/_preflight.py	415	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+secret_providers/_registry.py	20	ValueError	n	not a project class
+secret_providers/_registry.py	23	ValueError	n	not a project class
+secret_providers/_registry.py	26	ValueError	n	not a project class
+secret_providers/_requirements.py	132	MaskSecretError	y	admitted
+secret_providers/_requirements.py	135	_bad_encoding_for	n	not a project class
+secret_providers/_types.py	259	TypeError	n	not a project class
+secret_providers/_types.py	368	TypeError	n	not a project class
+secret_providers/_types.py	426	TypeError	n	not a project class
+secret_providers/_types.py	450	TypeError	n	not a project class
+secret_providers/vault.py	87	VaultClientConfigError	y	admitted
+secret_providers/vault.py	93	VaultClientConfigError	y	admitted
+secret_providers/vault.py	100	VaultClientConfigError	y	admitted
+secret_providers/vault.py	186	AttributeError	n	not a project class
+secret_providers/vault.py	189	AttributeError	n	not a project class
+secret_providers/vault.py	197	TypeError	n	not a project class
+signed_evidence/_artifacts.py	73	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	59	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	62	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	64	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	71	TypeError	n	not a project class
+signed_evidence/_boundary.py	128	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	149	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	160	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	167	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	183	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_boundary.py	193	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_bundle.py	51	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_bundle.py	70	TypeError	n	not a project class
+signed_evidence/_bundle.py	86	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_bundle.py	88	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_bundle.py	90	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_bundle.py	105	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_bundle.py	107	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_bundle.py	108	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_canonical.py	25	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	75	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	97	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	103	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	110	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	112	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	121	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	125	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	128	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	145	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	148	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	151	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	155	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_catalog.py	157	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	48	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	72	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	94	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	96	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	100	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	109	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	112	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	114	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_context.py	120	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	67	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	75	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	78	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	98	_prefixed	n	not a project class
+signed_evidence/_envelope.py	100	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	102	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	104	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	106	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	109	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	113	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	120	_prefixed	n	not a project class
+signed_evidence/_envelope.py	122	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	125	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	133	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	135	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	138	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	140	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	142	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	144	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	148	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_envelope.py	150	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_errors.py	35	ValueError	n	not a project class
+signed_evidence/_expectations.py	83	SpecRefusedError	y	admitted
+signed_evidence/_expectations.py	185	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_expectations.py	187	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_expectations.py	195	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_expectations.py	198	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_expectations.py	201	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_expectations.py	203	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_jws.py	63	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_jws.py	68	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_jws.py	72	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_jws.py	119	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_release.py	46	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_release.py	48	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_release.py	55	TypeError	n	not a project class
+signed_evidence/_signer.py	44	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_signer.py	70	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_signer.py	72	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_signer.py	74	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_signer.py	93	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	183	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	185	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	241	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	243	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	252	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	282	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	297	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	310	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	337	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	341	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	344	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	346	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	354	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	407	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	411	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	441	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	442	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	444	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	455	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	457	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	496	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_statement.py	504	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_strict_json.py	42	ImportError	n	not a project class
+signed_evidence/_strict_json.py	55	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_strict_json.py	62	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_strict_json.py	70	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_strict_json.py	73	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_strict_json.py	80	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_strict_json.py	96	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	95	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	97	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	104	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	144	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	150	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	156	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	158	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	167	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	175	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	178	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	180	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	191	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	215	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	217	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	220	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	223	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	226	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_trust.py	229	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_verifier.py	162	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_verifier.py	191	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_verifier.py	211	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+signed_evidence/_verifier.py	213	SignedEvidenceError	n	a raise of this class is tagged or near a copy
+subset/_api.py	115	SubsetPreflightError	n	a raise of this class is tagged or near a copy
+subset/_api.py	345	SubsetConfigError	y	admitted
+subset/_api.py	366	SubsetConfigError	y	admitted
+subset/_api.py	379	SubsetConfigError	y	admitted
+subset/_closure.py	149	SubsetInternalError	n	a raise of this class is tagged or near a copy
+subset/_closure.py	242	SubsetInternalError	n	a raise of this class is tagged or near a copy
+subset/_edges.py	152	SubsetPreflightError	n	a raise of this class is tagged or near a copy
+subset/_edges.py	174	unknown_table_error	n	not a project class
+subset/_inputs.py	153	TypeError	n	not a project class
+subset/_materialize.py	52	SubsetConfigError	y	admitted
+subset/_materialize.py	64	SubsetInternalError	n	a raise of this class is tagged or near a copy
+subset/_policy.py	43	SubsetConfigError	y	admitted
+subset/_policy.py	53	SubsetConfigError	y	admitted
+subset/_policy.py	87	SubsetBudgetExceededError	y	admitted
+subset/_policy.py	111	SubsetBudgetExceededError	y	admitted
+subset/_sample.py	42	invalid_knob	n	not a project class
+subset/_sample.py	93	invalid_knob	n	not a project class
+subset/_sample.py	96	unknown_table_error	n	not a project class
+subset/_sample.py	101	invalid_knob	n	not a project class
+subset/_scope.py	104	lazy_source_changed	n	not a project class
+subset/_scope.py	138	ValueError	n	not a project class
+subset/_seed.py	70	SubsetConfigError	y	admitted
+subset/_seed.py	175	TypeError	n	not a project class
+subset/_seed.py	202	ValueError	n	not a project class
+subset/_seed.py	294	_uncanonicalizable	n	not a project class
+subset/_seed.py	366	ValueError	n	not a project class
+subset/_seed.py	370	ValueError	n	not a project class
+subset/_seed.py	401	TypeError	n	not a project class
+subset/_seed.py	404	ValueError	n	not a project class
+subset/_seed.py	419	SubsetConfigError	y	admitted
+subset/_seed.py	453	SubsetConfigError	y	admitted
+subset/_seed.py	470	ValueError	n	not a project class
+subset/_types.py	73	invalid_knob	n	not a project class
+subset/_types.py	76	ValueError	n	not a project class
+subset/_types.py	80	ValueError	n	not a project class
+subset/_types.py	85	ValueError	n	not a project class
+subset/_types.py	91	ValueError	n	not a project class
+subset/_types.py	96	ValueError	n	not a project class
+subset/_types.py	101	ValueError	n	not a project class
+subset/_types.py	106	ValueError	n	not a project class
+subset/_types.py	111	ValueError	n	not a project class
+subset/_types.py	118	ValueError	n	not a project class
+support/_labels.py	23	ValueError	n	not a project class
+support/_runtime_lock.py	83	ValueError	n	not a project class
+support/_runtime_lock.py	102	SpecRefusedError	y	admitted
+support/_runtime_lock.py	104	SpecRefusedError	y	admitted
+support/_runtime_lock.py	114	SpecRefusedError	y	admitted
+support/_runtime_lock.py	118	SpecRefusedError	y	admitted
+support/_runtime_lock.py	121	SpecRefusedError	y	admitted
+support/_runtime_lock.py	124	SpecRefusedError	y	admitted
+support/_runtime_lock.py	191	MaskSecretError	y	admitted
+support/_runtime_lock.py	339	TypeError	n	not a project class
+support/_shape.py	50	TypeError	n	not a project class
+support/_shape.py	52	ValueError	n	not a project class
+support/_shape.py	77	ValueError	n	not a project class
+support/_shape.py	218	TypeError	n	not a project class
+support/_shape.py	221	TypeError	n	not a project class
+support/_shape.py	228	TypeError	n	not a project class
+support/_shape.py	230	TypeError	n	not a project class
+support/_shape.py	234	ValueError	n	not a project class
+support/_shape.py	238	ValueError	n	not a project class
+support/_shape.py	242	ValueError	n	not a project class
+support/_shape.py	282	ValueError	n	not a project class
+support/_shape.py	305	ValueError	n	not a project class
+support/_shape.py	344	ValueError	n	not a project class
+support/_shape.py	360	ValueError	n	not a project class
+support/_shape.py	380	ValueError	n	not a project class
+telemetry/_recorder.py	59	ValueError	n	not a project class
+telemetry/_vocab.py	90	ValueError	n	not a project class
+telemetry/_vocab.py	97	ValueError	n	not a project class
+telemetry/_vocab.py	105	ValueError	n	not a project class
+telemetry/_vocab.py	121	ValueError	n	not a project class
+telemetry/_vocab.py	123	ValueError	n	not a project class
+telemetry/_vocab.py	125	ValueError	n	not a project class
+telemetry/_vocab.py	127	ValueError	n	not a project class
+telemetry/_vocab.py	129	ValueError	n	not a project class
+telemetry/_vocab.py	133	ValueError	n	not a project class
+telemetry/_vocab.py	137	ValueError	n	not a project class
+transforms/_codeset_config_checks.py	57	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_config_checks.py	75	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_config_checks.py	94	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_config_checks.py	105	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	210	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	224	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	285	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	293	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	340	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	368	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	379	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	387	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	403	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	414	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	428	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	462	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	508	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	540	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	561	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	574	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_codeset_loader.py	582	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/_ff1.py	84	ValueError	n	not a project class
+transforms/_ff1.py	121	Ff1Error	y	admitted
+transforms/_ff1.py	171	Ff1Error	y	admitted
+transforms/_ff1.py	201	Ff1Error	y	admitted
+transforms/_ff1.py	203	Ff1Error	y	admitted
+transforms/_ff1.py	209	Ff1Error	y	admitted
+transforms/_ff1.py	215	Ff1Error	y	admitted
+transforms/_ff1.py	221	Ff1Error	y	admitted
+transforms/_ff1.py	226	Ff1Error	y	admitted
+transforms/_fpe_checksum.py	50	FpeChecksumError	y	admitted
+transforms/_fpe_checksum.py	60	FpeChecksumError	y	admitted
+transforms/_fpe_checksum.py	148	FpeChecksumError	y	admitted
+transforms/_fpe_checksum.py	158	FpeChecksumError	y	admitted
+transforms/_fpe_checksum.py	179	FpeChecksumError	y	admitted
+transforms/_fpe_checksum.py	227	FpeChecksumError	y	admitted
+transforms/bucket_perturb.py	105	ValueError	n	not a project class
+transforms/bucket_perturb.py	152	ExecutionError	n	a raise of this class is tagged or near a copy
+transforms/bucket_perturb.py	173	ExecutionError	n	a raise of this class is tagged or near a copy
+transforms/bucket_perturb.py	336	ValueError	n	not a project class
+transforms/bucket_perturb.py	340	ValueError	n	not a project class
+transforms/bucket_perturb.py	347	ValueError	n	not a project class
+transforms/bucket_perturb.py	350	ValueError	n	not a project class
+transforms/code_set.py	349	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/code_set.py	358	ValueError	n	not a project class
+transforms/code_set.py	384	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/code_set.py	408	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/code_set.py	427	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/code_set.py	444	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/code_set.py	478	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/code_set.py	517	ValueError	n	not a project class
+transforms/date_preserve.py	239	ValueError	n	not a project class
+transforms/date_shift.py	106	DateShiftWindowError	n	a raise of this class is tagged or near a copy
+transforms/derived.py	124	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/derived.py	144	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/derived.py	158	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/derived.py	170	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/derived.py	282	ValueError	n	not a project class
+transforms/derived_aggregate.py	94	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/derived_aggregate.py	104	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/derived_aggregate.py	112	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	86	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	117	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	164	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	174	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	229	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	235	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	241	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	249	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	257	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	263	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	278	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	292	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	399	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	411	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	438	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/fpe.py	451	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/geo_generalize.py	213	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/geo_generalize.py	224	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/geo_generalize.py	235	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/geo_generalize.py	248	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/geo_generalize.py	448	ImportError	n	not a project class
+transforms/group_key.py	103	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/group_key.py	115	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/group_key.py	123	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/grouped_series.py	110	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/grouped_series.py	121	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/grouped_series.py	132	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/grouped_series.py	140	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/grouped_series.py	156	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/joint_mask.py	176	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/joint_mask.py	186	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/joint_mask.py	198	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/joint_mask.py	240	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/joint_mask.py	311	ValueError	n	not a project class
+transforms/joint_mask.py	321	ValueError	n	not a project class
+transforms/text_mask.py	300	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/text_mask.py	308	FpeUnencryptableError	n	a raise of this class is tagged or near a copy
+transforms/text_mask.py	498	PipelineValidationError	n	a raise of this class is tagged or near a copy
+transforms/windowed_date.py	175	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/windowed_date.py	185	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/windowed_date.py	199	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/windowed_date.py	206	PlanCompileError	n	a raise of this class is tagged or near a copy
+transforms/windowed_date.py	214	PlanCompileError	n	a raise of this class is tagged or near a copy
+unmask.py	124	ExecutionError	n	a raise of this class is tagged or near a copy
+unmask.py	129	ExecutionError	n	a raise of this class is tagged or near a copy
+unmask.py	284	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+unmask.py	297	ExecutionError	n	a raise of this class is tagged or near a copy
+unmask.py	399	ExecutionError	n	a raise of this class is tagged or near a copy
+validation/_config.py	46	ConfigError	y	admitted
+validation/_config.py	55	ConfigError	y	admitted
+validation/_config.py	63	ConfigError	y	admitted
+validation/_config.py	67	ConfigError	y	admitted
+validation/_config.py	91	PipelineValidationError	n	a raise of this class is tagged or near a copy
+validation/_config.py	93	PipelineValidationError	n	a raise of this class is tagged or near a copy
+validation/finding_review.py	122	ReviewUnknownColumnError	y	admitted
+validation/finding_review.py	128	ReviewDuplicateError	y	admitted
+validation/finding_review.py	136	ReviewEntryError	y	admitted
+validation/finding_review.py	168	ReviewStaleError	y	admitted
+validation/finding_review.py	179	ReviewIntegrityOffError	y	admitted
+validation/finding_review.py	214	ReviewEntryError	y	admitted
+validation/finding_review.py	231	ReviewEntryError	y	admitted
+validation/finding_review.py	235	ReviewEntryError	y	admitted
+validation/finding_review.py	292	ReviewConflictError	y	admitted
+validation/finding_review.py	313	ReviewEntryError	y	admitted
+validation/finding_review.py	344	ReviewDismissRefusedError	y	admitted
+validation/starter_review.py	87	TypeError	n	not a project class
+validation/starter_review.py	187	_invalid	n	not a project class
+validation/starter_review.py	189	_invalid	n	not a project class
+validation/starter_review.py	197	_invalid	n	not a project class
+validation/starter_review.py	202	_invalid	n	not a project class
+validation/starter_review.py	209	_invalid	n	not a project class
+validation/starter_review.py	246	ReviewUnknownColumnError	y	admitted
+validation/starter_review.py	252	ReviewDuplicateError	y	admitted
+validation/starter_review.py	260	_invalid	n	not a project class
+validation/starter_review.py	267	_not_join_safe	n	not a project class
+validation/starter_review.py	290	ReviewEntryError	y	admitted
+validation/starter_review.py	300	AssertionError	n	not a project class
+validation/starter_review.py	323	_not_join_safe	n	not a project class
+validation/starter_review.py	353	_invalid	n	not a project class
+validation/starter_review.py	357	_invalid	n	not a project class
+validation/starter_review.py	377	_stale	n	not a project class
+validation/starter_review.py	383	_stale	n	not a project class
+validation/starter_review.py	386	_stale	n	not a project class
+validation/starter_review.py	389	_stale	n	not a project class
+validation/starter_review.py	404	_invalid	n	not a project class
+validation/starter_review.py	425	ReviewEmptyTableError	y	admitted
+validators/_fk_validators.py	100	ValueError	n	not a project class
+validators/_fk_validators.py	193	ValueError	n	not a project class
+validators/_generic.py	58	ValueError	n	not a project class
+validators/_generic.py	64	ValueError	n	not a project class
+validators/_generic.py	126	ValueError	n	not a project class
+validators/_leak_check.py	207	ValueError	n	not a project class
+validators/_leak_check.py	229	ValueError	n	not a project class
+validators/_leak_check.py	265	ValueError	n	not a project class
+validators/_registry.py	118	ValueError	n	not a project class
+validators/_registry.py	125	ValueError	n	not a project class
+validators/_relationship_checks.py	52	ValueError	n	not a project class
+validators/_relationship_checks.py	63	ValueError	n	not a project class
+validators/_relationship_checks.py	132	ValueError	n	not a project class
+validators/_relationship_checks.py	250	ValueError	n	not a project class
+validators/_relationship_checks.py	268	ValueError	n	not a project class
+vault/_format.py	172	VaultError	y	admitted
+vault/_format.py	182	VaultError	y	admitted
+vault/_format.py	296	VaultError	y	admitted
+vault/_reader.py	138	VaultError	y	admitted
+vault/_reader.py	145	_unreadable	n	not a project class
+vault/_reader.py	148	_unreadable	n	not a project class
+vault/_reader.py	152	_unreadable	n	not a project class
+vault/_reader.py	156	VaultError	y	admitted
+vault/_reader.py	166	VaultError	y	admitted
+vault/_reader.py	175	_unreadable	n	not a project class
+vault/_reader.py	179	VaultError	y	admitted
+vault/_reader.py	217	FileAccessUnavailable	y	admitted
+vault/_reader.py	237	VaultError	y	admitted
+vault/_reader.py	295	TypeError	n	not a project class
+vault/_v2_reader.py	48	_unreadable	n	not a project class
+vault/_v2_reader.py	52	_unreadable	n	not a project class
+vault/_v2_reader.py	56	_unreadable	n	not a project class
+vault/_v2_reader.py	58	VaultError	y	admitted
+vault/_v2_reader.py	66	VaultError	y	admitted
+vault/_v2_reader.py	78	_unreadable	n	not a project class
+vault/_v2_reader.py	82	VaultError	y	admitted
+vault/_v2_reader.py	91	_unreadable	n	not a project class
+vault/_v2_reader.py	96	_unreadable	n	not a project class
+vault/_writer.py	79	FileAccessUnavailable	y	admitted
+vault/_writer.py	135	TypeError	n	not a project class
+vault/_writer.py	139	ValueError	n	not a project class
+vault/_writer.py	179	VaultError	y	admitted
+vault/_writer.py	221	FileAccessUnavailable	y	admitted
+vault/_writer.py	313	VaultError	y	admitted
+vault/_writer.py	318	VaultError	y	admitted
+vault/_writer.py	337	VaultError	y	admitted
+vault/_writer.py	379	KeyedStrategyRequiresSecret	n	a raise of this class is tagged or near a copy
+verification/postmask/_blocked.py	226	ValueError	n	not a project class
+verification/postmask/_column_facts.py	281	ValueError	n	not a project class
+verification/postmask/_stream_input.py	46	ValueError	n	not a project class
+verification/postmask/runner.py	111	TypeError	n	not a project class
+verification/postmask/runner.py	117	TypeError	n	not a project class
+verification/postmask/runner.py	146	ValueError	n	not a project class
+verification/postmask/runner.py	161	ValueError	n	not a project class
+verification/postmask/runner.py	163	ValueError	n	not a project class
