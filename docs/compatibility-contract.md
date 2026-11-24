@@ -189,6 +189,8 @@ content unchanged.
 
 PRE-SCAN-RUN E1 (additive): writing a `pre_scan` block now turns the run-start pre-scan on, so the dump keeps a written block even when every field is the default (it still drops a block that was never written, so a config without one dumps as before). `decoy_engine.config.pre_scan_requested(config)` is the one reader of that switch. `pre_scan` gains `on_findings: warn | fail` (default `warn`, omitted from the dump while `warn`; a reader from before this change refuses the key). The block stays out of the plan hash under `warn`. Under `fail` the hash takes `{on_findings, detectors, ner_model}` with their effective values (`ner_model` only when `ner` is listed), because those decide whether a run blocks. `decoy-run-result/v1` gains the check id `pre_scan` (a tolerant `RunResultRead` keeps an unknown id as a token), and `build_run_result(pre_checks=...)` accepts at most one `pre_scan` then at most one `scan_drift` check, in that order. New reasons, pending: `pre_scan.uncovered_pii`, `pre_scan.uncovered_pii_blocked` and `warning.drift_not_checked`. `scan_baseline.on_drift` is not read by any run yet: the run-start drift check is planned (row 32 DRIFT), and the run warns with `warning.drift_not_checked` until it lands.
 
+PRE-SCAN-RUN E2 (additive): `decoy_engine.profiling.evaluate_pre_scan(config, core)` returns a value-free `PreScanVerdict` (table names, column names and detector source names only) and `PreScanVerdict.to_check()` builds the `pre_scan` run result check. `PreScanBlockedError` (code `pre_scan.uncovered_pii_blocked`) and `PreScanFailedError` (code `pre_scan.profile_failed`) are registered coded families in the reason adapter, so the codes reach the run result instead of `decoy.unexpected_error`. `PreScanWarning` is a `UserWarning`. No run calls them yet.
+
 **Pre-GA correction (one environment flag rule, DUP-FREEZE E3, 2026-11-14).** Every boolean engine flag reads
 through one parser (`decoy_engine.internal.env_flags.env_flag`). The accepted set, after `strip().lower()`, is
 `1`, `true`, `yes`, `on` (true) and `0`, `false`, `no`, `off` (false); an unset or empty variable gives the flag's
@@ -1055,7 +1057,8 @@ only this site moves.
   keeps the position-keyed draw of slice C5b-i, taken at the chunk's global row offset, so
   chunked output equals the whole-frame run for any chunk size. A column is admitted when it
   uses a provider in the C1
-  string-output allowlist (`person_first_name`, `person_last_name`), has no `when:` and is not
+  string-output allowlist (the `faker` operator's `provider_allowlist` in
+  `execution/_operator_registry.py`), has no `when:` and is not
   `unique`, `match_source_cardinality` or `scale_source_cardinality`; the namespace stays
   optional. A string source runs the compiled path and any other source type runs the chunked
   oracle leg with the same draw. A column that fails one of these conditions keeps running
@@ -1153,6 +1156,17 @@ only this site moves.
   values, column names, other Arrow types, nullability and row-group layout do not change. The
   public names `output_schema` and `output_table` are additive. In-memory results returned
   to a caller are outside this promise.
+  ROUTE-OUTPUT-CONTRACT, untouched columns (UF-DOMAIN S1, 2026-11-22): on every pandas-built
+  route (full-frame, sequential, unified slice) a column no rule changes is written from the
+  source Arrow column as stored, not from a pandas round trip. A `decimal` keeps its precision,
+  a nullable integer not declared lossless stays an integer, carried text follows the
+  pass-through text width rule (O3) on every route, an all-null or zero-row column keeps its source type (not `null`), and a float
+  NaN stays NaN (pandas turned it into null); this is what the chunked lane already wrote. One function,
+  `table_from_pandas_keeping_source_types`, builds that output from the source table's row
+  count and column order, and raises `ExecutionError` (`output_assembly_rows_changed`, `output_assembly_columns_mismatch`)
+  before any output exists if the frame no longer holds the source's rows. A carried column keeps
+  the pandas dtype hint its source named.
+  The earlier output of those routes changes for the lossy types named above.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
   that would auto-chunk alone dispatches on the same lane, so the auto-chunk shape above now

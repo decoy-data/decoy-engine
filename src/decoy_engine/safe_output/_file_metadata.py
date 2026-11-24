@@ -271,8 +271,42 @@ def sanitized_schema_metadata(
     return kept or None
 
 
+def _with_carried_entries(
+    meta: Mapping[bytes, bytes] | None,
+    carried_meta: Mapping[bytes, bytes] | None,
+    carried: Collection[str],
+) -> Mapping[bytes, bytes] | None:
+    """`meta` with the source's pandas `columns` entry for each carried column added, so a carried
+    column keeps the dtype hint (`Int64`, `string`) its source gave it. Only entries for names in
+    `carried` move, and the sanitizer still rebuilds every entry from the output schema."""
+    source_raw = (carried_meta or {}).get(_PANDAS)
+    if source_raw is None or not carried:
+        return meta
+    try:
+        source = strict_json_loads(source_raw, max_int_digits=None)
+        raw = (meta or {}).get(_PANDAS)
+        built = strict_json_loads(raw, max_int_digits=None) if raw is not None else {}
+    except (StrictJsonError, RecursionError):
+        return meta
+    if not isinstance(source, dict) or not isinstance(built, dict):
+        return meta
+    have = _source_entries(built.get("columns"))
+    extra = [
+        e
+        for n, e in _source_entries(source.get("columns")).items()
+        if n in carried and n not in have
+    ]
+    columns = built.get("columns")
+    merged = {**built, "columns": [*(columns if isinstance(columns, list) else []), *extra]}
+    return {**(meta or {}), _PANDAS: json.dumps(merged).encode()}
+
+
 def attach_output_metadata(
-    schema: pa.Schema, meta: Mapping[bytes, bytes] | None, *, carried: Collection[str]
+    schema: pa.Schema,
+    meta: Mapping[bytes, bytes] | None,
+    *,
+    carried: Collection[str],
+    carried_meta: Mapping[bytes, bytes] | None = None,
 ) -> pa.Schema:
     """`schema` with its schema metadata replaced by the sanitized form of `meta`.
 
@@ -280,9 +314,13 @@ def attach_output_metadata(
     source field by contract, so its field metadata stays). Every other column is rebuilt with no
     field metadata at any depth: a masked or generated column's source metadata can describe the
     values it replaced. Callers name the carried set from the plan, never from values. The writers
-    strip field metadata again; this is the in-memory entry."""
+    strip field metadata again; this is the in-memory entry.
+
+    `carried_meta` is the source's schema metadata: its pandas entry for a carried column rides
+    into the blob so that column reads back with the dtype the source named."""
     keep = frozenset(carried)
     fields = [f if f.name in keep else _field(f) for f in schema]
+    meta = _with_carried_entries(meta, carried_meta, keep)
     source_items = tuple(meta.items()) if meta else ()
     kept = _kept_metadata(source_items, tuple((f.name, f.type) for f in fields))
     out = pa.schema(fields)

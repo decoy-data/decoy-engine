@@ -509,7 +509,7 @@ def _timestamps() -> pa.Table:
 
 
 _DECLINES: dict[str, tuple[pa.Table, list[dict[str, Any]], Callable[..., None] | None]] = {
-    "faker_provider_outside_allowlist": (str_source(30), [nd_faker(provider="person_email")], None),
+    "faker_provider_outside_allowlist": (str_source(30), [nd_faker(provider="person_dob")], None),
     "faker_unique": (str_source(30), [nd_faker(cardinality_mode="unique")], None),
     # `faker_when` / `cat_when` moved out of the decline set in C8-iii-d-2: a string-reference
     # `when:` now runs natively (see tests/physical/test_c8_iii_d2_unified_positional_when.py).
@@ -535,7 +535,7 @@ _DECLINES: dict[str, tuple[pa.Table, list[dict[str, Any]], Callable[..., None] |
     "cat_large_string_source": (_typed(pa.large_string()), [cat_col()], None),
     "det_faker_provider_outside_allowlist": (
         str_source(30),
-        [nd_faker(provider="person_email", deterministic=True)],
+        [nd_faker(provider="person_dob", deterministic=True)],
         None,
     ),
     "det_categorical_numeric_categories": (
@@ -649,7 +649,7 @@ _VERDICT_CORPUS: dict[str, Callable[[], list[dict[str, Any]]]] = {
     "faker_nd": lambda: [nd_faker()],
     "faker_nd_no_ns": lambda: [nd_faker(namespace=None)],
     "faker_nd_no_pool": lambda: [nd_faker(pool_size=None)],
-    "faker_nd_provider_outside": lambda: [nd_faker(provider="person_email")],
+    "faker_nd_provider_outside": lambda: [nd_faker(provider="person_dob")],
     "faker_det": lambda: [nd_faker(deterministic=True)],
     "faker_det_no_pool": lambda: [nd_faker(deterministic=True, pool_size=None)],
 }
@@ -885,7 +885,7 @@ _FAKER_CLAUSES: dict[str, Callable[[Path], tuple[Case, dict[str, Any] | None]]] 
     "slice_deterministic": lambda p: (_cat_case(p, nd_faker()), {"deterministic": True}),
     "not_reuse": lambda p: (_cat_case(p, nd_faker(cardinality_mode="unique")), None),
     "slice_not_reuse": lambda p: (_cat_case(p, nd_faker()), {"cardinality_mode": "unique"}),
-    "provider_outside_allowlist": lambda p: (_cat_case(p, nd_faker(provider="person_email")), None),
+    "provider_outside_allowlist": lambda p: (_cat_case(p, nd_faker(provider="person_dob")), None),
     "vault": lambda p: (_cat_case(p, nd_faker(vault=True)), None),
     "timestamp_source": lambda p: (_cat_case(p, nd_faker(), source=_timestamps()), None),
 }

@@ -332,7 +332,7 @@ class TestChunkedCompatibility:
                 {
                     "name": "email",
                     "strategy": "faker",
-                    "provider": "person_email",
+                    "provider": "person_dob",
                     "namespace": "e_ns",
                     "provider_config": {"pool_size": 10},
                 }

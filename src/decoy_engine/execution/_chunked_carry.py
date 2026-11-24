@@ -165,6 +165,15 @@ def _same_failure(a: BaseException, b: BaseException) -> bool:
     return type(a) is type(b) and str(a) == str(b)
 
 
+def passthrough_leaves_input() -> bool:
+    """True when the registered passthrough handler declares its output is its input. The one
+    place that rule is read: `passthrough_columns` and `untouched_columns` both ask it, so a
+    handler that changes the column makes it touched on every route."""
+    from decoy_engine.execution._strategies import output_declaration
+
+    return output_declaration("passthrough", ()).is_input
+
+
 def passthrough_columns(
     config: Mapping[str, Any], *, table: str, names: Sequence[str], registry: Any
 ) -> list[str]:
@@ -177,27 +186,42 @@ def passthrough_columns(
     if written is None:
         return []
     configured = {c["name"]: c for c in entries if isinstance(c.get("name"), str)}
+    leaves_input = passthrough_leaves_input()
     return [
         n
         for n in names
         if n not in written
         and (
             n not in configured
-            or (configured[n].get("strategy") == "passthrough" and not has_when(configured[n]))
+            or (
+                leaves_input
+                and configured[n].get("strategy") == "passthrough"
+                and not has_when(configured[n])
+            )
         )
     ]
 
 
-def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any) -> frozenset[str]:
+def untouched_columns(
+    nodes: Iterable[Any],
+    names: Sequence[str],
+    registry: Any,
+    fk_edges: Iterable[Any] = (),
+    table: str | None = None,
+) -> frozenset[str]:
     """The columns of a table no work node changes. The node-side twin of
     `passthrough_columns` for the full-frame and sequential adapters, which hold work nodes
     rather than the config: it asks the same `handler_written_columns` registry about an entry
     rebuilt from each node's plan slice, so a column a handler writes beyond the node's own
     (a composite's canonical outputs) is touched here as it is there. A passthrough node, `when:`
-    or not, leaves its column as the source held it; every other node masks its own columns."""
+    or not, leaves its column as the source held it; every other node masks its own columns.
+    A child key of `table` (`fk_edges`) is never untouched: the cascade rewrites it to follow its
+    masked parent whatever its own strategy says. A parent key is only read, so it is untouched
+    when its own rule leaves it alone."""
     from decoy_engine.execution._adapter import provider_config_to_dict
     from decoy_engine.plan._types import ColumnSeed
 
+    passthrough_is_input = passthrough_leaves_input()
     entries: list[dict[str, Any]] = []
     masked: set[str] = set()
     for node in nodes:
@@ -215,12 +239,15 @@ def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any)
                 "when": seed.when,
             }
         )
-        if node.kind != "scalar" or node.strategy != "passthrough":
+        if node.kind != "scalar" or node.strategy != "passthrough" or not passthrough_is_input:
             masked |= set(node.columns)
     written = handler_written_columns(entries, registry)
     if written is None:  # a handler writes columns no declaration can name: nothing is untouched
         return frozenset()
-    return frozenset(names) - written - masked
+    # A child key is rebuilt from the masked parent. A parent key no other edge rewrites is only
+    # read by the cascade, so it stays untouched when its own rule leaves it alone.
+    cascaded = {c for e in fk_edges if e.child_table == table for c in e.child_columns}
+    return frozenset(names) - written - masked - cascaded
 
 
 def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]]:
