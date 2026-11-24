@@ -200,3 +200,37 @@ def test_profile_columns_raises_fixed_text_for_an_undecodable_cell(blob):
 @pytest.mark.parametrize("kind", [bytes, memoryview])
 def test_an_undecodable_cell_mixed_with_an_int_is_an_error_on_every_path(kind, caplog):
     _is_an_error_on_every_path({"t": pd.DataFrame({"blob": [kind(_MARKED), 7]})}, caplog)
+
+
+# An email, a NUL, then more bytes: the whole cell is no email. Cutting at the NUL leaves one.
+_NUL_CELLS = [f"user{i}@realmail.com\x00OTHER".encode() for i in range(10, 100)]
+_NUL_COLUMNS = {
+    "numpy bytes": lambda: pd.Series(np.array(_NUL_CELLS, dtype="S30")),
+    **{
+        f"arrow {name}": (lambda arrow=arrow: pd.Series(_NUL_CELLS, dtype=pd.ArrowDtype(arrow)))
+        for name, arrow in {**_ARROW_BINARY, "fixed binary": pa.binary(25)}.items()
+    },
+}
+
+
+@pytest.mark.parametrize("route", _NUL_COLUMNS)
+def test_an_embedded_nul_is_kept_in_the_cell_text(route):
+    column = _NUL_COLUMNS[route]()
+    expected = [cell.decode() for cell in _NUL_CELLS]
+    assert column_text(column).tolist() == expected
+    assert key_text(column) == expected
+
+
+@pytest.mark.parametrize("route", _NUL_COLUMNS)
+def test_an_embedded_nul_does_not_read_as_an_email_on_any_path(route):
+    frames = {"t": _NUL_COLUMNS[route]().to_frame("blob")}
+    assert _rows(check_residual_pii(frames, _ONE_TABLE, source_frames=frames)) == []
+    assert run_post_mask(frames, frames, config=_ONE_TABLE)["residual_pii"] == []
+
+
+@pytest.mark.parametrize("route", [r for r in _NUL_COLUMNS if r != "arrow binary_view"])
+def test_profile_columns_reads_an_embedded_nul_as_part_of_the_cell(route):
+    field = profile_columns(_NUL_COLUMNS[route]().to_frame("blob"), "t").fields[0]
+    assert field.detector_matches == []
+    if field.max_length is not None:
+        assert (field.min_length, field.max_length) == (25, 25)

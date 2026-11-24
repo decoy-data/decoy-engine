@@ -7,6 +7,8 @@ text conversion: `str`/`repr`/`format`/`ascii` called on anything, a text dtype 
 or `cast`, `str` passed as a function (`.map(str)`, `.apply(str)`), and an f-string that formats a
 value. Aliases count: `S = str`, `from builtins import str as S`, `import builtins as b; b.str`,
 `np.str_`. The few calls that read a table or column name (never a cell) are listed in ALLOWLIST.
+A site's key carries the loop it sits in, so an entry pins both the call and what its argument
+iterates over: `str(c) for c in frame.columns` is a name, `str(c) for c in cells` is not.
 """
 
 from __future__ import annotations
@@ -25,16 +27,21 @@ _TEXT_TYPE_FACTORIES = frozenset(
     {"string", "large_string", "utf8", "large_utf8", "string_view", "StringDtype"}
 )
 
-# `module::function::source` of a conversion that reads a name, not a cell.
+_RUNNER = "verification/postmask/runner.py"
+
+# `module::function::source for target in iterable` of a conversion that reads a name, not a cell.
 ALLOWLIST: dict[str, str] = {
-    "verification/postmask/runner.py::run_post_mask::str(name)": (
+    f"{_RUNNER}::run_post_mask::str(name) for name in output_frames": (
         "a table name for tables_checked, not a cell"
     ),
-    "verification/postmask/runner.py::run_post_mask_tables::str(name)": (
+    f"{_RUNNER}::run_post_mask_tables::str(name) for name in output_tables": (
         "a table name for tables_checked, not a cell"
     ),
-    "verification/postmask/runner.py::_frame_table::str(c)": (
-        "a column name, matched between the two frames, not a cell"
+    f"{_RUNNER}::_frame_table::str(c) for c in frame.columns": (
+        "a column name of the frame, not a cell"
+    ),
+    f"{_RUNNER}::_frame_table::str(c) for (n, c) in reversed(list(enumerate(other.columns)))": (
+        "a column name of the other frame, matched to the frame's, not a cell"
     ),
 }
 
@@ -90,16 +97,38 @@ def _function_of(tree: ast.Module) -> dict[ast.AST, str]:
     return owner
 
 
+def _loop_of(tree: ast.Module) -> dict[ast.AST, str]:
+    """For each node in a loop body, ` for target in iterable` of the innermost loop around it."""
+    loop: dict[ast.AST, str] = {}
+    comps = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+    for node in ast.walk(tree):  # outer loops first, so an inner loop is walked later and wins
+        if isinstance(node, comps):
+            text = "".join(
+                f" for {ast.unparse(g.target)} in {ast.unparse(g.iter)}" for g in node.generators
+            )
+            body = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            text = f" for {ast.unparse(node.target)} in {ast.unparse(node.iter)}"
+            body = node.body
+        else:
+            continue
+        for part in body:
+            for inner in ast.walk(part):
+                loop[inner] = text
+    return loop
+
+
 def _is_type_name(node: ast.expr) -> bool:
     """`type(x).__name__`: a class name, which is value-free."""
     return isinstance(node, ast.Attribute) and node.attr == "__name__"
 
 
 def conversions(module: str, text: str) -> list[str]:
-    """`module::function::source` of every text conversion in `text`."""
+    """`module::function::source` of every text conversion in `text`, with the loop around it."""
     tree = ast.parse(text)
     aliases, modules = _aliases(tree)
     owner = _function_of(tree)
+    loop = _loop_of(tree)
     found: list[ast.expr] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -117,7 +146,9 @@ def conversions(module: str, text: str) -> list[str]:
                 found.append(node)
         elif isinstance(node, ast.FormattedValue) and not _is_type_name(node.value):
             found.append(node)
-    return sorted({f"{module}::{owner.get(n, '<module>')}::{ast.unparse(n)}" for n in found})
+    return sorted(
+        {f"{module}::{owner.get(n, '<module>')}::{ast.unparse(n)}{loop.get(n, '')}" for n in found}
+    )
 
 
 def _live() -> list[str]:
@@ -183,3 +214,32 @@ def test_value_free_text_is_not_a_conversion() -> None:
 
 def test_sites_are_keyed_by_function() -> None:
     assert conversions("m.py", SEEDED["str(cell)"]) == ["m.py::f::str(v)"]
+
+
+# The allowlisted spelling `str(c)` in `_frame_table`, but over cells, not column names.
+_CELL_LOOPS = {
+    "for loop over cells": (
+        "def _frame_table(name, frame, other):\n"
+        "    for c in frame.iloc[:, 0]:\n"
+        "        yield str(c)\n"
+    ),
+    "comprehension over cells": (
+        "def _frame_table(name, frame, other):\n    return [str(c) for c in frame.iloc[:, 0]]\n"
+    ),
+    "no loop": "def _frame_table(name, frame, other):\n    c = frame.iloc[0, 0]\n    return str(c)\n",
+    "inner loop over cells": (
+        "def _frame_table(name, frame, other):\n"
+        "    for c in frame.columns:\n"
+        "        for c in frame[c]:\n"
+        "            yield str(c)\n"
+    ),
+}
+
+
+def test_an_allowlisted_call_over_cells_is_not_allowed() -> None:
+    allowed = {
+        name: [site for site in conversions(_RUNNER, text) if site in ALLOWLIST]
+        for name, text in _CELL_LOOPS.items()
+    }
+    assert allowed == {name: [] for name in _CELL_LOOPS}
+    assert all(conversions(_RUNNER, text) for text in _CELL_LOOPS.values())

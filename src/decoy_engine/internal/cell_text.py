@@ -72,16 +72,27 @@ def _text(values: pd.Series) -> pd.Series:
     return values.astype(str)
 
 
+def numpy_bytes_as_objects(series: pd.Series) -> pd.Series:
+    """A numpy bytes column as Python bytes cells, every byte kept; any other column unchanged.
+    Arrow reads a numpy bytes cell as a C string and stops at its first NUL, so a numpy bytes
+    column must not reach Arrow as it is."""
+    if isinstance(series.dtype, np.dtype) and series.dtype.kind == "S":
+        return pd.Series(series.to_numpy().astype(object), index=series.index, dtype=object)
+    return series
+
+
 def _bytes_as_objects(series: pd.Series) -> pd.Series:
-    """A bytes column as Python bytes cells, read through Arrow: pandas has no filter or cast
-    kernel for every Arrow binary type (binary_view has neither)."""
-    if not _is_binary(series.dtype):
-        return series
-    return pd.Series(pa.array(series).to_pylist(), index=series.index, dtype=object)
+    """A bytes column as Python bytes cells, every byte kept, embedded NULs included."""
+    series = numpy_bytes_as_objects(series)
+    if _is_arrow_binary(series.dtype):
+        # Through Arrow: pandas has no filter or cast kernel for every Arrow binary type
+        # (binary_view has neither).
+        return pd.Series(pa.array(series).to_pylist(), index=series.index, dtype=object)
+    return series
 
 
-def _is_binary(dtype: object) -> bool:
-    """True for a dtype whose cells are bytes: Arrow binary of any width, or numpy bytes."""
+def _is_arrow_binary(dtype: object) -> bool:
+    """True for Arrow binary of any width, or a pandas BinaryDtype where pandas has one."""
     if isinstance(dtype, pd.ArrowDtype):
         arrow = dtype.pyarrow_dtype
         view = getattr(pa.types, "is_binary_view", None)
@@ -92,9 +103,7 @@ def _is_binary(dtype: object) -> bool:
             or (view is not None and view(arrow))
         )
     binary_dtype = getattr(pd, "BinaryDtype", None)
-    if binary_dtype is not None and isinstance(dtype, binary_dtype):
-        return True
-    return isinstance(dtype, np.dtype) and dtype.kind == "S"
+    return binary_dtype is not None and isinstance(dtype, binary_dtype)
 
 
 def _number_key(value: object) -> str:

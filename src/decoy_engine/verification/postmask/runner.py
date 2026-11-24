@@ -28,7 +28,7 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
-from decoy_engine.internal.cell_text import key_text
+from decoy_engine.internal.cell_text import key_text, numpy_bytes_as_objects
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.plan.column_access import TableWrites
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
@@ -177,7 +177,7 @@ def _megabytes(limit: str) -> int:
 
 def _native(series: pd.Series) -> pa.Array | None:
     try:
-        return pa.array(series, from_pandas=True)
+        return pa.array(numpy_bytes_as_objects(series), from_pandas=True)
     except Exception as exc:
         if passes_through(exc):
             raise
