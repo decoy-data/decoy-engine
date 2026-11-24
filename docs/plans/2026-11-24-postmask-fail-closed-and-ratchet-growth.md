@@ -173,32 +173,47 @@ merges, the orchestrator checks ratchet growth by hand at each gate.
 
 After these slices, the gate and CI fail when the diff against the merge base:
 
-- removes a registry row, unless the same diff registers a replacement or split id (the existing
-  union rule then applies) or the head registry has a `[retired]` entry for that id with a dated
-  owner decision;
+- removes a registry row, unless the head registry has a `[retired]` entry for that id with a
+  dated owner decision, or the row is a real replacement or split: the removed id is not in
+  `GUARD_KEYS`, it had at least one key, and some of its keys are in the union of the ids new in
+  the diff (the existing union rule then applies);
 - deletes the registry file or leaves it with no rows;
 - deletes a sentry test file (`tests/sentry/**/test_*.py` plus the base's `OUTSIDE_SENTRIES`),
   unless git reports a rename or the head registry has a `[retired_files]` entry with a dated
   owner decision;
-- adds an unknown key to a registry row or to the `[retired]`, `[retired_files]` or
-  `[checker_change]` tables;
+- adds an unknown key to a registry row, or a value that is not a decision string to the
+  `[retired]`, `[retired_files]` or `[checker_change]` tables (top-level table names are not a
+  closed set);
 - names a registry path that is absolute, has a backslash or has a `..` part;
 - adds a baseline file with an empty or missing `created_in`;
 - raises a `max` or lowers a `min` on any baseline entry, unless an exact-key `approved_growth`
   row new in this diff lists that key;
-- drops a key from the `sentry-limits` baseline, unless an exact-key `approved_growth` row new in
-  this diff lists that key;
+- drops a key from a `GUARD_KEYS` baseline (`sentry-limits`), on its own row or through a
+  replacement, unless an exact-key `approved_growth` row new in this diff lists that key;
+- names a base commit that does not exist in the repository;
 - runs without the checker outside the baseline worktree;
-- fails the merge base's checker run against the head, unless the diff touches checker files and
-  the head registry has a `[checker_change]` entry new in this diff.
+- fails the merge base's checker run against the head, unless the diff touches checker files, the
+  head registry has a `[checker_change]` entry new in this diff, and the diff changes no baseline
+  file and no registry row.
+
+"New in this diff" has one meaning everywhere. An `approved_growth` row is new when its
+(sentry id, key) pair is not among the base approvals; a `[retired]`, `[retired_files]` or
+`[checker_change]` entry is new when its name is not in that base table. Rewording a decision that
+is already on base does not make it new, so it cannot re-arm an approval.
+
+Adding a key to a `GUARD_KEYS` baseline adds a guard, so it is not growth and needs no approval.
 
 Each decision row new in the diff (`approved_growth`, `[retired]`, `[retired_files]`,
-`[checker_change]`) is printed on its own report line, so the gate reviewer sees every sign-off.
+`[checker_change]`) is printed as a `ratchet: decision ...` line. The sentry step copies these
+lines to gate stderr on a pass too (`gates.sh` tails step logs only on failure, `gates.sh:531,542`),
+so the gate reviewer sees every sign-off.
 
 Named limits (known issues, not blockers):
 
 - L-A. A decision row is plain text that anyone with write access can type. V1 relies on the
-  report line and gate review (owner decision Q1). SSH-signed approvals and a `merge_check.py` run
+  report line and gate review (owner decision Q1). The gate reviewer brief adds one step: grep
+  the registry diff (`git diff <base> -- scripts/dev/sentry_registry.toml`) for new decision rows
+  and check each against OWNER-QUESTIONS.md. SSH-signed approvals and a `merge_check.py` run
   from a main checkout (platform H1) are V2. The V1 threat model covers accidental loosening only.
 - L-B. A sentry can be weakened in its test body without touching a baseline or limit (platform
   L3). Review catches this.
@@ -206,7 +221,9 @@ Named limits (known issues, not blockers):
   follow-up work.
 - L-D. A branch can edit `gates.sh`, a workflow or the head `ratchet_check.py` that starts the base
   run and applies the `[checker_change]` waiver. The base run lowers the impact, every waiver is
-  printed, and the `ci-write-scopes` sentry covers workflow writes. Closing it fully needs branch
+  printed, and the `ci-write-scopes` sentry covers workflow writes. A waiver clears every base
+  finding, so a diff with a `[checker_change]` entry may not also change a baseline file or a
+  registry row; such a diff is split into a checker PR and a baseline PR. Closing it fully needs branch
   protection on main, an owner setting.
 - L-E. Platform H4 process hygiene (process-group kill, `flock -o`, bash 3.2, exact workflow `if:`)
   is out of scope except the skip-if-missing fix (owner decision Q4).
@@ -298,20 +315,27 @@ Changes:
 - New `tests/sentry/ratchet/_integrity.py` (about 170 lines, stdlib only):
   - `registry_present(base, head)`: the registry exists at head and has at least one `[[sentry]]`
     row when the base had rows.
-  - `removed_rows(base_rows, head_rows, retired)`: an id at base and gone at head passes when the
-    same diff registers at least one new id. That is the existing replacement and split path
-    (`_ratchet.py:340-403`), which keeps its union rule. Otherwise the id needs a `[retired]` entry
-    `id = "owner YYYY-MM-DD reason"` matching `DECISION` and passing `reason_findings`.
+  - `removed_rows(base_rows, head_rows, retired)`: an id at base and gone at head is exempt only
+    when all three hold: it is not in `GUARD_KEYS`, its base baseline had at least one key, and
+    at least one of those keys is in the union of the keys of the ids new in the diff. That is the
+    existing replacement and split path (`_ratchet.py:340-403`), which keeps its union rule.
+    Otherwise the id needs a `[retired]` entry `id = "owner YYYY-MM-DD reason"` matching
+    `DECISION` and passing `reason_findings`. Removing a sentry and adding an unrelated empty one
+    therefore fails. RG-E1 defines `GUARD_KEYS` as an empty set; RG-E2 adds `sentry-limits`.
   - `removed_sentry_files(root, base_sha)`: sentry files at base (`git ls-tree -r --name-only`,
     filtered to `tests/sentry/**/test_*.py`) plus the base's `OUTSIDE_SENTRIES`, minus those at
     head. `OUTSIDE_SENTRIES` is read with `git show <base>:tests/sentry/test_sentry_manifest.py`
     and parsed with `ast` (a module-level tuple of string literals). It is never imported, so the
-    head copy and pytest are not involved. A path `git diff -M --name-status <base> HEAD` reports
-    as renamed passes. Others need a `[retired_files]` entry with a dated decision.
+    head copy and pytest are not involved. A base with no `test_sentry_manifest.py` gives an empty
+    list. A path `git diff -M --name-status <base> HEAD` reports as renamed passes only when its
+    destination is also in the sentry set (`tests/sentry/**/test_*.py` or the head
+    `OUTSIDE_SENTRIES`). Others need a `[retired_files]` entry with a dated decision.
   - `closed_keys(head_registry)`: one repo-wide constant `REGISTRY_ROW_KEYS = {"id", "baseline",
-    "approved_growth"}`, and the decision tables hold only `name = "decision"` string pairs. An
-    unknown key fails with its id. Baseline entries get no closed schema: typos there already fail
-    closed (see Problem).
+    "approved_growth"}`, and `DECISION_TABLES = ("retired", "retired_files", "checker_change")`,
+    all three known from RG-E1 on, whose values must be decision strings. An unknown row key fails
+    with its id. Top-level table names are not a closed set: an unknown table is ignored, so a
+    later slice can add one without failing an older base checker. Baseline entries get no closed
+    schema: typos there already fail closed (see Problem).
   - `safe_path(p)`: `PurePosixPath`; fails absolute, backslash or any `..` part. `parse_registry`
     uses it in place of `startswith`.
   - `new_baselines_dated(base, head)`: a baseline file new in the diff needs a non-empty
@@ -319,9 +343,12 @@ Changes:
     decision Q7: required for new baselines only, no back-fill.
   - `new_decisions(base, head)`: every decision row at head and not at base, for the report.
 - `_ratchet.py`: load `_integrity.py` by path from `Path(__file__).parent / "ratchet"`; `check()`
-  calls `integrity_findings(...)` and prints the decision lines. About +15 lines.
-- `scripts/dev/sentry_registry.toml`: add empty `[retired]` and `[retired_files]` tables with a
-  one-line comment on the decision format. Fix the stale comment at lines 6-7: the F29 reason
+  first runs `git rev-parse --verify <base>^{commit}` and fails with "ratchet: base commit not
+  found" when it is missing. Today a missing base reads as an empty registry
+  (`_ratchet.py:315-316`). Then `check()` calls `integrity_findings(...)` and prints the
+  `ratchet: decision ...` lines. About +20 lines.
+- `scripts/dev/sentry_registry.toml`: add empty `[retired]`, `[retired_files]` and
+  `[checker_change]` tables with a one-line comment on the decision format. Fix the stale comment at lines 6-7: the F29 reason
   baseline is registered (platform AT-E8).
 - Integrity case table: add the bypass cases to a vendored table beside
   `layout/_ratchet_cases.py` (or extend that file) so RG-C1a parametrizes the same cases.
@@ -341,6 +368,9 @@ Failure modes:
 |---|---|
 | Registry row, baseline JSON and source row deleted, no `[retired]` entry | Fail, names the id |
 | Row renamed to a new id that keeps the keys | Pass (replacement path) |
+| Row removed and an unrelated empty sentry added in the same diff | Fail, names the id |
+| Sentry file renamed to a path outside the sentry set | Fail |
+| `--base` names a commit that does not exist | Fail, "base commit not found" |
 | `[retired]` entry with a placeholder reason | Fail, `reason_findings` rules |
 | Registry file deleted or emptied | Fail |
 | Sentry test file deleted | Fail, names the path |
@@ -351,24 +381,31 @@ Failure modes:
 | New baseline with no `created_in` | Fail |
 | Base has no `[retired]` table (first run) | Pass; the tables are optional at base |
 
-Acceptance tests, all red before, in `tests/sentry/ratchet/test_integrity.py`. Reuse the
-temporary-git-repo helpers from `test_ratchet_check.py` by import; do not copy them.
+Acceptance tests in `tests/sentry/ratchet/test_integrity.py`. Reuse the temporary-git-repo
+helpers from `test_ratchet_check.py` by import; do not copy them. Each test is tagged. A
+**red-before** test must fail on the base, and the builder records that run. A **pin** test passes
+on the base and after; it guards against over-blocking, and the builder does not claim red
+evidence for it.
 
-- `test_removed_registry_row_without_retirement_fails` (AT-RI1): deletes the row, the baseline
-  file and nothing else the checker reads. Red before: today this passes.
-- `test_removed_registry_row_with_dated_retirement_passes`
-- `test_row_replaced_by_new_id_keeping_keys_passes`
-- `test_retirement_with_placeholder_reason_fails`
-- `test_deleted_registry_file_fails`
-- `test_emptied_registry_file_fails`
-- `test_deleted_sentry_file_fails` (AT-RI3)
-- `test_renamed_sentry_file_passes`
-- `test_deleted_outside_sentry_file_with_its_list_entry_fails`
-- `test_unknown_registry_key_fails`
-- `test_dotdot_absolute_and_backslash_paths_fail` (AT-RI7)
-- `test_new_baseline_without_created_in_fails` (AT-RI6)
-- `test_new_decision_rows_are_reported`
-- `test_live_registry_passes_against_origin_main` (passes before and after)
+- `test_removed_registry_row_without_retirement_fails` (AT-RI1, red-before): deletes the row and
+  the baseline file, nothing else the checker reads.
+- `test_removed_row_with_unrelated_empty_new_sentry_fails` (red-before)
+- `test_removed_registry_row_with_dated_retirement_passes` (pin)
+- `test_row_replaced_by_new_id_keeping_keys_passes` (pin)
+- `test_retirement_with_placeholder_reason_fails` (red-before)
+- `test_deleted_registry_file_fails` (red-before)
+- `test_emptied_registry_file_fails` (red-before)
+- `test_deleted_sentry_file_fails` (AT-RI3, red-before)
+- `test_renamed_sentry_file_passes` (pin)
+- `test_sentry_file_renamed_out_of_the_sentry_set_fails` (red-before)
+- `test_deleted_outside_sentry_file_with_its_list_entry_fails` (red-before)
+- `test_unknown_registry_key_fails` (red-before)
+- `test_unknown_top_level_table_is_ignored` (pin)
+- `test_dotdot_absolute_and_backslash_paths_fail` (AT-RI7, red-before)
+- `test_new_baseline_without_created_in_fails` (AT-RI6, red-before)
+- `test_unreachable_base_sha_fails` (red-before)
+- `test_new_decision_rows_are_reported` (red-before)
+- `test_live_registry_passes_against_origin_main` (pin)
 
 Size: about +170 helper, +15 `_ratchet.py`, +10 TOML, +250 tests, +1 CODEMAP row. No public names.
 
@@ -384,32 +421,45 @@ the `max` fields this slice adds (H1 order).
 Changes:
 
 - `_ratchet.py` (about +20):
-  - Raised-max approval: in `check()`, an exact-key `approved_growth` row that is not in the base
-    registry exempts that key from `raised` too, and prints "approved raise <key> (<decision>)".
-    An approval row already on main does not exempt a later raise.
+  - Raised-max approval: in `check()`, an exact-key `approved_growth` row new in the diff (its
+    (sentry id, key) pair is absent from the base approvals) exempts that key from `raised` too,
+    and prints "approved raise <key> (<decision>)". An approval already on main does not exempt a
+    later raise, even if the branch rewords its decision text.
   - `bound_loosened(head, base)` replaces `max_raised`: a `CEILING_FIELDS = ("max",)` value rose
     or was dropped, or a `FLOOR_FIELDS = ("min",)` value fell or was dropped. The replacement path
     (`replaced_raised`) uses it too.
-  - `GUARD_KEYS = {"sentry-limits"}`: for these sentries a key lost from the baseline is treated
-    like a grown key (it removes a guard, not a debt). An exact-key `approved_growth` row new in
-    the diff exempts it; the stale-approval check skips keys that were in the base.
+  - `GUARD_KEYS = {"sentry-limits"}` (the RG-E1 constant, now filled). For these sentries the
+    direction flips, because a key is a guard, not a debt:
+    - a key lost from the baseline needs an exact-key `approved_growth` row new in the diff;
+    - an added key is a tightening, so it is not growth and needs no approval;
+    - a `GUARD_KEYS` id is never covered by the replacement exemption (RG-E1), so a rename of
+      `sentry-limits` needs `[retired]`. On the replacement path in general, a `GUARD_KEYS` key in
+      `old_union` and not in `new_union` needs an exact-key approval new in the diff;
+    - the stale-approval check (`_ratchet.py:335-338`) skips a `GUARD_KEYS` approval row whose key
+      is absent from both the base and the head baseline. Without this, the approval for a removed
+      limit goes stale the moment it merges and every later PR stays red.
 - New `tests/sentry/ratchet/_limit_constants.py` (about 50 lines):
   - `LIMITS`: a dict from `(test file, constant)` to `"max"` or `"min"`.
   - `read_int(file, constant)`: parses the file with `ast` and returns the module-level `NAME =
     <int>` or `NAME: int = <int>` value (`Assign` and `AnnAssign`). A `bool` or a non-int value
     is an error, because `isinstance(True, int)` is true.
 - `tests/sentry/_baseline_sources.py` (562 lines, about +15, stays under 600):
-  - Add an optional `mins` callable to `Source`, written as `min` by the regenerate path the way
-    `maxes` is written as `max`.
+  - Add an optional `mins` callable to `Source`, read by the mirror test the way `maxes` is.
   - A `sentry-limits` source over `LIMITS`, keys `<file>::<CONSTANT>`, with `maxes` and `mins`.
   - Add `maxes=` to `module-size` (`in_code("test_module_size.py", "ALLOWLIST").maxes`; values are
     ints), `log-interpolation` and `locator-waivers` (`count_at=0`).
-  - Regenerate those three baselines and write the new `sentry-limits.json`; register it in the
-    TOML. Update the module-size docstring sentence that says the rule is review-enforced.
+  - There is no regenerate path (`write_initial` refuses to overwrite). The builder adds `max`
+    and `min` to the three baselines and writes `sentry-limits.json` by hand, with `created_in`.
+    The mirror test (`test_baseline_registry.py:47-49`, extended to `min`) is the check that the
+    hand-written values match the live constants. Register the new file in the TOML. Update the
+    module-size docstring sentence that says the rule is review-enforced.
 - `tests/sentry/test_baseline_registry.py`: the mirror test also compares `min` against `mins`.
   Replace the hand list in `test_every_numeric_source_declares_its_max` with a walk over every
-  `InCode` source: one whose values are ints, or tuples with an int at `count_at`, must declare
-  `maxes`.
+  `InCode` source: one with any value that is an int, or a tuple holding an int, and not a `bool`,
+  must declare `maxes`. The rule does not key off `count_at`, so `locator-waivers` tuple values
+  (`_baseline_sources.py:313`, `test_locator_hygiene.py:127` `WAIVERS`) are caught. Add `LIMITS`
+  to the `LIST_NAME` pattern (`test_baseline_registry.py:26-28`) so the unregistered-reader scan
+  sees the limit list.
 
 Initial `LIMITS` rows. The builder confirms each from the test body before adding it, and records
 the line that compares against it:
@@ -440,23 +490,33 @@ Failure modes:
 | WALK_FLOOR lowered 146 to 140 | Fail unless approved |
 | WALK_FLOOR raised 146 to 150 | Pass |
 | `LIMITS` row and its baseline entry deleted | Fail unless approved (`GUARD_KEYS`) |
+| The same removal, approved, after it merges to main | Next PR passes (approval is not stale) |
+| A new `LIMITS` row added | Pass, not growth |
+| `sentry-limits` renamed to `sentry-limits-v2` with GOAL dropped | Fail (no replacement exemption) |
+| An approval already on base reworded, and the max raised again | Fail |
 | GOAL rewritten as `GOAL: int = 600` | Pass, read via `AnnAssign` |
 | GOAL rewritten as `GOAL = True` | Fail, `read_int` refuses a bool |
 
-Acceptance tests, all red before, in `tests/sentry/ratchet/test_bounds.py` unless noted:
+Acceptance tests in `tests/sentry/ratchet/test_bounds.py` unless noted, tagged as in RG-E1:
 
-- `test_max_raise_with_approved_growth_passes` (H2)
-- `test_max_raise_with_approval_already_on_base_fails`
-- `test_module_size_ceiling_raise_needs_approval`
-- `test_log_interpolation_count_raise_needs_approval`
-- `test_locator_waiver_count_raise_needs_approval`
-- `test_limit_raise_without_approval_fails` (AT-RI5)
-- `test_floor_lowered_without_approval_fails`
-- `test_floor_raised_passes`
-- `test_removed_limit_key_needs_approval`
-- `test_read_int_handles_annassign_and_refuses_bool`
-- `test_every_numeric_in_code_source_declares_max` (in `test_baseline_registry.py`)
-- `test_source_matches_its_registered_baseline[sentry-limits]` (existing test, new case)
+- `test_max_raise_with_approved_growth_passes` (H2, red-before)
+- `test_max_raise_with_approval_already_on_base_fails` (pin)
+- `test_reworded_base_approval_does_not_exempt_a_raise` (pin)
+- `test_module_size_ceiling_raise_needs_approval` (red-before)
+- `test_log_interpolation_count_raise_needs_approval` (red-before)
+- `test_locator_waiver_count_raise_needs_approval` (red-before)
+- `test_limit_raise_without_approval_fails` (AT-RI5, red-before)
+- `test_floor_lowered_without_approval_fails` (red-before)
+- `test_floor_raised_passes` (pin)
+- `test_removed_limit_key_needs_approval` (red-before)
+- `test_merged_limit_removal_approval_is_not_stale` (red-before)
+- `test_added_limit_key_is_not_growth` (red-before)
+- `test_guard_sentry_renamed_with_a_dropped_key_fails` (red-before)
+- `test_read_int_handles_annassign_and_refuses_bool` (red-before)
+- `test_every_numeric_in_code_source_declares_max` (in `test_baseline_registry.py`, red-before)
+- `test_limits_list_is_seen_by_the_reader_scan` (in `test_baseline_registry.py`, red-before)
+- `test_source_matches_its_registered_baseline[sentry-limits]` (existing test, new case,
+  red-before)
 
 Size: about +20 `_ratchet.py`, +50 helper, +15 `_baseline_sources.py`, +8 TOML, three regenerated
 baselines and one new one, +200 tests. No ceiling is raised.
@@ -474,25 +534,34 @@ Changes:
   `check()` passes:
   - resolve the base sha once (the existing `--base`, else the merge base) and use it for every
     later git call;
-  - if `git cat-file -e <base>:scripts/dev/ratchet_check.py` fails, print "ratchet: base has no
-    checker, base run skipped" and stop. This is the only skip;
-  - extract the base tree with `git archive <base> scripts/dev tests/sentry | tar -x` into a
-    `tempfile.TemporaryDirectory`. No hand-written file list. The base `_ratchet.py` loads its
-    helpers relative to its own `__file__`, so it never reads the head's helpers;
+  - run `git rev-parse --verify <base>^{commit}` first; a missing base commit fails the step
+    ("ratchet: base commit not found"). It never reads as "no checker";
+  - if `git cat-file -e <base>:scripts/dev/ratchet_check.py` then fails, print "ratchet: base has
+    no checker, base run skipped" and stop. This is the only skip;
+  - extract the base tree from `git archive <base> scripts/dev tests/sentry` into a
+    `tempfile.TemporaryDirectory`. Read the archive with `subprocess.run(..., check=True)` and
+    unpack it with `tarfile` using `filter="data"`, so neither half of a pipe can fail unseen. No
+    hand-written file list. The base `_ratchet.py` loads its helpers relative to its own
+    `__file__`, so it never reads the head's helpers;
   - run `<tmp>/scripts/dev/ratchet_check.py --root <head root> --base <sha>` with the existing
     flags only (no `--repo`, no new flag on the base side, so an older base copy still runs);
   - if the extraction fails, or the base run exits non-zero, the step fails, unless the waiver
     below applies;
   - waiver: when `git diff --name-only <base> HEAD` touches `scripts/dev/ratchet_check.py`,
     `tests/sentry/_ratchet.py` or `tests/sentry/ratchet/_*.py`, and the head registry has a
-    `[checker_change]` entry not in the base registry with a dated owner decision, print each base
-    finding as "waived by checker_change <id> (<decision>)" and pass.
+    `[checker_change]` entry not in the base table with a dated owner decision, print each base
+    finding as "waived by checker_change <id> (<decision>)" and pass. A waiver clears every base
+    finding, so the step fails when a diff with a new `[checker_change]` entry also changes a
+    baseline file or a `[[sentry]]` row (L-D).
 - `scripts/dev/gates.sh` sentry step (`gates.sh:491`): `label` is a local in `run_steps`, so pass it
   into the `bash -c` string as an argument (`env GATE_LABEL="$label"` or a positional). Skip a
   missing checker only when the label is `baseline`. On any other tree, a missing
   `scripts/dev/ratchet_check.py` prints "ratchet checker missing" and fails. Call
-  `ratchet_check.py --with-base`. One shell line; the CLI reuses the same invocation (L7).
-- `scripts/dev/sentry_registry.toml`: add an empty `[checker_change]` table and its comment.
+  `ratchet_check.py --with-base` on the branch tree. On the `baseline` label call it without
+  `--with-base`: the baseline tree holds the base checker, which has no such flag and would exit
+  2 from argparse. One shell line; the CLI reuses the same invocation (L7).
+- After the step, copy the `ratchet: decision ...` and "waived by checker_change" lines from the
+  step log to gate stderr even when the step passes, so the gate reviewer sees them (L-A).
 - `.github/workflows/gate-selfhosted.yml` already runs the `sentry` step, so no workflow edit is
   planned. If one turns out to be needed, the `ci-write-scopes` sentry applies.
 
@@ -505,26 +574,35 @@ Failure modes:
 | Branch empties `integrity_findings` in the head helper and deletes a registry row | Base copy (its own helper) fails |
 | Head adds a new registry-row key with a matching checker change and a `[checker_change]` row | Pass, waiver printed |
 | The same without a `[checker_change]` row | Fail |
-| This slice's head run by the RG-E2 base checker | Pass (it ignores the new table) |
+| This slice's head run by the RG-E2 base checker | Pass (the `[checker_change]` table is known since RG-E1) |
 | Base has `ratchet_check.py` but it cannot be extracted or crashes | Fail |
 | Base has no `ratchet_check.py` | Skip, one printed line |
+| Base sha does not exist | Fail, "base commit not found" |
+| `git archive` fails while `tarfile` reads a partial stream | Fail |
+| Diff has a `[checker_change]` entry and also edits a baseline | Fail |
+| Passing gate with a new decision row | Pass, decision line on gate stderr |
+| Baseline-label run | Base checker runs without `--with-base` |
 | Baseline worktree with no checker | Skip, as today |
 
-Acceptance tests, all red before, in `tests/sentry/ratchet/test_base_run.py`. They run the sentry
-step command or `ratchet_check.py --with-base` on a temporary repo, following the harness pattern
-in `test_bash32_compat.py`:
+Acceptance tests in `tests/sentry/ratchet/test_base_run.py`, tagged as in RG-E1. They run the
+sentry step command or `ratchet_check.py --with-base` on a temporary repo, following the harness
+pattern in `test_bash32_compat.py`:
 
-- `test_missing_checker_fails_outside_baseline_tree`
-- `test_missing_checker_skips_in_baseline_tree`
-- `test_base_checker_catches_growth_hidden_by_branch_checker_edit`
-- `test_base_checker_ignores_tampered_head_helper` (H6)
-- `test_new_registry_key_with_checker_change_passes_base_run` (H1)
-- `test_new_registry_key_without_checker_change_fails_base_run`
-- `test_broken_base_checker_fails` (M5): the base has `ratchet_check.py` but its `_ratchet.py` has a
-  syntax error
-- `test_base_checker_absent_skips_with_message`
+- `test_missing_checker_fails_outside_baseline_tree` (red-before)
+- `test_missing_checker_skips_in_baseline_tree` (pin)
+- `test_base_checker_catches_growth_hidden_by_branch_checker_edit` (red-before)
+- `test_base_checker_ignores_tampered_head_helper` (H6, red-before)
+- `test_new_registry_key_with_checker_change_passes_base_run` (H1, red-before)
+- `test_new_registry_key_without_checker_change_fails_base_run` (red-before)
+- `test_checker_change_with_a_baseline_edit_fails` (red-before)
+- `test_broken_base_checker_fails` (M5, red-before): the base has `ratchet_check.py` but its
+  `_ratchet.py` has a syntax error
+- `test_unreachable_base_sha_fails_with_base` (red-before)
+- `test_base_checker_absent_skips_with_message` (red-before)
+- `test_decision_lines_shown_on_a_passing_gate` (red-before)
+- `test_baseline_label_runs_without_with_base` (red-before)
 
-Size: about +45 `ratchet_check.py`, +10 `gates.sh`, +5 TOML, +150 tests.
+Size: about +55 `ratchet_check.py`, +12 `gates.sh`, +180 tests.
 
 Test depth: T0 the new test file and `test_bash32_compat.py`; T1 impact selection; the gate runs
 `gates.sh --keep-going --steps env,ruff,format,mypy,sentry` on the exact head. Test-tooling
@@ -552,8 +630,8 @@ Starts after RG-E3 merges, so the CLI ports reviewed code.
   RG-E3.
 - CHANGELOG entry.
 
-Acceptance tests: the RG-E1 and RG-E3 test names in the CLI `tests/sentry/ratchet/`, all red
-before, plus `test_ci_runs_base_checker_on_pull_requests` (reads `ci.yml`; asserts the step, the
+Acceptance tests: the RG-E1 and RG-E3 test names in the CLI `tests/sentry/ratchet/`, with the same tags
+(red-before and pin), plus `test_ci_runs_base_checker_on_pull_requests` (red-before; reads `ci.yml`; asserts the step, the
 `--with-base` flag and its step-level `if`).
 
 Size: about +250 helpers and `ratchet_check.py`, +15 TOML, +25 `_ratchet.py`, +10 `gates.sh`,
@@ -573,7 +651,7 @@ Starts after RG-C1a merges.
 - The builder lists CLI numeric baselines without `max` (`module-size.json` already has it) and
   adds `maxes` where missing.
 
-Acceptance tests: the RG-E2 test names in the CLI `tests/sentry/ratchet/`, all red before.
+Acceptance tests: the RG-E2 test names in the CLI `tests/sentry/ratchet/`, with the same red-before and pin tags.
 
 Size: about +20 `_ratchet.py`, +50 helper, +15 sources, +8 TOML, one new baseline, +180 tests.
 
@@ -593,8 +671,8 @@ From the plan contract's class list (classes 1 to 10, checked by `~/bin/plan-lin
 | 4 | Route parity and silent fallback | PM-1: frame and batch paths fill `identity_error` the same way. RG: gates.sh and CI call the same `ratchet_check.py --with-base`; a missing checker fails outside the baseline tree; a broken base run fails instead of skipping | `test_frame_and_facts_paths_agree_on_identity_error`; `test_missing_checker_fails_outside_baseline_tree`; `test_broken_base_checker_fails` | Restore `return None` in `_source_identity`; restore the unconditional `-f` skip; return 0 on extraction error: each test fails |
 | 5 | Referential integrity | RG: a registry row's `baseline` path must exist and be safe; a `sentry-limits` key must resolve to a live int constant (mirror test). PM-1: N/A, no FK handling | `test_dotdot_absolute_and_backslash_paths_fail`; `test_source_matches_its_registered_baseline[sentry-limits]` | Revert `safe_path` to `startswith`: the path test fails |
 | 6 | Untrusted producer | N/A for V1: inputs are the repo's own registry, baselines and git history (V1 threat model, accidental only). Decision rows are parsed with the anchored `DECISION` regex using `fullmatch` | A decision row with a trailing newline is refused | Swap `fullmatch` for `match` with `$`: that case passes and the test fails |
-| 7 | Check then use on a path | `ratchet_check.py --with-base` resolves the base sha once and passes the same sha to every `git show`, `git ls-tree`, `git archive` and the base run | Code review on `ratchet_check.py` | Resolve the merge base twice: review finding |
-| 8 | Weak tests and overclaimed evidence | Every named AT is run red on the base first; `test_removed_registry_row_without_retirement_fails` deletes the baseline file too so it is red before; `test_live_registry_passes_against_origin_main` keeps the real repo in the loop; the numeric-source walk replaces a hand list | Builder report lists each red-before result and each mutation | Return an empty list from `integrity_findings`: every RG-E1 bypass test fails |
+| 7 | Check then use on a path | `check()` and `--with-base` verify `<base>^{commit}` exists; `ratchet_check.py --with-base` resolves the base sha once and passes the same sha to every `git show`, `git ls-tree`, `git archive` and the base run | Code review on `ratchet_check.py` | Resolve the merge base twice: review finding |
+| 8 | Weak tests and overclaimed evidence | Every AT is tagged red-before or pin; each red-before AT is run red on the base first, and pins are never offered as red evidence; `test_removed_registry_row_without_retirement_fails` deletes the baseline file too so it is red before; `test_live_registry_passes_against_origin_main` keeps the real repo in the loop; the numeric-source walk replaces a hand list | Builder report lists each red-before result and each mutation | Return an empty list from `integrity_findings`: every RG-E1 bypass test fails |
 | 9 | Refactor drift | PM-1 moves the catch from `_source_identity` to its one caller; `max_raised` becomes `bound_loosened` with every caller updated in the same slice | `postscan/test_column_facts.py` and `test_ratchet_check.py` pass unchanged | N/A |
 | 10 | Frozen contract drift | N/A: no public name, finding schema or reason code changes | Existing census sentries stay green | N/A |
 
@@ -610,7 +688,7 @@ Checked against `/home/cam/dev-rules/catalogs/recurring-defects.md`.
 | 4 | Versioned read models | The base run calls the base checker with existing flags only; new registry tables are optional at base; a new registry key needs `[checker_change]` (H1) |
 | 5 | Normalized guard scanners | `OUTSIDE_SENTRIES` and `LIMITS` constants are read with `ast` (`Assign` and `AnnAssign`), never by regex |
 | 6 | Private modules | `passes_through` comes from the public `decoy_engine.profiling` |
-| 7 | No hidden CI failures | The only skip is "base has no checker"; extraction or run failure fails (M5); the missing-checker skip is limited to the baseline label |
+| 7 | No hidden CI failures | The only skip is "base has no checker", checked after the base commit is verified; a missing base commit, an archive or extraction failure or a base run failure fails; the missing-checker skip is limited to the baseline label; decision lines reach gate stderr on a pass |
 | 8 | One input, one trust class | N/A: one input class (repo files) |
 | 9 | Mutations on the final head | The builder reruns the listed mutations after the last code change and records the head |
 | 10 | Allowlisted helpers are still checked | N/A: no sentry allowlist gains a helper |
@@ -627,8 +705,9 @@ Checked against `/home/cam/dev-rules/catalogs/recurring-defects.md`.
   `passes_through` keeps (propagates), any other raise (sets `identity_error`).
 - `_ratchet.check()` (`tests/sentry/_ratchet.py:305`): returns findings and report lines;
   `ratchet_check.py` exits 1 on any finding and 2 when it has no merge base.
-- `ratchet_check.py --with-base` (`scripts/dev/ratchet_check.py:37`): own check fails (1); base has
-  no checker (skip, 0 if own check passed); extraction or base run fails (1); base run fails with a
+- `ratchet_check.py --with-base` (`scripts/dev/ratchet_check.py:37`): own check fails (1); base
+  commit missing (1); base has no checker (skip, 0 if own check passed); waiver with a baseline or
+  registry-row change (1); extraction or base run fails (1); base run fails with a
   valid waiver (0, waiver printed); base run passes (0).
 - Engine sentry step (`scripts/dev/gates.sh:491`): checker present (run, fail on non-zero); checker
   missing with label `baseline` (skip); checker missing with any other label (fail).
@@ -654,7 +733,7 @@ FK logic.
 |---|---|---|
 | `ColumnFacts.identity_error` | `_column_facts.py:179` | now set on the frame path too |
 | `[[sentry]]` row keys `id`, `baseline`, `approved_growth` | `scripts/dev/sentry_registry.toml` | closed set (`REGISTRY_ROW_KEYS`) |
-| `[retired]`, `[retired_files]`, `[checker_change]` | registry | new tables, `key = "owner YYYY-MM-DD reason"` |
+| `[retired]`, `[retired_files]`, `[checker_change]` | registry | new tables (all in RG-E1), `key = "owner YYYY-MM-DD reason"`; top-level table names stay open |
 | Baseline file `created_in` | `tests/sentry/baselines/*.json` | required on baseline files new in the diff |
 | Baseline entry `max` | three baselines | added (RG-E2) |
 | Baseline entry `min` | `sentry-limits.json` | new floor field (RG-E2) |
@@ -713,6 +792,8 @@ gate tooling only.
 - A new required key or table breaks every open branch at once. Closed: the new tables are
   optional at base, `created_in` is required only for baselines new in the diff, and RG-E3's own
   head must pass the RG-E2 base checker.
+- An approved limit removal goes stale once merged and turns every later PR red. Closed: the
+  stale check skips `GUARD_KEYS` rows whose key is gone from base and head.
 - Builders learn to paste decision rows to get green. Partly closed: every new row is printed for
   the gate reviewer (L-A), and builders never write decision rows (see Builder brief items). A
   signed approval is V2.
@@ -739,7 +820,8 @@ gate tooling only.
   `[checker_change]`). When a change needs one, raise it on the vault `OWNER-QUESTIONS.md` with
   options and a recommendation, and write the row only with the owner's dated answer. Test
   fixtures inside `tmp_path` repos are not decision rows.
-- Red before: run each named acceptance test on the base first and record that it fails.
+- Red before: run each acceptance test tagged red-before on the base first and record that it
+  fails. Tests tagged pin pass on the base; do not report them as red evidence.
 - No cell values, query text or exception message text in any finding or log line.
 - Lint own edits: `ruff check`, `ruff format --check`, `mypy` before each commit.
 - CHANGELOG updated before merge.
