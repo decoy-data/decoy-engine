@@ -63,6 +63,15 @@ def _integrity() -> ModuleType:
 
 
 @dataclass(frozen=True)
+class Registry:
+    """A registry that passed ``load_side``: the document, ``{id: path}`` and the approvals."""
+
+    doc: dict[str, Any]
+    paths: dict[str, str]
+    approvals: dict[str, dict[str, str]]
+
+
+@dataclass(frozen=True)
 class Baseline:
     sentry_id: str
     created_in: str
@@ -374,22 +383,40 @@ def check(
         return [f"cannot read {exc.what} from the {exc.side} commit"], []
 
 
+def load_side(text: str, side: str, helper: ModuleType) -> tuple[Registry | None, list[str]]:
+    """The one loader for the HEAD and the BASE registry; nothing else reads a raw document.
+
+    Returns ``(None, findings)`` when the shape is unusable, otherwise the validated registry and
+    the findings of its rows (duplicate ids, shared or unsafe paths, bad approvals). Any finding on
+    the base raises ``BaseReadError``, because a base that is not a clean registry cannot anchor a
+    comparison; on HEAD the findings are reported.
+    """
+    doc, problems = helper.validate_registry(text)
+    if problems:
+        if side == "base":
+            raise helper.BaseReadError(REGISTRY)
+        return None, [f"registry: {REGISTRY} {p}" for p in problems]
+    paths, findings = parse_registry(doc)
+    approvals, approval_findings = parse_approvals(doc)
+    findings += approval_findings
+    if findings and side == "base":
+        raise helper.BaseReadError(REGISTRY)
+    return Registry(doc, paths, approvals), findings
+
+
 def _check(
     root: Path, tree: Any, helper: ModuleType, waiver_input: str | None
 ) -> tuple[list[str], list[str]]:
     reg_file = root / REGISTRY
     head_text = reg_file.read_text(encoding="utf-8") if reg_file.is_file() else ""
     base_text = tree.read(REGISTRY) or ""
-    head_doc, problems = helper.validate_registry(head_text)
-    if problems:
-        return [f"registry: {REGISTRY} {p}" for p in problems], []
-    base_doc, problems = helper.validate_registry(base_text)
-    base_reg, base_findings = parse_registry(base_doc)
-    if problems or base_findings:  # a base that is not a clean registry cannot anchor a comparison
-        raise helper.BaseReadError(REGISTRY)
-    head, findings = parse_registry(head_doc)
-    approvals, approval_findings = parse_approvals(head_doc)
-    findings += approval_findings
+    head_reg, findings = load_side(head_text, "head", helper)
+    if head_reg is None:
+        return findings, []
+    base_reg_loaded, _ = load_side(base_text, "base", helper)
+    assert base_reg_loaded is not None  # a base problem raised
+    head_doc, head, approvals = head_reg.doc, head_reg.paths, head_reg.approvals
+    base_doc, base_reg = base_reg_loaded.doc, base_reg_loaded.paths
     findings += helper.registry_present(
         len(base_doc.get("sentry", [])), reg_file.is_file(), len(head_doc.get("sentry", []))
     )
@@ -402,7 +429,7 @@ def _check(
     schema, waiver_report = helper.closed_keys(head_doc, ROW_KEYS, decision_problem, usable)
     findings += schema
     report: list[str] = helper.new_decisions(
-        head_dec, base_names, approvals, parse_approvals(base_doc)[0]
+        head_dec, base_names, approvals, base_reg_loaded.approvals
     )
     report += waiver_report
     safe = {sid: p for sid, p in head.items() if helper.safe_path(p, BASELINE_DIR)}

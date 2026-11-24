@@ -745,3 +745,73 @@ def test_a_padded_placeholder_approval_is_refused(repo: Path, weak: str) -> None
     _grow(repo, "m::new")
     _approve(repo, [("m::new", weak)])
     _assert_red(repo, "approved_growth for m::new needs a decision")
+
+
+# --- plan amendment A1: BASE and HEAD go through one loader -----------------------------------
+
+ROW = f'[[sentry]]\nid = "a"\nbaseline = "{A}"\n'
+GOOD_DECISION = "owner 2026-11-24 a reason that is long enough"
+MALFORMED: tuple[tuple[str, str, str], ...] = (
+    (
+        "duplicate id",
+        ROW + f'\n[[sentry]]\nid = "a"\nbaseline = "{B}"\n',
+        "sentry id a appears twice",
+    ),
+    ("shared path", ROW + f'\n[[sentry]]\nid = "t"\nbaseline = "{A}"\n', "share baseline"),
+    ("id list", f'[[sentry]]\nid = []\nbaseline = "{A}"\n', "id must be a non-empty string"),
+    ("id empty", f'[[sentry]]\nid = ""\nbaseline = "{A}"\n', "id must be a non-empty string"),
+    ("id missing", f'[[sentry]]\nbaseline = "{A}"\n', "id must be a non-empty string"),
+    ("baseline missing", '[[sentry]]\nid = "a"\n', "a: baseline must be a string path"),
+    ("baseline int", '[[sentry]]\nid = "a"\nbaseline = 5\n', "a: baseline must be a string path"),
+    ("bad toml", "this is = = broken\n", "is not valid TOML"),
+    ("non-table rows", "sentry = [1]\n", "as an array of tables"),
+    ("approval item int", ROW + "approved_growth = [5]\n", "a: approved_growth row has no key"),
+    ("approved_growth str", ROW + 'approved_growth = "x"\n', "a: approved_growth must be a list"),
+    (
+        "approval key list",
+        ROW + f'approved_growth = [{{ key = [], decision = "{GOOD_DECISION}" }}]\n',
+        "a: approved_growth row has no key",
+    ),
+    (
+        "approval no decision",
+        ROW + 'approved_growth = [{ key = "m::n" }]\n',
+        "approved_growth for m::n needs a decision",
+    ),
+    (
+        "approval weak decision",
+        ROW + 'approved_growth = [{ key = "m::n", decision = "owner 2026-11-24 xxxxxxxxxx" }]\n',
+        "approved_growth for m::n needs a decision",
+    ),
+    (
+        "approval padded placeholder",
+        ROW
+        + 'approved_growth = [{ key = "m::n", decision = "owner 2026-11-24 TODO..........." }]\n',
+        "approved_growth for m::n needs a decision",
+    ),
+)
+
+
+@pytest.mark.parametrize("text, needle", [c[1:] for c in MALFORMED], ids=[c[0] for c in MALFORMED])
+def test_a_malformed_head_registry_gives_its_own_diagnostic(
+    repo: Path, text: str, needle: str
+) -> None:
+    _write(repo, B, _baseline("a", ["m::f"]))
+    _write(repo, REG, text)
+    res = _run(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Traceback" not in res.stderr
+    assert needle in res.stderr, res.stderr
+
+
+@pytest.mark.parametrize("text", [c[1] for c in MALFORMED], ids=[c[0] for c in MALFORMED])
+def test_a_malformed_base_registry_fails_closed_with_one_line(repo: Path, text: str) -> None:
+    _write(repo, B, _baseline("a", ["m::f"]))
+    _write(repo, REG, text)
+    base = _commit(repo, "malformed base registry")
+    _write(repo, REG, _registry({"a": A}))
+    (repo / B).unlink()
+    res = _run_from(repo, base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Traceback" not in res.stderr
+    assert res.stderr.count("ratchet: FAIL") == 1, res.stderr
+    assert f"cannot read {REG} from the base commit" in res.stderr
