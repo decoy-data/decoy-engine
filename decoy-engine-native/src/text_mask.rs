@@ -48,12 +48,13 @@ pub struct SpliceSpan {
     pub verbatim: bool,
 }
 
-/// Append one unmatched gap under the policy; an empty gap emits nothing (`apply_unmatched`).
-fn push_gap(out: &mut String, gap: &str, token: &str, passthrough_unmatched: bool) {
-    if gap.is_empty() {
-        return;
+/// The outcome the legacy exports derive from one token and a verbatim flag.
+fn legacy_out(token: &str, verbatim: bool) -> SpanOut<'_> {
+    if verbatim {
+        SpanOut::Verbatim
+    } else {
+        SpanOut::Replace(token)
     }
-    out.push_str(if passthrough_unmatched { gap } else { token });
 }
 
 /// Rebuild `text` from start-ordered, non-overlapping `spans`. Returns `None` when the input is
@@ -71,27 +72,18 @@ pub fn splice_cell(
     if text.is_empty() {
         return Some(String::new());
     }
+    let outcomes: Vec<(usize, usize, SpanOut<'_>)> = spans
+        .iter()
+        .map(|s| (s.start, s.end, legacy_out(token, s.verbatim)))
+        .collect();
     let mut out = String::with_capacity(text.len());
-    let mut cursor = 0usize;
-    for span in spans {
-        if span.start < cursor || span.end < span.start || span.end > text.len() {
-            return None;
-        }
-        push_gap(
-            &mut out,
-            &text[cursor..span.start],
-            token,
-            passthrough_unmatched,
-        );
-        out.push_str(if span.verbatim {
-            &text[span.start..span.end]
-        } else {
-            token
-        });
-        cursor = span.end;
-    }
-    push_gap(&mut out, &text[cursor..], token, passthrough_unmatched);
-    Some(out)
+    splice_out(
+        text,
+        &outcomes,
+        legacy_out(token, passthrough_unmatched),
+        &mut out,
+    )
+    .then_some(out)
 }
 
 /// Detection + the oracle's merge + the splice for one eligible cell. `indices` are catalog
@@ -106,25 +98,107 @@ pub fn detect_splice_cell(
     token: &str,
     passthrough_unmatched: bool,
 ) -> Option<String> {
-    if !is_eligible(text) {
-        return None;
+    let outs: [SpanOut<'_>; CATALOG_LEN] = std::array::from_fn(|i| legacy_out(token, verbatim[i]));
+    let mut out = String::with_capacity(text.len());
+    detect_splice_cell_out(
+        text,
+        indices,
+        &outs,
+        legacy_out(token, passthrough_unmatched),
+        &mut out,
+    )
+    .then_some(out)
+}
+
+/// The outcome for one resolved span or gap: keep the text, or replace it with a literal. The
+/// legacy exports build it from one token and a verbatim flag; the additive Arrow entry carries
+/// one literal per detector and an independent gap outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpanOut<'a> {
+    Verbatim,
+    Replace(&'a str),
+}
+
+/// Append one non-empty unmatched gap under its outcome; an empty gap emits nothing.
+fn push_gap_out(out: &mut String, gap: &str, gap_out: SpanOut<'_>) {
+    if gap.is_empty() {
+        return;
     }
+    match gap_out {
+        SpanOut::Verbatim => out.push_str(gap),
+        SpanOut::Replace(literal) => out.push_str(literal),
+    }
+}
+
+/// The one writer behind every splice entry. Rebuild `text` from start-ordered, non-overlapping
+/// `spans` into `out`, each span written per its outcome and each non-empty gap per `gap_out`.
+/// Returns false (leaving `out` unspecified) when a span is out of order, out of range or not on
+/// a character boundary, so the caller declines instead of emitting a guess.
+pub fn splice_out(
+    text: &str,
+    spans: &[(usize, usize, SpanOut<'_>)],
+    gap_out: SpanOut<'_>,
+    out: &mut String,
+) -> bool {
+    let mut cursor = 0usize;
+    for &(start, end, outcome) in spans {
+        if start < cursor || end < start {
+            return false;
+        }
+        let (Some(gap), Some(span)) = (text.get(cursor..start), text.get(start..end)) else {
+            return false;
+        };
+        push_gap_out(out, gap, gap_out);
+        match outcome {
+            SpanOut::Verbatim => out.push_str(span),
+            SpanOut::Replace(literal) => out.push_str(literal),
+        }
+        cursor = end;
+    }
+    match text.get(cursor..) {
+        Some(tail) => {
+            push_gap_out(out, tail, gap_out);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Detect the requested detectors in one cell and resolve overlaps with the oracle's sweep:
+/// stable sort by `(start, -length)` (an exact tie keeps request order), then keep each span
+/// that starts at or after the previous end. Returns `(catalog index, start, end)`.
+fn resolve_spans(text: &str, indices: &[usize]) -> Vec<(usize, usize, usize)> {
     let mut cands = candidates_for_cell(text, indices);
-    // Stable, like Python's list.sort: equal (start, length) keeps requested-detector order.
     cands.sort_by(|a, b| a.1.cmp(&b.1).then((b.2 - b.1).cmp(&(a.2 - a.1))));
-    let mut spans: Vec<SpliceSpan> = Vec::with_capacity(cands.len());
+    let mut spans = Vec::with_capacity(cands.len());
     let mut last_end: i64 = -1;
     for (idx, start, end) in cands {
         if i64::from(start) >= last_end {
-            spans.push(SpliceSpan {
-                start: start as usize,
-                end: end as usize,
-                verbatim: verbatim[idx as usize],
-            });
+            spans.push((idx as usize, start as usize, end as usize));
             last_end = i64::from(end);
         }
     }
-    splice_cell(text, &spans, token, passthrough_unmatched)
+    spans
+}
+
+/// Detection, overlap resolution and the splice for one cell into `out`, with one outcome per
+/// catalog index (`outs`) and an independent gap outcome. Returns false when the cell is not
+/// eligible (so the caller repairs it on the Python path). An empty cell writes nothing.
+pub fn detect_splice_cell_out(
+    text: &str,
+    indices: &[usize],
+    outs: &[SpanOut<'_>; CATALOG_LEN],
+    gap_out: SpanOut<'_>,
+    out: &mut String,
+) -> bool {
+    if !is_eligible(text) {
+        return false;
+    }
+    let spans: Vec<(usize, usize, SpanOut<'_>)> = resolve_spans(text, indices)
+        .into_iter()
+        .map(|(idx, start, end)| (start, end, outs[idx]))
+        .collect();
+    splice_out(text, &spans, gap_out, out)
 }
 
 // ── PyO3 boundary ───────────────────────────────────────────────────────────────────────────

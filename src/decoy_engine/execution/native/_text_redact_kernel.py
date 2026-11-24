@@ -31,6 +31,8 @@ contract (C6c-i) stays intact because every regex call for the lookaround/custom
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from decoy_engine.detection.detectors import _SPAN_DETECTORS, Span
@@ -107,38 +109,223 @@ class _CompiledTextRedactKernel:
         return self._candidates_fn(values, list(detector_ids), catalog_version)
 
 
-def load_text_redact_kernel() -> TextRedactKernel | None:
-    """Return the compiled span kernel, or `None` to run the full Python path.
+# The wire contract of the additive `text_span_splice` entry; the companion reports the same value
+# from `text_span_splice_contract_version()`. Bump both when its arguments or result change.
+SPLICE_CONTRACT_VERSION = 1
 
-    `None` (never an exception) is returned for each of the three fallback modes in plan 4.6:
-    the companion package is absent or fails to import; it is an older build without the
-    `text_redact_candidates` symbol (or its agreement helpers); or its catalog version / supported
-    set does not match this core's. Each case resolves to the literal C6c-i Python detection path,
-    so output is unchanged. A silent per-cell `None` from the kernel (ineligible cell) is a
-    different mechanism and is handled by the caller, not here.
+# The ABI tag this core runs against (`_crypto_ext._EXPECTED_ABI_VERSION`). Kept as a literal so
+# this module does not import the crypto loader; `test_text_span_splice.py` pins the two equal.
+_EXPECTED_ABI = "decoy-native-abi-3"
+
+# The known-answer cells every probe runs. Synthetic: one match, one non-ASCII decline, one null.
+_KAT_CELLS = ["a@b.com", "café", None]
+_KAT_TOKEN = "<X>"  # noqa: S105 - a replacement literal, not a credential
+
+
+class TextSpanSplice(Protocol):
+    """The additive Arrow splice entry as job code calls it."""
+
+    def __call__(
+        self,
+        values: Any,
+        *,
+        detector_ids: Sequence[str],
+        outs: Sequence[str | None],
+        gap_out: str | None,
+        native_threads: int | None = None,
+    ) -> list[tuple[Any, Any]]: ...
+
+
+@dataclass(frozen=True)
+class CompanionCompat:
+    """One compatibility decision for one imported companion, shared by every loader.
+
+    `candidates` is None when the base agreement or the candidates known-answer test failed (E1:
+    nothing else is usable either). `additive` is the checked `text_span_splice` entry, or None
+    (E1b). `legacy` is the checked `(text_mask_splice_spans, text_mask_detect_splice)` pair, or
+    None when either legacy check failed.
     """
+
+    candidates: Callable[..., Any] | None
+    additive: Callable[..., Any] | None
+    legacy: tuple[Callable[..., Any], Callable[..., Any]] | None
+
+
+_REJECTED = CompanionCompat(None, None, None)
+# The last decision, keyed by the companion module and the core catalog version it was made for. A
+# different module object (a reinstall, a test double) or core version rebinds; the same pair never
+# probes twice.
+_BOUND: tuple[object, int, CompanionCompat] | None = None
+
+
+def _is_exact_int(value: object, expected: int) -> bool:
+    return type(value) is int and value == expected
+
+
+def _candidates_kat_ok(candidates_fn: Callable[..., Any]) -> bool:
+    answer = candidates_fn(_KAT_CELLS, ["email"], CATALOG_VERSION)
+    if type(answer) is not list or len(answer) != 3:
+        return False
+    first = answer[0]
+    if type(first) is not list or len(first) != 1:
+        return False
+    triple = first[0]
+    if type(triple) is not tuple or len(triple) != 3:
+        return False
+    if not all(type(field) is int for field in triple):
+        return False
+    return triple == (0, 0, 7) and answer[1] is None and answer[2] is None
+
+
+def _additive_kat_ok(additive_fn: Callable[..., Any]) -> bool:
+    import pyarrow as pa
+
+    result = additive_fn(
+        pa.array(_KAT_CELLS, type=pa.string()),
+        detector_ids=["email"],
+        outs=[_KAT_TOKEN],
+        gap_out=None,
+        catalog_version=CATALOG_VERSION,
+        splice_contract_version=SPLICE_CONTRACT_VERSION,
+    )
+    if type(result) is not list or len(result) != 1:
+        return False
+    pair = result[0]
+    if type(pair) is not tuple or len(pair) != 2:
+        return False
+    values, mask = pair
+    if not isinstance(values, pa.Array) or not isinstance(mask, pa.Array):
+        return False
+    if values.type != pa.string() or mask.type != pa.bool_():
+        return False
+    if len(values) != 3 or len(mask) != 3 or mask.null_count != 0:
+        return False
+    return values.to_pylist() == [_KAT_TOKEN, None, None] and mask.to_pylist() == [
+        False,
+        True,
+        False,
+    ]
+
+
+def _legacy_pair(kernel: Any) -> tuple[Callable[..., Any], Callable[..., Any]] | None:
+    splice_spans = getattr(kernel, "text_mask_splice_spans", None)
+    detect_splice = getattr(kernel, "text_mask_detect_splice", None)
+    if not callable(splice_spans) or not callable(detect_splice):
+        return None
+    expected = [_KAT_TOKEN, None, None]
+    spans = splice_spans(_KAT_CELLS, [[(0, 7, False)], [], []], _KAT_TOKEN, True)
+    detected = detect_splice(_KAT_CELLS, ["email"], [False], _KAT_TOKEN, True, CATALOG_VERSION)
+    if spans != expected or detected != expected:
+        return None
+    return splice_spans, detect_splice
+
+
+def _additive_entry(kernel: Any) -> Callable[..., Any] | None:
+    entry = getattr(kernel, "text_span_splice", None)
+    getter = getattr(kernel, "text_span_splice_contract_version", None)
+    if not callable(entry) or not callable(getter):
+        return None
+    if not _is_exact_int(getter(), SPLICE_CONTRACT_VERSION):
+        return None
+    return entry if _additive_kat_ok(entry) else None
+
+
+def _decide(kernel: Any) -> CompanionCompat:
+    abi_fn = getattr(kernel, "abi_version", None)
+    version_fn = getattr(kernel, "text_redact_catalog_version", None)
+    supported_fn = getattr(kernel, "text_redact_supported_ids", None)
+    candidates_fn = getattr(kernel, "text_redact_candidates", None)
+    if (
+        not callable(abi_fn)
+        or not callable(version_fn)
+        or not callable(supported_fn)
+        or not callable(candidates_fn)
+    ):
+        return _REJECTED
+    if abi_fn() != _EXPECTED_ABI:
+        return _REJECTED
+    if not _is_exact_int(version_fn(), CATALOG_VERSION):
+        return _REJECTED
+    if tuple(supported_fn()) != SUPPORTED_IDS:
+        return _REJECTED
+    if not _candidates_kat_ok(candidates_fn):
+        return _REJECTED
+    # Each capability past the base is checked on its own, so one failing leaves the others.
+    additive = _guarded(_additive_entry, kernel)
+    legacy = _guarded(_legacy_pair, kernel)
+    return CompanionCompat(candidates_fn, additive, legacy)
+
+
+def _guarded(check: Callable[[Any], Any], kernel: Any) -> Any:
+    try:
+        return check(kernel)
+    except Exception:
+        return None
+
+
+def companion_compat() -> CompanionCompat:
+    """The compatibility decision for the importable companion (all-None when absent or skewed).
+
+    Computed once per companion module object. The candidates loader, the legacy splice loader and
+    the additive probe all read this one result, so no job path can reach a data entry that a
+    check rejected.
+    """
+    global _BOUND
     try:
         from decoy_engine_native import _kernel
     except Exception:
         # Absent, or `sys.modules["decoy_engine_native"] = None` (the tests' companion-absent
         # simulation), or any import-time failure: run the full Python path.
-        return None
-
-    candidates_fn = getattr(_kernel, "text_redact_candidates", None)
-    version_fn = getattr(_kernel, "text_redact_catalog_version", None)
-    supported_fn = getattr(_kernel, "text_redact_supported_ids", None)
-    if candidates_fn is None or version_fn is None or supported_fn is None:
-        return None
-
+        return _REJECTED
+    if _BOUND is not None and _BOUND[0] is _kernel and _BOUND[1] == CATALOG_VERSION:
+        return _BOUND[2]
     try:
-        if int(version_fn()) != CATALOG_VERSION:
-            return None
-        if tuple(supported_fn()) != SUPPORTED_IDS:
-            return None
+        decision = _decide(_kernel)
     except Exception:
+        decision = _REJECTED
+    _BOUND = (_kernel, CATALOG_VERSION, decision)
+    return decision
+
+
+def load_text_redact_kernel() -> TextRedactKernel | None:
+    """Return the compiled span kernel, or `None` to run the full Python path.
+
+    `None` (never an exception) is returned when the companion is absent or fails to import, is an
+    older build without the `text_redact_candidates` symbol or its agreement helpers, reports the
+    wrong ABI tag, or its catalog version / supported set / known answer does not match this
+    core's. Each case resolves to the literal C6c-i Python detection path, so output is unchanged.
+    A silent per-cell `None` from the kernel (ineligible cell) is a different mechanism and is
+    handled by the caller, not here.
+    """
+    candidates = companion_compat().candidates
+    return None if candidates is None else _CompiledTextRedactKernel(candidates)
+
+
+def load_text_span_splice() -> TextSpanSplice | None:
+    """The checked additive Arrow splice entry, or `None` (E1/E1b) to keep the candidates path."""
+    entry = companion_compat().additive
+    if entry is None:
         return None
 
-    return _CompiledTextRedactKernel(candidates_fn)
+    def call(
+        values: Any,
+        *,
+        detector_ids: Sequence[str],
+        outs: Sequence[str | None],
+        gap_out: str | None,
+        native_threads: int | None = None,
+    ) -> list[tuple[Any, Any]]:
+        return entry(
+            values,
+            detector_ids=list(detector_ids),
+            outs=list(outs),
+            gap_out=gap_out,
+            catalog_version=CATALOG_VERSION,
+            splice_contract_version=SPLICE_CONTRACT_VERSION,
+            native_threads=native_threads,
+        )
+
+    return call
 
 
 def requested_rust_ids(detector_ids: list[str] | None) -> list[str]:
@@ -235,10 +422,15 @@ def merge_text_redact_spans(
 __all__ = [
     "CATALOG_LABELS",
     "CATALOG_VERSION",
+    "SPLICE_CONTRACT_VERSION",
     "SUPPORTED_IDS",
+    "CompanionCompat",
     "TextRedactKernel",
+    "TextSpanSplice",
+    "companion_compat",
     "is_ascii_safe",
     "load_text_redact_kernel",
+    "load_text_span_splice",
     "merge_text_redact_spans",
     "requested_rust_ids",
 ]
