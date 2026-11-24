@@ -14,6 +14,7 @@ from collections.abc import Iterator
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.errors import DecoyError
 from decoy_engine.execution._errors import ExecutionError
 
@@ -59,8 +60,6 @@ def check_stored_index(
     """Raise when the chunk's stored pandas index fields differ from the first chunk's."""
     if chunk.schema.metadata == expected.metadata:
         return  # same metadata, so the same stored index fields
-    from decoy_engine.execution._transforms import stored_index_fields
-
     was, now = sorted(stored_index_fields(expected)), sorted(stored_index_fields(chunk.schema))
     if was != now:
         raise _drift(

@@ -14,7 +14,7 @@
   "observed_shape::profile/_walk.py": {
    "reason": "the walk records each column's shape"
   },
-  "observed_shape::execution/_chunked_profile.py": {
+  "observed_shape::profile/arrow/_walk_arrow.py": {
    "reason": "the Arrow twin of the walk records the same shape"
   }
  }
