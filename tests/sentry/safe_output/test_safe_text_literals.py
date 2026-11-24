@@ -61,29 +61,82 @@ def _template_findings(call: ast.Call, risky: frozenset[str]) -> list[str]:
     return found
 
 
+_PRIVATE = frozenset({"_mint", "_TOKEN"})
+_CONSTRUCTORS = frozenset({"const", "template"})
+
+
+def _aliases(tree: ast.AST) -> frozenset[str]:
+    """Local names bound to `SafeText` by an import (`from ... import SafeText as ST`)."""
+    types = {"SafeText"}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            types |= {
+                a.asname or a.name for a in node.names if a.name.rpartition(".")[2] == "SafeText"
+            }
+    return frozenset(types)
+
+
+def _private_reference(node: ast.AST) -> bool:
+    """`_mint` anywhere, or `_TOKEN` taken from the renderer module (other modules own a `_TOKEN`)."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "_mint" or (
+            node.attr == "_TOKEN" and ast.unparse(node.value).endswith("_render")
+        )
+    if isinstance(node, ast.Name):
+        return node.id == "_mint"
+    if isinstance(node, ast.ImportFrom):
+        return any(
+            a.name == "_mint" or (a.name == "_TOKEN" and (node.module or "").endswith("_render"))
+            for a in node.names
+        )
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr":
+        return any(
+            isinstance(a, ast.Constant) and a.value in ("_mint", "_TOKEN") for a in node.args
+        )
+    return isinstance(node, ast.Constant) and node.value == "_mint"
+
+
 def literal_findings(source: str, rel_path: str) -> list[str]:
     """Every `SafeText` construction in `source` that is not a literal or an approved slot."""
     tree = ast.parse(source)
+    in_render = rel_path.endswith(_RENDER_MODULE)
     risky: frozenset[str] = frozenset().union(*(r for _, _, r in iter_scopes(tree)))
+    types = _aliases(tree)
+
+    def is_safe_text(node: ast.AST) -> bool:
+        """The expression names the class: `SafeText`, an alias, or `<module>.SafeText`."""
+        if isinstance(node, ast.Name):
+            return node.id in types
+        return isinstance(node, ast.Attribute) and (
+            node.attr == "SafeText" or (isinstance(node.value, ast.Name) and node.attr in types)
+        )
+
+    direct = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     found: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        where = f"{rel_path}:{node.lineno}"
-        if isinstance(func, ast.Name) and func.id == "SafeText":
-            if not rel_path.endswith(_RENDER_MODULE):
-                found.append(f"{where}: SafeText(...) built directly")
-        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            if func.value.id != "SafeText":
-                continue
-            if func.attr == "const":
+        where = f"{rel_path}:{getattr(node, 'lineno', 0)}"
+        if not in_render and _private_reference(node):
+            found.append(f"{where}: reference to a renderer-private name")
+        if isinstance(node, ast.Attribute) and is_safe_text(node.value):
+            if node.attr in _CONSTRUCTORS and id(node) not in direct:
+                found.append(f"{where}: SafeText.{node.attr} used other than as a direct call")
+        if isinstance(node, ast.Call) and is_safe_text(node.func) and not in_render:
+            found.append(f"{where}: SafeText(...) built directly")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and node.args
+            and is_safe_text(node.args[0])
+        ):
+            found.append(f"{where}: getattr on SafeText")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            func = node.func
+            if is_safe_text(func.value) and func.attr == "const":
                 if len(node.args) != 1 or node.keywords or not _is_str_literal(node.args[0]):
                     found.append(f"{where}: const takes one string literal")
-            elif func.attr == "template":
+            elif is_safe_text(func.value) and func.attr == "template":
                 found += [f"{where}: {m}" for m in _template_findings(node, risky)]
-            elif func.attr == "_mint" and not rel_path.endswith(_RENDER_MODULE):
-                found.append(f"{where}: SafeText._mint outside the renderer")
     return found
 
 
@@ -121,6 +174,12 @@ def test_the_renderer_itself_is_scanned() -> None:
         "def f(a):\n    return SafeText.template('c', labels={'a': 'x'})\n",
         "def f(a):\n    return SafeText('x', _token=a)\n",
         "def f(a):\n    return SafeText._mint(a)\n",
+        "from decoy_engine import safe_output\ndef f(x):\n    return safe_output.SafeText.const(x)\n",
+        "from decoy_engine.safe_output import _render\ndef f(x):\n    return _render.SafeText._mint(x)\n",
+        "from decoy_engine.safe_output import SafeText as ST\ndef f(x):\n    return ST.const(x)\n",
+        "def f(x):\n    return getattr(SafeText, '_mint')(x)\n",
+        "def f(x):\n    c = SafeText.const\n    return c(x)\n",
+        "from decoy_engine.safe_output._render import SafeText as S, _TOKEN\ndef f(x):\n    return S(x, _token=_TOKEN)\n",
         "g = lambda exc: SafeText.const(str(exc))\n",
     ],
     ids=[
@@ -140,6 +199,12 @@ def test_the_renderer_itself_is_scanned() -> None:
         "unknown_kind",
         "direct_construction",
         "mint_outside_renderer",
+        "qualified_const",
+        "module_qualified_mint",
+        "aliased_const",
+        "getattr_mint",
+        "const_stored_then_called",
+        "aliased_direct_with_token",
         "lambda",
     ],
 )

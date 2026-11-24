@@ -29,7 +29,9 @@ _SKIP_KW = frozenset({"exc_info", "stacklevel", "extra", "category"})
 class Admission:
     classes: Mapping[str, tuple[str, ...]]  # simple name -> dotted names defined in the sources
     bad: frozenset[str]  # a raise carries a value or sits beside an exception-text copy
-    uncoded: frozenset[str]  # raised at least once without a reason code
+    # Raised at least once without a reason code. Feeds the plan's share table only; admission
+    # to the registry never reads it.
+    uncoded: frozenset[str]
 
     @property
     def clean(self) -> frozenset[str]:
@@ -90,44 +92,54 @@ def analyze(sources: Mapping[str, str]) -> Admission:
                     if isinstance(sub, ast.Return) and isinstance(sub.value, ast.Call)
                 )
 
-    def resolve(call: ast.Call) -> tuple[str | None, bool]:
-        """(class name or None when unresolved, whether a reason code is passed)."""
+    def owners_of(name: str, seen: frozenset[str] = frozenset()) -> set[str]:
+        """Every class a function can return, following factories that return factories."""
+        found: set[str] = set()
+        for r in returns.get(name, []):
+            callee = _callee(r)
+            if callee in classes:
+                found.add(callee)
+            elif callee not in seen and callee in returns:
+                found |= owners_of(callee, seen | {name})
+        return found
+
+    def resolve(call: ast.Call) -> tuple[set[str], bool]:
+        """(the classes the call can build, whether a reason code is passed)."""
         name = _callee(call)
         if name in classes:
-            return name, _passes_code(call)
-        returned = returns.get(name, [])
+            return {name}, _passes_code(call)
         coded = (
             _passes_code(call)
-            or any(_passes_code(r) for r in returned)
+            or any(_passes_code(r) for r in returns.get(name, []))
             or (name in takes_code and bool(call.args or call.keywords))
         )
-        owners = {_callee(r) for r in returned if _callee(r) in classes}
-        if len(owners) == 1:
-            return owners.pop(), coded
-        return None, coded
+        return owners_of(name), coded
 
     bad: set[str] = set()
     uncoded: set[str] = set()
     for tree in trees.values():
         copies = copy_lines(tree)
+        raised = {id(n.exc) for n in ast.walk(tree) if isinstance(n, ast.Raise) and n.exc}
         for scope, own, risky in iter_scopes(tree):
             lo = getattr(scope, "lineno", 0)
             hi = getattr(scope, "end_lineno", 10**9) or 10**9
             near_copy = any(lo <= n <= hi for n in copies)
+            # Every call in the scope counts, not only `raise Call(...)`: a stored instance, a
+            # factory body and a returned instance carry the same text to the same sinks.
             for node in own:
-                if not (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)):
+                if not isinstance(node, ast.Call):
                     continue
-                call = node.exc
-                exprs = _message_exprs(call)
+                exprs = _message_exprs(node)
                 if not exprs:
                     continue
-                cls, coded = resolve(call)
-                if cls is None:
+                owners, coded = resolve(node)
+                if not owners:
                     continue
-                if not coded:
-                    uncoded.add(cls)
+                if not coded and id(node) in raised:
+                    uncoded |= owners
                 if near_copy or any(risky_in(e, risky) or exposes(e, risky) for e in exprs):
-                    bad.add(cls)
+                    # A call that can build several classes taints all of them: fail closed.
+                    bad |= owners
     return Admission(
         classes={k: tuple(v) for k, v in classes.items()},
         bad=frozenset(bad),

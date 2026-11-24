@@ -107,7 +107,7 @@ def test_rule_follows_a_factory_to_its_class() -> None:
         "def f(value):\n    raise _refuse(value)\n"
     )
     adm = _admission(m=src)
-    assert "E" in adm.uncoded
+    assert "E" in adm.uncoded and "E" in adm.bad
 
 
 def test_rule_counts_a_factory_raise_with_a_value_argument() -> None:
@@ -185,3 +185,36 @@ def test_rule_allows_the_type_of_a_caught_exception() -> None:
         "        name = type(e).__name__\n    raise E('failed: ' + name)\n"
     )
     assert "E" not in _admission(m=src).bad
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class E(Exception): pass\ndef f(value):\n    err = E(f'bad {value}')\n    raise err\n",
+        "class E(Exception): pass\ndef make():\n    try:\n        g()\n    except OSError as e:\n"
+        "        return E(str(e))\n",
+        "class A(Exception): pass\nclass E(Exception): pass\n"
+        "def make(kind, text):\n    if kind:\n        return A(text)\n    return E(text)\n"
+        "def f(value):\n    raise make(1, f'x {value}')\n",
+        "class E(Exception): pass\ndef inner(t):\n    return E(t)\ndef outer(t):\n    return inner(t)\n"
+        "def f(value):\n    raise outer(value)\n",
+        "class E(Exception): pass\ndef f(value):\n    return E(f'bad {value}')\n",
+        "class E(Exception): pass\ndef f(value):\n    errors.append(E(value))\n",
+        "class E(Exception): pass\ndef f():\n    try:\n        g()\n    except OSError as failure:\n"
+        "        raise E(failure)\n",
+    ],
+    ids=[
+        "stored_then_raised",
+        "tainted_factory_body",
+        "two_class_factory",
+        "two_level_factory",
+        "returned_not_raised",
+        "passed_as_argument",
+        "except_name_not_in_tagger",
+    ],
+)
+def test_rule_sees_every_call_that_builds_a_class(source: str) -> None:
+    adm = _admission(m=source)
+    assert "E" in adm.bad
+    if "class A" in source:
+        assert "A" in adm.bad

@@ -237,3 +237,13 @@ def test_generic_reasons_do_not_count_as_coded(
     )
     assert render_failure(_RegisteredError("kept message")).text == "kept message"
     assert render_failure(ValueError(_CANARY)).text == "ValueError"
+
+
+def test_registered_message_control_characters_become_spaces(registered: None) -> None:
+    assert render_failure(_RegisteredError("a\nb\x1b[31mc")).text == "a b [31mc"
+
+
+def test_long_registered_message_is_cut_with_a_marker(registered: None) -> None:
+    text = render_failure(_RegisteredError("x" * 600)).text
+    assert text == "x" * _render.MAX_MESSAGE_LEN + _render.TRUNCATED_MARKER
+    assert render_failure(_RegisteredError("x" * 500)).text == "x" * 500

@@ -8,7 +8,8 @@ reaches a sink was either written as a literal or chosen by this module.
 
 The renderer reads a coded error through ``reason_from_exception``, never ``capture_failure``:
 rendering a handled warning must not change which failure a run reports. Third-party and
-unregistered exception text is never printed, only the type label.
+unregistered exception text is never printed, only the type label. The registry covers engine
+raise sites only; a host or CLI sink is held to ``SafeText`` by its own sentry.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ _TOKEN = object()
 _WITHHELD = "<withheld>"
 MAX_PATH_LEN = 512
 MAX_MESSAGE_LEN = 500
+TRUNCATED_MARKER = " [truncated]"
 _MAX_CAUSE_DEPTH = 8
 
 
@@ -137,7 +139,6 @@ VALUE_FREE_CLASSES: frozenset[str] = frozenset(
         "decoy_engine._canonical._json.StrictJsonError",
         "decoy_engine._canonical._strict_spec.SpecRefusedError",
         "decoy_engine.delivery.resume._plan.ResumeRefusedError",
-        "decoy_engine.detection._model_status.ModelUnavailableError",
         "decoy_engine.errors.ConfigRuleError",
         "decoy_engine.errors.DecoyError",
         "decoy_engine.errors.EnvFlagError",
@@ -177,7 +178,6 @@ VALUE_FREE_CLASSES: frozenset[str] = frozenset(
         "decoy_engine.validation.finding_review.ReviewIntegrityOffError",
         "decoy_engine.validation.starter_review.ReviewDuplicateError",
         "decoy_engine.validation.starter_review.ReviewEmptyTableError",
-        "decoy_engine.validation.starter_review.ReviewKeyColumnError",
         "decoy_engine.validation.starter_review.ReviewStaleError",
         "decoy_engine.validation.starter_review.ReviewUnknownColumnError",
     }
@@ -217,7 +217,9 @@ def _render_registered(exc: BaseException) -> SafeText | None:
     cls = type(exc)
     if f"{cls.__module__}.{cls.__qualname__}" not in VALUE_FREE_CLASSES:
         return None
-    message = "".join(c if c.isprintable() else " " for c in str(exc))[:MAX_MESSAGE_LEN]
+    message = "".join(c if c.isprintable() else " " for c in str(exc))
+    if len(message) > MAX_MESSAGE_LEN:
+        message = message[:MAX_MESSAGE_LEN] + TRUNCATED_MARKER
     return SafeText._mint(message) if message.strip() else None
 
 
