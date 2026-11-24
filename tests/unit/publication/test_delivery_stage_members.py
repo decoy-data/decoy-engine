@@ -471,3 +471,32 @@ def test_a_rollback_that_fails_does_not_replace_the_refusal(
         stage.reserve("t", "a/b/x.csv")
     assert caught.value.receipt.os_error == "EACCES"
     assert "secret" not in str(caught.value) and caught.value.__context__ is None
+
+
+def test_a_claim_that_failed_never_authorizes_a_removal_of_its_name(
+    run: Run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A case-insensitive target refuses `a.csv` while `A.csv` is bound; excluding the failed
+    table must not unlink the name `a.csv`, which there is the winner's file."""
+    removed: list[str] = []
+    real_remove, real_claim = _LocalStageDir.remove, _LocalStageDir.claim_from
+
+    def spy(self: _LocalStageDir, component: str) -> None:
+        removed.append(component)
+        real_remove(self, component)
+
+    def claim(self: _LocalStageDir, source: Any, src: str, dst: str) -> Any:
+        if dst == "a.csv":
+            raise FileExistsError(errno.EEXIST, "taken")
+        return real_claim(self, source, src, dst)
+
+    monkeypatch.setattr(_LocalStageDir, "remove", spy)
+    monkeypatch.setattr(_LocalStageDir, "claim_from", claim)
+    stage = run.open()
+    put(stage, "a", "A.csv", b"first\n")
+    loser = stage.reserve("b", "a.csv")
+    loser.path.write_bytes(b"second\n")
+    with pytest.raises(PublicationFailed):
+        loser.complete()
+    assert deliver(stage, StageDecision(True, frozenset({"a"}))) == DeliveryReceipt("delivered")
+    assert "a.csv" not in removed and _bound(run) == {"A.csv": b"first\n"}
