@@ -51,6 +51,7 @@ from decoy_engine.fileaccess import (
     own_entry,
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.io.bounded_reader import UnsupportedColumnType
 from decoy_engine.publication import (
     CommitReceipt,
     PublicationRequest,
@@ -156,7 +157,14 @@ def _names_ok(names: object) -> TypeGuard[list[str]]:
 
 
 def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, dict[str, str]]:
-    """Stage each table under an opaque name in the private work root."""
+    """Stage each table under an opaque name in the private work root.
+
+    Raises `UnsupportedColumnType` for a dictionary nested in a dictionary's values: Arrow IPC
+    drops the inner dictionary and reads its indices back as values, and Parquet takes no dictionary."""
+    for table in sources.values():
+        for field in table.schema:
+            if not arrow_adapter.ipc_holds_type(field.type):
+                raise UnsupportedColumnType(column=field.name, kind="dictionary_in_dictionary")
     stage = handed_stage_dir(work_root, "isolated.sources")
     manifest = {}
     for index, (name, table) in enumerate(sources.items()):

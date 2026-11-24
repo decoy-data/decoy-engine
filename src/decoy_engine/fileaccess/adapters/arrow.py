@@ -215,6 +215,34 @@ def parquet_holds_type(t: pa.DataType) -> bool:
     return all(_parquet_exact(node) for node, _ in _walk(t))
 
 
+def _type_children(t: pa.DataType) -> list[pa.DataType]:
+    """Every type directly inside `t`, a dictionary's value type and union members included."""
+    if isinstance(t, pa.BaseExtensionType):
+        return [t.storage_type]
+    if pa.types.is_dictionary(t):
+        return [t.value_type]
+    if pa.types.is_map(t):
+        return [t.key_type, t.item_type]
+    if pa.types.is_struct(t) or pa.types.is_union(t):
+        return [t.field(i).type for i in range(t.num_fields)]
+    if hasattr(t, "value_type"):  # list, large list, fixed-size list and the list views
+        return [t.value_type]
+    return []
+
+
+def _dictionary_in_dictionary(t: pa.DataType, inside: bool) -> bool:
+    if pa.types.is_dictionary(t):
+        if inside:
+            return True
+        inside = True
+    return any(_dictionary_in_dictionary(child, inside) for child in _type_children(t))
+
+
+def ipc_holds_type(t: pa.DataType) -> bool:
+    """False for a dictionary anywhere in a dictionary's values: IPC reads it back corrupted."""
+    return not _dictionary_in_dictionary(t, False)
+
+
 def _refuse_fixed_list_null(data: pa.Table | pa.RecordBatch) -> None:
     for field, column in zip(data.schema, data.columns, strict=True):
         if not any(pa.types.is_fixed_size_list(t) for t, _ in _walk(field.type)):

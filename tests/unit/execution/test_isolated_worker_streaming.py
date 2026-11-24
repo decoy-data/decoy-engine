@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import subprocess
 import sys
 from decimal import Decimal
@@ -38,6 +39,7 @@ from decoy_engine.execution._isolated_commit import stage_sources
 from decoy_engine.execution._isolated_common import CAPPED_ENV
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.io.bounded_reader import UnsupportedColumnType
 from decoy_engine.profile._readers import LazySource
 from tests.native._rev9_type_catalogue import CATALOGUE
 
@@ -402,16 +404,29 @@ def _assert_exact(table, actual):
     """Equal schema and values, and every chunk keeps its own dictionary, order and indices."""
     assert actual.schema.equals(table.schema)
     assert str(actual.schema) == str(table.schema)
-    assert actual.to_pylist() == table.to_pylist()
+    assert _canon(actual.to_pylist()) == _canon(table.to_pylist())
     for name in table.column_names:
         want, got = table.column(name), actual.column(name)
         assert [len(c) for c in got.chunks] == [len(c) for c in want.chunks]
         for w, g in zip(want.chunks, got.chunks, strict=True):
             assert g.type.equals(w.type)
             if pa.types.is_dictionary(w.type):
-                assert g.dictionary.equals(w.dictionary)
+                # Arrow equality fails NaN against itself, so float dictionaries compare by bits.
+                if not pa.types.is_floating(w.type.value_type):
+                    assert g.dictionary.equals(w.dictionary)
                 assert _bits(g.dictionary) == _bits(w.dictionary)
                 assert g.indices.equals(w.indices)
+
+
+def _canon(value):
+    """Rows with each float as its bytes, so NaN matches itself and -0.0 differs from +0.0."""
+    if isinstance(value, float):
+        return struct.pack("<d", value)
+    if isinstance(value, dict):
+        return {k: _canon(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_canon(v) for v in value]
+    return value
 
 
 _FLOAT_BITS = {16: pa.int16(), 32: pa.int32(), 64: pa.int64()}
@@ -440,6 +455,28 @@ def _dict_chunks(dtype, *chunks):
 
 
 _DICT_FIXED = pa.list_(pa.int64(), 2)
+
+
+def _nan(payload):
+    """A float64 NaN with its own payload bits."""
+    return struct.unpack("<d", struct.pack("<Q", 0x7FF8_0000_0000_0000 | payload))[0]
+
+
+def _nested_dicts():
+    """A struct and a list over dictionaries, each chunk with its own dictionary."""
+    floats = pa.dictionary(pa.int32(), pa.float64())
+    strings = pa.dictionary(pa.int32(), pa.string())
+    structs = [
+        pa.StructArray.from_arrays([_dict_chunks(floats, chunk).chunk(0)], names=["d"])
+        for chunk in (([0, 0], [0.0]), ([0, 0], [-0.0]))
+    ]
+    lists = [
+        pa.ListArray.from_arrays(pa.array([0, 1, 2], pa.int32()), _dict_chunks(strings, c).chunk(0))
+        for c in (([0, 1], ["a", "b"]), ([1, 0], ["c", "a"]))
+    ]
+    return pa.table({"s": pa.chunked_array(structs), "l": pa.chunked_array(lists)})
+
+
 _DICTIONARY_CASES = {
     "fixed_list_beside_string_dicts": pa.table(
         {
@@ -492,6 +529,16 @@ _DICTIONARY_CASES = {
             )
         }
     ),
+    "float_nan_payloads": pa.table(
+        {
+            "x": _dict_chunks(
+                pa.dictionary(pa.int32(), pa.float64()),
+                ([0, 0, None], [_nan(1), _nan(2)]),
+                ([1, 0], [_nan(3), 2.5]),
+            )
+        }
+    ),
+    "dictionaries_in_struct_and_list": _nested_dicts(),
     "string_null_entry": pa.table(
         {
             "x": _dict_chunks(
@@ -531,3 +578,29 @@ def test_parquet_refused_parameters_route_through_ipc(tmp_path, name):
     assert manifest["t"]["format"] == "ipc"
     assert str(actual.schema) == str(table.schema)
     assert actual.equals(table)
+
+
+def _dict_of_dict():
+    """dictionary<dictionary<double>>, which Arrow IPC reads back as the inner indices."""
+    inner = pa.DictionaryArray.from_arrays(pa.array([0, 1], pa.int8()), pa.array([2.0, 3.0]))
+    return pa.DictionaryArray.from_arrays(pa.array([1, 0, 1], pa.int32()), inner)
+
+
+_DICT_IN_DICT = {
+    "top_level": lambda: _dict_of_dict(),
+    "in_struct": lambda: pa.StructArray.from_arrays([_dict_of_dict()], names=["y"]),
+    "under_struct_values": lambda: pa.DictionaryArray.from_arrays(
+        pa.array([0, 0], pa.int32()),
+        pa.StructArray.from_arrays([_dict_of_dict().dictionary], names=["y"]),
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(_DICT_IN_DICT))
+def test_dictionary_in_dictionary_is_refused_before_staging(tmp_path, name):
+    table = pa.table({"x": _DICT_IN_DICT[name]()})
+    with pytest.raises(UnsupportedColumnType) as caught:
+        stage_sources(tmp_path, {"t": table})
+    assert caught.value.detail == {"column": "x", "kind": "dictionary_in_dictionary"}
+    assert "2.0" not in str(caught.value)
+    assert list(tmp_path.iterdir()) == []
