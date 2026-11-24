@@ -208,15 +208,18 @@ def test_the_scan_reaches_sentry_subfolders() -> None:
     assert "layout/test_package_fanout.py" in names
 
 
-def test_every_module_int_is_a_bound_or_named() -> None:
-    """Every module-level UPPER_CASE integer literal under tests/sentry is a recorded bound or
-    carries a reason it is not one, so a new limit cannot sit outside the ratchet."""
-    lc = bs._limits()
-    known = set(lc.LIMITS) | set(lc.NOT_A_BOUND)
+# Sentry files the discovery scan skips, each with the reason. None today: the seeded sources
+# in this file are strings, so they hold no module-level integer.
+UNSCANNED: dict[str, str] = {}
+UPPER = re.compile(r"_*[A-Z][A-Z0-9_]*")
+
+
+def module_int_constants(sources: dict[str, str]) -> set[tuple[str, str]]:
+    """``(file, NAME)`` of every module-level UPPER_CASE (private or not) integer literal, signed
+    or not, in ``sources`` (``{path under tests/sentry: text}``)."""
     found = set()
-    for path in bs.SENTRY.rglob("*.py"):
-        rel = path.relative_to(bs.SENTRY).as_posix()
-        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+    for rel, text in sources.items():
+        for node in ast.parse(text).body:
             if isinstance(node, ast.Assign):
                 names = [t for t in node.targets if isinstance(t, ast.Name)]
             elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
@@ -224,12 +227,117 @@ def test_every_module_int_is_a_bound_or_named() -> None:
             else:
                 continue
             value = node.value
-            if (
-                isinstance(value, ast.Constant)
-                and type(value.value) is int
-                and not path.name.startswith("test_baseline_registry")
-            ):
-                found |= {(rel, t.id) for t in names if re.fullmatch(r"[A-Z][A-Z0-9_]*", t.id)}
+            if isinstance(value, ast.UnaryOp) and isinstance(value.op, (ast.USub, ast.UAdd)):
+                value = value.operand
+            if isinstance(value, ast.Constant) and type(value.value) is int:
+                found |= {(rel, t.id) for t in names if UPPER.fullmatch(t.id)}
+    return found
+
+
+def _sentry_sources() -> dict[str, str]:
+    return {
+        p.relative_to(bs.SENTRY).as_posix(): p.read_text(encoding="utf-8")
+        for p in bs.SENTRY.rglob("*.py")
+        if p.relative_to(bs.SENTRY).as_posix() not in UNSCANNED
+    }
+
+
+def test_every_module_int_is_a_bound_or_named() -> None:
+    """Every module-level UPPER_CASE integer literal under tests/sentry is a recorded bound or
+    carries a reason it is not one, so a new limit cannot sit outside the ratchet."""
+    lc = bs._limits()
+    known = set(lc.LIMITS) | set(lc.NOT_A_BOUND)
+    found = module_int_constants(_sentry_sources())
     assert sorted(found - known) == [], "an integer constant is neither a bound nor named"
     assert sorted(known - found) == [], "a LIMITS or NOT_A_BOUND row names no constant"
     assert not set(lc.LIMITS) & set(lc.NOT_A_BOUND)
+    assert all(len(r) >= 20 for r in lc.NOT_A_BOUND.values()), "a NOT_A_BOUND row needs a reason"
+    assert all(len(r) >= 20 for r in UNSCANNED.values()), "an UNSCANNED file needs a reason"
+
+
+@pytest.mark.parametrize(
+    "path, text",
+    [
+        ("test_baseline_registry.py", "NEW_CAP = 99\n"),
+        ("test_x.py", "_NEW_CAP = 99\n"),
+        ("test_x.py", "NEW_FLOOR = -5\n"),
+        ("test_x.py", "NEW_FLOOR: int = +5\n"),
+        ("test_baseline_registry_sibling.py", "A = B = 7\n"),
+    ],
+)
+def test_the_discovery_scan_sees_each_spelling(path: str, text: str) -> None:
+    assert module_int_constants({path: text})
+    assert not module_int_constants({path: "lower = 5\nFLAG = True\nNAME = 'x'\nX = 1.5\n"})
+
+
+def test_the_discovery_scan_reads_every_sentry_file() -> None:
+    assert "test_baseline_registry.py" in _sentry_sources()
+    assert UNSCANNED == {}
+
+
+def limit_problems(
+    entries: dict[str, dict[str, object]],
+    maxes: dict[str, int],
+    mins: dict[str, int],
+    keys: set[str],
+) -> list[str]:
+    """The ``sentry-limits`` entries against the live maps: every key has exactly one integer
+    bound, of the direction the live source gives it, equal to the live value."""
+    out = []
+    if set(maxes) | set(mins) != keys or set(maxes) & set(mins):
+        out.append("the numeric maps do not cover the keys exactly once")
+    for key, entry in sorted(entries.items()):
+        bounds = {f: entry[f] for f in ("max", "min") if f in entry}
+        live = {
+            **{k: ("max", v) for k, v in maxes.items()},
+            **{k: ("min", v) for k, v in mins.items()},
+        }
+        if len(bounds) != 1 or any(type(v) is not int for v in bounds.values()):
+            out.append(f"{key}: needs exactly one integer max or min")
+        elif live.get(key) != next(iter(bounds.items())):
+            out.append(f"{key}: recorded bound differs from the live one")
+    return out
+
+
+def test_live_limit_entries_have_exactly_one_matching_bound() -> None:
+    lc = bs._limits()
+    assert lc.direction_problems(lc.LIMITS) == []
+    src = next(s for s in bs.SOURCES if s.sentry_id == "sentry-limits")
+    assert src.maxes is not None and src.mins is not None
+    doc = json.loads((bs.BASELINES / "sentry-limits.json").read_text(encoding="utf-8"))
+    assert limit_problems(doc["entries"], src.maxes(), src.mins(), src.keys()) == []
+
+
+def test_a_misspelled_direction_and_a_reason_only_entry_are_caught() -> None:
+    lc = bs._limits()
+    assert lc.direction_problems({("a.py", "C"): "floor"}) == [
+        "a.py::C: direction 'floor' is not one of max, min"
+    ]
+    # the key survives in the baseline with a reason only, so key parity alone would pass
+    entries: dict[str, dict[str, object]] = {"a.py::C": {"reason": "r"}}
+    assert limit_problems(entries, {}, {}, {"a.py::C"})
+    assert limit_problems({"a.py::C": {"min": 1}}, {"a.py::C": 1}, {}, {"a.py::C"})
+    assert not limit_problems({"a.py::C": {"min": 1}}, {}, {"a.py::C": 1}, {"a.py::C"})
+
+
+def test_limit_constants_are_imported_never_rederived() -> None:
+    """A consumer of a ``LIMITS`` constant must import it by name from its home file and use it
+    only as a comparison operand; lowering it in the consumer would pass every other check."""
+    lc = bs._limits()
+    sources = _sentry_sources()
+    problems = []
+    for (file, name), _ in lc.LIMITS.items():
+        home = Path(file).stem
+        for rel, text in sources.items():
+            if rel != file and name in text:
+                problems += [f"{rel}: {p}" for p in lc.consumer_problems(text, name, home)]
+    assert problems == []
+
+
+def test_a_misspelled_direction_fails_the_live_maps(monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = bs._limits()
+    mod.LIMITS = {**mod.LIMITS, ("test_module_size.py", "GOAL"): "floor"}
+    monkeypatch.setattr(bs, "_limits", lambda: mod)
+    for kind in ("max", "min"):
+        with pytest.raises(ValueError, match="direction 'floor'"):
+            bs.live_bounds(kind)

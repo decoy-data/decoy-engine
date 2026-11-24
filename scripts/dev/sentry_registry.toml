@@ -11,9 +11,10 @@
 # `sentry-limits` records the scalar caps (`max`) and floors (`min`) the sentries compare against.
 # Its keys are guards: dropping one needs an `approved_growth` row, and retiring the id needs a
 # `[retired]` decision plus one `[retired_growth]` row per old key (`"<id>" = [{ key, decision }]`).
-# An approval row counts once: it passes in the PR that adds it, then sits on the merge base. To
-# raise the same key again, add a new decision in a second PR; a row already on main, reworded or
-# moved, does not exempt a later raise or drop.
+# An approval row counts once: it passes in the PR that adds it, then sits on the merge base. The
+# same key twice fails, and rewording a row that is on the base is not fresh. To approve a later
+# raise of the same key, first merge a PR that removes the spent row, then add the new row in the
+# PR that changes the bound.
 
 [[sentry]]
 id = "f29-reason-baseline"

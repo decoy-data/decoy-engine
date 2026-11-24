@@ -80,7 +80,9 @@ in_code = InCode
 
 
 def _limits() -> ModuleType:
-    """``ratchet/_limit_constants.py``, loaded by path (stdlib only, no package import needed)."""
+    """``ratchet/_limit_constants.py``, loaded by path; it imports its sibling helper by package."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     path = SENTRY / "ratchet" / "_limit_constants.py"
     spec = importlib.util.spec_from_file_location("_bl_limit_constants", path)
     if spec is None or spec.loader is None:
@@ -93,6 +95,8 @@ def _limits() -> ModuleType:
 def live_bounds(kind: str) -> dict[str, int]:
     """Live value per ``sentry-limits`` key for the ``"max"`` or ``"min"`` rows of ``LIMITS``."""
     mod = _limits()
+    if problems := mod.direction_problems(mod.LIMITS):
+        raise ValueError("; ".join(problems))
     return {
         mod.key_of(f, c): mod.read_int((SENTRY / f).read_text(encoding="utf-8"), c)
         for (f, c), k in sorted(mod.LIMITS.items())

@@ -354,3 +354,65 @@ def test_a_guard_successor_with_a_loosened_bound_does_not_retain_the_key() -> No
 def test_a_guard_successor_never_excuses_another_missing_key() -> None:  # red-before
     found = _retire([{"a::A": {"max": 5}}], {})
     assert len(found) == 1 and "b::B was dropped with its retired id" in found[0]
+
+
+# --- the consumer of an imported bound ---------------------------------------------------------
+
+HOME = "_faker_lock_lists"
+IMPORT = "from tests.sentry.dependencies._faker_lock_lists import EN_US_DIGEST_FLOOR\n"
+CONSUMERS = {
+    "arithmetic": IMPORT + "def f(d):\n    assert len(d) >= EN_US_DIGEST_FLOOR - 1\n",
+    "rebound after import": IMPORT + "EN_US_DIGEST_FLOOR = 252\n",
+    "rebound in a branch": IMPORT + "if True:\n    EN_US_DIGEST_FLOOR = 1\n",
+    "aliased import": "from tests.sentry.dependencies._faker_lock_lists import EN_US_DIGEST_FLOOR as F\n",
+    "import from elsewhere": "from tests.sentry.other import EN_US_DIGEST_FLOOR\n",
+    "attribute read": "import m\n\ndef f(d):\n    assert len(d) >= m.EN_US_DIGEST_FLOOR\n",
+    "passed on": IMPORT + "def f(d):\n    assert len(d) >= min(EN_US_DIGEST_FLOOR, 1)\n",
+    "walrus": IMPORT + "(EN_US_DIGEST_FLOOR := 1)\n",
+}
+
+
+@pytest.mark.parametrize("source", CONSUMERS.values(), ids=CONSUMERS.keys())
+def test_a_consumer_that_lowers_or_shadows_the_bound_is_caught(source: str) -> None:  # red-before
+    assert lc.consumer_problems(source, "EN_US_DIGEST_FLOOR", HOME)
+
+
+def test_a_plain_consumer_and_a_non_consumer_pass() -> None:  # pin
+    ok = IMPORT + "def f(d):\n    assert len(d) >= EN_US_DIGEST_FLOOR\n"
+    assert lc.consumer_problems(ok, "EN_US_DIGEST_FLOOR", HOME) == []
+    assert lc.consumer_problems("EN_US_DIGEST_FLOOR = 1\n", "EN_US_DIGEST_FLOOR", HOME) == []
+
+
+def test_the_faker_consumer_enforces_the_recorded_floor() -> None:  # red-before
+    """At the recorded floor the check passes; one digest below it fails. A consumer that lowers
+    or re-derives the constant makes the second half pass and this test red."""
+    import copy
+
+    from tests.sentry.dependencies import _faker_output_lock_support as support
+
+    floor = json.loads((ROOT / LIM).read_text("utf-8"))["entries"][
+        "dependencies/_faker_lock_lists.py::EN_US_DIGEST_FLOOR"
+    ]["min"]
+    locales = copy.deepcopy(support._load_lock()["locales"])
+    fields = support._fields("reflected")
+    have = sum(all(len(c[f]) == 64 for f in fields) for c in locales["en_US"]["reflected"].values())
+    assert have >= floor
+    _degrade_to(locales, fields, have - floor)
+    support._check_anchors_and_floor(locales)
+    _degrade_to(locales, fields, 1)
+    with pytest.raises(AssertionError):
+        support._check_anchors_and_floor(locales)
+
+
+def _degrade_to(locales: dict, fields: tuple[str, ...], count: int) -> None:
+    from tests.sentry.dependencies._faker_lock_lists import ANCHORS
+
+    anchors = {n for loc, s, n in ANCHORS if loc == "en_US" and s == "reflected"}
+    done = 0
+    for name, cell in locales["en_US"]["reflected"].items():
+        if done == count:
+            return
+        if name not in anchors and all(len(cell[f]) == 64 for f in fields):
+            cell[fields[0]] = "x"
+            done += 1
+    assert done == count

@@ -16,6 +16,8 @@ import ast
 from collections.abc import Iterator
 from pathlib import Path
 
+from tests.sentry.ratchet._bindings import bound_names
+
 WHEN_ROW_FUNCTIONS = frozenset(
     {
         ("execution/_when_gate.py", "_closed_grammar_error"),
@@ -25,7 +27,6 @@ WHEN_ROW_FUNCTIONS = frozenset(
 )
 ROW_ATTRS = frozenset({"config", "plan", "runtime"})
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
-_NAMED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.MatchAs, ast.MatchStar)
 
 
 def _own_nodes(fn: ast.FunctionDef) -> Iterator[ast.AST]:
@@ -40,24 +41,10 @@ def _own_nodes(fn: ast.FunctionDef) -> Iterator[ast.AST]:
 
 
 def _binding_count(fn: ast.FunctionDef, name: str) -> int:
-    count = 0
     args = fn.args
     params = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
-    count += sum(1 for a in params if a is not None and a.arg == name)
-    for node in _own_nodes(fn):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            count += node.id == name
-        elif isinstance(node, ast.ExceptHandler):
-            count += node.name == name
-        elif isinstance(node, (ast.Global, ast.Nonlocal)):
-            count += name in node.names
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            count += sum((a.asname or a.name.split(".")[0]) == name for a in node.names)
-        elif isinstance(node, _NAMED):
-            count += node.name == name
-        elif isinstance(node, ast.MatchMapping):
-            count += node.rest == name
-    return count
+    nodes = [*(a for a in params if a is not None), *_own_nodes(fn)]
+    return sum(name in bound_names(node) for node in nodes)
 
 
 def _is_row_assignment(stmt: ast.stmt, name: str) -> bool:

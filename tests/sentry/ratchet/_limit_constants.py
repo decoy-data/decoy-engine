@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import ast
 
+from tests.sentry.ratchet._bindings import bound_names
+
 # Each row names the line that compares against the constant (checked when it was added).
 LIMITS: dict[tuple[str, str], str] = {
     ("test_module_size.py", "GOAL"): "max",  # an entry at or under GOAL needs no allowlist row
@@ -25,9 +27,25 @@ LIMITS: dict[tuple[str, str], str] = {
     ("_ratchet.py", "MIN_REASON"): "min",  # a reason under it fails
 }
 
+DIRECTIONS = ("max", "min")
+
+
+def direction_problems(limits: dict[tuple[str, str], str]) -> list[str]:
+    """Rows whose direction is neither ``max`` nor ``min``: such a row would drop out of both
+    numeric maps and leave the baseline entry unchecked."""
+    return [
+        f"{file}::{name}: direction {kind!r} is not one of {', '.join(DIRECTIONS)}"
+        for (file, name), kind in sorted(limits.items())
+        if kind not in DIRECTIONS
+    ]
+
+
 # Module-level integer constants under tests/sentry that are not bounds, each with the reason.
 # ``test_every_module_int_is_a_bound_or_named`` fails on any other one.
 NOT_A_BOUND: dict[tuple[str, str], str] = {
+    ("profiling/test_snapshot_value_registry.py", "_N"): (
+        "row count of a seeded fixture frame, not compared to a measure"
+    ),
     ("ci_scan/_identity.py", "TRIES"): "default retry count of a helper, not compared to a measure",
     (
         "parallel/_resources.py",
@@ -40,21 +58,6 @@ NOT_A_BOUND: dict[tuple[str, str], str] = {
 
 
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
-
-
-def _binds(node: ast.AST, name: str) -> bool:
-    """True when ``node`` itself binds ``name`` in the scope that holds it."""
-    if isinstance(node, ast.Name):
-        return node.id == name and isinstance(node.ctx, (ast.Store, ast.Del))
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        return node.name == name
-    if isinstance(node, ast.alias):
-        return (node.asname or node.name.split(".")[0]) == name
-    if isinstance(node, ast.ExceptHandler):
-        return node.name == name
-    if isinstance(node, (ast.MatchAs, ast.MatchStar)):
-        return node.name == name
-    return isinstance(node, ast.MatchMapping) and node.rest == name
 
 
 def _global_names(scope: ast.AST) -> set[str]:
@@ -74,7 +77,7 @@ def _count_bindings(node: ast.AST, name: str, live: bool) -> int:
     """Bindings of module-level ``name`` under ``node``: module scope, and any function or class
     scope that declares it ``global``. A local of the same name does not count. ``live`` is true
     when ``node`` sits in such a scope."""
-    total = int(live and _binds(node, name))
+    total = int(live and name in bound_names(node) and not isinstance(node, ast.arg))
     for field, value in ast.iter_fields(node):
         for kid in value if isinstance(value, list) else [value]:
             if not isinstance(kid, ast.AST):
@@ -121,3 +124,39 @@ def read_int(source: str, constant: str) -> int:
 
 def key_of(file: str, constant: str) -> str:
     return f"{file}::{constant}"
+
+
+def consumer_problems(source: str, name: str, home: str) -> list[str]:
+    """How a module that uses ``name`` from another file may go wrong. ``home`` is the stem of
+    the declaring file.
+
+    A consumer must import the constant by name from ``home``, never under an alias, rebind or
+    shadow it, nor read it as an attribute, and may use it only as a direct operand of a
+    comparison. Arithmetic on it (``NAME - 1``) or passing it on lowers the bound the registry
+    records without touching the declaring file. A module that does not import ``name`` or
+    read it as an attribute is not a consumer and gives no problems.
+    """
+    tree = ast.parse(source)
+    imports = [
+        (node, alias)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == name
+    ]
+    attrs = [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == name]
+    if not imports and not attrs:
+        return []
+    parents = {kid: node for node in ast.walk(tree) for kid in ast.iter_child_nodes(node)}
+    out = [f"{name} is read as an attribute; import it by name from {home}" for _ in attrs]
+    for node, alias in imports:
+        if alias.asname or (node.module or "").split(".")[-1] != home:
+            out.append(f"{name} must be imported by its own name from {home}")
+    binds = sum(name in bound_names(n) for n in ast.walk(tree))
+    if binds > len(imports):
+        out.append(f"{name} is bound again in the importing module")
+    for use in ast.walk(tree):
+        if isinstance(use, ast.Name) and use.id == name and isinstance(use.ctx, ast.Load):
+            if not isinstance(parents.get(use), ast.Compare):
+                out.append(f"{name} is used other than as a direct comparison operand")
+    return out
