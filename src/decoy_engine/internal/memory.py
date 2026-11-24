@@ -51,7 +51,7 @@ class MemoryMonitor:
             logger.debug("Install with: pip install psutil")
             return None
         except Exception as e:
-            logger.warning(f"Could not monitor memory: {e}")
+            logger.warning(f"Could not monitor memory ({type(e).__name__})")
             return None
 
     @staticmethod

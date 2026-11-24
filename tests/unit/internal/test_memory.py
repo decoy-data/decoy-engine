@@ -168,7 +168,8 @@ class TestMonitorMemoryUsage:
         assert result is None
         warnings = logger.messages("warning")
         assert len(warnings) == 1
-        assert "Could not monitor memory: psutil exploded" in warnings[0]
+        assert "Could not monitor memory (RuntimeError)" in warnings[0]
+        assert "psutil exploded" not in warnings[0]
         # Distinguishable from the ImportError message.
         assert "not available" not in warnings[0]
 
@@ -185,7 +186,9 @@ class TestMonitorMemoryUsage:
         result = MemoryMonitor.monitor_memory_usage(logger)
 
         assert result is None
-        assert any("Could not monitor memory: vmem down" in m for m in logger.messages("warning"))
+        warnings = logger.messages("warning")
+        assert any("Could not monitor memory (ValueError)" in m for m in warnings)
+        assert not any("vmem down" in m for m in warnings)
 
 
 # ---------------------------------------------------------------------------

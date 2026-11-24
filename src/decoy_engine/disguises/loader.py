@@ -77,9 +77,9 @@ def _load_from(folder: DirHandle) -> list[Disguise]:
             if fileaccess.keeps_class(exc):
                 raise
             _log.error(
-                "load_disguises: could not read %s: %s",
+                "load_disguises: could not read %s (%s)",
                 path.name,
-                exc,
+                type(exc).__name__,
             )
             continue
 

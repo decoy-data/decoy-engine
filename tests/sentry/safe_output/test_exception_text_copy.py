@@ -34,9 +34,9 @@ ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
 SENTRY_ID = "engine-exception-text-copies"
 BASELINE = _baseline_sources.baseline_path(SENTRY_ID)
-# The F31 audit figure. The audit bucket must still match it until AE5 lowers it, in the same
-# change that lowers the baseline entries.
-AUDIT_PARITY = 100
+# The F31 audit figure (100) less the copies removed since (AE3: the memory monitor log). Lower
+# it in the same change that removes baseline entries.
+AUDIT_PARITY = 99
 
 
 def _total(counts: dict[str, int], bucket: str) -> int:

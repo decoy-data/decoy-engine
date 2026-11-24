@@ -37,17 +37,7 @@ _LEVELS = frozenset({"debug", "info", "warning", "warn", "error", "exception", "
 _EXCEPTION_MARKER = "<exception traceback>"
 
 # (module path relative to decoy_engine, qualified function name, variable) -> (count, reason).
-ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
-    # System errors whose text names a path or an OS condition, not data.
-    ("disguises/loader.py", "_load_from", "exc"): (1, "OSError reading a packaged file"),
-    ("internal/memory.py", "MemoryMonitor.monitor_memory_usage", "e"): (1, "psutil failure"),
-    # Package or environment configuration text, no customer data.
-    ("profiling/model_pack/loader.py", "ModelPackLoader.load_with_fallback", "exc"): (
-        2,
-        "model pack and environment config text",
-    ),
-    ("internal/faker_setup.py", "make_faker", "exc"): (1, "Faker locale error; locale is config"),
-}
+ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {}
 
 
 def _logger_aliases(tree: ast.AST) -> frozenset[str]:

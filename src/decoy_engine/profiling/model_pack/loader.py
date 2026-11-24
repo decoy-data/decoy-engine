@@ -230,13 +230,16 @@ class ModelPackLoader:
         try:
             return self.load()
         except ModelPackLoadError as exc:
-            _log.warning("Model pack unavailable; falling back to regex baseline: %s", exc)
+            _log.warning(
+                "Model pack unavailable (%s); falling back to regex baseline", type(exc).__name__
+            )
             return None
         except Exception as exc:
             if fileaccess.keeps_class(exc):
                 raise
             _log.warning(
-                "Unexpected error loading model pack; falling back to regex baseline: %s", exc
+                "Unexpected error loading model pack (%s); falling back to regex baseline",
+                type(exc).__name__,
             )
             return None
 
