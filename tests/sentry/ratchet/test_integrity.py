@@ -176,16 +176,17 @@ def test_emptied_registry_file_fails(repo: Path) -> None:
     _assert_red(repo, "registry")
 
 
-@pytest.mark.parametrize("how", ["delete", "empty"])
-def test_registry_required_after_last_baseline_removed(repo: Path, how: str) -> None:
+@pytest.mark.parametrize(
+    "how, needle",
+    [("delete", "registry file is missing"), ("empty", "registry has no [[sentry]] rows")],
+)
+def test_registry_required_after_last_baseline_removed(repo: Path, how: str, needle: str) -> None:
     (repo / A).unlink()
     if how == "delete":
         (repo / REG).unlink()
     else:
         _write(repo, REG, "")
-    res = _run(repo)
-    assert res.returncode == 1, res.stdout + res.stderr
-    assert "registry" in res.stdout + res.stderr
+    _assert_red(repo, needle)
 
 
 # --- sentry files -------------------------------------------------------------------------------
