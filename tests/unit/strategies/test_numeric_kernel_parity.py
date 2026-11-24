@@ -341,3 +341,17 @@ def test_top_code_resolver_errors_omit_supplied_values(cfg: dict[str, Any]) -> N
     assert "hunter2" not in text and "host.example" not in text
     assert info.value.code == reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE
     assert "n" in text or "floor" in text or "under_label" in text
+
+
+@pytest.mark.parametrize("dtype", ["int64", "Int64"])
+def test_fractional_cap_keeps_exact_integer_labels(dtype: str) -> None:
+    """Compare on float64, render from the integer source: no rounding of the label."""
+    value = -(TWO53 + 1)
+    column = pd.Series([value, 50], dtype=dtype)
+    array = pa.array([value, 50], pa.int64())
+    cells, detail = _top_code_handler(column, cap=89.5, over_label="over")
+    assert cells == [str(value), "50"]
+    assert detail is None
+    result = top_code_array(array, 89.5, "over")
+    assert result.labels.to_pylist() == cells
+    assert (result.over_count, result.under_count) == (0, 0)

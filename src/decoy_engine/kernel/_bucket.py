@@ -299,7 +299,9 @@ def top_code_array(
     else:
         under = pa.array(np.zeros(len(view), dtype=bool))
     in_range = pc.and_(present, pc.invert(pc.or_(over, under)))  # type: ignore[attr-defined, unused-ignore]
-    out = _scatter(len(view), in_range, _in_range_labels(view.filter(in_range)))
+    # Compare on the view, but print from the source: a float64 view rounds an integer past 2**53.
+    text_source = array if pa.types.is_integer(array.type) else view
+    out = _scatter(len(view), in_range, _in_range_labels(text_source.filter(in_range)))
     out = pc.if_else(over, pa.scalar(over_label), out)  # type: ignore[attr-defined, unused-ignore]
     if do_under and under_label is not None:
         out = pc.if_else(under, pa.scalar(under_label), out)  # type: ignore[attr-defined, unused-ignore]
