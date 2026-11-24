@@ -20,6 +20,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -64,11 +65,15 @@ def _integrity() -> ModuleType:
 
 @dataclass(frozen=True)
 class Registry:
-    """A registry that passed ``load_side``: the document, ``{id: path}`` and the approvals."""
+    """A registry that passed ``load_side``; ``_check`` reads only these validated fields."""
 
-    doc: dict[str, Any]
     paths: dict[str, str]
     approvals: dict[str, dict[str, str]]
+    baselines: dict[str, Baseline]
+    rows: int
+    decisions: dict[str, dict[str, str]]
+    names: dict[str, set[str]]
+    report: list[str]
 
 
 @dataclass(frozen=True)
@@ -80,17 +85,22 @@ class Baseline:
 
 
 def parse_registry(doc: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
-    """``{id: path}`` and findings for duplicate ids or shared paths, from a validated registry."""
-    rows = doc.get("sentry", [])
+    """``{id: path}`` and findings for duplicate ids, shared paths or unsafe paths.
+
+    Every row's path is checked, including the row of a duplicated id, so a duplicate cannot
+    hide an unsafe path. ``doc`` must have passed ``validate_registry``.
+    """
     out: dict[str, str] = {}
+    by_path: dict[str, list[str]] = {}
     findings: list[str] = []
-    for row in rows:
+    for row in doc.get("sentry", []):
         sid, path = row["id"], row["baseline"]
         if sid in out:
             findings.append(f"registry: sentry id {sid} appears twice")
         out[sid] = path
-    for path in sorted({p for p in out.values()}):
-        ids = sorted(i for i, p in out.items() if p == path)
+        by_path.setdefault(path, []).append(sid)
+    for path in sorted(by_path):
+        ids = sorted(set(by_path[path]))
         if len(ids) > 1:
             findings.append(f"registry: two sentries ({', '.join(ids)}) share baseline {path}")
         if not _integrity().safe_path(path, BASELINE_DIR):
@@ -149,6 +159,8 @@ def decision_problem(decision: object) -> str | None:
 
 def parse_baseline(text: str) -> Baseline:
     data = json.loads(text)
+    if not isinstance(data, dict) or not isinstance(data.get("entries", {}), dict):
+        raise ValueError("not a baseline document")
     entries = data.get("entries", {})
     created = data.get("created_in")
     return Baseline(
@@ -184,14 +196,6 @@ def _git_show(root: Path, ref: str, rel: str) -> str | None:
         text=True,
     )
     return res.stdout if res.returncode == 0 else None
-
-
-def _base_entries(tree: Any, path: str) -> dict[str, object]:
-    """Entries of a baseline the base registry lists; it must exist and parse."""
-    try:
-        return parse_baseline(tree.require(path)).reasons
-    except ValueError:
-        raise _integrity().BaseReadError(path) from None
 
 
 def _max_of(entry: object) -> int | None:
@@ -383,13 +387,39 @@ def check(
         return [f"cannot read {exc.what} from the {exc.side} commit"], []
 
 
-def load_side(text: str, side: str, helper: ModuleType) -> tuple[Registry | None, list[str]]:
+def guarded(fn: Callable[[], Any], passthrough: type[BaseException]) -> tuple[Any, bool]:
+    """The one read boundary: decoding, parsing and file reads turn any failure into ``False``.
+
+    ``passthrough`` (``BaseReadError``) is re-raised. Callers report a fixed text, never the
+    exception, so a hostile input (bad bytes, huge integers, deep nesting, a directory where a
+    file belongs) is a finding and not a traceback.
+    """
+    try:
+        return fn(), True
+    except passthrough:
+        raise
+    except Exception:
+        return None, False
+
+
+Reader = Callable[[str, str], "Baseline | str"]
+
+
+def load_side(
+    text: str,
+    side: str,
+    helper: ModuleType,
+    read_baseline: Reader,
+    base_names: dict[str, set[str]] | None = None,
+    waivers: frozenset[tuple[str, str]] = frozenset(),
+) -> tuple[Registry | None, list[str]]:
     """The one loader for the HEAD and the BASE registry; nothing else reads a raw document.
 
-    Returns ``(None, findings)`` when the shape is unusable, otherwise the validated registry and
-    the findings of its rows (duplicate ids, shared or unsafe paths, bad approvals). Any finding on
-    the base raises ``BaseReadError``, because a base that is not a clean registry cannot anchor a
-    comparison; on HEAD the findings are reported.
+    Both sides get the same full validation: shape, duplicate ids and paths, closed row keys,
+    decision tables, approvals, every baseline file, and approvals against that side's own
+    inventory. ``read_baseline(id, path)`` returns the parsed baseline or, on HEAD, a finding
+    text. Any finding on the base raises ``BaseReadError``, because a base that is not a clean
+    registry cannot anchor a comparison; on HEAD the findings are reported.
     """
     doc, problems = helper.validate_registry(text)
     if problems:
@@ -399,69 +429,107 @@ def load_side(text: str, side: str, helper: ModuleType) -> tuple[Registry | None
     paths, findings = parse_registry(doc)
     approvals, approval_findings = parse_approvals(doc)
     findings += approval_findings
+    dec = helper.decisions(doc)
+    fresh_fields = (
+        helper.fresh(dec["checker_change"], base_names["checker_change"], decision_problem)
+        if base_names is not None
+        else set()
+    )
+    usable = frozenset(w for w in waivers if w[1] in fresh_fields)
+    schema, report = helper.closed_keys(doc, ROW_KEYS, decision_problem, usable)
+    findings += schema
+    baselines: dict[str, Baseline] = {}
+    for sid, path in sorted(paths.items()):
+        if not helper.safe_path(path, BASELINE_DIR):
+            continue
+        got = read_baseline(sid, path)
+        if isinstance(got, str):
+            findings.append(got)
+            continue
+        baselines[sid] = got
+        findings += [
+            f"{sid}: stale approved_growth, {key} is not in {path}"
+            for key in sorted(set(approvals.get(sid, {})) - got.keys)
+        ]
     if findings and side == "base":
         raise helper.BaseReadError(REGISTRY)
-    return Registry(doc, paths, approvals), findings
+    rows = len(doc.get("sentry", []))
+    registry = Registry(paths, approvals, baselines, rows, dec, helper.table_names(doc), report)
+    return registry, findings
+
+
+def _head_reader(root: Path, helper: ModuleType) -> Reader:
+    def read(sid: str, path: str) -> Baseline | str:
+        file = root / path
+        if not file.exists():
+            return f"{sid}: registry points at {path} but there is no baseline file"
+        got, ok = guarded(
+            lambda: parse_baseline(file.read_text(encoding="utf-8")), helper.BaseReadError
+        )
+        return got if ok else f"{sid}: baseline {path} cannot be read or is not a baseline file"
+
+    return read
+
+
+def _base_reader(tree: Any, helper: ModuleType) -> Reader:
+    def read(sid: str, path: str) -> Baseline | str:
+        got, ok = guarded(lambda: parse_baseline(tree.require(path)), helper.BaseReadError)
+        if not ok:
+            raise helper.BaseReadError(path)
+        return got
+
+    return read
 
 
 def _check(
     root: Path, tree: Any, helper: ModuleType, waiver_input: str | None
 ) -> tuple[list[str], list[str]]:
     reg_file = root / REGISTRY
-    head_text = reg_file.read_text(encoding="utf-8") if reg_file.is_file() else ""
-    base_text = tree.read(REGISTRY) or ""
-    head_reg, findings = load_side(head_text, "head", helper)
+    head_text, ok = guarded(
+        lambda: reg_file.read_text(encoding="utf-8") if reg_file.is_file() else "",
+        helper.BaseReadError,
+    )
+    if not ok:
+        return [f"registry: {REGISTRY} cannot be read as UTF-8 text"], []
+    base_reg_loaded, _ = load_side(
+        tree.read(REGISTRY) or "", "base", helper, _base_reader(tree, helper)
+    )
+    assert base_reg_loaded is not None  # a base problem raised
+    waived, waiver_findings = schema_waivers(waiver_input)
+    head_reg, findings = load_side(
+        head_text, "head", helper, _head_reader(root, helper), base_reg_loaded.names, waived
+    )
+    findings += waiver_findings
     if head_reg is None:
         return findings, []
-    base_reg_loaded, _ = load_side(base_text, "base", helper)
-    assert base_reg_loaded is not None  # a base problem raised
-    head_doc, head, approvals = head_reg.doc, head_reg.paths, head_reg.approvals
-    base_doc, base_reg = base_reg_loaded.doc, base_reg_loaded.paths
-    findings += helper.registry_present(
-        len(base_doc.get("sentry", [])), reg_file.is_file(), len(head_doc.get("sentry", []))
-    )
-    head_dec, base_names = helper.decisions(head_doc), helper.table_names(base_doc)
-    fresh = {t: helper.fresh(head_dec[t], base_names[t], decision_problem) for t in head_dec}
-    waived, waiver_findings = schema_waivers(waiver_input)
-    findings += waiver_findings
-    # A waiver only counts for a field that carries a fresh [checker_change] decision.
-    usable = frozenset(w for w in waived if w[1] in fresh["checker_change"])
-    schema, waiver_report = helper.closed_keys(head_doc, ROW_KEYS, decision_problem, usable)
-    findings += schema
+    head, approvals, loaded = head_reg.paths, head_reg.approvals, head_reg.baselines
+    base_reg = base_reg_loaded.paths
+    findings += helper.registry_present(base_reg_loaded.rows, reg_file.is_file(), head_reg.rows)
+    fresh = {
+        t: helper.fresh(head_reg.decisions[t], base_reg_loaded.names[t], decision_problem)
+        for t in head_reg.decisions
+    }
     report: list[str] = helper.new_decisions(
-        head_dec, base_names, approvals, base_reg_loaded.approvals
+        head_reg.decisions, base_reg_loaded.names, approvals, base_reg_loaded.approvals
     )
-    report += waiver_report
-    safe = {sid: p for sid, p in head.items() if helper.safe_path(p, BASELINE_DIR)}
+    report += head_reg.report
 
     on_disk = {p.relative_to(root).as_posix() for p in (root / BASELINE_DIR).glob("*.json")}
     for path in sorted(on_disk - set(head.values())):
         findings.append(f"{path}: baseline file is not registered in {REGISTRY}")
 
-    loaded: dict[str, Baseline] = {}
-    for sid, path in sorted(safe.items()):
-        file = root / path
-        if not file.exists():
-            findings.append(f"{sid}: registry points at {path} but there is no baseline file")
-            continue
-        loaded[sid] = base = parse_baseline(file.read_text(encoding="utf-8"))
-        if base.sentry_id != sid:
-            findings.append(
-                f"{path}: sentry_id {base.sentry_id!r} does not match registry id {sid}"
-            )
-        findings += reason_findings(path, base)
-        findings += [
-            f"{sid}: stale approved_growth, {key} is not in {path}"
-            for key in sorted(set(approvals.get(sid, {})) - base.keys)
-        ]
+    for sid, bl in sorted(loaded.items()):
+        path = head[sid]
+        if bl.sentry_id != sid:
+            findings.append(f"{path}: sentry_id {bl.sentry_id!r} does not match registry id {sid}")
+        findings += reason_findings(path, bl)
     findings += helper.new_baseline_findings(
         tree, {head[s]: b.created_in for s, b in loaded.items()}
     )
 
     removed = set(base_reg) - set(head)
-    donors = {s: _base_entries(tree, base_reg[s]) for s in sorted(removed - fresh["retired"])}
-    for sid in sorted(removed & fresh["retired"]):
-        _base_entries(tree, base_reg[sid])  # a retirement still needs a readable base baseline
+    # Every base baseline, retired ids included, was already read by ``load_side``.
+    donors = {s: base_reg_loaded.baselines[s].reasons for s in sorted(removed - fresh["retired"])}
     successors: dict[str, dict[str, object]] = {}
     for sid, base in sorted(loaded.items()):
         path = head[sid]
@@ -470,7 +538,7 @@ def _check(
             if base_reg[sid] != path:
                 findings.append(f"{sid}: baseline moved from {base_reg[sid]} to {path}")
                 continue
-            old = _base_entries(tree, path)
+            old = base_reg_loaded.baselines[sid].reasons
             grown, rekeyed = growth(base.keys, frozenset(old), sid in REKEY_PER_SITE)
             report += [
                 f"{sid}: re-keyed permitted site {site} (review the message)" for site in rekeyed

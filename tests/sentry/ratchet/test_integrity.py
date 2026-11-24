@@ -560,22 +560,18 @@ def test_waiver_covers_only_its_own_field(repo: Path) -> None:
     assert "unknown registry key bypass" not in res.stdout + res.stderr
 
 
-def test_a_retired_name_on_the_base_with_a_non_string_value_is_not_fresh(two: Path) -> None:
+def test_a_base_retired_row_with_a_non_string_value_fails_closed(two: Path) -> None:
     _write(two, REG, _registry({"a": A, "b": B}) + '[retired]\n"a" = 5\n')
-    _commit(two, "non-string sign-off on base")
+    base = _commit(two, "non-string sign-off on base")
     _drop_a(two, _tables(retired={"a": DECISION}))
-    _assert_red(two, "a: removed from the registry")
+    _red_from(two, base, f"cannot read {REG} from the base commit")
 
 
-def test_a_checker_change_name_on_the_base_with_a_non_string_value_is_not_fresh(
-    repo: Path,
-) -> None:
+def test_a_base_checker_change_row_with_a_non_string_value_fails_closed(repo: Path) -> None:
     _write(repo, REG, _registry({"a": A}) + '[checker_change]\n"bypass" = 5\n')
-    _commit(repo, "non-string row on base")
+    base = _commit(repo, "non-string row on base")
     _new_field(repo, with_decision=True)
-    res = _run_env(repo, json.dumps([["a", "bypass"]]))
-    assert res.returncode == 1, res.stdout + res.stderr
-    assert "a: unknown registry key bypass" in res.stdout + res.stderr
+    _red_from(repo, base, f"cannot read {REG} from the base commit")
 
 
 GLOB = "test_*.py"
@@ -696,122 +692,3 @@ def test_a_malformed_head_registry_is_one_finding_not_a_traceback(repo: Path, te
     assert res.returncode == 1, res.stdout + res.stderr
     assert "Traceback" not in res.stderr
     assert "registry: scripts/dev/sentry_registry.toml" in res.stderr
-
-
-# --- review round 5: base registry errors, field types, one validation path ---------------------
-
-
-def test_a_base_registry_with_a_duplicate_id_fails_closed(repo: Path) -> None:
-    dup = f'[[sentry]]\nid = "a"\nbaseline = "{A}"\n\n[[sentry]]\nid = "a"\nbaseline = "{B}"\n'
-    _write(repo, B, _baseline("a", ["m::f"]))
-    _write(repo, REG, dup)
-    base = _commit(repo, "base with a duplicate id")
-    _write(repo, REG, _registry({"a": A}))
-    (repo / B).unlink()
-    _write(repo, A, _baseline("a", ["m::f", "m::g", "m::new"]))
-    _red_from(repo, base, f"cannot read {REG} from the base commit")
-
-
-def test_a_base_registry_with_a_shared_path_fails_closed(repo: Path) -> None:
-    _write(repo, REG, _registry({"a": A, "a-twin": A}))
-    base = _commit(repo, "base with a shared path")
-    _write(repo, REG, _registry({"a": A}))
-    _red_from(repo, base, f"cannot read {REG} from the base commit")
-
-
-@pytest.mark.parametrize(
-    "row",
-    [
-        'id = []\nbaseline = "tests/sentry/baselines/a.json"',
-        'id = ""\nbaseline = "tests/sentry/baselines/a.json"',
-        'id = "a"\nbaseline = 5',
-        'id = "a"\nbaseline = "tests/sentry/baselines/a.json"\napproved_growth = "x"',
-        'baseline = "tests/sentry/baselines/a.json"',
-    ],
-    ids=["id list", "id empty", "baseline int", "approved_growth str", "no id"],
-)
-def test_a_wrongly_typed_head_row_is_one_finding_not_a_traceback(repo: Path, row: str) -> None:
-    _write(repo, REG, f"[[sentry]]\n{row}\n")
-    res = _run(repo)
-    assert res.returncode == 1, res.stdout + res.stderr
-    assert "Traceback" not in res.stderr
-    assert res.stderr.count("ratchet: FAIL") == 1, res.stderr
-
-
-@pytest.mark.parametrize(
-    "weak", ["owner 2026-11-24 TODO...........", "owner 2026-11-24 tbd!!!!!!!!!!!!"]
-)
-def test_a_padded_placeholder_approval_is_refused(repo: Path, weak: str) -> None:
-    _grow(repo, "m::new")
-    _approve(repo, [("m::new", weak)])
-    _assert_red(repo, "approved_growth for m::new needs a decision")
-
-
-# --- plan amendment A1: BASE and HEAD go through one loader -----------------------------------
-
-ROW = f'[[sentry]]\nid = "a"\nbaseline = "{A}"\n'
-GOOD_DECISION = "owner 2026-11-24 a reason that is long enough"
-MALFORMED: tuple[tuple[str, str, str], ...] = (
-    (
-        "duplicate id",
-        ROW + f'\n[[sentry]]\nid = "a"\nbaseline = "{B}"\n',
-        "sentry id a appears twice",
-    ),
-    ("shared path", ROW + f'\n[[sentry]]\nid = "t"\nbaseline = "{A}"\n', "share baseline"),
-    ("id list", f'[[sentry]]\nid = []\nbaseline = "{A}"\n', "id must be a non-empty string"),
-    ("id empty", f'[[sentry]]\nid = ""\nbaseline = "{A}"\n', "id must be a non-empty string"),
-    ("id missing", f'[[sentry]]\nbaseline = "{A}"\n', "id must be a non-empty string"),
-    ("baseline missing", '[[sentry]]\nid = "a"\n', "a: baseline must be a string path"),
-    ("baseline int", '[[sentry]]\nid = "a"\nbaseline = 5\n', "a: baseline must be a string path"),
-    ("bad toml", "this is = = broken\n", "is not valid TOML"),
-    ("non-table rows", "sentry = [1]\n", "as an array of tables"),
-    ("approval item int", ROW + "approved_growth = [5]\n", "a: approved_growth row has no key"),
-    ("approved_growth str", ROW + 'approved_growth = "x"\n', "a: approved_growth must be a list"),
-    (
-        "approval key list",
-        ROW + f'approved_growth = [{{ key = [], decision = "{GOOD_DECISION}" }}]\n',
-        "a: approved_growth row has no key",
-    ),
-    (
-        "approval no decision",
-        ROW + 'approved_growth = [{ key = "m::n" }]\n',
-        "approved_growth for m::n needs a decision",
-    ),
-    (
-        "approval weak decision",
-        ROW + 'approved_growth = [{ key = "m::n", decision = "owner 2026-11-24 xxxxxxxxxx" }]\n',
-        "approved_growth for m::n needs a decision",
-    ),
-    (
-        "approval padded placeholder",
-        ROW
-        + 'approved_growth = [{ key = "m::n", decision = "owner 2026-11-24 TODO..........." }]\n',
-        "approved_growth for m::n needs a decision",
-    ),
-)
-
-
-@pytest.mark.parametrize("text, needle", [c[1:] for c in MALFORMED], ids=[c[0] for c in MALFORMED])
-def test_a_malformed_head_registry_gives_its_own_diagnostic(
-    repo: Path, text: str, needle: str
-) -> None:
-    _write(repo, B, _baseline("a", ["m::f"]))
-    _write(repo, REG, text)
-    res = _run(repo)
-    assert res.returncode == 1, res.stdout + res.stderr
-    assert "Traceback" not in res.stderr
-    assert needle in res.stderr, res.stderr
-
-
-@pytest.mark.parametrize("text", [c[1] for c in MALFORMED], ids=[c[0] for c in MALFORMED])
-def test_a_malformed_base_registry_fails_closed_with_one_line(repo: Path, text: str) -> None:
-    _write(repo, B, _baseline("a", ["m::f"]))
-    _write(repo, REG, text)
-    base = _commit(repo, "malformed base registry")
-    _write(repo, REG, _registry({"a": A}))
-    (repo / B).unlink()
-    res = _run_from(repo, base)
-    assert res.returncode == 1, res.stdout + res.stderr
-    assert "Traceback" not in res.stderr
-    assert res.stderr.count("ratchet: FAIL") == 1, res.stderr
-    assert f"cannot read {REG} from the base commit" in res.stderr

@@ -138,7 +138,7 @@ def validate_registry(text: str) -> tuple[dict[str, Any], list[str]]:
     """
     try:
         doc = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
+    except (ValueError, RecursionError):  # bad TOML, an oversized integer, nesting too deep
         return {}, ["is not valid TOML"]
     rows = doc.get("sentry", [])
     if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
