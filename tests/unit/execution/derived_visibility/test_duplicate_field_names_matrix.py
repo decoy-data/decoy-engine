@@ -592,37 +592,54 @@ def _unwritable_child(*, dup: bool) -> pa.Table:
     return child.append_column("iv", interval)
 
 
-def test_e3_unwritable_duplicate_surfaces_the_serialization_failure(
-    tmp_path: Path, spies: Spies, monkeypatch: pytest.MonkeyPatch
+def _staged_child(staging: Path) -> pa.Table:
+    # The child is the second staged source; a Parquet-refused type stages as an IPC stream.
+    assert not (staging / "s0001.parquet").exists()
+    with pa.memory_map(str(staging / "s0001.arrow"), "r") as source:
+        return pa.ipc.open_stream(source).read_all()
+
+
+def _assert_exact_handoff(staging: Path, expected: pa.Table) -> None:
+    staged = _staged_child(staging)
+    assert str(staged.schema) == str(expected.schema)
+    assert staged.equals(expected)
+    assert staged.column(staged.num_columns - 1).to_pylist() == [pa.MonthDayNano([1, 2, 3])] * 12
+
+
+def test_e3_unwritable_duplicate_reaches_the_child_refusal(
+    tmp_path: Path, spies: Spies, child_spy: Path
 ) -> None:
-    # CHARACTERIZATION of the narrowed contract (row 0): a duplicate table Parquet cannot write
-    # fails at the parent's serialization, as on main, ahead of the child's refusal. It is
-    # raised out of the call, not returned as a result (open finding, plan section 13).
-    from decoy_engine.execution import _isolated_run
-
+    # A duplicate table Parquet cannot write now stages as IPC (plan 2026-11-23-fixed-list-null,
+    # G-4), so the child refuses it as it refuses every other duplicate (E3).
     cell = Cell("auto", "res", "redact", row="0", label="CHARACTERIZATION")
-    spawned: list[object] = []
-    monkeypatch.setattr(_isolated_run, "_spawn_and_classify", lambda *a, **k: spawned.append(a))
-    with pytest.raises(pa.ArrowNotImplementedError) as exc:
-        _isolated(tmp_path, cell, dup="qty", isolate=True, child=_unwritable_child(dup=True))
-    err = exc.value
-    expected = "Unhandled type for Arrow to Parquet schema conversion: month_day_nano_interval"
-    assert str(err) == expected and err.args == (expected,)
-    assert getattr(err, "__notes__", []) == []
-    assert err.__cause__ is None and err.__context__ is None
+    child = _unwritable_child(dup=True)
+    result, spawned = _isolated(tmp_path, cell, dup="qty", isolate=True, child=child)
+    _assert_isolated_d(result, isolated=True)
     for name in (*_NAMES, "iv"):
-        assert name not in str(err), name
-    assert spawned == [] and spies.raises == [] and spies.calls == 0
-    # The caller owns staging_dir (kept on every path); the unwritable table left no file.
-    assert not (tmp_path / "staging" / "sources" / "child.parquet").exists()
-    assert not (tmp_path / "staging" / "payload.json").exists()
+        assert name not in repr(result.error), name
+    assert spawned and result.pid is not None and result.returncode == 0
+    assert spies.raises == [] and spies.calls == 0
+    lines = _spy_lines(child_spy)
+    assert lines.count("shared-raise") == 1
+    assert "handler" not in lines and "convert" not in lines
+    staging = tmp_path / "staging"
+    assert (staging / "payload.json").exists()
+    _assert_exact_handoff(staging, child)
 
 
-def test_e3_unwritable_unique_control_still_fails_serialization(tmp_path: Path) -> None:
-    # CHARACTERIZATION: the same failure without the duplicate; the parent has no refusal.
+def test_e3_unwritable_unique_control_fails_in_the_child(tmp_path: Path, spies: Spies) -> None:
+    # The handoff is exact, but the child cannot yet write an interval output (G-4 follow-up):
+    # the failure is a classified child crash, not a raise out of the call.
     cell = Cell("auto", "res", "redact", row="0", label="CHARACTERIZATION")
-    with pytest.raises(pa.ArrowNotImplementedError):
-        _isolated(tmp_path, cell, dup=None, isolate=True, child=_unwritable_child(dup=False))
+    child = _unwritable_child(dup=False)
+    result, spawned = _isolated(tmp_path, cell, dup=None, isolate=True, child=child)
+    assert result.outcome == "crashed" and result.outputs is None
+    assert result.isolated is True and result.error == "ArrowNotImplementedError"
+    assert (result.reason.namespace, result.reason.code) == ("decoy", "unexpected_error")
+    _assert_value_free_result(result)
+    assert spawned and result.pid is not None and result.returncode == 0
+    assert spies.raises == [] and spies.calls == 0
+    _assert_exact_handoff(tmp_path / "staging", child)
 
 
 @pytest.mark.parametrize("isolate", [False, True])
