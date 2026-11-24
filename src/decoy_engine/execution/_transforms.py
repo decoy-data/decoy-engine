@@ -55,7 +55,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.config._transforms import (
+from decoy_engine.config import (
     DedupeOp,
     DeriveOp,
     DropColumnOp,
