@@ -322,7 +322,7 @@ The tokenizer-specific `tests/native/test_chunked_entry_rev9_read.py::test_predi
 
 **A1.5 Placement and size.** The existing Placement row for `test_when_single_reader.py` covers AT-S1e. AT-S1f extends existing native and execution test modules and adds no file. `_column_access.py` changes only `_when`; the tokenizer loop remains. No ceiling rises.
 
-## Write and ordering model (revision after #783 round 4)
+## Write and ordering model (revision after #783 round 5)
 
 This revision governs S2 where sections 1 and 3 describe ordering. Code references use engine head
 `d74afd71c`. Execution paths below are relative to `src/decoy_engine/execution/`.
@@ -346,11 +346,25 @@ A write means a column whose cells dispatch may replace, including writes limite
 
 ### Final values and dependencies
 
-Build a list of writers for each (table, column). FK resolution takes final priority on its child key.
-A bundle takes priority over a separate creating scalar on a shared output. Known writers take
-priority over table wildcards. Break ties by explicit seed declaration order. The later writer
-wins on rows where both write. Record the seed position before grouping composites or sorting
-ready nodes. A grouped bundle takes the position of its first seed member (`_runner.py:112–136`).
+Give every work node one dispatch rank. For a plan that orders today, use its position
+in today's `order_work(build_work_list(...), graph)`. Keep the existing FK, driver and
+creator-before-bundle constraints for this rank. The heap takes the smallest ready
+`(table, columns)` after each placement. A global name sort would miss dependencies.
+`run_single` calls `run`, which walks that order serially (`_pandas_adapter.py:157`,
+`:242`, `:281`). Each ungated joint handler replaces all configured columns
+(`_when_gate.py:528`, `transforms/joint_mask.py:324` under `src/decoy_engine/`).
+Thus independent `city` runs before `zip` even when declared second.
+
+Commit all writes to each column in increasing dispatch rank. The last matching writer
+wins each row. Use the same ranks for every output of a node, including FK, bundle and
+wildcard outputs. Keep the input version that a successful overlap consumed. This
+preserves intermediate reads as well as the final winner. Seed position adds no override.
+If the old constraints contain a cycle, today's sort raises and supplies no ranks.
+For that case alone, rank by resolved operation class, then by node key. Commit
+wildcards first, then known non-bundle handlers, then bundles, then FK resolutions.
+Within each class the larger key writes last. Use these ranks for commits only.
+The required input checks below still reject a real value cycle. Never run handlers to
+choose ranks. Keep one ordering implementation in `_runner.py`.
 
 Evaluate each handler once when its input versions are ready. Collect its output values and
 selected row positions in isolation. The gate reads its predicate from the source. Preserve preflight, validation, warnings and row errors.
@@ -359,7 +373,9 @@ empty target. Each partial commit overlays its selected rows on the preceding ve
 An unconditional replacement supplies a whole version without waiting for the preceding commit.
 Keep earlier versions until every consumer has read them, including later writers of the same column.
 
-A masked sibling read waits for the final version of that column. A handler that transforms its
+A masked sibling read uses the final driver under its dependency edge. Preserve the
+existing exception for a creator ordered before the bundle that overwrites it. On a
+working overlap it reads the driver version available at its dispatch rank. A handler that transforms its
 own target waits for the version just before its write. For example, a later unconditional
 `truncate(last_name)` reads the bundle's generated surname (`_strategies/_truncate.py:115–121`).
 A replacement that never reads its target can skip an unused prior version. Its earlier handler
@@ -369,9 +385,26 @@ anchor snapshots before evaluation, including the original group key for `date_s
 
 For a gated derived `state` followed by a gated joint write to `city` and `state`, evaluate
 the joint handler from its source key. Commit its selected cities over the source cities.
-Evaluate the derived handler using that final city column. Commit derived states first.
-Overlay the joint handler's saved states on its selected rows. Ordering the two state commits
+Evaluate the derived handler using that final city column. The existing city driver edge ranks joint before derived.
+Commit joint states first. Overlay derived states on the rows its gate selected. Ordering the two state commits
 adds no dependency between the handler evaluations.
+
+Bind exact integer keys to the input version selected for deterministic Faker or ungated
+hash. Today registration records `node.columns` and sampling looks up only table and column
+(`_exact_int_sources.py:56–72`, `:160`). A joint mask can replace a secondary output
+without changing its null positions. That lookup can return stale Arrow integers.
+Attach the exact Arrow data to the source version at full-frame and sequential registration
+(`_pandas_adapter.py:245`, `_sequential.py:426`). A whole replacement supplies its own
+values. For a partial commit, keep the exact source integers on untouched rows and the
+writer's typed values on selected rows. Apply Faker's gate positions to that assembled
+input. Preserve nulls and integer width without a float round trip.
+
+Keep `order_work` returning ordered `WorkNode` objects. Out-of-core preflight passes them
+to compatibility, Group C and nullable-integer checks (`out_of_core/_preflight.py:67–92`).
+Build evaluation and commit steps inside the routes that execute them. The chunked oracle
+calls the adapter for each chunk (`_chunked_oracle.py:448`). Keep saved outputs, row positions
+and exact input versions local to that call. Release each after its last consumer and
+release all remaining temporaries before returning the chunk.
 
 Use the same version dependencies at compile time and execution. Include table wildcards in
 writer lookup. The sorted ready queue at `_runner.py:550` may order independent steps.
@@ -423,34 +456,59 @@ first kill the specified mutation, then restore it. Run the same tests green on 
    first. Then declare a joint mask on `city` that writes both city and state. Use two source
    flags and four rows. Use a single-row reference with a distinct joint city and state.
    Assert success. On the derived-only row, expect source city plus "!" as state.
-   On the joint-only row and the overlap row, expect the joint state. On the fourth row,
-   expect source state. Expect joint city exactly where the joint gate matched.
-   Adding a handler-order edge from derived to joint makes this run fail with a false cycle.
+   On the joint-only row, expect joint state. On the overlap row, expect joint city plus "!".
+   On the fourth row, expect source state. Expect joint city exactly where the joint gate matched.
+   Reversing the two state commits must fail the overlap assertion.
 9. **V1** `test_truncate_reads_generated_surname`. Run the bundle alone for a fixed-seed
    oracle. Then declare the same bundle first and unconditional head truncate on last_name
    second, with length three. Use source surnames whose first three characters differ from
    the oracle prefixes on every row. Assert each output surname equals the generated prefix.
    Dropping the bundle's surname before truncate reads it exposes the source prefix.
-10. **V1** `test_equal_priority_writer_spelling_swap`. Use two unconditional joint masks.
-    Give each its own single-row reference with distinct values for a shared output.
-    Let one write its dispatch column and the shared column. Let the other write its own
-    dispatch column and the shared column. Declare z_first before a_second. Then swap
-    the dispatch names in the seeds, input and reference schemas. Keep seed order, keys,
-    namespace and reference values fixed. Undo the output rename. Assert identical rows
-    in both runs and the second reference's value on every shared cell. Sorting tied
-    writers by name makes the reverse lexical case fail.
+10. **V1** `test_equal_priority_writer_spelling_swap`. Declare ungated z_first before
+    a_second. Give each a distinct one-row reference for its own column and a shared
+    column. Expect the first reference on every shared cell. Swap the dispatch names
+    throughout the fixture while keeping declaration order and reference values fixed.
+    Now expect the second reference. In both runs the larger ready key writes last.
 11. **V1** `test_date_shift_uses_original_group_key`. Use an ungated grouped date_shift.
     Get expected dates with the group key untouched. Mask that key to one value and run
     again with the same seed. Use source groups with distinct oracle shifts. Assert the
     masked key is constant and all dates match the oracle. Dropping the group snapshot
     fails the run. Using the masked key gives the wrong dates.
+12. **V1** `test_zip_city_state_matches_current_output`. Run two ungated joint masks
+    through `run_single`. Declare zip before city. Both read k and write state. Use source
+    rows (a, x, m, s) and (b, y, n, t) in column order k, zip, city, state. The one-row
+    references supply (ZIP, zip-state) and (CITY, city-state). Pin the complete output
+    observed at `d74afd71c`: (a, ZIP, CITY, zip-state) and (b, ZIP, CITY, zip-state).
+    Compare the new run with that fixed table, including schema and row order.
+13. **DESIGN** `test_three_writers_share_one_order`. Declare the first_name bundle,
+    a city joint mask, then a derived last_name. Supply all columns. Use independent
+    source keys and a separate driver for derived. Give all three distinct surnames.
+    City is ready first. The creator must precede the bundle. Assert the joint city
+    is present and every last_name equals the fixed-seed bundle oracle. Repeat with
+    zip as the joint dispatch key. Now the creator unlocks the bundle before zip runs.
+    Expect the joint surname. A fixed bundle priority fails the second run.
+14. **V1** `test_faker_uses_committed_nullable_integer`. Give deterministic Faker a
+    nullable Arrow int64 target with adjacent source keys above 2**53. An earlier joint
+    mask writes that target as a secondary output on selected non-null rows. Use a
+    distinct integer replacement and leave a large source key and a null untouched.
+    Keep the null positions identical. Compare Faker with a Faker-only run on the exact
+    expected Arrow overlay, using the same seed and namespace. Choose keys whose oracle
+    outputs distinguish replacement, stale source and rounded source. Also run with
+    Faker gated to all non-null positions. Put a null between two selected rows.
+15. **V1** `test_chunk_releases_saved_outputs`. Run the chunked oracle on two chunks
+    with different keys and gate matches. Force a multi-output handler to save a column
+    until its last commit. Observe the actual saved buffers with weak references.
+    Keep both returned chunks alive. Check the first chunk's temporary buffers are
+    collectible before supplying chunk two. Check the second chunk's after it returns.
+    Compare both outputs with their separate full-frame oracles. Retaining the buffers
+    on the shared adapter must fail the lifetime check.
 
 ### Placement and removal
 
 | Existing location | Builder change |
 | --- | --- |
 | `_column_access.py:266` | Keep the surface registry. Remove coherent group names from composite writes. Resolve operations and their writes here. Reuse the provider's canonical or configured outputs. |
-| `_runner.py:356`, `_runner.py:382`, `_runner.py:449`, `_runner.py:470`, `_runner.py:527` | Delete the conservative and dispatch write views, creator probe, composite overwrite scan, skipped driver edges and special FK scans. Build one writer index from resolved operations. |
+| `_runner.py:356`, `_runner.py:382`, `_runner.py:449`, `_runner.py:470`, `_runner.py:527` | Keep the current WorkNode ordering constraints for compatibility ranks. Reuse their sort. Build the version dependencies from resolved operations. Keep the old conservative rank inputs where narrowing them would change a working order. |
 | `_pandas_adapter.py:375`, `_when_gate.py:582`, `_strategies/_joint_mask.py:47` | Dispatch the resolved operation. Use its outputs for write-back and gated stitching. Remove the separate gated-output hook. |
 | `_runner.py:329`, `_chunked_carry.py:202` | Use resolved writes for predicate snapshots and for full-frame and sequential type preservation. A wildcard covers every predicate input in its table. |
 | `_chunked_carry.py:176`, `_column_access.py:527` | Feed the same write declaration into `passthrough_columns`. Replace the entry-based write union in `handler_written_columns`. Pass resolved writes to both `carried_columns` and `plan_carry` through this path. A wildcard disables carry for its table. |
