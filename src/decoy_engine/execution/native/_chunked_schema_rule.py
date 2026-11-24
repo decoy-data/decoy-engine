@@ -60,6 +60,7 @@ schema metadata.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -68,6 +69,7 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import group_by_sibling
@@ -198,14 +200,19 @@ def date_shift_pinned_columns(
 
 
 def date_shift_typed_pinned_columns(
-    configured: dict[str, dict[str, Any]], first_schema: pa.Schema, *, table: str
+    configured: dict[str, dict[str, Any]],
+    first_schema: pa.Schema,
+    shapes: Mapping[str, ColumnShape],
+    *,
+    table: str,
 ) -> dict[str, pa.DataType]:
     """The typed date_shift columns whose output is pinned to their source type.
 
-    A `date32` source is the resident type the plan's `DATE` shape names, so the column is
-    admitted by the typed half of `date_shift_config_rejection`, read from the first chunk's
-    real type, the same on both legs."""
-    from decoy_engine.contracts.column_shape import ColumnShape
+    `shapes` is the compiled plan's native date shapes for `table` (`table_date_shapes`), the
+    one source of truth for "this column is a typed date": a column the plan does not list (an
+    F06-declared date, which keeps its text output) is never pinned, whatever type its first
+    chunk carries. A listed column is pinned when the typed half of `date_shift_config_rejection`
+    admits it under that shape over the first chunk's real type, the same on both legs."""
     from decoy_engine.execution.native._operator_config_rejections import (
         date_shift_config_rejection,
     )
@@ -214,20 +221,21 @@ def date_shift_typed_pinned_columns(
     for name, col in configured.items():
         if col.get("strategy") != "date_shift" or _has_when(col):
             continue
-        if name not in first_schema.names or first_schema.field(name).type != pa.date32():
+        if name not in shapes or name not in first_schema.names:
             continue
         provider_config = col.get("provider_config")
+        field = first_schema.field(name)
         reason = date_shift_config_rejection(
             name,
             table,
             None,
             namespace=col.get("namespace"),
             provider_config=provider_config if isinstance(provider_config, dict) else {},
-            resident_sources={table: pa.schema([first_schema.field(name)]).empty_table()},
-            shape=ColumnShape.DATE,
+            resident_sources={table: pa.schema([field]).empty_table()},
+            shape=shapes[name],
         )
         if reason is None:
-            pinned[name] = pa.date32()
+            pinned[name] = field.type
     return pinned
 
 
@@ -293,6 +301,7 @@ def build_schema_rule(
     first: pa.Table,
     registry: Any,
     categorical_columns: frozenset[str] = frozenset(),
+    plan: Any = None,
 ) -> SchemaRule:
     """Classify `table`'s columns once, from the config and the first chunk.
 
@@ -305,7 +314,9 @@ def build_schema_rule(
     native-admissible group_key column by `group_key_pinned_columns`, a native-admissible
     text_redact column by `text_redact_pinned_columns`, a position-keyed faker column by
     `faker_positional_pinned_columns` and an admitted `when:` column by `when_pinned_columns`,
-    so every caller gets the pins without passing anything.
+    so every caller gets the pins without passing anything. A typed date_shift column is
+    pinned to its date type only from the compiled `plan`'s date shapes
+    (`date_shift_typed_pinned_columns`); a caller with no plan gets no typed pins.
 
     A column some handler writes (see `handler_written_columns`) is never a passthrough
     column here, so `normalize_chunk` cannot restore its source value."""
@@ -321,6 +332,9 @@ def build_schema_rule(
     written = handler_written_columns(
         [c for c in table_cfg.get("columns") or [] if isinstance(c, dict)], registry
     )
+    from decoy_engine.execution.native._real_type_admission import table_date_shapes
+
+    shapes = {} if plan is None else table_date_shapes(plan, table, first.schema.names)
     from decoy_engine.execution._faker_degenerate_pin import deterministic_faker_pin_columns
 
     strings = frozenset(n for n, c in configured.items() if _string_output_is_fixed(c))
@@ -348,7 +362,9 @@ def build_schema_rule(
         string_columns=strings,
         passthrough_types=passthrough,
         passthrough_fields=passthrough_fields,
-        typed_columns=date_shift_typed_pinned_columns(configured, first.schema, table=table),
+        typed_columns=date_shift_typed_pinned_columns(
+            configured, first.schema, shapes, table=table
+        ),
     )
 
 

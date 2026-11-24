@@ -551,17 +551,16 @@ def _route_chunked(
         else ()
     )
     categoricals = prepared_categoricals(state, table=table)
-    rule = (
-        build_schema_rule(
+    rule = None
+    if enforce_schema_rule:
+        rule = build_schema_rule(
             config,
             table=table,
             first=state.first,
             registry=state.registry,
             categorical_columns=frozenset(categoricals),
+            plan=state.plan,
         )
-        if enforce_schema_rule
-        else None
-    )
     read_passthrough = state.carry.read if state.carry is not None else ()
     if not decision.native_admitted:
         return _oracle_route(

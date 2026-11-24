@@ -280,6 +280,41 @@ def test_declared_date_column_keeps_its_text_output(route: str) -> None:
     assert got.column("d").to_pylist() == legacy.column("d").to_pylist() != rows
 
 
+@pytest.mark.parametrize("chunk", [1, 2, 100])
+def test_declared_date_column_on_the_dispatcher_matches_full_frame(chunk: int) -> None:
+    """Kills: pinning a column to `date32` from the chunk type instead of the plan shape. The
+    declared cast hands the chunked route `date32` cells, but the plan lists no native date
+    shape for the column, so its text output must leave the dispatcher as text, as on main."""
+    import tempfile
+
+    from tests.acceptance._f06_support import ISO_DATE, column, config, run, text_table, write_csv
+
+    rows = ["2026-01-01", "2026-03-04", "1999-12-31", "2001-07-15", "2010-10-10"]
+    declared = column(
+        "d",
+        "date_shift",
+        namespace="d",
+        logical_type="date",
+        parse_format=ISO_DATE,
+        error_policy="fail",
+        provider_config={"min_days": -400, "max_days": 400},
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        raw = config(
+            [declared], source_path=write_csv(Path(tmp) / "p.csv", ["d"], [[r] for r in rows])
+        )
+        tables = {"people": text_table(d=rows)}
+        kw: dict[str, Any] = {"key_provider": key_provider()}
+        base = run(raw, tables, execution_mode="full_frame", auto_chunk=False, **kw)
+        got = run(
+            raw, tables, auto_chunk=True, chunk_size_rows=chunk, auto_chunk_threshold_rows=1, **kw
+        )
+    assert got.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    want, out = base.outputs["people"], got.outputs["people"]
+    assert pa.types.is_string(out.schema.field("d").type)
+    assert out.column("d").to_pylist() == want.column("d").to_pylist() != rows
+
+
 def test_mixed_batch_dst_and_fixed_offset(tmp_path: Path) -> None:
     """One column with both ambiguous choices, a gap, an ordinary time, a null and a fixed zone."""
     from decoy_engine.execution._strategies._date_shift import _shift_zoned
