@@ -13,9 +13,16 @@ category set) never false-positives.
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
+from decoy_engine.detection.detectors import run_all_detectors
+from decoy_engine.fileaccess import FileAccessReadError
 from decoy_engine.verification.postmask import run_post_mask
-from decoy_engine.verification.postmask.residual_pii import check_residual_pii
+from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
+from decoy_engine.verification.postmask.residual_pii import (
+    check_residual_pii,
+    residual_pii_findings,
+)
 
 _EMAILS = [f"user{i}@realmail.com" for i in range(100)]
 
@@ -214,3 +221,76 @@ class TestUnknownTableWording:
         source, output = _frames(_EMAILS, synthetic)
         finding = _one(check_residual_pii(output, _cfg(None), source_frames=source))
         assert "was not configured to be masked" in finding.message
+
+
+class _CellWhoseEqualityRaises:
+    """A source cell whose comparison fails with a message that carries a value."""
+
+    def __hash__(self) -> int:
+        return 1
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self._error = error or TypeError("cannot compare secret-cell-value")
+
+    def __eq__(self, other: object) -> bool:
+        raise self._error
+
+
+def _raising_source(error: Exception | None = None):
+    cells = [_CellWhoseEqualityRaises(error) for _ in _EMAILS]
+    return {"t": pd.DataFrame({"email": cells})}
+
+
+class TestIdentityComparisonRaises:
+    def test_frame_path_comparison_raise_is_error_finding(self):
+        output = {"t": pd.DataFrame({"email": _EMAILS})}
+        finding = _one(check_residual_pii(output, _cfg("faker"), source_frames=_raising_source()))
+        assert finding.severity == "error"
+        assert "TypeError" in finding.message
+        assert "secret-cell-value" not in finding.message
+        assert "realmail.com" not in finding.message
+
+    def test_no_op_by_design_strategy_stays_quiet(self):
+        output = {"t": pd.DataFrame({"email": _EMAILS})}
+        finding = _one(
+            check_residual_pii(output, _cfg("passthrough"), source_frames=_raising_source())
+        )
+        assert finding.severity != "error"
+
+    def test_frame_path_passes_through_exception_propagates(self):
+        source = _raising_source(FileAccessReadError("sources.t.path"))
+        output = {"t": pd.DataFrame({"email": _EMAILS})}
+        with pytest.raises(FileAccessReadError):
+            check_residual_pii(output, _cfg("faker"), source_frames=source)
+
+    def test_frame_and_facts_paths_agree_on_identity_error(self):
+        output = {"t": pd.DataFrame({"email": _EMAILS})}
+        frame = check_residual_pii(output, _cfg("faker"), source_frames=_raising_source())
+        detectors = tuple(
+            DetectorRate(m.detector_id, m.match_rate, m.confidence)
+            for m in run_all_detectors(output["t"]["email"], "email")
+        )
+        facts = {
+            "t": {
+                "email": ColumnFacts(
+                    table="t",
+                    column="email",
+                    source_rows=0,
+                    output_rows=len(_EMAILS),
+                    comparable_rows=0,
+                    identical_rows=0,
+                    bytes_identical=False,
+                    source_distinct=0,
+                    output_distinct=0,
+                    detectors=detectors,
+                    identity_error="TypeError",
+                )
+            }
+        }
+        assert residual_pii_findings(facts, _cfg("faker")) == frame
+
+    def test_not_comparable_still_quiet(self):
+        source = {"t": pd.DataFrame({"email": _EMAILS[:50]})}
+        output = {"t": pd.DataFrame({"email": _EMAILS})}
+        finding = _one(check_residual_pii(output, _cfg("faker"), source_frames=source))
+        assert finding.severity != "error"

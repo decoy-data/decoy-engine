@@ -9,6 +9,10 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+### Fixed
+
+- the resident-frame residual-PII check now reports an error finding when its source comparison raises, as the batch check already did; before, the failure read as a clean check.
+
 ## [0.28.3] - 2026-11-22
 
 ### Breaking for consumers

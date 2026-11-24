@@ -50,6 +50,7 @@ import pandas as pd
 
 from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
+from decoy_engine.profiling import passes_through
 from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
@@ -179,10 +180,18 @@ def _frame_column_facts(
     share `residual_pii_findings` as the only place a finding is built."""
     series = df[col_name]
     comparable = identical = distinct = 0
+    identity_error: str | None = None
     if source_frames is not None:
-        identity = _source_identity(source_frames, table_name, col_name, series)
-        if identity is not None:
-            identical, comparable, distinct = identity
+        try:
+            identity = _source_identity(source_frames, table_name, col_name, series)
+        except Exception as exc:
+            if passes_through(exc):
+                raise
+            # Class name only: the message of a comparison error can carry a cell value.
+            identity_error = type(exc).__name__
+        else:
+            if identity is not None:
+                identical, comparable, distinct = identity
     return ColumnFacts(
         table=table_name,
         column=col_name,
@@ -197,6 +206,7 @@ def _frame_column_facts(
             DetectorRate(m.detector_id, m.match_rate, m.confidence)
             for m in run_all_detectors(series, col_name)
         ),
+        identity_error=identity_error,
     )
 
 
@@ -248,30 +258,27 @@ def _source_identity(
     Returns ``(identical_count, comparable_count, source_distinct)``. None
     when the source lacks the table/column, row counts differ (a
     row-count mismatch is policy_validation's M13 concern, not a leak
-    signal), or the comparison itself fails. Must never raise: the
-    runner's per-check catch-all would otherwise collapse every
-    residual finding into a single error row.
+    signal), or no row has both sides present. A comparison that fails
+    raises; the caller records it as the column's ``identity_error`` so
+    a crashed leak check never reads as a clean one.
     """
-    try:
-        src_df = source_frames.get(table_name)
-        if src_df is None or col_name not in src_df.columns:
-            return None
-        src_col = src_df[col_name]
-        if len(src_col) != len(out_col):
-            return None
-        # Positional comparison regardless of index shape (QA-4 F6
-        # precedent in policy_validation).
-        src = src_col.reset_index(drop=True).astype(object)
-        out = out_col.reset_index(drop=True).astype(object)
-        both_present = src.notna() & out.notna()
-        comparable = int(both_present.sum())
-        if comparable == 0:
-            return None
-        identical = int((src[both_present] == out[both_present]).sum())
-        src_distinct = int(src.nunique(dropna=True))
-        return (identical, comparable, src_distinct)
-    except Exception:
+    src_df = source_frames.get(table_name)
+    if src_df is None or col_name not in src_df.columns:
         return None
+    src_col = src_df[col_name]
+    if len(src_col) != len(out_col):
+        return None
+    # Positional comparison regardless of index shape (QA-4 F6
+    # precedent in policy_validation).
+    src = src_col.reset_index(drop=True).astype(object)
+    out = out_col.reset_index(drop=True).astype(object)
+    both_present = src.notna() & out.notna()
+    comparable = int(both_present.sum())
+    if comparable == 0:
+        return None
+    identical = int((src[both_present] == out[both_present]).sum())
+    src_distinct = int(src.nunique(dropna=True))
+    return (identical, comparable, src_distinct)
 
 
 # With no config entry for the table (no `--config`, or a table the config omits) the engine
