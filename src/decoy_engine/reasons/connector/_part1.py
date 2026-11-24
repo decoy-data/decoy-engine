@@ -22,6 +22,7 @@ __all__ = [
     "RELATION_SHAPE_CHANGED",
     "SAMPLE_WINDOW_EXCEEDED",
     "SOURCE_UNREACHABLE",
+    "STORED_CONTENT_ENCODING",
     "UNSUPPORTED_COLUMN_TYPE",
     "VALUE_GUARD_FAILED",
     "VALUE_NOT_REPRESENTABLE",
@@ -81,6 +82,17 @@ _d = _catalog.connector("SampleWindowExceeded")
 SAMPLE_WINDOW_EXCEEDED = _d(
     "sample_window_exceeded",
     "The sample rows were not found within the sample read limit.",
+    outcome=_USAGE,
+    retry=_FIX,
+    since=UNRELEASED,
+)
+
+_d = _catalog.connector("StoredContentEncoding")
+
+# Ranges of a gzip-stored GCS object are ranges of the compressed bytes, so none can be checked.
+STORED_CONTENT_ENCODING = _d(
+    "stored_content_encoding",
+    "The object is stored with a content encoding and cannot be read in checked ranges.",
     outcome=_USAGE,
     retry=_FIX,
     since=UNRELEASED,

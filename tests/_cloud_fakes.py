@@ -232,9 +232,10 @@ class FakeGcsSession:
     """The transport under a real ``storage.Client``: metadata JSON and ranged media GETs.
 
     ``ignore_range=True`` answers a media GET with 200 and a lazy 64 MiB body, no
-    Content-Range and no Content-Length. ``reply(start, end, size)``
-    returns headers laid over a 206 answer, to serve a wrong Content-Range or a
-    Content-Encoding. A ``generation`` query
+    Content-Range and no Content-Length. ``stored_gzip=True`` answers as GCS does for an
+    object uploaded with ``gsutil cp -Z``: 200, ``X-Goog-Stored-Content-Encoding: gzip`` and
+    the whole compressed object. ``reply(start, end, size)`` returns headers laid over a 206
+    answer, to serve a wrong Content-Range or a Content-Encoding. A ``generation`` query
     parameter that names a generation other than the current one answers 404, as GCS does.
     ``statuses`` is a queue of statuses served to media GETs before the normal answer.
     ``on_request`` sees each call first and may raise. ``tamper(n, part)`` rewrites the body
@@ -249,6 +250,7 @@ class FakeGcsSession:
         ledger: Ledger | None = None,
         *,
         ignore_range: bool = False,
+        stored_gzip: bool = False,
         reply: Callable[[int, int, int], dict[str, str]] | None = None,
         statuses: list[int] | None = None,
         change_after: int | None = None,
@@ -258,7 +260,7 @@ class FakeGcsSession:
         tamper: Callable[[int, bytes], bytes] | None = None,
     ) -> None:
         self.obj, self.ledger, self.ignore_range = obj, ledger or Ledger(), ignore_range
-        self._tamper, self._reply = tamper, reply
+        self._tamper, self._stored_gzip, self._reply = tamper, stored_gzip, reply
         self.log: list[str] = []
         self.statuses = list(statuses or [])
         self._change_after, self._on_request = change_after, on_request
@@ -312,6 +314,9 @@ class FakeGcsSession:
             return Response(self.ledger, 412, {}, Body(self.ledger, b""))
         size = len(self.obj.data)
         span = _span(headers.get("Range"), size)
+        if self._stored_gzip:
+            stored = {"X-Goog-Stored-Content-Encoding": "gzip", "Content-Encoding": "gzip"}
+            return Response(self.ledger, 200, stored, Body(self.ledger, length=64 * MiB))
         if self.ignore_range or span is None:
             return Response(self.ledger, 200, {}, Body(self.ledger, length=64 * MiB))
         start, end = span

@@ -9,3 +9,5 @@ error. A GCS media response that ignores the range or arrives transcoded is refu
 body is read. The CSV sample window now stops at 64 MiB with `connector/sample_window_exceeded`
 instead of growing to the whole object. The GCS connector's `open` uses the same pinned ranged
 read. SFTP reads stay at 1 MiB.
+A GCS object stored with a content encoding (for example uploaded with `gsutil cp -Z`) is
+refused with `connector/stored_content_encoding`, not a generic GCS error.

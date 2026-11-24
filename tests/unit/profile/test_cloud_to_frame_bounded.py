@@ -205,6 +205,13 @@ def test_gcs_pinned_read_of_replaced_generation_is_source_changed(
 
 
 @pytest.mark.parametrize("kind", _GCS_READS)
+def test_gcs_stored_gzip_object_refused(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    _, err = _gcs_refused(monkeypatch, kind, stored_gzip=True)
+    assert err.kind == "rejected"
+    assert getattr(err, "code", None) == reasons.connector.STORED_CONTENT_ENCODING
+
+
+@pytest.mark.parametrize("kind", _GCS_READS)
 def test_gcs_ranged_control_reads_exact_bytes(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     data = _small_parquet() if kind == "parquet_to_frame" else _SMALL_CSV
     ledger, _ = _serve(monkeypatch, "gcs", data)

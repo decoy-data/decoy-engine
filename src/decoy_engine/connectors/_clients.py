@@ -33,6 +33,7 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from decoy_engine.errors import ConnectorErrorKind
+from decoy_engine.reasons import connector as _connector_reasons
 from decoy_engine.sdk import ConnectorError, PermanentError, TransientError
 
 # Read at call time, never bound into defaults, so tests can shorten them.
@@ -196,6 +197,19 @@ def gcs_list_blobs(bucket: Any, *, prefix: str | None) -> Iterator[Any]:
         yield item
 
 
+class StoredContentEncoding(PermanentError):  # noqa: N818 - coded condition
+    """A GCS object stored compressed: its byte ranges are not ranges of the data."""
+
+    code = _connector_reasons.STORED_CONTENT_ENCODING
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The GCS object is stored with a content encoding such as gzip, so it cannot be "
+            "read in checked byte ranges; store it uncompressed or profile a local copy.",
+            kind="rejected",
+        )
+
+
 def gcs_reload(blob: Any) -> None:
     _guard(blob.reload, timeout=GCS_TIMEOUT, retry=gcs_retry())
 
@@ -244,6 +258,8 @@ def _ranged_body(response: Any, start: int, end: int, size: int) -> bytes:
         # 429 and 5xx come back as the types gcs_retry() retries.
         raise from_http_status(status, "GCS media read failed")
     headers = response.headers
+    if (headers.get("X-Goog-Stored-Content-Encoding") or "identity") != "identity":
+        raise StoredContentEncoding()
     encoding = headers.get("Content-Encoding") or "identity"
     exact = headers.get("Content-Range") == f"bytes {start}-{end}/{size}"
     if status != 206 or encoding != "identity" or not exact:
