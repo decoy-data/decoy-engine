@@ -110,7 +110,13 @@ def test_fk_child_bypasses_derived_creator() -> None:
         }
     )
     seed_plan = ws.plan([("first_name", ws.bundle()), ("email", ws.derived('concat(other, "#")'))])
-    out = ws.run(seed_plan, table, ws.fk_graph("first_name", "email"))
+    graph = ws.fk_graph("first_name", "email")
+    # The configured creator still forms today's cycle, so the run uses the fallback order.
+    from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.execution.work_order import compile_work_order
+
+    assert compile_work_order(build_work_list(seed_plan, ws.REG), graph).fallback
+    out = ws.run(seed_plan, table, graph)
     assert out.column("email").to_pylist() == out.column("first_name").to_pylist()
     assert out.column("last_name").to_pylist() == ws.bundle_oracle(FIRST)["last_name"]
 
@@ -474,3 +480,22 @@ def test_fk_composite_provider_snapshots_child_ref(run: object) -> None:
     out = run(seed_plan, table, graph, bound=(("ref",),))  # type: ignore[operator]
     assert out.column("ref").to_pylist() == ["X", "X"]
     assert out.column("z_secret").to_pylist() == ["REDACTED", "two"]
+
+
+def test_a_plan_that_orders_today_keeps_its_order_with_an_fk_child_creator() -> None:
+    """The compatibility sort keeps the configured creator's driver edge for an FK child: `email`
+    still waits for the node that writes `z_other`, as the unchanged sort has it."""
+    from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.execution.work_order import compile_work_order
+
+    seed_plan = ws.plan(
+        [
+            ("email", ws.derived('concat(z_other, "#")')),
+            ("z_other", ws.seed("redact")),
+            ("parent", ws.seed("redact")),
+        ]
+    )
+    order = compile_work_order(build_work_list(seed_plan, ws.REG), ws.fk_graph("parent", "email"))
+    names = [n.columns[0] for n in order.ordered]
+    assert not order.fallback
+    assert names.index("z_other") < names.index("email")
