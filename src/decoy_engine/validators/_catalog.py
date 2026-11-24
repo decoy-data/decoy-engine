@@ -19,81 +19,142 @@ No check-digit logic is re-implemented here.
 
 Null values in any column are skipped: a null is not a Luhn/NPI/IBAN/VIN
 violation. This matches the engine's treatment of nullable FKs.
+
+Each validator here is a fold (`ColumnFold`): it takes row spans one at a time and keeps, per
+configured column, an exact failure count and the first `FINDING_INDEX_CAP` failing positions.
+The ``validate_<name>`` functions stay as the registry entry points: they open the fold, feed
+whole tables as one span each and finish.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import pyarrow as pa
 
 import decoy_engine.checksums as _checksums
-from decoy_engine.validators._types import ValidatorFinding
+from decoy_engine import reasons
+from decoy_engine.validators._fold import (
+    CappedIndices,
+    FoldResult,
+    finding_index_cap,
+    run_whole,
+)
+from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
 # ---------------------------------------------------------------------------
-# Check-digit validators (luhn / npi / iban / vin)
+# The per-column fold shared by the check-digit validators and `_generic.py`
 # ---------------------------------------------------------------------------
 
 
-def _check_digit_validator(
-    scheme: str,
-    outputs: dict[str, pa.Table],
-    entry: dict[str, Any],
-) -> tuple[ValidatorFinding, ...]:
-    """Generic column-level check-digit validator.
+class ColumnFold:
+    """A row-local check over the columns named in ``entry["columns"]``.
 
-    Iterates over every (table, column) pair in ``entry["columns"]``, reads
-    each non-null value from the output table, and calls
-    ``checksums.validate(scheme, value)``. Returns one ``ValidatorFinding``
-    per column that contains at least one failing row.
-
-    Null values are skipped (they are not treated as check-digit failures).
-
-    Args:
-        scheme: Checksum scheme name passed to ``checksums.validate()``.
-        outputs: Read-only pipeline output tables; must not be mutated.
-        entry: Per-validator config block with ``columns`` sub-key.
-
-    Returns:
-        Tuple of ValidatorFinding (empty tuple when all values pass).
+    A subclass gives the validator name, ``failing_positions`` (the local row positions of a
+    value list that fail) and ``describe`` (the finding text built from the total count). Nulls
+    are the subclass's call. The fold keeps one tally per configured (table, occurrence), so a
+    column listed twice gives two findings, as the whole-table call did.
     """
-    columns_map: dict[str, list[str]] = entry.get("columns") or {}
-    findings: list[ValidatorFinding] = []
 
-    for table_name, col_names in columns_map.items():
-        table = outputs.get(table_name)
-        if table is None:
-            continue
-        for col_name in col_names:
-            if col_name not in table.schema.names:
+    name: str
+
+    def __init__(self, entry: dict[str, Any], *, cap: int | None) -> None:
+        self._columns: dict[str, list[str]] = entry.get("columns") or {}
+        self._cap = cap
+        self._tallies: dict[tuple[str, int], CappedIndices] = {}
+        self._present: set[tuple[str, int]] = set()
+        self._observed: set[str] = set()
+
+    def failing_positions(self, values: list[Any]) -> Iterable[int]:
+        raise NotImplementedError
+
+    def describe(self, count: int, table: str, column: str) -> str:
+        raise NotImplementedError
+
+    def add(self, table: str, span: RowSpan) -> None:
+        columns = self._columns.get(table)
+        if not columns:
+            return
+        self._observed.add(table)
+        names = span.output.schema.names
+        for occurrence, column in enumerate(columns):
+            if column not in names:
                 continue
-            col: pa.ChunkedArray = table.column(col_name)
-            values: list[Any] = col.to_pylist()
-            failing: list[int] = []
-            for i, val in enumerate(values):
-                if val is None:
-                    continue  # nulls are not a check-digit violation
-                try:
-                    valid = _checksums.validate(scheme, str(val))
-                except ValueError:
-                    valid = False
-                if not valid:
-                    failing.append(i)
-            if failing:
+            key = (table, occurrence)
+            self._present.add(key)
+            tally = self._tallies.setdefault(key, CappedIndices(self._cap))
+            for position in self.failing_positions(span.output.column(column).to_pylist()):
+                tally.add(span.offset + position)
+
+    def table_complete(self, table: str) -> None:
+        return None
+
+    def paired_tables(self) -> frozenset[str]:
+        return frozenset()
+
+    def finish(self) -> FoldResult:
+        findings: list[ValidatorFinding] = []
+        checked: list[tuple[str, str | None]] = []
+        skipped: list[SkippedColumn] = []
+        for table, columns in self._columns.items():
+            if columns and table not in self._observed:
+                skipped.append(
+                    SkippedColumn(table, None, reasons.warning.VALIDATOR_SKIP_MISSING_TABLE)
+                )
+                continue
+            for occurrence, column in enumerate(columns):
+                key = (table, occurrence)
+                if key not in self._present:
+                    skipped.append(
+                        SkippedColumn(table, column, reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN)
+                    )
+                    continue
+                checked.append((table, column))
+                tally = self._tallies.get(key)
+                if tally is None or tally.count == 0:
+                    continue
                 findings.append(
                     ValidatorFinding(
-                        validator=scheme,
-                        table=table_name,
-                        column=col_name,
-                        failing_row_indices=tuple(failing),
-                        detail=(
-                            f"{len(failing)} row(s) in {table_name}.{col_name} "
-                            f"failed {scheme} check-digit validation"
-                        ),
+                        validator=self.name,
+                        table=table,
+                        column=column,
+                        failing_row_indices=tally.indices(),
+                        detail=self.describe(tally.count, table, column),
+                        failing_row_count=tally.count,
                     )
                 )
+        return FoldResult(tuple(findings), tuple(checked), tuple(skipped))
 
-    return tuple(findings)
+
+class _CheckDigitFold(ColumnFold):
+    """Check-digit validation: delegates every value to ``checksums.validate(scheme, value)``.
+
+    Null values are skipped (they are not treated as check-digit failures).
+    """
+
+    def __init__(self, scheme: str, entry: dict[str, Any], *, cap: int | None) -> None:
+        super().__init__(entry, cap=cap)
+        self.name = scheme
+
+    def failing_positions(self, values: list[Any]) -> Iterable[int]:
+        for i, val in enumerate(values):
+            if val is None:
+                continue  # nulls are not a check-digit violation
+            try:
+                valid = _checksums.validate(self.name, str(val))
+            except ValueError:
+                valid = False
+            if not valid:
+                yield i
+
+    def describe(self, count: int, table: str, column: str) -> str:
+        return f"{count} row(s) in {table}.{column} failed {self.name} check-digit validation"
+
+
+def check_digit_fold(scheme: str, entry: dict[str, Any], config: dict[str, Any]) -> _CheckDigitFold:
+    """The fold for one check-digit scheme, capped by the config's quarantine setting."""
+    return _CheckDigitFold(scheme, entry, cap=finding_index_cap(config))
 
 
 def validate_luhn(
@@ -112,13 +173,13 @@ def validate_luhn(
     Args:
         outputs: Read-only pipeline outputs.
         entry: Config block for this validator instance.
-        config: Full pipeline config dict (unused by this validator).
+        config: Full pipeline config dict (read for the quarantine setting only).
         sources: Unused by this validator (registry contract, D2).
 
     Returns:
-        Tuple of ValidatorFinding for each column with Luhn failures.
+        Tuple of ValidatorFinding for each column with LUHN failures.
     """
-    return _check_digit_validator("luhn", outputs, entry)
+    return run_whole(check_digit_fold("luhn", entry, config), outputs).findings
 
 
 def validate_npi(
@@ -137,13 +198,13 @@ def validate_npi(
     Args:
         outputs: Read-only pipeline outputs.
         entry: Config block for this validator instance.
-        config: Full pipeline config dict (unused by this validator).
+        config: Full pipeline config dict (read for the quarantine setting only).
         sources: Unused by this validator (registry contract, D2).
 
     Returns:
         Tuple of ValidatorFinding for each column with NPI failures.
     """
-    return _check_digit_validator("npi", outputs, entry)
+    return run_whole(check_digit_fold("npi", entry, config), outputs).findings
 
 
 def validate_iban(
@@ -162,13 +223,13 @@ def validate_iban(
     Args:
         outputs: Read-only pipeline outputs.
         entry: Config block for this validator instance.
-        config: Full pipeline config dict (unused by this validator).
+        config: Full pipeline config dict (read for the quarantine setting only).
         sources: Unused by this validator (registry contract, D2).
 
     Returns:
         Tuple of ValidatorFinding for each column with IBAN failures.
     """
-    return _check_digit_validator("iban", outputs, entry)
+    return run_whole(check_digit_fold("iban", entry, config), outputs).findings
 
 
 def validate_vin(
@@ -187,10 +248,10 @@ def validate_vin(
     Args:
         outputs: Read-only pipeline outputs.
         entry: Config block for this validator instance.
-        config: Full pipeline config dict (unused by this validator).
+        config: Full pipeline config dict (read for the quarantine setting only).
         sources: Unused by this validator (registry contract, D2).
 
     Returns:
         Tuple of ValidatorFinding for each column with VIN failures.
     """
-    return _check_digit_validator("vin", outputs, entry)
+    return run_whole(check_digit_fold("vin", entry, config), outputs).findings
