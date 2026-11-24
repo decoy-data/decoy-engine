@@ -43,6 +43,12 @@ from decoy_engine.publication._sink_state import (
     SinkStateMachine,
     recover,
 )
+from decoy_engine.publication._stage import (
+    DeliveryReceipt,
+    DeliveryStage,
+    StageDecision,
+    StagedMember,
+)
 from decoy_engine.publication._types import (
     MAX_COUNT,
     OPERATION_ID_PATTERN,
@@ -72,6 +78,8 @@ __all__ = [
     "ArtifactSummary",
     "CommitReceipt",
     "CurrentPointer",
+    "DeliveryReceipt",
+    "DeliveryStage",
     "Descriptor",
     "DescriptorVault",
     "Exit",
@@ -87,6 +95,8 @@ __all__ = [
     "PublicationRequest",
     "SinkState",
     "SinkStateMachine",
+    "StageDecision",
+    "StagedMember",
     "VaultBinding",
     "build_descriptor",
     "check_request",

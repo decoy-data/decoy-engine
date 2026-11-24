@@ -137,6 +137,15 @@ def import_layer_keys(rel: str) -> Callable[[], set[str]]:
     return keys
 
 
+def exception_text_copy_census() -> dict[str, int]:
+    """Live engine exception-text copies: site key to multiplicity (the entry's ``max``)."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tests.sentry.safe_output._copies import census, scan_tree
+
+    return census(scan_tree(ROOT / "src" / "decoy_engine"))
+
+
 @dataclass(frozen=True)
 class Source:
     sentry_id: str
@@ -149,6 +158,12 @@ class Source:
 
 F29 = "tests/fixtures/f29"
 SOURCES: tuple[Source, ...] = (
+    Source(
+        "engine-exception-text-copies",
+        "safe_output/test_exception_text_copy.py",
+        lambda: set(exception_text_copy_census()),
+        maxes=exception_text_copy_census,
+    ),
     Source(
         "f29-reason-baseline",
         f"{F29}/reason-baseline.json",

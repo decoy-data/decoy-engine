@@ -86,6 +86,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("errors.py", "FpeUnencryptableError.__init__"): _CTOR,
     ("errors.py", "PipelineValidationError.__init__"): _CTOR,
     ("errors.py", "ValidationError.__init__"): _CTOR,
+    ("errors.py", "ValidatorStateError.__init__"): _CTOR,
     ("_execution_error.py", "ExecutionError.__init__"): _CTOR,
     ("execution/_errors.py", "StrategyError.__init__"): _CTOR,
     ("execution/_mixed_admission.py", "MixedDeclineError.__init__"): _CTOR,
@@ -115,6 +116,13 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("delivery/resume/_plan.py", "ResumeRefusedError.__init__"): _CTOR,
     ("publication/_types.py", "raise_for_outcome"): (
         "re-raises a CommitReceipt's code; the receipt accepts only a registered `decoy` code"
+    ),
+    ("publication/_publish.py", "_locked"): (
+        "forwards the registered code `lock_reason` picks from the one lock-failure map"
+    ),
+    ("publication/_stage.py", "_stage_failure"): (
+        "raises the registry symbol `PUBLICATION_FAILED` (a module alias) as an exact `str`; "
+        "PublicationFailed takes only a registered `decoy` code"
     ),
     ("publication/_sink_state.py", "recover"): (
         "builds the RECOVERING refusal receipt from the registry symbol "
