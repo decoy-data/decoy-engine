@@ -8,20 +8,18 @@ operator is one more entry in a dict and not another copy of the routing.
 A descriptor carries:
 
 - `load_kernel`: the one-time, run-scoped companion load (raises
-  `CryptoExtensionUnavailableError` when the companion is absent). Each strategy loads its own,
-  so one strategy's load failure never degrades another.
-- `admit`: CONFIG-aware. It sees the resolved column seed, not only the Arrow type, because a
-  configuration can be un-nativeable (fpe `checksum`) whatever the type is.
+  `CryptoExtensionUnavailableError` when absent); each strategy loads its own.
+- `admit`: CONFIG-aware: it sees the resolved seed, because a configuration can be
+  un-nativeable (fpe `checksum`) whatever the type is.
 - `apply`: the kernel call, returning values plus the kernel's own per-row error channel.
 - `fail_closed`: turns a non-empty error channel into the strategy's coded exception, raised
   by the seam before any value is returned, so a failed table publishes nothing.
 - `warn`: the handler-side residual-warning pass for operators whose kernel computes none.
 
-hash reuses the out-of-core entry points unchanged. fpe reuses the chunked route's compiled FF1
-kernel, its checksum-first admission rule (`native/_real_type_admission.py`), its fail-closed
-helper and its warning helper (`native/_fpe_route.py`); FF1 itself is not re-implemented here.
-
-Reason codes carry the strategy, the column name and the Arrow type only, never a cell value.
+hash reuses the out-of-core entry points unchanged. fpe reuses the chunked route's FF1 kernel,
+checksum-first admission (`native/_real_type_admission.py`) and fail-closed and warning helpers
+(`native/_fpe_route.py`); FF1 itself is not re-implemented here. Reason codes carry the
+strategy, the column name and the Arrow type only, never a cell value.
 """
 
 from __future__ import annotations
@@ -65,6 +63,7 @@ from decoy_engine.execution.native._real_type_admission import (
 )
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
 from decoy_engine.execution.native._text_redact_kernel import load_text_redact_kernel
+from decoy_engine.execution.native._when_admission import when_target_rejection
 from decoy_engine.execution.out_of_core._bucket_native import (
     decline_reason as bucket_decline_reason,
 )
@@ -398,9 +397,10 @@ def date_shift_admit(
     Adapts `date_shift_config_rejection` to the SEQ admit signature: a one-field empty table
     stands in for the resident source, so the type gate sees the pinned Arrow type. `shape` is
     the plan's typed date shape (None for text and an F06-declared date); a typed column takes
-    the typed gate, and a typed `when:` stays on Python with the other routes' code."""
-    if shape is not None and seed.when is not None:
-        return f"{reasons.runtime.WHEN_PREDICATE_NOT_NATIVE}:{column}"
+    the typed gate, and a typed `when:` asks the other routes' target rule."""
+    typed_when = shape is not None and seed.when is not None
+    if typed_when and (why := when_target_rejection(column, input_type)):
+        return why
     return date_shift_config_rejection(
         column,
         column,

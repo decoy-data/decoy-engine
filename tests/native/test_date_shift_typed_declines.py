@@ -181,3 +181,22 @@ def test_t9_control_the_admitted_typed_column_runs_native_on_both_routes(tmp_pat
     assert on.outputs[TABLE].equals(off.outputs[TABLE])
     seq = _sequential([_ds(), *_PASS], table, tmp_path)
     assert [b for b, _ in _sequential_backends(seq)] == ["rust_companion"]
+
+
+def test_one_when_target_rule_serves_every_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESIGN-a (Codex a2): the `when:` target rule has one owner. The unified and chunked
+    verdict (`when_native_rejection`) and the sequential admit both ask it."""
+    import inspect
+    from types import SimpleNamespace
+
+    from decoy_engine.contracts.column_shape import ColumnShape
+    from decoy_engine.execution import _sequential_native_ops as ops
+    from decoy_engine.execution.native import _when_admission as wa
+
+    assert wa.when_target_rejection("d", pa.date32()) == "when_predicate_not_native:d"
+    assert wa.when_target_rejection("d", None) == "when_predicate_not_native:d"
+    assert wa.when_target_rejection("d", pa.string()) is None
+    assert "when_target_rejection(" in inspect.getsource(wa.when_native_rejection)
+    monkeypatch.setattr(ops, "when_target_rejection", lambda column, _t: f"probe:{column}")
+    seed: Any = SimpleNamespace(when="x")
+    assert ops.date_shift_admit("d", pa.date32(), seed, ColumnShape.DATE) == "probe:d"
