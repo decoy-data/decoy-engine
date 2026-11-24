@@ -322,10 +322,12 @@ The tokenizer-specific `tests/native/test_chunked_entry_rev9_read.py::test_predi
 
 **A1.5 Placement and size.** The existing Placement row for `test_when_single_reader.py` covers AT-S1e. AT-S1f extends existing native and execution test modules and adds no file. `_column_access.py` changes only `_when`; the tokenizer loop remains. No ceiling rises.
 
-## Write and ordering model (revision after #783 round 5)
+## Write and ordering model
 
-This revision governs S2 where sections 1 and 3 describe ordering. Code references use engine head
-`d74afd71c`. Execution paths below are relative to `src/decoy_engine/execution/`.
+**Invariant.** Every config that runs today keeps byte-identical output. Only configs that raise today get new behavior.
+
+This model governs the remaining S2 ordering work. The baseline is engine `42436c973`.
+Execution paths below are relative to `src/decoy_engine/execution/`.
 
 ### One dispatch contract
 
@@ -337,7 +339,7 @@ A write means a column whose cells dispatch may replace, including writes limite
 
 | Selected operation | Writes and reads |
 | --- | --- |
-| FK resolution, checked first | Start each child key component at its source value. Overlay earlier child commits in dispatch rank order on their selected rows. On a plan that orders today, include every earlier commit. If the old sort raises a cycle, skip child commits from any node that supplies a final key component for any declared parent. Apply this skip once to the whole lookup. Merge parent maps in declared edge order. The first map containing a key wins. Look up one child tuple per row. Apply the shared orphan policy only on a miss. Write exactly the child tuple. See `_pandas_adapter.py:533–566`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
+| FK resolution, checked first | Resolve one child tuple per row against the existing parent maps. Apply the shared orphan policy on a miss. Write exactly the child tuple. The child input rule below covers cycles. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375` and `:533–566`. |
 | Scalar | Writes its target. A nested handler writes back its outer column. A multi-column `joint_mask` writes exactly its configured outputs. Its mask key reads source. A scalar `date_shift` with `group_by` needs the original group key in its table. Supply the aligned snapshot at `_strategies/_date_shift.py:190`. See `_column_access.py:347` and `_strategies/_joint_mask.py:119`. |
 | Creating scalar | Writes its target and can introduce it. Take masked drivers from the strategy declaration. This covers `derived`, `derived_aggregate`, `grouped_series`, `windowed_date` and `group_key`. See `_column_access.py:339` and `_column_access.py:409`. |
 | Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity. A deterministic bundle reads the first sorted group column at its dispatch rank. See `_column_access.py:266`, `_runner.py:113–115` (grouping), `_runner.py:127–136` (construction) and `_strategies/_composite.py:130`. |
@@ -381,14 +383,30 @@ own target waits for the version just before its write. For example, a later unc
 A replacement that never reads its target can skip an unused prior version. Its earlier handler
 still runs.
 
-Pair each original parent tuple with the selected parent versions from the same row.
-For a shared parent and child column in the same table, read the version just before this FK commits.
-Exclude the FK's own write from its wait set. Other parent components normally use their final versions.
-Reuse a cached map only for the same parent tuple and the same versions.
+On a successful sort, dispatch FKs in today's order against the same visible writes.
+The first child to request a parent map builds it from the source snapshots and the parent frame
+visible at that point. Keep the existing cache key `(parent_table, parent_columns)`.
+Later children reuse that first map even if another writer has since changed a parent column
+(`_pandas_adapter.py:620`). Keep the existing FK ordering edges. Add no wait for final parent writers.
+This also preserves self-FKs, mutual composite FKs and bundles keyed by a resolved child.
 
-On a plan that orders today, keep the bundle's read of the resolved child if it uses that child as its key.
-If waiting for the bundle would close a cycle, use the parent versions visible at the FK's old rank.
-The FK commits first. The bundle then reads the committed key. Test 19 pins this known limit.
+On a successful sort, the FK reads every earlier write to its child tuple.
+Only when the old sort raises a cycle, assemble the child tuple from source and earlier
+child writes in fallback rank order. Keep each write's selected rows. Skip a child write
+if its node also supplies a parent key component for this lookup. Apply that choice
+once across all declared parents. The skip affects only the child input. The writer
+still commits its parent output. Build the map at the FK's turn in the fallback order.
+
+In test 3 the bundle supplies the parent first_name. Skip its email write when assembling
+the child key. The original email then resolves to the bundle's masked first_name.
+In test 17 the earlier city writer supplies no parent key. Keep its email write and
+skip the bundle's. The passthrough variant sorts today, so it reads the bundle email.
+Test 16 also sorts today. Its child sees the joint writer's PA and preserves it on a miss.
+
+Merge maps in graph order. The graph builder sorts by parent table and parent columns,
+then by child table and child columns (`relationships/_graph.py:250` under `src/decoy_engine/`).
+The adapter keeps the first match with `setdefault` (`_pandas_adapter.py:529`).
+Look up the same assembled child tuple for every parent.
 
 An unwritten input uses the source version. Source reads add no writer edges. Supply required
 anchor snapshots before evaluation, including the original group key for `date_shift`.
@@ -438,11 +456,10 @@ first kill the specified mutation, then restore it. Run the same tests green on 
 1. **V1** `test_coherent_member_reads_generated_email`. Put summary in first_name's
    coherent group. Derive summary from email plus "!". Every summary must equal the output
    email plus "!" and differ from the source email plus "!".
-2. **V1** `test_fk_reads_final_bundle_surname`. Derive last_name from an unrelated input.
-   Also generate it in the bundle. Use distinct original surnames. Permute their order in a_ref.
-   Assert each child equals the generated surname for its original parent key and differs
-   from the intermediate derived value. Using final keys on both sides of the parent map
-   must fail that assertion.
+2. **V1** Characterize the existing surname fixture in `test_write_order.py`.
+   The queue runs derived last_name, then a_ref, then the bundle. Pin a_ref to
+   `[O2?, O0?, O3?, O1?]`. Pin last_name to the fixed-seed bundle oracle.
+   Remapping a_ref to the bundle surnames must fail this test.
 3. **V1** `test_fk_child_bypasses_derived_creator`. Resolve email from first_name while
    its configured derived expression names an unrelated column. Keep the cycle fixture.
    Source email holds the original first_name keys in row order. The bundle writes
@@ -461,9 +478,10 @@ first kill the specified mutation, then restore it. Run the same tests green on 
    Capture the real dependency map during the run. Include a second table's reader in the
    planning probe and assert it has no edge from z_stub. Make the two assertions fail by
    removing wildcard lookup and by pooling wildcards across tables, respectively.
-7. **V1** `test_renaming_child_preserves_output`. Run the surname fixture with a_ref,
-   then z_ref. Rename all associated references, hold seeds and namespace fixed, undo the
-   output rename and compare every column and row. Both runs must match the parent oracle.
+7. **V1** Run test 2 with a_ref and z_ref. Hold the seed and namespace fixed.
+   Pin a_ref to the list in test 2. The queue runs z_ref after the bundle.
+   Expect z_ref to contain bundle surnames from rows 2, 0, 3 and 1, in that order.
+   Compare every other output column across the two runs.
 
 8. **V1** `test_overlapping_derived_and_joint_gates`. Declare derived `state = concat(city, "!")`
    first. Then declare a joint mask on `city` that writes both city and state. Use two source
@@ -538,40 +556,33 @@ first kill the specified mutation, then restore it. Run the same tests green on 
     and managers [2, 1, 2, 1] as strings. Derive id as label plus "!".
     Use labels [a1, a2, b1, b2]. Pin the successful output at `42436c973`.
     Tenant and label keep their input values. Id is [a1!, a2!, b1!, b2!].
-    Manager is [a2!, a1!, b2!, b1!]. Waiting on the FK's tenant commit prevents this run.
+    Manager is [a2!, a1!, b2!, b1!]. The map sees tenant before the FK writes it.
 19. **V1** `test_bundle_keys_on_resolved_fk_child`. Repeat test 2 with
     `coherent_with=("a_ref",)`. Bind the sorted bundle group to the same namespace.
     At `42436c973`, a_ref is [O2?, O0?, O3?, O1?]. Assert that exact list.
     Compare first_name, last_name and email with the fixed-seed bundle oracle keyed by that list.
-    Assert the child values are absent from final last_name. Waiting for the bundle rejects the job.
+    Assert the child values are absent from final last_name. The bundle runs after the FK.
     Reading source a_ref instead changes all three generated columns.
 20. **V1** `test_multi_parent_fk_uses_one_child_tuple`. Extend the cycle in test 3.
     Use source first_name [F0, F1, F2, F3], email [F0, S, miss, F3] and second [F0, S, Q, R].
     Derive second from [O0, O1, O2, O3] plus "!". Declare first_name and second as parents of email.
     Only the bundle writes both a parent key and email. Use PRESERVE.
     Let G0 and G3 be the generated first names for F0 and F3 from the bundle oracle.
-    With first_name declared first, assert email is [G0, O1!, miss, G3].
-    Reverse the edges and assert [O0!, O1!, miss, G3]. Both orders raise
-    `cyclic_work_ordering` at `42436c973`. Using generated email for the second
-    parent loses its S match. Replacing an existing map entry reverses the F0 winner.
+    Build the graph from each declaration order. In both runs, first_name sorts before second.
+    Assert email is `[G0, O1!, miss, G3]` in both. F0 matches both maps and first_name wins.
+    S matches only second. The old sort raises `cyclic_work_ordering` for this fixture.
 
 ### Placement and removal
 
-At `42436c973`, the FK edge for a_ref points to the derived last_name node.
-The ready queue places a_ref before the bundle. Test 2 gets the intermediate
-surname. In test 7, z_ref runs after the bundle and gets the final surname.
-Keep commit ranks fixed. The only output correction for a job that runs today is the
-independent surname lookup in tests 2 and 7. Correct a matched child's intermediate
-surname only when it is absent from the final parent column. Use the final surname
-from the same parent row. Preserve a child already present in the final parent column,
-including on a mixed input. Keep existing orphan outcomes. The z_ref run already has
-the final surname. Record the a_ref correction under Fixed in the CHANGELOG.
-Test 19 retains today's order and output. Its child still points to an intermediate
-surname because the final surname depends on that resolved child.
+**V1 known defect.** The a_ref values in tests 2 and 7 can be absent from the final
+last_name column. Preserve this output in S2. The orchestrator files the separate
+row `FK-FINAL-PARENT-READ` as a 1.x candidate.
 
 Move existing code before adding logic. Current sizes and ceilings are
 `_runner.py` 598/600, `_when_gate.py` 600/600, `_pandas_adapter.py` 669/700
 and `_sequential.py` 677/680. Put the shared code in a named execution subpackage.
+Limit `work_order` to ranks, resolved input dependencies and output commits needed below.
+Keep FK map construction, merging and cache ownership in the current FK path.
 Expose shared entry points through `execution/work_order/__init__.py`.
 
 | Location | Builder change |
