@@ -144,13 +144,12 @@ def _unreadable_message(shown: str, locator: str, declared: str, cause_type: str
 
 def statistical_refusal_text(code: str, declared: str) -> str:
     """The text a compile refusal of a statistical column carries: the registry summary, so no
-    exception text reaches it. An unreadable snapshot also names the shown file and, for a
-    relative value, the fixed rule hint; the config-derived path stays out."""
+    exception text reaches it. An unreadable snapshot gets fixed text and, for a relative value,
+    the fixed rule hint; the declared value and the resolved path are config-derived and stay out."""
     summary: str = reasons.lookup(code)[0].summary
     if code != reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE:
         return summary
-    shown = fileaccess.shown(declared, fileaccess.position_key("snapshot_file"))
-    text = f"snapshot_file {shown!r} could not be read."
+    text = "snapshot_file could not be read."
     if not os.path.isabs(declared):
         text += " Relative snapshot_file paths resolve against the config file's folder."
     return text
