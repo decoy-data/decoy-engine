@@ -111,9 +111,12 @@ def selected_positions(mask: pd.Series[Any]) -> np.ndarray[Any, Any]:
 
 
 def gated_context(
-    ctx: StrategyContext, column: str, positions: np.ndarray[Any, Any]
+    ctx: StrategyContext,
+    column: str,
+    positions: np.ndarray[Any, Any],
+    source_row_count: int,
 ) -> StrategyContext:
-    """A one-call copy of `ctx` carrying the gate's full-table row positions.
+    """A one-call copy of `ctx` carrying the gate's full-table row positions and row count.
 
     A positional strategy (categorical, REUSE Faker, windowed_date) keys each selected row on
     its full-table row, so every gated call carries the positions (C8-iii-d). A deterministic
@@ -124,6 +127,7 @@ def gated_context(
     # frozen (the same pattern nested dispatch uses); copy.copy keeps the sinks shared, as before.
     gated = copy.copy(ctx)
     object.__setattr__(gated, "gate_positions", positions)
+    object.__setattr__(gated, "source_row_count", source_row_count)
     return gated
 
 

@@ -15,8 +15,20 @@ these tables instead of declining them. Their evidence no longer lists
 Out-of-core still refuses `when:`.
 
 A route that forgets the pre-mask snapshot of a `when:` column fails with the new runtime error
-`when_source_snapshot_missing`. No supported route does. A `when:` that names a column an earlier
-node creates (not in the source) still fails with `when_expression_error`, as before.
+`when_source_snapshot_missing`. No supported route does.
+
+On the pandas routes, a `when:` on a masked column must name columns the table holds before masking
+starts (source columns and `derive` targets). For a config that passes the existing declaration
+and stored-index checks (which can refuse first with their own codes), a name that only a masking
+column creates fails with `when_expression_error` before that table is masked. Main raised the
+same error when the creating column ran after the gated one, and read the created values when it
+ran before. On main, a read missing from the table could resolve to a stored pandas index when the
+engine's internal alias for that read (`_w0`, `_w1`, ...) matched the index name. It now fails
+with `when_expression_error`. If the gate should read index values, materialize them as a data
+column and use that column's name in `when:`. A `when:` on an FK child column or a composite
+bundle is not evaluated, as on main, and those jobs run as before. The refusal follows each
+route's existing failure contract: a transactional sink publishes nothing, and a plain callable
+sink or a chunk stream may already hold earlier tables or chunks.
 
 Work order is unchanged: the order of masking nodes is the order it was before, a plan raises
 `cyclic_work_ordering` exactly when it did, and nodes write into the live frame one at a time.

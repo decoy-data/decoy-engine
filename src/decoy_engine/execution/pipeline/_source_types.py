@@ -107,7 +107,7 @@ def table_from_pandas_keeping_source_types(
     The frame must still be the source's rows: same count and an index still in source order (no row
     dropped or reordered since the source was read), and its remaining columns in source order. A
     mismatch raises `ExecutionError` before any output exists; the message carries counts only.
-    With `kept_index` (the stored index `masking_frame` set aside), the frame is a masking frame:
+    With `kept_index` (the stored index `positional_frame` set aside), the frame is a masking frame:
     its index must still be `RangeIndex(len(kept_index))`, so a dropped or reordered row takes the
     same error path, and it then takes the kept labels as they are, with no sort or alignment.
     With `source=None` there is nothing to keep, and the whole frame converts."""

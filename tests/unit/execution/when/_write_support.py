@@ -12,7 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine.execution import PandasExecutionAdapter
-from decoy_engine.plan._types import ColumnSeed, GroupSeed, SeedEnvelope, TableSeed
+from decoy_engine.plan import ColumnSeed, GroupSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import (
     OrphanPolicy,

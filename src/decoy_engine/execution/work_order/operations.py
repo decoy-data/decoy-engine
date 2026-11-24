@@ -76,6 +76,19 @@ class ResolvedOperation:
         return (*own, *sorted(self.writes - set(own)))
 
 
+def gate_reads(op: ResolvedOperation) -> frozenset[str]:
+    """The columns the op's `when:` reads, when dispatch evaluates that gate (`op.gated`), else
+    none. The one answer for the snapshot set and the absent-column check."""
+    from decoy_engine.plan import ColumnSeed
+
+    seed = op.node.plan_slice
+    if not op.gated or not isinstance(seed, ColumnSeed):
+        return frozenset()
+    from decoy_engine.execution._runner import when_columns_of
+
+    return when_columns_of([seed.when])
+
+
 def _entry(node: WorkNode) -> dict[str, object] | None:
     from decoy_engine.execution._adapter import provider_config_to_dict
     from decoy_engine.plan import ColumnSeed
@@ -123,7 +136,7 @@ def resolve_operation(node: WorkNode, graph: RelationshipGraph) -> ResolvedOpera
 
     own = frozenset(node.columns)
     edges = graph.parents_of(node.table, node.columns)
-    gated = isinstance(node.plan_slice, ColumnSeed) and node.plan_slice.when is not None
+    has_when = isinstance(node.plan_slice, ColumnSeed) and node.plan_slice.when is not None
     entry = _entry(node)
     none = frozenset[str]()
     if edges:
@@ -142,16 +155,16 @@ def resolve_operation(node: WorkNode, graph: RelationshipGraph) -> ResolvedOpera
         # is group identity, not a write.
         writes = access.writes if not access.writes_unknown else own
         return ResolvedOperation(
-            node, "composite", writes, access.writes_unknown, False, gated,
+            node, "composite", writes, access.writes_unknown, False, False,
             source, masked, False, unknown,
         )  # fmt: skip
     if node.strategy == "passthrough" and passthrough_leaves_input():
         return ResolvedOperation(
-            node, "passthrough", none, False, False, gated, source, masked, False, unknown
+            node, "passthrough", none, False, False, has_when, source, masked, False, unknown
         )
     return ResolvedOperation(
         node, "scalar", own | access.writes, access.writes_unknown, creates_own_target(entry),
-        gated, source, masked, reads_own, unknown,
+        has_when, source, masked, reads_own, unknown,
     )  # fmt: skip
 
 

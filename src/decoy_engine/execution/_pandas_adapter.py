@@ -57,7 +57,7 @@ from decoy_engine.execution._fk_keys import (
     fk_nullable_int_array,
     lossless_fk_int_values,
     lossless_int_columns,
-    masking_frame,
+    to_pandas_fk_safe,
 )
 from decoy_engine.execution._fk_resolve import (
     cascade_row_errors,
@@ -82,6 +82,7 @@ from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._when_gate import run_with_when_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution.work_order import WorkOrderRun, compile_work_order
+from decoy_engine.execution.work_order.rows import positional_frame, take_source_snapshots
 from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -204,21 +205,18 @@ class PandasExecutionAdapter:
         group_anchor_cols = source_snapshot_columns(order)
         lossless = lossless_int_columns(plan, registry, relationship_graph, ordered)
         converted = {
-            t: masking_frame(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
+            t: positional_frame(to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)))
+            for t, tbl in sources.items()
         }
         frames: dict[str, pd.DataFrame] = {t: frame for t, (frame, _kept) in converted.items()}
         kept_indexes = {t: kept for t, (_frame, kept) in converted.items()}
         conversion_ms = (time.perf_counter() - t0) * 1000.0
-        # HC-3a P1 #1: snapshot each group_by anchor column PRE-MASK (before the
-        # node loop mutates any frame), keyed by (table, col), so the handler
-        # anchors on immutable source ids. Same construction as source_snapshots
-        # below but with no cross-table lifetime -- an anchor is same-table only.
-        group_anchor_snapshots: dict[tuple[str, str], pd.Series] = {
-            (t, col): frames[t][col].copy()
-            for t, cols in group_anchor_cols.items()
-            for col in cols
-            if t in frames and col in frames[t].columns
-        }
+        # HC-3a P1 #1: snapshot each source-read column PRE-MASK (before the node loop mutates any
+        # frame), keyed by (table, col). `take_source_snapshots` also refuses a `when:` that names
+        # a column the converted input lacks, for every table, before any node runs.
+        group_anchor_snapshots: dict[tuple[str, str], pd.Series] = {}
+        for t, frame in frames.items():
+            group_anchor_snapshots.update(take_source_snapshots(order, group_anchor_cols, t, frame))
 
         cache = pool_cache if pool_cache is not None else PoolCache()
         ctx = StrategyContext(
@@ -246,7 +244,6 @@ class PandasExecutionAdapter:
         run_state = WorkOrderRun(order)
         node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
         for t, frame in frames.items():
-            run_state.begin_table(t, sources[t].column_names)
             register_exact_int_sources(ctx, t, sources[t], frame, order)
 
         # FK-parent columns are snapshotted pre-mask so an FK child can rebuild

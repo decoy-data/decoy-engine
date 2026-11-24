@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import WorkNode
-from decoy_engine.plan._types import ColumnSeed
+from decoy_engine.plan import ColumnSeed
 
 if TYPE_CHECKING:
     from decoy_engine.relationships import RelationshipGraph

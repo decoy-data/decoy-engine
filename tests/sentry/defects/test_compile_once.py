@@ -3,7 +3,7 @@
 Static: every Python file under `execution/` is scanned for the calls that resolve a node
 (`compile_work_order`, `build_work_list`, `parents_of`, `resolve_operation(s)`, `column_access`,
 `declared_access`, the anchor-column walkers and `SURFACE_DECLARATIONS` reads). Each site must be
-named in `NAMED_SITES` with its reason, by enclosing function and callee. A new site fails here until
+named in `ALLOWED` with its reason, by enclosing function and callee. A new site fails here until
 it is named; dispatch, FK conversion and exact-integer registration are not allowed to have one.
 
 Runtime (F4): once an entry's `compile_work_order` has returned, the resolution functions raise
@@ -50,7 +50,7 @@ _STANDALONE = "a direct call with no run compiles its own one-node order"
 _CHUNK_ORDER = "a chunked helper reads only the ordered nodes of its own entry's plan"
 _DECL_API = "the declaration API implements nested and gated access, creator and ordering queries"
 
-NAMED_SITES: dict[Site, str] = {
+ALLOWED: dict[Site, str] = {
     ("work_order/compile.py", "compile_work_order", "resolve_operations"): _COMPILE,
     ("work_order/compile.py", "compile_plan_order", "build_work_list"): _COMPILE,
     ("work_order/compile.py", "compile_plan_order", "compile_work_order"): _COMPILE,
@@ -203,12 +203,12 @@ def _all_sites() -> set[Site]:
 
 
 def test_every_resolution_site_is_named_with_its_reason() -> None:
-    assert _all_sites() <= set(NAMED_SITES), sorted(_all_sites() - set(NAMED_SITES))
+    assert _all_sites() <= set(ALLOWED), sorted(_all_sites() - set(ALLOWED))
 
 
 def test_every_allowed_site_still_exists() -> None:
     """A removed call leaves no stale reason behind."""
-    assert set(NAMED_SITES) <= _all_sites(), sorted(set(NAMED_SITES) - _all_sites())
+    assert set(ALLOWED) <= _all_sites(), sorted(set(ALLOWED) - _all_sites())
 
 
 _SEEDS = {
@@ -254,16 +254,14 @@ def test_a_seeded_forbidden_call_is_found_and_not_allowed(seed: str) -> None:
     relpath, source = _SEEDS[seed]
     sites = find_sites(source, relpath)
     assert sites, seed
-    assert not sites <= set(NAMED_SITES), seed
+    assert not sites <= set(ALLOWED), seed
 
 
 # ---------------------------------------------------------------------------
 # F4: after the entry's compile, nothing but an allowed independent site resolves a node again.
 # ---------------------------------------------------------------------------
 
-_INDEPENDENT = {
-    (path, fn) for (path, fn, _callee) in NAMED_SITES if not path.startswith("work_order/")
-}
+_INDEPENDENT = {(path, fn) for (path, fn, _callee) in ALLOWED if not path.startswith("work_order/")}
 _TRAPPED = (
     "build_work_list",
     "resolve_operation",

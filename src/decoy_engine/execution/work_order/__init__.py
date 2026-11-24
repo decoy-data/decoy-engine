@@ -2,7 +2,8 @@
 
 `operations` resolves every node once (the one write authority), `compile` makes the one ordering
 decision every entry point shares (main's `order_work`), `commits` is the gated write-back and
-per-run state, and `when_reads` refuses a `when:` on a created column.
+per-run state, and `rows` reads and takes the pre-mask snapshots by row position (and refuses a
+`when:` on a column the input lacks).
 """
 
 from decoy_engine.execution.work_order.commits import Selection, WorkOrderRun

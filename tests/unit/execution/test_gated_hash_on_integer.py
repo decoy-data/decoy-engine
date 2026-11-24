@@ -16,7 +16,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
-from decoy_engine.execution import PandasExecutionAdapter, _fk_keys
+from decoy_engine.execution import PandasExecutionAdapter, _pandas_adapter, _sequential
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._guards import reject_gated_hash_on_integer
 from decoy_engine.execution._strategies._hash import HashStrategyHandler
@@ -69,13 +69,14 @@ class _Spies:
 
         monkeypatch.setattr(HashStrategyHandler, "run", spy)
         self.conversions: list[int] = []
-        real_convert = _fk_keys.to_pandas_fk_safe  # both routes convert in `masking_frame`
+        for module in (_pandas_adapter, _sequential):
+            real_convert = module.to_pandas_fk_safe
 
-        def convert(table: Any, cols: Any) -> Any:
-            self.conversions.append(table.num_rows)
-            return real_convert(table, cols)
+            def convert(table: Any, cols: Any, _real: Any = real_convert) -> Any:
+                self.conversions.append(table.num_rows)
+                return _real(table, cols)
 
-        monkeypatch.setattr(_fk_keys, "to_pandas_fk_safe", convert)
+            monkeypatch.setattr(module, "to_pandas_fk_safe", convert)
 
 
 class _RecordingSink:

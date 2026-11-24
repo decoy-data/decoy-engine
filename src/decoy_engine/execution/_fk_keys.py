@@ -462,20 +462,6 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
     )
 
 
-def masking_frame(table: pa.Table, lossless: Collection[str]) -> tuple[pd.DataFrame, pd.Index]:
-    """`to_pandas_fk_safe(table, lossless)` as a masking frame, plus the index it arrived with.
-
-    Masking addresses rows by position (a `when:` gate selects positions, snapshots are read by
-    position), so the frame carries a fresh `RangeIndex` where label and position coincide, even
-    when the source stored duplicate, unsorted or stepped labels. The stored index is returned
-    for the output assembly to put back (`table_from_pandas_keeping_source_types(kept_index=)`).
-    """
-    frame = to_pandas_fk_safe(table, lossless)
-    kept = frame.index
-    frame.index = pd.RangeIndex(len(frame))
-    return frame, kept
-
-
 def _rebuilds_with_source_type(arrow_type: pa.DataType) -> bool:
     """The nested types a Parquet source can hold and `pa.array(..., type=...)` rebuilds exactly
     from pandas cells. List views and unions are left out: Parquet cannot store them."""
@@ -501,6 +487,5 @@ __all__ = [
     "lossless_fk_int_values",
     "lossless_int_columns",
     "lossless_int_columns_from_config",
-    "masking_frame",
     "to_pandas_fk_safe",
 ]

@@ -284,6 +284,9 @@ class StrategyContext:
     # Positions, in the full frame, of the rows a `when:` gate handed to the handler.
     # None means every row in order. Set only on the per-call copy the gate makes.
     gate_positions: np.ndarray[Any, Any] | None = None
+    # Length of the full frame the gate ran on, set with `gate_positions` on the same per-call copy.
+    # `snapshot_rows` checks a snapshot against it before indexing by position.
+    source_row_count: int | None = None
     # D1c: rows a date operator emitted unchanged because they matched `preserve_values`,
     # summed per (table, column). A count only, never a value; empty unless a column opts in.
     date_preserved: dict[tuple[str, str], int] = field(default_factory=dict)

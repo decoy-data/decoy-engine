@@ -1,6 +1,6 @@
 """Rows travel by position from the gate to every consumer (plan revision 2.6, I2 and D1).
 
-The masking frame has a fresh `RangeIndex` (`_fk_keys.masking_frame`); the stored index comes
+The masking frame has a fresh `RangeIndex` (`work_order.rows.positional_frame`); the stored index comes
 back at output assembly through the one emission helper. These tests cross both routes with
 sources whose stored index is a repeated label, a stepped range, non-monotonic or a string.
 """
@@ -16,8 +16,9 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution._fk_keys import masking_frame
+from decoy_engine.execution._fk_keys import to_pandas_fk_safe
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
+from decoy_engine.execution.work_order.rows import positional_frame
 from tests.unit.execution.when import _write_support as ws
 
 ROUTES: dict[str, Callable[..., pa.Table]] = {
@@ -94,7 +95,7 @@ def test_emission_matches_main_for_a_stored_or_stepped_index(source: str, route:
 def test_a_dropped_row_still_takes_the_rows_changed_path() -> None:
     """The kept index is put back only for a frame that is still the source's rows in order."""
     source = _dup_source()
-    frame, kept = masking_frame(source, ())
+    frame, kept = positional_frame(to_pandas_fk_safe(source, ()))
     assert frame.index.equals(pd.RangeIndex(2))
     for broken in (frame.iloc[:1], frame.iloc[::-1]):
         with pytest.raises(ExecutionError) as err:
@@ -102,8 +103,8 @@ def test_a_dropped_row_still_takes_the_rows_changed_path() -> None:
         assert err.value.code == "output_assembly_rows_changed"
 
 
-def test_masking_frame_keeps_the_stored_index_for_assembly() -> None:
-    frame, kept = masking_frame(_dup_source(), ())
+def test_positional_frame_keeps_the_stored_index_for_assembly() -> None:
+    frame, kept = positional_frame(to_pandas_fk_safe(_dup_source(), ()))
     assert list(kept) == [7, 7]
     assert frame.index.equals(pd.RangeIndex(2))
 

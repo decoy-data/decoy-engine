@@ -333,21 +333,23 @@ def when_read_columns(plan: Plan) -> dict[str, frozenset[str]]:
 def source_snapshot_columns(order: WorkOrder) -> dict[str, frozenset[str]]:
     """Every column snapshotted pre-mask, from the compiled `order` alone: each operation's
     `source_reads` (the `joint_mask` `key_by` and `date_shift` `group_by` anchors, always) plus
-    each `when:`-read column that some operation writes. A `when:` column no node writes keeps
-    its original value in the live frame, so it costs no copy. Both snapshot sites call this.
+    each column an evaluated `when:` reads (`gate_reads`) that some operation writes. A `when:`
+    column no node writes keeps its original value in the live frame, so it costs no copy. Both
+    snapshot sites call this once per order.
 
     What a node writes comes from its resolved operation (`work_order.operations`), the one
     answer dispatch and ordering share: an FK child writes its child key whatever handler it is
     configured with. A node whose writes cannot be named snapshots every column its table's
     `when:` reads.
     """
+    from decoy_engine.execution.work_order.operations import gate_reads
+
     out: dict[str, set[str]] = defaultdict(set)
     reads: dict[str, set[str]] = defaultdict(set)
     for op in order.ops.values():
         if op.source_reads:
             out[op.table] |= op.source_reads
-        if isinstance(op.node.plan_slice, ColumnSeed):
-            reads[op.table] |= when_columns_of([op.node.plan_slice.when])
+        reads[op.table] |= gate_reads(op)
     for op in order.ops.values():
         hit = reads[op.table] if op.wildcard else reads[op.table] & op.writes
         if hit:

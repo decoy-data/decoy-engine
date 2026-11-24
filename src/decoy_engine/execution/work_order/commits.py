@@ -6,14 +6,13 @@ is created when its node writes it, so column order and dtype are main's.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from decoy_engine.execution.work_order.compile import WorkOrder
-from decoy_engine.execution.work_order.when_reads import reject_when_on_created
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
@@ -48,10 +47,6 @@ class WorkOrderRun:
     def __init__(self, order: WorkOrder) -> None:
         self.order = order
         self.selection = Selection()
-
-    def begin_table(self, table: str, source_columns: Iterable[str]) -> None:
-        """Refuse a `when:` that names a column a node creates (see `reject_when_on_created`)."""
-        reject_when_on_created(self.order, table, source_columns)
 
     def dispatch(
         self,

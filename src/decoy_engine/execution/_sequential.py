@@ -149,7 +149,7 @@ from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
 from decoy_engine.execution._chunked_carry import untouched_columns
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
-from decoy_engine.execution._fk_keys import lossless_int_columns, masking_frame
+from decoy_engine.execution._fk_keys import lossless_int_columns, to_pandas_fk_safe
 from decoy_engine.execution._guards import run_chunk_ingest_guards
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
@@ -172,6 +172,7 @@ from decoy_engine.execution._transactional_sink import (
 from decoy_engine.execution.pipeline._post_scan import note_quarantined, publish_after_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution.work_order import WorkOrderRun, compile_work_order
+from decoy_engine.execution.work_order.rows import positional_frame, take_source_snapshots
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -413,10 +414,11 @@ def run_sequential(
                 # silently widens to float64 on this table-at-a-time load either.
                 # HC-3a P1 #2: date_shift group_by anchor columns get the same
                 # lossless int+null path (union into the FK-safe set).
-                df, kept_index = masking_frame(src, lossless.for_table(table, src))
+                df, kept_index = positional_frame(
+                    to_pandas_fk_safe(src, lossless.for_table(table, src))
+                )
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
-                run_state.begin_table(table, src.column_names)
                 register_exact_int_sources(ctx, table, src, df, order)
                 native_run.prepare_table(plan, table, src.schema, graph)
                 # C5c-ii: capture the degenerate-Faker pin set from the SOURCE schema before
@@ -442,9 +444,9 @@ def run_sequential(
                 # columns pre-mask (before its node loop below masks anything),
                 # so the handler anchors on immutable source ids. Same-table
                 # lifetime only; evicted with the frame after the node loop.
-                for col in group_anchor_cols.get(table, set()):
-                    if col in df.columns:
-                        ctx.group_anchor_snapshots[(table, col)] = df[col].copy()
+                ctx.group_anchor_snapshots.update(
+                    take_source_snapshots(order, group_anchor_cols, table, df)
+                )
 
                 table_records_list: list[RowErrorRecord] = []
                 for node in nodes_by_table.get(table, ()):

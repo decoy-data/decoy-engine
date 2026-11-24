@@ -17,7 +17,7 @@ import pytest
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies._redact import RedactHandler
 from decoy_engine.execution._when_gate import run_with_when_gate
-from decoy_engine.plan._types import ColumnSeed
+from decoy_engine.plan import ColumnSeed
 from tests.native._c8_i_support import (
     chunk_by_sizes,
     run_native,

@@ -478,8 +478,10 @@ def when_source_frame(
     for col in snapped:
         # By position: `snapshot_rows` fails closed on a length mismatch and never aligns by label.
         # `ctx.gate_positions` is None here (the predicate sees the whole frame).
-        snapshot = snapshot_rows(ctx, table, col)
-        if snapshot is None or len(snapshot) != len(df):
+        snapshot = snapshot_rows(
+            ctx, table, col, len(df), lambda _msg: _snapshot_missing(strategy, table)
+        )
+        if snapshot is None:
             raise _snapshot_missing(strategy, table)
         src[col] = snapshot.array
     return src
@@ -547,7 +549,9 @@ def run_with_when_gate(
     sub_df = df.iloc[positions].copy()
     sub_rows = sub_df.index
     err_start = len(ctx.row_errors)
-    sub_df, warnings = handler.run(sub_df, column, plan, gated_context(ctx, column, positions))
+    sub_df, warnings = handler.run(
+        sub_df, column, plan, gated_context(ctx, column, positions, len(df))
+    )
     # Before the write-back below, which would turn a dropped row into a null.
     require_same_rows(sub_rows, sub_df, column=column, strategy=plan.strategy, table=table)
     # B1: remap subset-relative row-error indices to full-table positions before they leave the
