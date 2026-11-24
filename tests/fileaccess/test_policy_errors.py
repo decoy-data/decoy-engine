@@ -490,3 +490,14 @@ def test_strict_eligibility_is_unchanged_for_the_documented_shapes(rooted) -> No
     assert resurface_scrubbed(OddError(1, 2)) is None
     kept = resurface_scrubbed(pa.ArrowInvalid("Unknown error: Wrapping 5 failed"))
     assert type(kept) is pa.ArrowInvalid
+
+
+def test_an_errno_error_whose_constructor_refuses_the_errno_form_becomes_a_plain_oserror() -> None:
+    class OddOSError(OSError):
+        def __init__(self) -> None:
+            super().__init__(errno.ENOMEM, MARK)
+
+    result = _classify(OddOSError())
+    assert result is not None and result.kind == "typed_memory"
+    assert type(result.fresh) is OSError and result.fresh.errno == errno.ENOMEM
+    assert MARK not in _all_text(result.fresh)
