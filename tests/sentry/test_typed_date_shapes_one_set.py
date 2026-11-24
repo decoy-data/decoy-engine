@@ -128,6 +128,55 @@ def test_typed_date_shapes_is_read_only_at_allowlisted_sites() -> None:
     assert not stale, f"allowlist entries that no longer read the set: {sorted(stale)}"
 
 
+# The plan-level native-date view is `declared_casting.plan_native_date_shapes`. Composing it
+# again from its parts (`native_date_shapes` over `plan_column_shapes` or
+# `declared_date_shift_columns`) outside `declared_casting/` is a second producer.
+_VIEW_PARTS = frozenset({"plan_column_shapes", "declared_date_shift_columns"})
+
+
+def _callee(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr
+    return None
+
+
+def _composed_views(sources: dict[str, str]) -> set[tuple[str, int]]:
+    found: set[tuple[str, int]] = set()
+    for rel, text in sources.items():
+        if rel.startswith("declared_casting/"):
+            continue
+        for node in ast.walk(ast.parse(text)):
+            if not isinstance(node, ast.Call) or _callee(node) != "native_date_shapes":
+                continue
+            if any(_callee(arg) in _VIEW_PARTS for arg in node.args):
+                found.add((rel, node.lineno))
+    return found
+
+
+def test_the_plan_native_date_view_is_composed_only_in_declared_casting() -> None:
+    sources = {
+        p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8") for p in SRC.rglob("*.py")
+    }
+    assert not _composed_views(sources)
+
+
+def test_restoring_the_old_composition_in_a_caller_is_red() -> None:
+    """Mutation: the expression `typed_date_columns` held before `plan_native_date_shapes`."""
+    rel = "execution/_chunked_bucket_perturb.py"
+    text = (SRC / rel).read_text(encoding="utf-8")
+    old = "    return frozenset(column for (t, column) in plan_native_date_shapes(plan) if t == table)"
+    assert old in text
+    restored = text.replace(
+        old,
+        "    native = native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))\n"
+        "    return frozenset(column for (t, column) in native if t == table)",
+    )
+    assert len(_composed_views({rel: restored})) == 1
+
+
 def test_an_inline_native_date_derivation_in_a_caller_is_red() -> None:
     """Mutation: the producer's body pasted into a caller (the StrategyContext property)."""
     path = SRC / "execution/_adapter.py"

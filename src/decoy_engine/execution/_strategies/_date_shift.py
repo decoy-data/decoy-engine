@@ -82,10 +82,8 @@ from decoy_engine.execution._adapter import (
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
-from decoy_engine.generation.pool._canonicalize import (
-    _canonicalize_source,
-    canonicalize_typed_array,
-)
+from decoy_engine.generation.pool import canonicalize_typed_array
+from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.date_preserve import preserve_set_from_config
