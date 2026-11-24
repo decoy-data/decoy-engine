@@ -54,19 +54,33 @@ from decoy_engine.providers_v2._faker_adapter import (
     custom_provider_names,
     register_faker_provider_v2,
 )
+from decoy_engine.providers_v2._faker_draw_contracts import (
+    FAKER_DRAW_CONTRACTS,
+    FAMILY_CHOICE,
+    FAMILY_INT,
+    FAMILY_UUID,
+    FakerDrawContract,
+    faker_draw_contract,
+)
 from decoy_engine.providers_v2._registry import (
     ProviderRegistry,
     get_default_registry,
 )
 
 __all__ = [
+    "FAKER_DRAW_CONTRACTS",
+    "FAMILY_CHOICE",
+    "FAMILY_INT",
+    "FAMILY_UUID",
     "AdapterError",
     "BackendAdapter",
     "CapabilityMatrix",
+    "FakerDrawContract",
     "ProviderError",
     "ProviderRegistry",
     "ProviderSpec",
     "custom_provider_names",
+    "faker_draw_contract",
     "get_default_registry",
     "register_faker_provider_v2",
 ]

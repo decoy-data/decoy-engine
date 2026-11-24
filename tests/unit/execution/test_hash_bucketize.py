@@ -20,6 +20,7 @@ from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests._column_shapes import CTX_SHAPE_ATTRS, integer_shapes
 
 _REG = get_default_registry()
 _GRAPH = RelationshipGraph(edges=(), ordering=())
@@ -51,7 +52,8 @@ def _plan(col_name: str, seed: ColumnSeed) -> Any:
         seed_envelope=SeedEnvelope(
             job_seed=_SEED,
             per_table=(("t", TableSeed(per_column=((col_name, seed),), per_group=())),),
-        )
+        ),
+        column_shapes=integer_shapes("t", col_name),
     )
 
 
@@ -157,6 +159,9 @@ class _FakeCtx:
     job_seed = _SEED
     # DE-02: keyed strategies read ctx.mask_key; no-secret path == job_seed.
     mask_key = _SEED
+    column_shapes = CTX_SHAPE_ATTRS["column_shapes"]
+    current_table = "t"
+    nested_outer_column = ""
 
 
 class TestMixedObjectColumnRegression:
@@ -220,7 +225,7 @@ class TestMixedObjectColumnRegression:
 
 def _bucketize_ctx() -> SimpleNamespace:
     # Fresh per-call row_errors sink so direct handler runs never share state.
-    return SimpleNamespace(job_seed=_SEED, mask_key=_SEED, row_errors=[])
+    return SimpleNamespace(job_seed=_SEED, mask_key=_SEED, row_errors=[], **CTX_SHAPE_ATTRS)
 
 
 class TestBucketizeSurvivors:

@@ -44,7 +44,9 @@ S = ColumnShape
         (pa.list_(pa.int64()), S.OTHER),
         (pa.struct([pa.field("a", pa.int64())]), S.OTHER),
         (pa.binary(), S.OTHER),
-        (pa.dictionary(pa.int32(), pa.string()), S.OTHER),
+        (pa.dictionary(pa.int32(), pa.string()), S.TEXT),
+        (pa.dictionary(pa.int32(), pa.large_string()), S.TEXT),
+        (pa.dictionary(pa.int32(), pa.int64()), S.OTHER),
         (pa.null(), S.OTHER),
     ],
     ids=str,
@@ -122,3 +124,14 @@ def test_vocabulary_is_closed() -> None:
         "text", "date", "timestamp_tz", "timestamp_naive", "integer", "float",
         "decimal", "decimal_wide", "boolean", "other", "unknown",
     }  # fmt: skip
+
+
+def test_table_source_facts_sets_one_table_beside_the_given_siblings() -> None:
+    from decoy_engine.contracts.column_shape import NO_SOURCES, source_facts_of, table_source_facts
+
+    siblings = source_facts_of({"other": pa.table({"n": pa.array([1], pa.int64())})})
+    facts = table_source_facts("mine", pa.schema([("a", pa.string())]), siblings)
+    assert set(facts.schemas) == {"other", "mine"} and facts.resident == {"other", "mine"}
+    assert table_source_facts("mine", None, siblings).resident == {"other", "mine"}
+    assert table_source_facts("mine", None, NO_SOURCES).schemas == {}
+    assert siblings.resident == {"other"}  # the passed facts are not changed

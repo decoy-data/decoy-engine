@@ -90,8 +90,9 @@ def test_precondition_rejects_missing_namespace(namespace: str | None) -> None:
     assert faker_pool_precondition_met(_Node(_seed(namespace=namespace))) is False
 
 
-def test_precondition_rejects_missing_pool_size() -> None:
-    assert faker_pool_precondition_met(_Node(_seed(pool_size=None))) is False
+def test_precondition_admits_missing_pool_size() -> None:
+    # The size resolves to the default through `effective_pool_size`; it is not admission.
+    assert faker_pool_precondition_met(_Node(_seed(pool_size=None))) is True
 
 
 # ---------------------------------------------------------------------------

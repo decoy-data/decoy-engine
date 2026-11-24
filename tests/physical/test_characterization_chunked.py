@@ -12,6 +12,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked import run_mask_pipeline_chunked
 from decoy_engine.execution._pipeline_route_exec import run_mask_chunked
 from decoy_engine.execution.native._dispatch import run_native_or_oracle_chunked
@@ -168,6 +169,7 @@ def test_resident_chunked_aggregator_byte_identical(tmp_path: Path) -> None:
         adapter=None,
         vault_writer=None,
         chunk_size_rows=2,
+        sources=NO_SOURCES,
     )
     via = ResidentChunkedAggregatorAdapter().run(
         job.config,

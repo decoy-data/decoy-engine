@@ -5,7 +5,7 @@ ceiling (see the SP-10 comment in tests/sentry/test_module_size.py).
 
 Sprint 13 GATE-1 Q4 (PO-approved, 2026-07-03): close the sibling silent-
 unmask leaks in the same pass as truncate, not only truncate itself.
-``BucketizeStrategyHandler._resolve_width`` (`execution/_strategies/
+``resolve_bucketize_width`` (`execution/_strategies/
 _bucketize.py`) returns ``None`` -- and the handler then passes the source
 column through UNMASKED -- when ``preset`` names something not in the
 known preset table (e.g. the Studio picker's ``"(custom)"`` sentinel
@@ -14,8 +14,8 @@ or not positive. This module rejects both shapes at compile time, before
 any row is masked. The handler's ``run`` additionally raises
 ``StrategyError`` on the same shapes as a defense-in-depth backstop.
 
-Reuses ``_PRESETS`` from the handler module as the single source of truth
-for known preset names (no duplicated table to drift out of sync).
+Reads the width through ``contracts.bucketize_width``, the one rule the handler and the
+column-shape check share (no duplicated table to drift out of sync).
 
 This module exports exactly one function: ``check_bucketize_config``.
 """
@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.execution._strategies._bucketize import _PRESETS
+from decoy_engine.contracts.bucketize_width import BUCKETIZE_PRESETS, unresolvable_width_field
 from decoy_engine.plan._errors import PlanCompileError
 
 
@@ -33,10 +33,10 @@ def check_bucketize_config(config: dict[str, Any]) -> None:
     """Reject bucketize columns whose bucket width cannot be resolved.
 
     Compile-check ownership table row #23 (Sprint 13 / coercion-13 S3,
-    GATE-1 Q4, 2026-07-03). Mirrors ``BucketizeStrategyHandler._resolve_width``
+    GATE-1 Q4, 2026-07-03). Mirrors ``resolve_bucketize_width``
     exactly: a column is valid when either
 
-    1. ``preset`` is set and is a known preset name (``_PRESETS``); or
+    1. ``preset`` is set and is a known preset name (``BUCKETIZE_PRESETS``); or
     2. ``preset`` is unset and ``width`` is a positive ``int``/``float``
        (not a ``bool``, not a numeric string).
 
@@ -73,32 +73,28 @@ def check_bucketize_config(config: dict[str, Any]) -> None:
             if not isinstance(pc, dict):
                 pc = {}
 
-            preset = pc.get("preset")
-            if preset is not None:
-                if preset not in _PRESETS:
-                    raise PlanCompileError(
-                        code=reasons.plan.BUCKETIZE_WIDTH_UNRESOLVABLE,
-                        path=f"tables.{table_name}.columns.{col_name}.provider_config.preset",
-                        message=(
-                            f"bucketize column {col_name!r} in table {table_name!r} "
-                            f"has preset {preset!r}, which is not a known preset "
-                            f"(known: {sorted(_PRESETS)!r}). An unresolved preset "
-                            "(e.g. a UI sentinel like '(custom)' that was never "
-                            "replaced with a numeric width) leaves the column "
-                            "unmasked at run; set a known preset or drop 'preset' "
-                            "and set a numeric 'width' instead."
-                        ),
-                    )
-                continue  # resolved via a known preset; width is ignored
-
-            width = pc.get("width")
-            if isinstance(width, bool) or not isinstance(width, (int, float)) or width <= 0:
+            field = unresolvable_width_field(pc)
+            if field == "preset":
+                raise PlanCompileError(
+                    code=reasons.plan.BUCKETIZE_WIDTH_UNRESOLVABLE,
+                    path=f"tables.{table_name}.columns.{col_name}.provider_config.preset",
+                    message=(
+                        f"bucketize column {col_name!r} in table {table_name!r} "
+                        "has a preset that is not a known preset "
+                        f"(known: {sorted(BUCKETIZE_PRESETS)!r}). An unresolved preset "
+                        "(e.g. a UI sentinel like '(custom)' that was never "
+                        "replaced with a numeric width) leaves the column "
+                        "unmasked at run; set a known preset or drop 'preset' "
+                        "and set a numeric 'width' instead."
+                    ),
+                )
+            if field == "width":
                 raise PlanCompileError(
                     code=reasons.plan.BUCKETIZE_WIDTH_UNRESOLVABLE,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.width",
                     message=(
                         f"bucketize column {col_name!r} in table {table_name!r} has "
-                        f"invalid width {width!r} ({type(width).__name__}). Set "
+                        "no usable width. Set "
                         "either a known 'preset' or a positive numeric 'width' "
                         "(a numeric-looking string does not count; the emitter "
                         "must coerce it to a real number before it reaches the "

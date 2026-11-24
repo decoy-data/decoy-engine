@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -103,7 +103,7 @@ class CapabilityMatrix(BaseModel):
     forgot to declare uniqueness for synthetic_ssn" at import time is
     the point. The model is frozen; instances are immutable.
 
-    The 14 fields are pinned per cross-sprint contracts §2.3 and the S4
+    The 14 base fields (plus `draw`, default `pool`) are pinned per cross-sprint contracts §2.3 and the S4
     spec §4 disambiguation table (which fields S4 fills vs which later
     sprints fill via the same shape).
     """
@@ -124,6 +124,10 @@ class CapabilityMatrix(BaseModel):
     format_regex: str | None
     blocklist_validators: tuple[str, ...]
     fallback_behavior: str
+    # How the provider's masked value is drawn: from a pre-built value pool, or computed from the
+    # keyed bits (uuid, bounded integer, element choice). Only selects the draw family; the
+    # arguments and defaults of a computed draw live in `_faker_draw_contracts`.
+    draw: Literal["pool", "computed"] = "pool"
 
 
 class BackendAdapter(Protocol):

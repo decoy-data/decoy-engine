@@ -59,6 +59,7 @@ StageLabel = Literal[
     "vault",
     "pack",
     "publication",
+    "delivery_slots",
     "pointer",
 ]
 
@@ -176,6 +177,32 @@ class LeafTooLarge(_ErrnoOnly, DecoyError):  # noqa: N818 - the plan's name
     summary = "file over the read limit"
 
 
+class LinkUnsupported(DecoyError, OSError):  # noqa: N818 - the one named limit, as the plan names
+    """The target cannot hard-link, or ignores `chmod`: the claim cannot give the member its
+    final identity. A `DecoyError` that stays an `OSError`, so a caller keyed on the errno still
+    sees it; text is the errno name only."""
+
+    def __init__(self, errno_value: int) -> None:
+        self.errno_name = _errno.errorcode.get(errno_value, "EIO")
+        super().__init__(errno_value, f"file system cannot claim a file: {self.errno_name}")
+
+    def __reduce__(self) -> tuple[object, tuple[int]]:
+        return (type(self), (self.errno or _errno.EIO,))
+
+
+@dataclass(frozen=True, slots=True)
+class FileSeal:
+    """What `StageDir.seal_of` sees of one name, read without following a link: the inode
+    (`dev`, `ino`), its link count and its full `st_mode`. A claim returns the seal it made
+    (a regular file, one link, `0o600`); an equal seal later means nothing swapped, linked or
+    chmodded it in between."""
+
+    dev: int
+    ino: int
+    nlink: int
+    mode: int
+
+
 class EntryView(Protocol):
     """What a directory listing exposes: a name and type queries that, for a strict policy,
     never follow a symlink (a link inside a granted directory can point outside it)."""
@@ -188,6 +215,13 @@ class EntryView(Protocol):
     def is_dir(self, *, follow_symlinks: bool = True) -> bool: ...
 
     def is_symlink(self) -> bool: ...
+
+
+class StageEntry(EntryView, Protocol):
+    """A stage listing entry: its kind, read without following a link, as one closed token."""
+
+    @property
+    def kind(self) -> Literal["file", "dir", "link", "other"]: ...
 
 
 @runtime_checkable
@@ -260,6 +294,26 @@ class StageDir(Protocol):
         """The stage path, for the one subprocess route; strict policies raise."""
         ...
 
+    def open_subdir(self, component: str) -> StageDir:
+        """One existing folder of this stage as a read-only stage, opened without following a
+        link. Every change through it is refused, and it refuses after the owning stage ends."""
+        ...
+
+    def entries(self) -> Iterator[StageEntry]:
+        """The entries now in this stage, each with its kind read without following a link."""
+        ...
+
+    def claim_from(self, source: StageDir, src_component: str, dst_component: str) -> FileSeal:
+        """Move one regular file from `source` into this stage with a no-clobber link, so the
+        target file system decides whether the name is taken (`FileExistsError`). Both stages
+        must be live and writable. The file ends as one link, mode `0o600`; the seal is read
+        from the final inode's descriptor."""
+        ...
+
+    def seal_of(self, component: str) -> FileSeal | None:
+        """The seal of `component` read without following a link; `None` when absent."""
+        ...
+
 
 @runtime_checkable
 class OutputTxn(StageDir, Protocol):
@@ -284,6 +338,12 @@ class OutputDir(Protocol):
     display: str
     locator: str
     strict: bool
+    leaf: str  # the exact final component this capability may create
+
+    def parent_identity(self) -> tuple[int, int]:
+        """`(st_dev, st_ino)` of the leaf's parent folder, read from a descriptor opened the way
+        the policy opens it (a strict root refuses a link beneath it)."""
+        ...
 
     def begin(
         self,
@@ -340,7 +400,9 @@ __all__ = [
     "FileHandle",
     "FileRequest",
     "FileRole",
+    "FileSeal",
     "LeafTooLarge",
+    "LinkUnsupported",
     "LockTimeout",
     "LockUnavailable",
     "OutputDir",

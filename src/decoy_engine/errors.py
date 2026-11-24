@@ -384,6 +384,21 @@ class ValidatorFailedError(DecoyError):
         )
 
 
+class ValidatorStateError(DecoyError):
+    """A job-level validator cannot hold the state its check needs.
+
+    Raised by the validation session when a keyed check would outgrow its key-state budget
+    (``validator_key_state_over_budget``) or when the source rows of a paired check do not line
+    up with the published rows (``validator_source_pairing_mismatch``). The message names the
+    table and column only, never a cell value.
+    """
+
+    def __init__(self, *, code: str, message: str = "") -> None:
+        self.code = code
+        self.message = message
+        super().__init__(f"[{code}] {message}" if message else f"[{code}]")
+
+
 class RowErrorsFailedError(DecoyError):
     """Raised when per-row strategy errors exist and quarantine does not
     cover their trigger (Sprint 2 honesty pack, D8).
@@ -436,20 +451,17 @@ class FixedWidthParseError(DecoyError):
     """Raised when a fixed-width data file cannot be parsed against its
     `FixedWidthLayout` column-spec (S4, engine-finish-open-ended program).
 
-    Covers three fail-closed cases: a record shorter than a column's
-    `start + width` extent (row-width mismatch), a sliced value that
-    cannot cast to its column's declared type, and a line whose bytes are
-    not valid UTF-8. None of them truncates, coerces or replaces the bad
+    Covers three fail-closed cases: a record shorter than a column's `start + width` extent
+    (row-width mismatch), a sliced value that cannot cast to its column's declared type, and a
+    line whose bytes are not valid UTF-8. None of them truncates, coerces or replaces the bad
     input -- all raise here instead. Per the row-error framework's convention (see
-    `RowErrorsFailedError`), the message never embeds the offending
-    cell value -- only the file path, 1-based line number, and column
-    name -- since the file being parsed may itself carry the PII this
-    is a masking product for. Every raise in
-    `profile._fixed_width_reader` happens after its `except` block has
-    exited (the handler records only safe position data), so the caught
-    `ValueError`, `TypeError` or `UnicodeDecodeError` -- whose own text or
-    `.object` embeds the raw value -- is never attached as `__cause__` or
-    `__context__`, even if someone later inspects the raised exception.
+    `RowErrorsFailedError`), the message never embeds the offending cell value -- only the file
+    path, 1-based line number, and column name -- since the file being parsed may itself carry
+    the PII this is a masking product for. Every raise in `profile._fixed_width_reader` happens
+    after its `except` block has exited (the handler records only safe position data), so the
+    caught `ValueError`, `TypeError` or `UnicodeDecodeError` -- whose own text or `.object`
+    embeds the raw value -- is never attached as `__cause__` or `__context__`, even if someone
+    later inspects the raised exception.
     """
 
 
@@ -462,6 +474,12 @@ class FixedWidthRecordOverlongError(FixedWidthParseError):
     """
 
     code: str = reasons.runtime.FIXED_WIDTH_RECORD_OVERLONG
+
+
+class ParquetFixedListNullError(DecoyError):
+    """Parquet cannot round-trip a null fixed-size list cell."""
+
+    code: str = reasons.runtime.PARQUET_FIXED_LIST_NULL
 
 
 class FixedWidthWriteError(DecoyError):
@@ -493,6 +511,7 @@ class FixedWidthWriteError(DecoyError):
 CAPACITY_REASON_CODES: frozenset[str] = frozenset(
     {
         reasons.runtime.GENERATION_BUDGET_EXCEEDED,
+        reasons.runtime.NONFK_FULL_FRAME_CAPACITY_EXCEEDED,
         reasons.runtime.OUT_OF_CORE_INSUFFICIENT_MEMORY,
         reasons.runtime.OUT_OF_CORE_FANIN_EXCEEDS_BUDGET,
         reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED,
@@ -516,6 +535,10 @@ _SHADOW = "a shadow-run comparison finding, not a refusal that stops a job"
 _DISK = "disk or quota, not memory"
 _POOL_SHORT = "a uniqueness shortfall in the value pool, not memory"
 _UNKNOWN = "the check could not read its input; no capacity verdict was reached"
+_VALIDATOR_RUN = (
+    "a validator's own run-time state ceiling, raised by the validation run; "
+    "no capacity check produces it"
+)
 CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
     {
         reasons.runtime.FK_FULL_FRAME_OOM_RISK_REJECTED: _ROUTING,
@@ -541,6 +564,7 @@ CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
         reasons.runtime.HOLD_BACK_SPILL_UNAVAILABLE: _NOT_SET,
         reasons.verification.CANARY_RESOURCE_LIMIT: _NOT_MEMORY,
         reasons.physical.RESOURCE_LIMIT_BREACH: _SHADOW,
+        reasons.runtime.VALIDATOR_KEY_STATE_OVER_BUDGET: _VALIDATOR_RUN,
     }
 )
 
@@ -565,9 +589,11 @@ __all__ = [
     "MaskKeyDerivationError",
     "MaskKeyRequiredError",
     "PKDuplicatesError",
+    "ParquetFixedListNullError",
     "PipelineValidationError",
     "RowErrorsFailedError",
     "UnknownFKColumnError",
     "ValidationError",
     "ValidatorFailedError",
+    "ValidatorStateError",
 ]

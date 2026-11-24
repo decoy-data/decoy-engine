@@ -7,7 +7,7 @@ Two production mechanisms keep it that way, and both are non-deterministic pool 
   `PoolSampler.sample(..., deterministic=False)`.
 
 The compiled index kernel is reachable only through `PoolSampler._deterministic` ->
-`_sampler._derive_pool_indices` (compiled when the companion is installed and the value class is
+`_sampler.derive_pool_indices` (compiled when the companion is installed and the value class is
 admitted, else the byte-identical Python reference). The e2e witness records a `numpy_selection`
 label for ANY `PoolSampler.sample`, deterministic or not, so the absence of a compiled label proves
 nothing. This file observes the deterministic-index ENTRY itself with a record-and-delegate spy

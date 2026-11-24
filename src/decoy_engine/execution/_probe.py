@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pyarrow as pa
 
@@ -68,6 +68,7 @@ __all__ = [
     "ProbeResult",
     "probe_fits",
     "probe_peak_bytes",
+    "sampled_uniqueness_risk",
     "uniqueness_saturation_risk",
 ]
 
@@ -171,6 +172,9 @@ class ProbeResult:
     intercept_bytes: float | None = None
     low_point: ProbePoint | None = None
     high_point: ProbePoint | None = None
+    # Set by `risk_policy="measure"`: a column near its cardinality ceiling means a small-N
+    # probe can under-state the peak, so a measured fit is not proof.
+    uniqueness_risk: bool = False
 
     def __post_init__(self) -> None:
         if self.conclusive and self.estimated_peak_bytes is None:
@@ -207,6 +211,29 @@ def uniqueness_saturation_risk(
         if distinct / target_rows >= threshold:
             risky.append((table, column))
     return tuple(risky)
+
+
+def sampled_uniqueness_risk(
+    row_counts_at_target: Mapping[str, int],
+    distinct_counts: Mapping[tuple[str, str], int],
+    sampled_non_null_counts: Mapping[tuple[str, str], int],
+    *,
+    threshold: float = UNIQUENESS_SATURATION_THRESHOLD,
+) -> tuple[tuple[str, str], ...]:
+    """`uniqueness_saturation_risk` plus the ratio inside the sample.
+
+    A profiled table above the sample size reports a distinct count from the head sample, so it
+    never reaches `threshold` of the full row count; a near-unique column is still near-unique
+    in its own sample. A column with no sampled non-null value has nothing to saturate.
+    """
+    risky = set(
+        uniqueness_saturation_risk(row_counts_at_target, distinct_counts, threshold=threshold)
+    )
+    for key, distinct in distinct_counts.items():
+        non_null = sampled_non_null_counts.get(key, 0)
+        if non_null > 0 and distinct / non_null >= threshold:
+            risky.add(key)
+    return tuple(key for key in distinct_counts if key in risky)
 
 
 def _fit_line(low: ProbePoint, high: ProbePoint) -> tuple[float, float] | None:
@@ -289,6 +316,7 @@ def probe_peak_bytes(
     mem_cap_bytes: int | None = None,
     timeout_s: float | None = DEFAULT_PROBE_TIMEOUT_S,
     raw_floor_bytes: int | None = None,
+    risk_policy: Literal["skip", "measure"] = "skip",
     **run_pipeline_kwargs: Any,
 ) -> ProbeResult:
     """Measure `config`'s real full_frame peak RSS at two small scales of
@@ -322,8 +350,11 @@ def probe_peak_bytes(
     Guards, evaluated in order (each short-circuits to `conclusive=False`,
     never runs a subprocess it does not need to):
 
-      1. `uniqueness_risk_columns` non-empty -- §11's blind spot; a small-N
-         probe cannot see saturation near a column's true cardinality.
+      1. `uniqueness_risk_columns` non-empty under `risk_policy="skip"` (the
+         default) -- §11's blind spot; a small-N probe cannot see saturation
+         near a column's true cardinality. `"measure"` runs the probe anyway
+         and sets `ProbeResult.uniqueness_risk`: a measured non-fit still
+         counts, a fit is not proof.
       2. `opaque_generator_tables` non-empty -- a nonlinear/data-dependent
          generator (e.g. `statistical`, `derived_aggregate`) whose behavior
          at small N is not representative of its behavior at full scale.
@@ -361,7 +392,7 @@ def probe_peak_bytes(
             f"probe_fractions must be an increasing pair in (0, 1], got {probe_fractions}."
         )
 
-    if uniqueness_risk_columns:
+    if uniqueness_risk_columns and risk_policy == "skip":
         return ProbeResult(
             conclusive=False,
             reason=(
@@ -466,6 +497,7 @@ def probe_peak_bytes(
         intercept_bytes=intercept,
         low_point=low_point,
         high_point=high_point,
+        uniqueness_risk=bool(uniqueness_risk_columns),
     )
 
 

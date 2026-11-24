@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import SourceFacts
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._errors import ExecutionError
@@ -576,6 +577,7 @@ def run_mask_chunked(
     native_threads: int = 1,
     dispatcher_enabled: bool = True,
     cast_run: Any = None,
+    sources: SourceFacts,
 ) -> tuple[dict[str, pa.Table], tuple, float, tuple, dict[str, Any]]:
     """Mask one eligible table via the chunked lane; a delegate to
     `_pipeline_auto_chunk.run_auto_chunk`, which owns the lane logic.
@@ -604,6 +606,7 @@ def run_mask_chunked(
         native_threads=native_threads,
         dispatcher_enabled=dispatcher_enabled,
         cast_run=cast_run,
+        sources=sources,
     )
 
 

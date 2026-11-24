@@ -145,13 +145,23 @@ class TestAcceptedFormats:
 
     def test_compile_entrypoint(self, fmt: str | None, profile: Profile) -> None:
         cfg = _config({"bucket": "month", "date_format": fmt})
+        if not fmt:
+            # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on
+            # text: `date_format` required, else `column_shape_required`). The format check
+            # still accepts an absent format as "not set"; the required-settings check refuses it.
+            with pytest.raises(PlanCompileError) as exc:
+                _compile(cfg, profile)
+            assert exc.value.code == "column_shape_required"
+            return
         plan = _compile(cfg, profile)
         assert "bucket_perturb_config" in plan.plan_compile.checks_passed
 
 
-def test_absent_date_format_compiles(profile: Profile) -> None:
-    plan = _compile(_config({"bucket": "month"}), profile)
-    assert "bucket_perturb_config" in plan.plan_compile.checks_passed
+def test_absent_date_format_is_refused_at_compile(profile: Profile) -> None:
+    # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2: text needs `date_format`.
+    with pytest.raises(PlanCompileError) as exc:
+        _compile(_config({"bucket": "month"}), profile)
+    assert exc.value.code == "column_shape_required"
 
 
 def test_a_non_bucket_perturb_column_with_a_date_format_key_is_untouched(

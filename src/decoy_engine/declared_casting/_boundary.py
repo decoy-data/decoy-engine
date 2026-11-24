@@ -26,7 +26,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
-from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.declared_casting import (
@@ -182,18 +182,13 @@ def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
     )
 
 
-def native_date_columns(plan: Any) -> Mapping[tuple[str, str], ColumnShape]:
-    """(table, column) -> shape of each column the plan lists as a native date or zoned timestamp.
+def plan_column_shapes(plan: Any) -> dict[tuple[str, str], ColumnShape]:
+    """(table, column) -> the shape the plan recorded for each column under a shape-reading strategy.
 
-    The one list the runtime backstop reads: a column the plan does not list is never typed
-    here, whatever its data looks like. Declared date columns are not in it (they keep text).
+    The one list the numeric handlers' backstop reads: a handler skips its declaration only when
+    the plan lists the column with a shape that needs none, never from the pandas dtype.
     """
-    declared = declared_date_shift_columns(plan)  # an F06 declaration also shapes as a date
-    return {
-        (s.table, s.column): s.shape
-        for s in getattr(plan, "column_shapes", None) or ()
-        if s.shape in TYPED_DATE_SHAPES and (s.table, s.column) not in declared
-    }
+    return {(c.table, c.column): c.shape for c in getattr(plan, "column_shapes", None) or ()}
 
 
 @dataclass

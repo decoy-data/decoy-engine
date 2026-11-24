@@ -211,13 +211,13 @@ class ColumnConfig(BaseModel):
         if not stripped:
             return None
         from decoy_engine.errors import ValidationError as EngineValidationError
-        from decoy_engine.expressions._when_parser import WHEN_OUTSIDE_GRAMMAR_CODE, parse_when
+        from decoy_engine.expressions._when_parser import parse_when, when_refusal_codes
 
         try:
             parse_when(stripped)
         except EngineValidationError as exc:
             raise PydanticCustomError(
-                WHEN_OUTSIDE_GRAMMAR_CODE, "{reason}", {"reason": exc.raw_message}
+                when_refusal_codes(exc).config, "{reason}", {"reason": exc.raw_message}
             ) from exc
         return stripped
 

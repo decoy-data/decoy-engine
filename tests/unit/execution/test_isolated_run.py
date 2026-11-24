@@ -109,7 +109,8 @@ payload_path = Path(sys.argv[1])
 with open(payload_path, encoding="utf-8") as fh:
     payload = json.load(fh)
 
-sources = {name: pq.read_table(path) for name, path in (payload.get("sources") or {}).items()}
+from decoy_engine.execution._isolated_worker import _load_sources
+sources = _load_sources(payload.get("sources") or {}, lazy=False)
 result = run_pipeline(payload["config"], sources, **payload["kwargs"])
 
 staging_output_dir = Path(payload["staging_output_dir"])
@@ -181,13 +182,18 @@ def _mask_sources(tmp_path, n_rows: int, n_cols: int) -> dict[str, pa.Table]:
     return {"customers": pa.Table.from_pandas(df, preserve_index=False)}
 
 
+# date_shift is keyed and the child process never sees the in-process test secret, so the
+# fixture names a secret the child reads from its environment.
+_ROW_ERROR_SECRET_ENV = "DECOY_TEST_ROW_ERROR_SECRET"
+
+
 def _row_error_config(tmp_path) -> dict:
-    """bucketize on a column with one non-numeric non-null cell -> a
+    """date_shift on a column with one unparseable non-null cell -> a
     `format_error` row error (MED-4 fixture)."""
     return _validated_dump(
         {
             "version": 2,
-            "global_settings": {"seed": 42},
+            "global_settings": {"seed": 42, "mask_secret_ref": f"env:{_ROW_ERROR_SECRET_ENV}"},
             "sources": {
                 "customers": {
                     "type": "file",
@@ -200,7 +206,12 @@ def _row_error_config(tmp_path) -> dict:
                 {
                     "name": "customers",
                     "columns": [
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "date_shift",
+                            "namespace": "age_ns",
+                            "provider_config": {"date_format": "%Y-%m-%d"},
+                        },
                     ],
                 },
             ],
@@ -226,7 +237,7 @@ def _row_error_config(tmp_path) -> dict:
 
 
 def _row_error_sources(tmp_path) -> dict[str, pa.Table]:
-    df = pd.DataFrame({"age": ["23", "not-a-number", "47"]})
+    df = pd.DataFrame({"age": ["2020-01-23", "not-a-date", "2020-01-27"]})
     df.to_csv(tmp_path / "customers.csv", index=False)
     return {"customers": pa.Table.from_pandas(df, preserve_index=False)}
 
@@ -629,7 +640,8 @@ class TestOnSpawnExceptionReapsChild:
 
 
 class TestRowErrorsCarried:
-    def test_row_errors_cross_the_process_boundary_isolated(self, tmp_path):
+    def test_row_errors_cross_the_process_boundary_isolated(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(_ROW_ERROR_SECRET_ENV, "a1" * 32)
         cfg = _row_error_config(tmp_path)
         sources = _row_error_sources(tmp_path)
 
@@ -642,7 +654,8 @@ class TestRowErrorsCarried:
         assert err.column == "age"
         assert err.trigger == "format_error"
 
-    def test_row_errors_carried_in_process_fallback_too(self, tmp_path):
+    def test_row_errors_carried_in_process_fallback_too(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(_ROW_ERROR_SECRET_ENV, "a1" * 32)
         cfg = _row_error_config(tmp_path)
         sources = _row_error_sources(tmp_path)
 

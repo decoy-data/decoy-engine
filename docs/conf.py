@@ -224,6 +224,12 @@ nitpick_ignore = [
     # `bound_baseline` imports from. Same class as the entries above.
     ("py:class", "decoy_engine.config.OnDrift"),
     ("py:class", "decoy_engine.config.ScanBaselineConfig"),
+    # F09 pre-scan E2: `Check` and `CheckCounts` are defined in the private
+    # `run_result._model` and re-exported by `decoy_engine.run_result`; `PreScanStatus`
+    # is a Literal alias autoapi renders as a bare class. Same class as the entries above.
+    ("py:class", "decoy_engine.run_result.Check"),
+    ("py:class", "decoy_engine.run_result.CheckCounts"),
+    ("py:class", "PreScanStatus"),
     # CI-E1: bare aliases and a Literal that autoapi renders as a class.
     ("py:class", "ReasonRecord"),
     ("py:class", "Phase"),

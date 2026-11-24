@@ -16,6 +16,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import run_pipeline
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._planner import _whole_column_state_rejections
 from decoy_engine.execution.native._chunked_entry import aggregate_chunked_route_evidence
 from decoy_engine.execution.native._chunked_evidence import plan_column_backends
@@ -188,6 +189,7 @@ def test_the_evidence_planner_plans_arrow_python_for_text_redact() -> None:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert {p.column: p.planned_backend for p in plans}["s"] == "arrow_python"
 

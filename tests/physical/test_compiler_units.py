@@ -440,6 +440,45 @@ def test_registry_fingerprint_changes_with_capability_matrix(tmp_path: Path) -> 
     assert inputs_a.plan_hash() != inputs_b.plan_hash()
 
 
+# `registry_fingerprint` of the shipped registry on main before `CapabilityMatrix.draw` existed.
+_FINGERPRINT_BEFORE_DRAW = "59125c9a0376ff4262b8064e9d2408256b0deb34d785b92690193d96e5450024"
+
+
+def test_registry_fingerprint_moves_only_because_the_matrix_gained_draw(tmp_path: Path) -> None:
+    """The one-time move of `plan_hash` and `activation_hash` has a single cause: the `draw` key.
+
+    Rebuilding the fingerprint from the shipped registry with `draw` dropped from each dump
+    gives the digest main produced before the field existed, so no other provider fact moved."""
+    import hashlib
+    from dataclasses import replace
+
+    from decoy_engine.providers_v2 import get_default_registry
+
+    registry = get_default_registry()
+    legacy_parts = tuple(
+        (
+            name,
+            tuple(
+                sorted(
+                    (k, v)
+                    for k, v in registry.get_capabilities(name).model_dump().items()
+                    if k != "draw"
+                )
+            ),
+        )
+        for name in sorted(registry.known_providers())
+    )
+    legacy = hashlib.sha256(repr(legacy_parts).encode("utf-8")).hexdigest()
+    assert legacy == _FINGERPRINT_BEFORE_DRAW
+
+    inputs = replace(_flat_inputs(tmp_path), registry=registry)
+    assert inputs.registry_fingerprint() != _FINGERPRINT_BEFORE_DRAW
+    assert {registry.get_capabilities(n).draw for n in registry.known_providers()} == {
+        "pool",
+        "computed",
+    }
+
+
 # ---------------------------------------------------------------------------
 # relationship_role
 # ---------------------------------------------------------------------------

@@ -118,7 +118,7 @@ def plan_positional_when_guard(config: dict[str, Any], table: str) -> Positional
             continue
         column = str(entry.get("name", "?"))
         refs = when_column_refs(parse_when(when))
-        names = (column, *(r for r in refs if r != column))
+        names = (column, *(r.column for r in refs if r.column != column))
         guarded.append(_PositionalWhenColumn(column, code, names))
     return PositionalWhenGuard(tuple(guarded)) if guarded else None
 

@@ -256,7 +256,7 @@ HOW_F3_ASSERTS_WITNESS = (
     "(core, `np.random.default_rng(...).integers`) and "
     "`_faker_pool._build_and_sample_returning_pool` (legacy whole-table, "
     "`PoolSampler.sample(..., deterministic=False)`), so no generate_tables column enters "
-    "`_sampler._derive_pool_indices`, the only route to the compiled index kernel. The F-audit "
+    "`_sampler.derive_pool_indices`, the only route to the compiled index kernel. The F-audit "
     "(`test_phase_f_audit_*.py`, matrix `_f_audit_matrix.py`) keeps the remaining obligations: a "
     "predicate-derived matrix, consumed-output witnesses with discard-and-substitute mutants, the "
     "core-versus-legacy and resident-versus-streamed route proofs, a deterministic-index spy that "

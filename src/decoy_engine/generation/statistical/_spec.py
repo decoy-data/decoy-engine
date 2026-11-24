@@ -129,17 +129,17 @@ class StatisticalSpec:
 
 def spec_to_dict(spec: StatisticalSpec) -> dict[str, Any]:
     """Plain-dict form of a validated `StatisticalSpec`, for embedding into
-    `PinnedStatisticalSpec.spec` (guide section 4.7). `dataclasses.asdict`
-    is exact here because every field is already a JSON-shaped value
-    (str/dict/bool/None). `carrier` is dropped from the output when `None`
-    (guide section 3.9): it is a DP-v3-only field, so a legacy
-    `distribution-snapshot/v1` spec serializes exactly as it did before
-    phase 6, and an older serialized Plan deserializes unchanged."""
+    `PinnedStatisticalSpec.spec` (guide section 4.7). `dataclasses.asdict` is exact here because
+    every field is a JSON-shaped value. `carrier` (a DP-v3-only field), `cell_format`,
+    `datetime_buckets` and an unset `cell_format.char_class` are dropped when `None`, so a spec
+    without them serializes exactly as before and an older serialized Plan deserializes unchanged."""
     data = asdict(spec)
     if data.get("carrier") is None:
         del data["carrier"]
     if data.get("cell_format") is None:
         del data["cell_format"]
+    elif data["cell_format"].get("char_class") is None:
+        del data["cell_format"]["char_class"]
     if data.get("datetime_buckets") is None:
         del data["datetime_buckets"]
     return data

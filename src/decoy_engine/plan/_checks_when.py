@@ -13,7 +13,7 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.errors import ValidationError
-from decoy_engine.expressions._when_parser import parse_when
+from decoy_engine.expressions._when_parser import parse_when, when_refusal_codes
 from decoy_engine.plan._errors import PlanCompileError
 
 
@@ -92,13 +92,28 @@ def check_when_grammar(config: dict[str, Any]) -> None:
                 parse_when(when.strip())
                 continue
             except ValidationError as exc:
-                reason = exc.raw_message
+                refusal = exc
             # Raised outside the handler so `__context__` stays empty.
-            raise PlanCompileError(
-                code=reasons.plan.WHEN_OUTSIDE_CLOSED_GRAMMAR,
-                path=path,
-                message=(
-                    f"Column {table_name}.{col_name}: {reason}. See the "
-                    "`when:` section of docs/strategies.md for the accepted forms."
-                ),
-            )
+            raise _when_refusal_error(refusal, table_name, col_name, path)
+
+
+def _when_refusal_error(
+    refusal: ValidationError, table_name: object, col_name: object, path: str
+) -> PlanCompileError:
+    """The plan error for a parser refusal; the code is the refusal's row in `WHEN_REFUSALS`."""
+    codes = when_refusal_codes(refusal)
+    reason = refusal.raw_message
+    if codes.masked:
+        return PlanCompileError(
+            code=codes.plan,
+            path=path,
+            message=f"Column {table_name}.{col_name}: {reason}.",
+        )
+    return PlanCompileError(
+        code=codes.plan,
+        path=path,
+        message=(
+            f"Column {table_name}.{col_name}: {reason}. See the "
+            "`when:` section of docs/strategies.md for the accepted forms."
+        ),
+    )

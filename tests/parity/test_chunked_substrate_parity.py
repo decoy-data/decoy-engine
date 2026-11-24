@@ -19,6 +19,7 @@ from decoy_engine import run_mask_pipeline_chunked
 from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import run_pipeline
 from decoy_engine.plan import PlanCompileError
+from tests._column_shapes import INT_DECL
 from tests._declared_schema import declared_schema
 
 _ENGINE_VERSION = "chunked-substrate-parity-test"
@@ -54,6 +55,7 @@ _COLUMNS = [
         "name": "score",
         "strategy": "bucketize",
         "provider_config": {"width": 25},
+        **INT_DECL,
     },
     {
         "name": "contact",
