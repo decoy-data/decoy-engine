@@ -280,7 +280,7 @@ def _bound_params(
             ):  # pragma: no cover - C0 binds all three together with the KeyBinding
                 raise AssertionError(
                     "date_shift node reached run_operator with no resolved "
-                    "date_format-or-shape/min_days/max_days"
+                    "date_format/min_days/max_days"
                 )
             if column is None:
                 # The records must name their column; a caller that cannot say which

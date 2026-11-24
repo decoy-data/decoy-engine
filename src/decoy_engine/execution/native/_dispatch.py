@@ -276,7 +276,7 @@ def _static_route_decision(
         resident_sources=sibling_resident_sources(config, table, first_schema),
     )
     if date_shapes is not None:
-        date_shapes.update(plan.date_shapes)
+        date_shapes |= plan.date_shapes
     table_nodes = [n for n in plan.nodes if n.table == table]
     if not table_nodes:
         return _oracle_evidence(
