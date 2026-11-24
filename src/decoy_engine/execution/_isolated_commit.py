@@ -159,12 +159,13 @@ def _names_ok(names: object) -> TypeGuard[list[str]]:
 def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, dict[str, str]]:
     """Stage each table under an opaque name in the private work root.
 
-    Raises `UnsupportedColumnType` for a dictionary whose values are a dictionary: Arrow IPC drops
-    the inner one and reads its indices back as values, and Parquet takes no dictionary."""
+    Raises `UnsupportedColumnType` for a dictionary whose values are a dictionary or an extension
+    type: Arrow IPC cannot read those back, and Parquet takes no dictionary."""
     for table in sources.values():
         for field in table.schema:
-            if not arrow_adapter.ipc_holds_type(field.type):
-                raise UnsupportedColumnType(column=field.name, kind="dictionary_in_dictionary")
+            kind = arrow_adapter.ipc_refusal(field.type)
+            if kind is not None:
+                raise UnsupportedColumnType(column=field.name, kind=kind)
     stage = handed_stage_dir(work_root, "isolated.sources")
     manifest = {}
     for index, (name, table) in enumerate(sources.items()):

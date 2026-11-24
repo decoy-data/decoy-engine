@@ -424,6 +424,8 @@ def _assert_same(w, g):
         assert g.indices.equals(w.indices)
         _assert_same(w.dictionary, g.dictionary)
     elif pa.types.is_union(t):
+        # type_codes and dense offsets ignore a slice's offset; take rebuilds both from zero.
+        w, g = (a.take(pa.array(range(len(a)), pa.int64())) for a in (w, g))
         assert g.type_codes.equals(w.type_codes)
         if t.mode == "dense":
             assert g.offsets.equals(w.offsets)
@@ -434,13 +436,19 @@ def _assert_same(w, g):
         for i in range(t.num_fields):
             _assert_same(w.field(i), g.field(i))
     elif pa.types.is_map(t):
-        assert pc.list_value_length(g).equals(pc.list_value_length(w))
-        _assert_same(w.keys, g.keys)
-        _assert_same(w.items, g.items)
+        entries = pa.list_(t.field(0))  # no length kernel takes a map, its list storage has one
+        _assert_same(w.cast(entries), g.cast(entries))
     elif pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_fixed_size_list(t):
         assert g.is_null().equals(w.is_null())
         assert pc.list_value_length(g).equals(pc.list_value_length(w))
         _assert_same(w.flatten(), g.flatten())
+    elif pa.types.is_list_view(t) or pa.types.is_large_list_view(t):
+        assert g.is_null().equals(w.is_null())
+        for want_row, got_row in zip(w, g, strict=True):  # a cast to list drops view values
+            if want_row.is_valid:
+                _assert_same(want_row.values, got_row.values)
+    elif isinstance(t, pa.BaseExtensionType):
+        _assert_same(w.storage, g.storage)
     else:
         assert g.equals(w)
 
@@ -625,14 +633,65 @@ _DICT_IN_DICT = {
 }
 
 
-@pytest.mark.parametrize("name", list(_DICT_IN_DICT))
-def test_dictionary_in_dictionary_is_refused_before_staging(tmp_path, name):
-    table = pa.table({"x": _DICT_IN_DICT[name]()})
+def _dict_of(values):
+    return pa.DictionaryArray.from_arrays(pa.array([1, 0], pa.int8()), values)
+
+
+def _uuids():
+    return pa.ExtensionArray.from_storage(
+        pa.uuid(), pa.array([bytes(16), b"\1" * 16], pa.binary(16))
+    )
+
+
+def _json():
+    return pa.ExtensionArray.from_storage(pa.json_(), pa.array(['{"a":2.0}', "[2.0]"]))
+
+
+# The IPC reader rejects an extension type over dictionary storage, however deep it sits.
+_DICT_OF_EXTENSION = {
+    "uuid_top_level": lambda: _dict_of(_uuids()),
+    "uuid_in_struct": lambda: pa.StructArray.from_arrays([_dict_of(_uuids())], names=["u"]),
+    "uuid_in_list": lambda: pa.ListArray.from_arrays(
+        pa.array([0, 2], pa.int32()), _dict_of(_uuids())
+    ),
+    "uuid_under_struct_values": lambda: _dict_of(
+        pa.StructArray.from_arrays([_dict_of(_uuids())], names=["u"])
+    ),
+    "json_under_list_values": lambda: _dict_of(
+        pa.ListArray.from_arrays(pa.array([0, 1, 2], pa.int32()), _dict_of(_json()))
+    ),
+}
+
+_REFUSED = {
+    **{(name, "dictionary_in_dictionary"): make for name, make in _DICT_IN_DICT.items()},
+    **{(name, "dictionary_of_extension"): make for name, make in _DICT_OF_EXTENSION.items()},
+}
+
+
+@pytest.mark.parametrize(("name", "kind"), list(_REFUSED))
+def test_ipc_unreadable_dictionaries_are_refused_before_staging(tmp_path, name, kind):
+    table = pa.table({"x": _REFUSED[name, kind]()})
     with pytest.raises(UnsupportedColumnType) as caught:
         stage_sources(tmp_path, {"t": table})
-    assert caught.value.detail == {"column": "x", "kind": "dictionary_in_dictionary"}
+    assert caught.value.detail == {"column": "x", "kind": kind}
     assert "2.0" not in str(caught.value)
     assert list(tmp_path.iterdir()) == []
+
+
+_EXTENSION_UNDER_DICTIONARY = {
+    "uuid_in_struct_values": lambda: pa.StructArray.from_arrays([_uuids()], names=["u"]),
+    "json_in_list_values": lambda: pa.ListArray.from_arrays(
+        pa.array([0, 1, 2], pa.int32()), _json()
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(_EXTENSION_UNDER_DICTIONARY))
+def test_extension_under_a_nested_dictionary_value_stages_exactly(tmp_path, name):
+    table = pa.table({"x": _dict_of(_EXTENSION_UNDER_DICTIONARY[name]())})
+    manifest, actual = _round_trip(tmp_path, table)
+    assert manifest["t"]["format"] == "ipc"
+    _assert_exact(table, actual)
 
 
 def _floats(raw, width):
@@ -647,12 +706,34 @@ def _arm_swap(code):
     return pa.UnionArray.from_sparse(pa.array([code], pa.int8()), arms, ["f", "b"])
 
 
+def _sliced_sparse(row):
+    """One row of a sparse union whose rows hold the same 5 in an int64 and an int32 arm."""
+    arms = [pa.array([5, 5], pa.int64()), pa.array([5, 5], pa.int32())]
+    return pa.UnionArray.from_sparse(pa.array([0, 1], pa.int8()), arms, ["a", "b"]).slice(row, 1)
+
+
+def _sliced_dense(row):
+    """One row of a dense union over [1, 2]."""
+    codes, offsets = pa.array([0, 0], pa.int8()), pa.array([0, 1], pa.int32())
+    return pa.UnionArray.from_dense(codes, offsets, [pa.array([1, 2])], ["a"]).slice(row, 1)
+
+
 _NOT_EXACT = {
     "union_arm_swap": (_arm_swap(0), _arm_swap(1)),
     "float32_nan_payloads": (_floats([0x7FC00001], 32), _floats([0x7FC00002], 32)),
     # Widening to float64 quiets a signaling NaN, so it then matches the quiet one.
     "float32_signaling_nan": (_floats([0x7F800001], 32), _floats([0x7FC00001], 32)),
     "float16_signed_zero": (_floats([0x0000], 16), _floats([0x8000], 16)),
+    "sliced_sparse_union_arm": (_sliced_sparse(1), _sliced_sparse(0)),
+    "sliced_dense_union_value": (_sliced_dense(1), _sliced_dense(0)),
+    "list_view_signed_zero": (
+        pa.array([[0.0]], pa.list_view(pa.float64())),
+        pa.array([[-0.0]], pa.list_view(pa.float64())),
+    ),
+    "map_signed_zero": (
+        pa.array([[("a", 0.0)]], pa.map_(pa.string(), pa.float64())),
+        pa.array([[("a", -0.0)]], pa.map_(pa.string(), pa.float64())),
+    ),
 }
 
 

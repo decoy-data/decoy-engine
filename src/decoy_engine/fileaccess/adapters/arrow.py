@@ -238,17 +238,17 @@ def parquet_holds_type(t: pa.DataType) -> bool:
     return all(_parquet_exact(node) for node in _type_nodes(t))
 
 
-def _storage(t: pa.DataType) -> pa.DataType:
-    return _storage(t.storage_type) if isinstance(t, pa.BaseExtensionType) else t
-
-
-def ipc_holds_type(t: pa.DataType) -> bool:
-    """False when a dictionary's values are themselves a dictionary: IPC drops the inner one and
-    reads its indices back as values. A dictionary under a struct, list, map or union is exact."""
-    return not any(
-        pa.types.is_dictionary(node) and pa.types.is_dictionary(_storage(node.value_type))
-        for node in _type_nodes(t)
-    )
+def ipc_refusal(t: pa.DataType) -> str | None:
+    """Why IPC cannot stage `t`, or None. A dictionary may hold a struct, list, map or union of
+    anything, but not a dictionary (IPC reads the inner indices back as values) or an extension
+    type (the reader rejects the extension over dictionary storage)."""
+    for node in _type_nodes(t):
+        if pa.types.is_dictionary(node):
+            if pa.types.is_dictionary(node.value_type):
+                return "dictionary_in_dictionary"
+            if isinstance(node.value_type, pa.BaseExtensionType):
+                return "dictionary_of_extension"
+    return None
 
 
 def _refuse_fixed_list_null(data: pa.Table | pa.RecordBatch) -> None:
