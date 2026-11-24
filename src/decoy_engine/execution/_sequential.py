@@ -450,7 +450,8 @@ def run_sequential(
                 for node in nodes_by_table.get(table, ()):
                     with decline_composite_chain(ordered, graph, table):
                         warnings.extend(
-                            adapter._dispatch_mask_node(
+                            run_state.dispatch(
+                                adapter._dispatch_mask_node,
                                 node,
                                 frames,
                                 graph,

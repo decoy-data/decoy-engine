@@ -164,7 +164,7 @@ def _call_names(func: Callable[..., Any]) -> set[str]:
 
 
 def test_g3_dispatch_mask_node_calls_are_the_pinned_inventory() -> None:
-    assert _call_names(PandasExecutionAdapter._dispatch_node) == _PINNED_DISPATCH_CALLS
+    assert _call_names(PandasExecutionAdapter._dispatch_mask_node) == _PINNED_DISPATCH_CALLS
 
 
 def test_g3_work_node_kinds_are_the_pinned_set() -> None:
@@ -187,7 +187,7 @@ def test_g3_work_node_kinds_are_the_pinned_set() -> None:
 
 
 def test_g3_a_new_dispatch_call_would_be_noticed() -> None:
-    source = inspect.getsource(PandasExecutionAdapter._dispatch_node)
+    source = inspect.getsource(PandasExecutionAdapter._dispatch_mask_node)
     edited = source.replace(
         "        df = frames[node.table]\n",
         "        df = frames[node.table]\n        self._new_branch(df)\n",
@@ -273,7 +273,7 @@ _PINNED_RUN_CALLS = frozenset(
         "require_mask_key",
         "row_error_records.extend",
         "run_chunk_ingest_guards",
-        "self._dispatch_mask_node",
+        "run_state.dispatch",
         "plan_column_shapes",
         "set",
         "sources.items",

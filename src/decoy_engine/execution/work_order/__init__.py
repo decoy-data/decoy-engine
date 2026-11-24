@@ -6,7 +6,11 @@ and the ordinary sort, `compile` makes the one ordering decision every entry poi
 """
 
 from decoy_engine.execution.work_order.commits import Selection, WorkOrderRun
-from decoy_engine.execution.work_order.compile import WorkOrder, compile_work_order
+from decoy_engine.execution.work_order.compile import (
+    WorkOrder,
+    compile_plan_order,
+    compile_work_order,
+)
 from decoy_engine.execution.work_order.operations import (
     ResolvedOperation,
     resolve_operation,
@@ -18,6 +22,7 @@ __all__ = [
     "Selection",
     "WorkOrder",
     "WorkOrderRun",
+    "compile_plan_order",
     "compile_work_order",
     "resolve_operation",
     "resolve_operations",

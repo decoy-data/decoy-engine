@@ -29,11 +29,11 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine._field_names import repeated_names
 from decoy_engine.execution._column_access import (
-    handler_written_columns,
     has_when,
     touched_columns,
 )
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution.work_order.operations import entries_written
 
 PASSTHROUGH_UNREPRESENTABLE_CODE = reasons.runtime.CHUNKED_PASSTHROUGH_VALUE_UNREPRESENTABLE
 
@@ -182,7 +182,7 @@ def passthrough_columns(
     some handler writes (a composite's bundle) is never one of them, whatever its entry
     says: carrying it would let the source value overwrite the generated one."""
     entries = _table_columns(config, table)
-    written = handler_written_columns(entries, registry)
+    written = entries_written(entries, registry)
     if written is None:
         return []
     configured = {c["name"]: c for c in entries if isinstance(c.get("name"), str)}

@@ -67,10 +67,10 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState
-from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import group_by_sibling
 from decoy_engine.execution._strategies._redact import redact_with_is_string
+from decoy_engine.execution.work_order.operations import entries_written
 
 _STRING_OUTPUT_STRATEGIES = frozenset({"hash", "truncate", "redact"})
 
@@ -281,7 +281,7 @@ def build_schema_rule(
         for c in table_cfg.get("columns") or []
         if isinstance(c, dict) and isinstance(c.get("name"), str)
     }
-    written = handler_written_columns(
+    written = entries_written(
         [c for c in table_cfg.get("columns") or [] if isinstance(c, dict)], registry
     )
     from decoy_engine.execution._faker_degenerate_pin import deterministic_faker_pin_columns

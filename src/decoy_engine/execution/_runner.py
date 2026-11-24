@@ -360,6 +360,17 @@ def order_work(
     contradicts an FK edge is a genuine cycle and raises `cyclic_work_ordering`.
     """
     by_key: dict[_NodeKey, WorkNode] = {w.key: w for w in work}
+    return kahn_sorted(by_key, ordering_deps(work, relationship_graph, column_deps))
+
+
+def ordering_deps(
+    work: list[WorkNode],
+    relationship_graph: RelationshipGraph,
+    column_deps: Mapping[_NodeKey, set[_NodeKey]] | None = None,
+) -> dict[_NodeKey, set[_NodeKey]]:
+    """Every ordering constraint of `order_work`: FK edges, R17 composite edges and the
+    cross-column channel (`column_deps`, derived from the resolved operations when None)."""
+    by_key: dict[_NodeKey, WorkNode] = {w.key: w for w in work}
     deps: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
 
     for edge in relationship_graph.edges:
@@ -406,4 +417,4 @@ def order_work(
             if driver in by_key:
                 deps[dependent].add(driver)
 
-    return kahn_sorted(by_key, deps)
+    return deps

@@ -117,32 +117,49 @@ _PINNED_CALLERS: dict[str, set[tuple[str, str]]] = {
         ("work_order/operations.py", "resolve_operation"),
     },
     "column_access": {
-        ("_column_access.py", "handler_written_columns"),
+        ("work_order/operations.py", "entries_written"),
         ("_column_access.py", "touched_columns"),
         ("_column_access.py", "created_columns"),
         ("_mixed_static.py", "_mask_table_config"),
         ("_transforms.py", "reject_config_references_stored_index"),
     },
-    "handler_written_columns": {
-        ("_chunked_carry.py", "passthrough_columns"),
-        ("native/_chunked_schema_rule.py", "build_schema_rule"),
+    # One ordering decision: nothing else sorts the work list.
+    "order_work": {
+        ("work_order/compile.py", "compile_work_order"),
+        ("work_order/compile.py", "_components"),
     },
 }
 
 
+def _aliases(tree: ast.AST, name: str) -> set[str]:
+    """Every local spelling of `name` in a module: its own name plus each `import x as y` alias."""
+    spellings = {name}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom | ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[-1] == name and alias.asname:
+                    spellings.add(alias.asname)
+    return spellings
+
+
 def _callers(name: str) -> set[tuple[str, str]]:
+    """(path, enclosing function) of every call to `name`: a bare call, an aliased import, or a
+    module-qualified call (`mod.name(...)`)."""
     found: set[tuple[str, str]] = set()
     for path in SRC.rglob("*.py"):
         tree = ast.parse(path.read_text())
+        spellings = _aliases(tree, name)
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             for call in ast.walk(fn):
-                if (
-                    isinstance(call, ast.Call)
-                    and isinstance(call.func, ast.Name)
-                    and call.func.id == name
-                ):
+                if not isinstance(call, ast.Call):
+                    continue
+                func = call.func
+                called = func.id if isinstance(func, ast.Name) else None
+                if isinstance(func, ast.Attribute) and func.attr in spellings:
+                    called = func.attr
+                if called in spellings:
                     found.add((str(path.relative_to(SRC)), fn.name))
     return found
 
@@ -151,3 +168,13 @@ def _callers(name: str) -> set[tuple[str, str]]:
 def test_raw_write_declaration_lookups_are_pinned(name: str) -> None:
     """A new caller of a raw declaration reader fails here until it is pinned with its reason."""
     assert _callers(name) <= _PINNED_CALLERS[name]
+
+
+def test_dispatch_wrapper_publishes_before_and_saves_after() -> None:
+    """The run's dispatch wrapper makes exactly these calls: `before`, the node dispatch, `after`."""
+    from decoy_engine.execution.work_order import WorkOrderRun
+
+    tree = ast.parse(Path(WorkOrderRun.dispatch.__code__.co_filename).read_text())
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "dispatch")
+    calls = {ast.unparse(c.func) for c in ast.walk(fn) if isinstance(c, ast.Call)}
+    assert calls == {"self.before", "call", "self.after"}

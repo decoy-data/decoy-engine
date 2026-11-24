@@ -157,3 +157,30 @@ def test_three_writers_share_one_order(tmp_path: Path) -> None:
         out = ws.run(seed_plan, table)
         assert out.column("last_name").to_pylist() == expected, key_column
         assert out.column(key_column).to_pylist() == ["J"] * N
+
+
+def test_faker_never_keys_from_a_stale_integer_source(tmp_path: Path) -> None:
+    """14 (fail-closed part). A gated joint mask writes the nullable integer `n` as a secondary
+    output before a deterministic Faker column over `n`. The registered Arrow source of `n` is the
+    one from before the joint write, so Faker must not key from it: the column is not registered
+    after an earlier writer, and the job either keys from the written values or refuses."""
+    from decoy_engine.execution._exact_int_sources import exact_int_faker_sources
+    from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.relationships import RelationshipGraph
+
+    ref = ws.reference(tmp_path / "r.parquet", city=["JC"], n=[7])
+    source = pa.table(
+        {
+            "k": pa.array(["a", "b", "c", "d"]),
+            "city": pa.array(["c0", "c1", "c2", "c3"]),
+            "n": pa.array([2**60, None, 2**60 + 1, 5], type=pa.int64()),
+        }
+    )
+    faker = ws.seed("faker", deterministic=True, namespace="nm", provider="random_int")
+    seed_plan = ws.plan([("city", ws.joint(ref, ["city", "n"], when="k == 'a'")), ("n", faker)])
+    nodes = list(build_work_list(seed_plan, ws.REG))
+    frame = source.to_pandas()
+    graph = RelationshipGraph(edges=(), ordering=())
+    ordered = sorted(nodes, key=lambda n: n.columns)  # city's joint mask first, then n
+    assert ("t", "n") not in exact_int_faker_sources("t", source, frame, ordered, graph)
+    assert ("t", "n") in exact_int_faker_sources("t", source, frame, [ordered[-1]], graph)

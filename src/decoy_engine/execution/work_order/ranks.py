@@ -77,7 +77,8 @@ def fallback_edges(ops: Mapping[NodeKey, ResolvedOperation]) -> dict[NodeKey, se
     """Value dependencies for a plan the ordinary edges reject as cyclic. A masked driver waits
     for every writer, as above. A creator a bundle overwrites no longer forces the bundle after
     it (commit ranks decide the final value). An FK child bypasses its configured handler: it
-    waits for every other non-FK writer of its child columns, so its child tuple sees them."""
+    waits for every other non-FK writer of its child columns, so its child tuple sees them, and
+    for every writer of its parent columns."""
     writer = writer_index(ops)
     deps: dict[NodeKey, set[NodeKey]] = defaultdict(set)
     for op in ops.values():
@@ -86,6 +87,11 @@ def fallback_edges(ops: Mapping[NodeKey, ResolvedOperation]) -> dict[NodeKey, se
                 for key in writers_of(writer, op.table, col):
                     if key != op.key and ops[key].kind != "fk":
                         deps[op.key].add(key)
+            # The parent map reads the rank-assembled winner of every parent column, so the FK
+            # child waits for every writer of those columns, not only the parent's own node.
+            for edge in op.fk_edges:
+                for col in edge.parent_columns:
+                    deps[op.key] |= writers_of(writer, edge.parent_table, col) - {op.key}
             continue
         for col in op.masked_reads:
             deps[op.key] |= writers_of(writer, op.table, col) - {op.key}

@@ -527,16 +527,11 @@ def touched_columns(entries: Iterable[Mapping[str, Any]], registry: Any) -> froz
 def handler_written_columns(
     entries: Iterable[Mapping[str, Any]], registry: Any
 ) -> frozenset[str] | None:
-    """Columns some handler writes (own columns of composites included), or None when some
-    declaration has `writes_unknown`, meaning every source field is potentially written. An
-    unknown read never makes this None."""
-    written: set[str] = set()
-    for entry in entries:
-        access = column_access(entry, registry)
-        if access.writes_unknown:
-            return None
-        written |= access.writes
-    return frozenset(written)
+    """Columns some handler writes, or None when a declaration is `writes_unknown`: the one union
+    lives in `work_order.operations.entries_written`."""
+    from decoy_engine.execution.work_order.operations import entries_written
+
+    return entries_written(entries, registry)
 
 
 def composite_provider_offenders(

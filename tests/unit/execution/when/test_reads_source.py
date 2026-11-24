@@ -618,3 +618,27 @@ def test_a_column_created_before_the_composite_that_overwrites_it(created: str, 
     assert out.column(read).to_pylist() != source  # the composite ran
     # It ran after the creator, so the bundle's value is the final value of the column.
     assert not any(v.endswith("!") for v in out.column(created).to_pylist())
+
+
+@pytest.mark.parametrize("sequential", [False, True], ids=["full-frame", "sequential"])
+def test_a_stored_pandas_index_with_a_repeated_label_selects_by_position(sequential: bool) -> None:
+    """A Parquet-style source that stores its pandas index (`rid` = [7, 7]) reads back with a
+    repeated row label. The gate still selects by position, on both pandas routes, and the
+    output keeps the source's rows. No monkeypatching: the source is the real stored-index shape."""
+    df = pd.DataFrame(
+        {"status": ["active", "idle"], "zz_target": ["t0", "t1"]},
+        index=pd.Index([7, 7], name="rid"),
+    )
+    table = pa.Table.from_pandas(df, preserve_index=True)
+    seed_plan = _seed_plan(
+        [
+            ("status", _seed_of("redact")),
+            ("zz_target", _seed_of("redact", when="status == 'active'")),
+        ]
+    )
+    from tests.unit.execution.when import _write_support as ws
+
+    run = ws.run_sequential if sequential else ws.run
+    out = run(seed_plan, table, bound=())
+    assert out.column("zz_target").to_pylist() == ["REDACTED", "t1"]
+    assert out.column("status").to_pylist() == ["REDACTED", "REDACTED"]

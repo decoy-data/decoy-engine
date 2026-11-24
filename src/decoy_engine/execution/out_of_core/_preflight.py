@@ -15,13 +15,13 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution._runner import build_work_list, order_work
 from decoy_engine.execution.out_of_core import _mask_group_c
 from decoy_engine.execution.out_of_core._compat import check_out_of_core_compatibility
 from decoy_engine.execution.out_of_core._null_int_guard import reject_null_bearing_int_ooc
 from decoy_engine.execution.out_of_core._route_policy import resolve_reorder_threshold_rows
 from decoy_engine.execution.out_of_core._source import LazySource
 from decoy_engine.execution.out_of_core._vault_collect import assert_vault_inputs
+from decoy_engine.execution.work_order import compile_plan_order
 from decoy_engine.keyprovider import require_mask_key
 
 if TYPE_CHECKING:
@@ -64,7 +64,13 @@ def run_preflight(
     # check, so a keyed out-of-core job can never run off job_seed at GA from any entry point.
     mask_key = OpaqueBox(require_mask_key(plan, key_provider))
     assert_vault_inputs(vault_writer, config, mask_key.open()[0])
-    work = order_work(build_work_list(plan, registry), relationship_graph)
+    order = compile_plan_order(plan, registry, relationship_graph)
+    if order.fallback:  # no ordinary order: this route cannot run the plan
+        raise ExecutionError(
+            code=reasons.runtime.CYCLIC_WORK_ORDERING,
+            message="the work nodes have no ordinary order; out-of-core cannot run this plan",
+        )
+    work = list(order.ordered)
     # Schema-only read (a LazySource's schema is cached), so a forced out-of-core
     # job with a non-string faker source refuses here, before any scratch dir or
     # sink write, rather than aborting mid-run (B4).

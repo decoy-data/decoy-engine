@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import pyarrow as pa
@@ -284,7 +284,8 @@ class PandasExecutionAdapter:
                 if node.table not in frames:
                     continue
                 warnings.extend(
-                    self._dispatch_mask_node(
+                    run_state.dispatch(
+                        self._dispatch_mask_node,
                         node,
                         frames,
                         relationship_graph,
@@ -358,19 +359,6 @@ class PandasExecutionAdapter:
         )
 
     def _dispatch_mask_node(
-        self, node: WorkNode, frames: dict[str, pd.DataFrame], *args: Any, **kwargs: Any
-    ) -> list[QualityWarning]:
-        """Dispatch one node and, when the caller passes its `run` (the `WorkOrderRun`), publish the
-        column versions it reads before the node and save what it wrote after."""
-        run: WorkOrderRun | None = kwargs.get("run")
-        if run is not None:
-            run.before(node, frames)
-        warnings = self._dispatch_node(node, frames, *args, **kwargs)
-        if run is not None:
-            run.after(node, frames[node.table])
-        return warnings
-
-    def _dispatch_node(
         self,
         node: WorkNode,
         frames: dict[str, pd.DataFrame],
@@ -395,6 +383,7 @@ class PandasExecutionAdapter:
         # table identity (CodeSetHandler evidence keying) can read it. ctx is frozen;
         # object.__setattr__ is the sanctioned path (see StrategyContext.current_table).
         object.__setattr__(ctx, "current_table", node.table)
+        object.__setattr__(ctx, "current_operation", run.order.ops[node.key] if run else None)
         df = frames[node.table]
         child_edges = relationship_graph.parents_of(node.table, node.columns)
         if child_edges:

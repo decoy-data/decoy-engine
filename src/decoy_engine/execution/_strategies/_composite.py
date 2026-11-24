@@ -131,10 +131,8 @@ class CompositeHandler:
         bundle = generator.generate_bundle(
             spec, len(df), source=source, deterministic=deterministic
         )
-        from decoy_engine.execution.work_order import resolve_operation
-
-        op = resolve_operation(node, ctx.relationship_graph)
-        declared = None if op.wildcard else op.writes
+        op = ctx.current_operation  # the compiled operation, stamped by the dispatcher
+        declared = None if op is None or op.wildcard else op.writes
         for out_col, series in bundle.items():
             # A generated key outside the declared outputs is refused before any assignment.
             if out_col not in df.columns or (declared is not None and out_col not in declared):

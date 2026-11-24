@@ -12,18 +12,31 @@ the lookup's parent keys. Saved versions live on the run object and end with it.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from decoy_engine.execution.work_order.compile import WorkOrder
+from decoy_engine.execution.work_order.operations import ResolvedOperation
 from decoy_engine.execution.work_order.ranks import commit_rank
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
+    from decoy_engine.generation.pool._events import QualityWarning
 
 _Col = tuple[str, str]
+
+
+def _restore_dtype(series: pd.Series, dtype: Any) -> pd.Series:
+    """`series` as `dtype` when its values fit it, else unchanged (object)."""
+    if series.dtype == dtype:
+        return series
+    try:
+        return series.astype(dtype)
+    except (TypeError, ValueError, OverflowError):
+        return series
 
 
 class Selection:
@@ -59,26 +72,46 @@ class WorkOrderRun:
             col = op.node.columns[0]
             if op.creates and col not in frame.columns:
                 frame[col] = pd.Series([None] * len(frame), index=frame.index, dtype=object)
-        if self.order.fallback:
-            written = {c for op in self.order.ops.values() if op.table == table for c in op.writes}
-            if any(op.wildcard for op in self.order.ops.values() if op.table == table):
-                written = set(frame.columns)
-            for col in written & set(frame.columns):
-                self._source[(table, col)] = frame[col].copy()
+        fallback = [op for k, op in self.order.ops.items() if k in self.order.fallback_keys]
+        written = {c for op in fallback if op.table == table for c in op.writes}
+        if any(op.wildcard for op in fallback if op.table == table):
+            written = set(frame.columns)
+        for col in written & set(frame.columns):
+            self._source[(table, col)] = frame[col].copy()
+
+    def dispatch(
+        self,
+        call: Callable[..., list[QualityWarning]],
+        node: WorkNode,
+        frames: dict[str, pd.DataFrame],
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[QualityWarning]:
+        """Run `call(node, frames, ...)` (the adapter's node dispatch) between `before` and
+        `after`, so the versions the node reads are published first and what it wrote is saved."""
+        self.before(node, frames)
+        warnings = call(node, frames, *args, **kwargs)
+        self.after(node, frames[node.table])
+        return warnings
 
     def before(self, node: WorkNode, frames: dict[str, pd.DataFrame]) -> None:
         self.selection = Selection()
-        if not self.order.fallback:
+        if node.key not in self.order.fallback_keys:
             return
         op = self.order.ops[node.key]
         for col in op.masked_reads:
             self._publish(frames[node.table], node.table, col)
         if op.kind == "fk":
+            # The parent map reads the winning (rank-assembled) value of every parent column.
+            for edge in op.fk_edges:
+                for col in edge.parent_columns:
+                    if edge.parent_table in frames:
+                        self._publish(frames[edge.parent_table], edge.parent_table, col)
             self._assemble_child_input(op, frames[node.table])
 
     def after(self, node: WorkNode, frame: pd.DataFrame) -> None:
         """Save the rows `node` selected and the values it wrote there."""
-        if not self.order.fallback:
+        if node.key not in self.order.fallback_keys:
             return
         op = self.order.ops[node.key]
         positions = self.selection.positions
@@ -127,13 +160,12 @@ class WorkOrderRun:
             return
         result = pd.Series(values, index=frame.index, dtype=object)
         last = max(saves, key=lambda d: d[0])[3][1]
-        try:
-            result = result.astype(last)
-        except (TypeError, ValueError):
-            pass
-        frame[col] = result
+        # Restore the dtype the last writer produced. A column that cannot hold the assembled
+        # values in that dtype (an int column given a null by another writer) stays object, and
+        # the Arrow conversion at the table boundary types it from the values.
+        frame[col] = _restore_dtype(result, last)
 
-    def _assemble_child_input(self, op: Any, frame: pd.DataFrame) -> None:
+    def _assemble_child_input(self, op: ResolvedOperation, frame: pd.DataFrame) -> None:
         edges = op.fk_edges
         parents = frozenset(
             c for e in edges if e.parent_table == op.table for c in e.parent_columns

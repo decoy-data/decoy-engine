@@ -311,9 +311,9 @@ def reject_unsafe_group_key_group_by_dtype(
     Raises:
         PlanCompileError: ``code='chunked_group_key_group_by_dtype_unsupported'``.
     """
-    from decoy_engine.execution._runner import build_work_list, order_work
+    from decoy_engine.execution.work_order import compile_plan_order
 
-    ordered_work = order_work(build_work_list(plan, registry), relationship_graph)
+    ordered_work = list(compile_plan_order(plan, registry, relationship_graph).ordered)
     offending = unsafe_group_key_group_by_columns(ordered_work, source_schema, table=table)
     if not offending:
         return

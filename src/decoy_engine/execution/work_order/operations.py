@@ -9,20 +9,21 @@ consumer asks `column_access` about a node's writes itself, so one answer reache
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine.execution._column_access import (
     OWN_TARGET_CREATES,
     SURFACE_DECLARATIONS,
+    column_access,
     declared_access,
     scalar_creating_reads,
 )
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
-    from decoy_engine.relationships import RelationshipGraph
+    from decoy_engine.relationships import RelationshipEdge, RelationshipGraph
 
 OpKind = Literal["fk", "scalar", "composite", "passthrough"]
 NodeKey = tuple[str, tuple[str, ...]]
@@ -46,7 +47,7 @@ class ResolvedOperation:
     creates: bool
     gated: bool
     masked_reads: frozenset[str]
-    fk_edges: tuple[object, ...] = ()
+    fk_edges: tuple[RelationshipEdge, ...] = ()
     # The creator flag and masked reads of the handler the node is CONFIGURED with, kept for the
     # compatibility sort: a plan that orders today keeps its order, so an FK child's configured
     # creator still adds its edges there. Value dependencies (`creates`, `masked_reads`) discard
@@ -146,3 +147,16 @@ def resolve_operations(
 ) -> dict[NodeKey, ResolvedOperation]:
     """One record per work node, resolved once against the job's relationship graph."""
     return {n.key: resolve_operation(n, graph) for n in work}
+
+
+def entries_written(entries: Iterable[Mapping[str, Any]], registry: Any) -> frozenset[str] | None:
+    """Columns some handler writes across config `entries`, or None when a declaration cannot
+    name its writes (every source field is then potentially written). The carry side, which holds
+    the table config and no work list, reads the same declaration the resolver does."""
+    written: set[str] = set()
+    for entry in entries:
+        access = column_access(entry, registry)
+        if access.writes_unknown:
+            return None
+        written |= access.writes
+    return frozenset(written)

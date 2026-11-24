@@ -24,6 +24,7 @@ from decoy_engine.plan._types import ColumnSeed
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import StrategyContext
     from decoy_engine.execution._runner import WorkNode
+    from decoy_engine.relationships import RelationshipGraph
 
 
 def _widened_int_column(source: pa.Table, frame: pd.DataFrame, column: str) -> bool:
@@ -43,14 +44,22 @@ def _widened_int_column(source: pa.Table, frame: pd.DataFrame, column: str) -> b
 
 
 def exact_int_faker_sources(
-    table: str, source: pa.Table, frame: pd.DataFrame, nodes: Iterable[WorkNode]
+    table: str,
+    source: pa.Table,
+    frame: pd.DataFrame,
+    nodes: Iterable[WorkNode],
+    graph: RelationshipGraph | None = None,
 ) -> dict[tuple[str, str], pa.ChunkedArray]:
     """Original Arrow columns for the table's exact-int Faker and ungated hash columns.
 
     `nodes` are the table's work nodes in the adapter's real dispatch order. A column an
-    earlier node declared as written no longer holds the converted source, so it keeps
-    the behavior it has without this fix.
+    earlier node writes (its own column or a secondary output such as a joint mask's) no longer
+    holds the converted source, so it is not registered: a stale source key can never be read.
+    The write set is the node's resolved operation.
     """
+    from decoy_engine.execution.work_order import resolve_operation
+    from decoy_engine.relationships import RelationshipGraph as _Graph
+
     out: dict[tuple[str, str], pa.ChunkedArray] = {}
     written: set[str] = set()
     for node in nodes:
@@ -69,7 +78,10 @@ def exact_int_faker_sources(
             and _widened_int_column(source, frame, column)
         ):
             out[(table, column)] = source.column(column)
-        written.update(node.columns)
+        written.update(
+            resolve_operation(node, graph or _Graph(edges=(), ordering=())).writes
+            | set(node.columns)
+        )
     return out
 
 
@@ -81,7 +93,8 @@ def register_exact_int_sources(
     nodes: Iterable[WorkNode],
 ) -> None:
     """Record the table's exact-int Faker columns on the context, for its frame's lifetime."""
-    ctx.exact_int_sources.update(exact_int_faker_sources(table, source, frame, nodes))
+    graph = ctx.relationship_graph
+    ctx.exact_int_sources.update(exact_int_faker_sources(table, source, frame, nodes, graph))
 
 
 def release_table(sources: dict[tuple[str, str], pa.ChunkedArray], table: str) -> None:

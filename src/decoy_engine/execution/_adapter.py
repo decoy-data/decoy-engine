@@ -256,6 +256,9 @@ class StrategyContext:
     # that the `when:` gate may read (`_runner.source_snapshot_columns`). A route that builds no
     # snapshot leaves it None and the gate fails closed (`when_source_snapshot_missing`).
     source_snapshot_columns: Mapping[str, frozenset[str]] | None = None
+    # WHEN-READS-SOURCE: the compiled `ResolvedOperation` of the node in flight, stamped by the
+    # dispatcher beside `current_table`. A composite checks its generated keys against its writes.
+    current_operation: Any = None
     # Phase 4 slice 1 (DGRN -> windowed_date): the durable global row offset of
     # this call's FIRST row, i.e. the position the physical row 0 of `df`
     # occupies in the full, unchunked source. Full-frame and every other
