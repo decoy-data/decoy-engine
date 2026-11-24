@@ -26,11 +26,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
-
 REGISTRY = "scripts/dev/sentry_registry.toml"
 BASELINE_DIR = "tests/sentry/baselines"
 MIN_REASON = 15
@@ -75,13 +70,13 @@ class Baseline:
     reasons: dict[str, object]
 
 
-def parse_registry(text: str) -> tuple[dict[str, str], list[str]]:
-    """Return ``{id: path}`` and findings for duplicate ids or shared paths."""
-    rows = tomllib.loads(text).get("sentry", [])
+def parse_registry(doc: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+    """``{id: path}`` and findings for duplicate ids or shared paths, from a validated registry."""
+    rows = doc.get("sentry", [])
     out: dict[str, str] = {}
     findings: list[str] = []
     for row in rows:
-        sid, path = row.get("id", ""), row.get("baseline", "")
+        sid, path = row["id"], row["baseline"]
         if sid in out:
             findings.append(f"registry: sentry id {sid} appears twice")
         out[sid] = path
@@ -107,7 +102,7 @@ def _decision_ok(decision: object) -> bool:
     return True
 
 
-def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
+def parse_approvals(doc: dict[str, Any]) -> tuple[dict[str, dict[str, str]], list[str]]:
     """``{sentry id: {key: decision}}`` from ``approved_growth`` rows, and findings for bad rows.
 
     A row is ``{ key, decision }``; the key compares exactly (no glob or prefix) and the decision
@@ -115,7 +110,7 @@ def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
     """
     out: dict[str, dict[str, str]] = {}
     findings: list[str] = []
-    for row in tomllib.loads(text).get("sentry", []):
+    for row in doc.get("sentry", []):
         sid = row.get("id", "")
         for item in row.get("approved_growth", []):
             key = item.get("key") if isinstance(item, dict) else None
@@ -379,34 +374,22 @@ def check(
         return [f"cannot read {exc.what} from the {exc.side} commit"], []
 
 
-def _registry_doc(text: str) -> tuple[dict[str, Any], str | None]:
-    """Parse a registry; the second value says why it is unusable (no file content, no TOML text)."""
-    try:
-        doc = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return {}, "is not valid TOML"
-    rows = doc.get("sentry", [])
-    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
-        return {}, "must hold [[sentry]] as an array of tables"
-    return doc, None
-
-
 def _check(
     root: Path, tree: Any, helper: ModuleType, waiver_input: str | None
 ) -> tuple[list[str], list[str]]:
     reg_file = root / REGISTRY
     head_text = reg_file.read_text(encoding="utf-8") if reg_file.is_file() else ""
     base_text = tree.read(REGISTRY) or ""
-    head_doc, problem = _registry_doc(head_text)
-    if problem:
-        return [f"registry: {REGISTRY} {problem}"], []
-    base_doc, problem = _registry_doc(base_text)
-    if problem:
+    head_doc, problems = helper.validate_registry(head_text)
+    if problems:
+        return [f"registry: {REGISTRY} {p}" for p in problems], []
+    base_doc, problems = helper.validate_registry(base_text)
+    base_reg, base_findings = parse_registry(base_doc)
+    if problems or base_findings:  # a base that is not a clean registry cannot anchor a comparison
         raise helper.BaseReadError(REGISTRY)
-    head, findings = parse_registry(head_text)
-    approvals, approval_findings = parse_approvals(head_text)
+    head, findings = parse_registry(head_doc)
+    approvals, approval_findings = parse_approvals(head_doc)
     findings += approval_findings
-    base_reg = parse_registry(base_text)[0]
     findings += helper.registry_present(
         len(base_doc.get("sentry", [])), reg_file.is_file(), len(head_doc.get("sentry", []))
     )
@@ -419,7 +402,7 @@ def _check(
     schema, waiver_report = helper.closed_keys(head_doc, ROW_KEYS, decision_problem, usable)
     findings += schema
     report: list[str] = helper.new_decisions(
-        head_dec, base_names, approvals, parse_approvals(base_text)[0]
+        head_dec, base_names, approvals, parse_approvals(base_doc)[0]
     )
     report += waiver_report
     safe = {sid: p for sid, p in head.items() if helper.safe_path(p, BASELINE_DIR)}

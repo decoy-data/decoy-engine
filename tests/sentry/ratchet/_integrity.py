@@ -12,9 +12,16 @@ from __future__ import annotations
 
 import ast
 import subprocess
+import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from types import ModuleType
+from typing import Any
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 MANIFEST = "tests/sentry/test_sentry_manifest.py"
 DECISION_TABLES = ("retired", "retired_files", "checker_change")
@@ -122,6 +129,31 @@ def registry_present(base_rows: int, head_exists: bool, head_rows: int) -> list[
     return []
 
 
+def validate_registry(text: str) -> tuple[dict[str, Any], list[str]]:
+    """The one shape check for a registry, run on HEAD and on the base before anyone reads it.
+
+    Returns the parsed document and the problems that make it unusable (no file content, no TOML
+    text). Past this point every ``[[sentry]]`` row is a table with a non-empty string ``id``, a
+    string ``baseline`` and, when present, a list ``approved_growth``.
+    """
+    try:
+        doc = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return {}, ["is not valid TOML"]
+    rows = doc.get("sentry", [])
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return {}, ["must hold [[sentry]] as an array of tables"]
+    problems = []
+    for n, row in enumerate(rows, 1):
+        if not isinstance(row.get("id"), str) or not row["id"]:
+            problems.append(f"[[sentry]] row {n}: id must be a non-empty string")
+        elif not isinstance(row.get("baseline"), str):
+            problems.append(f"{row['id']}: baseline must be a string path")
+        elif not isinstance(row.get("approved_growth", []), list):
+            problems.append(f"{row['id']}: approved_growth must be a list")
+    return doc, problems
+
+
 def closed_keys(
     doc: dict[str, object],
     allowed: frozenset[str],
@@ -135,12 +167,8 @@ def closed_keys(
     """
     out: list[str] = []
     used: list[str] = []
-    rows = doc.get("sentry", [])
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict):
-            out.append("registry: a [[sentry]] row is not a table")
-            continue
-        sid = row.get("id", "?")
+    for row in doc.get("sentry", []):  # shape was checked by ``validate_registry``
+        sid = row["id"]
         for key in sorted(set(row) - allowed):
             if (sid, key) in waived:
                 used.append(f"{sid}: registry key {key} waived by checker_change")

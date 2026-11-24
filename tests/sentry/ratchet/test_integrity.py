@@ -696,3 +696,52 @@ def test_a_malformed_head_registry_is_one_finding_not_a_traceback(repo: Path, te
     assert res.returncode == 1, res.stdout + res.stderr
     assert "Traceback" not in res.stderr
     assert "registry: scripts/dev/sentry_registry.toml" in res.stderr
+
+
+# --- review round 5: base registry errors, field types, one validation path ---------------------
+
+
+def test_a_base_registry_with_a_duplicate_id_fails_closed(repo: Path) -> None:
+    dup = f'[[sentry]]\nid = "a"\nbaseline = "{A}"\n\n[[sentry]]\nid = "a"\nbaseline = "{B}"\n'
+    _write(repo, B, _baseline("a", ["m::f"]))
+    _write(repo, REG, dup)
+    base = _commit(repo, "base with a duplicate id")
+    _write(repo, REG, _registry({"a": A}))
+    (repo / B).unlink()
+    _write(repo, A, _baseline("a", ["m::f", "m::g", "m::new"]))
+    _red_from(repo, base, f"cannot read {REG} from the base commit")
+
+
+def test_a_base_registry_with_a_shared_path_fails_closed(repo: Path) -> None:
+    _write(repo, REG, _registry({"a": A, "a-twin": A}))
+    base = _commit(repo, "base with a shared path")
+    _write(repo, REG, _registry({"a": A}))
+    _red_from(repo, base, f"cannot read {REG} from the base commit")
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        'id = []\nbaseline = "tests/sentry/baselines/a.json"',
+        'id = ""\nbaseline = "tests/sentry/baselines/a.json"',
+        'id = "a"\nbaseline = 5',
+        'id = "a"\nbaseline = "tests/sentry/baselines/a.json"\napproved_growth = "x"',
+        'baseline = "tests/sentry/baselines/a.json"',
+    ],
+    ids=["id list", "id empty", "baseline int", "approved_growth str", "no id"],
+)
+def test_a_wrongly_typed_head_row_is_one_finding_not_a_traceback(repo: Path, row: str) -> None:
+    _write(repo, REG, f"[[sentry]]\n{row}\n")
+    res = _run(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Traceback" not in res.stderr
+    assert res.stderr.count("ratchet: FAIL") == 1, res.stderr
+
+
+@pytest.mark.parametrize(
+    "weak", ["owner 2026-11-24 TODO...........", "owner 2026-11-24 tbd!!!!!!!!!!!!"]
+)
+def test_a_padded_placeholder_approval_is_refused(repo: Path, weak: str) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [("m::new", weak)])
+    _assert_red(repo, "approved_growth for m::new needs a decision")
