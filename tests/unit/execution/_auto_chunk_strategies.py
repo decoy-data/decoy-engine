@@ -102,7 +102,7 @@ STRATEGY_FIXTURES: dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array]]] =
             _col(
                 "val",
                 "faker",
-                provider="person_email",
+                provider="person_dob",
                 deterministic=True,
                 namespace="contact_ns",
                 cardinality_mode="reuse",

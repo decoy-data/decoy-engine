@@ -103,8 +103,7 @@ _CASES = {
     "configured": ("x", "x > 4", True),
 }
 
-# Backtick quoting is outside the closed grammar: compile rejects it, so it never reaches the
-# read-set scan end to end. The scan itself is covered by `test_read_set_scans_predicates`.
+# Backtick quoting is in the closed grammar from S1: the quoted text is the exact column name.
 _BACKTICK_CASES = {
     "backtick": ("x", "`x` > 4", False),
     "backtick_configured": ("x", "`x` > 4", True),
@@ -145,19 +144,17 @@ def test_predicate_read_column_matches_the_public_oracle(
 
 
 @pytest.mark.parametrize("case", _BACKTICK_CASES)
-def test_backtick_predicate_is_rejected_at_compile(case: str) -> None:
+def test_backtick_predicate_is_accepted(case: str) -> None:
     name, expr, configured = _BACKTICK_CASES[case]
     entry, public = _entries(configured)
     base = [_when("s", expr)] + ([passthrough(name)] if configured else [])
     chunks = [_chunk(**{name: arr}) for arr in _INTS]
-    for call in (
-        lambda: entry(make_config(base), chunks),
-        lambda: public(make_config(base), chunks),
-    ):
-        with pytest.raises(PlanCompileError) as info:
-            call()
-        assert info.value.code == "when_outside_closed_grammar"
-        assert info.value.path == f"tables.{TABLE}.columns.s.when"
+    expected = public(make_config(base), chunks)
+    out, sink, _ = entry(make_config(base), chunks)
+    for got, want in zip(out, expected, strict=True):
+        assert got.column("s").to_pylist() == want.column("s").to_pylist()
+        assert same_column(got.column(name), want.column(name))
+    assert _read_lists(sink) == [[name]] * 3
 
 
 def _dict(values: list[Any]) -> pa.Array:
@@ -452,21 +449,32 @@ def _scan(columns: list[dict[str, Any]], passthrough_names: list[str]) -> frozen
     [
         ("x > 4", ["x", "y"], {"x"}),
         ("x > 4 and y < 2", ["x", "y", "z"], {"x", "y"}),
-        ("café > 4", ["café", "cafe"], {"café"}),
-        ("Δ > 4", ["Δ", "D"], {"Δ"}),
-        ("名字 == 'b'", ["名字", "名"], {"名字"}),
         ("`my col` > 4", ["my col", "my", "col"], {"my col"}),
         ("`my col` > 4 and x > 1", ["my col", "x"], {"my col", "x"}),
         ("s == 'x'", ["x", "y"], set()),
         ('s == "café"', ["café"], set()),
         ("x == 'y'", ["x", "y"], {"x"}),
         ("`x` == 'y'", ["x", "y"], {"x"}),
-        ("x.notnull()", ["x"], {"x"}),
         ("   ", ["x"], set()),
     ],
 )
 def test_read_set_scans_predicates(expr: str, names: list[str], expected: set[str]) -> None:
     assert _scan([{**redact("s"), "when": expr}], names) == frozenset(expected)
+
+
+@pytest.mark.parametrize(
+    ("expr", "names"),
+    [
+        ("café > 4", ["café", "cafe"]),
+        ("Δ > 4", ["Δ", "D"]),
+        ("名字 == 'b'", ["名字", "名"]),
+        ("x.notnull()", ["x", "y"]),
+    ],
+    ids=["unicode-cafe", "unicode-delta", "unicode-cjk", "method-call"],
+)
+def test_invalid_when_expression_reads_every_passthrough(expr: str, names: list[str]) -> None:
+    # Outside the closed grammar, `_when` cannot name the columns, so every one is read.
+    assert _scan([{**redact("s"), "when": expr}], names) == frozenset(names)
 
 
 def test_read_set_tokenizer_failure_reads_every_passthrough_column() -> None:

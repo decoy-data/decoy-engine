@@ -28,21 +28,46 @@ _CASES = {
 }
 
 
-@pytest.mark.parametrize("case", _CASES)
-def test_nfkc_spelled_predicate_resolves_to_the_real_column_name(case: str) -> None:
-    """Helper level: the read-set scan sees the name pandas resolves, so a spelled predicate
-    that reached the oracle without compile could never leave its column unmasked."""
-    from decoy_engine.execution._chunked_carry import read_set
+_BARE = ("fullwidth", "ligature", "ligature_notnull")
+_QUOTED = ("fullwidth_backtick", "ligature_backtick")
+
+
+@pytest.mark.parametrize(
+    "case", ["fullwidth", "ligature", "fullwidth_backtick", "ligature_backtick", "ligature_notnull"]
+)
+def test_generic_expression_scanner_nfkc_normalizes_name(case: str) -> None:
+    """Control: `predicate_names` still reads the pandas-resolved name. It serves derived and
+    transform expressions, a separate language from `when:` (plan A1.1)."""
     from decoy_engine.execution._column_access import predicate_names
 
     expr, name = _CASES[case]
     assert name in (predicate_names(expr) or set())
+
+
+@pytest.mark.parametrize("case", _BARE)
+def test_when_invalid_nfkc_bare_name_reads_every_passthrough(case: str) -> None:
+    """A bare NFKC spelling is outside the closed grammar, so `_when` fails closed."""
+    from decoy_engine.execution._chunked_carry import read_set
+
+    expr, name = _CASES[case]
     cols = [{**redact("s"), "when": expr}]
-    assert read_set(cols, [name, "other"], get_default_registry()) == frozenset({name})
+    assert read_set(cols, [name, "other"], get_default_registry()) == frozenset({name, "other"})
+
+
+@pytest.mark.parametrize("case", _QUOTED)
+def test_when_quoted_nfkc_name_is_exact(case: str) -> None:
+    """Quoted text is the literal column: fullwidth x is not x and the ligature is not "fi"."""
+    from decoy_engine.execution._chunked_carry import read_set
+
+    expr, normalized = _CASES[case]
+    literal = expr.split("`")[1]
+    cols = [{**redact("s"), "when": expr}]
+    registry = get_default_registry()
+    assert read_set(cols, [literal, normalized, "other"], registry) == frozenset({literal})
 
 
 @pytest.mark.parametrize("configured", [False, True], ids=["unconfigured", "configured"])
-@pytest.mark.parametrize("case", _CASES)
+@pytest.mark.parametrize("case", _BARE)
 def test_nfkc_spelled_predicate_is_rejected_at_compile(case: str, configured: bool) -> None:
     """The closed grammar's identifiers are ASCII, so no NFKC spelling reaches evaluation."""
     from decoy_engine.plan._errors import PlanCompileError
@@ -60,6 +85,28 @@ def test_nfkc_spelled_predicate_is_rejected_at_compile(case: str, configured: bo
             call()
         assert info.value.code == "when_outside_closed_grammar"
         assert info.value.path == "tables.t.columns.s.when"
+
+
+@pytest.mark.parametrize("configured", [False, True], ids=["unconfigured", "configured"])
+@pytest.mark.parametrize("case", _QUOTED)
+def test_nfkc_quoted_predicate_reads_exact_column(case: str, configured: bool) -> None:
+    """A quoted NFKC spelling reads the literal column; the masked output equals the oracle."""
+    expr, _ = _CASES[case]
+    name = expr.split("`")[1]
+    cols: list[dict[str, Any]] = [{**redact("s"), "when": expr}]
+    if configured:
+        cols.append(passthrough(name))
+    chunks = [
+        pa.table({"s": ["alice", "bob", "carol"], name: pa.array(v, pa.int64())})
+        for v in ([1, 5, 9], [9, 1, 5], [2, 6, 3])
+    ]
+    expected = run_public_below_gate(make_config(cols), chunks)
+    out, sink, _ = run_entry_below_gate(make_config(cols), chunks)
+    listed = [r.quality_metrics["chunked_route"]["pandas_read_passthrough"] for r in sink]
+    assert listed == [[name]] * 3
+    for got, want in zip(out, expected, strict=True):
+        assert got.column("s").to_pylist() == want.column("s").to_pylist()
+        assert same_column(got.column(name), want.column(name))
 
 
 @pytest.mark.parametrize("configured", [False, True], ids=["unconfigured", "configured"])
@@ -86,7 +133,8 @@ def test_string_literal_values_are_not_read_normalized_or_not() -> None:
     cols = [{**redact("s"), "when": "s == '\ufb01le'"}]
     assert read_set(cols, ["file", "other"], get_default_registry()) == frozenset()
     bare = [{**redact("s"), "when": "\ufb01le == 'x'"}]
-    assert read_set(bare, ["file", "other"], get_default_registry()) == frozenset({"file"})
+    # A bare ligature name is outside the closed grammar, so `_when` reads every column.
+    assert read_set(bare, ["file", "other"], get_default_registry()) == frozenset({"file", "other"})
 
 
 @pytest.mark.parametrize("configured", [False, True], ids=["unconfigured", "configured"])

@@ -22,6 +22,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection import detectors as detectors_mod
 from decoy_engine.detection import ner as ner_mod
 from decoy_engine.execution import PandasExecutionAdapter
@@ -182,7 +183,9 @@ def test_native_chunked_reroutes_either_side_of_a_declared_fk_edge(side: str) ->
         "relationships": [{"parent": {"table": "p"}, "children": [{"table": "c"}]}],
     }
     table = "p" if side == "parent" else "c"
-    evidence = _static_route_decision(config, None, table=table, engine_version="0")
+    evidence = _static_route_decision(
+        config, None, table=table, engine_version="0", siblings=NO_SOURCES
+    )
     assert evidence.native_admitted is False
     assert evidence.reroute_reason == "fk_relationship_not_native_route"
     assert all(r.route == "oracle" for r in evidence.node_routes)
@@ -751,10 +754,10 @@ def test_seq_ner_text_redact_declines_to_the_python_handler(
 
 def test_seq_faker_declined_config_runs_the_python_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     kernel = install_cat(monkeypatch, CatMarkingKernel())
-    seed = faker_seed(provider="person_email")  # provider outside the native allowlist
+    seed = faker_seed(provider="person_dob")  # provider outside the native allowlist
     shape = payload_shape({"f": (strs(FAKER_SRC), seed)})
     result = run_seq(shape)
-    assert_python_ran(result, "f", "faker_provider_not_native:f:person_email")
+    assert_python_ran(result, "f", "faker_provider_not_native:f:person_dob")
     assert [c for c in kernel.calls if c.namespace == "ns_f"] == []  # the compiled kernel idle
     assert result.outputs["P"].equals(run_full(shape).outputs["P"])
 

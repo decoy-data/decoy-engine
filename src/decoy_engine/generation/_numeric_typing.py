@@ -44,17 +44,33 @@ import pyarrow as pa
 from decoy_engine.config import generated_arrow_type, reference_root
 from decoy_engine.generation._numeric_derived import derived_uses_as_numbers
 from decoy_engine.generation.kinds import output_arrow_type
+from decoy_engine.generation.pool import INT64_MAX, INT64_MIN
 from decoy_engine.internal.pandas_compat import table_to_pandas_exact_ints
+from decoy_engine.providers_v2 import FAKER_DRAW_CONTRACTS
 
-_INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
 # Stock Faker providers with a bounded integer result; kwarg names and defaults per provider.
 # Anything not listed here stays text, because its range cannot be proven from the config.
 _INT_PROVIDERS: dict[str, tuple[str, str, int, int]] = {
     "pyint": ("min_value", "max_value", 0, 9999),
-    "random_int": ("min", "max", 0, 9999),
     "random_digit": ("", "", 0, 9),
     "random_digit_not_null": ("", "", 1, 9),
 }
+
+
+def _register_contract_int_providers() -> None:
+    """The bounded-integer draw's keys and bounds come from its contract rows, not this table."""
+    for contract in FAKER_DRAW_CONTRACTS:
+        if contract.family == "int":
+            lo_key, hi_key, _step_key = contract.arguments
+            _INT_PROVIDERS[contract.faker_type] = (
+                lo_key,
+                hi_key,
+                contract.defaults[lo_key],
+                contract.defaults[hi_key],
+            )
+
+
+_register_contract_int_providers()
 _MAX_RANDOM_NUMBER_DIGITS = 18  # 10**18 - 1 is the largest 18-digit value, inside int64
 
 
@@ -72,7 +88,7 @@ def sequence_is_plain(col: Mapping[str, Any]) -> bool:
 
 
 def _fits(*values: int) -> bool:
-    return all(_INT64_MIN <= v <= _INT64_MAX for v in values)
+    return all(INT64_MIN <= v <= INT64_MAX for v in values)
 
 
 def _sequence_type(col: Mapping[str, Any], rows: int) -> pa.DataType | None:

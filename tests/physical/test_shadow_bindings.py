@@ -142,7 +142,7 @@ def test_hash_node_binding_carries_key_source_and_namespace_not_bytes(tmp_path: 
         assert not isinstance(value, (bytes, bytearray))
 
 
-def test_faker_node_is_not_slice_bound(tmp_path: Path) -> None:
+def test_faker_node_without_pool_size_is_slice_bound(tmp_path: Path) -> None:
     source = pa.table({"c": pa.array(["a", "b"], type=pa.string())})
     plan = _plan_for(
         tmp_path,
@@ -158,7 +158,8 @@ def test_faker_node_is_not_slice_bound(tmp_path: Path) -> None:
     )
     node = plan.tables[0].nodes[0]
     assert node.strategy == "faker"
-    assert node.execution is None
+    assert node.execution is not None
+    assert node.execution.pool_binding.plan_pool_size is None
 
 
 def test_hash_without_namespace_is_not_bound(tmp_path: Path) -> None:
@@ -314,7 +315,7 @@ def test_faker_vault_column_is_unbound(tmp_path: Path) -> None:
 
 
 def test_faker_non_poolable_provider_never_compiles(tmp_path: Path) -> None:
-    """`uuid` is a real registered Faker provider with `poolable=False`
+    """`address_full` is a real registered Faker provider with `poolable=False`
     (`_provider_class.py`'s python_only class); `check_non_poolable_provider_
     with_pool_backend` (`plan/_checks.py`) already rejects this combination
     at PLAN COMPILE, before `execution_binding_for_slice_node` ever runs --
@@ -324,7 +325,7 @@ def test_faker_non_poolable_provider_never_compiles(tmp_path: Path) -> None:
 
     source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
     with pytest.raises(PlanCompileError, match="non_poolable_provider_with_pool_backend"):
-        _plan_for(tmp_path, source, [_faker_column(provider="uuid")])
+        _plan_for(tmp_path, source, [_faker_column(provider="address_full")])
 
 
 def test_faker_non_poolable_provider_hand_built_node_is_unbound(tmp_path: Path) -> None:
@@ -381,11 +382,11 @@ def test_faker_non_poolable_provider_hand_built_node_is_unbound(tmp_path: Path) 
 
 
 def test_faker_provider_outside_c1_allowlist_is_unbound(tmp_path: Path) -> None:
-    """A pool-native provider that is nonetheless NOT one of the two frozen
-    C1 providers (`person_first_name`/`person_last_name`) must stay unbound --
+    """A pool-native provider that is nonetheless NOT on the faker operator's
+    allowlist (`person_dob`, a date pool) must stay unbound --
     the allowlist, not bare poolability, is the gate."""
     source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
-    plan = _plan_for(tmp_path, source, [_faker_column(provider="person_email")])
+    plan = _plan_for(tmp_path, source, [_faker_column(provider="person_dob")])
     node = plan.tables[0].nodes[0]
     assert node.execution is None
 

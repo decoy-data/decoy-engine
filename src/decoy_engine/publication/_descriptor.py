@@ -43,9 +43,10 @@ from decoy_engine._canonical import (
     Spec,
     attempt,
     canonical_json_bytes,
+    check_unit_paths,
     parse_or_token,
 )
-from decoy_engine.fileaccess import DESCRIPTOR_NAME, is_valid_component
+from decoy_engine.fileaccess import DESCRIPTOR_NAME, RESERVED_MEMBER_NAMES, is_valid_component
 from decoy_engine.publication._types import (
     MAX_COUNT,
     OPERATION_ID_PATTERN,
@@ -55,6 +56,7 @@ from decoy_engine.publication._types import (
     ArtifactSummary,
     Role,
     Unit,
+    has_row_count,
     is_hex64,
     is_operation_id,
 )
@@ -123,7 +125,7 @@ class Artifact:
 
     path: str
     role: Role
-    rows: int
+    rows: int | None
     sha256: str
     size: int
 
@@ -174,9 +176,9 @@ _COUNT = CountSpec(MAX_COUNT)
 _SCHEMA_TAG = ExactSpec(SCHEMA)
 
 ARTIFACT_FIELDS: Final[tuple[tuple[str, Spec], ...]] = (
-    ("path", RelPathSpec(is_valid_component, DESCRIPTOR_NAME)),
+    ("path", RelPathSpec(is_valid_component, RESERVED_MEMBER_NAMES)),
     ("role", OneOfSpec(ROLES)),
-    ("rows", _COUNT),
+    ("rows", NullableSpec(_COUNT)),
     ("sha256", _HEX),
     ("size", _COUNT),
 )
@@ -234,8 +236,13 @@ def _check_document(raw: Any) -> Descriptor:
     """The declaration plus the document rules; the writer and the reader both end here."""
     descriptor: Descriptor = _load(_DOCUMENT, raw)
     paths = [a.path for a in descriptor.artifacts]
-    if any(a >= b for a, b in pairwise(paths)):
+    if any(a > b for a, b in pairwise(paths)):
         _refuse("artifacts_order")
+    _, refused = attempt(check_unit_paths, paths)
+    if refused is not None:
+        _refuse(refused)
+    if any(has_row_count(a.path, a.role) != (a.rows is not None) for a in descriptor.artifacts):
+        _refuse("wrong_type")
     if compute_result_id(descriptor.artifacts) != descriptor.result_id:
         _refuse("result_id_mismatch")
     return descriptor

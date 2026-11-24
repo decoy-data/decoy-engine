@@ -41,6 +41,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import derive
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import _unified_slice_admission as admission
@@ -364,6 +365,7 @@ def _chunked_preflight(tmp_path: Path, source: pa.Table):
         engine_version=ENGINE_VERSION,
         first_schema=source.schema,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
 
 
@@ -475,16 +477,18 @@ def _compile_plan_for(config: dict, source: pa.Table):
     return compile_physical_plan(inputs)
 
 
-def test_no_date_format_leaves_node_unbound_on_full_frame(tmp_path: Path) -> None:
-    """Boundary 2: the compiled full-frame binding leaves a no-date_format node
-    UNBOUND (`execution is None`), so the coordinator declines it to the oracle."""
+def test_no_date_format_is_refused_at_compile(tmp_path: Path) -> None:
+    """COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on text:
+    `date_format` required, else `column_shape_required`): a no-date_format node no longer
+    reaches binding, because plan compile refuses it before any physical plan exists."""
+    from decoy_engine.plan import PlanCompileError
+
     source = pa.table({"c": pa.array(["2024-01-01"], type=pa.string())})
     write_read_only_fixture(tmp_path, source, "x")
     config = build_config(tmp_path, "t", tmp_path / "x.parquet", [_bp_column(date_format=None)])
-    plan = _compile_plan_for(config, source)
-    nodes = [n for tbl in plan.tables for n in tbl.nodes if n.strategy == "bucket_perturb"]
-    assert nodes, "expected a bucket_perturb node in the compiled plan"
-    assert all(n.execution is None for n in nodes), "no-date_format bucket_perturb must NOT bind"
+    with pytest.raises(PlanCompileError) as caught:
+        _compile_plan_for(config, source)
+    assert caught.value.code == "column_shape_required"
 
 
 # ── Runtime fail-closed guards at dispatch ───────────────────────────
@@ -619,17 +623,17 @@ def test_unified_slice_parquet_round_trip(tmp_path: Path) -> None:
     assert off_back.column("c").to_pylist() == on_back.column("c").to_pylist()
 
 
-def test_non_string_source_declines_to_oracle(tmp_path: Path) -> None:
-    """A non-string bucket_perturb SOURCE is outside the native operator's
-    admitted resident type, so the arm takes the legacy route; ints that are not
-    dates under the format end in row errors."""
-    source = pa.table({"c": pa.array([20240101, 20231231, 20240229], type=pa.int64())})
-    # The ints are not dates under the default format, so each arm ends in row errors and
-    # neither writes the source numbers out as if they were masked.
-    from decoy_engine.errors import RowErrorsFailedError
+def test_integer_source_is_refused_at_compile(tmp_path: Path) -> None:
+    """A non-string bucket_perturb SOURCE is outside the native operator's admitted resident
+    type. COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on an
+    integer column: refused `column_shape_mismatch`): plan compile refuses it before either arm
+    runs, so neither writes the source numbers out as if they were masked."""
+    from decoy_engine.plan import PlanCompileError
 
-    with pytest.raises(RowErrorsFailedError):
+    source = pa.table({"c": pa.array([20240101, 20231231, 20240229], type=pa.int64())})
+    with pytest.raises(PlanCompileError) as caught:
         _run_both(tmp_path, source, [_bp_column()])
+    assert caught.value.code == "column_shape_mismatch"
 
 
 @pytest.mark.parametrize("bucket", _BUCKETS)

@@ -34,6 +34,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import derive
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import _unified_slice_admission as admission
@@ -893,6 +894,7 @@ def _chunked_preflight(tmp_path: Path, source: pa.Table) -> Any:
         engine_version=ENGINE_VERSION,
         first_schema=source.schema,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
 
 

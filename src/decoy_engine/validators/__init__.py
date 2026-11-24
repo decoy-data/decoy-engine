@@ -5,9 +5,14 @@ Public API::
     from decoy_engine.validators import validate
     report = validate(outputs, config)   # -> ValidationReport
 
-``validate()`` is the single entry point. It reads the ``validators:`` block
+``validate()`` is the whole-table entry point. It reads the ``validators:`` block
 from the pipeline config, runs each configured validator against the pipeline
-outputs (read-only), and returns a frozen ``ValidationReport``.
+outputs (read-only), and returns a frozen ``ValidationReport``. It is a one-span
+use of ``ValidationSession``, which a route that streams its output feeds batch by batch.
+
+Every validator is a fold with an exact failing-row count and at most ``FINDING_INDEX_CAP``
+listed row positions per finding (all of them under quarantine ``validation_fail``). The report
+lists one ``ValidatorResult`` per configured entry, passes and skips included.
 
 Built-in validators
 -------------------
@@ -61,17 +66,33 @@ Design constraints
 from __future__ import annotations
 
 from decoy_engine.errors import ValidatorFailedError
-from decoy_engine.validators._registry import validate
+from decoy_engine.validators._fold import FoldResult, assemble_report, finding_index_cap
+from decoy_engine.validators._registry import validate, validator_function
+from decoy_engine.validators._scope import plan_scope, unchecked_named_columns
+from decoy_engine.validators._session import ValidationSession
 from decoy_engine.validators._types import (
+    FINDING_INDEX_CAP,
     QuarantineSummary,
+    SkippedColumn,
     ValidationReport,
     ValidatorFinding,
+    ValidatorResult,
 )
 
 __all__ = [
+    "FINDING_INDEX_CAP",
+    "FoldResult",
     "QuarantineSummary",
+    "SkippedColumn",
     "ValidationReport",
+    "ValidationSession",
     "ValidatorFailedError",
     "ValidatorFinding",
+    "ValidatorResult",
+    "assemble_report",
+    "finding_index_cap",
+    "plan_scope",
+    "unchecked_named_columns",
     "validate",
+    "validator_function",
 ]

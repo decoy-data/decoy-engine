@@ -23,6 +23,7 @@ from decoy_engine.execution._when_gate import _eval_predicate, run_with_when_gat
 from decoy_engine.execution.native._dispatch import run_native_or_oracle_chunked
 from decoy_engine.execution.native._when_admission import when_native_rejection
 from decoy_engine.execution.native._when_mask import WhenSpec, when_mask, when_specs
+from decoy_engine.expressions._when_parser import WhenRead
 from decoy_engine.plan import compile_plan, plan_from_yaml, plan_to_yaml, run_config_only_checks
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.profile import profile_source
@@ -175,7 +176,7 @@ def test_unified_slice_mask_raises_the_grammar_code(rows: int) -> None:
 
 @pytest.mark.parametrize("rows", [3, 0], ids=["non_empty", "zero_rows"])
 def test_native_mask_raises_the_grammar_code(rows: int) -> None:
-    spec = WhenSpec("s", "redact", BAD, ("x",))
+    spec = WhenSpec("s", "redact", BAD, (WhenRead("x"),))
     table = pa.table({"x": pa.array(list(range(rows)), pa.int64())})
     with pytest.raises(StrategyError) as info:
         when_mask(spec, table, set())
@@ -412,7 +413,7 @@ def test_no_raising_boundary_renders_the_predicate(boundary: str, tmp_path: Path
 
             validate_config(_validated_config_with_when(LEAKY))
         else:
-            when_mask(WhenSpec("s", "redact", LEAKY, ("x",)), _chunks()[0], set())
+            when_mask(WhenSpec("s", "redact", LEAKY, (WhenRead("x"),)), _chunks()[0], set())
 
     del sources
     exc = _raise_from(call)

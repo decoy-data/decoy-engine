@@ -88,19 +88,6 @@ from decoy_engine.transforms.date_preserve import preserve_set_from_config
 from decoy_engine.transforms.date_shift import shift_window
 
 
-def _native_shape(column: str, ctx: StrategyContext) -> ColumnShape | None:
-    """The date or zoned-timestamp shape the plan lists for this top-level column, else None.
-
-    It keys on where the column sits in the plan (the table and column in
-    ``ctx.native_date_columns``, and not running as a nested child), never on the data, so a typed
-    column holding date objects and a text column are told apart by the plan alone. Such a column
-    keeps its source type on the way out; a declared date column keeps its legacy text output.
-    """
-    if ctx.nested_outer_column:
-        return None
-    return ctx.native_date_columns.get((ctx.current_table, column))
-
-
 def _is_declared(column: str, ctx: StrategyContext) -> bool:
     return not ctx.nested_outer_column and (ctx.current_table, column) in ctx.declared_date_columns
 
@@ -167,7 +154,7 @@ class DateShiftStrategyHandler:
         cfg = provider_config_to_dict(plan.provider_config)
         min_days, max_days = shift_window(cfg)
         range_size = max_days - min_days + 1
-        shape = _native_shape(column, ctx)
+        shape = ctx.native_date_shape(column)
         try:
             preserve = preserve_set_from_config(cfg, shape=shape)
         except ValueError as exc:

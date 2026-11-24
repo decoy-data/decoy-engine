@@ -2,24 +2,23 @@
 
 Pattern: `cap-std`'s `Dir` (create, rename and remove only through a held directory handle),
 Spark's `FileOutputCommitter` (stage privately, publish with one rename, delete the stage on
-abort) and POSIX `renameat`/`linkat` between directory fds. The caller never supplies or
-sees a stage pathname: the stage has a random name beside the final leaf, so publication is
-a rename on one filesystem. Every child name passes `validate_component` inside the
-transaction, and every operation is one `dir_fd`-relative call with `O_NOFOLLOW`, so a
-symlink planted in the stage is never followed.
+abort) and POSIX `renameat`/`linkat` between directory fds. The caller never supplies or sees a
+stage pathname: the stage has a random name beside the final leaf, so publication is a rename on
+one filesystem. Every child name passes `validate_component` inside the transaction, and every
+operation is one `dir_fd`-relative call with `O_NOFOLLOW`, so a symlink planted in the stage is
+never followed.
 
 Publication keeps each sink's existing semantics: a directory stage publishes with plain
 `rename(2)` (`ENOTEMPTY` on a non-empty destination, stage intact for `abort()`), a file stage with
-`link(2)` (`exclusive`) or `rename(2)` (`replace`; the `pointer` label then fsyncs its parent). A
-`DIRECTORY_PUBLISH_LABELS` stage is fsynced before the rename and its parent chain after it.
+`link(2)` (`exclusive`) or `rename(2)` (`replace`; `pointer` then fsyncs its parent). A
+`DIRECTORY_PUBLISH_LABELS` stage is fsynced before the rename and its parent chain after.
 
 Directories are made by one core, `_make_dir_core`, with two entry points: `make_stage_dir_at`
 (private stage directories, exact 0700) and `make_parent_dir_at` (user-named output parents at
-their real name, born mode with the owner bits forced). The core creates with the requested
-mode, observes the mode the filesystem actually gave (the umask or a default ACL decides it),
-and repairs only the owner bits, so Decoy can always open what it made; it never reads or sets
-the process umask. A parent keeps an inherited set-group-ID bit through that repair, as Git's
-`adjust_shared_perm` keeps `S_ISGID` on a shared repository directory.
+their real name, born mode with the owner bits forced). The core creates with the requested mode,
+observes the mode the filesystem gave (the umask or a default ACL decides it) and repairs only the
+owner bits, so Decoy can always open what it made; it never reads or sets the process umask. A
+parent keeps an inherited set-group-ID bit through that repair, as Git's `adjust_shared_perm` does.
 """
 
 from __future__ import annotations
@@ -32,14 +31,17 @@ import stat
 import sys
 import weakref
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from typing import Any, Literal, TypeVar
 
-from decoy_engine.fileaccess import _fdtree, _openat2, _osflags
-from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
+from decoy_engine.fileaccess import _fdtree, _osflags
+from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
-from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
+from decoy_engine.fileaccess._link import CREATOR_KEY as _CREATOR_KEY
+from decoy_engine.fileaccess._link import raise_link_error
+from decoy_engine.fileaccess._stage_claim import StageClaim
+from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
+from decoy_engine.fileaccess._types import FileAccessUnavailable, StageLabel
 
 # The only names a caller can influence: a closed label picks a prefix, never a path.
 STAGE_PREFIX: dict[str, str] = {
@@ -52,12 +54,15 @@ STAGE_PREFIX: dict[str, str] = {
     "vault": "_decoy_vault_stage_",
     "pack": "_decoy_pack_stage_",
     "publication": "._decoy_publication_pending_",
+    "delivery_slots": "._decoy_delivery_slots_",
     "pointer": "._decoy_pointer_stage_",
 }
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
 DURABLE_REPLACE_LABELS: frozenset[str] = frozenset({"pointer"})  # stage fsync, rename, parent fsync
-# Labels whose stage holds secrets or real data (0600 at creation); durable-replace ones included.
-PRIVATE_LABELS = DURABLE_REPLACE_LABELS | {"quarantine", "isolated", "vault", "publication"}
+# Labels whose stage holds secrets or real data (0600 at creation), durable-replace ones included.
+PRIVATE_LABELS = DURABLE_REPLACE_LABELS | {
+    *("quarantine", "isolated", "vault", "publication", "delivery_slots")
+}
 # `DURABLE_LABELS` publish exclusively: the writer fsyncs the stage, it is linked, then the parent is
 # fsynced (the commit point; its failure is raised). A failure removes only the stage.
 DURABLE_LABELS: frozenset[str] = frozenset({"vault"})
@@ -69,8 +74,6 @@ CREATES_PARENTS: frozenset[str] = frozenset(STAGE_PREFIX) - {"vault"}
 
 T = TypeVar("T")
 
-# Denial key for a bad name given straight to a creator; it names the capability, never the name.
-_CREATOR_KEY = "fileaccess.stage"
 
 _NOFOLLOW_CLOEXEC = _osflags.NOFOLLOW | _osflags.CLOEXEC
 _FILE_CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _NOFOLLOW_CLOEXEC
@@ -171,8 +174,32 @@ def _open_existing_dir(parent_fd: int, name: str) -> int:
     return _call(os.open, name, _DIR_FLAGS, dir_fd=parent_fd)
 
 
+def set_mode_fd(fd: int, mode: int) -> None:
+    """The one `fchmod` on a held file descriptor, errno only on failure."""
+    _call(os.fchmod, fd, mode)
+
+
 def _restore_always(fd: int) -> None:
-    _call(os.fchmod, fd, 0o600)
+    set_mode_fd(fd, 0o600)
+
+
+def link_noclobber_at(src_dir_fd: int, src_name: str, dst_dir_fd: int, dst_name: str) -> None:
+    """Link `src_name` to `dst_name` without replacing it, both validated components beneath held
+    directories, never following a symlink. Raises `FileExistsError` for a taken name,
+    `LinkUnsupported` for the errnos in `LINK_UNSUPPORTED` (or a backend whose `os.link` has no
+    descriptor form, answered as ENOSYS) and an errno-only `OSError` for anything else."""
+    validate_component(src_name, _CREATOR_KEY)
+    validate_component(dst_name, _CREATOR_KEY)
+    code = 0
+    try:
+        os.link(
+            src_name, dst_name, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=False
+        )
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend
+        code = errno.ENOSYS
+    raise_link_error(code)
 
 
 def _restore_missing_owner_bits(fd: int) -> None:
@@ -237,7 +264,7 @@ def _mark_publication_stage(parent_fd: int, name: str, stage_fd: int) -> None:
         raise
 
 
-class _State:
+class _State(StageLife):
     """What a transaction owns, held apart from the object so collection can clean up."""
 
     def __init__(self, parent_fd: int, stage_name: str, kind: str) -> None:
@@ -245,7 +272,7 @@ class _State:
         self.stage_name = stage_name
         self.kind = kind
         self.stage_fd = -1
-        self.finished = False
+        super().__init__()
         self.file_created = False
         self.child_fds: list[int] = []
         self.chain_fds: list[int] = []  # root down to the parent's parent, for a durable publish
@@ -259,7 +286,7 @@ def _close_all(fds: list[int]) -> None:
 def _discard(state: _State) -> None:
     if state.finished:
         return
-    state.finished = True
+    state.end()
     try:
         if state.kind == "dir":
             if state.stage_fd >= 0:
@@ -278,7 +305,7 @@ def _discard(state: _State) -> None:
         _close(state.parent_fd)
 
 
-class _StageDir:
+class _StageDir(StageWalk, StageClaim):
     """Name-taking operations over one stage directory descriptor."""
 
     strict = True
@@ -287,7 +314,7 @@ class _StageDir:
         self._fd = dir_fd
         self.display = display
         self._display = display
-        self._live = live
+        self._live = self._life = live
         self._mode = mode_bits
 
     def _check(self, *components: str) -> None:
@@ -416,14 +443,7 @@ class RootedOutputTxn(_StageDir):
                     raise
             else:
                 try:
-                    _call(
-                        os.link,
-                        state.stage_name,
-                        self._leaf,
-                        src_dir_fd=parent,
-                        dst_dir_fd=parent,
-                        follow_symlinks=False,
-                    )
+                    link_noclobber_at(parent, state.stage_name, parent, self._leaf)
                 except FileExistsError:
                     _discard(state)
                     raise
@@ -434,7 +454,7 @@ class RootedOutputTxn(_StageDir):
             self._rename_stage()
             if state.kind == "file":
                 _durable._sync(parent)
-        state.finished = True
+        state.end()
         if state.stage_fd >= 0:
             _close(state.stage_fd)
             state.stage_fd = -1
@@ -459,142 +479,11 @@ class RootedOutputTxn(_StageDir):
         self.abort()
 
 
-class RootedOutputDir:
-    """An output root fd plus one allowed leaf. Parent directories are created one validated
-    component at a time with `make_parent_dir_at` and opened with `openat2` when only read;
-    no symlink is ever followed."""
-
-    strict = True
-
-    def __init__(self, root_fd: int, rel: str, req: FileRequest) -> None:
-        parts = rel.split("/")
-        if any(p in ("", ".") for p in parts[:-1]) or not parts:
-            raise deny(req.field_key)
-        for part in parts:
-            validate_component(part, req.field_key)
-        self._root_fd = root_fd
-        self._parents = parts[:-1]
-        self._leaf = parts[-1]
-        self.display = req.field_key
-        self.locator = req.locator
-        self._field_key = req.field_key
-
-    def _open_parent(self, *, create: bool, chain: list[int] | None = None) -> int:
-        """The leaf's parent, opened from the root; `chain` keeps every directory above it."""
-        fd = os.dup(self._root_fd)
-        try:
-            for part in self._parents:
-                if create:
-                    child = make_parent_dir_at(fd, part)
-                else:
-                    child = _openat2._confined_open(fd, part, _osflags.RDONLY | _osflags.DIRECTORY)
-                if chain is None:
-                    _close(fd)
-                else:
-                    chain.append(fd)
-                fd = child
-        except OSError:
-            _close(fd)
-            raise
-        return fd
-
-    def begin(
-        self,
-        kind: Literal["file", "dir"],
-        mode: Literal["exclusive", "replace"],
-        *,
-        label: StageLabel,
-    ) -> RootedOutputTxn:
-        if label in DIRECTORY_PUBLISH_LABELS:
-            validate_publication_leaf(self._leaf, self._field_key)
-        failed = False
-        parent = -1
-        chain: list[int] = []
-        try:
-            parent = self._open_parent(create=label in CREATES_PARENTS, chain=chain)
-        except OSError:
-            failed = True
-        try:
-            if failed:
-                raise deny(self._field_key) from None
-            held = tuple(chain) if label in DIRECTORY_PUBLISH_LABELS else ()
-            return RootedOutputTxn(
-                _ISSUER, parent, self._leaf, kind, mode, label, self.display, held, self
-            )
-        finally:
-            for fd in (parent, *chain):
-                if fd >= 0:
-                    _close(fd)
-
-    def ensure_dir(self) -> None:
-        failed = False
-        parent = -1
-        try:
-            parent = self._open_parent(create=True)
-            _close(make_parent_dir_at(parent, self._leaf))
-        except OSError:
-            failed = True
-        finally:
-            if parent >= 0:
-                _close(parent)
-        if failed:
-            raise deny(self._field_key) from None
-
-    def lock(self, timeout_s: float) -> AbstractContextManager[None]:
-        from decoy_engine.fileaccess import _durable
-
-        validate_publication_leaf(self._leaf, self._field_key)
-        return _durable._held_lock(self._parent_reader, self._leaf, timeout_s)
-
-    def read_member(self, component: str, *, limit: int) -> bytes | None:
-        from decoy_engine.fileaccess import _durable
-
-        validate_component(component, self._field_key)
-        return _durable._read_member(self._parent_reader, self._leaf, component, limit)
-
-    def _parent_reader(self) -> int:
-        return self._open_parent(create=False)
-
-    def sync_chain(self) -> None:
-        from decoy_engine.fileaccess import _durable
-
-        _durable._sync_rooted_chain(self._open_parent, self._leaf)
-
-    def adopt_file(self, *, limit: int) -> bytes | None:
-        from decoy_engine.fileaccess._durable import _adopt_rooted
-
-        return _adopt_rooted(self._open_parent, self._leaf, limit)
-
-    def is_empty_or_absent(self) -> bool:
-        failed = False
-        parent = child = -1
-        try:
-            parent = self._open_parent(create=False)
-            child = _openat2._confined_open(
-                parent, self._leaf, _osflags.RDONLY | _osflags.DIRECTORY
-            )
-        except FileNotFoundError:
-            return True
-        except OSError:
-            failed = True
-        finally:
-            if parent >= 0:
-                _close(parent)
-        if failed:  # raised outside the handler: the OSError (which names the leaf) never rides
-            raise deny(self._field_key)
-        try:
-            with os.scandir(child) as it:
-                return next(it, None) is None
-        finally:
-            _close(child)
-
-
 __all__ = [
     "DIRECTORY_PUBLISH_LABELS",
     "DURABLE_LABELS",
     "PRIVATE_LABELS",
     "STAGE_PREFIX",
     "STAGE_SUFFIX",
-    "RootedOutputDir",
     "RootedOutputTxn",
 ]

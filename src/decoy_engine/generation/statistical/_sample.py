@@ -26,7 +26,9 @@ Methodology:
   fitted length histogram via the same Devroye inverse-CDF as numeric,
   filled with deterministic lorem tokens cut to exactly that length.
   Shape-preserving filler for load-shaped test data; content is
-  deliberately meaningless and no source tokens are retained.
+  deliberately meaningless and no source tokens are retained. A column
+  fitted with `cell_format.char_class == "digits"` draws ASCII digits
+  instead of lorem words (the SDV id-with-digit-regex pattern).
 - Conditional: per-row draw from the joint contingency row for the
   parent's value, falling back to the marginal when the parent value
   has no joint cells -- sequential conditional sampling as in synthpop
@@ -43,9 +45,9 @@ from __future__ import annotations
 
 import random
 from bisect import bisect_right
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, Final, NamedTuple, TypeVar
 
 from decoy_engine import reasons
 from decoy_engine.generation.statistical._cell_format import (
@@ -154,6 +156,19 @@ def _lorem_text(rng: random.Random, length: int) -> str:
         joined_len += len(word) + (1 if parts else 0)
         parts.append(word)
     return " ".join(parts)[:length]
+
+
+_DIGIT_CHARS: Final = "0123456789"
+
+
+def _digit_text(rng: random.Random, length: int) -> str:
+    """Deterministic string of EXACTLY `length` ASCII digits; a leading zero is allowed."""
+    return "".join(_DIGIT_CHARS[rng.randrange(10)] for _ in range(length))
+
+
+# One registry: a fitted `cell_format.char_class` token to the draw for it. The guard test pins
+# its keys to `profiling.cell_format.CHAR_CLASSES`, so a new class cannot validate and then draw lorem.
+CHAR_CLASS_DRAWS: Final[dict[str, Callable[[random.Random, int], str]]] = {"digits": _digit_text}
 
 
 def _cumulative(counts: list[float]) -> list[float]:
@@ -503,7 +518,12 @@ def sample_column(
                 value = ""
             else:
                 target = int(min(max(round(_numeric_row(rng, edges, length_cum)), min_len), hi_len))
-                value = _lorem_text(rng, target)
+                draw = (
+                    CHAR_CLASS_DRAWS.get(fmt.char_class, _lorem_text)
+                    if fmt and fmt.char_class
+                    else _lorem_text
+                )
+                value = draw(rng, target)
             out.append(None if null_rate and rng.random() < null_rate else value)
         return out
 

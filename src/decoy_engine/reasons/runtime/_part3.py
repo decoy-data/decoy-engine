@@ -16,6 +16,8 @@ __all__ = [
     "CATEGORICAL_WEIGHT_BELOW_RESOLUTION",
     "CHECKSUM_INVALID",
     "CODE_SET_GEN_REQUIRES_NAMESPACE",
+    "COLUMN_SHAPE_REQUIRED",
+    "COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN",
     "CONFIG_REFERENCES_STORED_INDEX",
     "DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED",
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED",
@@ -53,7 +55,11 @@ __all__ = [
     "NESTED_TARGET_MATCHED_NOTHING",
     "NESTED_TARGET_UNSET",
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
+    "NONFK_FULL_FRAME_CAPACITY_EXCEEDED",
     "NUMEXPR_REQUIRED",
+    "OUTPUT_ASSEMBLY_COLUMNS_MISMATCH",
+    "OUTPUT_ASSEMBLY_ROWS_CHANGED",
+    "PARQUET_FIXED_LIST_NULL",
     "POST_SCAN_DISTRIBUTION_DEFERRED",
     "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
     "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
@@ -87,6 +93,10 @@ __all__ = [
     "TRUNCATE_MASK_CHAR_INVALID",
     "UNIFIED_SLICE_INVARIANT_VIOLATION",
     "UNKNOWN_TRANSFORM_OP",
+    "VALIDATOR_COLUMN_MISSING",
+    "VALIDATOR_KEY_STATE_OVER_BUDGET",
+    "VALIDATOR_SOURCE_PAIRING_MISMATCH",
+    "VALIDATOR_SPAN_REPEATED",
     "VAULT_COMMIT_FAILED",
     "VAULT_CRYPTO_NOT_INSTALLED",
     "VAULT_ENTRY_TOO_LARGE",
@@ -100,6 +110,7 @@ __all__ = [
     "WEAK_MASK_SECRET",
     "WHEN_EXPRESSION_ERROR",
     "WHEN_EXPRESSION_NOT_BOOLEAN",
+    "WHEN_MASKED_REFERENCE_UNSUPPORTED",
     "WHEN_OUTSIDE_CLOSED_GRAMMAR",
     "WHEN_PREDICATE_NOT_NATIVE",
     "WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET",
@@ -126,6 +137,11 @@ CATEGORICAL_WEIGHTS_NONPOSITIVE = _d(
 CATEGORICAL_WEIGHTS_SHAPE = _d("categorical_weights_shape", "Categorical weights shape.")
 CODE_SET_GEN_REQUIRES_NAMESPACE = _d(
     "code_set_gen_requires_namespace", "Code set gen requires namespace."
+)
+COLUMN_SHAPE_REQUIRED = _d(
+    "column_shape_required",
+    "A strategy reads numbers or dates from text and the plan lists no declaration for the column.",
+    since="1.34.0",
 )
 DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED = _d(
     "date_preserve_values_with_group_by_unsupported",
@@ -221,6 +237,11 @@ TRUNCATE_LENGTH_INVALID = _d("truncate_length_invalid", "Truncate length invalid
 TRUNCATE_MASK_CHAR_INVALID = _d("truncate_mask_char_invalid", "Truncate mask char invalid.")
 WHEN_EXPRESSION_ERROR = _d("when_expression_error", "When expression error.")
 WHEN_EXPRESSION_NOT_BOOLEAN = _d("when_expression_not_boolean", "When expression not boolean.")
+WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
+    "when_masked_reference_unsupported",
+    "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
+    since="1.34.0",
+)
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
 
 _d = _catalog.runtime("SubsetInternalError")
@@ -351,6 +372,11 @@ CATEGORICAL_POSITION_OUT_OF_DOMAIN = _d(
 
 _d = _catalog.runtime("decoy_engine.execution._strategies._faker_positional")
 
+COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN = _d(
+    "computed_draw_position_out_of_domain",
+    "Computed draw position out of domain.",
+    since=UNRELEASED,
+)
 FAKER_POSITION_OUT_OF_DOMAIN = _d("faker_position_out_of_domain", "Faker position out of domain.")
 
 _d = _catalog.runtime("decoy_engine.execution._strategies._fpe")
@@ -434,6 +460,26 @@ POST_SCAN_DISTRIBUTION_DEFERRED = _d(
     retry=RetryClass.CONFIGURATION_REPAIR,
     since="1.30.0",
 )
+# A non-FK table the full-frame route holds whole: refused when even the input plus one pandas
+# copy cannot fit the kill ceiling, or a measured peak clears it by the calibration band.
+NONFK_FULL_FRAME_CAPACITY_EXCEEDED = _d(
+    "nonfk_full_frame_capacity_exceeded",
+    "A job with no foreign keys would hold more memory than this machine can give it.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since="1.34.0",
+)
+# Output assembly checks the masked frame against the source it was read from before it writes.
+# Both are engine invariants (no job input can cause them), so there is no retry class to repair.
+OUTPUT_ASSEMBLY_ROWS_CHANGED = _d(
+    "output_assembly_rows_changed",
+    "A masked frame no longer holds the rows of the source it was read from.",
+    since="1.34.0",
+)
+OUTPUT_ASSEMBLY_COLUMNS_MISMATCH = _d(
+    "output_assembly_columns_mismatch",
+    "A masked frame no longer holds the columns of the source it was read from, in order.",
+    since="1.34.0",
+)
 # A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
 # (a publication outcome) would name the wrong stage.
 SPOOL_DISK_FULL = _d(
@@ -461,4 +507,36 @@ GENERATION_PROVIDER_FAILED = _d(
     "generation_provider_failed",
     "A provider column could not be generated.",
     since="1.32.0",
+)
+
+_d = _catalog.runtime("ParquetFixedListNullError")
+PARQUET_FIXED_LIST_NULL = _d(
+    "parquet_fixed_list_null",
+    "Parquet cannot store a null fixed-size list cell.",
+    phases=(Phase.MASK, Phase.FINALIZE, Phase.PUBLISH, Phase.UNKNOWN),
+    retry=RetryClass.NEVER,
+    since=UNRELEASED,
+)
+
+_d = _catalog.runtime("ValidatorStateError")
+
+VALIDATOR_KEY_STATE_OVER_BUDGET = _d(
+    "validator_key_state_over_budget",
+    "A keyed validator would hold more state than its validation budget allows.",
+    since=UNRELEASED,
+)
+VALIDATOR_SOURCE_PAIRING_MISMATCH = _d(
+    "validator_source_pairing_mismatch",
+    "The source rows read for a leak check do not line up with the published rows.",
+    since=UNRELEASED,
+)
+VALIDATOR_COLUMN_MISSING = _d(
+    "validator_column_missing",
+    "A validator needs a parent key or window column that the parent table does not have.",
+    since=UNRELEASED,
+)
+VALIDATOR_SPAN_REPEATED = _d(
+    "validator_span_repeated",
+    "A validator that can only read a table whole was given the table in several batches.",
+    since=UNRELEASED,
 )

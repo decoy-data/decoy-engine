@@ -163,13 +163,15 @@ def when_native_rejection(
         # evaluates the predicate per chunk, where a numeric reference can widen and select
         # different rows than the whole frame. The unified route reuses this verdict, so a
         # numeric reference there falls to the full-frame oracle (= d-1), never natively.
-        for ref in refs:
+        for read in refs:
+            ref = read.column
             if ref not in schema.names or schema.field(ref).type != pa.string():
                 return f"{NOT_NATIVE_CODE}:{column}"
     written = _earlier_writes(column, entries, registry)
     if written is None:
-        return f"{READS_MASKED_CODE}:{column}:{refs[0]}"
-    for ref in refs:
+        return f"{READS_MASKED_CODE}:{column}:{refs[0].column}"
+    for read in refs:
+        ref = read.column
         if ref != column and ref in written:
             return f"{READS_MASKED_CODE}:{column}:{ref}"
     return None
@@ -286,7 +288,8 @@ def planner_relaxed_when_columns(
         ast = parsed_when(entry)
         refs = () if ast is None else when_column_refs(ast)
         if refs and all(
-            r in schema.names and _stable_when_reference(schema.field(r), facts) for r in refs
+            r.column in schema.names and _stable_when_reference(schema.field(r.column), facts)
+            for r in refs
         ):
             relaxed.add(name)
     return frozenset(relaxed)

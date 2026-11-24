@@ -856,18 +856,17 @@ class TestChunkStateGates:
         auto, forced = _run_pair(cfg, sources, monkeypatch, explain_plan=True)
         _assert_full_frame_and_identical(auto, forced, "accounts", "bucketize")
 
-    def test_bucketize_non_numeric_source_stays_full_frame(self, tmp_path, monkeypatch):
-        """Non-numeric bucketize source coerces per chunk (parseable strings
-        become numbers, the rest fall through), so it fails closed."""
+    def test_bucketize_non_numeric_source_is_refused_at_compile(self, tmp_path, monkeypatch):
+        """A text source has no number to bucket: the plan refuses the undeclared column before
+        either route runs, with no cell value in the error."""
+        from decoy_engine.plan import PlanCompileError
+
         values = [f"abc{i}" for i in range(_ROWS)]
         cfg, sources = self._bucketize_job(tmp_path, values, {"width": 10})
-        # S1's honesty pack (landed after this fixture was authored) turns
-        # the non-numeric bucketize source's mask errors into row errors on
-        # the full-frame pass; both routes must decline to chunk this shape
-        # and fail identically (see the helper's docstring).
-        _assert_row_errors_fail_identically_both_routes(
-            cfg, sources, monkeypatch, explain_plan=True
-        )
+        with pytest.raises(PlanCompileError) as refused:
+            _run_pair(cfg, sources, monkeypatch, explain_plan=True)
+        assert refused.value.code == "column_shape_required"
+        assert "abc0" not in str(refused.value)
 
     def test_bucketize_null_free_float_still_routes(self, tmp_path, monkeypatch):
         cfg, sources = self._bucketize_job(tmp_path, [(-1) ** i * (i * 7.3) for i in range(_ROWS)])

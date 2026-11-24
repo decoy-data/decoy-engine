@@ -27,8 +27,15 @@ import numpy as np
 import pytest
 
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution.native._real_type_admission import C1_PROVIDER_ALLOWLIST
 from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext
 from decoy_engine.generation.pool._builder import PoolBuilder
+from decoy_engine.generation.pool._value_pool import (
+    BUILD_HELD_BYTES_PER_VALUE,
+    ValuePool,
+    construction_floor,
+    measured_pool_bytes,
+)
 from decoy_engine.providers_v2 import get_default_registry
 
 _JOB_SEED = b"\x00\x01\x02\x03\x04\x05\x06\x07"
@@ -50,6 +57,38 @@ class _CountingPoolBuilder(PoolBuilder):
     def build(self, provider, **kwargs):  # type: ignore[no-untyped-def]
         self.build_calls += 1
         return super().build(provider, **kwargs)
+
+
+class _FixedWidthPoolBuilder(_CountingPoolBuilder):
+    """Counts builds but returns `size` distinct strings of one width, so a test controls the
+    measured pool size without a provider. `build_calls` still proves a refusal came first."""
+
+    def __init__(self, registry, *, width: int, ints: bool = False) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(registry)
+        self._width = width
+        self._ints = ints
+
+    def build(self, provider, **kwargs):  # type: ignore[no-untyped-def]
+        self.build_calls += 1
+        size = kwargs["size"]
+        # Ints above 256 are real 28-byte objects, not shared small ints.
+        values = np.array(
+            [1000 + i if self._ints else f"{i:0{self._width}d}" for i in range(size)],
+            dtype=object,
+        )
+        values.setflags(write=False)
+        return ValuePool(
+            values=values,
+            provider=provider,
+            locale=kwargs.get("locale") or "default",
+            config_hash=f"fixed|{kwargs.get('namespace')}",
+            seed=b"\x00" * 8,
+            size=size,
+            build_time_ms=0.0,
+            backend_type="stub",
+            backend_version="0",
+            distinct_count=size,
+        )
 
 
 @pytest.fixture
@@ -153,8 +192,8 @@ def test_second_context_has_independent_state(registry):
 
 def test_reservation_refused_before_provider_allocation(registry):
     builder = _CountingPoolBuilder(registry)
-    # A 1-byte allowance cannot hold any pool: the reservation must refuse
-    # before the provider is ever allocated.
+    # A 1-byte allowance cannot hold any pool: the lower-bound check must
+    # refuse before the provider is ever allocated.
     ctx = _context(registry, max_pool_bytes=1, builder=builder)
     prepared = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG))
 
@@ -165,23 +204,189 @@ def test_reservation_refused_before_provider_allocation(registry):
     assert ctx.builds == 0
 
 
-def test_pool_bytes_bounded_by_allowance_not_row_count(registry):
-    # Allowance sized for exactly one default-ish pool; a larger second distinct
-    # pool is refused. The bound is the allowance, independent of any batch size.
+def test_w1b_a_huge_pool_size_is_refused_before_any_build(registry):
     builder = _CountingPoolBuilder(registry)
-    reserve_per_value = 4096
+    ctx = _context(registry, builder=builder)
+    prepared = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg={"pool_size": 10**9})
+    with pytest.raises(ExecutionError) as exc:
+        ctx.get_pool(prepared)
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert builder.build_calls == 0
+    assert ctx.pool_count == 0
+    for fragment in (_PROVIDER, str(10**9), str(64 * 1024 * 1024)):
+        assert fragment not in str(exc.value)
+
+
+def test_w1b_the_floor_is_the_real_cpython_str_cost_not_four_bytes(registry):
+    # 500,000 values pass a 4-byte floor (2 MB) in an 8 MiB allowance but cannot fit at the
+    # real floor (about 28 MB), so the refusal must come before any build.
+    builder = _CountingPoolBuilder(registry)
+    ctx = _context(registry, max_pool_bytes=8 * 1024 * 1024, builder=builder)
+    prepared = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg={"pool_size": 500_000})
+    with pytest.raises(ExecutionError) as exc:
+        ctx.get_pool(prepared)
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert builder.build_calls == 0
+
+
+def test_a_pool_that_measures_over_the_allowance_is_dropped_after_the_build(registry):
+    # 100-char strings measure well above the construction-peak floor, so a budget just under
+    # the measured size passes the pre-build guard and is refused only after the build.
+    builder = _FixedWidthPoolBuilder(registry, width=100)
+    probe = _context(registry, builder=builder)
+    measured = measured_pool_bytes(
+        probe.get_pool(probe.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    )
+    assert construction_floor(_CFG["pool_size"], strings=True) < measured - 1
+    builder.build_calls = 0
+    ctx = _context(registry, max_pool_bytes=measured - 1, builder=builder)
+    with pytest.raises(ExecutionError) as exc:
+        ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert builder.build_calls == 1
+    assert (ctx.builds, ctx.pool_count, ctx.reserved_bytes) == (0, 0, 0)
+
+
+def test_w1d_the_construction_peak_guard_runs_before_the_build(registry):
+    # 6-char strings measure well under the floor floor: the final pool would fit a budget set
+    # just under the floor, but building it holds four pointer copies and a set on top, so it
+    # must be refused before the builder is called.
+    size = _CFG["pool_size"]
+    builder = _FixedWidthPoolBuilder(registry, width=6)
+    probe = _context(registry, builder=builder)
+    measured = measured_pool_bytes(
+        probe.get_pool(probe.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    )
+    floor = construction_floor(size, strings=True)
+    assert measured < floor
+    builder.build_calls = 0
+
+    ctx = _context(registry, max_pool_bytes=floor - 1, builder=builder)
+    with pytest.raises(ExecutionError) as exc:
+        ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert builder.build_calls == 0
+    assert (ctx.builds, ctx.pool_count, ctx.reserved_bytes) == (0, 0, 0)
+
+    # At the floor itself the build is allowed.
+    ok = _context(registry, max_pool_bytes=floor, builder=builder)
+    ok.get_pool(ok.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert builder.build_calls == 1
+
+
+def test_w1e_a_pool_of_ints_that_fits_is_admitted_and_a_string_pool_over_budget_is_not(registry):
+    # An int costs less than an empty str, so the string floor must not refuse an int pool
+    # that fits. The int provider is off the string allowlist, so it gets the type-free floor.
+    size = _CFG["pool_size"]
+    int_provider = "person_dob"
+    assert int_provider not in C1_PROVIDER_ALLOWLIST
+    string_floor = construction_floor(size, strings=True)
+    any_floor = construction_floor(size, strings=False)
+    assert any_floor < string_floor
+    allowance = (any_floor + string_floor) // 2
+
+    ints = _FixedWidthPoolBuilder(registry, width=0, ints=True)
+    ctx = _context(registry, max_pool_bytes=allowance, builder=ints)
+    pool = ctx.get_pool(ctx.prepare(provider=int_provider, namespace="ns", cfg=dict(_CFG)))
+    assert ints.build_calls == 1
+    assert measured_pool_bytes(pool) <= allowance
+
+    strings = _FixedWidthPoolBuilder(registry, width=6)
+    sctx = _context(registry, max_pool_bytes=allowance, builder=strings)
+    with pytest.raises(ExecutionError) as exc:
+        sctx.get_pool(sctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert strings.build_calls == 0
+
+
+def test_w1f_the_floor_follows_the_resolved_adapter_not_the_provider_name(registry):
+    # An allowlisted name rebound to an int adapter must get the type-free floor; the stock
+    # adapter under the same allowance is refused by the string floor before any build.
+    from tests.physical.test_unified_slice_faker import CountingAdapter
+    from tests.physical.test_unified_slice_faker import rebound_registry as swap_adapter_registry
+
+    size = _CFG["pool_size"]
+    assert _PROVIDER in C1_PROVIDER_ALLOWLIST
+    allowance = (
+        construction_floor(size, strings=False) + construction_floor(size, strings=True)
+    ) // 2
+
+    swapped = swap_adapter_registry(CountingAdapter(lambda i: 1000 + i))
+    ctx = OocFakerPoolContext(registry=swapped, job_seed=_JOB_SEED, max_pool_bytes=allowance)
+    pool = ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert ctx.builds == 1
+    assert measured_pool_bytes(pool) <= allowance
+
+    stock_builder = _CountingPoolBuilder(registry)
+    stock = _context(registry, max_pool_bytes=allowance, builder=stock_builder)
+    with pytest.raises(ExecutionError) as exc:
+        stock.get_pool(stock.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert stock_builder.build_calls == 0
+
+
+def test_the_peak_floor_counts_four_pointer_copies_and_a_set_slot():
+    # Pins the documented per-value constants: string object, four 8-byte pointers, one
+    # 16-byte set slot.
+    import sys
+
+    assert sys.getsizeof("") + 4 * 8 + 16 == BUILD_HELD_BYTES_PER_VALUE
+
+
+def test_the_ledger_and_the_cache_charge_the_same_bytes_for_long_strings(registry):
+    # 30-char strings: a characters-only estimate charged 120 B each, above the 87 B measured,
+    # so the inner cache refused a pool the ledger said fit. One function now serves both.
+    size = _CFG["pool_size"]
+    builder = _FixedWidthPoolBuilder(registry, width=30)
+    budget = construction_floor(size, strings=True)
+    ctx = _context(registry, max_pool_bytes=budget, builder=builder)
+    pool = ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    assert ctx.reserved_bytes == measured_pool_bytes(pool)
+    assert ctx._cache.stats().bytes_used == ctx.reserved_bytes
+    assert ctx.pool_count == 1
+
+
+def test_a_second_pool_the_ledger_admits_is_not_evicted_by_the_cache(registry):
+    size = _CFG["pool_size"]
+    builder = _FixedWidthPoolBuilder(registry, width=30)
+    one = measured_pool_bytes(
+        _context(registry, builder=builder).get_pool(
+            _context(registry, builder=builder).prepare(
+                provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)
+            )
+        )
+    )
+    # Room for two measured pools and the floor of the second.
+    budget = max(2 * one, one + construction_floor(size, strings=True))
+    builder.build_calls = 0
+    ctx = _context(registry, max_pool_bytes=budget, builder=builder)
+    for namespace in ("ns", "ns2"):
+        ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace=namespace, cfg=dict(_CFG)))
+    assert builder.build_calls == 2
+    assert ctx.pool_count == 2
+    assert ctx._cache.stats().evictions == 0
+
+
+def test_pool_bytes_bounded_by_allowance_not_row_count(registry):
+    # Allowance sized for exactly one pool; a second distinct pool is refused. The
+    # bound is the allowance, independent of any batch size.
+    builder = _FixedWidthPoolBuilder(registry, width=100)
+    probe = _context(registry, builder=builder)
+    first = probe.get_pool(probe.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))
+    one_pool = measured_pool_bytes(first)
     ctx = OocFakerPoolContext(
         registry=registry,
         job_seed=_JOB_SEED,
-        max_pool_bytes=16 * reserve_per_value,  # fits pool_size<=16 only
+        max_pool_bytes=one_pool,
         builder=builder,
     )
-    small = ctx.prepare(provider=_PROVIDER, namespace="ns", cfg={"pool_size": 16})
-    ctx.get_pool(small)  # fits exactly
-    big = ctx.prepare(provider=_PROVIDER, namespace="ns2", cfg={"pool_size": 17})
+    ctx.get_pool(ctx.prepare(provider=_PROVIDER, namespace="ns", cfg=dict(_CFG)))  # fits exactly
+    assert ctx.reserved_bytes == one_pool
+    other = ctx.prepare(provider=_PROVIDER, namespace="ns2", cfg=dict(_CFG))
     with pytest.raises(ExecutionError) as exc:
-        ctx.get_pool(big)
+        ctx.get_pool(other)
     assert exc.value.code == "out_of_core_faker_pool_budget_exceeded"
+    assert ctx.pool_count == 1
 
 
 def test_invalid_pool_size_rejected(registry):

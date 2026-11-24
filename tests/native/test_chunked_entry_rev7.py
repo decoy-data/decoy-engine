@@ -9,6 +9,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked_oracle
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.execution.native._dispatch import NativeRouteEvidence
@@ -163,6 +164,7 @@ def _oracle_with_cache(config: dict[str, Any], cache: PoolCache, registry: Any) 
         registry=registry,
         key_provider=key_provider(),
         pool_cache=cache,
+        sources=NO_SOURCES,
     )
     return list(_chunked_oracle._oracle_masked(state, config=config, table=TABLE))
 

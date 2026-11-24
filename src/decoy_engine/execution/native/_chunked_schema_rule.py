@@ -35,8 +35,7 @@ by definition the rule pins one type per column for the whole call:
   still masks but runs only on the oracle. Config only, so both legs agree.
   The whole-frame route still resolves an empty or all-null column to Arrow `null`, the same
   recorded route-dependent difference (docs/compatibility-contract.md, ROUTE-OUTPUT-CONTRACT).
-- a faker column the chunked route admits as a position-keyed draw (non-deterministic REUSE, an
-  explicit `pool_size`, a string-output provider, no `when:`): `string`, by the same cast. Its
+- a faker column the chunked route admits as a position-keyed draw (non-deterministic REUSE, a string-output provider, no `when:`): `string`, by the same cast. Its
   provider pool holds strings (a custom provider that returns anything else fails closed before
   any chunk), so pandas' empty -> float64 and all-null -> null are inference artifacts. Config
   only, so both legs agree. The whole-frame route still resolves an empty or all-null column to

@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 202 (asserted by the sentry).
+# Count: 203 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -136,6 +136,15 @@ ambient_only = true
 module = "decoy_engine/execution/_isolated_worker.py"
 function = "_load_sources"
 sink = "pyarrow.parquet.read_table"
+ordinal = 0
+rule = "path handed over by the parent in the payload: an engine-created scratch file or stage directory"
+owner = "cam"
+reason = "the isolated child reads its payload and writes its staged output; the parent refused every policy but the ambient one before spawning it"
+
+[[entry]]
+module = "decoy_engine/execution/_isolated_worker.py"
+function = "_load_sources"
+sink = "decoy_engine.fileaccess.adapters.arrow.ipc_read_path"
 ordinal = 0
 rule = "path handed over by the parent in the payload: an engine-created scratch file or stage directory"
 owner = "cam"
@@ -968,13 +977,13 @@ owner = "cam"
 reason = "ambient CLI semantics: best-effort directory fsync after a published replace (main's fixed-width writer did it)"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn.publish"
+module = "decoy_engine/fileaccess/_local_chain.py"
+function = "link_noclobber_beside"
 sink = "os.link"
 ordinal = 0
-rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
+rule = "the stage name generated beside the FileRequest.locator of a request served by LocalFileAccess, and that locator"
 owner = "cam"
-reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
+reason = "ambient CLI semantics on a backend whose os.link has no dir_fd (Windows): the plain two-path link, mapped by the same errno helper as the descriptor form; never installed after forbid_ambient()"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
@@ -1706,8 +1715,8 @@ owner = "cam"
 reason = "the allocator removes a directory it issued, or one it created that failed its own check"
 
 [[entry]]
-module = "decoy_engine/publication/_publish.py"
-function = "_measure_one"
+module = "decoy_engine/publication/_members.py"
+function = "_digest"
 sink = "mmap.mmap"
 ordinal = 0
 rule = "a descriptor `OutputTxn.open_file` returned for a validated component of a publication stage; read-only map, no path"
@@ -1715,7 +1724,7 @@ owner = "cam"
 reason = "F22 5.2: the publisher measures each staged table itself (SHA-256 over the read-only map) through the stage capability"
 
 [[entry]]
-module = "decoy_engine/publication/_publish.py"
+module = "decoy_engine/publication/_members.py"
 function = "_measure_one"
 sink = "pyarrow.parquet.ParquetFile"
 ordinal = 0

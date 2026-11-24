@@ -103,15 +103,27 @@ def test_r3_profile_compiles_the_same_plan_and_route(
     args = {"table": TABLE, "engine_version": ENGINE_VERSION}
     assert (
         plan_native_route(
-            config, r3, first_schema=first.schema, **args, registry=get_default_registry()
+            config,
+            r3,
+            first_schema=first.schema,
+            **args,
+            registry=get_default_registry(),
+            siblings=NO_SOURCES,
         ).evidence
         == plan_native_route(
-            config, real, first_schema=first.schema, **args, registry=get_default_registry()
+            config,
+            real,
+            first_schema=first.schema,
+            **args,
+            registry=get_default_registry(),
+            siblings=NO_SOURCES,
         ).evidence
     )
     assert plan_column_backends(
-        config, r3, **args, registry=get_default_registry()
-    ) == plan_column_backends(config, real, **args, registry=get_default_registry())
+        config, r3, **args, registry=get_default_registry(), siblings=NO_SOURCES
+    ) == plan_column_backends(
+        config, real, **args, registry=get_default_registry(), siblings=NO_SOURCES
+    )
 
 
 def test_placeholder_alone_is_not_enough() -> None:

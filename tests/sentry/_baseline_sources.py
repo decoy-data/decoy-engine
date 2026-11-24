@@ -137,6 +137,15 @@ def import_layer_keys(rel: str) -> Callable[[], set[str]]:
     return keys
 
 
+def exception_text_copy_census() -> dict[str, int]:
+    """Live engine exception-text copies: site key to multiplicity (the entry's ``max``)."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tests.sentry.safe_output._copies import census, scan_tree
+
+    return census(scan_tree(ROOT / "src" / "decoy_engine"))
+
+
 @dataclass(frozen=True)
 class Source:
     sentry_id: str
@@ -149,6 +158,12 @@ class Source:
 
 F29 = "tests/fixtures/f29"
 SOURCES: tuple[Source, ...] = (
+    Source(
+        "engine-exception-text-copies",
+        "safe_output/test_exception_text_copy.py",
+        lambda: set(exception_text_copy_census()),
+        maxes=exception_text_copy_census,
+    ),
     Source(
         "f29-reason-baseline",
         f"{F29}/reason-baseline.json",
@@ -187,6 +202,11 @@ SOURCES: tuple[Source, ...] = (
         "column-shape-classifier",
         "test_column_shape_classifier.py",
         in_code("test_column_shape_classifier.py", "ALLOWED_CALLERS", nested=True),
+    ),
+    Source(
+        "bucketize-width-contract",
+        "test_bucketize_width_contract.py",
+        in_code("test_bucketize_width_contract.py", "ALLOWED_CALLERS"),
     ),
     Source(
         "package-fanout",
@@ -243,9 +263,24 @@ SOURCES: tuple[Source, ...] = (
         in_code("defects/test_group_by_single_reader.py", "ALLOWED"),
     ),
     Source(
+        "faker-pool-size-one-resolver",
+        "defects/test_faker_pool_size_one_resolver.py",
+        in_code("defects/test_faker_pool_size_one_resolver.py", "ALLOWED"),
+    ),
+    Source(
+        "faker-native-allowlist-total",
+        "defects/test_faker_native_allowlist_total.py",
+        in_code("defects/test_faker_native_allowlist_total.py", "EXCLUDED"),
+    ),
+    Source(
         "lossless-int-columns",
         "defects/test_lossless_int_columns.py",
         in_code("defects/test_lossless_int_columns.py", "ALLOWED", nested=True),
+    ),
+    Source(
+        "output-assembly-one-path",
+        "defects/test_output_assembly_one_path.py",
+        in_code("defects/test_output_assembly_one_path.py", "ALLOWED"),
     ),
     Source(
         "validation-route-allowlist",

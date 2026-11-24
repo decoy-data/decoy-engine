@@ -163,3 +163,25 @@ def string_source(n: int = 11) -> pa.Table:
             "p": pa.array([None if i % 4 == 1 else i for i in range(n)], pa.int64()),
         }
     )
+
+
+def _core_without_sources() -> Any:
+    import inspect
+
+    from decoy_engine.execution.native.chunked._core import mask_chunked
+
+    sig = inspect.signature(mask_chunked)
+    return sig.replace(parameters=[p for p in sig.parameters.values() if p.name != "sources"])
+
+
+def mask_chunked_in_job(*args: Any, **kwargs: Any) -> Any:
+    """The core `mask_chunked` (it takes a vault writer, which the public entry refuses) for a
+    single table: the job's other tables are `NO_SOURCES`. Its signature is the core's without
+    `sources`, so a caller that binds arguments against it sees the public entry's shape."""
+    from decoy_engine.contracts.column_shape import NO_SOURCES
+    from decoy_engine.execution.native.chunked._core import mask_chunked
+
+    return mask_chunked(*args, sources=NO_SOURCES, **kwargs)
+
+
+mask_chunked_in_job.__signature__ = _core_without_sources()  # type: ignore[attr-defined]

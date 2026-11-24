@@ -70,11 +70,12 @@ class PoolBinding:
     same way the native chunked route resolves them, so there is exactly one
     place that split lives. The pool namespace is the CONFIGURED one, read from the bound
     `FakerParams.namespace` (it can be None, and for a position-keyed Faker it differs from
-    `KeyBinding.namespace`, which names the selection namespace).
+    `KeyBinding.namespace`, which names the selection namespace). `plan_pool_size` is None when
+    the config omits `pool_size`; `resolve_faker_pool_identity` then applies the default.
     """
 
     provider: str
-    plan_pool_size: int
+    plan_pool_size: int | None
 
 
 @dataclass(frozen=True)
@@ -83,7 +84,7 @@ class ExecutionBinding:
     COMPILE time (Task 4.4 C0; design doc section 8.1's per-node field list,
     scoped to the five strategies the shadow coordinator admits -- passthrough,
     redact, truncate, keyed hash, and (Task 4.6 slice 1) deterministic faker
-    over the frozen C1 provider allowlist). Populated only when the node's
+    over the faker operator's provider allowlist). Populated only when the node's
     compiled config was admitted to the corresponding native kernel or pool
     route; every other node leaves `PhysicalNode.execution` unset.
 
