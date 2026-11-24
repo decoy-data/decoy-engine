@@ -63,6 +63,7 @@ from decoy_engine.expressions._when_parser import (
 )
 
 _log = logging.getLogger(__name__)
+_ABSENT: Any = object()
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import (
@@ -455,6 +456,49 @@ def _eval_predicate(
     return mask
 
 
+def when_source_frame(
+    df: pd.DataFrame, ctx: StrategyContext, table: str, expression: str, strategy: str
+) -> pd.DataFrame:
+    """`df` with every `when:`-read column that some node writes replaced by its pre-mask value.
+
+    A `when:` selects rows by the ORIGINAL values it names, whatever earlier nodes masked. The
+    pre-mask copies live in `ctx.group_anchor_snapshots` (built by the route from
+    `_runner.source_snapshot_columns`). A read no node writes still holds its original value in
+    `df`. A route that built no snapshot set, or a set that names a column without a copy, fails
+    closed: reading the live frame would select rows by a masked value. A context without the
+    field (a test double) reads `df` as given.
+    """
+    snapshot_set = getattr(ctx, "source_snapshot_columns", _ABSENT)
+    if snapshot_set is _ABSENT:
+        return df
+    try:
+        reads = when_column_refs(parse_when_cached(expression))
+    except ValidationError:
+        return df  # `_eval_predicate` raises the coded grammar error
+    if snapshot_set is None:
+        raise _snapshot_missing(strategy, table)
+    snapped = [r.column for r in reads if r.column in snapshot_set.get(table, ())]
+    snapped = [c for c in snapped if c in df.columns]
+    if not snapped:
+        return df
+    src = df.copy(deep=False)
+    for col in snapped:
+        snapshot = ctx.group_anchor_snapshots.get((table, col))
+        if snapshot is None:
+            raise _snapshot_missing(strategy, table)
+        src[col] = snapshot.loc[df.index]
+    return src
+
+
+def _snapshot_missing(strategy: str, table: str) -> StrategyError:
+    # Table only: a column name or a predicate can carry user data.
+    return StrategyError(
+        code=reasons.runtime.WHEN_SOURCE_SNAPSHOT_MISSING,
+        strategy=strategy,
+        message=f"when: on table {table!r} has no pre-mask snapshot for a column it reads",
+    )
+
+
 def run_with_when_gate(
     handler: StrategyHandler,
     df: pd.DataFrame,
@@ -498,7 +542,8 @@ def run_with_when_gate(
     if preflight is not None:
         preflight(plan, ctx)
 
-    mask = _eval_predicate(df, plan.when, plan.strategy, column=column)
+    source = when_source_frame(df, ctx, table, plan.when, plan.strategy)
+    mask = _eval_predicate(source, plan.when, plan.strategy, column=column)
 
     if not mask.any():
         return df, []

@@ -73,7 +73,7 @@ from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
     order_work,
-    source_anchor_columns,
+    source_snapshot_columns,
 )
 from decoy_engine.execution._sequential import run_sequential as _run_sequential
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
@@ -199,7 +199,7 @@ class PandasExecutionAdapter:
         # anchors, top_code, group_key siblings, declared integers, columns a `when:` reads) is
         # named by the ONE `lossless_int_columns`, so a null never widens it to float64 and rounds
         # a value beyond 2**53. Every other column is unaffected.
-        group_anchor_cols = source_anchor_columns(plan, registry)
+        group_anchor_cols = source_snapshot_columns(plan, registry)
         lossless = lossless_int_columns(plan, registry, relationship_graph)
         frames: dict[str, pd.DataFrame] = {
             t: to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
@@ -225,6 +225,7 @@ class PandasExecutionAdapter:
             job_seed=plan.seed_envelope.job_seed,
             mask_key=require_mask_key(plan, key_provider),
             group_anchor_snapshots=group_anchor_snapshots,
+            source_snapshot_columns=group_anchor_cols,
             row_offset=row_offset,
             # Phase 4 slice 4: a caller (the chunked route) that resolved one
             # corpus record per code_set column up front seeds it here so

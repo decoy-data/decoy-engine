@@ -169,7 +169,7 @@ from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
     order_work,
-    source_anchor_columns,
+    source_snapshot_columns,
 )
 from decoy_engine.execution._sequential_composite_chain import decline_composite_chain
 from decoy_engine.execution._sequential_native import SeqNativeRun
@@ -321,12 +321,11 @@ def run_sequential(
 
     table_order = table_topo_order(plan, graph)
 
-    # HC-3a: per-table date_shift group_by anchor columns (Codex R1 P1 #1/#2),
-    # plus cross-column V1 joint_mask key_by source keys (`source_anchor_columns`):
-    # both read an immutable source sibling. Unioned into each table's FK-safe
-    # column set at load (lossless int+null) and snapshotted pre-mask into
-    # ctx.group_anchor_snapshots below.
-    group_anchor_cols = source_anchor_columns(plan, registry)
+    # HC-3a: per-table source-read columns (`source_snapshot_columns`): date_shift group_by anchors,
+    # joint_mask key_by keys and the written columns a `when:` reads. Each is an immutable source
+    # value: unioned into the table's FK-safe column set at load (lossless int+null) and
+    # snapshotted pre-mask into ctx.group_anchor_snapshots below.
+    group_anchor_cols = source_snapshot_columns(plan, registry)
     lossless = lossless_int_columns(plan, registry, graph)
 
     # A parent key map is retained until every child table that references it has
@@ -350,6 +349,7 @@ def run_sequential(
         seq_native=native_run,
         declared_date_columns=declared_date_shift_columns(plan),
         column_shapes=plan_column_shapes(plan),
+        source_snapshot_columns=group_anchor_cols,
     )
 
     parent_map_cache: dict[_NodeKey, dict[_KeyTuple, _KeyTuple]] = {}

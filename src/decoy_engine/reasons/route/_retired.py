@@ -9,7 +9,7 @@ from __future__ import annotations
 from decoy_engine.reasons import _catalog
 from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 
-__all__ = ["POST_SCAN_INTEGRITY_REQUESTED"]
+__all__ = ["POST_SCAN_INTEGRITY_REQUESTED", "WHEN_READS_MASKED_COLUMN"]
 
 # Regex-only integrity no longer keeps a run resident; only a model ask does.
 POST_SCAN_INTEGRITY_REQUESTED = _catalog.route("decoy_engine.execution._pipeline_routing")(
@@ -17,4 +17,12 @@ POST_SCAN_INTEGRITY_REQUESTED = _catalog.route("decoy_engine.execution._pipeline
     "The Post-scan integrity checks need the full frame resident.",
     deprecated_in="1.27.0",
     replaced_by=("route", "post_scan_models_resident"),
+)
+
+# A `when:` now reads original values on every route, so no table declines for reading a column an
+# earlier node masks (WHEN-READS-SOURCE). No replacement: the decline is gone.
+WHEN_READS_MASKED_COLUMN = _catalog.route("RouteDeclineCode")(
+    "when_reads_masked_column",
+    "When reads masked column.",
+    deprecated_in=UNRELEASED,
 )

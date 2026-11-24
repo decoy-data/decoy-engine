@@ -106,7 +106,6 @@ __all__ = [
     "VAULT_WRITER_REQUESTED",
     "WHEN_OUTSIDE_SUBSET",
     "WHEN_PREDICATE_NOT_NATIVE",
-    "WHEN_READS_MASKED_COLUMN",
 ]
 
 _d = _catalog.route("RouteDeclineCode")
@@ -146,7 +145,6 @@ UNCONFIGURED_SET_MISMATCH = _d("unconfigured_set_mismatch", "Unconfigured set mi
 UNCOVERED_OR_MISSING_COLUMNS = _d("uncovered_or_missing_columns", "Uncovered or missing columns.")
 WHEN_OUTSIDE_SUBSET = _d("when_outside_subset", "When outside subset.")
 WHEN_PREDICATE_NOT_NATIVE = _d("when_predicate_not_native", "When predicate not native.")
-WHEN_READS_MASKED_COLUMN = _d("when_reads_masked_column", "When reads masked column.")
 
 _d = _catalog.route("decoy_engine.execution._chunked_input")
 

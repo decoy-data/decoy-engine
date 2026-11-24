@@ -10,6 +10,8 @@ separate language, and is pinned by `test_transform_expression_readers_keep_the_
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -102,3 +104,54 @@ def test_two_column_when_carries_both_reads_and_matches_the_oracle(configured: b
         assert got.column("s").to_pylist() == want.column("s").to_pylist()
         assert same_column(got.column("left"), want.column("left"))
         assert same_column(got.column("right"), want.column("right"))
+
+
+# ---------------------------------------------------------------------------
+# WHEN-READS-SOURCE S2: every `_eval_predicate` caller evaluates over original values.
+# ---------------------------------------------------------------------------
+
+_SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine" / "execution"
+# (file, the one allowed first argument as source text, why it holds original values)
+_EVAL_CALLERS = {
+    "_when_gate.py": ("source", "`when_source_frame`: the live frame with pre-mask snapshots"),
+    "native/_when_mask.py": ("frame", "the raw chunk the source produced, before any mask"),
+    "_unified_slice_when.py": ("frame", "the unified slice's source frame, before any mask"),
+}
+
+
+def _eval_calls(path: Path) -> list[ast.Call]:
+    tree = ast.parse(path.read_text())
+    return [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "_eval_predicate"
+    ]
+
+
+def test_every_predicate_evaluation_reads_an_allowed_frame() -> None:
+    """A new `_eval_predicate` caller, or a caller that changes its frame argument, fails here
+    until it is added to `_EVAL_CALLERS` with its reason."""
+    found = {
+        str(p.relative_to(_SRC)): [ast.unparse(c.args[0]) for c in calls]
+        for p in _SRC.rglob("*.py")
+        if (calls := _eval_calls(p))
+    }
+    assert found == {name: [arg] for name, (arg, _why) in _EVAL_CALLERS.items()}
+
+
+def test_the_gate_frame_comes_from_when_source_frame() -> None:
+    tree = ast.parse((_SRC / "_when_gate.py").read_text())
+    gate = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "run_with_when_gate"
+    )
+    assigned = [
+        ast.unparse(n.value)
+        for n in ast.walk(gate)
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "source" for t in n.targets)
+    ]
+    assert len(assigned) == 1 and assigned[0].startswith("when_source_frame(")

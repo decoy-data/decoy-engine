@@ -278,6 +278,53 @@ def source_anchor_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, s
     return out
 
 
+def when_columns_of(whens: Iterable[object]) -> frozenset[str]:
+    """The columns the given `when:` predicates read, from `when_column_refs` (the one producer
+    of `when:` reads). A non-string or an unparsable predicate reads nothing here: the evaluator
+    raises its coded error for it, so there is nothing to snapshot or ingest exactly."""
+    from decoy_engine.errors import ValidationError
+    from decoy_engine.expressions._when_parser import parse_when_cached, when_column_refs
+
+    cols: set[str] = set()
+    for when in whens:
+        if not isinstance(when, str):
+            continue
+        try:
+            cols.update(read.column for read in when_column_refs(parse_when_cached(when)))
+        except ValidationError:
+            continue
+    return frozenset(cols)
+
+
+def when_read_columns(plan: Plan) -> dict[str, frozenset[str]]:
+    """Per table, the columns any column's `when:` reads.
+
+    A `when:` selects rows by the ORIGINAL values of these columns, so this one set feeds both
+    the lossless integer ingest (`LosslessInts.when_read`) and the pre-mask snapshot
+    (`source_snapshot_columns`).
+    """
+    out: dict[str, frozenset[str]] = {}
+    for table, table_seed in plan.seed_envelope.per_table:
+        cols = when_columns_of(seed.when for _name, seed in table_seed.per_column)
+        if cols:
+            out[table] = out.get(table, frozenset()) | cols
+    return out
+
+
+def source_snapshot_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, frozenset[str]]:
+    """Every column snapshotted pre-mask: `source_anchor_columns` plus each `when:`-read column
+    that some node writes. A `when:` column no node writes keeps its original value in the live
+    frame, so it costs no copy. Both snapshot sites call this in place of `source_anchor_columns`.
+    """
+    out = {t: frozenset(c) for t, c in source_anchor_columns(plan, registry).items()}
+    written = _writer_node_map(build_work_list(plan, registry))
+    for table, cols in when_read_columns(plan).items():
+        hit = frozenset(c for c in cols if (table, c) in written)
+        if hit:
+            out[table] = out.get(table, frozenset()) | hit
+    return out
+
+
 def _writer_output_columns(node: WorkNode) -> tuple[str, ...]:
     """Every column `node` WRITES, for the writer map (not its dispatch identity).
 

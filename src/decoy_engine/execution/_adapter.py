@@ -252,6 +252,10 @@ class StrategyContext:
     # mutate-in-place / default-empty pattern as the sinks above; a fresh dict
     # per job via default_factory.
     group_anchor_snapshots: dict[tuple[str, str], pd.Series] = field(default_factory=dict)
+    # WHEN-READS-SOURCE: per table, the columns snapshotted pre-mask into `group_anchor_snapshots`
+    # that the `when:` gate may read (`_runner.source_snapshot_columns`). A route that builds no
+    # snapshot leaves it None and the gate fails closed (`when_source_snapshot_missing`).
+    source_snapshot_columns: Mapping[str, frozenset[str]] | None = None
     # Phase 4 slice 1 (DGRN -> windowed_date): the durable global row offset of
     # this call's FIRST row, i.e. the position the physical row 0 of `df`
     # occupies in the full, unchunked source. Full-frame and every other

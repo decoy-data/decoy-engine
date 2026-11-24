@@ -489,15 +489,14 @@ def test_a_formatted_date_shift_with_a_simple_when_is_admitted_natively() -> Non
 
 
 @NEEDS_COMPANION
-def test_a_when_predicate_keeps_a_table_off_native() -> None:
-    # `a` is masked before `d` runs, so the predicate would read a masked value on the
-    # oracle and must keep the whole table off the native route.
+def test_a_when_predicate_on_an_earlier_masked_column_is_admitted_natively() -> None:
+    # `a` is masked before `d` runs; the predicate reads the original `a` on every route, so
+    # the table is admitted and the native output equals the oracle's.
     config = make_config([ds_col(), {"name": "a", "strategy": "redact"}, passthrough("p")])
-    config["tables"][0]["columns"][0]["when"] = "a == 'REDACTED'"
+    config["tables"][0]["columns"][0]["when"] = "a == 'k'"
     table = pa.table({"d": _valued().column("d"), "a": ["k"] * 6, "p": list(range(6))})
     run = run_one(config, [table])
-    assert run.ev[0].native_admitted is False
-    assert "when_predicate_reads_masked_column" in (run.ev[0].reroute_reason or "")
+    assert run.ev[0].native_admitted is True, run.ev[0].reroute_reason
 
 
 def test_a_when_predicate_keeps_a_table_off_auto_chunk() -> None:

@@ -129,7 +129,6 @@ def test_serialized_code_values_are_pinned() -> None:
         "NO_NATIVE_KERNEL_OR_POOL": "no_native_kernel_or_pool",
         "WHEN_PREDICATE_NOT_NATIVE": "when_predicate_not_native",
         "WHEN_OUTSIDE_SUBSET": "when_outside_subset",
-        "WHEN_READS_MASKED_COLUMN": "when_reads_masked_column",
         "FAKER_SOURCE_NOT_STRING": "faker_source_not_string",
         "FAKER_SCHEMA_NOT_GUARANTEED": "faker_schema_not_guaranteed",
         "FAKER_METADATA_NOT_ALLOWLISTED": "faker_metadata_not_allowlisted",
@@ -282,24 +281,24 @@ def test_when_declines_map_to_their_three_codes() -> None:
     assert first([_when(redact("s"), "p.notnull()"), passthrough("p")]) == column_decline(
         C.WHEN_OUTSIDE_SUBSET, TABLE, "s"
     )
+    # A predicate that reads a column an earlier node masks is no longer a decline: it reads
+    # the original value on every route.
     reads = [_when(redact("z"), "a == 'REDACTED'"), redact("a"), passthrough("p")]
-    assert first(reads) == column_decline(C.WHEN_READS_MASKED_COLUMN, TABLE, "z")
-    assert _recs(_plan(make_config(reads), _strings(4, "z", "a", "p"))) == [
-        (C.WHEN_READS_MASKED_COLUMN, "z", False)
-    ]
+    assert first_when_decline(make_config(reads), reg, table=TABLE, schema=schema) is None
+    assert _recs(_plan(make_config(reads), _strings(4, "z", "a", "p"))) == []
 
 
 def test_when_override_keeps_earlier_records_and_the_legacy_reason() -> None:
     config = make_config(
-        [force_oracle("c"), _when(redact("z"), "a == 'REDACTED'"), redact("a"), passthrough("p")]
+        [force_oracle("c"), _when(passthrough("z"), "a == 'x'"), redact("a"), passthrough("p")]
     )
     ev = _plan(config, _strings(4, "c", "z", "a", "p"))
     # The `when:` reason replaces the composite string (existing behavior) but the earlier
     # static record survives, in decision order.
-    assert (ev.reroute_reason or "").startswith("when_predicate_reads_masked_column:z:a")
+    assert (ev.reroute_reason or "").startswith("when_predicate_not_native:z")
     assert _recs(ev) == [
         (C.FALLBACK_POLICY_NOT_NATIVE, "c", False),
-        (C.WHEN_READS_MASKED_COLUMN, "z", False),
+        (C.WHEN_PREDICATE_NOT_NATIVE, "z", False),
     ]
 
 

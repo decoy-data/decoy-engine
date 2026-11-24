@@ -406,8 +406,8 @@ def scalar_creating_reads(entry: Mapping[str, Any]) -> frozenset[str]:
     admits by, so a created column runs after every column its value reads. An entry that does
     not create its target orders after nothing. Reads that cannot be named (`reads_unknown`)
     never drop the ones that can, so a dependent never reads a driver before it is masked.
-    A `when:` predicate adds no edge: the gate reads the frame as it stands when the entry
-    runs, and ordering on it would change which rows match and could form a new cycle.
+    A `when:` predicate adds no edge: the gate reads original values, so no ordering changes
+    which rows match, and an edge could only form a new cycle.
     """
     declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
     if declare is None:

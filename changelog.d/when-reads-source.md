@@ -1,0 +1,18 @@
+Breaking: a `when:` condition now reads the original value of every column it names, as documented. Before, on the pandas routes, it read a value that a column earlier in work order had already masked, so the rows it selected depended on column names. The native lanes no longer decline a `when:` that names a column masked earlier; the reason codes `route.when_reads_masked_column` and `runtime.when_predicate_reads_masked_column` are deprecated and no longer produced.
+
+### Fixed (when: reads the original value, WHEN-READS-SOURCE S2, 2026-11-23)
+
+A `when:` picks rows by the row's original values, from any column. "Mask `email` only on rows
+where the original `country` = 'US'" now holds when the job also masks `country`. Before, a job
+that hashed `status` and gated `zz_email` on `status == 'active'` compared the hash to `'active'`,
+selected no rows and wrote every email unmasked; renaming `zz_email` to `aa_email` changed the
+result. Output is now independent of column order and names. A config whose `when:` named a column
+masked earlier masks different rows than before.
+
+The chunked native route and the unified slice already read the original values, and they now take
+these tables instead of declining them. Their evidence no longer lists
+`when_predicate_reads_masked_column`, and `executed_backend` is the native backend.
+Out-of-core still refuses `when:`.
+
+A route that forgets the pre-mask snapshot of a `when:` column fails with the new runtime error
+`when_source_snapshot_missing`. No supported route does.
