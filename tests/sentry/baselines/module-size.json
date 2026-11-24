@@ -3,85 +3,112 @@
  "created_in": "X0a",
  "entries": {
   "scripts/audit/probe.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 775
   },
   "scripts/bench-generation-pool/bench_compare_gen.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 908
   },
   "scripts/bench-unified-slice/bench_compare.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 894
   },
   "scripts/build_golden_fixtures.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 626
   },
   "scripts/fk_memory_probe.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 1046
   },
   "scripts/gen_proof_manifest.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 1229
   },
   "scripts/native-baseline/bench_c1_oracle.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 758
   },
   "scripts/tb3_cgroup_validation.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 623
   },
   "scripts/tq_mutate.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 822
   },
   "src/decoy_engine/detection/detectors.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 920
   },
   "src/decoy_engine/execution/_pandas_adapter.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 700
   },
   "src/decoy_engine/execution/_pipeline_routing_signals.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 633
   },
   "src/decoy_engine/execution/_sequential.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 680
   },
   "src/decoy_engine/execution/_sequential_native.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 700
   },
   "src/decoy_engine/execution/native/_chunked_entry.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 689
   },
   "src/decoy_engine/execution/native/_dispatch.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 688
   },
   "src/decoy_engine/execution/native/_requirements.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 677
   },
   "src/decoy_engine/execution/out_of_core/_budget.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 622
   },
   "src/decoy_engine/execution/out_of_core/_spill_estimate.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 665
   },
   "src/decoy_engine/execution/out_of_core/_stream_join.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 665
   },
   "src/decoy_engine/internal/faker_setup.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 688
   },
   "src/decoy_engine/plan/_checks.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 700
   },
   "src/decoy_engine/plan/_compile.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 673
   },
   "src/decoy_engine/profiling/model_pack/trainer.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 711
   },
   "src/decoy_engine/quarantine.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 658
   },
   "src/decoy_engine/transforms/_codeset_loader.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 700
   },
   "src/decoy_engine/transforms/text_mask.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry"
+   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
+   "max": 670
   }
  }
 }

@@ -1,0 +1,30 @@
+{
+ "sentry_id": "sentry-limits",
+ "created_in": "RG-E2",
+ "entries": {
+  "layout/test_package_fanout.py::LIMIT": {
+   "reason": "direct-module cap per package; a higher cap lets every package hold more modules",
+   "max": 25
+  },
+  "release/test_public_signatures.py::HEAD_FLOOR": {
+   "reason": "floor on the public names the signature census maps; a lower floor lets the census shrink unnoticed",
+   "min": 350
+  },
+  "test_module_size.py::GOAL": {
+   "reason": "line count at or under which a module needs no module-size allowlist row; a higher goal loosens every entry",
+   "max": 600
+  },
+  "test_module_size.py::MARGIN": {
+   "reason": "headroom a fresh dense pin starts with; a higher margin lets a ceiling sit above its module",
+   "max": 20
+  },
+  "test_module_size.py::MAX": {
+   "reason": "hard line ceiling for new work; a higher value lets a module grow past the reviewed cap",
+   "max": 700
+  },
+  "test_outbound_clients.py::WALK_FLOOR": {
+   "reason": "floor on the files the outbound-client walk sees; a lower floor lets the walk shrink unnoticed",
+   "min": 146
+  }
+ }
+}

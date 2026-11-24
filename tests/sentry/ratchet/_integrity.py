@@ -392,7 +392,7 @@ def transfer_findings(
             elif free:
                 spent.add((free[0], key))
                 supplied.add(free[0])
-                if r.max_raised(successors[sid][key], donors[free[0]][key]):
+                if r.bound_loosened(successors[sid][key], donors[free[0]][key]):
                     loosened.add(key)
             else:
                 unmatched.add(key)

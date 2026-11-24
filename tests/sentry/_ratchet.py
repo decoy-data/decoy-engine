@@ -6,7 +6,10 @@ exactly one baseline path. ``check`` compares the working tree with a base commi
 findings; an empty list means the ratchet holds. Baseline keys compare exactly, except the
 ``permitted::<file>::<site>::<digest>`` keys of the sentries in ``REKEY_PER_SITE``, which
 compare by count per site (see ``growth``). An entry that carries a numeric ``max`` may keep
-or lower it, never raise or drop it (see ``max_raised``). A key of the form
+or lower it, never raise or drop it; one that carries a ``min`` may keep or raise it (see
+``bound_loosened``); an owner-approved raise names the key in a fresh ``approved_growth`` row.
+The keys of a ``GUARD_KEYS`` baseline are guards: dropping one needs the same approval
+(see ``ratchet/_bounds.py``). A key of the form
 ``<file>.py::<qualname>::<name>`` key of a ``REHOME_BY_BINDING`` sentry may also move 1:1 to a new
 entry that declares ``moved_from`` when the old site is gone from the source (see ``_rehome.rehomes``).
 Messages carry ids, paths and keys only.
@@ -43,6 +46,9 @@ REHOME_BY_BINDING = frozenset({"secret-material-census", "gcs-call-kwargs"})
 
 # The registry row schema of this repo; a key outside it fails (``closed_keys``).
 ROW_KEYS = frozenset({"id", "baseline", "approved_growth"})
+# Baselines whose keys are guards (scalar caps and floors), not debts: a lost key loosens the
+# check, a new key tightens it. They flip the growth rule (``ratchet/_bounds.py``).
+GUARD_KEYS = frozenset({"sentry-limits"})
 _HELPERS: dict[Path, ModuleType] = {}
 
 
@@ -65,12 +71,17 @@ def _integrity() -> ModuleType:
     return _helper("_integrity")
 
 
+def _bounds() -> ModuleType:
+    return _helper("_bounds")
+
+
 @dataclass(frozen=True)
 class Registry:
     """A registry that passed ``load_side``; ``_check`` reads only these validated fields."""
 
     paths: dict[str, str]
     approvals: dict[str, dict[str, str]]
+    retired_growth: dict[str, dict[str, str]]
     baselines: dict[str, Baseline]
     rows: int
     decisions: dict[str, dict[str, str]]
@@ -123,6 +134,31 @@ def _decision_ok(decision: object) -> bool:
     return True
 
 
+def _approval_rows(
+    sid: str, items: object, label: str, out: dict[str, dict[str, str]]
+) -> list[str]:
+    """Parse one id's ``{ key, decision }`` rows into ``out``; the one parser for both locations
+    (``approved_growth`` and ``[retired_growth]``). Returns findings for bad rows."""
+    findings: list[str] = []
+    for item in items if isinstance(items, list) else []:
+        key = item.get("key") if isinstance(item, dict) else None
+        decision = item.get("decision") if isinstance(item, dict) else None
+        if not isinstance(key, str) or not key:
+            findings.append(f"{sid}: {label} row has no key")
+        elif _GLOB_CHARS & set(key):
+            findings.append(f"{sid}: {label} key {key} is a pattern; list exact keys")
+        elif decision_problem(decision):
+            findings.append(
+                f"{sid}: {label} for {key} needs a decision "
+                f"'owner YYYY-MM-DD <reason of {MIN_REASON}+ chars>'"
+            )
+        elif key in out.get(sid, {}):
+            findings.append(f"{sid}: {label} key {key} appears twice")
+        else:
+            out.setdefault(sid, {})[key] = str(decision)
+    return findings
+
+
 def parse_approvals(doc: dict[str, Any]) -> tuple[dict[str, dict[str, str]], list[str]]:
     """``{sentry id: {key: decision}}`` from ``approved_growth`` rows, and findings for bad rows.
 
@@ -132,23 +168,24 @@ def parse_approvals(doc: dict[str, Any]) -> tuple[dict[str, dict[str, str]], lis
     out: dict[str, dict[str, str]] = {}
     findings: list[str] = []
     for row in doc.get("sentry", []):
-        sid = row.get("id", "")
-        for item in row.get("approved_growth", []):
-            key = item.get("key") if isinstance(item, dict) else None
-            decision = item.get("decision") if isinstance(item, dict) else None
-            if not isinstance(key, str) or not key:
-                findings.append(f"{sid}: approved_growth row has no key")
-            elif _GLOB_CHARS & set(key):
-                findings.append(f"{sid}: approved_growth key {key} is a pattern; list exact keys")
-            elif decision_problem(decision):
-                findings.append(
-                    f"{sid}: approved_growth for {key} needs a decision "
-                    f"'owner YYYY-MM-DD <reason of {MIN_REASON}+ chars>'"
-                )
-            elif key in out.get(sid, {}):
-                findings.append(f"{sid}: approved_growth key {key} appears twice")
-            else:
-                out.setdefault(sid, {})[key] = decision
+        findings += _approval_rows(
+            row.get("id", ""), row.get("approved_growth", []), "approved_growth", out
+        )
+    return out, findings
+
+
+def parse_retired_growth(doc: dict[str, Any]) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """``{old id: {key: decision}}`` from the ``[retired_growth]`` table, rows as in ``approved_growth``."""
+    table = doc.get("retired_growth", {})
+    if not isinstance(table, dict):
+        return {}, ["registry: [retired_growth] must be a table of arrays of { key, decision }"]
+    out: dict[str, dict[str, str]] = {}
+    findings: list[str] = []
+    for sid, items in sorted(table.items()):
+        if not isinstance(items, list):
+            findings.append(f"{sid}: retired_growth must be an array of {{ key, decision }}")
+        else:
+            findings += _approval_rows(sid, items, "retired_growth", out)
     return out, findings
 
 
@@ -234,10 +271,9 @@ def _max_of(entry: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def max_raised(head: object, base: object) -> bool:
-    """True when a numeric ``max`` rose, or was dropped, against the base entry."""
-    old, new = _max_of(base), _max_of(head)
-    return old is not None and (new is None or new > old)
+def bound_loosened(head: object, base: object) -> bool:
+    """True when ``head`` loosens a ``max`` or ``min`` its base entry carries."""
+    return bool(_bounds().loosened_fields(head, base))
 
 
 def permit_site(key: str) -> str | None:
@@ -361,7 +397,8 @@ def load_side(
         return None, [f"registry: {REGISTRY} {p}" for p in problems]
     paths, findings = parse_registry(doc)
     approvals, approval_findings = parse_approvals(doc)
-    findings += approval_findings
+    retired_growth, retired_growth_findings = parse_retired_growth(doc)
+    findings += approval_findings + retired_growth_findings
     dec = helper.decisions(doc)
     fresh_fields = (
         helper.fresh(dec["checker_change"], base_names["checker_change"], decision_problem)
@@ -404,10 +441,11 @@ def load_side(
                     f"{path}: sentry_id {parsed.sentry_id!r} does not match registry id {sid}"
                 )
             findings += reason_findings(path, parsed)
-            findings += [
-                f"{sid}: stale approved_growth, {key} is not in {path}"
-                for key in sorted(set(approvals.get(sid, {})) - parsed.keys)
-            ]
+            if sid not in GUARD_KEYS:  # a guard's lost keys are judged by ``_bounds``
+                findings += [
+                    f"{sid}: stale approved_growth, {key} is not in {path}"
+                    for key in sorted(set(approvals.get(sid, {})) - parsed.keys)
+                ]
         if len(findings) > before and blame is None:
             blame = path
     registered = {row["baseline"] for row in doc.get("sentry", [])}
@@ -416,7 +454,9 @@ def load_side(
     if findings and is_base:
         raise helper.BaseReadError(blame or orphans[0])
     rows = len(doc.get("sentry", []))
-    registry = Registry(paths, approvals, baselines, rows, dec, helper.table_names(doc), report)
+    registry = Registry(
+        paths, approvals, retired_growth, baselines, rows, dec, helper.table_names(doc), report
+    )
     return registry, findings
 
 
@@ -433,14 +473,21 @@ def _check(
         return findings, []
     head, approvals, loaded = head_reg.paths, head_reg.approvals, head_reg.baselines
     base_reg = base_reg_loaded.paths
+    bounds = _bounds()
+    base_all = bounds.merged(base_reg_loaded.approvals, base_reg_loaded.retired_growth)
     findings += helper.registry_present(base_reg_loaded.rows, head_reg.rows)
     fresh = {
         t: helper.fresh(head_reg.decisions[t], base_reg_loaded.names[t], decision_problem)
         for t in head_reg.decisions
     }
     report: list[str] = helper.new_decisions(
-        head_reg.decisions, base_reg_loaded.names, approvals, base_reg_loaded.approvals
+        head_reg.decisions, base_reg_loaded.names, approvals, base_all
     )
+    report += [
+        f"decision retired_growth {sid} {key}: {text}"
+        for sid, rows in sorted(head_reg.retired_growth.items())
+        for key, text in sorted(bounds.fresh(rows, base_all.get(sid, {})).items())
+    ]
     report += head_reg.report
 
     findings += helper.new_baseline_findings(
@@ -454,12 +501,23 @@ def _check(
     for sid, base in sorted(loaded.items()):
         path = head[sid]
         report.append(f"{sid}: {len(base.keys)} key(s) in {path}")
+        if sid in GUARD_KEYS and sid not in base_reg:  # a fresh approval needs a key to guard
+            findings += bounds.guard_findings(sid, path, (), base.keys, approvals.get(sid, {}), {})[
+                0
+            ]
         if sid in base_reg:
             if base_reg[sid] != path:
                 findings.append(f"{sid}: baseline moved from {base_reg[sid]} to {path}")
                 continue
             old = base_reg_loaded.baselines[sid].reasons
             grown, rekeyed = growth(base.keys, frozenset(old), sid in REKEY_PER_SITE)
+            if sid in GUARD_KEYS:  # a new guard key tightens the check; it is not growth
+                grown = frozenset()
+                lost, lost_report = bounds.guard_findings(
+                    sid, path, old, base.keys, approvals.get(sid, {}), base_all.get(sid, {})
+                )
+                findings += lost
+                report += lost_report
             report += [
                 f"{sid}: re-keyed permitted site {site} (review the message)" for site in rekeyed
             ]
@@ -483,16 +541,26 @@ def _check(
                 findings.append(
                     f"{sid}: baseline gained key(s) not in the merge base: {_fmt(grown)}"
                 )
-            raised = sorted(
-                k for k in base.keys & old.keys() if max_raised(base.reasons[k], old[k])
+            loose, approved_raises = bounds.loosened_findings(
+                sid, base.reasons, old, approvals.get(sid, {}), base_all.get(sid, {})
             )
-            if raised:
-                findings.append(f"{sid}: max raised or dropped for key(s): {', '.join(raised)}")
+            findings += loose
+            report += approved_raises
         elif removed:
             successors[sid] = base.reasons
         else:
             # Newly registered in this diff: the one way a first inventory is admitted.
             report.append(f"{sid}: first inventory, {len(base.keys)} key(s), review required")
+    retired, retired_report = bounds.retired_guards_findings(
+        removed & GUARD_KEYS,
+        {gid: base_reg_loaded.baselines[gid].reasons for gid in removed & GUARD_KEYS},
+        [b.reasons for sid, b in loaded.items() if sid in GUARD_KEYS and sid not in base_reg],
+        (head_reg.retired_growth, base_all),
+        fresh["retired"],
+        bound_loosened,
+    )
+    findings += retired
+    report += retired_report
     only_rekey = (set(donors) | set(successors)) <= REKEY_PER_SITE
     transfer, rekeyed_report = helper.transfer_findings(
         sys.modules[__name__], donors, successors, only_rekey, removed

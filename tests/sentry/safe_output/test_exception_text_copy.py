@@ -58,9 +58,9 @@ def test_audit_bucket_matches_the_historical_census() -> None:
 
 def test_merge_base_ratchet_catches_a_raised_pin_and_a_site_swap() -> None:
     a, b = "audit::a.py::f::str(exc)::raise", "audit::b.py::g::str(exc)::raise"
-    assert _ratchet.max_raised({"max": 101}, {"max": 100})
-    assert _ratchet.max_raised({}, {"max": 100})  # dropping the max is also a raise
-    assert not _ratchet.max_raised({"max": 99}, {"max": 100})
+    assert _ratchet.bound_loosened({"max": 101}, {"max": 100})
+    assert _ratchet.bound_loosened({}, {"max": 100})  # dropping the max is also a raise
+    assert not _ratchet.bound_loosened({"max": 99}, {"max": 100})
     grown, _ = _ratchet.growth(frozenset({b}), frozenset({a}), per_site=False)
     assert grown == {b}  # equal count, different site: new key, needs an approval
     assert _ratchet.growth(frozenset({a}), frozenset({a}), per_site=False)[0] == frozenset()

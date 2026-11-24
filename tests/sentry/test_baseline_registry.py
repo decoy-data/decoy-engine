@@ -24,7 +24,7 @@ else:
     import tomli as tomllib
 
 LIST_NAME = re.compile(
-    r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE|EXCEPTION|CENSUS"
+    r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE|EXCEPTION|CENSUS|LIMITS"
 )
 DATA_LITERAL = re.compile(r"[\w.\-]+\.(?:json|toml)$")
 IGNORED_DATA = {"pyproject.toml", "Cargo.toml", "package.json", "e1-1.json"}
@@ -44,16 +44,61 @@ def test_source_matches_its_registered_baseline(src: bs.Source) -> None:
     live, recorded = src.keys(), set(doc["entries"])
     assert live - recorded == set(), "live entries missing from the baseline"
     assert recorded - live == set(), "stale baseline entries (shrink the baseline)"
-    if src.maxes is not None:
-        assert {k: doc["entries"][k].get("max") for k in recorded} == src.maxes(), (
-            "a numeric entry's recorded max differs from its live value"
+    for field, bounds in (("max", src.maxes), ("min", src.mins)):
+        recorded_bounds = {k: e[field] for k, e in doc["entries"].items() if field in e}
+        assert all(type(v) is int for v in recorded_bounds.values()), f"a {field} is not an integer"
+        assert recorded_bounds == (bounds() if bounds else {}), (
+            f"a recorded {field} differs from the live value, or an entry carries a {field} "
+            "the source does not declare"
         )
 
 
-def test_every_numeric_source_declares_its_max() -> None:
-    """A source with integer values must emit them as ``max`` so the ratchet can see them."""
-    numeric = {s.sentry_id for s in bs.SOURCES if s.maxes is not None}
-    assert "package-fanout" in numeric
+def _is_count(value: object) -> bool:
+    """An int that is not a bool, or a tuple holding one: a value the ratchet must see as a bound."""
+    if isinstance(value, tuple):
+        return any(_is_count(v) for v in value)
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def numeric_in_code_sources(sources: tuple[bs.Source, ...]) -> list[str]:
+    """Ids of in-code sources with a numeric value and no ``maxes`` (their raise is invisible)."""
+    out = []
+    for s in sources:
+        if isinstance(s.keys, bs.InCode) and s.maxes is None:
+            table = getattr(s.keys._module(), s.keys.constant)
+            if isinstance(table, dict) and any(_is_count(v) for v in table.values()):
+                out.append(s.sentry_id)
+    return sorted(out)
+
+
+def test_every_numeric_in_code_source_declares_max() -> None:
+    """A source with an integer value, or a tuple holding one, must emit it as ``max``."""
+    assert numeric_in_code_sources(bs.SOURCES) == []
+    seeded = bs.Source("seeded", "t.py", bs.in_code("test_module_size.py", "ALLOWLIST"))
+    assert numeric_in_code_sources((seeded,)) == ["seeded"]  # ints under an undeclared max
+    assert {"module-size", "package-fanout", "locator-waivers", "log-interpolation"} <= {
+        s.sentry_id for s in bs.SOURCES if s.maxes is not None
+    }
+
+
+def test_limits_list_is_seen_by_the_reader_scan() -> None:
+    consts, files = _covered()
+    seeded = {"layout/_new.py": "LIMITS: dict[str, str] = {'a.py': 'max'}\n"}
+    assert unregistered_readers(seeded, set(), consts, files) == ["layout/_new.py: constant LIMITS"]
+
+
+def test_live_limit_constants_match_recorded_bounds() -> None:
+    """The ``sentry-limits`` baseline records each live scalar bound, caps as ``max`` and
+    floors as ``min``, and no entry carries both."""
+    src = next((s for s in bs.SOURCES if s.sentry_id == "sentry-limits"), None)
+    assert src is not None, "sentry-limits is not a registered source"
+    assert src.maxes is not None and src.mins is not None
+    doc = json.loads((bs.BASELINES / "sentry-limits.json").read_text(encoding="utf-8"))
+    entries = doc["entries"]
+    assert {k: e["max"] for k, e in entries.items() if "max" in e} == src.maxes()
+    assert {k: e["min"] for k, e in entries.items() if "min" in e} == src.mins()
+    assert not [k for k, e in entries.items() if "max" in e and "min" in e]
+    assert set(entries) == src.keys()
 
 
 def test_registry_has_no_source_less_sentry() -> None:
@@ -96,7 +141,7 @@ def unregistered_readers(
 def _covered() -> tuple[set[tuple[str, str]], set[str]]:
     files = set(bs.NOT_A_LIST) | IGNORED_DATA | {Path(s.where).name for s in bs.SOURCES}
     consts = {
-        (s.keys.test_file, s.keys.constant) for s in bs.SOURCES if isinstance(s.keys, bs.InCode)
+        (s.keys.test_file, s.keys.constant) for s in bs.SOURCES if hasattr(s.keys, "constant")
     }
     return consts, files
 
