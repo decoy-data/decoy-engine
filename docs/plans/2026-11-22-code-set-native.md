@@ -1,10 +1,10 @@
-Status: plan (revision 1, 2026-11-22)
+Status: plan (revision 2, 2026-11-24; re-anchored to engine main cb06f318e)
 
 # CODE-SET-NATIVE: code_set masks once per distinct value over Arrow, on every route, and gets a native operator
 
-Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: CODE-SET-NATIVE, new from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`, line 76: "`code_set` | pandas | chunked pandas | no operator | none | Rust lookup over the pinned code list, 1 to 2 slices, 1.0.x"). No row exists yet in the CLI roadmap; the CLI roadmap owner adds it to `docs/roadmap/groups/mask.md` (1.0.x) when this plan is accepted. Engine only.
+Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: CODE-SET-NATIVE, new from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`, line 76: "`code_set` | pandas | chunked pandas | no operator | none | Rust lookup over the pinned code list, 1 to 2 slices, 1.0.x"). The row is in the CLI roadmap `docs/roadmap/groups/mask.md` as a 1.0 row (owner 2026-11-22, V1 fast path). Engine only.
 
-Anchors: a path with no prefix is under `src/decoy_engine/` in decoy-engine. Read at engine `origin/main` `70881ad79` (0.28.3). Line numbers are at that head.
+Anchors: a path with no prefix is under `src/decoy_engine/` in decoy-engine. First read at engine `70881ad79` (0.28.3); re-anchored at `origin/main` `cb06f318e` (2026-11-24). Line numbers are at `cb06f318e`. Between the two heads only `execution/_operator_registry.py` (#776, faker allowlist widened) and `execution/out_of_core/_mask_group_c.py` (docstring) changed among the files this plan touches; no merged PR does this work (searched `code_set` in merged engine PRs).
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `performance.md`, `security.md` (keyed selection, secret material in frames), `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md` ("Where things go").
 
@@ -21,8 +21,8 @@ Where it runs today:
 | Route | Code | Shape |
 |---|---|---|
 | pandas full frame | `execution/_strategies/_code_set.py:206` `CodeSetHandler.run` | one `apply_code_set` call per row; each call re-runs `derive` (HKDF plus HMAC) for the key |
-| chunked | the same handler per chunk (`execution/_chunked.py:198`, admission `execution/_chunked_code_set.py:91`: mask mode, no `chapter_preserve`) | per row, per chunk |
-| out-of-core | `execution/out_of_core/_mask_group_c.py:385` `code_set_map` (`kernel/_code_set.py`) | once per distinct value, then `pc.take`; but `to_pylist` and a Python `str()` pass over every row first |
+| chunked | the same handler per chunk (admission `execution/_chunked.py:224` calls `execution/_chunked_code_set.py:91` `code_set_conditional_failures`: mask mode, no `chapter_preserve`) | per row, per chunk |
+| out-of-core | `execution/out_of_core/_mask_group_c.py:384` `code_set_map` (`kernel/_code_set.py`) | once per distinct value, then `pc.take`; but `to_pylist` and a Python `str()` pass over every row first |
 | unified slice | not admitted: no `OperatorSpec` for `code_set` (`execution/_operator_registry.py`); ROUTE-LABEL-TRUTH files it as `no_native_operator` | - |
 
 Measured on the Dell, 120,000 rows over the shipped `icd10` corpus (65 rows), companion irrelevant:
@@ -65,7 +65,7 @@ After this row:
 4. One mechanism: `CodeSetHandler.run`, the chunked path, the out-of-core path and the native operator all call `code_set_map` with one selector type.
 5. The derived key is never a plain local in a frame (OpaqueBox pattern).
 
-Non-goals: gen mode (`_pick_gen`, keyed on row index; it keeps its per-row loop and is named on the run card as Python); a Rust kernel (section 10); `chapter_preserve` on native routes (per-value errors are not modeled there, as on the chunked route today); new corpora.
+Non-goals: a native tenant on the sequential FK route (it keeps the handler, which S1 already makes per distinct); gen mode (`_pick_gen`, keyed on row index; it keeps its per-row loop and is named on the run card as Python); a Rust kernel (section 10); `chapter_preserve` on native routes (per-value errors are not modeled there, as on the chunked route today); new corpora.
 
 ## 4. Enumerations
 
@@ -91,11 +91,11 @@ Non-goals: gen mode (`_pick_gen`, keyed on row index; it keeps its per-row loop 
 | out-of-core | `code_set_map` with the Arrow front and hoisted key (S1) |
 | unified slice | new `native_code_set` operator (S2) |
 | chunked native step | same operator (S2) |
-| sequential | same operator, if `_sequential_native_ops` admits the spec (S2; the builder confirms the sequential admission list reads `OPERATORS`) |
+| sequential (non-key column) | the pandas handler, so it gets the S1 per-distinct path. Not a native tenant: `execution/_sequential_native_ops.py` (593 lines) admits strategies through its own hand-written `_<strategy>_admit`/`_apply` pairs, not `OPERATORS`, and a code_set pair is not in this row (V2-LOG, section 13) |
 
 ### Codes
 
-No new failure codes. S2 removes `code_set` from the `no_native_operator` family in ROUTE-LABEL-TRUTH's `KERNEL_LESS_FAMILY` if that plan has merged; its sentry then sees the new `OperatorSpec`. Native declines for `chapter_preserve` and gen mode reuse the chunked admission texts (`_chunked_code_set.py:97-107`); if ROUTE-LABEL-TRUTH needs them as `RouteDeclineCode` members, S2 registers them once in `reasons/route`.
+No new failure codes. S2 removes `code_set` from the `no_native_operator` family in ROUTE-LABEL-TRUTH's `KERNEL_LESS_FAMILY` if that plan has merged (not on main at `cb06f318e`); its sentry then sees the new `OperatorSpec`. Native declines for `chapter_preserve` and gen mode reuse the chunked admission texts (`_chunked_code_set.py:97-107`); if ROUTE-LABEL-TRUTH needs them as `RouteDeclineCode` members, S2 registers them once in `reasons/route`.
 
 ### FK shapes
 
@@ -157,6 +157,12 @@ Gen mode keeps the existing loop.
 
 `OperatorSpec(strategy="code_set", operator_id="native_code_set", shape="kernel", planned_backend=ARROW_PYTHON, required_kernel=None, positive_kernel_evidence=False, unified_resident_types=string and large_string, full_frame_assembly=<the shape that matches the handler, proven by AT-6>)`. `CodeSetParams` carries the pinned record from `resolve_pinned_code_set_records`. The step calls `code_set_map`. The evidence for `code_set_corpora` rides on the step result and is merged with `aggregate_chunk_code_set_corpora`, the function the chunked route uses today.
 
+The tables derived from the registry (unified-slice admission and evidence, `_shadow_bindings`, `_real_type_admission`, `_chunked_evidence`, `_requirements`) pick up the new spec. `tests/native/test_operator_tables_snapshot.py` holds a literal snapshot of those tables, so S2 updates its literals for `native_code_set` and lists each changed table in the PR. That file is a behavior snapshot, not a ratchet or allowlist: no sentry list, census or baseline grows in this row.
+
+Public signatures (engine #763 sentry): `apply_code_set` keeps its signature; `CodeSetSelector` is a new name (additive); `code_set_map` is in the private `kernel/_code_set.py`. If a builder changes a public signature, the changelog fragment needs a `Breaking:` line or the sentry fails.
+
+Sibling plans that touch the same files: FPE-CHECKSUM-NATIVE (adds `checksum_schemes` with a default to `OperatorSpec`), BUCKET-TOPCODE-NATIVE (new specs) and TEXT-REDACT-RUST-SPLICE (registry and `_operator_step.py`). This row adds no Rust and no companion ABI change, so it does not take part in the ABI bump; the registry and step edits are separate entries in one tuple and one dispatch, so merge order is free and a later slice only resolves an adjacent-line conflict.
+
 ## 6. Placement
 
 | What | Where | CODEMAP line | Beside |
@@ -164,7 +170,7 @@ Gen mode keeps the existing loop.
 | `CodeSetSelector` | `transforms/code_set.py` (569 lines, about +40, then about -20 from `_pick_from_seq`) | "Transforms", fan-out limit 25 | no new module |
 | Arrow front and `on_error` | `kernel/_code_set.py` | "Arrow kernels" | no new module |
 | handler change | `execution/_strategies/_code_set.py` (283 lines, net smaller) | "Masking strategy handler", freeze 28 | no new module |
-| `OperatorSpec`, params, step branch | `execution/_operator_registry.py`, `execution/native/_operator_params.py`, `execution/native/_operator_step.py` | "Pipeline spine", "Native companion bridge" | no new module; `execution/native/` stays at its freeze (55) |
+| `OperatorSpec`, params, step branch | `execution/_operator_registry.py` (312 lines), `execution/native/_operator_params.py` (358), `execution/native/_operator_step.py` (569; the branch must keep it under 600) | "Pipeline spine", "Native companion bridge" | no new module; `execution/native/` is at its freeze (55 modules plus `__init__`) |
 | tests | `tests/unit/transforms/test_code_set_selector.py`, `tests/unit/kernel/test_code_set_map.py`, `tests/unit/execution/native/test_native_code_set.py` | "Unit tests" | existing code_set tests |
 | docs | `docs/` route table row; changelog fragment | docs | - |
 
@@ -205,7 +211,7 @@ Gen mode keeps the existing loop.
 
 | ID | Test | Fail-before | Slice |
 |---|---|---|---|
-| AT-1 | Golden parity: outputs of today's per-row oracle captured at `70881ad79` for icd10 and one more shipped corpus, values in and out of corpus, nulls, int and float and bool sources in an object column (`1`, `1.0`, `True`), `chapter_preserve` true and false, two namespaces and the absent namespace; every route gives the same values and pandas dtype | passes before (kept as guard); fail-before is AT-2 | S1 |
+| AT-1 | Golden parity: outputs of today's per-row oracle captured on the S1 base head before the change for icd10 and one more shipped corpus, values in and out of corpus, nulls, int and float and bool sources in an object column (`1`, `1.0`, `True`), `chapter_preserve` true and false, two namespaces and the absent namespace; every route gives the same values and pandas dtype | passes before (kept as guard); fail-before is AT-2 | S1 |
 | AT-2 | Instrumented: for a string source, `to_pylist` is not called and `derive` is called once per column (spy) | per-row `derive` today | S1 |
 | AT-3 | Pinning: replacing the override corpus file between chunks does not change the output or the evidence | passes today; guards the selector build site | S1 |
 | AT-4 | `chapter_preserve` errors: the `RowError` list equals today's, same order, original values kept | passes today; guards `on_error` | S1 |
@@ -241,13 +247,16 @@ Gen mode keeps the existing loop.
 
 | Slice | Content | Size | Gate |
 |---|---|---|---|
-| S1 | `CodeSetSelector`; `code_set_map` Arrow front and `on_error`; handler and out-of-core on the one path; AT-1 to AT-5, AT-8 | S to M: about 150 lines, 250 lines tests | Codex and Dennis; T2 on the code_set selection |
-| S2 | `OperatorSpec`, `CodeSetParams`, step branch, evidence merge, admission reuse; remove `code_set` from `no_native_operator`; docs route table; AT-6, AT-7 | M: about 200 lines, 250 lines tests | Codex and Dennis |
+| S1 | `CodeSetSelector`; `code_set_map` Arrow front and `on_error`; handler and out-of-core on the one path; AT-1 to AT-5, AT-8 | S to M: about 150 lines, 250 lines tests; one builder-day. Risk R2 | Codex and Dennis; T2 on the code_set selection |
+| S2 | `OperatorSpec`, `CodeSetParams`, step branch, evidence merge, admission reuse; operator-table snapshot literals; remove `code_set` from `no_native_operator` if present; docs route table; AT-6, AT-7 | M: about 200 lines, 250 lines tests; one builder-day. Risk R2 | Codex and Dennis |
 
 Both slices fit before 2026-12-15. S2 depends on ROUTE-LABEL-TRUTH S1 if that has merged (its sentry), and works without it.
 
-## 13. Open questions for the owner
+## 13. Owner questions and deferred items
 
-- Q1: Accept Arrow (byte-identical) over Rust (recommended), given the measurement in section 1?
-- Q2: Add the CODE-SET-NATIVE row to the CLI roadmap `mask.md` at 1.0.x (S1) with S2 in the same row? Recommended: yes, one row.
-- Q3: Gen-mode `code_set` stays per row and is named on the run card. Recommended: yes for V1; a later row can key it on the positional index kernel with a `Breaking:` line.
+Q1 and Q3 are in the vault `OWNER-QUESTIONS.md` (2026-11-24, kind: default; the recommended choice applies if unanswered when S1 starts). Q2 is settled: the row is already a 1.0 row in `mask.md`.
+
+- Q1: Arrow per distinct (byte-identical) over a Rust kernel (byte change). Recommended: Arrow, per the measurement in section 1.
+- Q3: gen-mode `code_set` stays per row and is named on the run card. Recommended: yes for V1; a later row can key it on the positional index kernel with a `Breaking:` line.
+
+V2-LOG: a native code_set tenant on the sequential FK route (a `_code_set_admit`/`_apply` pair in `execution/_sequential_native_ops.py`); S1 already removes the per-row cost there.
