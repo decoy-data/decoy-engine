@@ -429,7 +429,7 @@ def run_sequential(
                 )
 
                 faker_pin = deterministic_faker_pin_columns_from_plan(
-                    plan, table, src.schema, relationship_graph=graph
+                    plan, table, src.schema, relationship_graph=graph, registry=registry
                 )
                 # `src` stays until the output is assembled: untouched columns are written from it.
 

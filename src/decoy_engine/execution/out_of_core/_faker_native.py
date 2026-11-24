@@ -48,7 +48,6 @@ from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import (
     PYTHON_SCALAR,
-    RUST_COMPANION,
     RUST_POOL_SELECT,
 )
 from decoy_engine.execution.native._operator_step import sample_faker_array
@@ -58,13 +57,10 @@ from decoy_engine.execution.native._real_type_admission import (
     string_source_type_rejection,
 )
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
-from decoy_engine.execution.native.draw import deterministic_computed_array
+from decoy_engine.execution.native.draw import BoundFakerKernel, deterministic_computed_array
 from decoy_engine.generation.pool import ComputedDrawSpec
-from decoy_engine.providers_v2 import FAMILY_UUID
 
 if TYPE_CHECKING:
-    from decoy_engine.execution.native._crypto_ext import KeyedDerivationKernel
-    from decoy_engine.execution.native._index_ext import IndexDerivationKernel
     from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext
     from decoy_engine.generation.pool._value_pool import ValuePool
     from decoy_engine.plan._types import ColumnSeed
@@ -72,21 +68,6 @@ if TYPE_CHECKING:
 
 _NO_BACKEND_RAN = "none"
 _REASON_NO_SELECT_CALLS = reasons.route.NO_NATIVE_KERNEL_CALLS
-
-
-@dataclass(frozen=True)
-class BoundFakerKernel:
-    """The index kernel one run selects faker pools with, and the thread budget.
-
-    `compiled` is True for the Rust companion and False for the pure-Python
-    reference (`reference_index_derivation`); both derive byte-identical indices
-    (INDEX_KAT), so the flag changes only the recorded backend, never the output.
-    """
-
-    kernel: IndexDerivationKernel
-    native_threads: int | None
-    compiled: bool
-    hash_kernel: KeyedDerivationKernel | None = None
 
 
 def decline_reason(
@@ -216,14 +197,6 @@ class TableFakerPlan:
         return NativeFaker(self._bound, decision)
 
 
-def _computed_backend(bound: BoundFakerKernel, spec: ComputedDrawSpec) -> str:
-    """The backend a computed draw runs on: the companion kernel its variant needs, else the
-    byte-identical reference."""
-    needs_hash = spec.family == FAMILY_UUID
-    ready = bound.compiled and (bound.hash_kernel is not None or not needs_hash)
-    return RUST_COMPANION if ready else PYTHON_SCALAR
-
-
 def decide_table(
     table_name: str,
     schema: pa.Schema,
@@ -272,7 +245,7 @@ def decide_table(
             decisions[column] = FakerColumnDecision(
                 table=table_name,
                 column=column,
-                backend=_computed_backend(bound, computed),
+                backend=bound.backend(computed),
                 reason=None,
                 pinned_type=pinned_type,
                 namespace=seed.namespace,
@@ -361,7 +334,6 @@ def native_faker_array(
 
 
 __all__ = [
-    "BoundFakerKernel",
     "FakerColumnDecision",
     "NativeFaker",
     "TableFakerPlan",

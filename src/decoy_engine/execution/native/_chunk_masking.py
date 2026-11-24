@@ -365,7 +365,7 @@ def reject_nonstring_deterministic_pools(state: Any, *, config: dict[str, Any], 
     """
     from decoy_engine.execution._faker_degenerate_pin import deterministic_faker_pin_columns
 
-    pin = deterministic_faker_pin_columns(config, table, state.first.schema)
+    pin = deterministic_faker_pin_columns(config, table, state.first.schema, state.registry)
     if not pin:
         return
     envelope = state.plan.seed_envelope

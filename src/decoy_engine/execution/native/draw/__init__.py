@@ -7,5 +7,11 @@ from decoy_engine.execution.native.draw._computed_batch import (
     deterministic_computed_array,
     keyed_uuid_array,
 )
+from decoy_engine.execution.native.draw._kernels import BoundFakerKernel
 
-__all__ = ["UUID_HEX_DIGITS", "deterministic_computed_array", "keyed_uuid_array"]
+__all__ = [
+    "UUID_HEX_DIGITS",
+    "BoundFakerKernel",
+    "deterministic_computed_array",
+    "keyed_uuid_array",
+]

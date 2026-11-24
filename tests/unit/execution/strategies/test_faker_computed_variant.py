@@ -189,6 +189,42 @@ class TestAllNullSchema:
         assert pin.deterministic_faker_pin_columns(config, "t", schema) == {"f"}
 
 
+def uuid_as_int() -> Any:
+    """`uuid` rebound to a pool binding whose adapter draws integers: the name says a string
+    computed draw, the live binding says an integer pool."""
+    return _rebound("uuid", "person_first_name", adapter_of="random_int_range")
+
+
+class TestLiveRegistryPin:
+    """The degenerate-output pin reads the run's registry, never the stock binding."""
+
+    CONFIG = {
+        "tables": [
+            {"name": "t", "columns": [{"name": "f", "strategy": "faker", "provider": "uuid"}]}
+        ]
+    }
+
+    def test_a_rebound_provider_is_not_pinned_by_its_stock_binding(self) -> None:
+        schema = pa.schema([("f", pa.string())])
+        assert pin.deterministic_faker_pin_columns(self.CONFIG, "t", schema) == {"f"}
+        assert pin.deterministic_faker_pin_columns(self.CONFIG, "t", schema, uuid_as_int()) == set()
+        assert pin.deterministic_faker_pin_columns(self.CONFIG, "t", schema, _DEFAULT) == {"f"}
+
+    @pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+    def test_an_all_null_column_keeps_the_rebound_providers_type_on_both_routes(
+        self, deterministic, tmp_path
+    ) -> None:
+        helper = _AllNull()
+        column = _column("uuid", {}, deterministic=deterministic)
+        registry = uuid_as_int()
+        whole = helper.run(
+            tmp_path, column, registry=registry, execution_mode="full_frame", auto_chunk=False
+        )
+        seq = helper.run(tmp_path, column, registry=registry, execution_mode="sequential")
+        assert whole.outputs["t"].schema.field("f").type != pa.string()
+        assert seq.outputs["t"].schema == whole.outputs["t"].schema
+
+
 @contextmanager
 def _hash_kernel_fails() -> Iterator[None]:
     """The compiled hash kernel fails its self-test; the index kernel is untouched."""
@@ -214,17 +250,17 @@ class TestKernelBinding:
     """Finding 3: a column is admitted on the kernel its variant runs, not on a sibling kernel."""
 
     def test_a_uuid_declines_at_sequential_admission_when_the_hash_kernel_is_missing(self) -> None:
-        from decoy_engine.execution.sequential._faker_admission import (
-            BoundFakerKernels,
-            faker_admit,
-        )
+        from decoy_engine.execution.native.draw import BoundFakerKernel
+        from decoy_engine.execution.sequential._faker_admission import faker_admit
 
         index = mock.sentinel.index
-        bound = BoundFakerKernels(index, None, None)
+        bound = BoundFakerKernel(index, None, True, None)
         seed = _seed("uuid", {})
         assert faker_admit("f", pa.string(), seed, bound=bound) == "crypto_extension_unavailable"
         assert (
-            faker_admit("f", pa.string(), seed, bound=BoundFakerKernels(index, None, mock.Mock()))
+            faker_admit(
+                "f", pa.string(), seed, bound=BoundFakerKernel(index, None, True, mock.Mock())
+            )
             is None
         )
         choice = _seed("random_choice", CHOICE_KW)
@@ -267,6 +303,98 @@ class TestKernelBinding:
         assert forced.outputs["t"].equals(whole.outputs["t"])
         entries = [e for e in forced.quality_metrics["out_of_core_faker"] if e["column"] == "f"]
         assert entries and all(e["executed_backend"] == PYTHON_SCALAR for e in entries), entries
+
+
+@contextmanager
+def _index_kernel_fails() -> Iterator[None]:
+    """The compiled index kernel fails to load; the hash kernel is untouched."""
+    boom = CryptoExtensionUnavailableError("injected index load failure")
+    with (
+        mock.patch(
+            "decoy_engine.execution.sequential._faker_admission.load_compiled_index_kernel",
+            side_effect=boom,
+        ),
+        mock.patch(
+            "decoy_engine.execution.out_of_core._hash_run.load_compiled_index_kernel",
+            side_effect=boom,
+        ),
+    ):
+        yield
+
+
+class TestBackendFollowsTheBoundKernel:
+    """Finding 3 reciprocal: the reported backend is the one the variant's own kernel ran on."""
+
+    @pytest.mark.parametrize(
+        ("compiled", "hash_bound", "uuid_backend", "choice_backend"),
+        [
+            (True, True, RUST_COMPANION, RUST_COMPANION),
+            (True, False, PYTHON_SCALAR, RUST_COMPANION),
+            (False, True, RUST_COMPANION, PYTHON_SCALAR),
+            (False, False, PYTHON_SCALAR, PYTHON_SCALAR),
+        ],
+    )
+    def test_the_record_names_the_kernel_each_variant_uses(
+        self, compiled, hash_bound, uuid_backend, choice_backend
+    ) -> None:
+        from decoy_engine.execution.native.draw import BoundFakerKernel
+
+        bound = BoundFakerKernel(
+            mock.sentinel.index, None, compiled, mock.Mock() if hash_bound else None
+        )
+        uuid = computed_mask_spec("uuid", {})
+        choice = computed_mask_spec("random_choice", CHOICE_KW)
+        assert bound.backend(uuid) == uuid_backend and bound.ready(uuid) == hash_bound
+        assert bound.backend(choice) == choice_backend and bound.ready(choice) == compiled
+
+    @needs_companion
+    def test_out_of_core_reports_the_compiled_hash_when_only_the_index_kernel_is_down(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=True)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _index_kernel_fails():
+            forced = helper.run(tmp_path, column, execution_mode="out_of_core")
+        assert forced.outputs["t"].equals(whole.outputs["t"])
+        entries = [e for e in forced.quality_metrics["out_of_core_faker"] if e["column"] == "f"]
+        assert entries and all(e["executed_backend"] == RUST_COMPANION for e in entries), entries
+
+    @needs_companion
+    def test_out_of_core_reports_the_reference_for_a_choice_when_the_index_kernel_is_down(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("random_choice", CHOICE_KW, deterministic=True)
+        with _index_kernel_fails():
+            forced = helper.run(tmp_path, column, execution_mode="out_of_core")
+        entries = [e for e in forced.quality_metrics["out_of_core_faker"] if e["column"] == "f"]
+        assert entries and all(e["executed_backend"] == PYTHON_SCALAR for e in entries), entries
+
+    @needs_companion
+    @pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+    def test_sequential_keeps_the_healthy_hash_kernel_when_the_index_kernel_is_down(
+        self, deterministic, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=deterministic)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _index_kernel_fails():
+            seq = helper.run(tmp_path, column, execution_mode="sequential")
+        assert seq.outputs["t"].equals(whole.outputs["t"])
+        [entry] = [e for e in seq.quality_metrics["sequential_faker"] if e["column"] == "f"]
+        assert entry["executed_backend"] == RUST_COMPANION and entry["native_calls"] > 0, entry
+
+    @needs_companion
+    def test_sequential_declines_a_choice_when_the_index_kernel_is_down(self, tmp_path) -> None:
+        helper = _Routes()
+        column = _column("random_choice", CHOICE_KW, deterministic=True)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _index_kernel_fails():
+            seq = helper.run(tmp_path, column, execution_mode="sequential")
+        assert seq.outputs["t"].equals(whole.outputs["t"])
+        [entry] = [e for e in seq.quality_metrics["sequential_faker"] if e["column"] == "f"]
+        assert entry["executed_backend"] == PYTHON_SCALAR and entry["native_calls"] == 0, entry
 
 
 class TestOneDeterministicDraw:

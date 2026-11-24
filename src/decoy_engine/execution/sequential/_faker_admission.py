@@ -10,7 +10,6 @@ variant cannot run stays on pandas, which draws the same bytes.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -21,43 +20,43 @@ from decoy_engine.execution.native._crypto_ext import (
     KeyedDerivationKernel,
     load_compiled_crypto_kernel,
 )
-from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
+from decoy_engine.execution.native._index_ext import (
+    IndexDerivationKernel,
+    load_compiled_index_kernel,
+    reference_index_derivation,
+)
 from decoy_engine.execution.native._provider_class import resolve_faker_variant
 from decoy_engine.execution.native._real_type_admission import (
     faker_provider_decline,
     string_source_type_rejection,
 )
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
-from decoy_engine.execution.out_of_core._categorical_native import BoundIndexKernel
+from decoy_engine.execution.native.draw import BoundFakerKernel
 from decoy_engine.execution.out_of_core._hash_native import REASON_UNAVAILABLE
-from decoy_engine.generation.pool import ComputedDrawSpec
-from decoy_engine.providers_v2 import FAMILY_UUID
 
 if TYPE_CHECKING:
     from decoy_engine.plan._types import ColumnSeed
     from decoy_engine.providers_v2 import ProviderRegistry
 
-__all__ = ["BoundFakerKernels", "bound_decline", "faker_admit", "load_faker_kernels"]
+__all__ = ["bound_decline", "faker_admit", "load_faker_kernels"]
 
 
-@dataclass(frozen=True)
-class BoundFakerKernels(BoundIndexKernel):
-    """The index kernel every faker column needs, plus the hash kernel a `uuid` draw needs.
+def load_faker_kernels(native_threads: int | None) -> BoundFakerKernel:
+    """Bind the index kernel and the hash kernel, each on its own.
 
-    `hash_kernel` is None when the hash kernel did not load or failed its self-test; a pool
-    column does not need it."""
-
-    hash_kernel: KeyedDerivationKernel | None = None
-
-
-def load_faker_kernels(native_threads: int | None) -> BoundFakerKernels:
-    """Bind the index kernel (raises when it is unavailable) and, separately, the hash kernel."""
-    index = BoundIndexKernel(load_compiled_index_kernel(), native_threads)
+    A kernel that is unavailable binds the byte-identical reference (index) or None (hash), and
+    `BoundFakerKernel.ready` then declines the columns that variant cannot run natively, so a
+    missing index kernel does not discard a healthy hash kernel or the reverse."""
+    try:
+        index: IndexDerivationKernel = load_compiled_index_kernel()
+        compiled = True
+    except CryptoExtensionUnavailableError:
+        index, compiled = reference_index_derivation(), False
     try:
         hash_kernel: KeyedDerivationKernel | None = load_compiled_crypto_kernel()
     except CryptoExtensionUnavailableError:
         hash_kernel = None
-    return BoundFakerKernels(index.kernel, native_threads, hash_kernel)
+    return BoundFakerKernel(index, native_threads, compiled, hash_kernel)
 
 
 def faker_admit(
@@ -84,12 +83,7 @@ def faker_admit(
         return provider_decline[0]
     variant = resolve_faker_variant(seed.provider, cfg, registry)
     spec = variant.spec
-    if (
-        isinstance(spec, ComputedDrawSpec)
-        and spec.family == FAMILY_UUID
-        and isinstance(bound, BoundFakerKernels)
-        and bound.hash_kernel is None
-    ):
+    if isinstance(bound, BoundFakerKernel) and not bound.ready(spec):
         return REASON_UNAVAILABLE
     if seed.deterministic:
         if not faker_pool_precondition_met_seed(seed):
@@ -113,6 +107,6 @@ def bound_decline(
     registry's, and the kernel it needs depends on that variant."""
     if bound is None:
         return REASON_UNAVAILABLE
-    if isinstance(bound, BoundFakerKernels):
+    if isinstance(bound, BoundFakerKernel):
         return admit(column, input_type, seed, registry=registry, bound=bound)
     return admit(column, input_type, seed)

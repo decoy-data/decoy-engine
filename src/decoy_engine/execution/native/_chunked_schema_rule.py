@@ -294,7 +294,7 @@ def build_schema_rule(
     # C5c-ii: an admitted deterministic-Faker column over bool/int/uint pins its degenerate
     # output to `string` on both chunked legs, so the native leg (always `string`) and the
     # chunked oracle leg (pandas `null`/`double` for an all-null/empty chunk) agree.
-    strings |= deterministic_faker_pin_columns(config, table, first.schema)
+    strings |= deterministic_faker_pin_columns(config, table, first.schema, registry)
     strings |= date_shift_pinned_columns(configured, first.schema, table=table)
     strings |= when_pinned_columns(config, first.schema, table=table, registry=registry)
     strings |= group_key_pinned_columns(configured, first.schema, table=table, written=written)

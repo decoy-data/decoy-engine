@@ -24,13 +24,16 @@ from decoy_engine.execution._positional_keys import positional_key_array
 from decoy_engine.execution._sequential_native_ops import FAKER
 from decoy_engine.execution._strategies._faker_positional import resolve_selection_namespace
 from decoy_engine.execution.native._operator_step import sample_faker_array_positional
-from decoy_engine.execution.native.draw import deterministic_computed_array, keyed_uuid_array
+from decoy_engine.execution.native.draw import (
+    BoundFakerKernel,
+    deterministic_computed_array,
+    keyed_uuid_array,
+)
 from decoy_engine.generation.pool import ComputedDrawSpec, computed_selection_namespace
 from decoy_engine.providers_v2 import FAMILY_UUID
 
 if TYPE_CHECKING:
     from decoy_engine.execution._sequential_native import SeqNativeRun
-    from decoy_engine.execution.sequential._faker_admission import BoundFakerKernels
     from decoy_engine.plan._types import ColumnSeed
 
 __all__ = ["computed_faker_array", "computed_faker_column"]
@@ -61,7 +64,7 @@ def computed_faker_column(
 
 
 def computed_faker_array(
-    bound: BoundFakerKernels,
+    bound: BoundFakerKernel,
     values: pa.Array | pa.ChunkedArray,
     spec: ComputedDrawSpec,
     ctx: StrategyContext,

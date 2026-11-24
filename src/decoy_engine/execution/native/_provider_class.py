@@ -176,12 +176,16 @@ def computed_output_decline(
     return f"{reasons.route.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED}:{column}:{spec.provider}"
 
 
-def draws_computed_string(provider: object, provider_config: Mapping[str, Any] | None) -> bool:
-    """True when the stock binding of `provider` is a computed draw whose output is exact `string`.
+def draws_computed_string(
+    provider: object,
+    provider_config: Mapping[str, Any] | None,
+    registry: ProviderRegistry | None = None,
+) -> bool:
+    """True when the live binding of `provider` is a computed draw whose output is exact `string`.
 
     The degenerate-output pin reads it: such a column is typed `string` on every route, even
     when every cell is null or the table is empty."""
-    spec = computed_mask_spec(provider, provider_config)
+    spec = computed_mask_spec(provider, provider_config, registry)
     return spec is not None and spec.output_type == pa.string()
 
 

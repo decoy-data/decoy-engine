@@ -39,6 +39,7 @@ from decoy_engine.execution.native._index_ext import (
     reference_index_derivation,
 )
 from decoy_engine.execution.native._text_redact_kernel import load_text_redact_kernel
+from decoy_engine.execution.native.draw import BoundFakerKernel
 from decoy_engine.execution.out_of_core._bucket_native import (
     NativeBucket,
     TableBucketPlan,
@@ -51,7 +52,6 @@ from decoy_engine.execution.out_of_core._categorical_native import (
     decide_table,
 )
 from decoy_engine.execution.out_of_core._faker_native import (
-    BoundFakerKernel,
     NativeFaker,
     TableFakerPlan,
 )
