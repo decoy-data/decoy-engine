@@ -53,7 +53,17 @@ RISKY_NAMES = frozenset(
 # `stderr`/`stdout` are routine, harmless names in code that does not build a user-facing error.
 SINK_RISKY = RISKY_NAMES | {"stderr", "stdout"}
 
+# Builtins that turn an object into its text. Shared with the copy ratchet (`_copies.py`), so
+# "which calls format a value" is one edit.
+FORMAT_BUILTINS = frozenset({"str", "repr", "format"})
+
 COUNT_METHODS = frozenset({"count", "nunique", "sum", "size", "__len__"})
+
+
+def format_builtin(call: ast.Call) -> str | None:
+    """`str`, `repr` or `format` when `call` is a bare call of that builtin, else None."""
+    func = call.func
+    return func.id if isinstance(func, ast.Name) and func.id in FORMAT_BUILTINS else None
 
 
 def root_name(value: ast.expr) -> str | None:
@@ -104,7 +114,7 @@ def risky_in(value: ast.expr, risky: frozenset[str]) -> list[str]:
         children = list(value.elts)
     elif isinstance(value, ast.Call):
         func = value.func
-        if (isinstance(func, ast.Name) and func.id in {"str", "repr", "format"}) or (
+        if format_builtin(value) is not None or (
             isinstance(func, ast.Attribute) and func.attr in {"format", "join"}
         ):
             children = [*value.args, *(k.value for k in value.keywords)]
@@ -134,6 +144,20 @@ def own_nodes(scope: ast.AST) -> list[ast.AST]:
     return own
 
 
+def ordered_assignments(own: list[ast.AST]) -> list[ast.Assign | ast.AnnAssign | ast.AugAssign]:
+    """Plain, annotated and augmented assignments of a scope, in source order."""
+    return sorted(
+        (n for n in own if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign))),
+        key=lambda n: (n.lineno, n.col_offset),
+    )
+
+
+def assign_target_names(node: ast.Assign | ast.AnnAssign | ast.AugAssign) -> list[str]:
+    """The plain names an assignment binds (`a = b = x`, `a: T = x`, `a += x`)."""
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return [t.id for t in targets if isinstance(t, ast.Name)]
+
+
 def tainted_names(own: list[ast.AST], risky: frozenset[str]) -> frozenset[str]:
     """Names assigned from a risky expression, in source order, one pass.
 
@@ -143,14 +167,9 @@ def tainted_names(own: list[ast.AST], risky: frozenset[str]) -> frozenset[str]:
     expression-only check cannot see because `stderr_tail` is not a risky name.
     """
     tainted: set[str] = set()
-    assigns = sorted(
-        (n for n in own if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign))),
-        key=lambda n: (n.lineno, n.col_offset),
-    )
-    for node in assigns:
+    for node in ordered_assignments(own):
         if node.value is None:
             continue
         if risky_in(node.value, risky | tainted):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            tainted |= {t.id for t in targets if isinstance(t, ast.Name)}
+            tainted |= set(assign_target_names(node))
     return frozenset(tainted)
