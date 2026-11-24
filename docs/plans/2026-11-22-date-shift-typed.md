@@ -1,4 +1,4 @@
-Status: plan (revision 3, 2026-11-22; Dennis R1 and Codex R2 findings closed)
+Status: plan (revision 4, 2026-11-24; section 13 replaces the per-site value-free patches with one source-read boundary after the PR #790 review cap)
 
 # DATE-SHIFT-TYPED: `date_shift` on `date32` and zoned `timestamp` sources runs native, on the typed values
 
@@ -52,7 +52,7 @@ After S1 (DATE) and S2 (TIMESTAMP_TZ):
 3. One arithmetic for both routes: `shift_typed_days(array, offsets) -> (shifted, failed)` in `transforms/date_shift.py`. The native route calls it on the resident array. The oracle calls it on an Arrow array built from the usable cells (section 4 "Exit paths"). Oracle and native output values agree by construction.
 4. The output column keeps the source Arrow type (`date32`; `timestamp` with the source unit and zone) on every route. On the unified slice the native output column goes to the UF-DOMAIN assembler through `arrow_columns`, never through the pandas frame.
 5. Before key construction, timezone conversion, formatting, or day addition, typed temporal values are read as their physical integer plus unit and checked with integer quotient/remainder and explicit bounds. A source timestamp whose UTC second is outside Python ISO years 1 to 9999, or whose local-time conversion cannot be represented, and any shifted value outside the source type's int64/unit range, is a `format_error` row error and keeps its source value on both routes. No Arrow floor, cast, timezone, formatting, or addition kernel receives a value that has not passed the applicable preflight.
-6. Deterministic: same seed, namespace and input give the same bytes on every route and every run. One named exception: a `date32` source value outside years 1 to 9999 (B4). The unified slice and chunked routes keep it with a row error; the sequential and full-frame routes read the table through pandas, cannot convert the column, and fail the job with the coded `ExecutionError` `full_frame_value_unrepresentable` (table and column named, no value) (amended 2026-11-24 after Codex a1 round 3). The value-free guarantee covers every read before the route too, including profiling's sample conversion: profiling converts its sample without raising on an unrepresentable value, so the route's coded error fires whether the value sits inside or outside the profile sample, on both pandas routes (amended 2026-11-24 after Codex a2).
+6. Deterministic: same seed, namespace and input give the same bytes on every route and every run. One named exception: a `date32` source value outside years 1 to 9999 (B4). The unified slice and chunked routes keep it with a row error; the sequential and full-frame routes read the table through pandas, cannot convert the column, and fail the job with the coded `ExecutionError` `full_frame_value_unrepresentable` (table and column named, no value) (amended 2026-11-24 after Codex a1 round 3). The value-free guarantee covers every read before the route too, including profiling's sample conversion: profiling converts its sample without raising on an unrepresentable value, so the route's coded error fires whether the value sits inside or outside the profile sample, on both pandas routes (amended 2026-11-24 after Codex a2). Revision 4: this guarantee is now held by the one source-read boundary in section 13, not by `profile/_frame.py`.
 
 Non-goals, each kept on its existing path with a coded reason:
 
@@ -107,7 +107,7 @@ Each item marked "byte change" is in section 10 and a `Breaking:` line.
 - B1 Column type, `TIMESTAMP_TZ`: keeps the source unit and zone on every route (guarantee 4). Not a byte change on the pandas route at pandas 2 (probed: `timestamp[us, UTC]` round-trips through pandas with its unit). T5 proves it on every route, unified included.
 - B2 Overlap resolution, `TIMESTAMP_TZ` and text zoned sources: an ambiguous local time keeps the source row's UTC offset if that offset is valid, else the earlier instant (Java rule), on both routes. Byte change where the oracle's DST-flag rule picked differently.
 - B3 Gap resolution: first valid instant after the gap, as today. No change; T4.
-- B4 Out of range: a `date32` source outside years 1 to 9999, a timestamp source outside the key/timezone preflight, and any shifted value outside the source type's range: row error, source kept. Byte change where the oracle raised or failed the job. Route difference (amended 2026-11-24 after Codex a1 round 3): sequential and full_frame read the whole table through pandas before any strategy runs, so an out-of-range `date32` source fails the job there with `ExecutionError` `full_frame_value_unrepresentable`, naming the table and column and no value, instead of quarantining the row. Recorded under ROUTE-OUTPUT-CONTRACT. Amended 2026-11-24 after Codex a2: profiling reads the source before either route, so its sample conversion goes through the same value-tolerant helper as resident profiling (`profile/_frame.py` `profile_frame`); no bare `to_pandas()` on a source table stays in `profile/`.
+- B4 Out of range: a `date32` source outside years 1 to 9999, a timestamp source outside the key/timezone preflight, and any shifted value outside the source type's range: row error, source kept. Byte change where the oracle raised or failed the job. Route difference (amended 2026-11-24 after Codex a1 round 3): sequential and full_frame read the whole table through pandas before any strategy runs, so an out-of-range `date32` source fails the job there with `ExecutionError` `full_frame_value_unrepresentable`, naming the table and column and no value, instead of quarantining the row. Recorded under ROUTE-OUTPUT-CONTRACT. Amended 2026-11-24 after Codex a2: profiling reads the source before either route, so its sample conversion goes through the same value-tolerant helper as resident profiling (`profile/_frame.py` `profile_frame`); no bare `to_pandas()` on a source table stays in `profile/`. Revision 4: superseded by section 13; `profile/_frame.py` is deleted and every source read goes through `internal/pandas_compat.py` `source_frame`.
 - B5 Unified slice: the target column comes from the native Arrow output, so the pandas schema metadata does not list it (the UF-DOMAIN S1 rule).
 - Values for `DATE` sources in range: unchanged (T1).
 - Route evidence: `date_shift` native in place of `pandas_oracle`; two new decline codes.
@@ -243,8 +243,158 @@ Performance evidence (performance.md): 1,000,000-row `date32` and `timestamp[us,
 
 - **Q1.** The B2 overlap rule changes oracle output where a zone's base offset changed between the source and target dates. Recommended: accept (one rule on both routes, vectorized). T4 reports the count of changed cells before merge.
 
+## 13. Revision 4 (2026-11-24): one source-read boundary
+
+PR #790 (S1, head `a5c33ec0a`) reached the three-round review cap (development-loop REMEDIATE). Round 3 (Codex a3) found four more V1 sites of one rule: a source value pandas cannot hold (a date past year 9999, a time with non-zero nanoseconds) must never surface as text. Rounds 1 to 3 each closed the sites that review found. This section fixes the plan instead: one choke point for every Arrow-to-pandas conversion and every pandas file read, a guard that fails on any site outside it, and a report-boundary rule for the columns the choke point could not convert.
+
+### 13.1 Defect class
+
+- Primary: cross-cutting-concerns.md, missing policy enforcement point (shotgun surgery). `profile/_frame.py` `profile_frame` was the "helper every site is expected to call" that the rulebook calls the convention form: nothing failed when `_chunked_profile.py` or the cloud readers skipped it. Fix: choke point plus guard test with a ratchet allowlist.
+- recurring-defects #5, normalized guard scanners: the S1 sentries matched only positional arguments and literal import spellings.
+- recurring-defects #10, allowlisted helpers are still checked: the new guard names the choke point by exact `(path, function)`, so a second function in the same module is not exempt.
+- recurring-defects #3, exception context: the V2-LOG item stays deferred (see Deferred). The new choke point raises after its `except` block closes because it is new code, but this is not a gate item for this revision.
+
+### 13.2 Guarantee and non-goals of this revision
+
+Guarantee: no Arrow-to-pandas conversion and no pandas file read of source data or of a table derived from it (masked output, sample, chunk, index columns) runs outside the choke point. At the choke point a column that pandas cannot convert either (a) is withheld: its cells become value-free tokens and the frame names it, or (b) raises the caller's coded error that names the column and no value. No pandas or Arrow error text from a conversion reaches a caller.
+
+Non-goals, each recorded in Deferred:
+
+- Python-object conversion (`to_pylist`, `as_py`, `to_pydict`, `to_numpy().tolist()`): 86, 26, 0 and 3 call sites in `src/` at `a5c33ec0a`, mostly on arrays already admitted as string or numeric. Not walked by the new guard. The public-entry matrix (R2) is the evidence that no reachable path converts an out-of-range temporal value this way.
+- Deliberate scanner evasion (`getattr(t, "to_pandas")`, `eval`, `importlib`): catalog #5 scope.
+- Arrow-native reads (`pq.read_table`, `pyarrow.csv.read_csv`, `pq.ParquetFile.iter_batches`): they do not convert to Python or pandas and do not fail on these values. They feed the choke point.
+
+### 13.3 The choke point
+
+`internal/pandas_compat.py` (181 lines today, an existing module that already owns `table_to_pandas_exact_ints`, the engine's Arrow-to-pandas conversion with exact integers). Public names:
+
+- `source_frame(table, *, on_unrepresentable, int_columns=(), types_mapper=None) -> pd.DataFrame`
+- `source_series(array, *, on_unrepresentable, types_mapper=None) -> pd.Series`
+- `WITHHOLD`: the sentinel policy value.
+- `unrepresentable_columns(frame) -> frozenset[str]`: the reader for the identity the choke point records.
+
+`on_unrepresentable` is keyword-only and required: either `WITHHOLD` or a callable `(column_name) -> NoReturn` that raises the caller's coded error. There is no "propagate" option. `table_to_pandas_exact_ints` becomes a call to `source_frame` (its `on_unconvertible` integer callback is kept), so `to_pandas_fk_safe` and `generated_table_to_pandas` go through the choke point with no further change to their callers' conversion code.
+
+Algorithm:
+
+1. Try `table.to_pandas(...)` once. On success, set `frame.attrs[UNREPRESENTABLE_ATTR] = ()` and return. The success path costs one `try`.
+2. On `ValueError` or `OverflowError` (`ArrowInvalid` is a `ValueError`), leave the handler, then probe each column alone. A column whose own conversion raises is a failing column.
+3. With a callable policy: call it with the first failing column's name, after the handler has closed. The callable must raise. If it returns, the choke point raises a value-free `TypeError("on_unrepresentable must raise")`.
+4. With `WITHHOLD`: replace each failing column on the original table with `table.set_column(i, table.schema.field(i).with_type(pa.string()), tokens)`. This keeps the schema metadata and the field metadata (probed at pyarrow 24.0.0: a table with a stored index `stored_id`, a `date32` column at year 10000 and a `timestamp[ns, Europe/London]` column, each replaced in turn, still converts with index `stored_id` and the same data columns). Never rebuild the table from arrays and names.
+5. Tokens: for a temporal column, view the cells as their physical integer (`date32` to `int32`; `date64`, `timestamp`, `time64`, `duration` to `int64`) and map each distinct non-null integer to `"withheld:" + blake2b(value bytes, key=process key, digest_size=8).hexdigest()`. The key is 16 random bytes made once per process and never written. Nulls stay null. Equal values give equal tokens and distinct values give distinct tokens, so null counts, distinct counts and source-versus-output equality (fidelity and post-mask comparisons) stay correct within one run. No calendar text is formed. A non-temporal failing type (none known today) gets one constant token per non-null cell. The hashing loop runs only on a column that failed conversion.
+6. Set `frame.attrs[UNREPRESENTABLE_ATTR]` to the sorted failing column names. pandas carries `attrs` through `iloc` slicing and column selection; R1 asserts this for every operation between a reader and its consumer.
+
+Two layers hold the guarantee. The tokens make the frame value-free by construction, so a consumer that loses the `attrs` identity can show a meaningless token but not a value. The identity lets the report boundary say why a column's statistics are missing.
+
+Placement. `profile/_frame.py` is deleted, so `profile/` goes back to 19 direct modules (Codex a3 DESIGN). Codex suggested the profile reader module. `internal/` is used instead because execution, verification and generation callers need the same function, and `internal/pandas_compat.py` already owns this conversion. No new module and no new public export from `decoy_engine` or `decoy_engine.profile`.
+
+### 13.4 Site dispositions
+
+Found by an AST walk of `src/decoy_engine/**/*.py` at `a5c33ec0a` (calls whose attribute is `to_pandas`, and calls or references that resolve to `pandas.read_*`), then checked by reading each site. The R4 guard repeats this walk on every run; the table is the starting state, not the guard's input.
+
+| # | Site (at `a5c33ec0a`) | What it converts | Disposition |
+|---|---|---|---|
+| 1 | `execution/_chunked_profile.py:45` `walk_one_table` | first source chunk | `source_frame(WITHHOLD)` (Codex a3 V1-1) |
+| 2 | `execution/_chunked_profile.py:171` `empty_input_profile` | empty table from the source schema | `source_frame(WITHHOLD)`; no values, routed so the allowlist stays empty |
+| 3 | `execution/_pipeline_finalize.py:186` `compute_fidelity_reports` | source table | `source_frame(WITHHOLD)` |
+| 4 | `execution/_pipeline_finalize.py:187` | masked output (keeps out-of-range source cells as row errors) | `source_frame(WITHHOLD)` |
+| 5 | `execution/pipeline/_post_scan.py:285`, `:435` | source tables | `source_frame(WITHHOLD)` |
+| 6 | `execution/pipeline/_post_scan.py:286`, `:436` | masked outputs | `source_frame(WITHHOLD)` |
+| 7 | `verification/postmask/_column_facts.py:209` `_series` | source and output batches | `source_series(WITHHOLD, types_mapper=exact_int_types_mapper)` |
+| 8 | `execution/pipeline/_source_types.py:64` `_expected_index` | stored index columns of a source | `source_frame` with the caller's coded callback |
+| 9 | `execution/_unified_slice_evidence.py:228` | an empty masked column | `source_series` with a coded callback; no values |
+| 10 | `execution/native/_date_shift_ext.py:270` | string column (admission) | `source_series` with a coded callback |
+| 11 | `execution/native/_bucket_perturb_ext.py:100`, `:277` | string column (admission) | `source_series` with a coded callback |
+| 12 | `execution/native/_operator_step.py:279` `_preserved_mask` | string column (`preserve_values` is string-only) | `source_series` with a coded callback |
+| 13 | `execution/out_of_core/_bucket_native.py:263` | string column | `source_series` with a coded callback |
+| 14 | `execution/out_of_core/_mask_group_c.py:537` `_to_series` | single string column | `source_series` with a coded callback |
+| 15 | `internal/pandas_compat.py:95`, `:101` `table_to_pandas_exact_ints` | every execution ingest through `to_pandas_fk_safe` (10 call sites: `_transforms_table.py:72`, `_chunked_carry.py:143`, `_pipeline_full_frame.py:81`, `_unified_slice_admission.py:347`, `_sequential.py:415`, `_pandas_adapter.py:205`, `_mixed_fk_bridge.py:264`, `native/_group_key_kernel.py:173`, `native/_faker_null_mask.py:44`, `native/_when_mask.py:58`) and `generation/_numeric_typing.py:417` | becomes the choke point body. `to_pandas_fk_safe` gains a required keyword `table_name` and passes a callback that raises `ExecutionError` `full_frame_value_unrepresentable` naming table and column. `_raise_if_source_value_unrepresentable` (`_pipeline_full_frame.py:56`, called at `:234` and `_sequential.py:419`), which re-converted each column after the fact to find the offender, is deleted |
+| 16 | `profile/_frame.py:19`, `:24`, `:28` | S1's helper | deleted; its callers (`profile/_readers.py:415`, `:496`, `:500`, `profile/_readers_resident.py:34`, `:37`) call `source_frame(WITHHOLD)` |
+| 17 | `profile/_cloud_readers.py:270` S3 `to_frame`, `:391` GCS `to_frame` | whole Parquet object, `residency="full"` | `pq.read_table(io.BytesIO(data))` then `source_frame(WITHHOLD)` (Codex a3 V1-2). The sample path (`_read_parquet_sample`, `:109`) already goes through `head_frame_from_batches` |
+| 18 | `profile/_cloud_readers.py:145`, `:318`, `:438` | CSV bytes, `pd.read_csv` with lexeme options | allowlisted with reason: a CSV text parse with no Arrow temporal conversion. Moving cloud CSV onto `_csv_reader._read_csv_rows` is a separate change |
+| 19 | `fileaccess/adapters/pandas.py:23`, `:37`, `:44` (`pd.read_csv` references) | the file-access guard wrappers that the one CSV reader calls | allowlisted with reason; their callers are scanned (catalog #10): only `profile/_csv_reader.py` may call `read_csv*` adapters |
+| 20 | `fileaccess/adapters/pandas.py:28` (`pd.read_parquet` reference) | guard wrapper with no `src/` caller (tests and `tests/sentry/file_access_registry.toml` use it) | allowlisted with reason; the guard fails on any `src/` caller of `fileaccess.adapters.pandas.read_parquet` |
+
+Arrow-native reads seen by the walk and left alone (non-goal, 13.2): `execution/_isolated_worker.py:111`, `execution/_isolated_commit.py:218`, `profile/_readers.py:371`, `generation/kinds/_lookup.py:187`, `reference_tables/_loader.py:112`, `transforms/_codeset_loader.py:456`, `vault/_format.py:269` (`read_table`), and `io/bounded_reader.py:365` (`pyarrow.csv.read_csv`).
+
+Starting allowlist: 7 entries (rows 18 to 20). It is a ratchet: it may shrink and never grows without a reviewed change (catalog #11).
+
+### 13.5 Report boundary for withheld columns
+
+- `FieldStats` (`profiling/types.py`) gains `source_value_unrepresentable: bool = False`, classified in `VALUE_FREE_FIELDS` (`profiling/_value_redaction.py`), so the existing type walk accepts it.
+- `profile_columns` (`profiling/profiler.py:308`) reads `unrepresentable_columns(df)`, sets the flag, and does not compute value-bearing statistics for a flagged column. Null and distinct counts stay.
+- `is_value_sensitive` (`_value_redaction.py:441`) returns True for a flagged field. `redact_profile_dict` and `profile_document` then remove `mode_value`, `top_values`, `distribution`, samples, `min` and `max` for it by the existing `VALUE_FIELDS` rules. A flagged field is redacted with `include_values=True` too: its cells are tokens, so there is nothing to show.
+- Fidelity (`quality/report.py` `compute_quality_report`) and post-mask (`verification/postmask/runner.py` `run_post_mask`) need no new code: their frames hold tokens. R2 proves their outputs carry no literal.
+
+### 13.6 Guard test
+
+New `tests/sentry/test_source_read_boundary.py`, registered in `scripts/dev/sentry_registry.toml`. It reuses `walk_with_scope`, `dotted`, `package_of`, `import_bindings` and `canonical` from `tests/sentry/_retry_scan.py` (the existing resolver). It does not copy them.
+
+Covered shapes (catalog #5, listed before building):
+
+- any `X.to_pandas(...)` call, any receiver, positional or keyword arguments;
+- the unbound form `pa.Table.to_pandas(t)` and `to_pandas` passed as a value (`map(pa.Table.to_pandas, ts)`, `fn=t.to_pandas`);
+- `pandas.read_*` reached as `pd.read_x`, `pandas.read_x`, an aliased module import (`import pandas as p`), `from pandas import read_x [as y]`, `pandas.io.parquet.read_parquet`, or a relative import, each called or passed as a positional or keyword argument value;
+- calls to `decoy_engine.fileaccess.adapters.pandas.read_parquet` or `read_csv*` from any module other than the allowlisted callers.
+
+Exempt by exact `(path, function)`: `internal/pandas_compat.py` `source_frame`, `source_series` and their one private conversion helper. A call in any other function of that module is a violation.
+
+The allowlist holds `(path, function, canonical target, reason)`. A stale entry fails the test.
+
+### 13.7 DESIGN fixes on #790
+
+- D1. `tests/sentry/test_typed_date_shapes_one_set.py` `_composed_views` (line 154): resolve the callee with `canonical(dotted(node.func), import_bindings(tree, package_of(rel)))` and check both `node.args` and `node.keywords` values for the view parts, resolved the same way.
+- D2. `tests/sentry/test_public_import_boundary.py` `_private_canonicalize_imports` (line 164): resolve imports with `import_bindings(tree, package_of(rel))`, so `from decoy_engine.generation.pool import _canonicalize as c`, `import decoy_engine.generation.pool._canonicalize as c` and relative forms all resolve to the private module before the allowlist check.
+- D3. `tests/native/test_date_shift_typed_declines.py:199`: replace the `inspect.getsource` substring check with a behavior probe. Monkeypatch `wa.when_target_rejection` to return a sentinel, call `when_native_rejection` with a `when:` entry and a schema where the target column is `pa.date32()` (a known type, so the missing-schema branch does not run), and assert the sentinel comes back. This is the same probe the test already uses for the sequential admit.
+
+### 13.8 Acceptance tests (each fails before the change unless marked)
+
+- **R1 choke point.** New `tests/unit/internal/test_source_frame.py`.
+  - Control (passes before and after): for a corpus of every Arrow type the profile and execution readers produce, `source_frame(t, on_unrepresentable=WITHHOLD)` equals `t.to_pandas()` (frame, dtypes and index) and `unrepresentable_columns` is empty.
+  - Withhold: one table each with `date32` at year 10000, `date64` past year 9999 and `time64[ns]` with a non-zero nanosecond (probed: pyarrow raises `ArrowInvalid: Value 1 has non-zero nanoseconds`). Each as one row and as 20 equal rows plus a null. No exception. Failing cells are `withheld:` tokens: equal values give one token, distinct values give distinct tokens, nulls stay null. Other columns equal their own bare conversion. `unrepresentable_columns` names exactly the failing columns. No cell, attr or column name contains `10000`, `2932897` or the nanosecond value.
+  - Metadata: stored index `stored_id`, a `timestamp[ns, Europe/London]` column and a range index. Index and data columns after fallback equal those of the same table with the bad cell set to an in-range value.
+  - Callback policy: the callback receives the column name. The coded error's `str`, `repr` and formatted traceback carry no value. A callback that returns gives the value-free `TypeError`. Calling without `on_unrepresentable` is a `TypeError`.
+  - `attrs` survival: `iloc[:n]` and column selection keep the identity.
+  - Mutations that must turn R1 red: rebuild the table with `pa.Table.from_arrays` (metadata cell); cast the column to `string` instead of tokens (no-literal cell); unkeyed token `str(int)` (no-day-number cell); catch only `ValueError` (no: `OverflowError` cell, from an out-of-range `date64`).
+- **R2 public-entry matrix.** New `tests/integration/test_unrepresentable_source_values.py`, Parquet sources with a `date32` year-10000 cell, a `time64[ns]` cell and a passthrough column. Each cell asserts it completes or fails with a coded error, and that `str`, `repr`, the traceback, `caplog`, the returned documents and the written output carry no `10000-01-01`, `10000` or `2932897`.
+  - `run_mask_chunked` with the bad cell in the first chunk and in a later chunk, with a `date_shift` target and as a passthrough column (Codex a3 V1-1). Before #790 lands the outcome is a coded error or a decline to the oracle. After #790, T8 pins the `format_error` row.
+  - `run_mask` on sequential and full_frame: coded `full_frame_value_unrepresentable` with table and column named, now raised at the choke point.
+  - Profile with `residency="full"` and with sampling: local Parquet, S3 and GCS readers with transport mocked and real Parquet bytes (Codex a3 V1-2).
+  - Scan: default `profile_document`, `include_values=True`, and the raw `to_dict()` (Codex a3 V1-3).
+  - `fidelity_report=True` and post-scan integrity requested.
+  - Fail-before: chunked, both cloud readers and scan cells are red on `origin/main` and on `a5c33ec0a`.
+- **R3 report boundary.** In the existing `tests/profiling/` value-redaction suite: column `d` with 20 equal out-of-range dates, and a singleton. `source_value_unrepresentable` is true. `mode_value`, `top_values`, `distribution`, samples, `min` and `max` are absent or empty in `profile_document` in both modes. Null and distinct counts are right. With a stored index, the profile's data columns before and after the fallback are both `['d']` (Codex a3 V1-4). Mutations: `is_value_sensitive` ignores the flag (default-mode cell red); `profile_columns` ignores `unrepresentable_columns` (flag cell red).
+- **R4 guard.** `test_source_read_boundary.py` passes on the tree. Seeded cases in a scratch module, each red: aliased module import, `from pandas import read_parquet as rp`, `pd.read_parquet` passed as a keyword argument value, unbound `pa.Table.to_pandas(t)`, `t.to_pandas(types_mapper=m)`, a relative import of the choke point's private helper, and a new function in `internal/pandas_compat.py` that calls `to_pandas`. Real-caller mutations, each red: restore `table.to_pandas()` in `walk_one_table`; restore `pd.read_parquet(io.BytesIO(data))` in the GCS `to_frame`. Walk proof: the count of matched sites equals the 7 allowlisted entries, rises by one per seed, and a removed allowlisted site makes the stale-entry check red.
+- **R5 DESIGN (#790).** D1 seeds against the real caller `execution/_chunked_bucket_perturb.py`: `native_date_shapes(shapes=plan_column_shapes(plan), declared=declared_date_shift_columns(plan))` and the same call through an aliased import; both red. D2 seeds against a real `execution/` caller: `from decoy_engine.generation.pool import _canonicalize as c`, `import decoy_engine.generation.pool._canonicalize as c` and a relative form; all red. D3 mutation: add a separate known-target check in `when_native_rejection` before the shared helper call; red.
+- **R6 placement.** No test. `profile/_frame.py` deleted, no new module, `internal/` count unchanged. The reviewer checks the diff.
+
+Mutations are rerun on the final head of each slice and that head is recorded (catalog #9).
+
+### 13.9 Slice decision and size
+
+The class exists on `origin/main` today. A `date32` year-10000 source already raises `year 10000 is out of range` through `walk_one_table`, the cloud full readers and fidelity, with no `date_shift` in the config. So the boundary is not part of DATE-SHIFT-TYPED and does not belong on #790.
+
+New slice **S1b SOURCE-READ-BOUNDARY**, from `origin/main`, its own PR to `main` (not stacked on #790, so it cannot strand on a non-main base). Risk R2 (value-free guarantee on every source read). Plan gate: this section. Code gate: Codex and Dennis.
+
+| Part | Lines (estimate) |
+|---|---|
+| `internal/pandas_compat.py` choke point | +110 / -20 |
+| sites 1 to 17 and the 10 `to_pandas_fk_safe` callers | +70 / -40 |
+| delete `_raise_if_source_value_unrepresentable` and its two calls | -40 |
+| `profiling/types.py`, `_value_redaction.py`, `profiler.py` | +25 |
+| changelog fragment, sentry registry row | +10 |
+| tests R1 to R4 | +560 |
+| **Total** | about 875 changed lines |
+
+That is above the 600-line limit for adding to #790, which is already 2,188 / -299. S1b merges first. Then #790 rebases on `main`, deletes `profile/_frame.py` and points its readers at `source_frame`, and adds D1 to D3 (R5): about +100 / -60 on #790. #790's T8 cells then pass through the S1b choke point unchanged. Codex reviews S1b in full and the #790 delta as a delta.
+
+If the S1b build passes 1,000 lines, the builder stops and reports (proportionality.md) instead of carrying it to review.
+
 ## Deferred (V2-LOG)
 
 - **V2-LOG: sequential keeps typed dates in Arrow (option B for B4).** Sequential would keep an admitted typed `date32` column as Arrow, and `date_shift_column` would return Arrow instead of `to_pylist()`, so an out-of-range date becomes a quarantined row as on the unified slice. Deferred because the sequential frame is pandas end to end: the table is converted before any strategy runs and `to_pylist()` cannot hold year 10000, so the change touches the sequential frame model, not one strategy. V1 takes option A (coded job failure) instead.
 - **V2-LOG: the coded error keeps the original in `__context__`** (added 2026-11-24 after Codex a2). `raise ... from None` in `_pipeline_full_frame.py` hides the pandas exception from the printed traceback but leaves it on `__context__`, where a caller that walks the chain can still read the value text. V1 threat model (accidental leaks) is met because no V1 path prints or logs `__context__`; clearing it is hardening for V2, with option B.
 - **V2-LOG — sentry completeness.** The one-arithmetic AST sentry scans `execution/**/*.py`, so it catches the realistic bypass of restoring arithmetic in `_strategies/_date_shift.py` (`origin/main` lines 358-405), but it does not scan `transforms/`, where the approved `shift_typed_days` choke point lives (`transforms/date_shift.py:1-10`). Extending the scanner to distinguish the one allowed transform function from a second transform implementation is completeness hardening for V2; it does not change the V1 guard or verdict.
+- **V2-LOG: Python-object conversion of source values** (added 2026-11-24, revision 4). `to_pylist`, `as_py`, `to_pydict` and `to_numpy().tolist()` also fail on a date past year 9999 with a message that quotes the year. Section 13 guards Arrow-to-pandas conversion and pandas file reads only; the R2 public-entry matrix is the V1 evidence that no reachable path converts such a value this way. Extending the guard to these calls needs a type-aware rule (most of the 115 sites read string or numeric arrays) and is V2 hardening.
+- **V2-LOG: deliberate evasion of the source-read guard** (added 2026-11-24, revision 4). `getattr(t, "to_pandas")`, `eval` and `importlib` spellings are out of the guard's listed shapes (recurring-defects #5 scope).
+- **V2-LOG: cloud CSV through the one CSV reader** (added 2026-11-24, revision 4). The three `pd.read_csv` calls in `profile/_cloud_readers.py` stay allowlisted in section 13. Routing them through `_csv_reader._read_csv_rows` removes three allowlist entries.
