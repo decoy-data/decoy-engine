@@ -10,7 +10,6 @@ from __future__ import annotations
 import errno
 import os
 import re
-import sys
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, Literal, NewType, TypeVar
@@ -110,10 +109,19 @@ def _is_typed_memory(exc: BaseException) -> bool:
         return True
     if isinstance(exc, OSError) and exc.errno == errno.ENOMEM:
         return True
-    # Never import on the failure path: a capped worker has no headroom to load DuckDB, and an
-    # error of this type cannot exist unless DuckDB is already loaded.
-    duckdb = sys.modules.get("duckdb")
-    return duckdb is not None and isinstance(exc, duckdb.OutOfMemoryException)
+    return _is_duckdb_out_of_memory(exc)
+
+
+def _is_duckdb_out_of_memory(exc: BaseException) -> bool:
+    """DuckDB's OOM, recognised by its own class hierarchy so nothing is imported on the failure
+    path (a capped worker has no headroom to load DuckDB). The native module raises
+    `_duckdb.OutOfMemoryException`; the `duckdb` wrapper re-exports the same class, and either may
+    be unloaded when it is raised. Pinned against duckdb 1.5.4, where `__module__` is `_duckdb`."""
+    return any(
+        cls.__name__ == "OutOfMemoryException"
+        and cls.__module__.partition(".")[0] in ("duckdb", "_duckdb")
+        for cls in type(exc).__mro__
+    )
 
 
 # The under-cap failure shapes fk_memory_probe documents evidence for: OpenSSL's EVP_MD_CTX copy
