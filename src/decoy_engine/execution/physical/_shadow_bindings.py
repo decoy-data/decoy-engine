@@ -26,7 +26,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.contracts.column_shape import ColumnShape
-from decoy_engine.declared_casting._boundary import plan_native_date_shape
+from decoy_engine.declared_casting import plan_native_date_shape
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._operator_registry import (
     DETERMINISTIC_FAKER_SOURCE_TYPES,

@@ -191,17 +191,22 @@ def plan_column_shapes(plan: Any) -> dict[tuple[str, str], ColumnShape]:
     return {(c.table, c.column): c.shape for c in getattr(plan, "column_shapes", None) or ()}
 
 
-def plan_native_date_shape(plan: Any, table: str, column: str) -> ColumnShape | None:
-    """The native date shape the plan lists for a top-level ``(table, column)``, else None.
+def plan_native_date_shapes(plan: Any) -> dict[tuple[str, str], ColumnShape]:
+    """``(table, column)`` -> the native date shape of every top-level column the plan lists.
 
     The plan-side twin of ``StrategyContext.native_date_shape``: the same
     ``native_date_shapes`` view over the same two plan fields, for the native admission and
-    binding sites that hold a plan but no strategy context.
+    binding sites that hold a plan but no strategy context. The one plan-to-mapping lookup;
+    every caller selects from it.
     """
     from decoy_engine.contracts.column_shape import native_date_shapes
 
-    native = native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))
-    return native.get((table, column))
+    return native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))
+
+
+def plan_native_date_shape(plan: Any, table: str, column: str) -> ColumnShape | None:
+    """The native date shape the plan lists for one top-level ``(table, column)``, else None."""
+    return plan_native_date_shapes(plan).get((table, column))
 
 
 @dataclass

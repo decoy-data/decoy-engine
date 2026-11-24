@@ -192,14 +192,15 @@ def compile_native_plan(
                 fallback_policy=req.fallback_policy,
             )
         )
-    from decoy_engine.declared_casting._boundary import plan_native_date_shape
+    from decoy_engine.declared_casting import plan_native_date_shapes
 
+    shapes = plan_native_date_shapes(plan)
     date_shapes: dict[tuple[str, str], ColumnShape] = {}
     for node in nodes:
         if node.strategy == "date_shift" and node.kind == "scalar" and node.columns:
-            shape = plan_native_date_shape(plan, node.table, node.columns[0])
-            if shape is not None:
-                date_shapes[(node.table, node.columns[0])] = shape
+            key = (node.table, node.columns[0])
+            if key in shapes:
+                date_shapes[key] = shapes[key]
     return NativeExecutionPlan(
         engine_version=engine_version,
         nodes=tuple(nodes),

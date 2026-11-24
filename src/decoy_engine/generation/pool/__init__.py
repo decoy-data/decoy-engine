@@ -44,6 +44,7 @@ from decoy_engine.generation.pool._cache import (
     PoolCache,
     get_default_pool_cache,
 )
+from decoy_engine.generation.pool._canonicalize import canonicalize_typed_array
 from decoy_engine.generation.pool._capacity import unique_capacity_ok
 from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._computed_draw import (
@@ -100,6 +101,7 @@ __all__ = [
     "PoolSampler",
     "QualityWarning",
     "ValuePool",
+    "canonicalize_typed_array",
     "check_pool_capacity_pre_flight",
     "choice_from_index",
     "computed_draw_spec",

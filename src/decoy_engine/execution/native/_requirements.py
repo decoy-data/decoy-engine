@@ -627,7 +627,7 @@ def requirements_for(
         kernel_reason = native_pool_rejection(node, column_name, strategy_name)
     else:
         kernel_reason = native_kernel_rejection(column_name, strategy_name)
-    from decoy_engine.declared_casting._boundary import plan_native_date_shape
+    from decoy_engine.declared_casting import plan_native_date_shape
 
     # The plan's native date shape, read once here so the config gate and the output schema
     # see the same answer. Only date_shift reads it in S1.

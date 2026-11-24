@@ -92,10 +92,10 @@ def table_date_shapes(plan: Any, table: str, columns: Iterable[str]) -> dict[str
 
     The one lookup the chunked entry points read the plan's date shapes through, so admission,
     parameter resolution and the schema rule see the same answer."""
-    from decoy_engine.declared_casting._boundary import plan_native_date_shape
+    from decoy_engine.declared_casting import plan_native_date_shapes
 
-    shapes = {name: plan_native_date_shape(plan, table, name) for name in columns}
-    return {name: shape for name, shape in shapes.items() if shape is not None}
+    shapes = plan_native_date_shapes(plan)
+    return {name: shapes[(table, name)] for name in columns if (table, name) in shapes}
 
 
 def policy_decline(

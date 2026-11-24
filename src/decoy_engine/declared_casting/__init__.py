@@ -9,7 +9,13 @@ a leaf of the dependency graph.
 from __future__ import annotations
 
 from decoy_engine._lexeme import lexeme_columns_by_table, profile_descriptors
-from decoy_engine.declared_casting._boundary import DeclaredCastRun, arrow_type, arrow_type_for_spec
+from decoy_engine.declared_casting._boundary import (
+    DeclaredCastRun,
+    arrow_type,
+    arrow_type_for_spec,
+    plan_native_date_shape,
+    plan_native_date_shapes,
+)
 from decoy_engine.declared_casting._catalog import (
     FormatDescriptor,
     capability_manifest,
@@ -92,6 +98,8 @@ __all__ = [
     "max_rendered_width",
     "output_width",
     "parse_value",
+    "plan_native_date_shape",
+    "plan_native_date_shapes",
     "preflight_declared_casting",
     "profile_descriptors",
     "round_to_scale",

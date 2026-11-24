@@ -46,7 +46,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.contracts.column_shape import ColumnShape
-from decoy_engine.declared_casting._boundary import plan_native_date_shape
+from decoy_engine.declared_casting import plan_native_date_shape
 from decoy_engine.execution._adapter import pandas_column_to_kernel_input
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR, RUST_COMPANION

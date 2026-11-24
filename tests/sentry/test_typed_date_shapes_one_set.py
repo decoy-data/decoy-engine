@@ -142,8 +142,9 @@ def test_an_inline_native_date_derivation_in_a_caller_is_red() -> None:
     }
     gate = (SRC / "execution/_chunked_bucket_perturb.py").read_text(encoding="utf-8")
     gate_inline = gate.replace(
-        "native = native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))",
-        "native = [k for k, v in plan_column_shapes(plan).items() if v in TYPED_DATE_SHAPES]",
+        "for (t, column) in plan_native_date_shapes(plan) if t == table",
+        "for (t, column), v in plan_column_shapes(plan).items()"
+        " if t == table and v in TYPED_DATE_SHAPES",
     )
     assert gate_inline != gate
     assert _unlisted_reads({"execution/_chunked_bucket_perturb.py": gate_inline}) == {

@@ -59,8 +59,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._row_errors import RowError
-from decoy_engine.generation.pool import GenerationError
-from decoy_engine.generation.pool._canonicalize import canonicalize_typed_array
+from decoy_engine.generation.pool import GenerationError, canonicalize_typed_array
 from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as _BUCKET_REASON
 from decoy_engine.transforms.date_shift import order_window, shift_typed_days
 
