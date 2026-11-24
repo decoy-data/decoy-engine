@@ -1,382 +1,235 @@
-Status: plan (revision 4, 2026-11-24; Codex round 1 applied)
+Status: plan (revision 5, 2026-11-24; scope cut after Codex round 2, Opus rework)
 
-# CODE-SET-NATIVE: code_set masks once per distinct value over Arrow, on every route, and gets a native operator
+# CODE-SET-NATIVE: code_set masks once per distinct value on the handler routes, and out-of-core admits only text it reproduces
 
-Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: CODE-SET-NATIVE, new from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`, line 76: "`code_set` | pandas | chunked pandas | no operator | none | Rust lookup over the pinned code list, 1 to 2 slices, 1.0.x"). The row is in the CLI roadmap `docs/roadmap/groups/mask.md` as a 1.0 row (owner 2026-11-22, V1 fast path). Engine only.
+Owner: Cam. Author: Opus (plan author). Date: 2026-11-22, reworked 2026-11-24. Roadmap row: CODE-SET-NATIVE, from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`, line 76). The row is a 1.0 row in the CLI roadmap `docs/roadmap/groups/mask.md`. Engine only.
 
-Source anchor: engine `3f0ae93c5`. Paths without a prefix start at `src/decoy_engine/`. Only the plan changed since `9f7bb1f4a`.
+Source anchor: engine main `9f7bb1f4a`. Every file this plan touches is unchanged between that commit and the plan branch. Paths without a prefix start at `src/decoy_engine/`.
 
-Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `performance.md`, `security.md` (keyed selection, secret material in frames), `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md` ("Where things go").
+Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `performance.md`, `security.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md`.
 
-Risk: R2 (keyed masking on every route; a new native operator; secret-derived key material). Plan review: Dennis (round 1 GO-WITH-FIXES, every V1 and design item applied in revision 3), then Codex (round 1 findings applied in revision 4). Code gate: Codex and Dennis.
+Risk: R2 (masking output on every handler route; route admission). Plan review history: Dennis r1 GO-WITH-FIXES, Codex r1 NO-GO, codex-fix to rev 4, Codex r2 NO-GO, Opus rework to rev 5. Code gate per slice: Codex and Dennis.
 
-Owner direction (2026-11-22): choose the fastest path by measurement and name every compatibility change. Start with Arrow per distinct value. The Dell timings estimate the component costs. AT-8 measures the full handler.
+## Changes in revision 5
+
+Revisions 1 to 4 tried to build a new native operator, an Arrow front for the handler and a hoisted, boxed key in one row. Three review rounds kept finding the same class of defect: a native or Arrow route reads the physical Arrow value, while the oracle reads the value pandas reconstructs, and the two can differ in key text, output width and payload size. Revision 5 fixes this at the root by not creating a second interpretation. The handler routes keep the oracle's own loop and add a per-distinct memo. The one existing streaming route (out-of-core) admits a code_set column only when the full-frame pandas converter proves the column is plain text. Everything else moves to V2-LOG or to a separate candidate row.
+
+| Codex r2 finding | Verified on main | Resolution in rev 5 |
+|---|---|---|
+| 1 BLOCKER: physical text does not establish the oracle's HMAC input (pandas metadata `double[pyarrow]` on a string column turns `"1"` into `1.0`) | Yes. Full-frame ingestion is `to_pandas_fk_safe` (`execution/_pandas_adapter.py:204-206`), which applies schema metadata. Out-of-core admission for code_set checks config shape only (`execution/out_of_core/_compat.py:406`); source types reach only the faker check | Native unified and native chunked routes cut to V2-LOG (section 13): no new route reads physical values. Handler routes run on the pandas objects the oracle reads, so no gap exists there. Out-of-core (an existing route) admits code_set only for columns that the full-frame converter itself turns into text, checked on the schema before streaming (section 5.2). Forced streaming refuses before any scratch or sink write. AT-3 carries the Codex reproduction, the int64 case and text controls |
+| 2 HIGH: eager key derivation changes success and error precedence | Yes, for the rev 4 selector (`determinism/_derive.py:300` encodes the namespace strictly) | The selector and key hoist are cut (V2-LOG). The memo calls the unchanged `apply_code_set` in row order, once for each new string form. Missing cells and repeats make no call. Derivation, E4 and E5 order are the oracle's by construction. AT-2 requires zero calls for empty and all-missing input and pins a lone-surrogate namespace case |
+| 3 HIGH: chunk widths differ from pandas string storage | Yes, for the rev 4 native chunk rule | Native chunked route cut. The handler keeps today's assignment code, so pandas inference is the oracle's under every pandas option. AT-1 runs under default options, `mode.string_storage="pyarrow"` and `future.infer_string=True` |
+| 4 HIGH: one Arrow string array hits the 32-bit offset limit | Yes, for the rev 4 handler front | The handler builds no Arrow array. The memo is a Python dict over the strings the loop already makes. Out-of-core keeps its current per-batch `code_set_map`, which is bounded by `batch_rows` and unchanged by this row (V2-LOG notes the existing bound) |
+| 5 HIGH: `verify_corpus` bypasses the safe projection | Yes, and it is existing main behavior (`transforms/_codeset_loader.py:623+`), not caused by code_set routing | Out of this plan. Filed as candidate row CODE-SET-CORPUS-TEXT-HYGIENE in vault `OWNER-QUESTIONS.md`, "V1 candidate rows", together with the rev 4 loader, E4/E5 message and provenance items |
+| 6 HIGH: two customer-file stats to protect | Yes, existing main behavior (`transforms/_codeset_loader.py:220-228` catches only `FileNotFoundError` and `NotADirectoryError`; `:283-296` interpolates `{exc}`) | Same candidate row as finding 5 |
+| DESIGN: evidence helper imports a private chunked module | n/a | Moot. No evidence helper. Handler and out-of-core evidence code is unchanged |
+| V2-LOG: one resolution per run is unproved for gated and nested calls | Yes, existing behavior (`preflight` in `execution/_strategies/_code_set.py` resolves and discards) | Unchanged by this row. Kept in V2-LOG |
+| V2-LOG: AT-7 expects the wrong failure for a later numeric chunk | n/a | Moot (native chunked cut) |
+| V2-LOG: four tests require an empty chunked veto set | n/a | Moot (no veto) |
+| V2-LOG: F29 producer growth from the fatal projection | n/a | Moot (no fatal projection). S1 keeps both `exc.code` reads and the reason f-string verbatim in `CodeSetHandler.run`. Expected F29 delta is zero. CS-Q4 withdrawn |
+| V2-LOG LOW: fixture wording (zero-row corpus, out-of-core all-missing output type, public-job golden key) | Out-of-core all-missing output type: yes, existing | Zero-row corpus and key fixtures moot. Out-of-core all-missing output type kept in V2-LOG |
+| V2-LOG LOW: proof claims (provider index, OpaqueBox, HMAC) | n/a | Moot (no selector, no box) |
+
+Also removed with the native cut: the census rehome, the draw-catalogue re-pin, the operator snapshot, the `_requirements.py` and `_chunked_entry.py` size moves, evidence-route parity, assembly policy and the unified retry boundary. This row now changes no sentry baseline, census, catalogue digest or size ceiling.
 
 ## 1. Frame
 
-`code_set` remaps a code (for example, ICD-10 or MCC) to another real code from a pinned corpus. Mask mode (`transforms/code_set.py:465` `_pick_mask`, `:494` `_pick_from_seq`) is a pure function of the value: `idx = int(hmac_hex(derive(mask_key, namespace or "code_set", _KEYED_SALT), value)[:8], 16) % candidate_count`, then the "index with a hole" step (`transforms/_codeset_index.py:98`, `:111`) skips the input's own position. `hmac_hex` (`internal/crypto.py:44`) encodes the value with `errors="replace"`.
+`code_set` remaps a code (ICD-10, MCC) to another real code from a pinned corpus. In mask mode the output is a pure function of `str(value)`, the config, the mask key, the namespace and the pinned corpus record (`transforms/code_set.py:262`, `_pick_mask` at `:465`, chapter path `_apply_chapter_preserve`). `row_index` is read only in gen mode.
 
-Where it runs today:
+Today the handler (`execution/_strategies/_code_set.py`, loop at about `:202-239`) calls `apply_code_set(str(value), ...)` once for every non-missing row. Each call re-runs `derive` (HKDF plus HMAC) and the selection. Dell estimate from the earlier microbenchmark: 21 to 23 us per row on the shipped `icd10` corpus. The handler serves four routes: pandas full frame, the chunked oracle leg, nested `_nested_leaves` and sequential non-key columns.
 
-| Route | Code | Shape |
-|---|---|---|
-| pandas full frame | `execution/_strategies/_code_set.py:206` (loop in `CodeSetHandler.run`, `:142`) | one `apply_code_set` call per row; each call re-runs `derive` (HKDF plus HMAC) for the key |
-| chunked | the same handler per chunk (admission: `execution/_chunked.py:224` calls `execution/_chunked_code_set.py:91` `code_set_conditional_failures`: mask mode, no `chapter_preserve`) | per row, per chunk |
-| nested (`_nested_leaves`) | `NestedStrategyHandler` dispatches the same handler | per row |
-| sequential (non-key column) | the same handler | per row |
-| out-of-core | `execution/out_of_core/_mask_group_c.py:384` `code_set_map` (`kernel/_code_set.py`) | once per distinct value, then `pc.take`; but `to_pylist` and a Python `str()` pass over every row first, and the `_select` closure re-derives the key per distinct value |
-| unified slice | not admitted: no `OperatorSpec` for `code_set` (`execution/_operator_registry.py`) | - |
+Out-of-core (`execution/out_of_core/_mask_group_c.py`, about `:370-395`) already selects once per distinct value through `kernel/_code_set.py` `code_set_map`. It reads the physical Arrow value and stringifies it with Python `str()`. Admission checks mode and `chapter_preserve` only. So an int64 source with a null maps `1` to key `"1"`, while the full frame converts the column to float64 and hashes `"1.0"`. With shipped ICD-10, namespace `cs` and test key `bytes([17]) * 8`, the out-of-core output for int64 `[1, null, 2]` is `[R10.9, None, M17.11]` and the full-frame output is `[L89.90, None, I10]`. Codex r2 showed the same split for a string column carrying `double[pyarrow]` pandas metadata. This is an existing route-dependent output: the same input masks to different codes depending on table size. It breaks joins across runs, which meets the V1 bar (function break).
 
-Earlier Dell microbenchmark estimates, 120,000 rows over the shipped `icd10` corpus (65 rows), companion irrelevant:
-
-| Path | Per row |
-|---|---|
-| `CodeSetHandler` per row (oracle) | 21 to 23 us |
-| `code_set_map` (out-of-core today) | 1.05 to 1.16 us, almost all `to_pylist` and `str()` |
-| Arrow front: `dictionary_encode` on the Arrow array, select per distinct, `pc.take` | 34 to 58 ns |
-| one `select` per distinct value, as written (re-derives the key) | 14 to 24 us per distinct |
-| the HMAC alone with the key hoisted | 2.7 to 4.6 us per distinct |
-
-The text samples agreed. These numbers cover the Arrow front only, not the handler's object-to-Arrow conversion and pandas list assignment; S1 measures the handler end to end (AT-8). The cost model is `rows x (conversion + 50 ns) + distinct x (HMAC + lookup)`. A Rust HMAC kernel would cut the second term by about 10x, which matters only when distinct is close to rows. Code columns are bounded vocabularies (ICD-10-CM has about 74,000 codes), so Arrow wins on cost per line of new code.
-
-No existing compiled kernel computes `HMAC(derive(K, ns, salt), value)`: `derive_hex_raw_batch` (`decoy-engine-native/src/arrow_ffi.rs:436`) computes `derive(K, ns, value)`, which frames the namespace into the message. Using it would change every code_set output. Section 10 records this as the rejected alternative.
-
-The frozen reference is the full-frame pandas handler. On plain Arrow `int64 [1, null, 2]`, the old streaming map hashes `"1"` and `"2"`. The full frame hashes `"1.0"` and `"2.0"`. A null in a later batch can affect the first key. S1 corrects automatic routing and refuses an unsafe forced stream before it starts.
-
-The 20x end-to-end gain is a target pending measurement. AT-8 retains it as a merge gate.
+No native, unified-slice or chunked-native code_set route exists today, and this row adds none.
 
 ## 2. Established solutions
 
-Search run: dictionary encoding as a compute pattern (Apache Arrow `dictionary_encode`, Parquet dictionary pages, DuckDB dictionary vectors, Polars categorical `map` on categories), and keyed pseudonymization over a lookup domain (NIST SP 800-188 de-identification, HMAC-based pseudonym tables).
+Search run: the earlier revisions surveyed Arrow compute, DuckDB, Polars and Parquet for per-distinct evaluation, and NIST SP 800-188 for keyed pseudonymization; the codebase was searched for existing route-admission proofs. Rev 5 adopts the simplest of those patterns.
 
-- Arrow, Parquet, DuckDB and Polars all compute a pure function of a low-cardinality column once per dictionary entry, then expand by index. The engine already follows this in `kernel/_code_set.py` (B6). This row moves that one helper to an Arrow front and calls it on every route.
-- Keyed pseudonymization with HMAC over a fixed domain is the standard (NIST SP 800-188 section on pseudonymization; the engine's DE-02 decision). The selection formula does not change.
-- The HMAC call stays `hmac_hex`, not `hmac.digest`: it fixes the `errors="replace"` encoding, so bytes cannot drift on a lone surrogate, and it keeps the draw token the draw-site catalogue resolves (section 6.2). The per-distinct HMAC cost (a few us) is not the bottleneck.
+- Compute a pure function once per distinct value and expand: Arrow `dictionary_encode`, Parquet dictionary pages, DuckDB dictionary vectors, Polars categorical `map`. In Python the standard form is memoization keyed by the function's exact input (`functools.lru_cache` semantics). The handler's exact input is `str(value)`, so the memo key is `str(value)`, not the raw object (`1`, `1.0` and `True` hash equal as Python objects but have different string forms).
+- Keyed pseudonymization by HMAC over a fixed domain (NIST SP 800-188; DE-02). The selection formula does not change.
+- Route admission by proving the input interpretation: the unified slice already declines a column whose pandas round trip differs from the resident Arrow column (`execution/_unified_slice_admission.py:374-400`). Out-of-core reuses the same idea, done on the schema with the full-frame converter.
+
+Custom code left: one dict lookup in the handler loop and one schema check in out-of-core preflight. Neither has a library equivalent at this size.
 
 ### Reuse inventory
 
-- `kernel/_code_set.py` `code_set_map`: the one per-distinct helper. Extended, not copied.
-- `transforms/code_set.py` `resolve_corpus_record`, `_pick_mask`, `_apply_chapter_preserve`, `_pick_from_seq`, `hole_candidate_count`, `hole_resolve`, `describe_loaded_corpus`: the selection math and every raise site stay where they are. The new selector calls them.
-- `_opaque.OpaqueBox`: holds the hoisted derived key between draws.
-- `execution/_chunked_code_set.py`: `resolve_pinned_code_set_records` (`:265`), `code_set_conditional_failures` (`:91`, non-raising), `aggregate_chunk_code_set_corpora` (`:299`). The new evidence helper goes here too (section 5.5).
-- `execution/native/_operator_config_rejections.py`: the one config-rejection choke point shared by the compiler (`_config_gate_rejection`, `execution/native/_requirements.py:496`) and `native_route_eligibility`.
-- `execution/native/protocol/providers_mask.py:105` `CodeSetKeyedSelectProvider`: an independent reproduction of the selection formula. AT-1 uses it as a second oracle.
-- `OperatorSpec` and the operator step (`execution/native/_operator_step.py`): reused for the new operator.
+- `apply_code_set` and everything under it: unchanged, called by the memo.
+- `CodeSetHandler.run`: same loop, record pin, row errors, evidence and assignment.
+- `execution/_fk_keys.py:430` `to_pandas_fk_safe`: the full-frame converter, called on an empty table built from the source schema.
+- `_arrow_types.is_text`: string and large_string.
+- `_group_c_conditional_rejection` and its existing code `out_of_core_code_set_shape_unsupported`: the new refusal reuses this code, so no reason is added to the registry.
+- `execution/out_of_core/_preflight.py` (source types at about `:69-77`) and `execution/_pipeline_routing_signals.py` (`_source_arrow_types` at `:219-236`): the two production callers of the compat check, and the only places that read source schemas for it.
 
 ## 3. Guarantee and non-goals
 
 After this row:
 
-1. Freeze the full-frame oracle's keys, output values, pandas dtype and ordered row errors. Per frame, chunk, batch or native step, derive once and select once per distinct non-missing string key. E5 preserves the exact reason and original failed object at each position.
-2. Encode Arrow string and large_string arrays directly. Materialize only dictionary entries before selection.
-3. Native execution reports `arrow_python` for admitted mask-mode text. Section 5.4 gives the route gates. Section 5.5 defines evidence equality.
-4. All routes use the exported kernel map and one selector. Bind the current config to its corpus record before the first draw, including empty inputs.
-5. The selector stores an `OpaqueBox`. Open it inline with `.open()[0]`. Wipe tracked engine key parameters on exceptional exit. The box constructor and HMAC receive bytes during the call.
-6. Keep data literals and secrets out of public error text. Publish only counts and safe provenance identifiers as corpus evidence.
+1. In mask mode, every handler route calls `apply_code_set` at most once per distinct `str(value)` per handler call, in first-occurrence row order, and never for a missing cell. Output values, row errors (index, column, trigger, reason, order), failed original objects, the raised exception for fatal cases, evidence and the pandas dtype equal the base handler's.
+2. Out-of-core admits a code_set column only when its source schema is known, the Arrow type is string or large_string, and the full-frame converter turns that column into a text dtype with an unchanged column label. Otherwise automatic routing declines before streaming and the full-frame oracle runs, and forced out-of-core refuses before any scratch or sink write.
 
-Non-goals: a native tenant on the sequential FK route (it keeps the handler, which S1 already makes per distinct); gen mode (`_pick_gen`, keyed on row index; it keeps its per-row loop and is named on the run card as Python); a Rust kernel (section 10); `chapter_preserve` on native routes (per-value errors are not modeled there, as on the chunked route today); new corpora; merging the two existing `code_set_corpora` aggregators (section 13).
+Non-goals (V2-LOG, section 13): a native `code_set` operator on the unified slice or chunked step; a hoisted or boxed key; an Arrow front in the handler; a Rust kernel; gen mode (keeps its per-row loop, since `row_index` matters); out-of-core admission of numeric code columns; any change to loader, provenance or error text (candidate row CODE-SET-CORPUS-TEXT-HYGIENE).
 
 ## 4. Enumerations
 
-### Exit paths
+### Exit paths (handler, mask mode)
 
 | # | Condition | Result |
 |---|---|---|
-| E1 | source mask marks a missing cell | exclude before stringification, append Python `None`, skip selection |
-| E2 | value in corpus | candidate count `n - 1`, hole skip |
-| E3 | value not in corpus | candidate count `n` |
-| E4 | single-row corpus and the value equals its code | `CODE_SET_SINGLE_ROW_CORPUS`, job-fatal, raised in `_pick_mask` (`transforms/code_set.py:478-485`). S1 makes the message value-free |
-| E5 | `chapter_preserve`, chapter absent or sole-member bucket | per-value `RowError` for every row with that value; original value kept (handler routes only; codes in `execution/_strategies/_code_set.py:93` `_PER_VALUE_CODE_SET_ERRORS`; raised at `transforms/code_set.py:408-417` and `:427-434`). S1 makes both messages value-free |
-| E6 | any other `PlanCompileError` from the selector | job-fatal, as today |
-| E7 | empty frame | assign `pd.array([], dtype="string")`. For a nonempty frame assign the completed list and let pandas infer the dtype |
-| E8 | out-of-core sees a per-value code | `OUT_OF_CORE_CODE_SET_ROW_ERROR_UNREACHABLE`, as today (`execution/out_of_core/_mask_group_c.py:386-395`) |
-| E9 | the object column cannot become an Arrow string array (a lone surrogate, only from the in-memory DataFrame API) | the handler falls back to the per-distinct dict path over the same `str()` forms (section 5.3); same bytes as today; no conversion exception is kept |
-| E10 | admitted native selection raises | convert to a value-free fatal failure at the shared step. Propagate past unified retry. Abort chunked publication too (section 5.4) |
+| E1 | `source.isna()` marks the cell | append `None`, no call, no memo entry (as today) |
+| E2 | `str(value)` seen before with a success | append the memoized output, set `masked_any` |
+| E3 | `str(value)` seen before with a per-value error | append this row's own original object, emit a `RowError` for this row with the memoized reason |
+| E4 | first occurrence, `apply_code_set` returns | memoize, append, set `masked_any` |
+| E5 | first occurrence, `PlanCompileError` with a code in `_PER_VALUE_CODE_SET_ERRORS` | memoize the reason string, append the original object, emit the `RowError` |
+| E6 | first occurrence, any other exception (E4 single-row corpus, pin mismatch, lone-surrogate namespace, ...) | propagates unchanged, at the same row as today, because every earlier row had a non-fatal string form |
+| E7 | zero rows, or every cell missing | zero calls; existing assignment branches |
 
 ### Routes
 
 | Route | After |
 |---|---|
-| pandas full frame | `CodeSetHandler.run` calls `code_set_map` (S1) |
-| chunked oracle leg | same handler (S1) |
-| nested (`_nested_leaves`) | same handler (S1) |
-| sequential (non-key column) | same handler (S1). Not a native tenant: `execution/_sequential_native_ops.py` admits strategies through its own hand-written `_<strategy>_admit`/`_apply` pairs, not `OPERATORS` (V2-LOG, section 13) |
-| out-of-core | `code_set_map` with the Arrow front and one selector per batch (S1) |
-| unified slice | new `native_code_set` operator (S2a) |
-| chunked native step | same operator (S2b) |
+| pandas full frame | memoized handler (S1) |
+| chunked oracle leg | memoized handler per chunk; memo resets per call (S1) |
+| nested `_nested_leaves` | memoized handler (S1) |
+| sequential non-key column | memoized handler (S1) |
+| out-of-core | unchanged mapping; admission requires proved text (S2) |
+| unified slice, chunked native | not admitted today; unchanged (V2-LOG) |
 
 ### Codes
 
-Keep registered reasons. Unified admission can silently decline and return the oracle outcome. Direct chunked preflight raises for an unsupported source, FK key or `when:`. Test each public entry point. E10 uses the registered reason for a known failure and fixed unexpected-error text otherwise. Update the `no_native_operator` family if ROUTE-LABEL-TRUTH has landed.
+No new reason code. S2's refusal reuses `out_of_core_code_set_shape_unsupported` with a message that names the cause and the remedy (cast the column to text). The message carries table and column names only, no values.
 
-### FK shapes
+### FK shapes and `when:`
 
-- A code_set column on a table with any profile relationship: the unified slice declines the whole table (`execution/_unified_slice_admission.py:258`). The chunked route refuses a code_set FK key in both orientations (`reject_code_set_fk_keys`, `execution/_chunked_code_set.py:225`); that check stays where it is.
-- A code_set column that is not a key: no FK interaction.
-
-### `when:`
-
-`code_set` is not in `ADMITTED_WHEN_STRATEGIES` (`execution/native/_when_admission.py:45`), so a gated code_set column declines natively and runs on the oracle. The chunked route keeps `reject_code_set_when` (`execution/_chunked_code_set.py:186`).
-
-### Fields
-
-| Field | Values | Handling |
-|---|---|---|
-| `code_set` | a shipped corpus or an override path | `resolve_corpus_record`, pinned once per table |
-| `mode` | `mask`, `gen` | mask: this row; gen: unchanged per-row loop |
-| `chapter_preserve` | true, false | true: per-distinct selection with per-value errors (handler routes); native declines |
-| `namespace` | set or absent | absent uses `"code_set"`, as today |
-| `corpus_source_version` | set or absent | pin check unchanged |
+Unchanged. Out-of-core FK candidates with a non-key code_set payload are the case AT-3 runs. Gated code_set columns keep today's `run_with_when_gate` path.
 
 ### Output surfaces
 
 | Surface | Change |
 |---|---|
-| masked column | full-frame keys and values. Empty output is Arrow string. Nonempty all-missing output is Arrow null. See section 5.4 for chunk boundaries |
-| `row_errors` | same entries, same order, same value-free reasons |
-| raised messages | fixed text for selection, version, stat and read failures. Keep registered reasons and safe structural paths |
-| `quality_metrics["code_set_corpora"]` | safe evidence for each column with a successful mask. Compare by table and column across routes |
-| route evidence and run card | `arrow_python` on the native operator |
-| `docs/execution-backends.md` (`:77`, `:97`, `:203`, `:214-219`) | code_set rows name Arrow per distinct and the native operator; gen mode stays Python |
+| masked column, row_errors, raised errors, evidence | none on handler routes |
+| out-of-core route choice | numeric, null-typed, unknown-schema and metadata-reinterpreted code_set payloads now take the full-frame route (automatic) or refuse (forced) |
+| `docs/execution-backends.md` code_set rows | say "once per distinct value" for handler routes and name the out-of-core text requirement |
+| CHANGELOG | one line for the routing change |
 
-## 5. Design notes
+## 5. Design
 
-Keep selection in `transforms/code_set.py` and mapping in `kernel/_code_set.py`. Export both map entry points and their result from `kernel/__init__.py`. The handler, out-of-core adapter and native step import the facade. Kernel takes callables and has no dependency on execution or transforms. The layer contract permits same-tier imports (`.importlinter:21`). Guard all three imports and run AT-2 on all callers.
+Design notes: no new module, class, abstraction or route. Principles in play: one place per fact (the full-frame converter is the single definition of "what the oracle reads", and S2 asks it instead of restating its rules); single-purpose function (`pandas_text_columns`). Pattern: memoization of a pure function (section 2).
 
-### 5.1 The selector
+### 5.1 Handler memo (S1)
 
-Prepare `CodeSetSelector(config, *, corpus_record=None, mask_key: bytes, namespace=None)` once per build. Use one record-preparation operation in the transform. With no supplied record, resolve once under the caller's column file-access position. With a supplied record, check it against the current config with the existing version-pin validator. Return that exact object. Use this operation on both public scalar branches. In mask mode the selector owns preparation, so the scalar wrapper does not resolve or validate twice. Keep the scalar signature and mismatch checks (`transforms/code_set.py:312-332`).
+In `CodeSetHandler.run`, mask mode only, keep the loop `for i, value in enumerate(source)` and the `na_mask` check. Add two local dicts, `done: dict[str, str]` and `failed: dict[str, str]` (string form to output, string form to row-error reason). For a non-missing cell compute `key = str(value)`. On a hit in `done`, append the output and set `masked_any`. On a hit in `failed`, append `value` (this row's own object) and a `RowError` for row `i` with the stored reason. Otherwise run today's `try` block unchanged with `key` as the first argument, then record the result in `done` or the built reason string in `failed`.
 
-Store the record and chapter policy. Inside a single outer wiping try, store `OpaqueBox(derive(mask_key, namespace or "code_set", _KEYED_SALT))` and delete the input key on normal exit. Delete it on exceptional exit before re-raising. Include preparation in that protection. The mask branches of `_pick_mask` and `_apply_chapter_preserve` pass the box to `_pick_from_seq`. Call `hmac_hex(hmac_key.open()[0], key_value)` there. Keep the prefix, modulus, hole position and UTF-8 replacement behavior. Keep `_pick_gen` and its row-index draw in place.
+Keep the two `exc.code` expressions and the reason f-string verbatim inside `run` (F29 inventory keys are file, function and expression; expected delta zero). Gen mode keeps the current loop untouched, since its output depends on `row_index`. The dicts are locals of one `run` call, so no state outlives the column. They hold string forms and output codes, never key material, so the secret-material census is unaffected.
 
-Give E4 and both E5 failures fixed advice. Keep the structural path and registered reason. Remove chapter and code literals. Apply the same rule in the loader. Pin mismatch omits both version strings. Stat and Parquet read errors omit raw exception text. Raise translated errors after leaving the handler. Preserve file-access policy, resource-error classification and handle cleanup. Use the policy-approved path display with URL credentials removed. Remove value interpolation from malformed version-pin and provenance-stamp diagnostics too. See `transforms/_codeset_loader.py:290-296`, `:337-349` and `:459-466`.
+Cost model after S1: `rows x (iteration + isna + str + dict lookup, about 0.3 us) + distinct x (today's 21 us)`.
 
-### 5.2 Mapping
+### 5.2 Out-of-core admission (S2)
 
-`code_set_map(values, select, *, on_error=None)` returns a `CodeSetMapResult` with an Arrow string array `out` and an optional nullable string array `row_codes`. The callback returns the exact registered E5 code for a handled failure. A null return means re-raise. Without a callback all failures escape the map.
+One helper, `pandas_text_columns(sources) -> frozenset[tuple[str, str]]`, in `execution/out_of_core/_preflight.py`. For each source with a schema: build `schema.empty_table()` and convert it with `to_pandas_fk_safe(empty, ())`, inside a `try` that treats any exception as "nothing proved for this table". If the frame's column labels differ from the schema names, prove nothing for that table. Otherwise include `(table, column)` when `is_text(field.type)` and the frame dtype is `object`, a pandas `StringDtype`, or an `ArrowDtype` over string or large_string. The empty conversion runs the same metadata reconstruction as full-frame ingestion (`execution/_pandas_adapter.py:204-206`), so a column whose metadata re-types it (the `double[pyarrow]` case) is not proved. It reads no rows.
 
-Combine a chunked array first, including the zero-chunk case. Dictionary-encode text directly. Use one selection loop over distinct keys in first-occurrence order. On success store the mapped value and a null reason. On handled failure store a null output and its code. Expand both with `pc.take` on the same indices. A source null yields two nulls. Keep exceptions out of the result. The E9 entry point `code_set_map_strings` builds indices with a Python dict and calls the same loop. Discard the conversion exception before selection. Only mapped values and reasons need to fit in Arrow there. If low-level callers pass a non-text Arrow array, keep the existing scalar coercion for that helper. Job routing must exclude that branch before streaming.
+`check_out_of_core_compatibility` (`execution/out_of_core/_compat.py:174`) and `out_of_core_admission` (`execution/_pipeline_routing_signals.py:57`) take a new keyword `pandas_text: frozenset[tuple[str, str]] | None = None`. `_group_c_conditional_rejection` receives it. For a mask-mode code_set node without `chapter_preserve`, it rejects with the existing code unless every node column is in `pandas_text`. `None` proves nothing, so it rejects too.
 
-At out-of-core routing and direct preflight, require a known string or large_string source type for every code_set payload. Pass source types into the Group C compatibility check. Use the existing `is_text` predicate for the string/large_string domain in both the chunked and out-of-core checks. Reuse the existing out-of-core shape refusal. Unknown and non-text schemas decline before streaming. Automatic routing can then ingest the whole table through the oracle. Forced preflight refuses before scratch or sink writes. Both consult the same decision (`execution/out_of_core/_preflight.py:71-85`). Keep the low-level guard. Batch-local coercion cannot reproduce whole-frame ingestion.
+The compat check has exactly two production callers on main, and both pass the helper's result: the runner preflight (`_preflight.py:77`) and routing (`_pipeline_routing_signals.py:83`, fed from its source loop at `:267-269`). Choke point: `_group_c_conditional_rejection` is the only place code_set admission is decided, and its default (`None`) rejects, so a new caller that forgets the facts gets a refusal, not a silent admit. Guard: AT-3 `pandas_text=None` case. Mutation: M5. Forced out-of-core raises from preflight, which runs before the caller creates a temp root, so no scratch or sink write happens.
 
-Use the table's pinned record in each batch selector. A standalone call without a record resolves once at preparation. Return the map's output. For E8 raise the existing fixed error after leaving the handler. Preserve genuine corpus failures. Move the existing E5 set and its classifier to the public transform module. Return a code only for a PlanCompileError whose code belongs to that set. The handler and E8 guard share it. Keep the gen loop's existing reason text and use one handler builder for both gen and expanded mask row errors.
+Size: `_compat.py` is 585 lines with a 600 ceiling. If the change would cross 600, move `_group_c_conditional_rejection` into `execution/out_of_core/_mask_group_c.py` (544 lines) beside `preflight_group_c`, after checking for an import cycle. Do not raise a ceiling. `_pipeline_routing_signals.py` is 613 with ceiling 633; the change there is about +3 lines.
 
-### 5.3 Handler
+## 6. Placement, size and pinned surfaces
 
-1. Pin under the existing context key, including `nested_outer_column`. Prepare the selector even for empty and all-missing input. Retain this record for evidence and repeat invocations.
-2. Compute `source.isna()` first. For an Arrow-backed text Series with the same validity mask, pass its underlying Arrow array to the map. Otherwise iterate the original Series by position. Append a null key for each missing position. For every other cell use Python `str(value)`. Deduplicate those strings. This preserves pandas Timestamp and nullable-number spellings.
-3. Try `pa.array(keys, type=pa.string())`. On Unicode or Arrow conversion failure, leave the exception handler before calling the E9 fallback. Catch only conversion failures here.
-4. For chapter preservation supply the E5 classifier. Walk results in source order. Append Python `None` at missing positions. At failed positions append the original object, even if it is non-string. Emit one `RowError` with the original column, positional index, trigger and `code_set could not mask this value (<code>)`. Otherwise append the mapped string and set `masked_any`.
-5. Assign the completed list directly for every nonempty result. For zero rows assign an explicit pandas string array. Keep the gen loop and quarantine behavior. See `execution/_strategies/_code_set.py:202-239` and `:272-282`.
-
-### 5.4 Native operator
-
-Register `native_code_set` as a kernel-shaped `arrow_python` operator. It needs no companion or positive compiled-kernel evidence. Declare string and large_string resident types, `string_on_empty` assembly and `reduce_row_error:mask_error`. Admission excludes both E5 conditions through the chapter gate. The diagnostic subset check is at `execution/_unified_slice_admission.py:479`.
-
-**Admission.** Use one non-raising code_set predicate with a provider-config mapping as its only input. The native wrapper takes the column name to format the rejection. Keep the existing column-entry signature of `code_set_conditional_failures` as a thin adapter. Move its actual mode and chapter tests to the transform predicate, which accepts provider config. Native dispatch passes `cfg` to that predicate, and the chunked adapter passes `col_entry.get("provider_config") or {}`. Wire both `_requirements._config_gate_rejection` and `_plan._config_rejection` to it. Adapt the existing out-of-core mode and chapter checks to the same predicate. The owning transform exposes the config-shape check for route callers, so out-of-core has no dependency on native dispatch. Keep FK and predicate gates at their route boundaries. The chunked source-type list in `execution/native/_real_type_admission.py:59-67` is route-specific.
-
-For a populated code_set target only, allow the cheap unified round trip from resident large_string to string when widening the reconstruction back proves identical values and nulls. Keep exact comparison on other columns and reject any changed value. Then apply the resident-type check (`execution/_unified_slice_admission.py:374-400`). S2a puts code_set in `CHUNKED_ROUTE_VETOED_STRATEGIES`. The dispatcher consults it before native binding (`execution/native/_dispatch.py:300-306`). Remove it only with the S2b wiring and tests.
-
-**Binding and pinning.** Static `resolve_operator_params` at `execution/physical/_shadow_bindings.py:381-387` builds only a config descriptor with the effective namespace (`namespace or "code_set"`). Static compilation, explain and hashing perform no corpus I/O and serialize no rows. After resident admission succeeds, call `resolve_pinned_code_set_records` for the admitted table. It resolves each column under `fileaccess.at_position` (`execution/_chunked_code_set.py:283-296`). Pass this mapping on the runtime `ShadowContext`, keyed by (table, column). The batch runner passes the node identity to `run_operator`. Its `_bound_params` combines the descriptor with the exact record from this mapping before `run_kernel_step`. A missing runtime pin is fatal. Test identity at the executing step and evidence builder, including the synthesized empty batch. Use the same mapping for evidence. At the shared step prepare the selector from the bound config, record and existing mask-key parameter. Call the map without a recovery callback. Return `StepResult(out, None)` for Arrow Python work. Keep the physical plan immutable. The runner synthesizes one empty batch (`execution/physical/_shadow_batch_runner.py:98`). Pin before running it. Runtime coordinator callers executing this binding also prepare the pins before their first batch.
-
-**Errors.** Use one typed fatal path for native code_set preparation and execution. In the shared step, protect the selector build and map, including empty inputs. In unified execution also protect post-admission resolution and runtime binding. Classify caught failures through the registered reason adapter. Create a fresh safe public error with the registered code and summary and a trusted structural path. Unknown exceptions get the fixed unexpected-error reason. Preserve the public corpus error class and code for ordinary domain failures, including E4 and bad pins. A runtime-only marker defined at the execution error boundary carries the sanitized error past the retry boundary. Raise after leaving the catch. Recognize the marker before the generic reroute in `execution/_unified_slice.py:362-377`. Raise its safe error outside the catch. The chunked entry delivers the same error and aborts. For already scrubbed file-policy and resource errors, preserve their required class and bypass retry as well. Propagate process interrupts normally. Never attach the caught exception or retry the oracle on this path.
-
-**Assembly.** Both the physical assembler and final pandas overlay read the operator's assembly policy. In full-frame results a zero-row output gets pandas StringDtype before the final Arrow conversion. A nonempty all-missing output gets a list of Python None and becomes Arrow null. Compare final Arrow tables with `schema.equals(..., check_metadata=True)` as well as value equality (`execution/_unified_slice_evidence.py:203-225`).
-
-**Chunked execution.** S2b gives `resolve_params_by_column` the existing preflight `state.code_set_records` and binds each column once before iteration. Use the same record for every chunk and evidence entry. In the native raw-chunk guard call `reject_unsafe_code_set_chunk_schema` on every chunk, including the first, before `cast_null_columns` or masking. The oracle already does this. A refusal cannot yield the offending chunk or commit staged output.
-
-Keep code_set out of the fixed-string pin set. Define the Arrow empty/all-null transformation once beside the mapping operation and export it through the kernel facade. Apply it by registry policy in full-frame assembly and before per-chunk writeback. Keep the pandas StringDtype overlay at the pandas boundary. Apply the same degenerate-output policy to each completed native chunk before either yield path. A present zero-row chunk gives string, a nonempty all-null chunk gives null and a populated chunk gives string. The legacy iterator yields these types directly. The normalized iterator strips schema metadata and keeps these field types on both legs. The existing join or streamed resolver promotes a leading null field when later text arrives. A wholly null table stays null (`execution/_chunked.py:529-585`). An empty iterable yields no chunks after preflight. Reconcile a full frame only after combining all its native batch outputs.
-
-Update the operator snapshot and list the derived tables that changed. Keep the S2a veto visible in chunked route evidence until S2b.
-
-### 5.5 Evidence
-
-One helper, `code_set_evidence_entry(code_cfg, record, *, table, column) -> dict`, in `execution/_chunked_code_set.py`: `{**describe_loaded_corpus(code_cfg, record=record), "table": table, "column": column}`. Callers:
-
-- the handler, when `masked_any` (replaces its inline dict);
-- the out-of-core stamp (`execution/out_of_core/_stream_driver_support.py:181`, replaces its inline dict);
-- the unified slice: for each admitted code_set node whose source column has a non-null value, it adds the entry to `quality_metrics["code_set_corpora"]` (built at `execution/_unified_slice.py:309-350`). For the admitted shape every non-null value is masked, so "has a non-null value" is exactly the handler's `masked_any`;
-- the chunked native step: per chunk, the same rule, written into the chunk `ExecutionResult.quality_metrics`, then folded by the existing aggregators (`aggregate_chunk_code_set_corpora`; `fold_corpora` at `execution/_chunked_output_sink.py:200`). No third aggregator.
-
-Compare evidence by (table, column) across routes. Require one entry per key and exact field equality. Preserve each route's current order, including first observation in chunk aggregators. Omit the metrics key when no column masks.
-
-Sanitize once at the public provenance projection used by `describe_loaded_corpus`. Use it for every exported evidence string derived from metadata, including free-form source, license and version. Have the metrics builder and provenance JSON exporter call this same projection. Keep their existing field sets. Keep safe identifiers and counts. Strip URL userinfo, signed query parameters and fragments, including URLs embedded in free text. Omit unsafe text when parsing is ambiguous. Keep the original version inside the record for pin validation. Guard the returned metrics and serialized evidence with credential canaries.
-
-### 5.6 Public signatures
-
-Keep the public scalar signature. Export the supported mapping interface from the kernel facade. Keep selection internals private. For an in-scope signature break the release sentry requires a `Breaking:` fragment naming the affected object and parameter (`tests/sentry/release/test_public_signatures.py:338-353`).
-
-### 5.7 Sibling plans
-
-FPE-CHECKSUM-NATIVE, BUCKET-TOPCODE-NATIVE and TEXT-REDACT-RUST-SPLICE share registry, step or snapshot edits. Recount on the merged head and rerun snapshots and mutations. At the anchor, 22 lines separate `_requirements.py` from its ceiling. Headroom after sibling merges is an estimate. This row adds no Rust or companion ABI change.
-
-
-## 6. Placement
-
-### 6.1 Files
-
-No new production module. At the source anchor the direct module counts are 55 in `execution/native`, 28 in `execution/_strategies`, 103 in `execution` and 24 in `transforms`. Use existing test directories. New test placement follows the CODEMAP rows below.
-
-| New test | CODEMAP row | Existing neighbor |
-|---|---|---|
-| `tests/unit/transforms/test_code_set_selector.py` | Transforms, line 278 | `test_code_set.py` |
-| `tests/unit/kernel/test_code_set_map.py` | Arrow kernels, line 277 | `test_kernel_contracts.py` |
-| `tests/unit/execution/native/test_native_code_set.py` | Native companion bridge, line 273 | `test_admission_descriptor_parity.py` |
+No new file. Public names added: none. Private names added: `pandas_text_columns`, keyword `pandas_text`.
 
 | File | Lines now | Ceiling | Slice and change |
 |---|---|---|---|
-| `transforms/code_set.py` | 569 | 600 | S1: config-aware selector, shared preparation and fixed E4/E5 text. Consolidate existing code to fit. Keep gen helpers here |
-| `kernel/__init__.py` | existing | 600 | S1: export map, fallback and result. S2a: export degenerate Arrow assembly beside them |
-| `transforms/_codeset_loader.py`, `transforms/_codeset_config_checks.py`, `transforms/_codeset_provenance.py` | existing | current pins | S1: fixed loader and validation errors, safe provenance projection |
-| `execution/out_of_core/_compat.py` | 585 | 600 | S1: schema-aware Group C decision shared by route choice and preflight |
-| `execution/native/_plan.py` | 420 | 600 | S2a: eligibility uses the compiler's code_set predicate |
-| `execution/_unified_slice_admission.py`, `execution/_unified_slice_evidence.py` | existing | current pins | S2a: prove text-width parity, reconstruct final dtype and evidence |
-| `execution/physical/_shadow_bindings.py`, `_shadow_context.py`, `_shadow_batch_runner.py` in the same package | existing | current pins | S2a: static descriptor, runtime mapping, pass the table and column into binding |
-| `execution/_errors.py` | existing | current pin | S2a: shared native fatal boundary and safe public error |
-| `kernel/_code_set.py` | 44 | 600 | S1: Arrow front, reason array, fallback and shared selection loop. S2a: shared output assembly |
-| `execution/_strategies/_code_set.py` | 283 | 600 | S1: handler body, shared classifier and row-error builder |
-| `execution/out_of_core/_mask_group_c.py` | 544 | 600 | S1: selector in place of `_select` (net about -5) |
-| `execution/out_of_core/_stream_driver_support.py` | 264 | 600 | S1: evidence helper call (net about 0) |
-| `execution/_chunked_code_set.py` | 315 | 600 | S1: `code_set_evidence_entry` (about +12) |
-| `execution/_operator_registry.py` | 312 | 600 | S2a: spec and `AssemblyShape` literal (about +14) |
-| `execution/physical/_shadow_assembly.py` | 161 | 600 | S2a: `string_on_empty` branch (about +5) |
-| `execution/native/_operator_config_rejections.py` | 324 | 600 | S2a: `code_set_config_rejection` (about +12) |
-| `execution/native/_requirements.py` | 655 | 677 (dense entry) | S2a: config dispatch and explicit chunked veto. S2b removes the veto |
-| `execution/native/_operator_params.py` | 358 | 600 | S2a: `CodeSetParams`, pinned-record parameter (about +25) |
-| `execution/native/_operator_step.py` | 569 | 600 | S2a: one branch (about +11) |
-| `execution/physical/_shadow_operators.py` | 437 | 600 | S2a: one `_bound_params` branch (about +6) |
-| `execution/_unified_slice.py` | 473 | 600 | S2a: pin after admission, pass runtime context, stamp evidence, bypass retry for protected failures |
-| `execution/native/_chunked_entry.py` | 688 | 689 | S2b: first move `_native_chunk_result` into `_chunked_evidence.py`. Then bind preflight records, check raw schemas and handle fatal errors during iteration |
-| `execution/native/_chunked_evidence.py` | 292 | 600 | S2b: receives `_native_chunk_result`, merges `code_set_corpora` (about +50) |
-| `execution/native/_chunk_masking.py` | 447 | 600 | S2b: pinned params for the chunked step, per-chunk evidence rule (about +15) |
-| `execution/native/_chunked_schema_rule.py` | 363 | 600 | S2b: verify existing normalization and keep code_set outside the fixed-string set |
-| `tests/native/test_operator_tables_snapshot.py` | - | - | S2a: snapshot literals |
-| `docs/execution-backends.md` | - | - | S2a: route table rows |
+| `execution/_strategies/_code_set.py` | 283 | 600 | S1: memo in the mask loop, about +20 |
+| `execution/out_of_core/_preflight.py` | 94 | 600 | S2: `pandas_text_columns`, pass it to compat, about +30 |
+| `execution/out_of_core/_compat.py` | 585 | 600 | S2: keyword and code_set check, about +12; move per 5.2 if needed |
+| `execution/_pipeline_routing_signals.py` | 613 | 633 | S2: pass the facts, about +3 |
+| `docs/execution-backends.md`, `CHANGELOG` | - | - | S1 and S2 wording |
 
-### 6.2 Pinned surfaces: what moves and what does not
+Tests go in existing test files beside the current code_set strategy tests (AT-1, AT-2), `tests/parity/test_out_of_core_group_c_parity.py` and `tests/parity/test_ooc_code_set_arrow.py` (AT-3), and the `tests/perf/` throughput file (AT-4). Witnesses to recheck in S2: `tests/unit/execution/test_out_of_core_public_api.py` and any test that admits a code_set out-of-core node with a non-text or unknown source. Update only those that assert the old admission, and keep their value assertions.
 
-| Surface | Delta | How |
-|---|---|---|
-| Secret-material census | one rehome and two removals | Move `_pick_from_seq::mask_key` to `CodeSetSelector.__init__::mask_key`. Declare the full donor key in `moved_from`. The donor must be lost, uniquely claimed, have the same bound name and have no numeric max. Remove every binding and read of `mask_key` in the donor. An annotation change is insufficient. Drop `_pick_mask::mask_key` and `_code_set_array._select::job_seed`. Keep the outer batch, scalar, chapter, gen and step key sites. See `tests/sentry/ratchet/_rehome.py:60-114` |
-| Census files | refresh each slice | Run `scripts/secret_material_census.py --write`. New identities start unreviewed. Inspect the wiping try and set the new row to `wiped` explicitly. Review live line changes, including `run_kernel_step::mask_key`, after S1, S2a and S2b. Adjust the ratchet only for the rehome and removals |
-| Draw catalogue | metadata and two digests | Keep the `hmac_hex(` token in `_pick_from_seq` and the gen draw in its current file. Correct the operation, derivation and per-distinct mask notes in `execution/native/_draw_sites_mask.py:186-202`. Review and re-pin the entry and whole-catalogue digests. Output goldens keep their bytes |
-| F29 reason inventory | inspect live identities separately from fixture keys | The ratchet reads the fixture by file, function and expression. Message edits do not change those keys. The builder scans live source. The unchanged gen loop retains `CodeSetHandler.run::exc.code`. Shared classification replaces the out-of-core direct read and adds the classifier read. Native error projection reads the registered reason. Review the live scan diff for each slice. F29 consumers have no rehome exemption. Refresh only the affected inventory entries after comparing live scans on both heads. Section 13 covers the required new consumer keys |
-| Module size | shrink when required | Recount the first S2b move on that commit. Below 649 lines the 689 pin is stale. Lower the size entry and corresponding baseline under the existing headroom rule. Keep later wiring within the new ceiling |
-| Package fan-out | no production growth | reuse existing modules |
-| Operator snapshot and route witnesses | reviewed behavior changes | Update literals on the slice that changes them. Keep output bytes, mismatch and refusal assertions |
-
-Retarget the provider golden to the boxed-key helper. Move out-of-core selection counts, injected-error and handler file-swap spies to the real selector. Retain the independent reference. Update Phase D's sequential and chunked matrix, backend classification, eligibility and auto-chunk expectations. S2a expects the temporary chunked veto. S2b expects Arrow Python work. Keep distinct-call counts and all current refusal cases. Update assertions that previously required a leaked version string to require its absence and the same error code.
-
-Witness files include `tests/native/test_determinism_goldens.py`, `tests/parity/test_ooc_code_set_arrow.py`, `tests/unit/execution/test_code_set_strategy.py`, `tests/parity/test_phase_d_audit_no_legacy.py`, `tests/parity/_d_audit_matrix.py`, `tests/native/test_native_plan_config_aware.py` and `tests/unit/execution/_auto_chunk_strategies.py`.
+Pinned surfaces: secret-material census, draw-site catalogue, F29 reason inventory, reason registry, module size, package fan-out and operator snapshot all have zero planned delta. A builder who sees a nonzero delta in any of them stops and reports. No baseline, census or allowlist refresh is part of this plan.
 
 ## 7. Defect classes
 
-### 7.1 Plan-contract classes
-
-| # | Class | Where it applies | Structure that closes it | Proof | Mutation that must turn it red |
+| # | Class | Where | Structure that closes it | Proof | Mutation |
 |---|---|---|---|---|---|
-| 1 | Value-bearing output | `RowError` reasons, E4 and E5 messages, conversion errors | reasons carry the code only; selection and loader messages use fixed advice, evidence strips credentials; the E9 fallback binds no exception | AT-5 | M7, M8 |
-| 2 | Cleanup missing on an exit path | loader handles and key parameters | preserve close and wipe paths | AT-5 and census | remove the exceptional wipe |
-| 3 | State and concurrency | the hoisted key and the pinned record are per selector build and per table | selector built once per handler call, batch or step; record pinned before the first chunk | AT-3, AT-9 | M5 |
-| 4 | Route parity and silent fallback | seven routes | one `code_set_map` and one selector on all of them; route-specific refusal and activation witnesses | AT-1, AT-6, AT-7 | M2 |
-| 5 | Referential integrity | code_set on an FK key | unified slice declines any table with relationships; chunked keeps its two-orientation refusal | AT-7 | drop the relationships decline for a code_set table (AT-7 red) |
-| 6 | Untrusted producer | an override corpus file | existing schema and version checks; unchanged | existing corpus tests | n/a |
-| 7 | Check then use | the corpus file | the record is read once and pinned; the selector never reopens the file | AT-3, AT-9 | M5 |
-| 8 | Weak tests | value parity alone can pass before the change | AT-2 (no `to_pylist`, one derive per build) and AT-8 (speed) carry the fail-before | AT-2, AT-8 | M4 |
-| 9 | Refactor drift | the key now travels boxed | golden outputs captured before S1, plus the protocol provider as a second oracle | AT-1 | M1 |
-| 10 | Frozen contract drift | the compatibility contract freezes code_set output | freeze pandas output and correct unsafe stream selection | AT-1 | M1 |
-| 11 | Silent route claim | `routed_diagnostics` on the native operator | the safe fatal marker bypasses unified retry | AT-7 | M9 |
-| 12 | Evidence loss | native routes | one evidence helper, existing aggregators | AT-6 | M6 |
+| 1 | Route parity, two interpretations of one value | out-of-core vs full frame | admit only columns the full-frame converter proves are text | AT-3 | M4, M5 |
+| 2 | Memo key wider than the function input | handler | key is `str(value)`, the exact first argument | AT-1 | M1 |
+| 3 | Memo keeps row-specific data | failed rows | memo stores only the reason; the row's own object and index are used | AT-1 | M2 |
+| 4 | State outliving its scope | memo dicts | locals of one `run` call | AT-1 | M3 |
+| 5 | Error precedence change | fatal and per-value errors | first occurrence calls the unchanged scalar function in row order | AT-2 | M7 |
+| 6 | Weak test (value parity passes before the change) | speed | call counts and the perf ratio carry fail-before | AT-2, AT-4 | M7 |
+| 7 | Silent mid-run abort | forced out-of-core | refusal in preflight, before temp root | AT-3 | M5 |
+| 8 | Gen-mode drift | gen loop | memo only in mask mode | AT-1 | M6 |
 
-### 7.2 Recurring-defect catalog (dev-rules)
-
-| # | Class | Applies | Guard |
-|---|---|---|---|
-| 1 | Anchored validation | no new anchored validation grammar | - |
-| 2 | Strict wire and stored types | no new persisted model | - |
-| 3 | No exception context | yes: selector errors, the kernel's `on_error` loop and the E9 fallback must not keep the key or value | AT-5 (d) |
-| 4 | Versioned read models | the corpus `source_version` pin, unchanged | existing tests |
-| 5 | Normalized guard scanners | no new scanner | - |
-| 6 | No reaching into private modules | all three execution callers import the kernel facade and the public transform selector | review |
-| 7 | No hidden CI failures | AT-8 is under the `perf` marker, which runs in the default gate (`pyproject.toml:435`), so it uses a ratio, not an absolute time | AT-8 |
-| 8 | One input, one trust class | no | - |
-| 9 | Mutations on the final head | yes | M1 to M9 on the final head, head recorded |
-| 10 | Allowlisted helpers are still checked | census rehome and draw-site resolution | section 6.2; census and draw-site sentries in T2 |
-| 11 | No raised caps | module size, fan-out freezes | section 6.1: ratchet down stale pins |
+Recurring-defect catalog: no new validation grammar, persisted type, scanner or raised cap. No exception context is added (the memo stores strings). No value text is added to any log or message. Mutations run on the final head of each slice, head recorded.
 
 ## 8. Acceptance tests
 
 | ID | Test | Fail-before | Slice |
 |---|---|---|---|
-| AT-1 | Golden parity: outputs of today's per-row oracle, captured on the S1 base head before the change, for icd10 and one more shipped corpus: values in and out of corpus; `None`, `NaN` and `pd.NA` in one object column; `1`, `1.0`, `True` and `"1"` in one object column; a float column; an Int64 column with `pd.NA`; a boolean extension column; a category column; a datetime64 column (pins `str(Timestamp)`); a non-empty all-null object column (no evidence entry); a zero-row frame; a zero-chunk `ChunkedArray` on `code_set_map`; a lone-surrogate cell (in-memory DataFrame only); the nested `_nested_leaves` route; `chapter_preserve` true and false; two namespaces and the absent namespace. Include NaT and failed non-string objects. Check Python None at missing positions before assignment and observable scalars, identity where pandas preserves it, inferred dtype and returned Arrow schema after assignment. Choose a fixed seed and corpus with distinct goldens for 1, 1.0 and True. Every handler route gives the same values and pandas dtype. The selector also agrees with `CodeSetKeyedSelectProvider` on every string input in the golden suite. Check fatal and recoverable cases against the scalar oracle separately. Run a real automatic out-of-core FK candidate with a non-key ICD-10 payload in int64 batches [1] then [null, 2]. Assert fallback before streaming and exact equality with the whole-frame result at all three positions. Force direct streaming on the same source and assert pre-stream refusal. Include an admitted text control | numeric streaming disagrees today | S1 |
-| AT-2 | Spy separately on derive and select for each handler call, out-of-core batch and native step. Require one derive per build and exactly one select per distinct non-null string, including repeats, all-null input and the E9 fallback. Spy on source materialization before encoding for both text widths. Dictionary and result reads after encoding are allowed | per-row derive today | S1, S2a, S2b |
-| AT-3 | Keep scalar and out-of-core supplied-record mismatch tests. Bind a record from another release and assert the existing mismatch code before selection. With no supplied record count one resolution per column per run, or one per standalone batch call. Swap to a disjoint replacement corpus between handler draws and between chunked oracle chunks. Assert original outputs, record identity and evidence | existing pin and swap guards | S1 |
-| AT-4 | Interleave an absent chapter and a sole-member bucket, repeat both, and include a missing row and a successful mask. Compare every RowError to the base handler, including exact index, column, trigger, reason and order. Check original failed objects, None normalization, pandas dtype, successful output and evidence. Repeat without a success and require no evidence | guards loss of reason or position | S1 |
-| AT-5 | (a) E4 on a one-row customer corpus omits the planted corpus code and input from str(exc). (b) Both E5 reasons omit input and chapter. (c) Check RowError.reason and public diagnostics. (d) Assert empty cause and context on E4, E5, the E8 translation and translated reader errors. Use a surrogate plus a separate E4-triggering member so conversion fails first. Verify tracked key parameters are wiped on failure. (e) Plant version, reader and stat canaries. Assert the same registered codes, structural paths and fixed advice, with no canary in str(exc) or returned diagnostics. (f) Put credentials in URL-valued and free-form provenance. Inspect the returned result and serialized metrics. Safe identifiers and counts survive, credentials do not | selector and loader text and public evidence expose canaries today | S1 |
-| AT-6 | Run flag-on and flag-off. Check actual unified activation or chunked native execution, arrow_python, AT-1 values and exact returned schemas. Include populated metadata-free large_string, a wholly null nonempty typed string table, a zero-row table and a leading all-null chunk followed by populated rows. Cover both normalized legs and the legacy iterator. Compare final full-frame pandas metadata and route-specific chunk types from section 5.4. With a valid zero-row corpus require unified activation. Assert one evidence entry per masked (table, column) with exact fields when B masks in the first chunk and A only later. Require absence of the key when neither masks | no operator today | S2a, S2b |
-| AT-7 | Run the route and fatal cases below. Assert admission, oracle outcomes and publication at each public entry | no native guard today | S2a, S2b |
-| AT-8 | Speed, `perf`: 200,000 rows, 5,000 distinct codes, object column, through `CodeSetHandler.run` end to end; at least 20x faster than the per-row oracle on the same sample in the same process. S1 records the measured ratio and the Dell per-row number in the PR | about 1x today | S1 |
-| AT-9 | S2b repeats AT-3 during native streaming. Count one record resolution per configured column before iteration. Swap in a disjoint release between chunks. Check native activation, outputs and evidence from the original record. Keep supplied-record mismatch and empty-input failures | no native step today | S2b |
+| AT-1 | Golden parity against the base handler, captured on the S1 base head. One object column with `"1"`, `1`, `1.0`, `True`, `None`, `NaN`, `pd.NA`, a lone-surrogate string, and repeats of each; a float column; Int64 with NA; boolean extension; category; datetime64 with NaT; non-empty all-null; zero rows; shipped `icd10` plus one more shipped corpus; namespaces `cs`, another, and absent; `chapter_preserve` false and true, with an absent chapter and a sole-member bucket interleaved and repeated, plus a missing row and a success. Compare outputs, the full `RowError` list (index, column, trigger, reason, order), the original failed object per row, evidence in `ctx.code_set_corpora`, pandas dtype and `pa.Table.from_pandas` schema. Run under default pandas options, `mode.string_storage="pyarrow"` and `future.infer_string=True`. Run on the full-frame, chunked oracle (two chunks that split repeats), nested and sequential entries. Gen mode: same columns, output equal to base | memo bugs (M1, M2, M3, M6) | S1 |
+| AT-2 | Spy on `apply_code_set` inside the handler. Mask mode: exactly one call per distinct `str(value)` of non-missing cells, in first-occurrence order; zero calls for zero rows and for all-missing input. A column whose first non-null value triggers E4 raises the same exception class, code and message as base at the same call. A column with E5 values before an E4 value records the same row errors as base before raising. A lone-surrogate namespace: all-missing input succeeds with zero calls (as base); non-missing input raises the same exception as base. Gen mode: one call per non-missing row (unchanged) | one call per row today | S1 |
+| AT-3 | Out-of-core admission. Sources: (a) int64 batches `[1]` then `[null, 2]` (the section 1 witness); (b) Codex reproduction: string column `["1", null]` with pandas metadata `double[pyarrow]`; (c) null-typed column; (d) metadata that renames the column label; (e) metadata-free string and large_string; (f) string with pandas metadata for `object` and for `string`. For (a) to (d), in a real automatic out-of-core FK candidate job with a non-key code_set payload, assert the route declines before streaming (route evidence names `out_of_core_code_set_shape_unsupported`) and output equals the full-frame result at every position; with forced out-of-core assert the coded refusal and no temp root, scratch or sink file. For (e) and (f), assert out-of-core runs and output equals the full-frame result, under default options and `future.infer_string=True`. A direct `check_out_of_core_compatibility` call with `pandas_text=None` rejects code_set and still admits a plan without code_set | (a) and (b) stream today with different output | S2 |
+| AT-4 | `perf` marker: 200,000 rows, 2,000 distinct codes, object column, `CodeSetHandler.run` end to end, mask mode, base loop and memo in the same process on the same sample. Require a ratio of at least 15x (ratio only, as the default gate runs `perf`). The PR records the measured ratio and the Dell numbers | about 1x today | S1 |
 
-AT-1 has a reproducible scalar witness at the source anchor. Use shipped ICD-10, namespace `cs` and the test mask key `bytes([17]) * 8`. The old Arrow path returns `[R10.9, None, M17.11]`. The full-frame keys give `[L89.90, None, I10]`. With the same key, the distinct strings `"1"`, `"1.0"` and `"True"` select `R10.9`, `L89.90` and `S52.501A`. Inject the same resolved mask key at the route boundary or capture the full-frame golden for the route's own resolved key.
-
-AT-7 cases:
-
-- Compare the public eligibility query and compiler with defaults, gen alone, chapter preservation alone and both flags. Require the same config decision and explanation. For unified refusal on mode, chapter, source type (including pa.null()), `when:` or relationships, require no activation and the oracle outcome. Check both FK orientations.
-- Direct chunked preflight must raise `chunked_code_set_when_not_supported`, `chunked_code_set_fk_key_unsupported` or `chunked_code_set_source_dtype_unsupported` for the corresponding case. For direct gen or chapter rejection, pin the existing config-compatibility failure. On S2b also try a good text chunk followed by a null-typed or numeric chunk. Check the same code before casting. A manual iterator can yield the earlier good chunk. Require no offending yield and no committed table or output file in a publishing job.
-- On the same supported config S2a must activate unified execution and finish chunked execution through the oracle with the veto recorded. S2b must activate both routes. Static compile and plan inspection perform zero corpus opens. For good and bad zero-row corpora run the public job with activation on and off. Assert matching final schema or the oracle's exact error code. Prove the good unified step ran and the bad admitted job never retried.
-- Inject a per-value PlanCompileError containing a data canary only inside native execution. Repeat with an unexpected exception containing a canary. Leave the oracle healthy and count oracle calls. For unified S2a and chunked S2b assert public job failure, zero retries, zero published outputs and no canary in str(exc), job-visible logs, evidence or notifications. Exercise failure after earlier staged work too.
+Existing code_set tests (pin, swap, mismatch, evidence, quarantine, `when:` preflight) stay green unchanged in S1.
 
 ## 9. Named mutations
 
 | ID | Mutation | Must turn red |
 |---|---|---|
-| M1 | `hole_resolve` uses `idx > position` instead of `idx < position` | AT-1 |
-| M2 | deduplicate the S1 handler objects before stringification so 1, 1.0 and True collide | AT-1 |
-| M3 | keep only the first failed position or use one E5 reason for both kinds | AT-4 |
-| M4 | the handler calls `to_pylist` before encoding | AT-2 |
-| M5 | resolve again after the disjoint file swap | AT-3, AT-9 |
-| M6 | native routes drop the evidence helper call | AT-6 |
-| M7 | put `{value!r}` back into the E4 message | AT-5 (a) |
-| M8 | bind the E9 conversion exception and run the fallback inside the `except` block | AT-5 (d) |
-| M9 | pass a handler callback that consumes the injected native E5, or let the unified catch retry the healthy oracle | AT-7, on the applicable native route |
+| M1 | key the memo by the raw object instead of `str(value)` | AT-1 (`1`, `1.0`, `True` collide) |
+| M2 | memoize the first failed row's object and reuse it for later rows | AT-1 |
+| M3 | lift the memo to module scope | AT-1 (namespace and corpus cases) |
+| M4 | S2 helper checks only the Arrow type, not the converted dtype | AT-3 (b) |
+| M5 | treat `pandas_text=None` or a missing column as proved | AT-3 (`None` case) |
+| M6 | apply the memo in gen mode | AT-1 gen case |
+| M7 | remove the memo hit path (call per row) | AT-2, AT-4 |
 
 ## 10. Frozen contracts
 
-- Freeze the full-frame pandas result. S1 corrects the older numeric out-of-core divergence through pre-stream admission. Preserve the per-route schema and evidence contracts in sections 5.4 and 5.5.
-- Error message text is not frozen; only codes are. The E4 and E5 message change is a fix.
-- Rejected alternative, recorded for the owner: route code_set through `derive_index_batch` (native, threaded, and moved to CMAC by NATIVE-THREADS-DEFAULT S3). It would change every code_set output and break joins with earlier runs, for a speed gain only at near-unique cardinality. Not proposed. If a measured customer column shows distinct close to rows, a follow-up row can add it with a `Breaking:` line.
+- The full-frame handler output is the reference and does not change. S1 is byte-identical by construction (section 5.1), and AT-1 checks it.
+- S2 changes out-of-core route choice, not out-of-core mapping. Admitted out-of-core output is unchanged. Inputs that change route now get the full-frame output, which is the contract.
+- Error text is unchanged in this row.
 
 ## 11. Pre-mortem
 
-- An object column holding both `"1"` and `1` dedupes to one entry. It must, because both print as `"1"` and today's loop gives both the same output. AT-1 covers it.
-- The Arrow conversion treats one of `pd.NA`, `NaN` and `None` as non-null. The handler excludes missing positions before stringification and emits Python None during reconstruction. AT-1 has all three.
-- A lone surrogate fails strict UTF-8 conversion. E9 falls back to the dict path; `hmac_hex` encodes with `errors="replace"`, so the bytes match today. Arrow-read sources are valid UTF-8, so out-of-core and native routes never see one.
-- A builder "optimizes" the non-string branch with `astype(str)`. Datetime and float spellings change. AT-1's datetime64 and float cells catch it.
-- The hoisted key outlives the column. The selector is a local of the handler call, batch or step and is dropped at return; the key sits in an `OpaqueBox`.
-- `routed_diagnostics` is set and a later change admits `chapter_preserve` natively. AT-7's guard case and M9 catch a step that writes raw values.
-- S2a lands before PER-COLUMN-ROUTING and a mixed table still runs one route. S2a's gain then shows only on all-native tables; S1 already removes the per-row cost everywhere.
+- A builder iterates with `source.tolist()` or `to_numpy()` for speed. String forms can differ from `Series.__iter__` (numpy scalar vs Python scalar boxing). Keep the existing iteration. AT-1's float, Int64, bool, category and datetime columns catch a change.
+- A large table with an integer code column (MCC stored as int64) used to stream through out-of-core with the wrong keys. It now goes full frame, which may exceed the memory budget and fail with the router's existing budget error. That is the right trade: a clear error with a remedy (cast to text) instead of route-dependent output. The CHANGELOG line says so. V2-LOG holds the follow-up to admit null-free integer columns.
+- The empty-table conversion could differ from the populated one for some metadata. Dtype reconstruction is where the conversion reinterprets values, and the empty conversion runs it. AT-3 (b) is the guard, and an unknown result declines.
+- Chunked oracle chunks that carry their own metadata: the chunked oracle leg converts each chunk with pandas, as today. This row does not change it (V2-LOG).
+- High-cardinality columns (distinct close to rows) gain little. The cost never exceeds today's loop plus one dict lookup per row.
 
 ## 12. Slices
 
 | Slice | Content | Size | Risk | Gate |
 |---|---|---|---|---|
-| S1 | Config-aware selector, boxed key, reason arrays and public kernel facade. Repair pandas reconstruction, out-of-core admission, loader errors and evidence. Update census, draw catalogue and test seams. AT-1 to AT-5 and AT-8. M1 to M5, M7 and M8 | estimate: one builder-day plus gate | R2 | Codex and Dennis. Run selection, census and draw sentries |
-| S2a | Register unified operator, shared config query, runtime pins, fatal boundary, final schema and evidence. Retain chunked veto. Update snapshots, witnesses and backend docs. AT-2, AT-6 and AT-7 on unified, plus chunked veto control. M6 and M9 | estimate: one builder-day plus gate | R2 | Codex and Dennis |
-| S2b | First move the chunk-result builder and recount its size pin. Bind preflight records, validate every raw chunk, preserve both schema modes, collect evidence and propagate fatal errors. Remove veto with the working route. AT-2, AT-6, AT-7 and AT-9. Repeat M5, M6 and M9 | estimate: one builder-day plus gate | R2 | Codex and Dennis |
+| S1 | Handler memo (5.1), AT-1, AT-2, AT-4, M1 to M3, M6, M7. Docs line | half a builder-day plus gate | R2 | Codex and Dennis; T1 code_set tests plus F29 and census sentries (expected zero delta) |
+| S2 | Out-of-core admission (5.2), AT-3, M4, M5, witness updates. Docs and CHANGELOG line | one builder-day plus gate | R2 | Codex and Dennis; out-of-core parity suites and routing tests |
 
-S2a depends on S1. S2b depends on S2a. The target date is 2026-12-15. Confirm the estimates after S1. S2a works with or without ROUTE-LABEL-TRUTH.
+S1 and S2 touch different files and can build in parallel in separate worktrees. Target: both merged by 2026-12-15.
 
 ## 13. Owner questions and deferred items
 
-Q1 and Q3 are in the vault `OWNER-QUESTIONS.md` (2026-11-24, kind: default; the recommended choice applies if unanswered when S1 starts). Q2 is settled: the row is already a 1.0 row in `mask.md`. Only required new sentry identities need an owner decision.
+In vault `OWNER-QUESTIONS.md`:
 
-- Q1: Arrow per distinct (byte-identical) over a Rust kernel (byte change). Recommended: Arrow, per the measurement in section 1.
-- Q3: gen-mode `code_set` stays per row and is named on the run card. Recommended: yes for V1; a later row can key it on the positional index kernel with a `Breaking:` line.
-
-- Q4 (F29 consumer baseline): a live refresh needs keys for the shared classifier and safe fatal projection. Existing consumers use different file/function/expression identities. Options are to admit only the reviewed new keys and remove obsolete ones, or defer the inventory refresh pending a different approved design. Recommend the narrow update. Compare the generated delta with the base scan before updating the fixture or ratchet. No census or size-cap growth is requested.
+- CS-Q1 (Arrow per distinct vs Rust kernel): superseded. Rev 5 keeps byte-identical output with a Python memo; no Rust kernel.
+- CS-Q3 (gen mode per row in V1): unchanged, recommended yes.
+- CS-Q4 (F29 keys): withdrawn; no F29 delta.
+- CS-Q5 (new, kind default): the native code_set operator moves to 1.x, and code_set is a named exception on the run card. Recommended yes: S1 gives the handler routes a large speed-up on code columns, and the native route needs a pandas-interpretation proof, width policy and offset handling that three review rounds could not close cheaply.
+- Candidate row CODE-SET-CORPUS-TEXT-HYGIENE under "V1 candidate rows" (Codex r2 findings 5 and 6, plus the rev 4 loader and message items).
 
 V2-LOG:
 
-- A native code_set tenant on the sequential FK route (a `_code_set_admit`/`_apply` pair in `execution/_sequential_native_ops.py`); S1 already removes the per-row cost there.
-- Two existing `code_set_corpora` aggregators with the same rule (`aggregate_chunk_code_set_corpora`, `execution/_chunked_code_set.py:299`, and `fold_corpora`, `execution/_chunked_output_sink.py:200`). Merge them in a later cleanup; this row adds no third.
+- Native `code_set` operator on the unified slice and chunked step. Preconditions found in the rev 1 to 4 reviews: prove the pandas interpretation per column and per later manual chunk (metadata can change while the physical type stays string); match pandas string storage width (`large_string` under `mode.string_storage="pyarrow"` or `future.infer_string`); share distinct selections across bounded chunks and size the mapped output against the 32-bit offset limit; a typed fatal path past unified retry; F29 producer review for any rebuilt `PlanCompileError`; strategy-specific chunked veto tests.
+- Hoisted, boxed key per handler call or batch (cuts about 15 us per distinct). Requires lazy derivation on the first draw, so empty, all-missing and rejected inputs derive nothing, plus a census rehome and draw-catalogue re-pin.
+- Arrow front for Arrow-backed text Series in the handler.
+- Out-of-core admission of null-free integer code columns (reuse the existing null-bearing integer scan).
+- Out-of-core output type for an all-missing string payload is fixed `string`, while the full frame gives Arrow null (existing).
+- Out-of-core `code_set_map` builds one `pa.string()` array per batch; payloads are bounded by `batch_rows` (existing).
+- One corpus resolution per run for `when:`-gated and nested code_set: `preflight` resolves and discards, then `run` resolves again; an ungated nested column with no leaves returns before the child runs (existing).
+- Chunked oracle leg: per-chunk pandas metadata is not checked against the first chunk (existing).
+- A native code_set tenant on the sequential FK route.
+- Merge the two `code_set_corpora` aggregators (`execution/_chunked_code_set.py`, `execution/_chunked_output_sink.py`).
