@@ -64,7 +64,12 @@ from decoy_engine.publication._members import (
     measure_members,
     stage_is_closed,
 )
-from decoy_engine.publication._types import CommitReceipt, Outcome, PublicationRequest
+from decoy_engine.publication._types import (
+    CommitReceipt,
+    Outcome,
+    PublicationRequest,
+    lock_reason,
+)
 from decoy_engine.publication._vault_order import (
     FsyncFailed,
     VaultConflict,
@@ -250,13 +255,9 @@ def _locked(
         with out.lock(request.lock_timeout_s):
             return _judge_and_bind(out, txn, request, members)
     except LockTimeout as exc:
-        return _receipt(
-            request, "refused", reasons.decoy.PUBLICATION_LOCK_TIMEOUT, os_error=exc.errno_name
-        )
+        return _receipt(request, "refused", lock_reason(exc), os_error=exc.errno_name)
     except LockUnavailable as exc:
-        return _receipt(
-            request, "refused", reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE, os_error=exc.errno_name
-        )
+        return _receipt(request, "refused", lock_reason(exc), os_error=exc.errno_name)
 
 
 def _judge_and_bind(

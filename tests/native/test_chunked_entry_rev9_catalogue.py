@@ -14,10 +14,11 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from decoy_engine.execution._chunked_profile import arrow_column_profile, walk_one_table
+from decoy_engine.execution._chunked_profile import walk_one_table
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.profile._types import ColumnProfile
+from decoy_engine.profile.arrow import arrow_column_profile
 from tests.native._chunked_entry_support import TABLE, make_config, passthrough, redact
 from tests.native._rev9_support import run_entry, run_public
 from tests.native._rev9_type_catalogue import CATALOGUE

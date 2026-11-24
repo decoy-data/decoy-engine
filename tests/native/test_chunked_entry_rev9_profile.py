@@ -75,7 +75,7 @@ def _compiled(config: dict[str, Any], profile: Any) -> tuple[str, tuple[str, ...
 def test_arrow_column_profile_equals_the_pandas_profile_field_for_field(
     case: str, xname: str
 ) -> None:
-    from decoy_engine.execution._chunked_profile import arrow_column_profile
+    from decoy_engine.profile.arrow import arrow_column_profile
 
     first = _first(case, xname)
     real = next(c for c in _real_profile(first).tables[0].columns if c.name == xname)

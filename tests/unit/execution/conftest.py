@@ -1,4 +1,5 @@
-"""Shared fixtures for the execution unit tests."""
+"""Shared fixtures for the execution unit tests, and the shared scratch-env fixture for the tests
+here that patch `tempfile.tempdir`."""
 
 from __future__ import annotations
 
@@ -6,6 +7,8 @@ from collections.abc import Iterator
 
 import pandas as pd
 import pytest
+
+from tests._scratch_env import scratch_env_clean  # noqa: F401 - registers the fixture
 
 
 @pytest.fixture(params=[False, True], ids=["cow-off", "cow-on"])

@@ -55,6 +55,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.config import (
     DedupeOp,
     DeriveOp,
@@ -103,12 +104,6 @@ class TransformError(DecoyError):
         self.code = code
         self.message = message
         super().__init__(message)
-
-
-def stored_index_fields(schema: pa.Schema) -> set[str]:
-    """Physical fields the `pandas` metadata marks as index columns."""
-    meta = schema.pandas_metadata or {}
-    return {c for c in meta.get("index_columns", []) if isinstance(c, str)}
 
 
 def _structured_references(table_config: Mapping[str, Any], config: Mapping[str, Any]) -> set[str]:
