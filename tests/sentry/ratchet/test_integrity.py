@@ -17,7 +17,7 @@ import pytest
 
 from tests.sentry import _ratchet
 from tests.sentry.layout import REGISTRY_PATH_CASES
-from tests.sentry.ratchet._integrity import safe_path, sentry_set
+from tests.sentry.ratchet import safe_path, sentry_set
 from tests.sentry.test_ratchet_check import (
     REG,
     ROOT,
@@ -459,12 +459,13 @@ def test_uncommitted_manifest_edit_cannot_restore_an_outside_entry(repo: Path) -
     _red_from(repo, base, f"{OUTSIDE}: sentry test file was removed")
 
 
-def _run_env(repo: Path, waiver: str | None) -> subprocess.CompletedProcess[str]:
+def _run_env(repo: Path, waiver: str | None, flag: bool = True) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k != "RATCHET_SCHEMA_WAIVER"}
     if waiver is not None:
         env["RATCHET_SCHEMA_WAIVER"] = waiver
+    extra = ["--schema-waiver-env"] if flag else []
     return subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, str(SCRIPT), "--root", str(repo), "--base", "HEAD"],
+        [sys.executable, str(SCRIPT), "--root", str(repo), "--base", "HEAD", *extra],
         capture_output=True,
         text=True,
         env=env,
@@ -486,13 +487,31 @@ def test_exact_waiver_with_a_checker_change_row_passes_and_is_reported(repo: Pat
     assert "a: registry key bypass waived by checker_change" in res.stdout
 
 
-@pytest.mark.parametrize(
-    "waiver", [None, '[["a","other"]]', '[["z","bypass"]]', "not json", '[["a"]]']
-)
-def test_waiver_for_another_pair_or_bad_input_still_fails(repo: Path, waiver: str | None) -> None:
+@pytest.mark.parametrize("waiver", [None, '[["a","other"]]', '[["z","bypass"]]'])
+def test_waiver_for_another_pair_still_fails(repo: Path, waiver: str | None) -> None:
     _new_field(repo, with_decision=True)
     res = _run_env(repo, waiver)
     assert res.returncode == 1, res.stdout + res.stderr
+    assert "a: unknown registry key bypass" in res.stdout + res.stderr
+
+
+@pytest.mark.parametrize("waiver", ["not json", '[["a"]]', '{"a": "bypass"}', '[["a", 1]]'])
+def test_malformed_waiver_input_is_reported_on_a_clean_registry(repo: Path, waiver: str) -> None:
+    res = _run_env(repo, waiver)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "RATCHET_SCHEMA_WAIVER is not a JSON list of [id, field] pairs" in res.stderr
+
+
+def test_inherited_waiver_does_not_admit_a_field_on_the_head_run(repo: Path) -> None:
+    _new_field(repo, with_decision=True)
+    res = _run_env(repo, json.dumps([["a", "bypass"]]), flag=False)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "a: unknown registry key bypass" in res.stdout + res.stderr
+
+
+def test_malformed_waiver_in_the_environment_is_ignored_on_the_head_run(repo: Path) -> None:
+    res = _run_env(repo, "not json", flag=False)
+    assert res.returncode == 0, res.stdout + res.stderr
 
 
 def test_waiver_without_a_checker_change_row_fails(repo: Path) -> None:
@@ -536,3 +555,42 @@ def test_waiver_covers_only_its_own_field(repo: Path) -> None:
     assert res.returncode == 1, res.stdout + res.stderr
     assert "a: unknown registry key extra" in res.stdout + res.stderr
     assert "unknown registry key bypass" not in res.stdout + res.stderr
+
+
+def test_a_retired_name_on_the_base_with_a_non_string_value_is_not_fresh(two: Path) -> None:
+    _write(two, REG, _registry({"a": A, "b": B}) + '[retired]\n"a" = 5\n')
+    _commit(two, "non-string sign-off on base")
+    _drop_a(two, _tables(retired={"a": DECISION}))
+    _assert_red(two, "a: removed from the registry")
+
+
+def test_a_checker_change_name_on_the_base_with_a_non_string_value_is_not_fresh(
+    repo: Path,
+) -> None:
+    _write(repo, REG, _registry({"a": A}) + '[checker_change]\n"bypass" = 5\n')
+    _commit(repo, "non-string row on base")
+    _new_field(repo, with_decision=True)
+    res = _run_env(repo, json.dumps([["a", "bypass"]]))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "a: unknown registry key bypass" in res.stdout + res.stderr
+
+
+def _glob_literal_sites() -> list[str]:
+    """Every call that passes the sentry glob literal as an argument, under tests and scripts."""
+    import ast
+
+    sites = []
+    for top in ("tests", "scripts"):
+        for path in sorted((_ROOT / top).rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and any(
+                    isinstance(a, ast.Constant) and a.value == "test_*.py" for a in node.args
+                ):
+                    sites.append(path.relative_to(_ROOT).as_posix())
+    return sites
+
+
+def test_no_second_sentry_membership_predicate_exists() -> None:
+    # test_gate_pins asks "does this directory hold any test file", which is not membership.
+    assert sorted(set(_glob_literal_sites()) - {"tests/sentry/test_gate_pins.py"}) == []

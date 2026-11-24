@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.sentry.parallel._resources import parse_marker_expr
-from tests.sentry.ratchet._integrity import is_sentry_glob
+from tests.sentry.ratchet import is_sentry_glob
 
 ROOT = Path(__file__).resolve().parents[2]
 GATES = ROOT / "scripts" / "dev" / "gates.sh"

@@ -17,7 +17,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
-import os
 import re
 import subprocess
 import sys
@@ -346,9 +345,12 @@ def _fmt(keys: frozenset[str]) -> str:
     return ", ".join(sorted(keys))
 
 
-def schema_waivers() -> tuple[frozenset[tuple[str, str]], list[str]]:
-    """Exact ``(id, field)`` pairs from ``RATCHET_SCHEMA_WAIVER`` (a JSON list of pairs)."""
-    raw = os.environ.get("RATCHET_SCHEMA_WAIVER")
+def schema_waivers(raw: str | None) -> tuple[frozenset[tuple[str, str]], list[str]]:
+    """Exact ``(id, field)`` pairs from a JSON list of pairs; ``None`` means no waiver input.
+
+    Only ``ratchet_check.py --schema-waiver-env`` (the extracted base checker) passes the
+    ``RATCHET_SCHEMA_WAIVER`` value here; the head run never reads the environment.
+    """
     if raw is None:
         return frozenset(), []
     try:
@@ -363,19 +365,23 @@ def schema_waivers() -> tuple[frozenset[tuple[str, str]], list[str]]:
     return frozenset(), ["RATCHET_SCHEMA_WAIVER is not a JSON list of [id, field] pairs"]
 
 
-def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
+def check(
+    root: Path, base_ref: str, waiver_input: str | None = None
+) -> tuple[list[str], list[str]]:
     """Return ``(findings, report_lines)`` for the tree at ``root`` against ``base_ref``."""
     helper = _integrity()
     sha = helper.resolve_commit(root, base_ref)
     if sha is None:
         return [f"base commit not found: {base_ref}"], []
     try:
-        return _check(root, helper.BaseTree(root, sha), helper)
+        return _check(root, helper.BaseTree(root, sha), helper, waiver_input)
     except helper.BaseReadError as exc:
         return [f"cannot read {exc.what} from the base commit"], []
 
 
-def _check(root: Path, tree: Any, helper: ModuleType) -> tuple[list[str], list[str]]:
+def _check(
+    root: Path, tree: Any, helper: ModuleType, waiver_input: str | None
+) -> tuple[list[str], list[str]]:
     reg_file = root / REGISTRY
     head_text = reg_file.read_text(encoding="utf-8") if reg_file.is_file() else ""
     base_text = tree.read(REGISTRY) or ""
@@ -387,16 +393,16 @@ def _check(root: Path, tree: Any, helper: ModuleType) -> tuple[list[str], list[s
     findings += helper.registry_present(
         len(base_doc.get("sentry", [])), reg_file.is_file(), len(head_doc.get("sentry", []))
     )
-    head_dec, base_dec = helper.decisions(head_doc), helper.decisions(base_doc)
-    fresh = {t: helper.fresh(head_dec[t], base_dec[t], decision_problem) for t in head_dec}
-    waived, waiver_findings = schema_waivers()
+    head_dec, base_names = helper.decisions(head_doc), helper.table_names(base_doc)
+    fresh = {t: helper.fresh(head_dec[t], base_names[t], decision_problem) for t in head_dec}
+    waived, waiver_findings = schema_waivers(waiver_input)
     findings += waiver_findings
     # A waiver only counts for a field that carries a fresh [checker_change] decision.
     usable = frozenset(w for w in waived if w[1] in fresh["checker_change"])
     schema, waiver_report = helper.closed_keys(head_doc, ROW_KEYS, decision_problem, usable)
     findings += schema
     report: list[str] = helper.new_decisions(
-        head_dec, base_dec, approvals, parse_approvals(base_text)[0]
+        head_dec, base_names, approvals, parse_approvals(base_text)[0]
     )
     report += waiver_report
     safe = {sid: p for sid, p in head.items() if helper.safe_path(p, BASELINE_DIR)}

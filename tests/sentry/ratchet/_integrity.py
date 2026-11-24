@@ -157,8 +157,16 @@ def decisions(doc: dict[str, object]) -> dict[str, dict[str, str]]:
     return out
 
 
+def table_names(doc: dict[str, object]) -> dict[str, set[str]]:
+    """Every key of each decision table, whatever its value type (freshness is about names)."""
+    return {
+        t: set(doc[t]) if isinstance(doc.get(t), dict) else set()  # type: ignore[arg-type]
+        for t in DECISION_TABLES
+    }
+
+
 def fresh(
-    head: dict[str, str], base: dict[str, str], problem: Callable[[object], str | None]
+    head: dict[str, str], base: set[str], problem: Callable[[object], str | None]
 ) -> set[str]:
     """Names of valid decisions at head whose name is not in the base table."""
     return {name for name, text in head.items() if name not in base and problem(text) is None}
@@ -166,7 +174,7 @@ def fresh(
 
 def new_decisions(
     head: dict[str, dict[str, str]],
-    base: dict[str, dict[str, str]],
+    base: dict[str, set[str]],
     approvals: dict[str, dict[str, str]],
     base_approvals: dict[str, dict[str, str]],
 ) -> list[str]:
