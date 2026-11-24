@@ -191,12 +191,15 @@ def open_input(side: Side, path: str) -> str | None:
 def list_entries(side: Side, directory: str) -> list[str]:
     """Every regular ``.json`` file below ``directory``, nested folders included, sorted.
 
-    A proven absent directory holds none. Every directory is checked before descent, and a link,
+    A proven absent directory holds none; a file there is a failure. Every directory is checked before descent, and a link,
     a special file or any listing error raises ``InputReadError``.
     """
-    if kind_of(side, directory) is None:
+    kind = kind_of(side, directory)
+    if kind is None:
         return []
     try:
+        if kind != "dir":
+            raise ValueError("not a directory")
         if side.tree is not None:
             names = side.tree.children(directory)
         else:

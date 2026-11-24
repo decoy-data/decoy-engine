@@ -21,40 +21,46 @@ INTEGRITY = "tests/sentry/ratchet/_integrity.py"
 BARRED = frozenset(
     {"glob", "rglob", "iglob", "isfile", "isdir", "exists", "lexists", "is_file", "is_dir"}
 )
-# primitive -> the (module, function) pairs that may use it
+# primitive -> the (module, owner) pairs that may use it. An owner is a qualified name
+# (``Class.method`` or ``function``); a function nested inside an owner counts as that owner.
 HOMES: dict[str, frozenset[tuple[str, str]]] = {
     "scandir": frozenset({(INTEGRITY, "list_entries")}),
     "listdir": frozenset({(INTEGRITY, "list_entries")}),
     "iterdir": frozenset({(INTEGRITY, "list_entries")}),
+    "children": frozenset({(INTEGRITY, "list_entries")}),
     "open": frozenset({(INTEGRITY, "open_input")}),
     "fdopen": frozenset({(INTEGRITY, "open_input")}),
     "read": frozenset({(INTEGRITY, "open_input")}),
     "read_text": frozenset({(INTEGRITY, "open_input")}),
     "read_bytes": frozenset({(INTEGRITY, "open_input")}),
+    "blob": frozenset({(INTEGRITY, "open_input"), (INTEGRITY, "BaseTree.blob")}),
     "stat": frozenset({(INTEGRITY, "_probe")}),
     "lstat": frozenset({(INTEGRITY, "_probe")}),
     "fstat": frozenset({(INTEGRITY, "_probe")}),
-    "_git": frozenset({(INTEGRITY, "__init__"), (INTEGRITY, "blob"), (INTEGRITY, "_renames")}),
+    "_git": frozenset(
+        {(INTEGRITY, "BaseTree.__init__"), (INTEGRITY, "BaseTree.blob"), (INTEGRITY, "_renames")}
+    ),
     "run": frozenset({(INTEGRITY, "_git"), (INTEGRITY, "resolve_commit"), (CHECKER, "_git_show")}),
 }
 
 
 def checker_modules() -> list[str]:
+    """The checker and every non-test module beside it, with or without a leading underscore."""
     folder = ROOT / "tests/sentry/ratchet"
     names = sorted(
         p.name
-        for p in folder.iterdir()
-        if p.suffix == ".py" and p.name[0] in "_" and p.name != "__init__.py"
+        for p in folder.glob("*.py")
+        if not p.name.startswith("test_") and p.name != "conftest.py"
     )
-    return [
-        CHECKER,
-        *(f"tests/sentry/ratchet/{n}" for n in names),
-        "tests/sentry/ratchet/__init__.py",
-    ]
+    return [CHECKER, *(f"tests/sentry/ratchet/{n}" for n in names)]
+
+
+def _allowed(owners: frozenset[tuple[str, str]], module: str, owner: str) -> bool:
+    return any(module == m and (owner == o or owner.startswith(o + ".")) for m, o in owners)
 
 
 def violations(sources: dict[str, str]) -> list[str]:
-    """``module:function: name`` for every barred spelling and every primitive outside its home."""
+    """``module:owner: name`` for every barred spelling and every primitive outside its home."""
     out: list[str] = []
 
     def spelled(node: ast.AST) -> str | None:
@@ -68,17 +74,17 @@ def violations(sources: dict[str, str]) -> list[str]:
             return node.value  # getattr(os.path, "isfile")
         return None
 
-    def walk(node: ast.AST, module: str, func: str) -> None:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            func = node.name
+    def walk(node: ast.AST, module: str, owner: str) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            owner = node.name if owner == "<module>" else f"{owner}.{node.name}"
         name = spelled(node)
         if name in BARRED:
-            out.append(f"{module}:{func}: {name}")
+            out.append(f"{module}:{owner}: {name}")
         elif name in HOMES and not isinstance(node, ast.Constant):
-            if (module, func) not in HOMES[name]:
-                out.append(f"{module}:{func}: {name}")
+            if not _allowed(HOMES[name], module, owner):
+                out.append(f"{module}:{owner}: {name}")
         for child in ast.iter_child_nodes(node):
-            walk(child, module, func)
+            walk(child, module, owner)
 
     for module, text in sorted(sources.items()):
         walk(ast.parse(text), module, "<module>")
@@ -128,6 +134,8 @@ SPELLINGS = (
     "x.stat()",
     "_git(a, b)",
     "subprocess.run(c)",
+    "tree.blob(p)",
+    "tree.children(d)",
 )
 
 
@@ -159,3 +167,28 @@ def test_an_import_alias_of_a_barred_name_is_caught() -> None:
 def test_the_owning_function_may_use_its_primitive(func: str, call: str) -> None:
     seeded = {INTEGRITY: f"def {func}(x):\n    {call}\n"}
     assert violations(seeded) == []
+
+
+def test_a_sibling_class_method_named_like_the_home_is_caught() -> None:
+    seeded = {
+        INTEGRITY: "class Other:\n    def open_input(self, p):\n        return p.read_bytes()\n"
+    }
+    assert violations(seeded) == [f"{INTEGRITY}:Other.open_input: read_bytes"]
+
+
+def test_a_plain_helper_calling_the_git_blob_reader_is_caught() -> None:
+    seeded = {INTEGRITY: "def helper(tree, path):\n    return tree.blob(path)\n"}
+    assert violations(seeded) == [f"{INTEGRITY}:helper: blob"]
+
+
+def test_the_git_reader_method_itself_may_run_git() -> None:
+    seeded = {INTEGRITY: "class BaseTree:\n    def blob(self, p):\n        return _git(p)\n"}
+    assert violations(seeded) == []
+
+
+def test_a_module_without_a_leading_underscore_is_scanned() -> None:
+    assert "tests/sentry/ratchet/_integrity.py" in checker_modules()
+    for module in checker_modules():
+        assert not Path(module).name.startswith("test_")
+    seeded = {"tests/sentry/ratchet/reader.py": "def f(p):\n    return p.glob('*')\n"}
+    assert violations(seeded) != []

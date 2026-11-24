@@ -373,12 +373,12 @@ def load_side(
     findings += schema
     try:
         listed: set[str] | None = set(helper.list_entries(side, BASELINE_DIR))
-    except helper.InputReadError:
+    except helper.InputReadError as exc:
         listed = None
         findings += unreadable(
-            BASELINE_DIR,
-            f"{BASELINE_DIR} cannot be listed or holds a link or special file ({side.name})",
+            exc.what, f"{exc.what} cannot be listed or is a link or special file ({side.name})"
         )
+    blame = REGISTRY if findings else None  # the path a base failure names
     baselines: dict[str, Baseline] = {}
     for row in doc.get("sentry", []):  # every row, so a duplicate id cannot hide a diagnostic
         sid, path = row["id"], row["baseline"]
@@ -394,26 +394,27 @@ def load_side(
         except (helper.InputReadError, ValueError, RecursionError):
             findings += unreadable(path, broken)
             continue
+        before = len(findings)
         if got is None:
             findings.append(f"{sid}: registry points at {path} but there is no baseline file")
-            continue
-        baselines[sid] = parsed
-        if parsed.sentry_id != sid:
-            findings.append(
-                f"{path}: sentry_id {parsed.sentry_id!r} does not match registry id {sid}"
-            )
-        findings += reason_findings(path, parsed)
-        findings += [
-            f"{sid}: stale approved_growth, {key} is not in {path}"
-            for key in sorted(set(approvals.get(sid, {})) - parsed.keys)
-        ]
+        else:
+            baselines[sid] = parsed
+            if parsed.sentry_id != sid:
+                findings.append(
+                    f"{path}: sentry_id {parsed.sentry_id!r} does not match registry id {sid}"
+                )
+            findings += reason_findings(path, parsed)
+            findings += [
+                f"{sid}: stale approved_growth, {key} is not in {path}"
+                for key in sorted(set(approvals.get(sid, {})) - parsed.keys)
+            ]
+        if len(findings) > before and blame is None:
+            blame = path
     registered = {row["baseline"] for row in doc.get("sentry", [])}
-    findings += [
-        f"{path}: baseline file is not registered in {REGISTRY}"
-        for path in sorted((listed or set()) - registered)
-    ]
+    orphans = sorted((listed or set()) - registered)
+    findings += [f"{path}: baseline file is not registered in {REGISTRY}" for path in orphans]
     if findings and is_base:
-        raise helper.BaseReadError(REGISTRY)
+        raise helper.BaseReadError(blame or orphans[0])
     rows = len(doc.get("sentry", []))
     registry = Registry(paths, approvals, baselines, rows, dec, helper.table_names(doc), report)
     return registry, findings

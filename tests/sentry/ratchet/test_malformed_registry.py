@@ -311,7 +311,7 @@ def test_a_base_baseline_symlink_fails_closed(
     res = _run_from(repo, base)
     assert res.returncode == 1, res.stdout + res.stderr
     assert res.stderr.count("ratchet: FAIL") == 1
-    assert " from the base commit" in res.stderr
+    assert f"cannot read {A} from the base commit" in res.stderr
 
 
 def test_a_tracked_empty_base_registry_is_not_an_absent_one(repo: Path) -> None:
@@ -441,7 +441,7 @@ def test_a_committed_orphan_baseline_fails_the_base_even_with_head_repaired(repo
     res = _run_from(repo, base)
     assert res.returncode == 1, res.stdout + res.stderr
     assert res.stderr.count("ratchet: FAIL") == 1
-    assert " from the base commit" in res.stderr
+    assert f"cannot read {ORPHAN} from the base commit" in res.stderr
 
 
 def test_a_special_file_in_place_of_a_baseline_is_refused(repo: Path) -> None:
@@ -501,7 +501,7 @@ def test_a_git_symlink_baseline_on_the_base_is_refused_even_if_its_text_is_valid
     _write(repo, A, GOOD)
     res = _run_from(repo, base)
     assert res.returncode == 1, res.stdout + res.stderr
-    assert " from the base commit" in res.stderr
+    assert f"cannot read {A} from the base commit" in res.stderr
 
 
 def test_an_unreadable_base_registry_is_not_a_first_inventory(repo: Path) -> None:
@@ -513,3 +513,30 @@ def test_an_unreadable_base_registry_is_not_a_first_inventory(repo: Path) -> Non
     res = _run_from(repo, base)
     assert res.returncode == 1, res.stdout + res.stderr
     assert f"cannot read {REG} from the base commit" in res.stderr
+
+
+FOLDER = "tests/sentry/baselines"
+
+
+def _no_rows(repo: Path) -> None:
+    _git(repo, "rm", "-r", "-q", "-f", FOLDER)
+    _write(repo, REG, "# no sentries\n")
+
+
+def test_a_file_at_the_baseline_folder_path_fails_the_base(repo: Path) -> None:
+    _no_rows(repo)
+    _write(repo, FOLDER, "not a folder\n")
+    base = _commit(repo, "a file where the baseline folder belongs")
+    (repo / FOLDER).unlink()
+    res = _run_from(repo, base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"cannot read {FOLDER} from the base commit" in res.stderr
+
+
+def test_a_file_at_the_baseline_folder_path_fails_head(repo: Path) -> None:
+    _no_rows(repo)
+    base = _commit(repo, "no baselines on base")
+    _write(repo, FOLDER, "not a folder\n")
+    res = _run_from(repo, base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"{FOLDER} cannot be listed" in res.stderr
