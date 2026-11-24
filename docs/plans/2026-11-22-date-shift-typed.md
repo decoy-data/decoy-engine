@@ -464,7 +464,7 @@ From `git grep` at `origin/main` `4bc582d0a` over `src/decoy_engine/**/*.py`, th
 | 14 | `profile/_cloud_readers.py:145`, `:318`, `:438` | CSV text | allowlist | reason: text parse, no Arrow temporal conversion |
 | 15 | `fileaccess/adapters/pandas.py:23`, `:28`, `:37`, `:44` | file-access guard wrappers | allowlist | reason: wrappers; their `src/` callers are scanned |
 
-Allowlist count: 7 at `4bc582d0a`. The ratchet baseline is the count the guard measures on the S1b-1 base, recorded in the guard file with that SHA. It may only go down. A change that raises it fails the guard unless the same diff lowers the recorded baseline's reviewer-signed entry list, which the guard does not allow to grow (M6). The count is never set to fit S1b's own sites: S1b-1 routes its sites, it does not allowlist them.
+Allowlist count: 7 at `4bc582d0a`. The ratchet baseline is the count the guard measures on the S1b-1 base, recorded in the guard file with that SHA. It may only go down (M6). A change that adds an entry or raises the count fails the guard; lowering it means editing the recorded count in the same diff that removes the site. The count is never set to fit S1b's own sites: S1b-1 routes its sites, it does not allowlist them.
 
 #790 delta (applied when #790 rebases on S1b-2):
 
