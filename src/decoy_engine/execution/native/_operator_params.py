@@ -351,7 +351,7 @@ def resolve_params_by_column(
     these up per chunk. `table` keys the default selection namespace of a position-keyed faker.
     `plan` is the compiled plan; a typed date_shift column takes the shape it lists there.
     """
-    from decoy_engine.execution.native._date_shape_plan import table_date_shapes
+    from decoy_engine.execution.native._real_type_admission import table_date_shapes
 
     date_shapes = (
         {} if plan is None or table is None else table_date_shapes(plan, table, col_seed_by_name)

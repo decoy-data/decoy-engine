@@ -177,14 +177,25 @@ def _typed_date_shift_rejection(
     """The typed half of `date_shift_config_rejection`: window bounds, no `preserve_values`, and
     the resident type the shape names. Only a resident table is read for the type (never the
     profile's coarse label); without one the decision defers to the route's real-type gate."""
-    from decoy_engine.transforms.date_preserve import has_preserve_values
-
-    if has_preserve_values(provider_config):
-        return f"date_shift_typed_preserve_not_native:{name}"
+    reason = typed_date_shift_preserve_rejection(name, provider_config)
+    if reason is not None:
+        return reason
     reason = _date_shift_window_rejection(name, provider_config)
     if reason is not None:
         return reason
     return typed_date_shift_type_rejection(name, table, shape, resident_sources)
+
+
+def typed_date_shift_preserve_rejection(
+    name: str, provider_config: Mapping[str, Any]
+) -> str | None:
+    """The coded reason a typed `date_shift` column with `preserve_values` runs on the oracle,
+    or None. The one check for both the config gate and the route's policy decline."""
+    from decoy_engine.transforms.date_preserve import has_preserve_values
+
+    if has_preserve_values(provider_config):
+        return f"date_shift_typed_preserve_not_native:{name}"
+    return None
 
 
 def typed_date_shift_type_rejection(

@@ -63,7 +63,6 @@ from decoy_engine.execution.native._crypto_ext import (
     CryptoExtensionUnavailableError,
     load_compiled_crypto_kernel,
 )
-from decoy_engine.execution.native._date_shape_plan import policy_decline
 from decoy_engine.execution.native._faker_deterministic_admission import (
     C5cIiAdmissionContext,
     deterministic_faker_decline,
@@ -84,7 +83,7 @@ from decoy_engine.execution.native._operator_params import (  # noqa: F401 -- re
     _resolve_truncate_keep,
 )
 from decoy_engine.execution.native._plan import compile_native_plan
-from decoy_engine.execution.native._real_type_admission import real_type_decline
+from decoy_engine.execution.native._real_type_admission import policy_decline, real_type_decline
 from decoy_engine.execution.native._requirements import (
     CHUNKED_ROUTE_VETOED_STRATEGIES,
     NATIVE_KERNEL_STRATEGIES,

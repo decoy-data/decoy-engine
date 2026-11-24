@@ -47,6 +47,7 @@ from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._chunked_group_key_gate import group_by_columns
 from decoy_engine.execution.native._operator_config_rejections import (
     group_key_sibling_type_admitted,
+    typed_date_shift_preserve_rejection,
     typed_date_shift_type_rejection,
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
@@ -65,19 +66,67 @@ _STRING_SOURCE_STRATEGIES: Final = frozenset(
 )
 
 
-def _fpe_checksum_decline(config: dict[str, Any], table: str, column: str) -> str | None:
-    """The coded reason an fpe column declines to the oracle for a configured `checksum` mode,
-    or None. Checksum modes stay on the Python path (C6a plan §3g): the compiled FF1 kernel has
-    no checksum path, so a column with `checksum` set runs the whole table on the oracle."""
+def _provider_config(config: dict[str, Any], table: str, column: str) -> dict[str, Any]:
+    """The `provider_config` of `table.column` in the raw config, or {} when it has none."""
     for table_cfg in config.get("tables") or ():
         if not isinstance(table_cfg, dict) or table_cfg.get("name") != table:
             continue
         for col in table_cfg.get("columns") or ():
-            if not isinstance(col, dict) or col.get("name") != column:
-                continue
-            pc = col.get("provider_config")
-            if isinstance(pc, dict) and pc.get("checksum"):
-                return f"fpe_checksum_not_native:{column}"
+            if isinstance(col, dict) and col.get("name") == column:
+                pc = col.get("provider_config")
+                return pc if isinstance(pc, dict) else {}
+    return {}
+
+
+def _fpe_checksum_decline(config: dict[str, Any], table: str, column: str) -> str | None:
+    """The coded reason an fpe column declines to the oracle for a configured `checksum` mode,
+    or None. Checksum modes stay on the Python path (C6a plan §3g): the compiled FF1 kernel has
+    no checksum path, so a column with `checksum` set runs the whole table on the oracle."""
+    if _provider_config(config, table, column).get("checksum"):
+        return f"fpe_checksum_not_native:{column}"
+    return None
+
+
+def table_date_shapes(plan: Any, table: str, columns: Iterable[str]) -> dict[str, ColumnShape]:
+    """Each of `columns` the compiled `plan` lists as a native typed date column, with its shape.
+
+    The one lookup the chunked entry points read the plan's date shapes through, so admission,
+    parameter resolution and the schema rule see the same answer."""
+    from decoy_engine.declared_casting._boundary import plan_native_date_shape
+
+    shapes = {name: plan_native_date_shape(plan, table, name) for name in columns}
+    return {name: shape for name, shape in shapes.items() if shape is not None}
+
+
+def policy_decline(
+    config: dict[str, Any],
+    shapes: Mapping[tuple[str, str], ColumnShape],
+    node: Any,
+    table: str,
+    column: str,
+    positional: bool,
+) -> CodedDecline | None:
+    """The static admission's policy decline for one scalar `node`, or None.
+
+    A typed column (in the plan's `shapes`) with `preserve_values` resolves a non-native policy
+    too, so its own code is checked first: otherwise it would report the generic
+    `fallback_policy_not_native`. A `positional` column (the seeded non-deterministic
+    categorical and the non-deterministic REUSE faker) resolves a non-native policy because the
+    full-frame operators are source-keyed; the chunked route admits it, config only.
+    """
+    if (table, column) in shapes:
+        cfg = _provider_config(config, table, column)
+        reason = typed_date_shift_preserve_rejection(column, cfg)
+        if reason is not None:
+            code = RouteDeclineCode.DATE_SHIFT_TYPED_PRESERVE_NOT_NATIVE
+            return coded(reason, code, table, column)
+    if node.fallback_policy != "native" and not positional:
+        return coded(
+            f"fallback_policy_not_native:{column}:{node.fallback_policy}",
+            RouteDeclineCode.FALLBACK_POLICY_NOT_NATIVE,
+            table,
+            column,
+        )
     return None
 
 
