@@ -47,6 +47,11 @@ KINDS = [
 ]
 
 
+from decoy_engine.relationships._graph import RelationshipGraph  # noqa: E402
+
+_NO_GRAPH = RelationshipGraph(edges=(), ordering=())
+
+
 def _expected_rows(source: pa.Table) -> list[bool]:
     return [s == "active" for s in source.column("status").to_pylist()]
 
@@ -379,7 +384,7 @@ def test_a_composite_nodes_provider_output_is_snapshotted_for_a_when() -> None:
             ("zz_target", _seed_of("redact", when="email == 'active'")),
         ]
     )
-    assert "email" in source_snapshot_columns(plan, reg).get("t", frozenset())
+    assert "email" in source_snapshot_columns(plan, reg, _NO_GRAPH).get("t", frozenset())
     n = 6
     emails = ["active" if i % 2 == 0 else f"u{i}@x.test" for i in range(n)]
     table = pa.table(
@@ -423,7 +428,7 @@ def test_every_column_a_handler_declares_written_is_snapshotted_when_read(provid
         plan = _seed_plan(
             [(outputs[0], head), ("zz_target", _seed_of("redact", when=f"{read} == 'x'"))]
         )
-        assert read in source_snapshot_columns(plan, get_default_registry()).get(
+        assert read in source_snapshot_columns(plan, get_default_registry(), _NO_GRAPH).get(
             "t", frozenset()
         ), (
             provider,
@@ -441,7 +446,7 @@ def test_an_unknown_writer_snapshots_every_column_the_table_reads() -> None:
             ("zz_target", _seed_of("redact", when="status == 'x'")),
         ]
     )
-    assert source_snapshot_columns(plan, get_default_registry()).get("t") == {"status"}
+    assert source_snapshot_columns(plan, get_default_registry(), _NO_GRAPH).get("t") == {"status"}
 
 
 def test_duplicate_row_labels_select_by_position_on_the_full_frame_and_chunked_oracle(

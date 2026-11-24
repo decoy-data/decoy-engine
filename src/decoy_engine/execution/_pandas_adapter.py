@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyarrow as pa
@@ -71,7 +71,6 @@ from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
 from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
-    order_work,
     source_snapshot_columns,
 )
 from decoy_engine.execution._sequential import run_sequential as _run_sequential
@@ -82,11 +81,7 @@ from decoy_engine.execution._strategies._orphan import make_remap_fn
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._when_gate import run_with_when_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
-from decoy_engine.execution.work_order import (
-    FallbackCommits,
-    allocate_creator_targets,
-    fallback_order,
-)
+from decoy_engine.execution.work_order import WorkOrderRun, compile_work_order
 from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -204,7 +199,7 @@ class PandasExecutionAdapter:
         # anchors, top_code, group_key siblings, declared integers, columns a `when:` reads) is
         # named by the ONE `lossless_int_columns`, so a null never widens it to float64 and rounds
         # a value beyond 2**53. Every other column is unaffected.
-        group_anchor_cols = source_snapshot_columns(plan, registry)
+        group_anchor_cols = source_snapshot_columns(plan, registry, relationship_graph)
         lossless = lossless_int_columns(plan, registry, relationship_graph)
         frames: dict[str, pd.DataFrame] = {
             t: to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
@@ -244,16 +239,11 @@ class PandasExecutionAdapter:
             column_shapes=plan_column_shapes(plan),
         )
 
-        work = build_work_list(plan, registry)
-        commits: FallbackCommits | None = None
-        try:
-            ordered = order_work(work, relationship_graph)
-        except ExecutionError as exc:
-            if exc.code != reasons.runtime.CYCLIC_WORK_ORDERING:
-                raise
-            ordered = fallback_order(work, relationship_graph)  # a value cycle raises again
-            commits = FallbackCommits(ordered, relationship_graph, frames)
-        allocate_creator_targets(ordered, frames, relationship_graph)
+        order = compile_work_order(build_work_list(plan, registry), relationship_graph)
+        ordered = list(order.ordered)
+        run_state = WorkOrderRun(order, relationship_graph)
+        for t, frame in frames.items():
+            run_state.begin_table(t, frame)
         node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
         for t, frame in frames.items():
             register_exact_int_sources(
@@ -293,8 +283,6 @@ class PandasExecutionAdapter:
             for node in ordered:
                 if node.table not in frames:
                     continue
-                if commits is not None:
-                    commits.before(node)
                 warnings.extend(
                     self._dispatch_mask_node(
                         node,
@@ -306,6 +294,7 @@ class PandasExecutionAdapter:
                         ctx,
                         key_error_rows=key_error_rows,
                         errored_keys_cache=errored_keys_cache,
+                        run=run_state,
                     )
                 )
                 # Sprint 2 honesty pack (D7): drain the shared row_errors sink
@@ -313,8 +302,6 @@ class PandasExecutionAdapter:
                 # fk_resolve all route through `_dispatch_mask_node`),
                 # attributing to node.table, so no row error is ever silently
                 # dropped regardless of which node produced it.
-                if commits is not None:
-                    commits.after(node)
                 batch = drain_row_errors(ctx.row_errors, table=node.table)
                 row_error_records.extend(batch)
                 # S2: fold into the key-error index; parents mask+drain before
@@ -324,8 +311,7 @@ class PandasExecutionAdapter:
                         rec.row_index
                     ] = rec.trigger
 
-        if commits is not None:
-            commits.commit()
+        run_state.finish(frames)
 
         # DE-03: fail-closed output projection before the point of no return. A
         # generate-kind table rides through `frames` as an echoed source, declared
@@ -372,6 +358,19 @@ class PandasExecutionAdapter:
         )
 
     def _dispatch_mask_node(
+        self, node: WorkNode, frames: dict[str, pd.DataFrame], *args: Any, **kwargs: Any
+    ) -> list[QualityWarning]:
+        """Dispatch one node and, when the caller passes its `run` (the `WorkOrderRun`), publish the
+        column versions it reads before the node and save what it wrote after."""
+        run: WorkOrderRun | None = kwargs.get("run")
+        if run is not None:
+            run.before(node, frames)
+        warnings = self._dispatch_node(node, frames, *args, **kwargs)
+        if run is not None:
+            run.after(node, frames[node.table])
+        return warnings
+
+    def _dispatch_node(
         self,
         node: WorkNode,
         frames: dict[str, pd.DataFrame],
@@ -383,6 +382,7 @@ class PandasExecutionAdapter:
         *,
         key_error_rows: _KeyErrorRows | None = None,
         errored_keys_cache: dict[_NodeKey, dict[_KeyTuple, str]] | None = None,
+        run: WorkOrderRun | None = None,
     ) -> list[QualityWarning]:
         """Mask one work node in place in `frames[node.table]`, returning its
         warnings. Shared by the full-frame `run` and the sequential
@@ -451,8 +451,15 @@ class PandasExecutionAdapter:
             # plan_slice.when is None (byte-identical to calling handler.run()
             # directly). When set, it evaluates the predicate via numexpr
             # (scope-clamped per Dennis C1) and routes only matching rows through.
+            op = run.order.ops[node.key] if run is not None else None
             frames[node.table], node_warnings = run_with_when_gate(
-                handler, df, node.columns[0], plan_slice, ctx
+                handler,
+                df,
+                node.columns[0],
+                plan_slice,
+                ctx,
+                op.outputs if op is not None else (),
+                run.selection if run is not None else None,
             )
         return node_warnings
 

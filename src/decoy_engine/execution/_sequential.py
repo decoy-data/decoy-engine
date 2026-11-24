@@ -164,7 +164,6 @@ from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
 from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
-    order_work,
     source_snapshot_columns,
 )
 from decoy_engine.execution._sequential_composite_chain import decline_composite_chain
@@ -176,6 +175,7 @@ from decoy_engine.execution._transactional_sink import (
 )
 from decoy_engine.execution.pipeline._post_scan import note_quarantined, publish_after_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
+from decoy_engine.execution.work_order import WorkOrderRun, compile_work_order
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -310,7 +310,9 @@ def run_sequential(
     counts_by_trigger: dict[str, int] = {}
 
     graph = relationship_graph
-    ordered = order_work(build_work_list(plan, registry), graph)
+    order = compile_work_order(build_work_list(plan, registry), graph)
+    ordered = list(order.ordered)
+    run_state = WorkOrderRun(order, graph)
     node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
     nodes_by_table: dict[str, list[WorkNode]] = {}
     for node in ordered:
@@ -322,7 +324,7 @@ def run_sequential(
     # joint_mask key_by keys and the written columns a `when:` reads. Each is an immutable source
     # value: unioned into the table's FK-safe column set at load (lossless int+null) and
     # snapshotted pre-mask into ctx.group_anchor_snapshots below.
-    group_anchor_cols = source_snapshot_columns(plan, registry)
+    group_anchor_cols = source_snapshot_columns(plan, registry, graph)
     lossless = lossless_int_columns(plan, registry, graph)
 
     # A parent key map is retained until every child table that references it has
@@ -449,6 +451,7 @@ def run_sequential(
                     if col in df.columns:
                         ctx.group_anchor_snapshots[(table, col)] = df[col].copy()
 
+                run_state.begin_table(table, df)
                 table_records_list: list[RowErrorRecord] = []
                 for node in nodes_by_table.get(table, ()):
                     with decline_composite_chain(ordered, graph, table):
@@ -463,6 +466,7 @@ def run_sequential(
                                 ctx,
                                 key_error_rows=key_error_rows,
                                 errored_keys_cache=errored_keys_cache,
+                                run=run_state,
                             )
                         )
                     # S2 self-ref FK (round 3): drain + fold per node, BEFORE the
@@ -479,6 +483,8 @@ def run_sequential(
                         key_error_rows.setdefault(rec.table, {}).setdefault(rec.column, {})[
                             rec.row_index
                         ] = rec.trigger
+
+                run_state.finish(frames, table)
 
                 # Per-table fail-loud classification stays here (after the loop),
                 # so a table raises on any uncovered record BEFORE its parent map

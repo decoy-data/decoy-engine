@@ -44,20 +44,6 @@ class JointMaskHandler:
     wizard_options: tuple[StrategyOption, ...] = ()
     offer_in_wizard: bool = False
 
-    def gated_output_columns(self, plan: ColumnSeed) -> tuple[str, ...]:
-        """Every column this handler writes, for the `when`-gate stitch-back.
-
-        joint_mask is multi-column: `run` writes all `columns` from the config in
-        one pass, but the adapter dispatches on just one of them (the per-column
-        node's dispatch column). The `when` gate must copy ALL of these back into
-        the full frame for the selected rows; copying only the dispatch column
-        leaves the joint_mask's other outputs unmasked for those rows. Duck-typed
-        (`getattr`) by `run_with_when_gate`, the same pattern as `preflight`; a
-        handler that writes only its dispatch column simply does not define it.
-        """
-        cols = provider_config_to_dict(plan.provider_config).get("columns")
-        return tuple(cols) if cols else ()
-
     def run(
         self,
         df: pd.DataFrame,

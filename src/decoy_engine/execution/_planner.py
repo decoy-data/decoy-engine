@@ -225,7 +225,8 @@ def classify_job(
     passthrough column gets no exemption from the dtype gate.
     """
     from decoy_engine.execution._pipeline import classify_table_kinds
-    from decoy_engine.execution._runner import build_work_list, order_work
+    from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.execution.work_order import compile_work_order
 
     table_kinds = classify_table_kinds(config)
     mask_tables = sorted(name for name, kind in table_kinds.items() if kind == "mask")
@@ -235,7 +236,7 @@ def classify_job(
     # work-order aware (Trap E), so the auto-route rejection needs the same
     # ordered list `check_chunked_compatibility`'s manual-entry gate derives
     # from the plan; computed once here rather than re-derived per table.
-    ordered_work = order_work(work, relationship_graph)
+    ordered_work = list(compile_work_order(work, relationship_graph).ordered)
     has_fk = bool(relationship_graph.edges)
 
     rejections: dict[str, str] = {}

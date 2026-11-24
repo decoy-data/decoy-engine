@@ -97,8 +97,10 @@ def test_unknown_writer_is_table_scoped(monkeypatch: pytest.MonkeyPatch) -> None
     """6. A strategy whose writes cannot be named may write any column of ITS OWN table: a
     reader in that table waits for it and sees its replacement; a reader in another table gets no
     edge from it."""
-    from decoy_engine.execution._runner import build_work_list, column_dependency_edges
+    from decoy_engine.execution._runner import build_work_list
     from decoy_engine.execution._strategies import SCALAR_HANDLERS
+    from decoy_engine.execution.work_order import resolve_operations
+    from decoy_engine.execution.work_order.ranks import dependency_edges
 
     class Stub:
         name = "z_stub"
@@ -118,7 +120,7 @@ def test_unknown_writer_is_table_scoped(monkeypatch: pytest.MonkeyPatch) -> None
     plan = ws.plan([("reader", ws.derived('concat(drv, "!")')), ("z_stub", ws.seed("z_stub"))])
     assert ws.run(plan, table).column("reader").to_pylist() == ["STUB!"] * N
     work = build_work_list(_two_table_plan(), ws.REG)
-    edges = column_dependency_edges(work, ws.NO_GRAPH)
+    edges = dependency_edges(resolve_operations(work, ws.NO_GRAPH))
     assert ("t", ("z_stub",)) in edges[("t", ("reader",))]
     assert ("t", ("z_stub",)) not in edges.get(("u", ("reader",)), set())
 

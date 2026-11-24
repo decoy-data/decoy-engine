@@ -19,14 +19,13 @@ PandasExecutionAdapter (later slice) consumes them.
 
 from __future__ import annotations
 
-import heapq
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
-from decoy_engine import reasons
-from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution.work_order.operations import resolve_operations
+from decoy_engine.execution.work_order.ranks import dependency_edges, kahn_sorted
 from decoy_engine.plan._types import ColumnSeed, GroupSeed
 
 if TYPE_CHECKING:
@@ -311,172 +310,31 @@ def when_read_columns(plan: Plan) -> dict[str, frozenset[str]]:
     return out
 
 
-def source_snapshot_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, frozenset[str]]:
+def source_snapshot_columns(
+    plan: Plan, registry: ProviderRegistry, graph: RelationshipGraph
+) -> dict[str, frozenset[str]]:
     """Every column snapshotted pre-mask: `source_anchor_columns` plus each `when:`-read column
     that some node writes. A `when:` column no node writes keeps its original value in the live
     frame, so it costs no copy. Both snapshot sites call this in place of `source_anchor_columns`.
 
-    What a node writes comes from `column_access`, the one handler-write declaration (a composite
-    also writes its provider's own output columns, which no config entry names). A node whose
-    writes cannot be named snapshots every column its table's `when:` reads.
+    What a node writes comes from its resolved operation (`work_order.operations`), the one
+    answer dispatch, ordering, carry and commits share: an FK child writes its child key whatever
+    handler it is configured with. A node whose writes cannot be named snapshots every column its
+    table's `when:` reads.
     """
+    from decoy_engine.execution.work_order.operations import resolve_operations
+
     out = {t: frozenset(c) for t, c in source_anchor_columns(plan, registry).items()}
     reads = when_read_columns(plan)
     written: dict[str, set[str]] = defaultdict(set)
-    for node in build_work_list(plan, registry):
-        if node.table not in reads:
-            continue
-        names, unknown = node_written_columns(node)
-        written[node.table] |= reads[node.table] if unknown else names
+    for op in resolve_operations(build_work_list(plan, registry), graph).values():
+        if op.table in reads:
+            written[op.table] |= reads[op.table] if op.wildcard else op.writes
     for table, cols in reads.items():
         hit = cols & written[table]
         if hit:
             out[table] = out.get(table, frozenset()) | hit
     return out
-
-
-def node_entry(node: WorkNode) -> dict[str, Any] | None:
-    """The config-entry view of a `ColumnSeed` node (None for a composite FK group), the shape
-    the `column_access` declarations read."""
-    from decoy_engine.execution._adapter import provider_config_to_dict
-
-    seed = node.plan_slice
-    if not isinstance(seed, ColumnSeed):
-        return None
-    return {
-        "name": node.columns[0] if node.columns else None,
-        "strategy": seed.strategy,
-        "provider": seed.provider,
-        "provider_config": provider_config_to_dict(seed.provider_config),
-        "coherent_with": list(seed.coherent_with),
-        "when": seed.when,
-    }
-
-
-def node_written_columns(node: WorkNode) -> tuple[frozenset[str], bool]:
-    """The ONE write declaration of a work node: `(columns, unknown)`.
-
-    The node's own columns plus what its `column_access` declaration writes (a composite's
-    canonical outputs, every column a `joint_mask` config lists). `unknown` means the
-    declaration cannot name the writes. This is the conservative view: the `when:` snapshot set
-    and the carry's untouched set read it as is and treat `unknown` as "every column". The
-    ordering edges read the dispatch view built on it, `dispatch_writes`.
-    """
-    from decoy_engine.execution._column_access import declared_access
-
-    names = frozenset(node.columns)
-    entry = node_entry(node)
-    if entry is None:
-        return names, False
-    access = declared_access(entry, node.kind == "composite")
-    if node.kind == "composite" and not access.writes_unknown:
-        names = frozenset()  # a group member the provider does not output is read, not written
-    return names | access.writes, access.writes_unknown
-
-
-def dispatch_writes(node: WorkNode, graph: RelationshipGraph) -> tuple[frozenset[str], bool]:
-    """`(columns, unknown)` that `_dispatch_mask_node` really writes for `node`, for the
-    ordering edges. An extra edge can form a false cycle, so this view is exact where dispatch
-    is known: an FK child resolves through its parent's key map before any handler runs, so it
-    writes its own columns only, even when its plan slice is a composite."""
-    if graph.parents_of(node.table, node.columns):
-        return frozenset(node.columns), False
-    return node_written_columns(node)
-
-
-def node_creates_own_target(node: WorkNode) -> bool:
-    """Whether `node` is a scalar that writes its own column without reading it, so the column
-    may be absent from the source until the node runs."""
-    from decoy_engine.execution._column_access import creates_own_target
-
-    entry = node_entry(node) if node.kind == "scalar" else None
-    return entry is not None and creates_own_target(entry)
-
-
-def writer_node_map(
-    work: list[WorkNode], graph: RelationshipGraph
-) -> dict[tuple[str, str | None], set[_NodeKey]]:
-    """Each written (table, column) -> the keys of ALL nodes that write it (`dispatch_writes`),
-    so a dependent waits on every writer and reads the final value (a joint_mask group is one
-    node per output, each writing every output). `(table, None)` holds the nodes whose writes
-    cannot be named: they may write any column, so `writers_of` returns them for every one."""
-    writer: dict[tuple[str, str | None], set[_NodeKey]] = defaultdict(set)
-    for node in work:
-        names, unknown = dispatch_writes(node, graph)
-        if unknown:
-            writer[(node.table, None)].add(node.key)
-        for col in names:
-            writer[(node.table, col)].add(node.key)
-    return writer
-
-
-def writers_of(
-    writer: Mapping[tuple[str, str | None], set[_NodeKey]], table: str, column: str
-) -> set[_NodeKey]:
-    return writer.get((table, column), set()) | writer.get((table, None), set())
-
-
-def masked_driver_columns(node: WorkNode) -> frozenset[str]:
-    """The same-table sibling columns `node` reads for their MASKED value, so it
-    must be ordered AFTER them (the cross-column V1 ordering edge).
-
-    Only a scalar node whose strategy creates its own target from other columns has
-    such drivers. Their names come from `scalar_creating_reads`, the same declaration
-    `created_columns` admits a created column by, so a column accepted as created is
-    ordered after every column it reads, for every creating strategy. Every other node
-    (including `joint_mask`, whose `key_by` is a SOURCE read via snapshot) imposes no
-    ordering edge.
-    """
-    plan_slice = node.plan_slice
-    if node.kind != "scalar" or not isinstance(plan_slice, ColumnSeed):
-        return frozenset()
-    from decoy_engine.execution._column_access import scalar_creating_reads
-
-    return scalar_creating_reads(node_entry(node) or {})
-
-
-def composite_overwrites(
-    work: list[WorkNode], writer: Mapping[tuple[str, str | None], set[_NodeKey]]
-) -> dict[_NodeKey, set[_NodeKey]]:
-    """Composite node -> the creating nodes whose column it also writes. The handler writes
-    every bundle output and refuses one not yet on the frame, so the composite runs after the
-    creator and overwrites the created value with the coherent bundle's."""
-    by_key = {n.key: n for n in work}
-    out: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
-    for (_table, col), keys in writer.items():
-        if col is None:
-            continue
-        composites = {k for k in keys if by_key[k].kind == "composite"}
-        for k in keys - composites:
-            if node_creates_own_target(by_key[k]):
-                for c in composites:
-                    out[c].add(k)
-    return out
-
-
-def column_dependency_edges(
-    work: list[WorkNode], graph: RelationshipGraph
-) -> dict[_NodeKey, set[_NodeKey]]:
-    """The cross-column ordering channel for `order_work`: dependent-node key ->
-    the keys of the nodes that write its MASKED driver columns.
-
-    A driver resolves to its writers through `writer_node_map`; a column no node writes adds
-    no edge, nor does a self-ref. SOURCE-read drivers (`joint_mask` `key_by`) read a snapshot.
-    A creator a composite overwrites (`composite_overwrites`) runs first and gets no edge onto
-    that composite: what it read never reaches the output, and the edge could only form a
-    cycle. Cycles fall to `order_work`'s topo sort and `check_derived_column_refs`.
-    """
-    writer = writer_node_map(work, graph)
-    overwrites = composite_overwrites(work, writer)
-    deps: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
-    for composite, creators in overwrites.items():
-        deps[composite] |= creators
-    for node in work:
-        for col in masked_driver_columns(node):
-            for writer_key in writers_of(writer, node.table, col):
-                if writer_key != node.key and node.key not in overwrites.get(writer_key, ()):
-                    deps[node.key].add(writer_key)
-    return deps
 
 
 def order_work(
@@ -537,7 +395,9 @@ def order_work(
     # drivers, so the read is intentional (not lexicographic luck). FK edges
     # above stay dominant: these only add constraints.
     col_deps = (
-        column_dependency_edges(work, relationship_graph) if column_deps is None else column_deps
+        dependency_edges(resolve_operations(work, relationship_graph))
+        if column_deps is None
+        else column_deps
     )
     for dependent, drivers in col_deps.items():
         if dependent not in by_key:
@@ -546,55 +406,4 @@ def order_work(
             if driver in by_key:
                 deps[dependent].add(driver)
 
-    return _kahn_sorted(by_key, deps)
-
-
-def _kahn_sorted(
-    by_key: dict[_NodeKey, WorkNode], deps: dict[_NodeKey, set[_NodeKey]]
-) -> list[WorkNode]:
-    """Deterministic topological sort: at each step take the sorted-smallest node
-    whose dependencies are all placed. Total order, byte-stable across runs.
-
-    QA-10 F9 (2026-06-01): heapq-based Kahn replaces the prior O(n^2)
-    "scan all keys + sort the ready set" loop. Pre-fix every
-    topological step did a full `sorted(k for k in keys if ...)`,
-    yielding O(n^2 log n) total work. Post-fix maintains a min-heap
-    of ready nodes + an indegree counter; each node is pushed/popped
-    once for O((n+e) log n) total. Output is byte-identical to the
-    prior implementation (both yield the lexicographically smallest
-    topological order). Same fix shape as QA-8 F1 closure on the
-    relationship-graph builder.
-    """
-    keys = set(by_key)
-    if not keys:
-        return []
-    # Build reverse adjacency + indegree counter so each placement
-    # only revisits the children of the just-placed node, not the
-    # full key set.
-    rev: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
-    indegree: dict[_NodeKey, int] = {k: 0 for k in keys}
-    for child, parents in deps.items():
-        if child not in keys:
-            continue
-        for parent in parents:
-            if parent not in keys:
-                continue
-            rev[parent].add(child)
-            indegree[child] += 1
-    ready_heap: list[_NodeKey] = [k for k in keys if indegree[k] == 0]
-    heapq.heapify(ready_heap)
-    placed: list[_NodeKey] = []
-    while ready_heap:
-        nxt = heapq.heappop(ready_heap)
-        placed.append(nxt)
-        for child in sorted(rev[nxt]):
-            indegree[child] -= 1
-            if indegree[child] == 0:
-                heapq.heappush(ready_heap, child)
-    if len(placed) < len(keys):
-        unplaced = sorted(k for k in keys if indegree[k] > 0)
-        raise ExecutionError(
-            code=reasons.runtime.CYCLIC_WORK_ORDERING,
-            message=f"cycle in work-node dependencies; unresolved: {unplaced!r}",
-        )
-    return [by_key[k] for k in placed]
+    return kahn_sorted(by_key, deps)
