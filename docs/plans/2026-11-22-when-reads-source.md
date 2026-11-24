@@ -321,3 +321,98 @@ These are intentionally two choke points because they model different languages.
 The tokenizer-specific `tests/native/test_chunked_entry_rev9_read.py::test_predicate_names_fails_closed_on_a_token_kind_it_does_not_know` remains valid and unchanged because `predicate_names` remains the generic scanner. The derived-expression and transform controls in AT-S1f remain broad; no broader expression test is rewritten to the closed `when:` grammar.
 
 **A1.5 Placement and size.** The existing Placement row for `test_when_single_reader.py` covers AT-S1e. AT-S1f extends existing native and execution test modules and adds no file. `_column_access.py` changes only `_when`; the tokenizer loop remains. No ceiling rises.
+
+## Write and ordering model (revision after #783 round 4)
+
+This revision governs S2 where sections 1 and 3 describe ordering. Code references use engine head
+`d74afd71c`. Execution paths below are relative to `src/decoy_engine/execution/`.
+
+### One dispatch contract
+
+Compile each work node with one function, `resolve_dispatch(node, graph)`. It returns the selected
+operation, its table, outputs, creatable targets, masked inputs and source inputs. Resolve the
+whole work list once. Both the dispatcher and the scheduler call this function or consume its
+cached result. Dispatch selects the handler and commits its outputs through that result.
+A write means a column whose cells dispatch may replace, including writes limited to selected rows.
+
+| Selected operation | Writes and reads |
+| --- | --- |
+| FK resolution, checked first | Writes exactly the child tuple. Reads original child keys and final parent keys. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
+| Scalar | Writes its target. A nested handler writes back its outer column. A multi-column `joint_mask` writes exactly its configured outputs. Its mask key reads source. See `_column_access.py:347` and `_strategies/_joint_mask.py:119`. |
+| Creating scalar | Writes its target and can introduce it. Take masked drivers from the strategy declaration. This covers `derived`, `derived_aggregate`, `grouped_series`, `windowed_date` and `group_key`. See `_column_access.py:339` and `_column_access.py:409`. |
+| Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity and the deterministic source key. See `_column_access.py:266`, `_runner.py:119` and `_strategies/_composite.py:130`. |
+| Passthrough | Writes nothing. A gate may still read its predicate. See `_strategies/_passthrough.py:24`. |
+| Unknown writer | May write any column of its own table. Use one table-scoped wildcard. An unsupported handler still raises its existing error. See `_column_access.py:385` and `_runner.py:411`. |
+
+### Final values and dependencies
+
+Choose the final writer for each (table, column) before building edges. FK resolution owns its
+child key. A generated bundle owns its outputs over a separate creating scalar. A known writer
+takes precedence over a wildcard. For equivalent-priority overlaps, preserve explicit seed
+declaration order, with the later operation final. Preserve the declared order of successive
+partial writes so rows skipped by the last gate retain the previous value. Never use spelling
+to decide ownership. The sorted ready queue at `_runner.py:550` may break independent ties.
+
+For an unconditional owner, exclude the shadowed cells from the earlier operation's commit.
+Still execute its configured validation, gate and handler against isolated output columns.
+Preserve its warnings and row errors. Only committed outputs count when building value edges.
+This lets a shadowed creator evaluate even if its drivers depend indirectly on the bundle.
+It also lets an FK overwrite one bundle field while other fields keep their generated values.
+
+For every masked input, add an edge from its final writer to the consumer. A read-modify-write
+of the same target reads the preceding version. Include possible wildcard writes in that table.
+A source-only input reads its snapshot or untouched source and adds no value edge.
+Use the same lookup for every component of every FK parent tuple. Build or cache the masked
+parent map only after those writers finish. An unwritten column adds no writer edge.
+Use the same graph at compile and execution. Reject a cycle of required value or FK edges
+at compile time with `cyclic_work_ordering`, before dispatch. Keep both directions of a true
+dependency. For example, two live derived outputs that require each other's final value cycle.
+
+Separate column existence from value order. After source snapshots and before dispatch,
+allocate each admitted missing creator target as an index-aligned, typed nullable column.
+Keep existing columns intact. The gate still runs preflight and evaluates the original predicate.
+Zero matches leave that column null. Partial matches fill only selected rows.
+The bundle can now fill an admitted target even if the creator matched nothing.
+Keep the missing-output error for undeclared targets. See `_when_gate.py:541` and
+`_strategies/_composite.py:135`.
+
+### Red-first acceptance through run_single
+
+Use the real adapter and the fixture at `tests/unit/execution/when/test_reads_source.py:572`.
+Run each case before the fix and record its failing assertion. For an already-green behavior,
+first kill the specified mutation, then restore it. Run the same tests green on the final head.
+
+1. **V1** `test_coherent_member_reads_generated_email`. Put summary in first_name's
+   coherent group. Derive summary from email plus "!". Every summary must equal the output
+   email plus "!" and differ from the source email plus "!".
+2. **V1** `test_fk_reads_final_bundle_surname`. Derive last_name from an unrelated input.
+   Also generate it in the bundle. Match a_ref to the original surname. Assert each child
+   equals its final generated parent and differs from the intermediate derived value.
+3. **V1** `test_fk_child_bypasses_derived_creator`. Resolve email from first_name while
+   its configured derived expression reads an unrelated column. Matching keys must yield
+   email equal to masked first_name. The bundle must still generate last_name.
+4. **V1** `test_indirect_creator_reads_after_bundle`. Supply all columns. Derive email
+   from summary and summary from last_name. Assert success, summary equal to generated
+   last_name plus "!", and email equal to the fixed-seed bundle oracle.
+5. **V1** `test_zero_match_creator_supplies_missing_target`. Omit email. Match no rows.
+   Run once without the bundle and assert email exists with all nulls. With the bundle,
+   assert every email equals the generated oracle. Keep both existing overlap cases at
+   `tests/unit/execution/when/test_reads_source.py:636`.
+6. **V2-LOG** `test_unknown_writer_is_table_scoped`. Register z_stub with unknown outputs.
+   Have it replace an otherwise unwritten driver. Assert a_derived reads its replacement.
+   Capture the real dependency map during the run. Include a second table's reader in the
+   planning probe and assert it has no edge from z_stub. Make the two assertions fail by
+   removing wildcard lookup and by pooling wildcards across tables, respectively.
+7. **V1** `test_renaming_child_preserves_output`. Run the surname fixture with a_ref,
+   then z_ref. Rename all associated references, hold seeds and namespace fixed, undo the
+   output rename and compare every column and row. Both runs must match the parent oracle.
+
+### Placement and removal
+
+| Existing location | Builder change |
+| --- | --- |
+| `_column_access.py:266` | Keep the surface registry. Remove coherent group names from composite writes. Resolve operations and their writes here. Reuse the provider's canonical or configured outputs. |
+| `_runner.py:356`, `_runner.py:382`, `_runner.py:449`, `_runner.py:470`, `_runner.py:527` | Delete the conservative and dispatch write views, creator probe, composite overwrite scan, skipped driver edges and special FK scans. Build one writer index from resolved operations. |
+| `_pandas_adapter.py:375`, `_when_gate.py:582`, `_strategies/_joint_mask.py:47` | Dispatch the resolved operation. Use its outputs for write-back and gated stitching. Remove the separate gated-output hook. |
+| `_runner.py:329`, `_chunked_carry.py:202` | Feed snapshot and carry from the same resolved writes. For a wildcard, snapshot every predicate input and disable carry in its table. |
+| `tests/unit/execution/when/test_reads_source.py:572` | Extend the existing acceptance tests. Guard the commit boundary with a generated bundle containing an undeclared key. Removing the key check must turn the guard red. |
