@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.sentry.parallel._resources import parse_marker_expr
+from tests.sentry.ratchet._integrity import is_sentry_glob
 
 ROOT = Path(__file__).resolve().parents[2]
 GATES = ROOT / "scripts" / "dev" / "gates.sh"
@@ -33,7 +34,8 @@ OUTSIDE_SENTRIES = (
 
 def sentry_files(root: Path) -> set[str]:
     """Every sentry test file under ``tests/sentry``, nested folders included."""
-    return {p.relative_to(root).as_posix() for p in (root / "tests" / "sentry").rglob("test_*.py")}
+    found = (p.relative_to(root).as_posix() for p in (root / "tests" / "sentry").rglob("*"))
+    return {p for p in found if is_sentry_glob(p)}
 
 
 # By the CODEMAP rule every test file under tests/sentry/ is a sentry, so the glob is the list.

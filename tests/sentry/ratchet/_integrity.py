@@ -114,17 +114,26 @@ def closed_keys(
     doc: dict[str, object],
     allowed: frozenset[str],
     problem: Callable[[object], str | None],
-) -> list[str]:
-    """Unknown row keys and malformed decision tables. Unknown top-level tables are ignored."""
+    waived: frozenset[tuple[str, str]] = frozenset(),
+) -> tuple[list[str], list[str]]:
+    """Unknown row keys and malformed decision tables, plus the waiver report lines.
+
+    ``waived`` holds exact ``(id, field)`` pairs; only the unknown-key finding of that pair is
+    omitted. Unknown top-level tables are ignored.
+    """
     out: list[str] = []
+    used: list[str] = []
     rows = doc.get("sentry", [])
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict):
             out.append("registry: a [[sentry]] row is not a table")
             continue
-        out += [
-            f"{row.get('id', '?')}: unknown registry key {k}" for k in sorted(set(row) - allowed)
-        ]
+        sid = row.get("id", "?")
+        for key in sorted(set(row) - allowed):
+            if (sid, key) in waived:
+                used.append(f"{sid}: registry key {key} waived by checker_change")
+            else:
+                out.append(f"{sid}: unknown registry key {key}")
     for table in DECISION_TABLES:
         rows_ = doc.get(table, {})
         if not isinstance(rows_, dict):
@@ -134,7 +143,7 @@ def closed_keys(
             why = problem(decision)
             if why:
                 out.append(f"{table} {name}: {why}")
-    return out
+    return out, used
 
 
 def decisions(doc: dict[str, object]) -> dict[str, dict[str, str]]:
@@ -191,6 +200,7 @@ def transfer_findings(
     donors: dict[str, dict[str, object]],
     successors: dict[str, dict[str, object]],
     per_site: bool,
+    removed: Iterable[str] = (),
 ) -> tuple[list[str], list[str]]:
     """Match every successor key to one removed donor's key; each ``(donor, key)`` pair once.
 
@@ -199,7 +209,7 @@ def transfer_findings(
     may not loosen a bound against its donor, and every donor with an inventory must supply at
     least one key. With ``per_site`` the unmatched ``permitted::`` keys fall back to ``r.growth``.
     """
-    if not donors:
+    if not donors and not successors:
         return [], []
     holders: dict[str, list[str]] = {}
     for did, entries in donors.items():
@@ -230,7 +240,7 @@ def transfer_findings(
         sites = set(rekeyed)
         supplied |= {d for d, e in donors.items() if any(r.permit_site(k) in sites for k in e)}
         unmatched = set(grown)
-    ids = ", ".join(sorted(donors))
+    ids = ", ".join(sorted(donors or removed))
     if unmatched:
         out.append(f"replacement or split of {ids} adds key(s): {', '.join(sorted(unmatched))}")
     if loosened:
@@ -241,7 +251,7 @@ def transfer_findings(
     out += [
         f"{d}: removed from the registry without a fresh [retired] decision or a key moved to a new sentry"
         for d in sorted(donors)
-        if donors[d] and d not in supplied
+        if d not in supplied
     ]
     return out, report
 
@@ -260,36 +270,40 @@ def outside_sentries(text: str) -> list[str] | None:
     return None
 
 
-def _is_sentry_glob(path: str) -> bool:
+def is_sentry_glob(path: str) -> bool:
+    """``tests/sentry/**/test_*.py``: the one definition of sentry-file membership."""
     parts = PurePosixPath(path).parts
     return (
         parts[:2] == ("tests", "sentry") and parts[-1].startswith("test_") and path.endswith(".py")
     )
 
 
-def _sentry_set(files: Iterable[str], manifest: str | None) -> set[str] | None:
+def sentry_set(files: Iterable[str], manifest: str | None) -> set[str] | None:
+    """Sentry files among ``files`` plus the manifest's ``OUTSIDE_SENTRIES``; ``None`` if unparsable."""
     outside = [] if manifest is None else outside_sentries(manifest)
     if outside is None:
         return None
-    return {f for f in files if _is_sentry_glob(f)} | set(outside)
+    return {f for f in files if is_sentry_glob(f)} | set(outside)
 
 
 def sentry_file_findings(root: Path, tree: BaseTree, retired_files: set[str]) -> list[str]:
-    """Sentry test files of the base tree that are gone at head without a rename or retirement."""
-    head_manifest = root / MANIFEST
-    base_set = _sentry_set(tree.files(), tree.read(MANIFEST))
+    """Sentry test files of the base tree that are gone at head without a rename or retirement.
+
+    The head set comes from the HEAD commit, the same one rename detection diffs, and is then
+    limited to files still on disk, so an untracked copy cannot stand in for a deleted file.
+    """
+    base_set = sentry_set(tree.files(), tree.read(MANIFEST))
     if base_set is None:
         raise BaseReadError(MANIFEST)
     base_set = {p for p in base_set if tree.has_file(p)}
-    head_files = (
-        p.relative_to(root).as_posix() for p in (root / "tests" / "sentry").rglob("test_*.py")
-    )
-    head_set = _sentry_set(
-        head_files, head_manifest.read_text(encoding="utf-8") if head_manifest.is_file() else None
-    )
+    head_sha = resolve_commit(root, "HEAD")
+    if head_sha is None:
+        raise BaseReadError("the head commit")
+    head_tree = BaseTree(root, head_sha)
+    head_set = sentry_set(head_tree.files(), head_tree.read(MANIFEST))
     if head_set is None:
         return [f"{MANIFEST}: OUTSIDE_SENTRIES is not a literal tuple of strings"]
-    head_set = {p for p in head_set if (root / p).is_file()}
+    head_set = {p for p in head_set if head_tree.has_file(p) and (root / p).is_file()}
     gone = sorted(base_set - head_set)
     if not gone:
         return []

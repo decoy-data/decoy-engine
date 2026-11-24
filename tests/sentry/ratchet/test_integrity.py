@@ -8,14 +8,16 @@ Sentry ids, keys and decisions are synthetic. The decision rows written here liv
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from tests.sentry import _ratchet
 from tests.sentry.layout import REGISTRY_PATH_CASES
-from tests.sentry.ratchet._integrity import safe_path
+from tests.sentry.ratchet._integrity import safe_path, sentry_set
 from tests.sentry.test_ratchet_check import (
     REG,
     ROOT,
@@ -28,6 +30,8 @@ from tests.sentry.test_ratchet_check import (
     _run,
     _write,
 )
+from tests.sentry.test_sentry_manifest import ROOT as _ROOT
+from tests.sentry.test_sentry_manifest import SENTRIES, sentry_files
 
 B = "tests/sentry/baselines/b.json"
 DECISION = "owner 2026-11-24 sentry superseded by another rule"
@@ -392,3 +396,123 @@ def test_live_registry_passes_against_origin_main() -> None:
     if res.returncode == 2:
         pytest.skip("no merge base with origin/main in this checkout")
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+# --- review round 1: empty inventories, retired ids, head commit, waiver input, one predicate ---
+
+
+def test_removed_id_with_an_empty_inventory_needs_a_retirement(two: Path) -> None:
+    _write(two, A, _baseline("a", []))
+    _commit(two, "a is empty")
+    _drop_a(two)
+    _assert_red(two, "a: removed from the registry")
+
+
+def test_removed_id_with_an_empty_inventory_and_a_retirement_passes(two: Path) -> None:
+    _write(two, A, _baseline("a", []))
+    _commit(two, "a is empty")
+    _drop_a(two, _tables(retired={"a": DECISION}))
+    res = _run(two)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_a_retirement_does_not_admit_a_first_inventory(two: Path) -> None:
+    n = "tests/sentry/baselines/n.json"
+    (two / A).unlink()
+    _write(two, n, _baseline("n", ["m::f", "m::g"]))
+    _write(two, REG, _registry({"b": B, "n": n}) + _tables(retired={"a": DECISION}))
+    _assert_red(two, "adds key(s): m::f, m::g")
+
+
+def test_a_retirement_with_an_empty_new_sentry_passes(two: Path) -> None:
+    n = "tests/sentry/baselines/n.json"
+    (two / A).unlink()
+    _write(two, n, _baseline("n", []))
+    _write(two, REG, _registry({"b": B, "n": n}) + _tables(retired={"a": DECISION}))
+    res = _run(two)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_a_retired_base_baseline_must_still_be_readable(two: Path) -> None:
+    _unlink_object(two, A)
+    _drop_a(two, _tables(retired={"a": DECISION}))
+    _assert_red(two, f"cannot read {A} from the base commit")
+
+
+def test_untracked_copy_of_a_deleted_sentry_file_does_not_pass(
+    with_sentry: tuple[Path, str],
+) -> None:
+    repo, base = with_sentry
+    _git(repo, "rm", "-q", SENTRY)
+    _commit(repo, "delete")
+    _write(repo, SENTRY, SENTRY_BODY)  # on disk, in no commit
+    _red_from(repo, base, f"{SENTRY}: sentry test file was removed")
+
+
+def test_uncommitted_manifest_edit_cannot_restore_an_outside_entry(repo: Path) -> None:
+    _write(repo, MANIFEST, _manifest((OUTSIDE,)))
+    _write(repo, OUTSIDE, SENTRY_BODY)
+    base = _commit(repo, "outside sentry")
+    _write(repo, MANIFEST, _manifest(()))
+    _commit(repo, "drop the list entry")
+    _write(repo, MANIFEST, _manifest((OUTSIDE,)))  # not committed
+    _red_from(repo, base, f"{OUTSIDE}: sentry test file was removed")
+
+
+def _run_env(repo: Path, waiver: str | None) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if k != "RATCHET_SCHEMA_WAIVER"}
+    if waiver is not None:
+        env["RATCHET_SCHEMA_WAIVER"] = waiver
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, str(SCRIPT), "--root", str(repo), "--base", "HEAD"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def _new_field(repo: Path, with_decision: bool) -> None:
+    extra = 'bypass = "yes"\n'
+    _write(repo, REG, _registry({"a": A}) + extra)
+    if with_decision:
+        text = _registry({"a": A}).rstrip("\n") + '\nbypass = "yes"\n\n'
+        _write(repo, REG, text + _tables(checker_change={"bypass": DECISION}))
+
+
+def test_exact_waiver_with_a_checker_change_row_passes_and_is_reported(repo: Path) -> None:
+    _new_field(repo, with_decision=True)
+    res = _run_env(repo, json.dumps([["a", "bypass"]]))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "a: registry key bypass waived by checker_change" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "waiver", [None, '[["a","other"]]', '[["z","bypass"]]', "not json", '[["a"]]']
+)
+def test_waiver_for_another_pair_or_bad_input_still_fails(repo: Path, waiver: str | None) -> None:
+    _new_field(repo, with_decision=True)
+    res = _run_env(repo, waiver)
+    assert res.returncode == 1, res.stdout + res.stderr
+
+
+def test_waiver_without_a_checker_change_row_fails(repo: Path) -> None:
+    _new_field(repo, with_decision=False)
+    res = _run_env(repo, json.dumps([["a", "bypass"]]))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "a: unknown registry key bypass" in res.stdout + res.stderr
+
+
+def test_sentry_membership_has_one_definition() -> None:
+    everything = [p.relative_to(_ROOT).as_posix() for p in (_ROOT / "tests").rglob("*")]
+    manifest = (_ROOT / "tests/sentry/test_sentry_manifest.py").read_text(encoding="utf-8")
+    assert sentry_set(everything, manifest) == set(SENTRIES)
+    assert sentry_files(_ROOT) == {p for p in SENTRIES if p.startswith("tests/sentry/")}
+
+
+@pytest.mark.parametrize("reason", ["x" * 14, "x" * 15, "todo", "n/a", "reviewed on 2026-11-04"])
+def test_reason_predicate_is_shared_by_baselines_and_decisions(reason: str) -> None:
+    weak = _ratchet.weak_reason(reason)
+    base = _ratchet.parse_baseline(_baseline("a", ["k"], reason=reason))
+    assert bool(_ratchet.reason_findings("p", base)) is weak
+    if len(reason) >= 10:
+        assert (_ratchet.decision_problem(f"owner 2026-11-24 {reason}") is not None) is weak

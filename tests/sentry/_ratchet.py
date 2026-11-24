@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -138,8 +139,7 @@ def decision_problem(decision: object) -> str | None:
     """Why ``decision`` is not an acceptable owner decision, or ``None`` when it is."""
     if not _decision_ok(decision):
         return "needs a decision 'owner YYYY-MM-DD <text of 10+ chars>'"
-    text = str(decision).split(" ", 2)[2].strip()
-    if len(text) < MIN_REASON or text.lower().strip(".!") in PLACEHOLDERS:
+    if weak_reason(str(decision).split(" ", 2)[2]):
         return f"reason is empty, a placeholder or under {MIN_REASON} chars"
     return None
 
@@ -156,13 +156,18 @@ def parse_baseline(text: str) -> Baseline:
     )
 
 
+def weak_reason(text: str) -> bool:
+    """True when a reason is empty, a placeholder or under ``MIN_REASON`` chars (one predicate)."""
+    text = text.strip()
+    return len(text) < MIN_REASON or text.lower().strip(".!") in PLACEHOLDERS
+
+
 def reason_findings(path: str, base: Baseline) -> list[str]:
     out = []
     for key in sorted(base.keys):
         entry = base.reasons[key]
         reason = entry.get("reason") if isinstance(entry, dict) else None
-        text = reason.strip() if isinstance(reason, str) else ""
-        if len(text) < MIN_REASON or text.lower().strip(".!") in PLACEHOLDERS:
+        if weak_reason(reason if isinstance(reason, str) else ""):
             out.append(
                 f"{path}: reason for {key} is empty, a placeholder or under {MIN_REASON} chars"
             )
@@ -341,6 +346,23 @@ def _fmt(keys: frozenset[str]) -> str:
     return ", ".join(sorted(keys))
 
 
+def schema_waivers() -> tuple[frozenset[tuple[str, str]], list[str]]:
+    """Exact ``(id, field)`` pairs from ``RATCHET_SCHEMA_WAIVER`` (a JSON list of pairs)."""
+    raw = os.environ.get("RATCHET_SCHEMA_WAIVER")
+    if raw is None:
+        return frozenset(), []
+    try:
+        pairs = json.loads(raw)
+        if isinstance(pairs, list) and all(
+            isinstance(p, list) and len(p) == 2 and all(isinstance(x, str) for x in p)
+            for p in pairs
+        ):
+            return frozenset((p[0], p[1]) for p in pairs), []
+    except ValueError:
+        pass
+    return frozenset(), ["RATCHET_SCHEMA_WAIVER is not a JSON list of [id, field] pairs"]
+
+
 def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
     """Return ``(findings, report_lines)`` for the tree at ``root`` against ``base_ref``."""
     helper = _integrity()
@@ -365,12 +387,18 @@ def _check(root: Path, tree: Any, helper: ModuleType) -> tuple[list[str], list[s
     findings += helper.registry_present(
         len(base_doc.get("sentry", [])), reg_file.is_file(), len(head_doc.get("sentry", []))
     )
-    findings += helper.closed_keys(head_doc, ROW_KEYS, decision_problem)
     head_dec, base_dec = helper.decisions(head_doc), helper.decisions(base_doc)
+    fresh = {t: helper.fresh(head_dec[t], base_dec[t], decision_problem) for t in head_dec}
+    waived, waiver_findings = schema_waivers()
+    findings += waiver_findings
+    # A waiver only counts for a field that carries a fresh [checker_change] decision.
+    usable = frozenset(w for w in waived if w[1] in fresh["checker_change"])
+    schema, waiver_report = helper.closed_keys(head_doc, ROW_KEYS, decision_problem, usable)
+    findings += schema
     report: list[str] = helper.new_decisions(
         head_dec, base_dec, approvals, parse_approvals(base_text)[0]
     )
-    fresh = {t: helper.fresh(head_dec[t], base_dec[t], decision_problem) for t in head_dec}
+    report += waiver_report
     safe = {sid: p for sid, p in head.items() if helper.safe_path(p, BASELINE_DIR)}
 
     on_disk = {p.relative_to(root).as_posix() for p in (root / BASELINE_DIR).glob("*.json")}
@@ -399,6 +427,8 @@ def _check(root: Path, tree: Any, helper: ModuleType) -> tuple[list[str], list[s
 
     removed = set(base_reg) - set(head)
     donors = {s: _base_entries(tree, base_reg[s]) for s in sorted(removed - fresh["retired"])}
+    for sid in sorted(removed & fresh["retired"]):
+        _base_entries(tree, base_reg[sid])  # a retirement still needs a readable base baseline
     successors: dict[str, dict[str, object]] = {}
     for sid, base in sorted(loaded.items()):
         path = head[sid]
@@ -430,14 +460,14 @@ def _check(root: Path, tree: Any, helper: ModuleType) -> tuple[list[str], list[s
             )
             if raised:
                 findings.append(f"{sid}: max raised or dropped for key(s): {', '.join(raised)}")
-        elif donors:
+        elif removed:
             successors[sid] = base.reasons
         else:
             # Newly registered in this diff: the one way a first inventory is admitted.
             report.append(f"{sid}: first inventory, {len(base.keys)} key(s), review required")
     only_rekey = (set(donors) | set(successors)) <= REKEY_PER_SITE
     transfer, rekeyed_report = helper.transfer_findings(
-        sys.modules[__name__], donors, successors, only_rekey
+        sys.modules[__name__], donors, successors, only_rekey, removed
     )
     findings += transfer
     report += rekeyed_report
