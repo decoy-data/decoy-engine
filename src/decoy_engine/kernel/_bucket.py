@@ -21,7 +21,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from decoy_engine.contracts.bucketize_width import EXACT_INT_BOUND
+from decoy_engine.contracts.bucketize_width import BUCKETIZE_FORMATS, EXACT_INT_BOUND
 
 _BOUND = float(EXACT_INT_BOUND)  # 2**53 is exact in float64
 
@@ -46,7 +46,6 @@ def integer_width_exit_mask(values: pa.Array | pa.ChunkedArray) -> pa.Array:
     return mask
 
 
-_BUCKET_FORMATS = ("lower", "range", "midpoint")
 _INT64_LOW = -(2.0**63)  # exact in float64
 _INT64_HIGH = 2.0**63  # exclusive upper limit of the signed 64-bit cast range
 
@@ -163,7 +162,7 @@ def python_float_str(values: pa.Array | pa.ChunkedArray) -> pa.Array:
 def floor_multiple(values: pa.Array | pa.ChunkedArray, width: int | float) -> pa.Array:
     """``floor(x / width) * width`` in float64: the bucket start, bit-equal to NumPy's."""
     w = pa.scalar(float(width), pa.float64())
-    quotient = pc.divide(_combine(values), w)  # type: ignore[attr-defined, unused-ignore]
+    quotient = pc.divide(_as_float64(_combine(values)), w)  # type: ignore[attr-defined, unused-ignore]
     return pc.multiply(pc.floor(quotient), w)  # type: ignore[attr-defined, unused-ignore, no-any-return]
 
 
@@ -215,7 +214,7 @@ def bucketize_array(
     """
     array = _combine(values)
     _require_numeric(array, "bucketize")
-    if fmt not in _BUCKET_FORMATS:
+    if fmt not in BUCKETIZE_FORMATS:
         raise ValueError("bucketize format is not one of lower, range, midpoint")
     is_int_width = isinstance(width, int) and not isinstance(width, bool)
     if is_int_width and width >= EXACT_INT_BOUND:

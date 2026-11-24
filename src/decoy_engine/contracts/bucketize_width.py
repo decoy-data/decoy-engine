@@ -12,12 +12,16 @@ from collections.abc import Mapping
 from typing import Any
 
 __all__ = [
+    "BUCKETIZE_FORMATS",
     "BUCKETIZE_PRESETS",
     "EXACT_INT_BOUND",
     "MAX_EXACT_DECIMAL_WIDTH",
     "resolve_bucketize_width",
     "unresolvable_width_field",
 ]
+
+# The label formats a bucketize column accepts: one list for the handler and the array kernel.
+BUCKETIZE_FORMATS: tuple[str, ...] = ("lower", "range", "midpoint")
 
 BUCKETIZE_PRESETS: Mapping[str, int] = {
     "by_year": 1,

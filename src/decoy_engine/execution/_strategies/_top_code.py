@@ -158,10 +158,8 @@ def resolve_top_code_settings(cfg: Mapping[str, Any], column: str) -> TopCodeSet
             code=reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE,
             strategy="top_code",
             message=(
-                f"column {column!r} uses top_code but neither a known "
-                f"preset ({cfg.get('preset')!r}) nor a resolvable numeric "
-                f"cap ({cfg.get('cap')!r}) with a non-empty over_label is "
-                "configured."
+                f"column {column!r} uses top_code but neither a known preset nor a "
+                "resolvable numeric cap with a non-empty over_label is configured."
             ),
         )
     floor, under_label = TopCodeStrategyHandler._resolve_bottom_bound(dict(cfg))
@@ -184,8 +182,12 @@ def _classify_numeric(
     in_range_mask = nums.notna() & ~over_mask & ~under_mask
 
     if pd.api.types.is_integer_dtype(nums.dtype):
-        # Already ".0"-free and arbitrary-precision; no normalization.
+        # NumPy and nullable integer dtypes print ".0"-free and exact. A pyarrow-backed integer
+        # column prints through float64 when it holds a null ("-1.0", and digits lost past 2**53),
+        # so it renders each present cell as a Python int, the text the kernel prints.
         in_range_str = nums.astype(str)
+        if isinstance(nums.dtype, pd.ArrowDtype):
+            in_range_str = nums.astype(object).map(lambda v: None if pd.isna(v) else str(int(v)))
     else:
         # Float dtype (nulls widened it, or genuine floats): an integral
         # value renders "67.0", so strip the ".0" via Python's
@@ -493,9 +495,9 @@ class TopCodeStrategyHandler:
                 code=reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE,
                 strategy="top_code",
                 message=(
-                    f"top_code floor {floor!r} is not a usable bound (must be a "
-                    "finite number with magnitude below 2**53). Refusing to run "
-                    "rather than silently disable bottom-coding."
+                    "top_code floor is not a usable bound (must be a finite number "
+                    "with magnitude below 2**53). Refusing to run rather than "
+                    "silently disable bottom-coding."
                 ),
             )
         under_label = cfg.get("under_label")
@@ -504,9 +506,8 @@ class TopCodeStrategyHandler:
                 code=reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE,
                 strategy="top_code",
                 message=(
-                    f"top_code sets floor {floor!r} but no non-empty under_label "
-                    f"(got {under_label!r}). Refusing to run rather than silently "
-                    "drop the bottom tail."
+                    "top_code sets a floor but no non-empty under_label. Refusing to "
+                    "run rather than silently drop the bottom tail."
                 ),
             )
         return floor, under_label

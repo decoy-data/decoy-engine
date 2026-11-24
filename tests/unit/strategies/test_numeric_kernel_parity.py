@@ -31,7 +31,7 @@ from decoy_engine.execution._strategies import (
 )
 from decoy_engine.execution._strategies._bucketize import BucketizeStrategyHandler
 from decoy_engine.execution._strategies._top_code import TopCodeStrategyHandler
-from decoy_engine.kernel import SparseLabels, bucketize_array, top_code_array
+from decoy_engine.kernel import SparseLabels, bucketize_array, floor_multiple, top_code_array
 from decoy_engine.plan._types import ColumnSeed
 
 INF = math.inf
@@ -134,10 +134,9 @@ def test_bucketize_kernel_equals_the_handler(
     assert result.exit_positions.to_pylist() == bad, name
 
 
-# top_code columns reach the handler as NumPy int64 or nullable Int64 (they are lossless-int
-# columns); the handler renders a null-bearing int64[pyarrow] through float64 and loses digits,
-# a dtype that never reaches it, so that one is a bucketize-only case.
-TOP_CODE_COLUMNS = [c for c in COLUMNS if c[0] != "int64[pyarrow]"]
+# Every column dtype, including a null-bearing int64[pyarrow], which the handler used to render
+# through float64 ("-1.0" and lost digits past 2**53) while the kernel printed exact integers.
+TOP_CODE_COLUMNS = COLUMNS
 
 
 @pytest.mark.parametrize(
@@ -298,3 +297,47 @@ def test_exceptional_renderers_literals() -> None:
     flt = resolve_bucketize_settings({"width": 2.5, "format": "range"}, "n")
     assert _cells(render_exceptional_bucket_labels(ext, flt)) == ["nan-nan"]
     assert _cells(render_exceptional_bucket_labels(pd.Series([math.nan]), flt)) == [None]
+
+
+def test_reconstructed_arrow_int_column_prints_exact_integers() -> None:
+    """A null-bearing int64[pyarrow] column renders like the kernel, with no ".0" and no loss."""
+    values = [-1, None, 95, TWO53 - 3]
+    cap = TWO53 - 1
+    cells, detail = _top_code_handler(
+        pd.Series(values, dtype="int64[pyarrow]"), cap=cap, over_label="over"
+    )
+    assert cells == ["-1", None, "95", str(TWO53 - 3)]
+    assert detail is None
+    assert top_code_array(pa.array(values, pa.int64()), cap, "over").labels.to_pylist() == cells
+
+
+def test_floor_multiple_takes_integers_without_quoting_them() -> None:
+    values = pa.array([9007199254740993, -3, None], pa.int64())
+    try:
+        out = floor_multiple(values, 2.5)
+    except pa.ArrowInvalid as exc:
+        assert "9007199254740993" not in str(exc)
+        raise
+    expected = np.floor(np.array([9007199254740993, -3], dtype=np.float64) / 2.5) * 2.5
+    assert out.to_pylist() == [*expected.tolist(), None]
+
+
+_SECRET = "https://user:hunter2@host.example/x"
+
+
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        {"cap": _SECRET, "over_label": "o"},
+        {"preset": _SECRET},
+        {"cap": 5, "over_label": "o", "floor": _SECRET, "under_label": "u"},
+        {"cap": 5, "over_label": "o", "floor": 1, "under_label": [_SECRET]},
+    ],
+)
+def test_top_code_resolver_errors_omit_supplied_values(cfg: dict[str, Any]) -> None:
+    with pytest.raises(StrategyError) as info:
+        resolve_top_code_settings(cfg, "n")
+    text = str(info.value)
+    assert "hunter2" not in text and "host.example" not in text
+    assert info.value.code == reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE
+    assert "n" in text or "floor" in text or "under_label" in text

@@ -41,7 +41,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.contracts.bucketize_width import resolve_bucketize_width
+from decoy_engine.contracts.bucketize_width import BUCKETIZE_FORMATS, resolve_bucketize_width
 from decoy_engine.contracts.format_error_reasons import format_error_reason
 from decoy_engine.execution._adapter import (
     StrategyContext,
@@ -56,7 +56,7 @@ from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.kernel import integer_width_exit_mask
 from decoy_engine.plan._types import ColumnSeed
 
-_FORMATS = frozenset({"lower", "range", "midpoint"})
+_FORMATS = frozenset(BUCKETIZE_FORMATS)
 _NOT_NUMERIC = "value is not numeric under bucketize"
 
 
