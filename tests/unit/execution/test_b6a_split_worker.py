@@ -252,7 +252,7 @@ def _worker_job(tmp_path: Path) -> tuple[dict[str, Any], pa.Table]:
 def _payload(cfg: dict[str, Any], tmp_path: Path, name: str, **kwargs: Any) -> dict[str, Any]:
     return {
         "config": cfg,
-        "sources": {"t": cfg["sources"]["t"]["path"]},
+        "sources": {"t": {"format": "parquet", "path": cfg["sources"]["t"]["path"]}},
         "kwargs": {
             "engine_version": "b6a-worker",
             "auto_chunk_threshold_rows": 1_000,

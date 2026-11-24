@@ -43,6 +43,7 @@ from decoy_engine.fileaccess._protected_dir import (
 )
 from decoy_engine.fileaccess._rooted import Root, RootedFileAccess, lexical_ok
 from decoy_engine.fileaccess._scratch_reports import CleanupReport, Disposition
+from decoy_engine.fileaccess._stage_claim import StageClaim
 from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, FileRole
 
@@ -180,7 +181,7 @@ def _mark_and_publish(fd: int, base_fd: int, pending: str) -> str:
         _close(marker)
 
 
-class ScratchArena(StageWalk):
+class ScratchArena(StageWalk, StageClaim):
     """An A-4 `StageDir` over private scratch. Children share the root's lock and finished state;
     only the opener's `reclaim()`, its `with` exit or collection of the owning root removes."""
 
@@ -278,6 +279,9 @@ class ScratchArena(StageWalk):
             validate_component(component, _DISPLAY)
         if writes and _MARKER in components:
             raise deny(_DISPLAY)  # the marker is the sweep's proof of ownership
+
+    def _check_write(self, *components: str) -> None:
+        self._check(*components, writes=True)
 
     def create_file(self, component: str) -> int:
         self._check(component, writes=True)
