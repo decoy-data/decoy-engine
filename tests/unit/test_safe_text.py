@@ -13,6 +13,7 @@ import multiprocessing
 import pickle
 import re
 import sys
+import weakref
 from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -96,7 +97,7 @@ def test_production_logs_one_warning_per_call_site(
 
 def test_a_literal_in_every_plain_spelling_passes() -> None:
     folded = SafeText.const("ab" + "cd-ef")
-    implicit = SafeText.const("one two")
+    implicit = SafeText.const("one " "two")  # fmt: skip
     plain = SafeText.const("plain text")
     nofield = SafeText.const(f"no field here")  # noqa: F541
     in_lambda = (lambda: SafeText.const("inside a lambda"))()
@@ -123,8 +124,18 @@ def test_a_wrapper_in_a_mutmut_module_passes_the_literal_of_its_caller() -> None
     # Calls sit outside the asserts: pytest's assert rewriting changes folded constants.
     plain = wrap("plain text")
     folded = wrap("ab" + "cd-ef")
-    implicit = wrap("one two")
-    assert [str(x) for x in (plain, folded, implicit)] == ["plain text", "abcd-ef", "one two"]
+    implicit = wrap("one " "two")  # fmt: skip
+    nofield = wrap(f"no field here")  # noqa: F541
+    in_lambda = (lambda: wrap("inside a lambda"))()
+    in_comp = next(wrap("inside a comprehension") for _ in range(1))
+    assert [str(x) for x in (plain, folded, implicit, nofield, in_lambda, in_comp)] == [
+        "plain text",
+        "abcd-ef",
+        "one two",
+        "no field here",
+        "inside a lambda",
+        "inside a comprehension",
+    ]
 
 
 def test_the_same_wrapper_outside_mutmut_withholds_a_non_literal_argument() -> None:
@@ -144,9 +155,24 @@ def test_a_mutmut_wrapper_calling_a_body_with_the_literal_passes() -> None:
     def body() -> Any:
         return SafeText.const("body literal")
 
+    def body_lambda() -> Any:
+        return (lambda: SafeText.const("lambda body literal"))()
+
+    def body_comp() -> Any:
+        return next(SafeText.const("comprehension body literal") for _ in range(1))
+
+    def body_implicit() -> Any:
+        return SafeText.const("body " "implicit")  # fmt: skip
+
     ns: dict[str, Any] = {"__name__": "mutmut.mutation.trampoline"}
     exec("def trampoline(fn):\n    return fn()\n", ns)  # noqa: S102
-    assert str(ns["trampoline"](body)) == "body literal"
+    texts = [str(ns["trampoline"](f)) for f in (body, body_lambda, body_comp, body_implicit)]
+    assert texts == [
+        "body literal",
+        "lambda body literal",
+        "comprehension body literal",
+        "body implicit",
+    ]
 
 
 # A22: identity with a literal must not be a cache accident.
@@ -201,12 +227,35 @@ def test_a_malformed_template_is_withheld(production: None) -> None:
 
 
 # The leaf imports nothing from decoy_engine (A19, part one; the layer contract is the second).
+def _runtime_imports(body: list[ast.stmt]) -> Iterator[ast.Import | ast.ImportFrom]:
+    """Imports that run at import time: everything except ``if TYPE_CHECKING:`` bodies."""
+    for node in body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            yield node
+        elif isinstance(node, ast.If):
+            test = node.test
+            if not (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"):
+                yield from _runtime_imports(node.body)
+            yield from _runtime_imports(node.orelse)
+        elif isinstance(node, (ast.Try, ast.With, ast.FunctionDef, ast.ClassDef)):
+            yield from _runtime_imports(node.body)
+
+
 def test_the_leaf_imports_only_the_standard_library() -> None:
     tree = ast.parse(_LEAF.read_text(encoding="utf-8"))
-    names = [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names] + [
-        n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
-    ]
-    assert not [n for n in names if n.startswith(("decoy_engine", "importlib"))]
+    bad: list[str] = []
+    for node in _runtime_imports(tree.body):
+        if isinstance(node, ast.ImportFrom):
+            roots = ["." * node.level + (node.module or "")] if node.level else [node.module or ""]
+        else:
+            roots = [a.name for a in node.names]
+        bad += [
+            r for r in roots if r.startswith(".") or r.split(".")[0] not in sys.stdlib_module_names
+        ]
+    assert not bad
+    assert "typing_extensions" not in {
+        r for n in _runtime_imports(tree.body) for r in [getattr(n, "module", "")]
+    }
 
 
 # E: pickle and the process pool.
@@ -234,7 +283,7 @@ def _worker_echo(text: object) -> str:
 
 
 def _worker_strict() -> bool:
-    return _safe_text._strict
+    return _safe_text._strict_active()
 
 
 def test_a_safe_text_crosses_a_process_pool_and_the_worker_withholds() -> None:
@@ -315,3 +364,69 @@ def test_an_error_while_walking_frames_means_no_proof(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(_safe_text.inspect, "currentframe", lambda: _Broken())
     assert _safe_text._caller_code() == (None, ("unknown", "unknown", 0))
+
+
+class _RaisingLen(str):
+    def __len__(self) -> int:
+        raise RuntimeError("len ran")
+
+
+def _dead_proxy() -> Any:
+    class _Holder(str):
+        pass
+
+    obj = _Holder("some long text")
+    proxy = weakref.proxy(obj)
+    del obj
+    return proxy
+
+
+def _raising() -> Any:
+    return _RaisingLen("abcdef")
+
+
+_ODD_INPUTS = {"raising-len": _raising, "dead-proxy": _dead_proxy}
+_BUILDERS: dict[str, Callable[[Any], Any]] = {
+    "const": lambda v: SafeText.const(v),
+    "template": lambda v: SafeText.literal_template(v),
+}
+
+
+@pytest.mark.parametrize("builder", sorted(_BUILDERS))
+@pytest.mark.parametrize("odd", sorted(_ODD_INPUTS))
+def test_an_odd_input_is_withheld_without_running_its_code(
+    odd: str, builder: str, production: None
+) -> None:
+    assert _BUILDERS[builder](_ODD_INPUTS[odd]()) is WITHHELD
+
+
+@pytest.mark.parametrize("builder", sorted(_BUILDERS))
+@pytest.mark.parametrize("odd", sorted(_ODD_INPUTS))
+def test_an_odd_input_under_strict_raises_only_the_location_error(odd: str, builder: str) -> None:
+    with pytest.raises(TypeError, match=r"^SafeText needs a string literal at \S+:\S+:\d+$"):
+        _BUILDERS[builder](_ODD_INPUTS[odd]())
+
+
+def test_a_malformed_template_error_does_not_chain_the_parser_error() -> None:
+    with pytest.raises(TypeError) as info:
+        SafeText.literal_template("broken {")
+    assert info.value.__context__ is None
+
+
+def _worker_strict_active() -> bool:
+    return _safe_text._strict_active()
+
+
+def _worker_withholds(value: str) -> bool:
+    return SafeText.const(value) is WITHHELD
+
+
+@pytest.mark.parametrize("method", ["fork", "spawn"])
+def test_strict_applies_only_in_the_process_that_set_it(method: str) -> None:
+    if method not in multiprocessing.get_all_start_methods():
+        pytest.skip(f"{method} is not available here")
+    assert _safe_text._strict_active() is True
+    ctx = multiprocessing.get_context(method)
+    with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+        assert pool.submit(_worker_strict_active).result() is False
+        assert pool.submit(_worker_withholds, _canary()).result() is True

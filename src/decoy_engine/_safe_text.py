@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import string
 from collections.abc import Mapping
 from types import CodeType
@@ -36,6 +37,7 @@ _KEY: Final = object()
 _Site = tuple[str, str, int]
 _warned: set[_Site] = set()
 _strict = False
+_strict_pid = 0
 
 
 class _Withheld:
@@ -60,10 +62,18 @@ WITHHELD: Final = _Withheld()
 
 
 def _set_strict(on: bool) -> bool:
-    """Test-only switch; returns the previous value. Production never calls it."""
-    global _strict
-    previous, _strict = _strict, on
+    """Test-only switch; returns the previous value. Production never calls it.
+
+    The switch counts only in the process that set it, so a forked child that inherits ``True``
+    runs non-strict like production.
+    """
+    global _strict, _strict_pid
+    previous, _strict, _strict_pid = _strict, on, os.getpid()
     return previous
+
+
+def _strict_active() -> bool:
+    return _strict and _strict_pid == os.getpid()
 
 
 def _caller_code() -> tuple[CodeType | None, _Site]:
@@ -89,14 +99,15 @@ def _caller_code() -> tuple[CodeType | None, _Site]:
 
 
 def _is_constant(text: object, code: CodeType | None) -> bool:
-    if code is None or not isinstance(text, str) or len(text) < _MIN_LEN:
+    # Exact ``str`` first: a subclass's __len__ or a dead weakref proxy must not run or raise here.
+    if code is None or type(text) is not str or len(text) < _MIN_LEN:
         return False
     return any(const is text for const in code.co_consts)
 
 
 def _refuse(site: _Site) -> _Withheld:
     where = f"{site[0]}:{site[1]}:{site[2]}"
-    if _strict:
+    if _strict_active():
         raise TypeError(f"SafeText needs a string literal at {where}")
     if site not in _warned:
         _warned.add(site)
@@ -140,14 +151,18 @@ class SafeText:
         if not _is_constant(fmt, code):
             return _refuse(site)
         try:
-            parts = list(string.Formatter().parse(fmt))
+            parts: list[tuple[str, str | None, str | None, str | None]] | None = list(
+                string.Formatter().parse(fmt)
+            )
         except ValueError:
+            parts = None
+        if parts is None:  # refuse outside the handler so the parser error is not chained
             return _refuse(site)
         out: list[str] = []
         for literal, field, _spec, _conv in parts:
             out.append(literal or "")
             if field is not None:
-                if _strict:
+                if _strict_active():
                     raise TypeError(
                         f"SafeText slot needs a safe value at {site[0]}:{site[1]}:{site[2]}"
                     )
