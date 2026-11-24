@@ -17,7 +17,7 @@ import pyarrow as pa
 
 from decoy_engine import run_pipeline
 from decoy_engine.execution._sequential_native_ops import SEQ_DATE_SHIFT_DISPOSITION_KEY
-from tests.native._b8_support import assert_same_as_oracle, run_pair
+from tests.native._b8_support import assert_same_as_oracle, run_one, run_pair
 from tests.native._chunked_entry_support import (
     NEEDS_COMPANION,
     TABLE,
@@ -165,3 +165,25 @@ def test_t3_sequential_fk_job_runs_native_and_equals_the_oracle(tmp_path: Path) 
     got, want = seq.outputs["child"].column("d"), full.outputs["child"].column("d")
     assert got.type == pa.date32()
     assert got.combine_chunks().equals(want.combine_chunks())
+
+
+def test_an_empty_date32_column_keeps_its_type_on_every_route(tmp_path: Path) -> None:
+    """A zero-row table has no value to type the pandas column by, so the full-frame frame holds
+    `float64`; the output assembler restores the source type, as the unified slice and the
+    chunked API already do. Two all-null rows are the control that already passed."""
+    for rows in (0, 2):
+        table = pa.table({"d": pa.array([None] * rows, pa.date32())})
+        config = make_config([_ds("d")])
+        for unified in (False, True):
+            result = _run(
+                config,
+                {TABLE: table},
+                tmp_path,
+                execution_mode="full_frame",
+                auto_chunk=False,
+                unified_slice_enabled=unified,
+            )
+            got = result.outputs[TABLE].schema.field("d").type
+            assert got == pa.date32(), (rows, unified, got)
+        chunked = run_one(config, [table])
+        assert all(c.schema.field("d").type == pa.date32() for c in chunked.out), rows
