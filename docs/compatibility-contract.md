@@ -83,6 +83,8 @@ declared integers, `date_shift` anchors, `top_code` columns and `group_key` sibl
 `NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
 that passes through is written as `int64` instead of `double`.
 
+**Pre-GA additive name with VALIDATE-SUBSET-EDGES E1 (2026-11-24).** `decoy_engine.subset.drop_subset_block(config) -> dict` returns the run config with its `subset` block set to `None`, or the input dict itself when it has no block. `split_subset_config` now also refuses a bad `subset.edge_directions` entry (`subset_unknown_edge`, `subset_dangling_not_acknowledged`) before any read; no reason code, schema or config key changes, and a config that passed before passes now.
+
 **Pre-GA additive name with GEN-CATALOG GC3-E (2026-11-17).** `decoy_engine.code_set_catalog() -> dict[str, str]` returns each shipped code set name with its one-line description, in name order, read from the engine registry. It returns a new dict per call and reads no corpus file. No reason code, schema, config key or exit code changes.
 
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
@@ -343,6 +345,12 @@ no-FK full-frame job move once (a forced full-frame job is excluded). The reside
 figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
 hash still covers `facts.budget_bytes`, so it can differ between hosts when no explicit budget is set.
 `pipeline_config_hash` does not move. No schema version moves.
+
+**Pre-GA correction (GEN-NONFAKER-DRAWS S1a, 2026-11-23).** The physical `plan_hash` and `activation_hash` move once
+for every unified-slice job, because `CapabilityMatrix` gains a `draw` field (`pool` or `computed`) and
+`registry_fingerprint()` hashes the dump of every provider's matrix. Both hashes are written to output evidence. No
+other input to the fingerprint changes: with `draw` removed the fingerprint equals the one on the previous main, and a test
+pins that. `pipeline_config_hash` does not move. No schema version moves.
 
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
