@@ -129,7 +129,9 @@ def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> Non
             provider = col_entry.get("provider")
             if provider is None or provider not in known:
                 continue  # unknown_provider (row 2) owns missing/unknown
-            if not registry.get_capabilities(provider).poolable:
+            caps = registry.get_capabilities(provider)
+            # A computed draw builds no pool; `check_computed_draws` owns its refusals.
+            if not caps.poolable and caps.draw != "computed":
                 col_name = col_entry.get("name", "?")
                 raise PlanCompileError(
                     code=reasons.plan.NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND,

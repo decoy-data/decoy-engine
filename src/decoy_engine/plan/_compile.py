@@ -58,7 +58,6 @@ from decoy_engine.plan._checks import (
     check_basic_uniqueness_pre_flight,
     check_composite_columns_length_match,
     check_fpe_checksum_scheme,
-    check_non_poolable_provider_with_pool_backend,
     check_null_bearing_int_unsupported,
     check_text_mask_ner_available,
     check_text_redact_ner_available,
@@ -107,6 +106,7 @@ from decoy_engine.plan.checks import (
     DEFERRED,
     check_generate_columns,
     check_nested_targets,
+    check_pool_routing,
     check_required_strategy_settings,
     column_shape_warnings,
 )
@@ -195,7 +195,7 @@ def compile_plan(
     # Row 11 (audit H5, 2026-06-12): structural (config + registry only),
     # runs in both branches right after unknown_provider so a missing
     # provider still surfaces as row 2 first.
-    check_non_poolable_provider_with_pool_backend(config)
+    check_pool_routing(config)
     # DPS Scope B (guide 4.7/5): read-and-pin once so every check below sees the same bytes;
     # DP verification runs first, as check_statistical_columns needs its dp_verified verdicts.
     check_dp_generate_contract(config)  # Row 31 (DPS-3): config-only, so before any snapshot read
@@ -524,7 +524,7 @@ def run_config_only_checks(
     check_when_with_coherent_with(config)
     check_when_grammar(config)
     deterministic_namespace_completeness(config)
-    check_non_poolable_provider_with_pool_backend(config)
+    check_pool_routing(config)
     # DPS Scope B (guide 4.7/5): same read-verify-validate order as above.
     check_dp_generate_contract(config)  # Row 31 (DPS-3), before any snapshot read
     # Row 12 (WS3): config plus its snapshot artifacts, so config-only callers catch a bad one.
