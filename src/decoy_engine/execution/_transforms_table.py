@@ -33,8 +33,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
-from decoy_engine.config import TableConfig
-from decoy_engine.config._transforms import DeriveOp, DropColumnOp, TransformOp
+from decoy_engine.config import SOURCE_ORIGIN, TableConfig, TransformOp, final_bindings
 from decoy_engine.execution import _transforms
 from decoy_engine.execution._fk_keys import to_pandas_fk_safe
 from decoy_engine.execution._transforms_gate import find_table_config
@@ -49,9 +48,6 @@ __all__ = [
     "to_transform_frame",
     "transform_resolved_source",
 ]
-
-_SOURCE = "source"
-_DERIVED = "derived"
 
 
 def null_bearing_int_columns(table: pa.Table) -> list[str]:
@@ -78,29 +74,11 @@ def to_transform_frame(table: pa.Table) -> pd.DataFrame:
     return frame
 
 
-def _final_bindings(
-    frame_columns: Sequence[Any], ops: Sequence[TransformOp]
-) -> list[tuple[str, str]]:
-    """`(name, origin)` per output column after the ordered ops.
-
-    A dropped-then-derived name is a new `derived` binding, never the old source
-    column.
-    """
-    bindings = [(str(c), _SOURCE) for c in frame_columns]
-    for op in ops:
-        if isinstance(op, DropColumnOp):
-            dropped = set(op.columns)
-            bindings = [b for b in bindings if b[0] not in dropped]
-        elif isinstance(op, DeriveOp):
-            bindings.append((op.column, _DERIVED))
-    return bindings
-
-
 def _apply_ops(table: pa.Table, ops: Sequence[TransformOp]) -> pa.Table:
     frame = to_transform_frame(table)
     start_columns = list(frame.columns)
     frame = _transforms.apply_transforms(frame, list(ops))
-    bindings = _final_bindings(start_columns, ops)
+    bindings = final_bindings(start_columns, ops)
     if [name for name, _ in bindings] != [str(c) for c in frame.columns]:
         raise _transforms.TransformError(
             code=reasons.runtime.TRANSFORM_LINEAGE_MISMATCH,
@@ -110,7 +88,7 @@ def _apply_ops(table: pa.Table, ops: Sequence[TransformOp]) -> pa.Table:
     arrays: list[pa.Array | pa.ChunkedArray] = []
     fields: list[pa.Field] = []
     for name, origin in bindings:
-        if origin == _SOURCE:
+        if origin == SOURCE_ORIGIN:
             position = table.schema.get_field_index(name)
             arrays.append(pc.take(table.column(position), ordinals))
             fields.append(table.schema.field(position))
@@ -128,7 +106,7 @@ def _apply_ops(table: pa.Table, ops: Sequence[TransformOp]) -> pa.Table:
     # the transform frame gave them); no other source key, and no source `attributes`, is kept.
     fresh = pa.Schema.from_pandas(frame, preserve_index=False)
     # Only a column read straight from the source table is the source field; a derived one is new.
-    carried = [name for name, origin in bindings if origin == _SOURCE]
+    carried = [name for name, origin in bindings if origin == SOURCE_ORIGIN]
     schema = attach_output_metadata(pa.schema(fields), fresh.metadata, carried=carried)
     return pa.Table.from_arrays(arrays, schema=schema)
 
