@@ -351,23 +351,22 @@ def test_ambient_cleanup_failure_after_the_link_warns_and_keeps_the_leaf(
         txn.publish()
 
 
-def test_the_ambient_link_is_the_portable_path_only_call(
+def test_an_ambient_publish_on_a_backend_without_a_descriptor_link_is_the_named_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A backend whose `os.link` has no descriptor keywords must still publish."""
-    real = os.link
-    seen: list[set[str]] = []
+    """V1 is POSIX: a backend whose `os.link` takes no descriptors (Windows) refuses cleanly."""
 
-    def path_only(src: Any, dst: Any, **kwargs: Any) -> None:
-        seen.append(set(kwargs))
-        if kwargs:
-            raise NotImplementedError("no descriptor form on this backend")
-        real(src, dst)
+    def no_descriptors(src: Any, dst: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("no descriptor form on this backend")
 
-    monkeypatch.setattr(os, "link", path_only)
+    monkeypatch.setattr(os, "link", no_descriptors)
     txn, target, _ = _ambient_txn(tmp_path)
-    txn.publish()
-    assert seen == [set()] and target.read_bytes() == b"sidecar\n"
+    with pytest.raises(LinkUnsupported) as caught:
+        txn.publish()
+    assert caught.value.errno == errno.ENOSYS and caught.value.__context__ is None
+    monkeypatch.undo()
+    txn.abort()
+    assert not target.exists() and _litter(tmp_path) == []
 
 
 def test_only_link_noclobber_at_calls_os_link_in_fileaccess() -> None:

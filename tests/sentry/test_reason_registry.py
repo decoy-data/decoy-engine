@@ -119,7 +119,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("publication/_publish.py", "_locked"): (
         "forwards the registered code `lock_reason` picks from the one lock-failure map"
     ),
-    ("publication/_stage.py", "DeliveryStage.open"): (
+    ("publication/_stage.py", "_stage_failure"): (
         "raises the registry symbol `PUBLICATION_FAILED` (a module alias) as an exact `str`; "
         "PublicationFailed takes only a registered `decoy` code"
     ),
@@ -547,6 +547,7 @@ def test_ci_collects_the_registry_guards() -> None:
 # `decoy.unexpected_error` (retry advice `unknown`), never with a guessed meaning. Adding a code
 # is a reviewed registry addition; this list may only shrink.
 UNCLASSIFIED: dict[str, str] = {
+    "LinkUnsupported": "an errno-only OSError from the file-access link; DeliveryStage.open turns it into publication_failed with the errno name",
     "DecoyError": "the root class; a subclass without an identity is unclassified, not this",
     "VaultClientConfigError": "a Vault client-construction error raised by the CLI helper before any run; fixed value-free text",
     "SecretClosedError": "an internal invariant breach (a closed secret buffer was used); not a user-facing failure",

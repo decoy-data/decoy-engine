@@ -35,6 +35,7 @@ from decoy_engine.fileaccess._local_chain import (
     _make_stage_dir,
     _open_dir,
     _publish_durable_dir,
+    link_noclobber_beside,
 )
 from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
@@ -221,8 +222,7 @@ class _LocalStageDir(PathStageWalk, StageClaim):
 
 
 def _sync_dir(directory: Path) -> None:
-    """Best-effort fsync of a directory so a rename into it survives a crash. A directory that
-    cannot be opened, synced or closed is skipped: the rename has already published."""
+    """Best-effort fsync of a directory after a rename; any failure is skipped (already published)."""
     try:
         fd = os.open(directory, _osflags.RDONLY | _osflags.CLOEXEC)
     except OSError:
@@ -459,7 +459,7 @@ class LocalOutputTxn(_LocalStageDir):
             return
         occupied = False
         try:
-            _durable.link_noclobber_at(None, staged, None, self._target)
+            link_noclobber_beside(staged, self._target)
         except FileExistsError:
             occupied = True
         if occupied:  # raised outside the handler: the link error (both paths) never rides

@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 202 (asserted by the sentry).
+# Count: 201 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -966,15 +966,6 @@ disposition = "read"
 rule = "the parent directory of a FileRequest.locator served by LocalFileAccess, opened read-only after the replace to fsync it"
 owner = "cam"
 reason = "ambient CLI semantics: best-effort directory fsync after a published replace (main's fixed-width writer did it)"
-
-[[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn.publish"
-sink = "os.link"
-ordinal = 0
-rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
-owner = "cam"
-reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"

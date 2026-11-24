@@ -353,29 +353,20 @@ def discard_stage_at(dir_fd: int, name: str) -> None:
         pass
 
 
-def link_noclobber_at(
-    src_dir_fd: int | None,
-    src_name: str | os.PathLike[str],
-    dst_dir_fd: int | None,
-    dst_name: str | os.PathLike[str],
-) -> None:
-    """The one no-clobber hard link: the file system decides whether `dst_name` is taken.
+def link_noclobber_at(src_dir_fd: int, src_name: str, dst_dir_fd: int, dst_name: str) -> None:
+    """The one no-clobber hard link: the file system decides whether `dst_name` is taken. Both
+    names are validated components beneath held directories and the link never follows a symlink.
 
-    With descriptors, both names are validated components beneath held directories and the link
-    never follows a symlink. With neither descriptor (the ambient policy's own path operands) it
-    is the portable two-path call, so a backend with no descriptor form still works. Raises
-    `FileExistsError` for a taken name, `LinkUnsupported` for `_LINK_UNSUPPORTED` (or a backend
-    that cannot take descriptor keywords) and an errno-only `OSError` for anything else; no
-    path, name or OS text rides along."""
-    with_fds = src_dir_fd is not None or dst_dir_fd is not None
-    kwargs: dict[str, object] = {}
-    if with_fds:
-        validate_component(src_name, _CREATOR_KEY)
-        validate_component(dst_name, _CREATOR_KEY)
-        kwargs = {"src_dir_fd": src_dir_fd, "dst_dir_fd": dst_dir_fd, "follow_symlinks": False}
+    Raises `FileExistsError` for a taken name, `LinkUnsupported` for `_LINK_UNSUPPORTED` (or a
+    backend whose `os.link` has no descriptor form) and an errno-only `OSError` for anything
+    else; no path, name or OS text rides along."""
+    validate_component(src_name, _CREATOR_KEY)
+    validate_component(dst_name, _CREATOR_KEY)
     code = 0
     try:
-        os.link(src_name, dst_name, **kwargs)  # type: ignore[arg-type]
+        os.link(
+            src_name, dst_name, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=False
+        )
     except OSError as exc:
         code = exc.errno or errno.EIO
     except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend

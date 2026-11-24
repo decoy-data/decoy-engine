@@ -347,10 +347,10 @@ def test_a_folder_and_a_file_whose_names_differ_by_case(
 
 
 def _swap_inode(path: Path) -> None:
-    data = path.read_bytes()
-    path.unlink()
-    path.write_bytes(data)
-    path.chmod(0o600)
+    fresh = path.parent / "fresh"  # made while the old inode lives, so the numbers differ
+    fresh.write_bytes(path.read_bytes())
+    fresh.chmod(0o600)
+    os.replace(fresh, path)
 
 
 def _hard_link(path: Path) -> None:

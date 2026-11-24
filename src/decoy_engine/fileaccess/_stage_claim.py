@@ -47,18 +47,28 @@ def _seal_of_stat(st: os.stat_result) -> FileSeal:
     return FileSeal(st.st_dev, st.st_ino, st.st_nlink, st.st_mode)
 
 
-def seal_at(dir_fd: int, name: str) -> FileSeal | None:
-    """The seal of `name` beneath the held `dir_fd`, read without following a link; `None` when
-    the name is absent. Any other failure keeps only its errno."""
+def _lstat_at(dir_fd: int, name: str) -> os.stat_result | None:
+    """`lstat` of `name` beneath the held `dir_fd` from its directory entry (never through a
+    link); `None` when the name is absent. Any other failure keeps only its errno."""
     validate_component(name, _CREATOR_KEY)
     code = 0
     try:
-        return _seal_of_stat(os.stat(name, dir_fd=dir_fd, follow_symlinks=False))
-    except FileNotFoundError:
-        return None
+        with os.scandir(dir_fd) as entries:
+            for entry in entries:
+                if entry.name == name:
+                    return entry.stat(follow_symlinks=False)
     except OSError as exc:
         code = exc.errno or errno.EIO
-    raise OSError(code, os.strerror(code))
+    if code:
+        raise OSError(code, os.strerror(code))
+    return None
+
+
+def seal_at(dir_fd: int, name: str) -> FileSeal | None:
+    """The seal of `name` beneath the held `dir_fd`, read without following a link; `None` when
+    the name is absent."""
+    found = _lstat_at(dir_fd, name)
+    return None if found is None else _seal_of_stat(found)
 
 
 def _tighten(dst_fd: int, dst_name: str, before: os.stat_result) -> tuple[FileSeal | None, int]:
@@ -93,11 +103,12 @@ def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> Fil
     checked and tightened (`_tighten`); on any failure the final name this call made is removed.
     Errors keep no path, name or OS text and carry no context."""
     from decoy_engine.fileaccess import _durable  # `_durable` imports `_output`, which imports us
-    from decoy_engine.fileaccess._output import _call
 
     validate_component(src_name, _CREATOR_KEY)
     validate_component(dst_name, _CREATOR_KEY)
-    before = _call(os.stat, src_name, dir_fd=src_fd, follow_symlinks=False)
+    before = _lstat_at(src_fd, src_name)
+    if before is None:
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT))
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise FileAccessUnavailable("only a plain, singly linked file can be claimed")
     _durable.link_noclobber_at(src_fd, src_name, dst_fd, dst_name)
@@ -157,15 +168,9 @@ class StageClaim:
             self._release_fd(fd)
 
 
-def probe_claim(slots: StageDir, unit: StageDir) -> None:
-    """Prove that `unit` can take a claimed file before any writer runs.
-
-    A disposable file is made in `slots` (born `0o600`), set to `0o644` and read back as `0o644`
-    on its descriptor, so the claim has a real mode to tighten; a file system that ignores
-    `chmod` is `LinkUnsupported` here. The claim then links it into `unit` and must observe
-    `0o600` on the final descriptor. The probe name is removed from `unit` at once. Raises
-    `LinkUnsupported` (unsupported link or ignored chmod) or the claim's own error."""
-    fd = slots.create_file(_SLOT_PROBE)
+def _start_probe(fd: int) -> int:
+    """Set the probe file to 0644 on its descriptor and read it back; close it. Returns 0 or the
+    errno that says this file system does not hold a chmod."""
     code = 0
     try:
         os.fchmod(fd, _PROBE_START_MODE)
@@ -175,6 +180,18 @@ def probe_claim(slots: StageDir, unit: StageDir) -> None:
         code = exc.errno or errno.EIO
     finally:
         _close(fd)
+    return code
+
+
+def probe_claim(slots: StageDir, unit: StageDir) -> None:
+    """Prove that `unit` can take a claimed file before any writer runs.
+
+    A disposable file is made in `slots` (born `0o600`), set to `0o644` and read back as `0o644`
+    on its descriptor, so the claim has a real mode to tighten; a file system that ignores
+    `chmod` is `LinkUnsupported` here. The claim then links it into `unit` and must observe
+    `0o600` on the final descriptor. The probe name is removed from `unit` at once. Raises
+    `LinkUnsupported` (unsupported link or ignored chmod) or the claim's own error."""
+    code = _start_probe(slots.create_file(_SLOT_PROBE))
     if code:
         raise LinkUnsupported(code)
     unit.claim_from(slots, _SLOT_PROBE, PROBE_NAME)
@@ -183,7 +200,10 @@ def probe_claim(slots: StageDir, unit: StageDir) -> None:
 
 def parent_identity_of(open_parent: Callable[[], int]) -> tuple[int, int]:
     """`(st_dev, st_ino)` of the folder `open_parent` opens, read from that descriptor."""
-    fd = open_parent()
+    return _identity(open_parent())
+
+
+def _identity(fd: int) -> tuple[int, int]:
     try:
         st = os.fstat(fd)
     finally:

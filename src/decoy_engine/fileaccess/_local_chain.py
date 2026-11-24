@@ -103,3 +103,13 @@ def _publish_durable_dir(stage: Path, held: HeldStage, target: Path) -> None:
     _durable._sync_tree(held.fd)
     _call(os.replace, stage, target)
     held.close()
+
+
+def link_noclobber_beside(staged: Path, target: Path) -> None:
+    """Link `staged` to `target`, both names in one folder, without replacing `target`: the
+    ambient exclusive publish, through the one link primitive (never a path-form `os.link`)."""
+    parent_fd = _open_dir(target.parent)
+    try:
+        _durable.link_noclobber_at(parent_fd, staged.name, parent_fd, target.name)
+    finally:
+        _close(parent_fd)

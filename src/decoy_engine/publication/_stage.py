@@ -444,7 +444,9 @@ class DeliveryStage:
             # A replay (F23): the pointer already named this run, so a failed rewrite changes
             # nothing while it still does. The row assumes the folder is not current.
             now = self._read()
-            if now is not None and self._names_run(now.raw):
+            if now is None:  # an unreadable pointer cannot say the run is not visible
+                swap = _Verdict("uncertain", _UNCERTAIN)
+            elif self._names_run(now.raw):
                 swap = _Verdict("delivered", None)
         return _combine(bind, swap)
 
