@@ -587,7 +587,8 @@ def test_time64_ns_aligned_values_come_back_unchanged(configured: bool, tmp_path
     cfg = support.make_cfg(cols, path=support.write_source(src, tmp_path / "s.parquet"))
     dispatcher, legacy, _full = _trio(cfg, src)
     assert dispatcher.outputs[support.TABLE].schema.field("x").type == pa.time64("ns")
-    assert legacy.outputs[support.TABLE].schema.field("x").type == pa.time64("us")
+    # Rule 3 (A1): the full-frame lane keeps the untouched source type too.
+    assert legacy.outputs[support.TABLE].schema.field("x").type == pa.time64("ns")
     support.check_contract(
         dispatcher.outputs[support.TABLE],
         legacy.outputs[support.TABLE],

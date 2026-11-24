@@ -57,7 +57,6 @@ from decoy_engine.execution._fk_keys import (
     fk_nullable_int_array,
     lossless_fk_int_values,
     lossless_int_columns,
-    table_from_pandas_keeping_source_types,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._fk_resolve import (
@@ -82,6 +81,7 @@ from decoy_engine.execution._strategies._fpe import FpeStrategyHandler
 from decoy_engine.execution._strategies._orphan import make_remap_fn
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._when_gate import run_with_when_gate
+from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -321,8 +321,14 @@ class PandasExecutionAdapter:
             {
                 t: table_from_pandas_keeping_source_types(
                     f,
-                    sources[t].schema,
-                    untouched_columns((n for n in ordered if n.table == t), f.columns, registry),
+                    sources[t],
+                    untouched_columns(
+                        (n for n in ordered if n.table == t),
+                        f.columns,
+                        registry,
+                        relationship_graph.edges,
+                        t,
+                    ),
                     [c for (table, c) in ctx.native_date_columns if table == t],
                 )
                 for t, f in frames.items()

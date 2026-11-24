@@ -170,6 +170,7 @@ def _execute_admitted(
 
     from decoy_engine.execution import _pipeline_finalize, _pipeline_route_exec
     from decoy_engine.execution._adapter import ExecutionResult
+    from decoy_engine.execution._chunked_carry import passthrough_columns
     from decoy_engine.execution._unified_slice_evidence import (
         assemble_node_evidence,
         reconstruct_source_shaped_output,
@@ -288,10 +289,15 @@ def _execute_admitted(
 
         # `candidate.source` is the resident `pa.Table`; the `is not` identity check above
         # narrows its static type to a union for the rest of the function, so cast it back.
-        source_schema = cast("pa.Table", candidate.source).schema
+        source_table = cast("pa.Table", candidate.source)
+        source_schema = source_table.schema
         outputs = reconstruct_source_shaped_output(
             table=candidate.table,
             frame=candidate.source_frame,
+            source=source_table,
+            untouched=passthrough_columns(
+                config, table=candidate.table, names=source_schema.names, registry=registry
+            ),
             masked_table=shadow_result.outputs[candidate.table],
             nodes=physical_table.nodes,
             when_selected=when.selected,
