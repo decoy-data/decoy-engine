@@ -58,3 +58,41 @@ def test_the_text_comes_from_the_same_builder_as_sdk_translation() -> None:
         raw = ValueError(MARK)
         translated = translate(raw)
         assert str(_refreshed(translated, provider)) == str(translated)
+
+
+@pytest.mark.parametrize("cls", [TransientError, PermanentError])
+def test_a_kind_outside_the_table_reads_as_unexpected_and_keeps_the_class(
+    cls: type[ConnectorError],
+) -> None:
+    out = _refreshed(cls(f"sdk text {MARK}", kind="weird"), "S3")  # type: ignore[arg-type]
+    assert type(out) is cls and out.kind == "unexpected"
+    assert str(out) == "Unexpected S3 error"
+    assert MARK not in f"{out!s} {out!r} {out.args!r}"
+
+
+def test_raised_after_the_handler_the_fresh_error_has_no_chain() -> None:
+    from decoy_engine.fileaccess import classified_failure
+
+    def reraise() -> None:
+        try:
+            raise PermanentError(f"sdk text {MARK}", kind="not_found")
+        except PermanentError as exc:
+            fresh = _refreshed(exc, "S3")
+        raise fresh from None
+
+    with pytest.raises(PermanentError) as ei:
+        reraise()
+    assert ei.value.__cause__ is None and ei.value.__context__ is None
+    assert ei.value.__suppress_context__ is True
+
+    def reclassify() -> None:
+        try:
+            raise MemoryError(MARK)
+        except MemoryError as exc:
+            result = classified_failure(exc)
+        assert result is not None and result.fresh is not None
+        raise result.fresh from None
+
+    with pytest.raises(MemoryError) as mi:
+        reclassify()
+    assert mi.value.__cause__ is None and mi.value.__context__ is None

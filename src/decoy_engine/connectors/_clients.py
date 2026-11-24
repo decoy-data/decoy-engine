@@ -61,8 +61,12 @@ _PHRASE: dict[ConnectorErrorKind, str] = {
 
 
 def _text(provider: str, kind: ConnectorErrorKind) -> str:
-    """The one kind-to-text builder, shared by SDK translation and ``refreshed_error``."""
-    return f"Unexpected {provider} error" if kind == "unexpected" else f"{provider} {_PHRASE[kind]}"
+    """The one kind-to-text builder, shared by SDK translation and ``refreshed_error``.
+
+    A kind outside the table (``kind`` is not checked at runtime) reads as ``unexpected``."""
+    if kind == "unexpected" or kind not in _PHRASE:
+        return f"Unexpected {provider} error"
+    return f"{provider} {_PHRASE[kind]}"
 
 
 def _classified(provider: str, kind: ConnectorErrorKind) -> ConnectorError:
@@ -71,11 +75,13 @@ def _classified(provider: str, kind: ConnectorErrorKind) -> ConnectorError:
     return cls(_text(provider, kind), kind=kind)
 
 
-def refreshed_error(exc: ConnectorError, provider: str) -> ConnectorError:
+def refreshed_error(exc: TransientError | PermanentError, provider: str) -> ConnectorError:
     """A fresh copy of a caught ``TransientError`` or ``PermanentError``: same class, same
-    ``kind``, fixed text from the kind table, nothing chained. The class is kept as caught, so a
-    retryable error never turns final (and a final one never turns retryable)."""
-    kind = exc.kind
+    ``kind`` (``unexpected`` when the kind is not in the table), fixed text, nothing chained. The
+    class is kept as caught, so a retryable error never turns final (and a final one never turns
+    retryable). Build it in the handler and raise it after the ``except`` block closes, ``from
+    None``: raising inside the block sets ``__context__`` to the original error."""
+    kind: ConnectorErrorKind = exc.kind if exc.kind in _PHRASE else "unexpected"
     cls = TransientError if isinstance(exc, TransientError) else PermanentError
     return cls(_text(provider, kind), kind=kind)
 

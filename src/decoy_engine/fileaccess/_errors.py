@@ -184,7 +184,9 @@ FailureKind = Literal["typed_memory", "resource", "text_memory"]
 @dataclass(frozen=True, slots=True)
 class ClassifiedFailure:
     """A recognised memory or resource failure. `fresh` is the value-free replacement (no chain,
-    no filename, fixed text), or None when the type cannot be rebuilt."""
+    no filename, fixed text), or None when the type cannot be rebuilt. Raise it after the
+    `except` block closes, `from None`, as `deny` advises: raising inside the block sets
+    `__context__` to the original error."""
 
     kind: FailureKind
     fresh: BaseException | None
@@ -193,7 +195,8 @@ class ClassifiedFailure:
 def classified_failure(exc: BaseException) -> ClassifiedFailure | None:
     """Classify `exc` for a boundary that must not forward its text, or None when it is none of
     these. A typed memory error anywhere in the chain wins; then a direct disk or quota
-    `OSError`; then a direct failure the worker recognises by wording."""
+    `OSError`; then a direct failure the worker recognises by wording. Build the result in the
+    handler and raise `fresh` outside it (see `ClassifiedFailure`)."""
     member = typed_memory_member(exc)
     if member is not None:
         if isinstance(member, OSError):

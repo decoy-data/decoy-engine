@@ -155,8 +155,8 @@ CAPPED_ENV: dict[str, str] = {
 }
 
 # Same three under-cap failure shapes fk_memory_probe documents evidence for
-# (`_MEMORY_ERRORS`, now `fileaccess.typed_memory_member` / `_MEMORY_ERROR_MARKERS` / `_MEMORY_ERROR_PATTERNS` /
-# `_GLIBC_TLS_OOM_MARKER`): pyarrow/numpy MemoryError subclasses and DuckDB's
+# (the typed check is `fileaccess.typed_memory_member`; the markers, patterns and
+# `_GLIBC_TLS_OOM_MARKER` are below): pyarrow/numpy MemoryError subclasses and DuckDB's
 # own OutOfMemoryException are the common case; OpenSSL's EVP_MD_CTX copy
 # (hashlib, masking the FK key) and Arrow's arrow-to-pandas value conversion
 # both raise their own error type under a hard cap instead of MemoryError,
