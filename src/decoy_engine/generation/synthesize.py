@@ -334,7 +334,7 @@ def _generate_column(
     ``reference_policy`` is the orphan policy of the relationship covering a ``reference`` column;
     with ``on_warning`` it decides what an empty parent does (see ``_reference``).
     ``siblings`` are the table's column configs, for a column that reads its parent's row.
-    ``bundles`` is the table's composite-group cache, shared by its `provider` columns."""
+    ``bundles`` is the table's provider-group cache, shared by its `provider` columns."""
     col = with_table(col, table_name)
     kind = col.get("type")
     if kind == "sequence":
