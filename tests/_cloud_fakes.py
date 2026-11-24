@@ -239,7 +239,9 @@ class FakeGcsSession:
     object uploaded with ``gsutil cp -Z``: 200, ``X-Goog-Stored-Content-Encoding: gzip`` and
     the whole compressed object. ``reply(start, end, size)`` returns headers laid over a 206
     answer, to serve a wrong Content-Range or a Content-Encoding. A ``generation`` query
-    parameter that names a generation other than the current one answers 404, as GCS does.
+    parameter that names a generation other than the current one answers ``replaced_status``:
+    404 as an unversioned bucket does, or 412 for a store that checks ``ifGenerationMatch``
+    first.
     ``statuses`` is a queue of statuses served to media GETs before the normal answer.
     ``on_request`` sees each call first and may raise. ``tamper(n, part)`` rewrites the body
     of the n-th media GET (from 1) after its headers are set, as a store that lost bytes
@@ -261,6 +263,7 @@ class FakeGcsSession:
         fail_at: int | None = None,
         error: BaseException | None = None,
         tamper: Callable[[int, bytes], bytes] | None = None,
+        replaced_status: int = 404,
     ) -> None:
         self.obj, self.ledger, self.ignore_range = obj, ledger or Ledger(), ignore_range
         self._tamper, self._stored_gzip, self._reply = tamper, stored_gzip, reply
@@ -268,6 +271,7 @@ class FakeGcsSession:
         self.statuses = list(statuses or [])
         self._change_after, self._on_request = change_after, on_request
         self._fail_at, self._error = fail_at, error
+        self._replaced_status = replaced_status
         self.timeouts: list[Any] = []
         self.closed = False
         self.is_mtls = False
@@ -312,7 +316,7 @@ class FakeGcsSession:
             self.obj.generation = (self.obj.generation or 0) + 1
         named = query.get("generation")
         if named is not None and int(named) != self.obj.generation:
-            return Response(self.ledger, 404, {}, Body(self.ledger, b""))
+            return Response(self.ledger, self._replaced_status, {}, Body(self.ledger, b""))
         if pin is None or int(pin) != self.obj.generation:
             return Response(self.ledger, 412, {}, Body(self.ledger, b""))
         size = len(self.obj.data)

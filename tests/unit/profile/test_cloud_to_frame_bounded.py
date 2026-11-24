@@ -180,9 +180,10 @@ def test_gcs_inexact_206_refused_before_body(
     assert (err.kind, str(err)) == ("unexpected", "Unexpected GCS error")
 
 
+@pytest.mark.parametrize("status", [404, 412])
 @pytest.mark.parametrize("kind", _GCS_READS)
 def test_gcs_pinned_read_of_replaced_generation_is_source_changed(
-    monkeypatch: pytest.MonkeyPatch, kind: str
+    monkeypatch: pytest.MonkeyPatch, kind: str, status: int
 ) -> None:
     session: list[FakeGcsSession] = []
 
@@ -195,6 +196,7 @@ def test_gcs_pinned_read_of_replaced_generation_is_source_changed(
         "gcs",
         _small_parquet() if kind == "parquet_to_frame" else _SMALL_CSV,
         on_request=replace_before_media,
+        replaced_status=status,
     )
     session.append(fake)
     with pytest.raises(ConnectorError) as info:
@@ -332,9 +334,13 @@ def test_gcs_cached_size_still_reloads_generation(
     assert any(r["kind"] == "metadata" for r in ledger.requests)
 
 
-@pytest.mark.parametrize("provider", ["s3", "gcs"])
-def test_changed_object_is_source_changed(monkeypatch: pytest.MonkeyPatch, provider: str) -> None:
-    ledger, _ = _serve(monkeypatch, provider, _parquet_bytes(4 * MiB), change_after=1)
+@pytest.mark.parametrize(
+    ("provider", "kw"), [("s3", {}), ("gcs", {}), ("gcs", {"replaced_status": 412})]
+)
+def test_changed_object_is_source_changed(
+    monkeypatch: pytest.MonkeyPatch, provider: str, kw: dict[str, int]
+) -> None:
+    ledger, _ = _serve(monkeypatch, provider, _parquet_bytes(4 * MiB), change_after=1, **kw)
     with pytest.raises(ConnectorError) as info:
         _source(provider, "parquet").to_frame()
     assert info.value.kind == "source_changed"
@@ -382,9 +388,21 @@ def test_csv_sample_total_capped(monkeypatch: pytest.MonkeyPatch, provider: str)
     assert max(ledger.responses) <= PIECE and ledger.all_closed()
 
 
+def _bad_body_parquet() -> bytes:
+    """A footer that reads, over page headers that do not: the failure comes from the batches."""
+    sink = io.BytesIO()
+    table = pa.table({"t": pa.array([MARKER.decode() * 20] * 200)})
+    pq.write_table(table, sink, use_dictionary=False)
+    data = bytearray(sink.getvalue())
+    for i in range(4, len(data) // 2):
+        data[i] ^= 0xFF
+    return bytes(data)
+
+
 _MALFORMED = {
     "csv": b"a,t\n1,zz_marker\n2,zz_marker,zz_marker\n",
     "parquet": b"PAR1" + MARKER * 64 + b"\x10\x00\x00\x00PAR1",
+    "parquet_body": _bad_body_parquet(),
 }
 
 
@@ -397,7 +415,7 @@ def test_malformed_object_leaves_as_value_free_read_error(
 
     _serve(monkeypatch, provider, _MALFORMED[fmt])
     with pytest.raises(FileAccessReadError) as info:
-        _source(provider, fmt).to_frame()
+        _source(provider, fmt.split("_")[0]).to_frame()
     _value_free(info.value)
     assert str(info.value) == f"file could not be read: {provider.upper()}"
 
@@ -432,5 +450,14 @@ def test_stream_handle_read_all_is_sized() -> None:
     from tests._cloud_fakes import Body
 
     ledger, data = Ledger(), MARKER * (300 * 1024)
-    assert StreamHandle(Body(ledger, data), "S3").read_all() == data  # type: ignore[arg-type]
+    body, asks = Body(ledger, data), []
+    real_read = body.read
+
+    def read(amt: int | None = None, decode_content: Any = None) -> bytes:
+        asks.append(amt)
+        return real_read(amt)
+
+    body.read = read  # type: ignore[method-assign]
+    assert StreamHandle(body, "S3").read_all() == data  # type: ignore[arg-type]
     assert ledger.unsized_reads == 0 and ledger.body_bytes_read == len(data)
+    assert len(asks) > 2 and set(asks) == {MiB}

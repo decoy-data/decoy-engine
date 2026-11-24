@@ -92,7 +92,9 @@ SEEDED = {
         "from ..connectors import _clients as c\ndef f(blob):\n    return c.gcs_download(blob)\n"
     ),
     "download_as_bytes": "def f(blob):\n    return blob.download_as_bytes()\n",
-    "get_object_no_range": "def f(client, b, k):\n    return client.get_object(Bucket=b, Key=k)\n",
+    "get_object_no_range": (
+        "def f(client, b, k):\n    return client.get_object(Bucket=b, Key=k, IfMatch='e')\n"
+    ),
     "get_object_unpinned": (
         "from decoy_engine.connectors import _clients\n"
         "def f(client):\n"
@@ -101,9 +103,15 @@ SEEDED = {
 }
 
 
+# Each get_object seed lacks one keyword, so its finding must name that keyword.
+_DIAGNOSTIC = {"get_object_no_range": "without Range", "get_object_unpinned": "without IfMatch"}
+
+
 @pytest.mark.parametrize("case", sorted(SEEDED))
 def test_seeded_bypass_is_caught(case: str) -> None:
-    assert findings(SEEDED[case], "decoy_engine.profile._cloud_readers") != []
+    found = findings(SEEDED[case], "decoy_engine.profile._cloud_readers")
+    assert found != []
+    assert all(_DIAGNOSTIC.get(case, "") in item for item in found), found
 
 
 def test_ranged_forms_pass() -> None:
