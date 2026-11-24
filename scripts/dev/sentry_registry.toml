@@ -284,3 +284,7 @@ baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
 [[sentry]]
 id = "cell-text-names"
 baseline = "tests/sentry/baselines/cell-text-names.json"
+
+[[sentry]]
+id = "engine-exception-text-copies"
+baseline = "tests/sentry/baselines/engine-exception-text-copies.json"

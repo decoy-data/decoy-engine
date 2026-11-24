@@ -31,7 +31,19 @@ from decoy_engine.fileaccess._entry import (
     run_in_context,
     scope,
 )
-from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
+from decoy_engine.fileaccess._errors import (
+    GLIBC_TLS_OOM_MARKER,
+    MEMORY_ERROR_MARKERS,
+    MEMORY_ERROR_PATTERNS,
+    MEMORY_TEXT,
+    ClassifiedFailure,
+    classified_failure,
+    encode_field_key,
+    is_memory_failure,
+    redact_locators,
+    scrub,
+    typed_memory_member,
+)
 from decoy_engine.fileaccess._fdtree import (
     DESCRIPTOR_NAME,
     RESERVED_MEMBER_NAMES,
@@ -146,8 +158,13 @@ __all__ = [
     "DESCRIPTOR_NAME",
     "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
+    "GLIBC_TLS_OOM_MARKER",
+    "MEMORY_ERROR_MARKERS",
+    "MEMORY_ERROR_PATTERNS",
+    "MEMORY_TEXT",
     "RESERVED_MEMBER_NAMES",
     "STAGE_MARKER",
+    "ClassifiedFailure",
     "CleanupReport",
     "CommitUncertain",
     "DirHandle",
@@ -178,6 +195,7 @@ __all__ = [
     "at_position",
     "bind_iterator",
     "capture",
+    "classified_failure",
     "config_relative",
     "current",
     "encode_field_key",
@@ -188,6 +206,7 @@ __all__ = [
     "handed_stage_dir",
     "installed",
     "is_ambient",
+    "is_memory_failure",
     "is_valid_component",
     "keeps_class",
     "map_in_context",
@@ -210,5 +229,6 @@ __all__ = [
     "scrub",
     "shown",
     "stage_entries",
+    "typed_memory_member",
     "write_private",
 ]
