@@ -384,6 +384,21 @@ class ValidatorFailedError(DecoyError):
         )
 
 
+class ValidatorStateError(DecoyError):
+    """A job-level validator cannot hold the state its check needs.
+
+    Raised by the validation session when a keyed check would outgrow its key-state budget
+    (``validator_key_state_over_budget``) or when the source rows of a paired check do not line
+    up with the published rows (``validator_source_pairing_mismatch``). The message names the
+    table and column only, never a cell value.
+    """
+
+    def __init__(self, *, code: str, message: str = "") -> None:
+        self.code = code
+        self.message = message
+        super().__init__(f"[{code}] {message}" if message else f"[{code}]")
+
+
 class RowErrorsFailedError(DecoyError):
     """Raised when per-row strategy errors exist and quarantine does not
     cover their trigger (Sprint 2 honesty pack, D8).
@@ -517,6 +532,10 @@ _SHADOW = "a shadow-run comparison finding, not a refusal that stops a job"
 _DISK = "disk or quota, not memory"
 _POOL_SHORT = "a uniqueness shortfall in the value pool, not memory"
 _UNKNOWN = "the check could not read its input; no capacity verdict was reached"
+_VALIDATOR_RUN = (
+    "a validator's own run-time state ceiling, raised by the validation run; "
+    "no capacity check produces it"
+)
 CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
     {
         reasons.runtime.FK_FULL_FRAME_OOM_RISK_REJECTED: _ROUTING,
@@ -542,6 +561,7 @@ CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
         reasons.runtime.HOLD_BACK_SPILL_UNAVAILABLE: _NOT_SET,
         reasons.verification.CANARY_RESOURCE_LIMIT: _NOT_MEMORY,
         reasons.physical.RESOURCE_LIMIT_BREACH: _SHADOW,
+        reasons.runtime.VALIDATOR_KEY_STATE_OVER_BUDGET: _VALIDATOR_RUN,
     }
 )
 
@@ -571,4 +591,5 @@ __all__ = [
     "UnknownFKColumnError",
     "ValidationError",
     "ValidatorFailedError",
+    "ValidatorStateError",
 ]
