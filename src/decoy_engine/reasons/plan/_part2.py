@@ -241,7 +241,7 @@ JOINT_MASK_REFERENCE_NOT_FOUND = _d(
     "joint_mask_reference_not_found", "Joint mask reference not found."
 )
 NESTED_TARGET_UNSUPPORTED = _d(
-    "nested_target_unsupported", "Nested target unsupported.", since=UNRELEASED
+    "nested_target_unsupported", "Nested target unsupported.", since="1.34.0"
 )
 NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND = _d(
     "non_poolable_provider_with_pool_backend", "Non poolable provider with pool backend."
@@ -307,7 +307,7 @@ VAULT_STRATEGY_UNMASKED = _d("vault_strategy_unmasked", "Vault strategy unmasked
 WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
     "when_masked_reference_unsupported",
     "A masked. reference in when: is planned for 1.x; V1 reads original values only.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
 WHEN_STRING_OUTPUT_ON_NUMERIC_UNSUPPORTED = _d(
