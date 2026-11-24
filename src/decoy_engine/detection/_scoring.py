@@ -21,6 +21,7 @@ import pandas as pd
 
 from decoy_engine.detection.domains import domain_for
 from decoy_engine.detection.types import DetectorMatch
+from decoy_engine.internal.cell_text import cell_text
 
 # ── thresholds ──
 #
@@ -43,23 +44,13 @@ HIGH_CONFIDENCE_WITH_HINT_FLOOR = 0.45  # content alongside a confirming name hi
 SAMPLE_MISS_LIMIT = 3
 
 
-class UnreadableCellError(ValueError):
-    """A cell that cannot be read as text. The text is fixed: a decode error names the cell's
-    bytes, so its message must not reach a finding, a report or a log."""
-
-    def __init__(self) -> None:
-        super().__init__("a cell could not be read as text")
-
-
 def _as_text(series: pd.Series) -> pd.Series:
-    try:
-        strs: pd.Series | None = series.dropna().astype(str)
-    except UnicodeError:
-        strs = None
-    if strs is None:
-        # Raised outside the handler, so the decode error is not chained as its context.
-        raise UnreadableCellError
-    return strs
+    """Non-null cells as text, by the shared cell rule (`cell_text`). Only an object column can
+    hold bytes; the other dtypes keep the vectorised `astype(str)`."""
+    values = series.dropna()
+    if values.dtype == object:
+        return values.map(cell_text)
+    return values.astype(str)
 
 
 class PreparedValues:

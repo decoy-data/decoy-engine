@@ -15,8 +15,9 @@ from decoy_engine.plan.column_access import (
     KnownSet,
     Unknown,
     transform_op_writes,
+    written_columns_by_table,
 )
-from decoy_engine.verification.postmask._column_facts import standalone_writes
+from decoy_engine.providers_v2 import get_default_registry
 
 
 def _op_names() -> set[str]:
@@ -61,7 +62,10 @@ _CASES = {
 def test_both_consumers_answer_from_the_one_classifier(case):
     ops, query, declared = _CASES[case]
     config = {"version": 2, "tables": [{"name": "t", "columns": [], "transforms": ops}]}
-    assert standalone_writes(config, {"t": ["x"]}) == {"t": query}
+    written = written_columns_by_table(
+        config, schemas={"t": ["x"]}, edges=(), registry=get_default_registry()
+    )
+    assert written == {"t": query}
     access = SURFACE_DECLARATIONS["surface:transforms"]({"name": "t", "transforms": ops})
     assert access.writes_unknown is (declared is None)
     if declared is not None:

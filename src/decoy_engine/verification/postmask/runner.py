@@ -29,6 +29,7 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
+from decoy_engine.internal.cell_text import cell_text
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.internal.pandas_missing import is_null_cell
 from decoy_engine.plan.column_access import TableWrites
@@ -207,7 +208,8 @@ def _key(value: object) -> str:
         if value == value.to_integral_value():
             return str(int(value))
         return format(value.normalize(), "f")
-    return str(value)
+    # Bytes read as the detectors read them, so a byte-encoded email is still an email.
+    return cell_text(value)
 
 
 def _frame_table(name: str, frame: pd.DataFrame, other: pd.DataFrame | None) -> TableBatches:
