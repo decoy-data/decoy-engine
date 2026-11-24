@@ -103,7 +103,10 @@ def _span(header: str | None, size: int) -> tuple[int, int] | None:
         return None
     match = _RANGE.fullmatch(header)
     assert match, header
-    return int(match[1]), min(int(match[2]), size - 1)
+    start, end = int(match[1]), int(match[2])
+    # No clamping: a reader that asks past the last byte is a bug the fakes must surface.
+    assert 0 <= start <= end < size, header
+    return start, end
 
 
 def _fail_offset(fail_at: int | None, start: int, end: int) -> int | None:

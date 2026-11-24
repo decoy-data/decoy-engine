@@ -15,6 +15,8 @@ import os
 from collections.abc import Callable
 from typing import Any, BinaryIO, TextIO
 
+_READ_PIECE_BYTES = 1 << 20
+
 
 class MemoryHandle:
     """In-memory stand-in for an open, authorized file. Nothing here touches a file system."""
@@ -83,7 +85,13 @@ class StreamHandle:
         return self.display
 
     def read_all(self, limit: int | None = None) -> bytes:
-        return self._stream.read() if limit is None else self._stream.read(limit)
+        if limit is not None:
+            return self._stream.read(limit)
+        # Sized reads only: an unsized read asks the stream for the whole object at once.
+        parts: list[bytes] = []
+        while piece := self._stream.read(_READ_PIECE_BYTES):
+            parts.append(piece)
+        return b"".join(parts)
 
     def open_binary(self, opener: Callable[..., BinaryIO] | None = None) -> BinaryIO:
         return self._stream

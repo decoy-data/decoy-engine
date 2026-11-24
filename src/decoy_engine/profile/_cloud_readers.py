@@ -148,26 +148,25 @@ class _RangeFileReader(io.RawIOBase):
         return done
 
 
-def _parquet(size: int, fetch: Fetch, provider: str) -> pq.ParquetFile:
+def _parquet(size: int, fetch: Fetch, provider: str) -> tuple[StreamHandle, pq.ParquetFile]:
     stream = pa.PythonFile(_RangeFileReader(size, fetch, provider), mode="r")
     handle = StreamHandle(stream, provider)
     # pre_buffer=False: one request per column chunk, never a coalesced row-group read.
-    return arrow_adapter.parquet_file(handle, pre_buffer=False)
+    return handle, arrow_adapter.parquet_file(handle, pre_buffer=False)
 
 
 def _read_parquet_row_count(size: int, fetch: Fetch, provider: str) -> RowCount:
-    return RowCount(_parquet(size, fetch, provider).metadata.num_rows, exact=True)
+    return RowCount(_parquet(size, fetch, provider)[1].metadata.num_rows, exact=True)
 
 
 def _read_parquet_schema(size: int, fetch: Fetch, provider: str) -> pa.Schema:
-    return _parquet(size, fetch, provider).schema_arrow
+    return _parquet(size, fetch, provider)[1].schema_arrow
 
 
 def _read_parquet_sample(size: int, fetch: Fetch, provider: str, sample_rows: int) -> pd.DataFrame:
-    parquet_file = _parquet(size, fetch, provider)
-    return head_frame_from_batches(
-        parquet_file.iter_batches(batch_size=sample_rows), sample_rows, parquet_file.schema_arrow
-    )
+    handle, pf = _parquet(size, fetch, provider)
+    batches = arrow_adapter.iter_batches(handle, pf, batch_size=sample_rows)
+    return head_frame_from_batches(batches, sample_rows, pf.schema_arrow)
 
 
 def _read_parquet_frame(size: int, fetch: Fetch, provider: str) -> pd.DataFrame:
@@ -176,8 +175,9 @@ def _read_parquet_frame(size: int, fetch: Fetch, provider: str) -> pd.DataFrame:
     The schema carries the pandas metadata (index, categoricals, timezones) and keeps a file
     with no row groups valid, where `iter_batches` yields nothing.
     """
-    pf = _parquet(size, fetch, provider)
-    return pa.Table.from_batches(pf.iter_batches(), schema=pf.schema_arrow).to_pandas()
+    handle, pf = _parquet(size, fetch, provider)
+    batches = arrow_adapter.iter_batches(handle, pf)
+    return pa.Table.from_batches(batches, schema=pf.schema_arrow).to_pandas()
 
 
 def _read_csv_frame(size: int, fetch: Fetch, provider: str, lexeme_columns: Any) -> pd.DataFrame:

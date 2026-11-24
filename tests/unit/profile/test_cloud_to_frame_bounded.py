@@ -401,3 +401,11 @@ def test_malformed_object_leaves_as_value_free_read_error(
     _value_free(info.value)
     assert str(info.value) == f"file could not be read: {provider.upper()}"
 
+
+def test_stream_handle_read_all_is_sized() -> None:
+    from decoy_engine.fileaccess.adapters.memory import StreamHandle
+    from tests._cloud_fakes import Body
+
+    ledger, data = Ledger(), MARKER * (300 * 1024)
+    assert StreamHandle(Body(ledger, data), "S3").read_all() == data  # type: ignore[arg-type]
+    assert ledger.unsized_reads == 0 and ledger.body_bytes_read == len(data)

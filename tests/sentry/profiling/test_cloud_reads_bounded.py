@@ -4,7 +4,8 @@ A profile reader that pulls a whole object holds it in memory, so a large object
 the host. The bounded path is a ranged S3 `get_object`, a ranged `gcs_download` and a sized
 `read`. This sentry scans `src/decoy_engine/profile/` and fails on:
 
-- a `get_object` call, direct or passed to `s3_call`, without `Range=`;
+- a `get_object` call, direct or passed to `s3_call`, without `Range=` or without `IfMatch=`
+  (an unpinned range can mix two versions of the object);
 - a `gcs_download` call without `start=` and `end=`, under any import alias;
 - any `download_as_bytes`, `download_as_string` or `download_as_text` call;
 - a `.read()` with no size, called directly or passed to another call (`s3_call(stream.read)`).
@@ -55,14 +56,14 @@ def findings(text: str, module: str, is_package: bool = False) -> list[str]:
         name = func.id if isinstance(func, ast.Name) else attr
         if attr in WHOLE_DOWNLOADS:
             out.append(f"{line}: whole-object {attr}")
-        if attr == "get_object" and "Range" not in _kw(node):
-            out.append(f"{line}: get_object without Range")
-        if node.args and isinstance(node.args[0], ast.Attribute):
-            passed = node.args[0].attr
-            if passed == "get_object" and "Range" not in _kw(node):
-                out.append(f"{line}: get_object passed without Range")
-            if _unsized_read(node.args[0]) and len(node.args) < 2:
-                out.append(f"{line}: read passed without a size")
+        first = node.args[0] if node.args else None
+        passed = first.attr if isinstance(first, ast.Attribute) else None
+        if "get_object" in (attr, passed):
+            how = "get_object" if attr == "get_object" else "get_object passed"
+            missing = [k for k in ("Range", "IfMatch") if k not in _kw(node)]
+            out.extend(f"{line}: {how} without {k}" for k in missing)
+        if first is not None and _unsized_read(first) and len(node.args) < 2:
+            out.append(f"{line}: read passed without a size")
         if attr == "read" and not node.args and not node.keywords:
             out.append(f"{line}: read() without a size")
         if name == "gcs_download" or resolve(func, scope, index) == GCS_DOWNLOAD:
@@ -92,6 +93,11 @@ SEEDED = {
     ),
     "download_as_bytes": "def f(blob):\n    return blob.download_as_bytes()\n",
     "get_object_no_range": "def f(client, b, k):\n    return client.get_object(Bucket=b, Key=k)\n",
+    "get_object_unpinned": (
+        "from decoy_engine.connectors import _clients\n"
+        "def f(client):\n"
+        "    return _clients.s3_call(client.get_object, Bucket='b', Key='k', Range='bytes=0-1')\n"
+    ),
 }
 
 
