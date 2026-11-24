@@ -306,6 +306,16 @@ def reference_transform(table: pa.Table, ops: Sequence[dict[str, Any]]) -> pa.Ta
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields)).replace_schema_metadata(meta)
 
 
+def _same_with_nan(a: pa.Array, e: pa.Array) -> bool:
+    if a.type != e.type:
+        return False
+    return [_nan_key(v) for v in a.to_pylist()] == [_nan_key(v) for v in e.to_pylist()]
+
+
+def _nan_key(value: object) -> object:
+    return "NaN" if isinstance(value, float) and value != value else value
+
+
 def tables_equal(actual: pa.Table, expected: pa.Table) -> None:
     """Full Arrow schema (names, types, nullability) and values, exact."""
     assert actual.schema.equals(expected.schema, check_metadata=False), (
@@ -315,4 +325,8 @@ def tables_equal(actual: pa.Table, expected: pa.Table) -> None:
     for name in expected.column_names:
         a = actual.column(name).combine_chunks()
         e = expected.column(name).combine_chunks()
-        assert a.equals(e), f"column {name!r} differs: {a.to_pylist()} != {e.to_pylist()}"
+        # Arrow `equals` treats NaN as unequal to itself; an untouched NaN is kept as stored
+        # (rule 3, plan amendment A1), so equal columns can hold NaN.
+        assert a.equals(e) or _same_with_nan(a, e), (
+            f"column {name!r} differs: {a.to_pylist()} != {e.to_pylist()}"
+        )

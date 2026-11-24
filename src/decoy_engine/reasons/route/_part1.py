@@ -266,17 +266,17 @@ _d = _catalog.route("decoy_engine.execution.pipeline._resident_fit")
 NONFK_FULL_FRAME_FITS = _d(
     "nonfk_full_frame_fits",
     "A job with no foreign keys fits in memory by the byte estimate.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 NONFK_FULL_FRAME_PROBE_FITS = _d(
     "nonfk_full_frame_probe_fits",
     "A job with no foreign keys fits in memory by a measured probe.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 NONFK_FULL_FRAME_UNVERIFIED = _d(
     "nonfk_full_frame_unverified",
     "A job with no foreign keys could not be shown to fit or not fit, so it runs as before.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 _d = _catalog.route("decoy_engine.execution.physical._reasons")
 NO_RELATIONSHIPS = _d("no_relationships", "No relationships.")

@@ -672,7 +672,7 @@
     ],
     [
      "x",
-     "null",
+     "bool",
      true,
      false
     ]
@@ -698,7 +698,7 @@
     ],
     [
      "x",
-     "null",
+     "bool",
      true,
      false
     ]
@@ -806,7 +806,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "bool|pass|none": {
@@ -1584,7 +1586,7 @@
     ],
     [
      "x",
-     "null",
+     "bool",
      true,
      false
     ]
@@ -1610,7 +1612,7 @@
     ],
     [
      "x",
-     "null",
+     "bool",
      true,
      false
     ]
@@ -1718,7 +1720,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "bool|uncfg|none": {
@@ -2496,7 +2500,7 @@
     ],
     [
      "x",
-     "null",
+     "date32[day]",
      true,
      false
     ]
@@ -2522,7 +2526,7 @@
     ],
     [
      "x",
-     "null",
+     "date32[day]",
      true,
      false
     ]
@@ -2630,7 +2634,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "date32|pass|none": {
@@ -3408,7 +3414,7 @@
     ],
     [
      "x",
-     "null",
+     "date32[day]",
      true,
      false
     ]
@@ -3434,7 +3440,7 @@
     ],
     [
      "x",
-     "null",
+     "date32[day]",
      true,
      false
     ]
@@ -3542,7 +3548,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "date32|uncfg|none": {
@@ -4320,7 +4328,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -4346,7 +4354,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -4422,7 +4430,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -4448,13 +4456,15 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "date64_subday|pass|none": {
@@ -4522,7 +4532,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -4548,7 +4558,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -5232,7 +5242,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -5258,7 +5268,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -5334,7 +5344,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -5360,13 +5370,15 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "date64_subday|uncfg|none": {
@@ -5434,7 +5446,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -5460,7 +5472,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -6144,7 +6156,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -6170,7 +6182,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -6246,7 +6258,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -6272,13 +6284,15 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "date64_whole|pass|none": {
@@ -6346,7 +6360,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -6372,7 +6386,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -7056,7 +7070,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -7082,7 +7096,7 @@
     ],
     [
      "x",
-     "null",
+     "date64[ms]",
      true,
      false
     ]
@@ -7158,7 +7172,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -7184,13 +7198,15 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "date64_whole|uncfg|none": {
@@ -7258,7 +7274,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -7284,7 +7300,7 @@
     ],
     [
      "x",
-     "date32[day]",
+     "date64[ms]",
      true,
      false
     ]
@@ -22216,7 +22232,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -22242,7 +22258,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -22350,7 +22366,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "large_string|pass|none": {
@@ -23128,7 +23146,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -23154,7 +23172,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -23262,7 +23280,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "large_string|uncfg|none": {
@@ -25270,7 +25290,7 @@
      "x",
      "string",
      true,
-     false
+     true
     ]
    ],
    "mode": "full_frame",
@@ -25296,7 +25316,7 @@
      "x",
      "string",
      true,
-     false
+     true
     ]
    ],
    "mode": "chunked",
@@ -25372,7 +25392,7 @@
      "x",
      "string",
      true,
-     false
+     true
     ]
    ],
    "mode": "full_frame",
@@ -25398,7 +25418,7 @@
      "x",
      "string",
      true,
-     false
+     true
     ]
    ],
    "mode": "chunked",
@@ -25473,7 +25493,7 @@
     [
      "x",
      "string",
-     true,
+     false,
      false
     ]
    ],
@@ -25504,9 +25524,7 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": [
-    "pandas"
-   ]
+   "schema_metadata": []
   }
  },
  "string_nonnullable_field|uncfg|none": {
@@ -25575,7 +25593,7 @@
     [
      "x",
      "string",
-     true,
+     false,
      false
     ]
    ],
@@ -25606,9 +25624,7 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": [
-    "pandas"
-   ]
+   "schema_metadata": []
   }
  },
  "string|faker|all": {
@@ -26284,7 +26300,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -26310,7 +26326,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -26418,7 +26434,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "string|pass|none": {
@@ -27196,7 +27214,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -27222,7 +27240,7 @@
     ],
     [
      "x",
-     "null",
+     "string",
      true,
      false
     ]
@@ -27330,7 +27348,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "string|uncfg|none": {
@@ -28108,7 +28128,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[ms]",
      true,
      false
     ]
@@ -28134,7 +28154,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[ms]",
      true,
      false
     ]
@@ -28210,7 +28230,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
@@ -28236,13 +28256,15 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time32_ms|pass|none": {
@@ -28310,7 +28332,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
@@ -28336,7 +28358,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
@@ -29020,7 +29042,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[ms]",
      true,
      false
     ]
@@ -29046,7 +29068,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[ms]",
      true,
      false
     ]
@@ -29122,7 +29144,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
@@ -29148,13 +29170,15 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time32_ms|uncfg|none": {
@@ -29222,7 +29246,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
@@ -29248,7 +29272,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[ms]",
      true,
      false
     ]
@@ -29932,7 +29956,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[s]",
      true,
      false
     ]
@@ -29958,7 +29982,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[s]",
      true,
      false
     ]
@@ -30034,7 +30058,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
@@ -30060,13 +30084,15 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time32_s|pass|none": {
@@ -30134,7 +30160,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
@@ -30160,7 +30186,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
@@ -30844,7 +30870,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[s]",
      true,
      false
     ]
@@ -30870,7 +30896,7 @@
     ],
     [
      "x",
-     "null",
+     "time32[s]",
      true,
      false
     ]
@@ -30946,7 +30972,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
@@ -30972,13 +30998,15 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time32_s|uncfg|none": {
@@ -31046,7 +31074,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
@@ -31072,7 +31100,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time32[s]",
      true,
      false
     ]
@@ -31756,7 +31784,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -31782,7 +31810,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -31858,7 +31886,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
@@ -31884,13 +31912,15 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time64_ns_aligned|pass|none": {
@@ -31958,7 +31988,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
@@ -31984,7 +32014,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
@@ -32668,7 +32698,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -32694,7 +32724,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -32770,7 +32800,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
@@ -32796,13 +32826,15 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time64_ns_aligned|uncfg|none": {
@@ -32870,7 +32902,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
@@ -32896,7 +32928,7 @@
     ],
     [
      "x",
-     "time64[us]",
+     "time64[ns]",
      true,
      false
     ]
@@ -33248,7 +33280,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -33274,7 +33306,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -33662,7 +33694,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -33688,7 +33720,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[ns]",
      true,
      false
     ]
@@ -34408,7 +34440,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[us]",
      true,
      false
     ]
@@ -34434,7 +34466,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[us]",
      true,
      false
     ]
@@ -34542,7 +34574,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time64_us|pass|none": {
@@ -35320,7 +35354,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[us]",
      true,
      false
     ]
@@ -35346,7 +35380,7 @@
     ],
     [
      "x",
-     "null",
+     "time64[us]",
      true,
      false
     ]
@@ -35454,7 +35488,9 @@
     ]
    ],
    "mode": "chunked",
-   "schema_metadata": []
+   "schema_metadata": [
+    "pandas"
+   ]
   }
  },
  "time64_us|uncfg|none": {

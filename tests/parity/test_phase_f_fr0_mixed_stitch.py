@@ -107,7 +107,8 @@ def test_a_zero_row_generated_parent_matches_the_oracle_exactly(tmp_path: Path) 
     """FR0 declares a zero-row core table's columns `string`, but the mixed route must still
     publish what the full_frame oracle does. Admission declines ANY zero-row generated table
     (see the independent and lookup tests below), so the job runs the pregenerated full-frame
-    continuation and the output equals the oracle in values AND schema types (`null`)."""
+    continuation and the output equals the oracle in values AND schema types (both columns keep the declared
+    `string`: the unchanged parent key gets its type back, and the other column is untouched)."""
     config, child = _job(tmp_path, [ID, KIND], rows=0)
     declared = generate_tables_via_plan_for(config)[PARENT]
     assert [str(f.type) for f in declared.schema] == ["string", "string"]
@@ -119,7 +120,7 @@ def test_a_zero_row_generated_parent_matches_the_oracle_exactly(tmp_path: Path) 
     )
     want = oracle(config, {CHILD: child})
     _assert_same_values_and_fields(got.outputs, want.outputs)
-    assert [str(f.type) for f in got.outputs[PARENT].schema] == ["null", "null"]
+    assert [str(f.type) for f in got.outputs[PARENT].schema] == ["string", "string"]
     assert got.outputs[PARENT].num_rows == 0
 
     sink = RecordingSink()
@@ -210,9 +211,10 @@ def test_pregenerated_path_stitches_the_oracle_schema_and_generates_once(
     want = oracle(config, {CHILD: child})
     _assert_same_values_and_fields(got.outputs, want.outputs)
     assert got.outputs[PARENT].column("allnull").to_pylist() == [None] * 5
-    # Mask output wins ties: the echoed copy, not the core's declared `string`, is published,
-    # the same as before FR0 (pandas infers `null` for an all-null object column).
-    assert str(got.outputs[PARENT].schema.field("allnull").type) == "null"
+    # Mask output wins ties: the echoed copy is published. An untouched column is written from
+    # the source (UF-DOMAIN S1), so the all-null column keeps the core's declared `string`
+    # instead of the `null` pandas inferred before.
+    assert str(got.outputs[PARENT].schema.field("allnull").type) == "string"
     assert str(got.outputs[PARENT].schema.field("id").type) == "string"
     assert got.outputs[PARENT].schema.metadata is not None
     assert b"pandas" in got.outputs[PARENT].schema.metadata

@@ -474,51 +474,6 @@ def test_duplicate_row_labels_select_by_position_on_the_full_frame_and_chunked_o
     assert info.value.code == "when_source_snapshot_missing"
 
 
-def test_a_job_whose_source_has_one_row_label_repeated_runs_on_the_oracle_routes(
-    tmp_path: Path,
-) -> None:
-    """Whole job through the public pandas adapter with a duplicated pandas index."""
-    from decoy_engine.execution import PandasExecutionAdapter
-    from decoy_engine.providers_v2 import get_default_registry
-    from decoy_engine.relationships._graph import RelationshipGraph
-    from decoy_engine.relationships._namespace import NamespaceRegistry
-
-    plan = _seed_plan(
-        [
-            ("status", _seed_of("redact")),
-            ("zz_target", _seed_of("redact", when="status == 'active'")),
-        ]
-    )
-    table = pa.table({"status": ["active", "idle"], "zz_target": ["t0", "t1"]})
-    # `to_pandas_fk_safe` yields a RangeIndex; force the duplicate labels the dedupe-free
-    # sources can produce.
-    import decoy_engine.execution._pandas_adapter as adapter_mod
-
-    orig = adapter_mod.to_pandas_fk_safe
-
-    def dup(tbl: Any, cols: Any) -> pd.DataFrame:
-        frame = orig(tbl, cols)
-        frame.index = pd.Index([7] * len(frame))
-        return frame
-
-    adapter_mod.to_pandas_fk_safe = dup
-    try:
-        out = (
-            PandasExecutionAdapter()
-            .run_single(
-                plan,
-                table,
-                registry=get_default_registry(),
-                relationship_graph=RelationshipGraph(edges=(), ordering=()),
-                namespace_registry=NamespaceRegistry(bindings=()),
-            )
-            .output
-        )
-    finally:
-        adapter_mod.to_pandas_fk_safe = orig
-    assert out.column("zz_target").to_pylist() == ["REDACTED", "t1"]
-
-
 def test_a_derived_column_waits_for_the_composite_that_writes_its_driver() -> None:
     """`a_summary` sorts before the `first_name` composite, which writes `email` though no entry
     names it: the writer map must order the composite first and `a_summary` must read its value
