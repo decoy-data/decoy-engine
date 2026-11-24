@@ -84,6 +84,7 @@ def test_at_e6b_override_keeps_a_blockless_config_unchanged(tmp_path: Path) -> N
     assert run_config2 == cfg2 and "subset" not in run_config2
     assert _hash(run_config2) == _hash(cfg2)
     assert scope2.declared is False and scope.declared is False
+    assert scope.fingerprint == request.fingerprint() == scope2.fingerprint
 
 
 def test_at_e6b_override_hash_equals_the_config_path_with_a_block(tmp_path: Path) -> None:
@@ -94,7 +95,7 @@ def test_at_e6b_override_hash_equals_the_config_path_with_a_block(tmp_path: Path
     via_config = split_subset_config(cfg).run_config
     assert overridden == via_config
     assert _hash(overridden) == _hash(via_config)
-    assert scope.declared is True
+    assert scope.declared is True and scope.fingerprint == request.fingerprint()
 
 
 def test_at_e7_skip_still_refuses_a_dangling_block(tmp_path: Path) -> None:
