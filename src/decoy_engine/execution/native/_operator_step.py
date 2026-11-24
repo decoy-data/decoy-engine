@@ -147,7 +147,7 @@ def sample_faker_array_positional(
     native_threads: int | None,
     missing_mask: pa.Array | None = None,
     gate_positions: np.ndarray[Any, Any] | None = None,
-    domain_code: str = reasons.runtime.FAKER_POSITION_OUT_OF_DOMAIN,
+    code: str = reasons.runtime.FAKER_POSITION_OUT_OF_DOMAIN,
 ) -> pa.Array:
     """Select one batch's non-deterministic REUSE faker values by global row position.
 
@@ -169,7 +169,7 @@ def sample_faker_array_positional(
     decides it from the dtype it rebuilds, so it is not always Arrow validity. Both routes pass
     it; `None` falls back to Arrow validity, which is the oracle's answer for a string source.
 
-    `domain_code` is the registered runtime code raised for a row number outside the unsigned
+    `code` is the registered runtime code raised for a row number outside the unsigned
     64-bit domain; a computed draw passes its own, as `positional_pool_indices` does.
     """
     try:
@@ -180,7 +180,7 @@ def sample_faker_array_positional(
         keys = positional_key_array(
             row_offset,
             n,
-            code=domain_code,
+            code=code,
             gate_positions=gate_positions,
         )
         idx = _checked_batch(

@@ -150,7 +150,7 @@ class TestSequentialRoute:
     def test_a_non_string_draw_declines_with_the_typed_reason(
         self, provider, config, deterministic
     ) -> None:
-        from decoy_engine.execution._sequential_native_ops import _faker_admit
+        from decoy_engine.execution.sequential._faker_admission import faker_admit as _faker_admit
 
         seed = _seed(provider, config, deterministic=deterministic)
         assert _faker_admit("f", pa.string(), seed) == f"{NOT_STRING}:f:{provider}"
@@ -158,7 +158,7 @@ class TestSequentialRoute:
     def test_a_uuid_with_a_non_string_source_stays_on_pandas(self, tmp_path) -> None:
         """Admission is exact `string` in, as for the pool operator: another source type declines
         with the shared source reason and the pandas draw still masks it."""
-        from decoy_engine.execution._sequential_native_ops import _faker_admit
+        from decoy_engine.execution.sequential._faker_admission import faker_admit as _faker_admit
 
         seed = _seed("uuid", {})
         assert _faker_admit("f", pa.string(), seed) is None

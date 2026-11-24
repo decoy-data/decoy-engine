@@ -1,12 +1,12 @@
 """The sequential native leg of a computed Faker draw (`uuid`, exact-string `random_choice`).
 
 A computed draw has no pool. Its native value is the keyed kernel's output, taken through the
-entries the pool operator and the hash operator already use: `sample_faker_array` and its
-positional twin gather from the element table, and `native_keyed_hash` takes the 32 hex digits
-that `uuid_from_hex` lays out as an RFC 9562 version 4 string. The key namespace is the column's
-plus the provider, as on the pandas route, so both routes draw the same bytes.
+entries the pool operator and the hash operator already use. The deterministic draw is the one
+`deterministic_computed_array` shares with the out-of-core route; the positional twin gathers
+from the element table by row number, or keys a uuid from it. The key namespace is the column's
+plus the provider, as on the pandas route, so every route draws the same bytes.
 
-Only an exact-`string` output reaches here: admission (`_faker_admit`) declines every other
+Only an exact-`string` output reaches here: admission (`faker_admit`) declines every other
 computed output type with `faker_computed_output_type_unsupported`.
 """
 
@@ -23,26 +23,18 @@ from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._positional_keys import positional_key_array
 from decoy_engine.execution._sequential_native_ops import FAKER
 from decoy_engine.execution._strategies._faker_positional import resolve_selection_namespace
-from decoy_engine.execution.native._kernels_keyed import native_keyed_hash
-from decoy_engine.execution.native._operator_step import (
-    sample_faker_array,
-    sample_faker_array_positional,
-)
-from decoy_engine.generation.pool import (
-    ComputedDrawSpec,
-    computed_selection_namespace,
-    uuid_from_hex,
-)
+from decoy_engine.execution.native._operator_step import sample_faker_array_positional
+from decoy_engine.execution.native.draw import deterministic_computed_array, keyed_uuid_array
+from decoy_engine.generation.pool import ComputedDrawSpec, computed_selection_namespace
 from decoy_engine.providers_v2 import FAMILY_UUID
 
 if TYPE_CHECKING:
     from decoy_engine.execution._sequential_native import SeqNativeRun
-    from decoy_engine.execution.out_of_core._categorical_native import BoundIndexKernel
+    from decoy_engine.execution.sequential._faker_admission import BoundFakerKernels
     from decoy_engine.plan._types import ColumnSeed
 
 __all__ = ["computed_faker_array", "computed_faker_column"]
 
-_UUID_HEX_DIGITS = 32
 _POSITION_CODE = reasons.runtime.COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN
 
 
@@ -57,7 +49,7 @@ def computed_faker_column(
     """The computed values for `df[column]`, positionally, or None when the pandas draw runs.
 
     Every computed column is offered, so a declined one still books its rows. The run's
-    decision for the column came from `_faker_admit`; the kernel is the faker operator's."""
+    decision for the column came from `faker_admit`; the kernel is the faker operator's."""
     gate = run.admitted(ctx, column, FAKER, len(df))
     if gate is None:
         return None
@@ -69,7 +61,7 @@ def computed_faker_column(
 
 
 def computed_faker_array(
-    bound: BoundIndexKernel,
+    bound: BoundFakerKernels,
     values: pa.Array | pa.ChunkedArray,
     spec: ComputedDrawSpec,
     ctx: StrategyContext,
@@ -77,26 +69,25 @@ def computed_faker_array(
     plan: ColumnSeed,
 ) -> pa.Array:
     """One batch's exact-string computed values: deterministic keys each source value under the
-    mask key, positional keys each row's full-table number under the job seed.
+    mask key (the draw shared with the out-of-core route), positional keys each row's full-table
+    number under the job seed.
 
     A null source stays null; in positional mode it still consumes its row number."""
-    deterministic = bool(plan.deterministic)
+    if plan.deterministic:
+        return deterministic_computed_array(
+            values,
+            spec,
+            column_namespace=str(plan.namespace),
+            mask_key=ctx.mask_key,
+            index_kernel=bound.kernel,
+            hash_kernel=bound.hash_kernel,
+            native_threads=bound.native_threads,
+        )
     namespace = computed_selection_namespace(
-        str(plan.namespace)
-        if deterministic
-        else resolve_selection_namespace(ctx, column, plan.namespace),
-        spec.provider,
+        resolve_selection_namespace(ctx, column, plan.namespace), spec.provider
     )
+    gate_positions = getattr(ctx, "gate_positions", None)
     if spec.family != FAMILY_UUID:
-        if deterministic:
-            return sample_faker_array(
-                values,
-                pool=spec,
-                namespace=namespace,
-                mask_key=ctx.mask_key,
-                index_kernel=bound.kernel,
-                native_threads=bound.native_threads,
-            )
         return sample_faker_array_positional(
             values,
             pool=spec,
@@ -106,33 +97,18 @@ def computed_faker_array(
             index_kernel=bound.kernel,
             native_threads=bound.native_threads,
             missing_mask=None,
-            gate_positions=getattr(ctx, "gate_positions", None),
-            domain_code=_POSITION_CODE,
-        )
-    if deterministic:
-        return uuid_from_hex(
-            native_keyed_hash(
-                values,
-                mask_key=ctx.mask_key,
-                namespace=namespace,
-                truncate=_UUID_HEX_DIGITS,
-                native_threads=bound.native_threads,
-            )
+            gate_positions=gate_positions,
+            code=_POSITION_CODE,
         )
     keys = positional_key_array(
-        ctx.row_offset,
-        len(values),
-        code=_POSITION_CODE,
-        gate_positions=getattr(ctx, "gate_positions", None),
+        ctx.row_offset, len(values), code=_POSITION_CODE, gate_positions=gate_positions
     )
-    drawn = uuid_from_hex(
-        native_keyed_hash(
-            keys,
-            mask_key=ctx.job_seed,
-            namespace=namespace,
-            truncate=_UUID_HEX_DIGITS,
-            native_threads=bound.native_threads,
-        )
+    drawn = keyed_uuid_array(
+        keys,
+        key=ctx.job_seed,
+        namespace=namespace,
+        hash_kernel=bound.hash_kernel,
+        native_threads=bound.native_threads,
     )
     valid = pc.is_valid(values)  # type: ignore[attr-defined, unused-ignore]
     return pc.if_else(valid, drawn, pa.scalar(None, pa.string()))  # type: ignore[attr-defined, unused-ignore]

@@ -48,11 +48,12 @@ from decoy_engine.execution.native._operator_config_rejections import (
     group_key_sibling_type_admitted,
 )
 from decoy_engine.execution.native._provider_class import (
-    computed_mask_spec,
     computed_output_decline,
+    resolve_faker_variant,
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
 from decoy_engine.execution.native._route_decline_codes import CodedDecline, RouteDeclineCode, coded
+from decoy_engine.providers_v2 import ProviderRegistry
 
 # The frozen C1 recipe's faker providers, from the operator registry (edit the registry). An
 # unset allowlist admits no provider, so a registry edit cannot widen admission by accident.
@@ -101,21 +102,31 @@ def faker_provider_decline(
     provider_config: Mapping[str, Any] | None,
     *,
     runs_computed: bool,
+    registry: ProviderRegistry | None = None,
+    stock_only: bool = False,
 ) -> tuple[str, RouteDeclineCode] | None:
     """The reason and decline code a route gives a faker column's provider, or None to admit it.
 
-    A pool provider must be on the C1 allowlist. A computed draw (`uuid`, `random_int_range`,
-    `random_choice`) has no pool: a route that `runs_computed` admits it when its output is
-    exact `string`, and every route declines any other output type (E11 and E13). A route that
-    does not run computed draws yet declines an exact-string one as not native."""
-    spec = computed_mask_spec(provider, provider_config)
-    if spec is not None:
-        reason = computed_output_decline(column, provider, provider_config)
+    The live binding decides the variant (`resolve_faker_variant`). A pool provider must be on
+    the C1 allowlist. A computed draw has no pool: a route that `runs_computed` admits it when
+    its output is exact `string`, and every route declines any other output type (E11 and E13).
+    A route that does not run computed draws yet declines an exact-string one, and a computed
+    binding with no descriptor, as not native. `stock_only` is for a route whose schema is read
+    from the stock binding (out-of-core): a rebound provider that resolves to another variant than
+    the stock registry's is declined, so the schema and the draw cannot disagree."""
+    variant = resolve_faker_variant(provider, provider_config, registry)
+    if stock_only and variant != resolve_faker_variant(provider, provider_config):
+        return (
+            f"faker_provider_not_native:{column}:{provider}",
+            RouteDeclineCode.FAKER_PROVIDER_NOT_NATIVE,
+        )
+    if variant.kind == "computed":
+        reason = computed_output_decline(column, provider, provider_config, registry)
         if reason is not None:
             return reason, RouteDeclineCode.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED
         if runs_computed:
             return None
-    elif provider in C1_PROVIDER_ALLOWLIST:
+    elif variant.kind == "pool" and provider in C1_PROVIDER_ALLOWLIST:
         return None
     return (
         f"faker_provider_not_native:{column}:{provider}",
@@ -164,6 +175,7 @@ def real_type_decline(
     *,
     table: str,
     profile: Any,
+    registry: ProviderRegistry | None = None,
 ) -> CodedDecline | None:
     """The first real-type decline as its legacy reason plus a structured record, or None.
     The column is the node under test, so attribution never reparses the reason string."""
@@ -196,7 +208,11 @@ def real_type_decline(
                 return coded(reason, RouteDeclineCode.HASH_CONFIG_REJECTED, table, column)
         elif node.strategy == "faker" and (
             provider_decline := faker_provider_decline(
-                column, providers.get(column), provider_configs.get(column), runs_computed=False
+                column,
+                providers.get(column),
+                provider_configs.get(column),
+                runs_computed=False,
+                registry=registry,
             )
         ):
             reason, code = provider_decline

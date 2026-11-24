@@ -26,11 +26,13 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._faker_deterministic_admission import (
     DETERMINISTIC_FAKER_SOURCE_TYPES,
     is_effective_deterministic_faker,
 )
+from decoy_engine.execution.native._provider_class import draws_computed_string
 from decoy_engine.safe_output import attach_output_metadata
 
 # The string-output provider allowlist: only these providers draw guaranteed-string values, so
@@ -92,7 +94,14 @@ def deterministic_faker_pin_columns(
         name = col.get("name")
         if not isinstance(name, str) or name not in source_names or name in fk_children:
             continue
-        if _has_when(col) or not is_effective_deterministic_faker(col):
+        if _has_when(col):
+            continue
+        if col.get("strategy") == "faker" and draws_computed_string(
+            col.get("provider"), col.get("provider_config")
+        ):
+            pinned.add(name)
+            continue
+        if not is_effective_deterministic_faker(col):
             continue
         if col.get("provider") not in _FAKER_PROVIDER_ALLOWLIST:
             continue
@@ -120,7 +129,12 @@ def deterministic_faker_pin_columns_from_plan(
     for name, seed in table_seed.per_column:
         if name not in source_names or name in fk_children:
             continue
-        if seed.strategy != "faker" or not seed.deterministic or seed.when:
+        if seed.strategy != "faker" or seed.when:
+            continue
+        if draws_computed_string(seed.provider, provider_config_to_dict(seed.provider_config)):
+            pinned.add(name)
+            continue
+        if not seed.deterministic:
             continue
         if seed.provider not in _FAKER_PROVIDER_ALLOWLIST:
             continue

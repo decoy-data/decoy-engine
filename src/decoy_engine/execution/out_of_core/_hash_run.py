@@ -295,11 +295,13 @@ class OocHashRun:
         bound = self._faker_bound
         if bound is None:
             index = self._index_kernel()
+            hashed = self._kernel()  # a `uuid` draw runs the hash kernel; None runs the reference
+            hash_kernel = hashed.kernel if hashed is not None else None
             bound = (
-                BoundFakerKernel(index.kernel, index.native_threads, compiled=True)
+                BoundFakerKernel(index.kernel, index.native_threads, True, hash_kernel)
                 if index is not None
                 else BoundFakerKernel(
-                    reference_index_derivation(), self._native_threads, compiled=False
+                    reference_index_derivation(), self._native_threads, False, hash_kernel
                 )
             )
             self._faker_bound = bound

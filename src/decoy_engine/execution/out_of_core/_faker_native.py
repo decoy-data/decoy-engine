@@ -51,7 +51,6 @@ from decoy_engine.execution._operator_registry import (
     RUST_COMPANION,
     RUST_POOL_SELECT,
 )
-from decoy_engine.execution.native._kernels_keyed import native_keyed_hash
 from decoy_engine.execution.native._operator_step import sample_faker_array
 from decoy_engine.execution.native._provider_class import computed_mask_spec
 from decoy_engine.execution.native._real_type_admission import (
@@ -59,22 +58,19 @@ from decoy_engine.execution.native._real_type_admission import (
     string_source_type_rejection,
 )
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
-from decoy_engine.generation.pool import (
-    ComputedDrawSpec,
-    computed_selection_namespace,
-    uuid_from_hex,
-)
-from decoy_engine.kernel import hash_array
+from decoy_engine.execution.native.draw import deterministic_computed_array
+from decoy_engine.generation.pool import ComputedDrawSpec
 from decoy_engine.providers_v2 import FAMILY_UUID
 
 if TYPE_CHECKING:
+    from decoy_engine.execution.native._crypto_ext import KeyedDerivationKernel
     from decoy_engine.execution.native._index_ext import IndexDerivationKernel
     from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext
     from decoy_engine.generation.pool._value_pool import ValuePool
     from decoy_engine.plan._types import ColumnSeed
+    from decoy_engine.providers_v2 import ProviderRegistry
 
 _NO_BACKEND_RAN = "none"
-_UUID_HEX_DIGITS = 32
 _REASON_NO_SELECT_CALLS = reasons.route.NO_NATIVE_KERNEL_CALLS
 
 
@@ -90,9 +86,12 @@ class BoundFakerKernel:
     kernel: IndexDerivationKernel
     native_threads: int | None
     compiled: bool
+    hash_kernel: KeyedDerivationKernel | None = None
 
 
-def decline_reason(column: str, schema: pa.Schema, seed: ColumnSeed) -> str | None:
+def decline_reason(
+    column: str, schema: pa.Schema, seed: ColumnSeed, registry: ProviderRegistry | None = None
+) -> str | None:
     """None when `column` can run the deterministic-REUSE native faker payload, else a reason.
 
     The admitted subset is the exact one the sequential and chunked routes gate
@@ -103,7 +102,12 @@ def decline_reason(column: str, schema: pa.Schema, seed: ColumnSeed) -> str | No
     scope; UNIQUE/MATCH/SCALE need whole-column RNG state. Those all decline here.
     """
     provider_decline = faker_provider_decline(
-        column, seed.provider, provider_config_to_dict(seed.provider_config), runs_computed=True
+        column,
+        seed.provider,
+        provider_config_to_dict(seed.provider_config),
+        runs_computed=True,
+        registry=registry,
+        stock_only=True,
     )
     if provider_decline is not None:
         return provider_decline[0]
@@ -212,6 +216,14 @@ class TableFakerPlan:
         return NativeFaker(self._bound, decision)
 
 
+def _computed_backend(bound: BoundFakerKernel, spec: ComputedDrawSpec) -> str:
+    """The backend a computed draw runs on: the companion kernel its variant needs, else the
+    byte-identical reference."""
+    needs_hash = spec.family == FAMILY_UUID
+    ready = bound.compiled and (bound.hash_kernel is not None or not needs_hash)
+    return RUST_COMPANION if ready else PYTHON_SCALAR
+
+
 def decide_table(
     table_name: str,
     schema: pa.Schema,
@@ -233,7 +245,10 @@ def decide_table(
     decisions: dict[str, FakerColumnDecision] = {}
     for column, seed in seeds.items():
         pinned_type = schema.field(column).type
-        computed = computed_mask_spec(seed.provider, provider_config_to_dict(seed.provider_config))
+        registry = faker_pool.registry if faker_pool is not None else None
+        computed = computed_mask_spec(
+            seed.provider, provider_config_to_dict(seed.provider_config), registry
+        )
         if bound is None or (faker_pool is None and computed is None):
             raise ExecutionError(
                 code=reasons.runtime.OUT_OF_CORE_FAKER_POOL_UNSUPPORTED,
@@ -242,7 +257,7 @@ def decide_table(
                     "mask planner without a pool context or index kernel; the run is aborted."
                 ),
             )
-        reason = decline_reason(column, schema, seed)
+        reason = decline_reason(column, schema, seed, registry)
         if reason is not None:
             raise ExecutionError(
                 code=reasons.runtime.OUT_OF_CORE_FAKER_SOURCE_TYPE_UNSUPPORTED,
@@ -257,7 +272,7 @@ def decide_table(
             decisions[column] = FakerColumnDecision(
                 table=table_name,
                 column=column,
-                backend=RUST_COMPANION if bound.compiled else PYTHON_SCALAR,
+                backend=_computed_backend(bound, computed),
                 reason=None,
                 pinned_type=pinned_type,
                 namespace=seed.namespace,
@@ -316,29 +331,14 @@ def native_faker_array(
         spec = native.decision.spec
         if spec is not None:
             native.decision.select_calls += 1
-            selection = computed_selection_namespace(namespace, spec.provider)
-            if spec.family != FAMILY_UUID:
-                return sample_faker_array(
-                    values,
-                    pool=spec,
-                    namespace=selection,
-                    mask_key=mask_key,
-                    index_kernel=native.bound.kernel,
-                    native_threads=native.bound.native_threads,
-                )
-            # The reference hash is byte-identical to the compiled one, as the index kernel is.
-            if native.bound.compiled:
-                return uuid_from_hex(
-                    native_keyed_hash(
-                        values,
-                        mask_key=mask_key,
-                        namespace=selection,
-                        truncate=_UUID_HEX_DIGITS,
-                        native_threads=native.bound.native_threads,
-                    )
-                )
-            return uuid_from_hex(
-                hash_array(values, seed=mask_key, namespace=selection, truncate=_UUID_HEX_DIGITS)
+            return deterministic_computed_array(
+                values,
+                spec,
+                column_namespace=namespace,
+                mask_key=mask_key,
+                index_kernel=native.bound.kernel,
+                hash_kernel=native.bound.hash_kernel,
+                native_threads=native.bound.native_threads,
             )
         pool = native.decision.pool
         if pool is None:  # pragma: no cover - a native decision always carries its pool

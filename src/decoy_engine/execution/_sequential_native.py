@@ -111,7 +111,8 @@ from decoy_engine.execution.native._fpe_ext import load_compiled_fpe_kernel
 from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
 from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core._categorical_native import BoundIndexKernel
-from decoy_engine.execution.out_of_core._hash_native import REASON_UNAVAILABLE, BoundHashKernel
+from decoy_engine.execution.out_of_core._hash_native import BoundHashKernel
+from decoy_engine.execution.sequential._faker_admission import bound_decline, load_faker_kernels
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import StrategyContext
@@ -132,8 +133,7 @@ REASON_BUCKET_OUT_OF_RANGE = reasons.route.SEQUENTIAL_BUCKET_PERTURB_DATE_OUT_OF
 _CONVERSION_ERRORS = (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError)
 
 
-# Loaders live here, not in the ops module, so each resolves through this module's globals at
-# call time (a test swaps the companion load by patching the name).
+# Loaders live here so each resolves through this module's globals (tests patch the name).
 def _load_hash(native_threads: int | None) -> BoundHashKernel:
     return BoundHashKernel(load_compiled_crypto_kernel(), native_threads)
 
@@ -152,7 +152,7 @@ _OPS: dict[str, NativeOp] = {
     CATEGORICAL: categorical_op(_load_index),
     BUCKET_PERTURB: bucket_perturb_op(_load_index),
     DATE_SHIFT: date_shift_op(_load_index),
-    FAKER: faker_op(_load_index),
+    FAKER: faker_op(load_faker_kernels),
     TEXT_REDACT: text_redact_op(_load_text_redact),
     TEXT_MASK: text_mask_op(_load_text_redact),
     GROUP_KEY: group_key_op(load_raw_hex),
@@ -166,8 +166,8 @@ class SeqNativeRun:
     that needs a decision. The decisions outlive the table that made them: REMAP on a later
     child table reads its parent's decision after the parent frame has been evicted."""
 
-    def __init__(self, *, native_threads: int | None = None) -> None:
-        self._native_threads = native_threads
+    def __init__(self, *, native_threads: int | None = None, registry: Any = None) -> None:
+        self._native_threads, self._registry = native_threads, registry
         self._load_attempted: set[str] = set()
         self._bound: dict[str, Any] = {}
         self._decisions: dict[tuple[str, str], ColumnDecision] = {}
@@ -199,7 +199,7 @@ class SeqNativeRun:
     ) -> ColumnDecision:
         bound = self._kernel(op)
         admit = op.key_admit if is_key and op.key_admit is not None else op.admit
-        reason = admit(column, input_type, seed) if bound is not None else REASON_UNAVAILABLE
+        reason = bound_decline(self._registry, admit, bound, column, input_type, seed)
         native = bound is not None and reason is None
         return ColumnDecision(
             table,
