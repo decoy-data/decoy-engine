@@ -1,7 +1,7 @@
 """RG-E1 A1: the checker reads inputs only through the one reader in ``_integrity.py``.
 
-An AST scan of the checker modules (``tests/sentry/_ratchet.py`` and the underscore modules in
-``tests/sentry/ratchet``) bars the filesystem and Git spellings that bypass it: ``glob``,
+An AST scan of the checker modules (``tests/sentry/_ratchet.py`` and every non-test module in
+``tests/sentry/ratchet``, whatever its name) bars the filesystem and Git spellings that bypass it: ``glob``,
 ``rglob``, ``isfile``, ``exists`` and their pathlib forms anywhere, and each raw primitive outside
 the one function that owns it. Aliases, bound references, unbound method forms and ``getattr``
 strings are all seen, because the scan looks at every attribute and name, not only at calls.
@@ -22,7 +22,8 @@ BARRED = frozenset(
     {"glob", "rglob", "iglob", "isfile", "isdir", "exists", "lexists", "is_file", "is_dir"}
 )
 # primitive -> the (module, owner) pairs that may use it. An owner is a qualified name
-# (``Class.method`` or ``function``); a function nested inside an owner counts as that owner.
+# (``Class.method`` or ``function``); a nested function is its own owner, so a helper defined
+# inside an owner does not inherit the right to use the primitive.
 HOMES: dict[str, frozenset[tuple[str, str]]] = {
     "scandir": frozenset({(INTEGRITY, "list_entries")}),
     "listdir": frozenset({(INTEGRITY, "list_entries")}),
@@ -44,9 +45,9 @@ HOMES: dict[str, frozenset[tuple[str, str]]] = {
 }
 
 
-def checker_modules() -> list[str]:
+def checker_modules(root: Path = ROOT) -> list[str]:
     """The checker and every non-test module beside it, with or without a leading underscore."""
-    folder = ROOT / "tests/sentry/ratchet"
+    folder = root / "tests/sentry/ratchet"
     names = sorted(
         p.name
         for p in folder.glob("*.py")
@@ -56,7 +57,7 @@ def checker_modules() -> list[str]:
 
 
 def _allowed(owners: frozenset[tuple[str, str]], module: str, owner: str) -> bool:
-    return any(module == m and (owner == o or owner.startswith(o + ".")) for m, o in owners)
+    return any(module == m and owner == o for m, o in owners)
 
 
 def violations(sources: dict[str, str]) -> list[str]:
@@ -91,8 +92,8 @@ def violations(sources: dict[str, str]) -> list[str]:
     return sorted(set(out))
 
 
-def live_sources() -> dict[str, str]:
-    return {m: (ROOT / m).read_text(encoding="utf-8") for m in checker_modules()}
+def live_sources(root: Path = ROOT) -> dict[str, str]:
+    return {m: (root / m).read_text(encoding="utf-8") for m in checker_modules(root)}
 
 
 def test_the_checker_reads_only_through_the_one_reader() -> None:
@@ -186,9 +187,23 @@ def test_the_git_reader_method_itself_may_run_git() -> None:
     assert violations(seeded) == []
 
 
-def test_a_module_without_a_leading_underscore_is_scanned() -> None:
-    assert "tests/sentry/ratchet/_integrity.py" in checker_modules()
-    for module in checker_modules():
-        assert not Path(module).name.startswith("test_")
-    seeded = {"tests/sentry/ratchet/reader.py": "def f(p):\n    return p.glob('*')\n"}
-    assert violations(seeded) != []
+def test_a_module_without_a_leading_underscore_is_scanned(tmp_path: Path) -> None:
+    folder = tmp_path / "tests/sentry/ratchet"
+    folder.mkdir(parents=True)
+    (tmp_path / "tests/sentry/_ratchet.py").write_text("X = 1\n", encoding="utf-8")
+    (folder / "reader.py").write_text("def f(p):\n    return p.glob('*')\n", encoding="utf-8")
+    (folder / "test_x.py").write_text("def test_a(p):\n    p.glob('*')\n", encoding="utf-8")
+    (folder / "conftest.py").write_text("Y = 1\n", encoding="utf-8")
+    sources = live_sources(tmp_path)
+    assert sorted(sources) == [CHECKER, "tests/sentry/ratchet/reader.py"]
+    assert violations(sources) == ["tests/sentry/ratchet/reader.py:f: glob"]
+
+
+def test_a_nested_helper_inside_the_owner_does_not_inherit_its_right() -> None:
+    seeded = {
+        INTEGRITY: "def open_input(side, p):\n"
+        "    def later():\n"
+        "        return p.read_bytes()\n"
+        "    return later\n"
+    }
+    assert violations(seeded) == [f"{INTEGRITY}:open_input.later: read_bytes"]
