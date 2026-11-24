@@ -355,7 +355,7 @@ def test_bad_manifest_precedes_reads(monkeypatch, bad, lazy):
 # it does not prove zero copy. The `data` cell (VmData, cap baseline + size // 2)
 # plus the /proc/self/maps check below prove the column is mapped, not copied.
 def test_mapped_ipc_under_cap(tmp_path, kind):
-    table = pa.table({"x": pa.array([1] * 8_000_000, pa.date64())})
+    table = pa.table({"x": pa.array([1] * 16_000_000, pa.date64())})
     manifest = stage_sources(tmp_path, {"t": table})
     assert manifest["t"]["format"] == "ipc"
     script = """
@@ -371,9 +371,9 @@ size = Path(manifest["t"]["path"]).stat().st_size
 baseline = read_vm_fields(os.getpid(), (field,))[field]
 apply_mem_cap(baseline + (3 * size if kind == "as" else size // 2), kind)
 table = _load_sources(manifest, lazy=True)["t"]
-assert table.num_rows == 8_000_000
+assert table.num_rows == 16_000_000
 buf = table["x"].chunk(0).buffers()[1]
-assert buf.size >= 64_000_000
+assert buf.size >= 128_000_000
 staged = os.path.realpath(manifest["t"]["path"])
 mapped = False
 for line in Path("/proc/self/maps").read_text().splitlines():
