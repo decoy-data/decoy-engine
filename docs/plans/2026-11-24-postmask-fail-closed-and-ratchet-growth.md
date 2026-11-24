@@ -94,8 +94,11 @@ conditional targets, transform outputs and every cascade child component. A look
 contributes no write. Expand bounded wildcards against the table schema. An unresolved writer
 makes its table unknown. Unknown reads alone do not (`execution/_column_access.py:520-532`).
 
-Bind the query result to the run at `execution/pipeline/_post_scan.py:512-528`.
-Use the resolved plan declarations, source field names, `ctx.graph.edges` and `ctx.registry`.
+Compute ownership once in `build_run_context` after the graph and registry are ready.
+Use resolved plan declarations, source field names, `graph.edges` and `resolved_registry`.
+Store the result on `PipelineRunContext` before `decide_route` runs at `execution/_pipeline.py:358`.
+Route admission, source restoration and verification all read that result.
+`bind_gate` consumes it later at `execution/_pipeline_route_dispatch.py:72`.
 The pipeline compiles the graph from profiled relationships and resolves the registry once
 (`execution/pipeline/_routing_facts.py:98-117`, `execution/_pipeline_context.py:306,397-422`).
 Pass ownership through verification's internal assembly for resident, deferred and staged checks.
@@ -161,7 +164,10 @@ key and value, retaining duplicates. Recurse at each level. A schema-free dict h
 keys and uses the same unordered field/value encoding as a struct or unique-key map.
 Use schema or paired evidence to identify map pairs. Without schema evidence, give sequences of key/value tuples the unordered map encoding.
 Resolve this convention once for both inputs, before comparison or distinct counting.
-Ordinary lists retain order. For identity, treat indistinguishable cells as identical. If the source
+Ordinary lists retain order. Apply the missingness rules below first.
+For each comparable pair, check both cells for possible loss of precision or other evidence.
+If either side may have lost evidence, count the pair as identical even when the surviving keys differ.
+Compare exact keys when both sides retain the evidence. If the source
 representation could have merged distinct values, mark source diversity Unknown. This
 includes lossy frame conversion and map encoding without schema evidence. Apply PM-1a's
 unknown-diversity grade. Only proven constant sources qualify for the constant exemption.
@@ -189,7 +195,7 @@ Four decisions consume the key.
 ### PM-1c. Execution consumers (R2)
 
 Replace the writer exclusions in `execution/_chunked_carry.py:177-202,225-250` with the same
-query result. Passthrough candidates obey the handler declaration and conditional rule.
+ownership result stored on the run context before route selection. Passthrough candidates obey the handler declaration and conditional rule.
 Untouched candidates come from resolved nodes and cascade edges. Keep the source order,
 read set and adapter eligibility checks (`execution/_chunked_carry.py:64-80,261-286`).
 Unknown ownership permits no carry or source restoration for that table.
@@ -217,46 +223,47 @@ A schema-only assertion cannot catch a masked sibling overwritten by source rest
 | Comparison fails on a proven passthrough | No comparison error. A detector hit keeps its normal info grade | `residual_pii.py:436-444,513-537` |
 | Typed conversion or comparison fails after an earlier batch succeeded | Clear partial identity counts for that column. Other columns finish. Propagate pass-through exceptions | `_column_facts.py:378-390,410-412`, `residual_pii.py:180-194` |
 | Source missing, unequal lengths, or no comparable rows | No comparison error. Preserve detector-only grading | `residual_pii.py:252-268,534-537` |
-| Nested nulls, reordered keys, NaN or adjacent large integers | Lossless inputs match the reference counts. Lossy inputs follow the Unknown rule below | `_column_facts.py:238-268`, `residual_pii.py:175-190` |
+| Nested nulls, reordered keys, NaN or adjacent large integers | Lossless inputs match the reference counts. Count a comparable pair as identical if either side may have lost evidence | `_column_facts.py:238-268`, `residual_pii.py:175-190` |
 | Lossy source evidence gives one key for identical output | Mark diversity Unknown. Use the PM-1a grade and deny the policy constant exemption | `residual_pii.py:298-299`, `policy_validation.py:237-249` |
 | Source count fails after comparison succeeded | Keep identity counts. Equal final grades stand. Different final grades give one error | `residual_pii.py:538-579` |
 | Output count alone fails | Grade with the known source count | `_column_facts.py:400-404`, `postscan/test_column_suite_on_facts.py:508` |
 
 ## Acceptance tests
 
-- **PM-1a ownership inputs.** Use a subset-free run for edge parity. An active subset
+- **PM-1a ownership inputs (pin).** Use a subset-free run for edge parity. An active subset
   restricts the profile before graph compilation (`execution/pipeline/_routing_facts.py:96-116`).
-  Capture the edges and registry passed to verification and execution for the same config. Compare complete edge tuples, including composite child components.
-  Assert registry object identity with a custom composite provider. Repeat for the standalone
-  default registry and for empty, multi-child and parent-only cases. Compare standalone edges
-  with the compiled run for the same config. Drop one child component to turn this test red
+  Capture the edges and registry at execution on the base and at the writer query after the move. Compare complete edge tuples, including composite child components.
+  Assert registry object identity with a custom composite provider. Repeat with the default registry and with empty, multi-child and parent-only relationships. Drop one child component to turn this test red
   (`relationships/_graph.py:72-96`, `execution/_pipeline_context.py:397-422`).
-- **PM-1a writer regressions.** Run both frame and batch paths. Add a passthrough entry for the joint mask's `zip` sibling. Inject
+- **PM-1a shared ownership (red-before).** Observe a pipeline run through route selection, restoration and verification.
+  Require exactly one ownership query during context construction. Check that each consumer receives its result by identity.
+  Computing ownership at gate binding or repeating the query must fail the test.
+  For standalone verification, compare its query inputs with the compiled run for the same config. Check the default registry and complete edges.
+- **PM-1a writer regressions (red-before).** Run both frame and batch paths. Add a passthrough entry for the joint mask's `zip` sibling. Inject
   a comparison failure with no detector hit. Require exactly one `error` for `zip`. Repeat
   for an FK child key and an unknown wildcard writer. Repeat with a detector hit. Check the
   public query directly for every component of a composite child key and for a read-only parent.
   Keep a sibling table with a proven passthrough quiet. Removing the cascade union or letting
   passthrough win before lookup must fail these tests. See `test_residual_pii_source_compare.py:356-400`
   and `execution/_chunked_carry.py:242-250`.
-- **PM-1a grading regressions.** Use unchanged hash output with an email hit. Run the same facts with
+- **PM-1a grading regressions (red-before).** Use unchanged hash output with an email hit. Run the same facts with
   source count 1, count 2 and a failed count. Expect one `fail` in all three runs. Repeat with
-  a faker case whose final grades differ. Expect one `error` for the failed count. Pin gated
-  hits and an output-only count failure. Comparing intermediate overrides must fail the hash
+  a faker case whose final grades differ. Expect one `error` for the failed count. Gated hits and an output-only count failure are pins. Bypass the hit gate or discard the known source count to break them. Comparing intermediate overrides must fail the hash
   test. See `residual_pii.py:462-468,538-574` and `postscan/test_column_suite_on_facts.py:414-437,508-520`.
-- **PM-1a imports and declarations.** Run layer checks. In fresh subprocesses import
+- **PM-1a imports and declarations (red-before).** Run layer checks. In fresh subprocesses import
   execution, verification.postmask and plan.column_access first in turn. Resolve and run
   the public query in each. Restore the private import to turn the guard red
   (`_column_facts.py:33`, `execution/pipeline/_post_scan.py:53`,
   `tests/sentry/post_scan/test_post_scan_choke_points.py:84-109`).
   Assert that the passthrough handler's `output_is_input` matches the plan declaration.
   Flip the handler attribute alone and require the test to fail.
-- **PM-1b equality regressions.** An unchanged `[1, null]` counts as one comparable, identical row.
+- **PM-1b equality regressions (red-before).** An unchanged `[1, null]` counts as one comparable, identical row.
   Reverse a dict's insertion order under a declared map type and under a struct type.
   Both rows stay identical. For nullable object integers, compare `[2**60, None]` with
   `[2**60 + 1, None]`. Expect one comparable row and zero identical rows on each path.
-  Keep the existing list-to-scalar case. Restoring pandas `map` must fail the integer case.
+  Keep the existing list-to-scalar case as a pin. Treat a singleton list as its scalar to break it. Restoring pandas `map` must fail the integer case.
   See `_column_facts.py:238-268` and `test_residual_pii_source_compare.py:313-332`.
-- **PM-1b property test.** Generate paired Arrow schemas and logical rows with Hypothesis
+- **PM-1b property test (red-before).** Generate paired Arrow schemas and logical rows with Hypothesis
   (`pyproject.toml:182-192`). Include nullable int64 versus float64, string versus large_string,
   dictionary versus plain, decimal scales and signed zero. Pair True with 1.
   Pair naive and aware timestamps at the same wall time. Pair equal instants in different
@@ -267,6 +274,10 @@ A schema-only assertion cannot catch a masked sibling overwritten by source rest
   runner, direct frame check and public frame runner. Supply exact object frames and default
   `table.to_pandas()` frames. Compare against an independent recursive oracle using the
   logical values each input retains. For lossless inputs require identical facts and findings.
+  Set `n = 2**60 + 1`. Build int64 source `[n, 0]` and output `[n, null]`.
+  Default `to_pandas()` preserves the source integer and rounds the output integer to `2**60`.
+  Repeat with source and output swapped so only the source rounds. In each direction require one comparable row and one identical row.
+  Dropping the loss check on either side must fail that direction.
   After loss, the identical count may increase and must never decrease for those rows.
   Merged source evidence must yield Unknown diversity, never a constant exemption.
   Use nullable Arrow int64 values `[2**60, 2**60 + 1]` with identical output. Append a
@@ -277,12 +288,12 @@ A schema-only assertion cannot catch a masked sibling overwritten by source rest
   both distinct counts, failure flags and findings (`test_residual_pii_source_compare.py:286-320`).
   Require one distinct source key for reordered maps in separate batches. Restore raw DuckDB
   DISTINCT or pandas equality and require the corresponding tests to fail.
-- **PM-1b comparison guard.** Extend the post-scan sentry to scan normalized Python AST across
+- **PM-1b comparison guard (red-before).** Extend the post-scan sentry to scan normalized Python AST across
   postmask. Flag direct source/output cell comparisons, pandas `equals`, `nunique`, and raw
   cell DISTINCT outside the key path. Include an alias and an extracted local variable in the
   guard fixtures. Permit comparisons of counts, thresholds and schema metadata. Restore the
   direct comparison at `policy_validation.py:131-132` or `_column_facts.py:272-282` to turn it red.
-- **PM-1b comparator faults and boundaries.** Inject a fault at the shared Arrow comparator. Check
+- **PM-1b comparator faults and boundaries (pin).** Inject a fault at each base comparator. After PM-1b, inject it at the shared comparator. Check
   propagation, column isolation, missing input, row mismatch and class-only messages on both
   paths. The key encoder raises only plain exceptions for unsupported cells. A plain
   `ValueError` on a later batch must clear earlier tallies for that column alone. Assert
@@ -291,19 +302,21 @@ A schema-only assertion cannot catch a masked sibling overwritten by source rest
   (`profiling/scan_set.py:307-311`). Seed the exception with a cell value and assert it never appears in the finding.
   Removing the pass-through guard must fail the propagation test. See
   `_column_facts.py:378-386` and `test_residual_pii_source_compare.py:248-273`.
-- **PM-1b resident runner.** At the deferred gate, omit keys and check the FK finding
+- **PM-1b resident runner (red-before).** At the deferred gate, omit keys and check the FK finding
   against the frame runner. Supply an empty key sequence on the counted path and assert
   that no frame key count runs. Exercise a resident model detector and the deferred NER
   blocking decision. See `fk_preservation.py:33-47` and
   `execution/pipeline/_post_scan.py:284-290,432-441`.
-- **PM-1c route parity.** Run each fixture on every eligible route. Compare the ordered
+- **PM-1c route parity (pin).** Run each fixture on every eligible route. Compare the ordered
   passthrough names, untouched fields and actual output cells against independent expectations.
   Cover a joint sibling marked passthrough, a custom composite, a conditional target, an
   unbounded writer, an unwritten parent and a rewritten composite child. Keep route-specific
   rejections. Include a source sentinel in each masked output position. Assert the expected
-  masked value survives final carry, restoration and native normalization. Remove the child
-  exclusion or restore a joint sibling from source and require a red test
-  (`execution/_chunked_carry.py:91-105,242-250`, `execution/native/_chunked_schema_rule.py:284-305`).
+  masked value survives final carry, restoration and native normalization. Pair each read-only or conditional control with a protected field on the same route.
+  For carry pins, remove the handler-write exclusion at `execution/_chunked_carry.py:185`. Require the pin to catch the changed carry set or overwritten sibling.
+  For restoration pins, remove the child exclusion at `execution/_chunked_carry.py:249`. Require the pin to catch the changed untouched set or overwritten child.
+  Record the applicable mutation for each pin. Keep the pin tag unless an eligible route emits a wrong value at `224a0102d`.
+  Tag that case red-before and record the route and failed output assertion.
 
 Run the focused tests and post-scan sentry first. Then run impact tests for execution and
 postmask. Record red-before results against `224a0102d` and repeat the listed mutations on the
@@ -929,14 +942,14 @@ From the plan contract's class list (classes 1 to 10, checked by `~/bin/plan-lin
 |---|---|---|---|---|
 | 1 | Value-bearing output | PM-1b: the shared batch facts record only the error class (`_column_facts.py:378-386`). RG: findings name ids, paths, keys and numbers from the repo's own registry, never file content | PM-1 AT asserts no cell value in the message | Put `str(exc)` in `identity_error`: the message check fails |
 | 2 | Cleanup on an exit path | RG-E3 extracts the base checker into a `tempfile.TemporaryDirectory` context, removed on every exit; RG tests use pytest `tmp_path` repos; nothing is written to the shared `.git` (`git archive` reads only) | `test_broken_base_checker_fails` checks the temp dir is gone after a failing run | Replace the context with `mkdtemp`: the leftover-dir check fails |
-| 3 | State and concurrency | The ratchet helpers keep no module state; each call reads base with `git show` and head from the tree. PM-1 adds no state | Tests run under xdist with separate `tmp_path` repos | N/A: no shared state to mutate |
+| 3 | State and concurrency | The ratchet helpers keep no module state; each call reads base with `git show` and head from the tree. PM-1 stores ownership on each run context | Tests run under xdist with separate `tmp_path` repos | N/A: no shared state to mutate |
 | 4 | Route parity and silent fallback | PM-1b: frame and batch adapters feed one Arrow facts path (`runner.py:397-425`). RG: gates.sh and CI call the same `ratchet_check.py --with-base`; a missing checker fails outside the baseline tree; a broken base run fails instead of skipping | PM-1b property and fault tests, extending `test_residual_pii_source_compare.py:339-354`; `test_missing_checker_fails_outside_baseline_tree`; `test_broken_base_checker_fails` | Discard the comparison error in `_column_facts.py:378-386`; restore the unconditional `-f` skip; return 0 on extraction error: each test fails |
 | 5 | Referential integrity | RG: a registry row's `baseline` path must exist and be safe; a `sentry-limits` key must resolve to a live int constant (mirror test). PM-1a includes each cascade child component. PM-1c uses ownership before restoring source fields (`execution/_chunked_carry.py:244-250`) | `test_dotdot_and_backslash_below_baseline_dir_fail`; `test_source_matches_its_registered_baseline[sentry-limits]` | Revert `safe_path` to `startswith`: the path test fails |
 | 6 | Untrusted producer | N/A for V1: inputs are the repo's own registry, baselines and git history (V1 threat model, accidental only). Decision rows are parsed with the anchored `DECISION` regex using `fullmatch` | A decision row with a trailing newline is refused | Swap `fullmatch` for `match` with `$`: that case passes and the test fails |
 | 7 | Check then use on a path | `check()` and `--with-base` verify `<base>^{commit}` exists; `ratchet_check.py --with-base` resolves the base sha once and passes the same sha to every `git show`, `git ls-tree`, `git archive` and the base run | Code review on `ratchet_check.py` | Resolve the merge base twice: review finding |
 | 8 | Weak tests and overclaimed evidence | Every AT is tagged red-before or pin; each red-before AT is run red on the base first, and pins are never offered as red evidence; `test_removed_registry_row_without_retirement_fails` deletes the baseline file too so it is red before; `test_live_registry_passes_against_origin_main` keeps the real repo in the loop; the numeric-source walk replaces a hand list | Builder report lists each red-before result and each mutation | Return an empty list from `integrity_findings`: the shared-key transfer test fails |
 | 9 | Refactor drift | PM-1b replaces the frame comparison at `residual_pii.py:175-194` with batch facts; `max_raised` becomes `bound_loosened` with every caller updated in the same slice | `postscan/test_column_facts.py` and `test_ratchet_check.py` pass unchanged | N/A |
-| 10 | Frozen contract drift | PM-1a adds a plan API. PM-1b preserves the public frame call and report shape (`runner.py:67-75`) | Existing census sentries stay green | N/A |
+| 10 | Frozen contract drift | PM-1a adds a plan API. PM-1b extends the public table runner and preserves the public frame call and report shape (`runner.py:67-75`) | Existing census sentries stay green | N/A |
 
 ## Recurring defect catalog (11 classes)
 
@@ -962,7 +975,7 @@ Checked against `/home/cam/dev-rules/catalogs/recurring-defects.md`.
 
 - PM-1b aligns by position. Missing input, unequal row counts and zero comparable rows give
   no residual identity evidence (`residual_pii.py:252-268`, `_column_facts.py:360-375`).
-  A failed comparison clears partial counts for its column. A count failure preserves identity. Lossy source keys give Unknown diversity.
+  A failed comparison clears partial counts for its column. A count failure preserves identity. Possible evidence loss on either side counts the comparable pair as identical. Lossy source keys give Unknown diversity.
   Only proven constants receive the constant-source exemption.
   Classified exceptions propagate (`_column_facts.py:325-337,378-386,397-418`).
 - `_ratchet.check()` (`tests/sentry/_ratchet.py:305`): returns findings and report lines;
@@ -1044,8 +1057,11 @@ Checked against `/home/cam/dev-rules/catalogs/recurring-defects.md`.
 
 # Frozen contracts
 
-PM-1 adds the plan writer API. Resident and staged Arrow checks use the existing
-`run_post_mask_tables` entry (`runner.py:132-155`). Keep the public
+PM-1a adds the plan writer API. PM-1b extends the public `run_post_mask_tables`
+(`verification/postmask/__init__.py:112`, `runner.py:132-155`). It adds optional detectors and resident output frames for models.
+It makes `keys` optional. Omitted keys trigger FK counting. Supplied keys keep their meaning, including an empty sequence.
+In PM-1b, add a table-runner entry to `docs/compatibility-contract.md` and a CHANGELOG line for this additive API change.
+Keep the public
 `run_post_mask` signature, report schema and verdict mapping (`runner.py:67-75`,
 `residual_pii.py:580-592`, `_blocked.py:5-8`). Preserve the frame contract in
 `docs/compatibility-contract.md:483-494,1237`. The ratchet work is test and
