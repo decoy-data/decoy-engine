@@ -35,7 +35,8 @@ def _seed(when: str) -> ColumnSeed:
 
 
 class _Ctx:
-    pass
+    # No column is masked by an earlier node: every read is live.
+    source_snapshot_columns: dict = {}
 
 
 @pytest.fixture(autouse=True)

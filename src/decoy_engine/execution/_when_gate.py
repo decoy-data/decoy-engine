@@ -63,7 +63,6 @@ from decoy_engine.expressions._when_parser import (
 )
 
 _log = logging.getLogger(__name__)
-_ABSENT: Any = object()
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import (
@@ -465,12 +464,9 @@ def when_source_frame(
     pre-mask copies live in `ctx.group_anchor_snapshots` (built by the route from
     `_runner.source_snapshot_columns`). A read no node writes still holds its original value in
     `df`. A route that built no snapshot set, or a set that names a column without a copy, fails
-    closed: reading the live frame would select rows by a masked value. A context without the
-    field (a test double) reads `df` as given.
+    closed: reading the live frame would select rows by a masked value.
     """
-    snapshot_set = getattr(ctx, "source_snapshot_columns", _ABSENT)
-    if snapshot_set is _ABSENT:
-        return df
+    snapshot_set = ctx.source_snapshot_columns
     try:
         reads = when_column_refs(parse_when_cached(expression))
     except ValidationError:
@@ -508,7 +504,8 @@ def run_with_when_gate(
 ) -> tuple[pd.DataFrame, list[QualityWarning]]:
     """Invoke `handler.run(...)` directly when `plan.when` is None.
 
-    When `plan.when` is set, evaluate the predicate on `df`, run the
+    When `plan.when` is set, evaluate the predicate on the pre-mask frame from
+    `when_source_frame`, run the
     handler on the matching subset, and stitch the result back into
     `df` at those row positions. Rows that do not match are left
     untouched.

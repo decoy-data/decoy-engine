@@ -44,6 +44,8 @@ class _Ctx:
 
     def __init__(self) -> None:
         self.row_errors: list[RowError] = []
+        # No column of these frames is masked by an earlier node: every read is live.
+        self.source_snapshot_columns: dict[str, frozenset[str]] = {}
 
 
 # ── row-error remap: subset-relative -> full-table (B1) ───────────────
@@ -281,6 +283,7 @@ def _real_ctx(**kw):
     from decoy_engine.relationships._namespace import NamespaceRegistry
 
     kw.setdefault("current_table", "t")
+    kw.setdefault("source_snapshot_columns", {})
     return StrategyContext(
         registry=get_default_registry(),
         pool_cache=PoolCache(),

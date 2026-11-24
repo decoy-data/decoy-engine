@@ -257,7 +257,7 @@ def test_expression_error_through_the_gate_carries_no_predicate_text() -> None:
             _datetime_frame(),
             "s",
             seed,
-            SimpleNamespace(row_errors=[]),  # type: ignore[arg-type]
+            SimpleNamespace(row_errors=[], source_snapshot_columns={}),  # type: ignore[arg-type]
         )
     )
     assert isinstance(exc, StrategyError) and exc.code == "when_expression_error"
