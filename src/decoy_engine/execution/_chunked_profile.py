@@ -17,6 +17,8 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine._arrow_types import is_text
+from decoy_engine._execution_error import source_column_unrepresentable
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -42,7 +44,7 @@ def walk_one_table(table: pa.Table, *, table_name: str, source_format: str | Non
     from decoy_engine.profile._walk import walk_dataframe
 
     return walk_dataframe(
-        table.to_pandas(),
+        arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable(table_name)),
         table_name=table_name,
         declared_pk_cols=frozenset(),
         fk_specs={},
@@ -168,7 +170,9 @@ def empty_input_profile(
     ]
     empty_df = pd.DataFrame({name: pd.Series([], dtype="object") for name in columns})
     if source_schema is not None:
-        typed = source_schema.empty_table().to_pandas()
+        typed = arrow_to_frame(
+            source_schema.empty_table(), on_unrepresentable=source_column_unrepresentable()
+        )
         for name in columns:
             if name not in typed.columns:
                 typed[name] = pd.Series([], dtype="object")

@@ -76,39 +76,115 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
     return dtype_cls() if dtype_cls is not None else None
 
 
+# A value pandas cannot hold raises ValueError (a date past year 9999; ArrowInvalid is a subclass,
+# as is a sub-microsecond time64) or, defensively, OverflowError.
+_UNREPRESENTABLE: Final = (ValueError, OverflowError)
+
+_Mapper = Callable[[pa.DataType], pd.api.extensions.ExtensionDtype | None]
+
+
+def _fail(on_unrepresentable: Callable[[str], NoReturn], column: str) -> NoReturn:
+    on_unrepresentable(column)
+    raise TypeError("on_unrepresentable must raise")
+
+
+def _no_widening(widen: bool) -> None:
+    if widen:
+        raise NotImplementedError("widening a column pandas cannot hold is not available yet")
+
+
+def arrow_to_frame(
+    table: pa.Table,
+    *,
+    on_unrepresentable: Callable[[str], NoReturn],
+    widen: bool = False,
+    types_mapper: _Mapper | None = None,
+) -> pd.DataFrame:
+    """Experimental: the one Arrow-to-pandas conversion of a table (source-read boundary, S1b).
+
+    A column pandas cannot hold calls `on_unrepresentable(column)` after the conversion's own
+    handler has closed, so the coded error it raises carries no pandas or Arrow text (which
+    quotes the value). Code outside this module never calls `to_pandas` itself; the guard in
+    `tests/sentry/source_read` fails on a bare call.
+    """
+    _no_widening(widen)
+    failed = None
+    try:
+        return table.to_pandas(types_mapper=types_mapper)
+    except _UNREPRESENTABLE:
+        for position, name in enumerate(table.column_names):
+            try:
+                table.column(position).to_pandas(types_mapper=types_mapper)
+            except _UNREPRESENTABLE:
+                failed = name
+                break
+    if failed is None:
+        raise ValueError("an Arrow table could not be converted to pandas")
+    _fail(on_unrepresentable, failed)
+
+
+def arrow_to_series(
+    array: pa.Array | pa.ChunkedArray,
+    *,
+    on_unrepresentable: Callable[[str], NoReturn],
+    widen: bool = False,
+    types_mapper: _Mapper | None = None,
+    name: str = "",
+) -> pd.Series:
+    """Experimental: `arrow_to_frame` for one column; `name` is what the callback is told."""
+    _no_widening(widen)
+    try:
+        return array.to_pandas(types_mapper=types_mapper)
+    except _UNREPRESENTABLE:
+        pass
+    _fail(on_unrepresentable, name)
+
+
+def arrow_to_frame_pair(
+    source: pa.Table,
+    output: pa.Table,
+    *,
+    on_unrepresentable: Callable[[str], NoReturn],
+    widen: bool = False,
+    types_mapper: _Mapper | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Experimental: a source table and its output converted together, one rule for both sides."""
+    kwargs: dict[str, Any] = {
+        "on_unrepresentable": on_unrepresentable,
+        "widen": widen,
+        "types_mapper": types_mapper,
+    }
+    return arrow_to_frame(source, **kwargs), arrow_to_frame(output, **kwargs)
+
+
 def table_to_pandas_exact_ints(
     table: pa.Table,
     columns: Iterable[str],
     *,
-    types_mapper: Callable[[pa.DataType], pd.api.extensions.ExtensionDtype | None] = (
-        exact_int_types_mapper
-    ),
+    on_unrepresentable: Callable[[str], NoReturn],
+    types_mapper: _Mapper = exact_int_types_mapper,
     on_unconvertible: Callable[[str], NoReturn] | None = None,
 ) -> pd.DataFrame:
-    """`table.to_pandas()` with the named integer columns kept exact as nullable integer dtypes.
+    """`arrow_to_frame` with the named integer columns kept exact as nullable integer dtypes.
 
     Plain `to_pandas()` widens an integer column holding any null to float64, which rounds values
     beyond 2**53. Columns not named, or not integer-typed, keep pyarrow's default. A column that
-    does not fit its own dtype calls `on_unconvertible(column)` (which must raise), or re-raises
-    the pyarrow error when none is given.
+    does not fit its own dtype calls `on_unconvertible(column)` (or `on_unrepresentable` when none
+    is given), which must raise.
     """
-    df = table.to_pandas()
-    failed = None
+    df = arrow_to_frame(table, on_unrepresentable=on_unrepresentable)
     for col in columns:
         if col not in table.column_names or not pa.types.is_integer(table.schema.field(col).type):
             continue
-        try:
-            series = table.column(col).to_pandas(types_mapper=types_mapper)
-        except (pa.lib.ArrowInvalid, OverflowError):
-            if on_unconvertible is None:
-                raise
-            failed = col
-            break
+        series = arrow_to_series(
+            table.column(col),
+            on_unrepresentable=on_unconvertible or on_unrepresentable,
+            types_mapper=types_mapper,
+            name=col,
+        )
         # `.array` carries no index, so the assignment is positional even when `df` has a
         # non-default index.
         df[col] = series.array
-    if failed is not None and on_unconvertible is not None:
-        on_unconvertible(failed)  # raised outside the except block, so no exception context
     return df
 
 

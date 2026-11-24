@@ -28,8 +28,14 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError, postmask_not_inspectable
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
-from decoy_engine.internal.pandas_compat import exact_int_types_mapper
+from decoy_engine.internal.pandas_compat import (
+    arrow_to_frame_pair,
+    arrow_to_series,
+    exact_int_types_mapper,
+)
 from decoy_engine.profiling import KEY_BATCH_ROWS, column_distinct, passes_through
 from decoy_engine.verification.postmask._stream_input import TableBatches, key_batches
 
@@ -203,10 +209,43 @@ class _Tally:
     values: _ValueTally | None = None
 
 
-def _series(batch: pa.RecordBatch, column: str) -> pd.Series:
-    # The dtype comes from the schema, so a null in one batch cannot retype an integer column.
-    array = batch.column(batch.schema.get_field_index(column))
-    return array.to_pandas(types_mapper=exact_int_types_mapper)
+_NOT_INSPECTABLE_CODE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+
+
+def _output_series(
+    src_batch: pa.RecordBatch | None, out_batch: pa.RecordBatch, column: str, tally: _Tally
+) -> pd.Series:
+    """The output column as a series, with the identity tally run against the source when the
+    column is compared. The dtype comes from the schema, so a null in one batch cannot retype an
+    integer column. A column pandas cannot hold raises the `postmask_column_not_inspectable` error."""
+    if src_batch is None or tally.error is not None:
+        index = out_batch.schema.get_field_index(column)
+        return arrow_to_series(
+            out_batch.column(index),
+            on_unrepresentable=postmask_not_inspectable,
+            types_mapper=exact_int_types_mapper,
+            name=column,
+        )
+    # One pair, converted together, so one rule covers both sides.
+    src_f, out_f = arrow_to_frame_pair(
+        _one_column(src_batch, column),
+        _one_column(out_batch, column),
+        on_unrepresentable=postmask_not_inspectable,
+        types_mapper=exact_int_types_mapper,
+    )
+    try:
+        _add_identity(tally, src_f[column], out_f[column])
+    except Exception as exc:
+        # One column that cannot be compared (a list or map cell, say) must not take the other
+        # columns down with it.
+        if passes_through(exc):
+            raise
+        tally.error = type(exc).__name__
+    return out_f[column]
+
+
+def _one_column(batch: pa.RecordBatch, column: str) -> pa.Table:
+    return pa.Table.from_batches([batch.select([column])]).replace_schema_metadata(None)
 
 
 def _aligned(
@@ -338,16 +377,17 @@ def column_facts(
         pairs = ((None, b) for b in out_read.read(wanted, batch_rows))
     for src_batch, out_batch in pairs:
         for c in wanted:
-            out_s = _series(out_batch, c)
-            if src_batch is not None and c in compared and tallies[c].error is None:
-                try:
-                    _add_identity(tallies[c], _series(src_batch, c), out_s)
-                except Exception as exc:
-                    # One column that cannot be compared (a list or map cell, say) must not
-                    # take the other columns down with it.
-                    if passes_through(exc):
-                        raise
-                    tallies[c].error = type(exc).__name__
+            if tallies[c].error == _NOT_INSPECTABLE_CODE:
+                continue  # a batch already showed this column cannot be read
+            try:
+                out_s = _output_series(
+                    src_batch if c in compared else None, out_batch, c, tallies[c]
+                )
+            except ExecutionError as exc:
+                if exc.code != _NOT_INSPECTABLE_CODE:
+                    raise
+                tallies[c].error = exc.code
+                continue
             _add_detectors(tallies[c], out_s, c)
             values = tallies[c].values
             if values is not None:
@@ -378,7 +418,8 @@ def column_facts(
             output_distinct=distinct[1],
             detectors=_fired(t),
             identity_error=t.error,
-            distinct_error=distinct_failed,
+            distinct_error=distinct_failed
+            or (_NOT_INSPECTABLE_CODE if t.error == _NOT_INSPECTABLE_CODE else None),
             source_distinct_failed=source_failed,
             output_values=t.values.done() if t.values is not None else None,
         )

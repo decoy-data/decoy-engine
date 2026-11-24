@@ -31,8 +31,10 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.execution._planner import AUTO_CHUNK_THRESHOLD_ROWS_DEFAULT
 from decoy_engine.generation.pool import QualityWarning
+from decoy_engine.internal.pandas_compat import arrow_to_frame_pair
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
@@ -182,9 +184,12 @@ def compute_fidelity_reports(
         src_table = merged_sources.get(table_name)
         if src_table is None:
             continue
+        src_frame, out_frame = arrow_to_frame_pair(
+            src_table, out_table, on_unrepresentable=source_column_unrepresentable(table_name)
+        )
         fidelity_reports[table_name] = compute_quality_report(
-            src_table.to_pandas(),
-            out_table.to_pandas(),
+            src_frame,
+            out_frame,
             expect_row_parity=True,
             joint_columns=None,
             now_iso=now_iso,

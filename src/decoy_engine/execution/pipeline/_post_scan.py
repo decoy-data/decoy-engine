@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Final
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._execution_error import post_scan_not_inspectable
 from decoy_engine.config import (
     RelationshipConfig,
     parse_relationship_config,
@@ -46,6 +47,7 @@ from decoy_engine.execution.pipeline._post_scan_distribution import (
 )
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.internal.memory_limit import require_megabytes
+from decoy_engine.internal.pandas_compat import arrow_to_frame_pair
 from decoy_engine.profile import LazySource
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
 from decoy_engine.progress import safe_error_class
@@ -69,6 +71,8 @@ from decoy_engine.verification.postmask import (
 )
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from decoy_engine.execution._adapter import ExecutionResult
     from decoy_engine.execution._pipeline_context import PipelineRunContext
     from decoy_engine.profiling.model_pack import DetectorSet
@@ -282,8 +286,7 @@ class PostScanGate:
         masked = _suite_tables(outputs, sources, table_kinds)
         if masked:
             self.report = run_post_mask(
-                {n: materialize_source(sources[n]).to_pandas() for n in masked},
-                {n: outputs[n].to_pandas() for n in masked},
+                *_suite_frames(sources, outputs, masked),
                 config=dict(self._config),
                 detectors=self._detectors,
             )
@@ -432,8 +435,7 @@ class PostScanGate:
         # Generated tables have no source to compare against, as in the report-only suite.
         masked = _suite_tables(outputs, sources, table_kinds)
         return run_post_mask(
-            {n: materialize_source(sources[n]).to_pandas() for n in masked},
-            {n: outputs[n].to_pandas() for n in masked},
+            *_suite_frames(sources, outputs, masked),
             config=dict(self._config),
             detectors=self._detectors,
             keys=keys,
@@ -467,6 +469,22 @@ def _suite_tables(
         for n in names
         if n in sources and (table_kinds is None or table_kinds.get(n, "mask") == "mask")
     ]
+
+
+def _suite_frames(
+    sources: Mapping[str, Any], outputs: Mapping[str, pa.Table], tables: Iterable[str]
+) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
+    """The source and output frames of the suite tables. A column pandas cannot hold fails the
+    gate with `post_scan_column_not_inspectable`: the check never passes a column it did not read."""
+    src: dict[str, pd.DataFrame] = {}
+    out: dict[str, pd.DataFrame] = {}
+    for name in tables:
+        src[name], out[name] = arrow_to_frame_pair(
+            materialize_source(sources[name]),
+            outputs[name],
+            on_unrepresentable=post_scan_not_inspectable(name),
+        )
+    return src, out
 
 
 _ACTIVE: ContextVar[PostScanGate | None] = ContextVar("decoy_post_scan_gate", default=None)

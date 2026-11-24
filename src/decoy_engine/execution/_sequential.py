@@ -417,7 +417,7 @@ def run_sequential(
                 # silently widens to float64 on this table-at-a-time load either.
                 # HC-3a P1 #2: date_shift group_by anchor columns get the same
                 # lossless int+null path (union into the FK-safe set).
-                df = to_pandas_fk_safe(src, lossless.for_table(table, src))
+                df = to_pandas_fk_safe(src, lossless.for_table(table, src), table_name=table)
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
                 register_exact_int_sources(ctx, table, src, df, nodes_by_table.get(table, ()))

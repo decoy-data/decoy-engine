@@ -156,6 +156,7 @@ from decoy_engine.generation.pool import (
     get_default_pool_cache,
 )
 from decoy_engine.generation.synthesize import generate_tables
+from decoy_engine.internal.pandas_compat import arrow_to_frame, arrow_to_frame_pair, arrow_to_series
 from decoy_engine.keyprovider import (
     KeyedStrategyRequiresSecret,
     KeyProvider,
@@ -502,6 +503,9 @@ __all__ = [
     "WeakMaskSecret",
     "WriteResult",
     "apply_table_transforms",
+    "arrow_to_frame",
+    "arrow_to_frame_pair",
+    "arrow_to_series",
     "atomic_swap_db_providers",
     "build_namespace_registry",
     "build_relationship_graph",
