@@ -286,11 +286,16 @@ def _quarantine_loader_run(tmp_path: Path, post_scan: dict[str, Any]) -> tuple[A
     """A loader run (deferred gate) whose `age` column quarantines one row."""
     from decoy_engine.execution import run_pipeline
 
-    ages = ["badX" if i == 3 else str(10 + i % 70) for i in range(ROWS)]
+    ages = ["badX" if i == 3 else f"2020-01-{1 + i % 28:02d}" for i in range(ROWS)]
     table = _source().append_column("age", pa.array(ages, type=pa.string()))
     qpath = tmp_path / "q.jsonl"
     quarantine = {"enabled": True, "output_path": str(qpath), "triggers": ["format_error"]}
-    age = {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}
+    age = {
+        "name": "age",
+        "strategy": "date_shift",
+        "namespace": "age_ns",
+        "provider_config": {"date_format": "%Y-%m-%d"},
+    }
     cfg = _cfg(tmp_path, table, post_scan, extra_columns=(age,), quarantine=quarantine)
 
     def run() -> Any:

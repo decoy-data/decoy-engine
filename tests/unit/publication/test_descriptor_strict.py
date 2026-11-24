@@ -168,7 +168,7 @@ CELLS: dict[str, tuple[Callable[[], bytes], str]] = {
     "path_reserved": (_art(path="_decoy_publication.json"), "bad_path"),
     # document rules
     "artifacts_unsorted": (_unsorted, "artifacts_order"),
-    "artifacts_duplicate_path": (_duplicate_path, "artifacts_order"),
+    "artifacts_duplicate_path": (_duplicate_path, "bad_path"),
     "result_id_forged": (_forged_result_id, "result_id_mismatch"),
     "not_canonical": (_pretty, "not_canonical"),
 }
@@ -271,7 +271,7 @@ def test_writer_refuses_a_bad_operation_id_and_duplicate_paths() -> None:
     assert str(caught.value) == PREFIX + "bad_token"
     with pytest.raises(ValueError) as caught:
         codec.build_descriptor(operation_id="op-1", artifacts=[arts[0], arts[0]], vault=None)
-    assert str(caught.value) == PREFIX + "artifacts_order"
+    assert str(caught.value) == PREFIX + "bad_path"
     assert arts[0] != arts[1]  # non-vacuity: only the repeated entry is refused
 
 

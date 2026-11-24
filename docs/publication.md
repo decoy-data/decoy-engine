@@ -159,6 +159,77 @@ the pointer's own file and parent are new. A crash can leave a private pointer s
 `LATEST`; sweeping it is a named limit (V2-LOG). Only `publication/_current.py` may name the label
 (`tests/sentry/test_pointer_label_caller.py`).
 
+## The delivery stage
+
+`DeliveryStage` makes one run folder (`out/<name>/<run-id>/`) and the pointer move together. The
+stage reads only plain data, so `publication` never imports `delivery`: the caller passes
+`StageDecision(deliver, delivered)`, the tables the decision delivers.
+
+- `DeliveryStage.open(out, pointer, run_id, operation_id)` first checks the destination: the
+  output leaf must be exactly the run id, and its parent folder must be the pointer's parent
+  folder (compared by device and inode, so under the ambient policy a symlinked spelling of the
+  parent opens, and a strict root refuses a link beneath it). A mismatch is a `ValueError`
+  before any pointer read, lock or stage. Then it reads the pointer, opens a `publication`
+  unit stage and a `delivery_slots` stage beside the run folder, and probes that the target
+  can claim files (see "Named limits"). An unreadable pointer (a link, a special file, over
+  4 KiB), a stage that cannot open, or a failed probe raises `PublicationFailed`
+  (`publication_failed`) before a writer runs. `run_id` must be a value the pointer reader
+  accepts.
+- `reserve(table, relpath, role="table")` returns a `StagedMember`. `table` is the table the
+  file belongs to; `None` (the post-scan report) is always delivered. Nothing exists at the
+  member's `path`: the unit's folders are made (a folder this stage already made is reused by
+  its exact name) and the writer's slot is a numbered folder `s<n>/` in the slots stage, so the
+  writer sees the file's real name, extension and any 255-byte basename. The writer writes to
+  `path`, closes the file, then calls `complete()`, which claims the file into the unit with a
+  no-clobber hard link: the target file system decides whether the name is taken. The claimed
+  file is mode `0600` with one link. A zero-byte file is a valid member. `fail()` marks the
+  member unusable. `omit()` drops an optional member that was never written (a quarantine run
+  with no rows). `staged_path(table)` is the reserved destination in the unit stage, whatever
+  the completion state; the quarantine alias guard compares it with the sidecar's destination.
+  `stage_dir()` is the slots stage root, for spill and temporary files; it is always discarded.
+  A duplicate path or a file/folder clash is a `ValueError`; a name the target treats as taken
+  (for example `D` after `d` on a case-insensitive volume) is `PublicationFailed` with errno
+  `EEXIST`. A failed `reserve` removes only the folders it made.
+- `set_vault(VaultBinding)` has `publish_unit` publish the vault create-only before the bind
+  (rule V).
+- `deliver(decision, before_visible, reconcile=None)` first prunes: a claimed file of a table
+  the decision does not deliver is removed from the unit, then folders left empty. Only a
+  claimed file is ever removed; a failed, omitted or pending reservation never authorizes a
+  removal. A member of a delivered table that was never completed gives `nothing`. Then it takes
+  the pointer lock, compares the pointer with the state read at `open`, checks that every
+  claimed member is still the same inode (one link, mode `0600`, no two members the same
+  inode), calls `before_visible()`, binds the unit with `publish_unit`, then swaps the pointer
+  with that same state. `reconcile(receipt)` runs under the lock with the final receipt and must
+  not raise. An exception or interrupt after the lock is held is judged by one pointer re-read
+  (`LATEST` names this run: `uncertain`), reconciled once, and only then is the lock released
+  and the error raised again. An interrupt before the lock settles with no read.
+- The stage writes local paths, so a member's `path` needs the ambient policy; a strict policy
+  refuses `local_stage_path` at `reserve`. The stage makes no file-system call of its own: it
+  goes through `StageDir`, `OutputTxn` and `OutputDir` only.
+- A second interrupt while `deliver` settles a receipt can leave the stage state `delivering`; the
+  pointer, not the state, says whether the run is visible.
+- `abort()` removes both stages and never touches the pointer; it is a no-op after `delivered`. A
+  `deliver` after `abort` raises `RuntimeError`.
+
+`DeliveryReceipt(state, cause)` has state `delivered`, `uncertain` (visible, durability unknown;
+counts as delivered) or `nothing`. Every F22 outcome and every pointer result maps to one state:
+
+| Source | Value | State | Cause |
+|---|---|---|---|
+| bind | `published`, `already_committed` | go on to the swap | none |
+| bind | `commit_uncertain` | go on to the swap; at most `uncertain` | `publication_commit_uncertain` |
+| bind | `refused` | `nothing` | F22's code (target occupied, lock timeout or unavailable, vault mismatch or conflict) |
+| bind | `operation_conflict` | `nothing` | `publication_operation_conflict` |
+| bind | `failed` | `nothing` | `publication_failed` |
+| compare, before the bind | pointer moved | `nothing`, nothing bound | `delivery_pointer_moved` |
+| swap | `replaced` | `delivered` | none |
+| swap | `stale` | `nothing`; the bound run folder stays, not current | `delivery_pointer_moved` |
+| swap | `uncertain`, `unknown` | `uncertain` | `publication_commit_uncertain` |
+| swap | `failed`, `conflict` | `nothing` | `publication_failed` |
+
+A vault published for a run that then does not deliver stays on disk. The next run that names
+the same `--vault` path refuses until it is deleted.
+
 ## The vault commit
 
 `VaultWriter.publish(out)` writes the vault as `write` does (private stage, file fsync, exclusive
@@ -200,8 +271,12 @@ filename gives) is refused as `not_canonical` by the writer and the reader.
 | `engine_version` | the writing engine's version |
 
 An artifact `path` is relative to the unit root, `/`-separated; no component is empty, `.` or
-`..` or holds NUL, and the path is never the descriptor's own name. `role` is `"table"`. `rows`,
-`size` and `entry_count` are JSON integers from 0 to 2^63 - 1. Digests are 64 lowercase hex
+`..` or holds NUL, a path has at most 8 components, no two paths are equal, no path is a folder
+of another (`a` beside `a/b`), and the path is never a reserved name (the descriptor's own name
+or the stage marker, compared without case). `role` is `"table"`, `"quarantine"` or `"report"`.
+`rows` is the Parquet footer count for a `table` whose path ends in `.parquet`, and `null` for
+every other member; the key is always present, and a `.parquet` table with `null` or any other
+member with a number is refused. `size` and `entry_count` are JSON integers from 0 to 2^63 - 1. Digests are 64 lowercase hex
 digits.
 
 `result_id` is the SHA-256 of `decoy-publication-result/v1`, a NUL byte, and the canonical JSON
@@ -238,9 +313,22 @@ a `publication` stage of `out` holding exactly the Parquet tables named in `tabl
 directly in the stage. `publish_tables(out, {name: table}, request)` is the resident entry: it
 stages each table under its name and calls `publish_unit`. The caller names the files; the
 publisher measures every one itself through the stage (size, SHA-256, row count from the Parquet
-footer), never taking a number from the producer. A file left in the stage but not named is
-bound without being described, so a producer stages nothing else (the engine's own callers
-stage only the tables they name).
+footer), never taking a number from the producer.
+
+`publish_unit(out, txn, request, members=[Member(path, role), ...])` takes members that are not
+flat Parquet tables: nested paths such as `masked/customers.csv`, a CSV or fixed-width table, the
+quarantine file (`quarantine`) and the post-scan report (`report`). Pass `tables` or `members`,
+never both. Every path passes one rule before the lock is taken (`check_unit_path` for each,
+`check_unit_paths` for the set), the same rule the descriptor reader applies. The stage is
+closed: the publisher walks it through `StageDir.entries` and `StageDir.open_subdir` and refuses
+(`publication_failed`, nothing bound) any entry no member names, a link, a special file, a
+folder that is not a prefix of a member, or a member of the wrong kind. Only the stage's own
+marker at the root is allowed. An empty file is hashed as the empty string with size 0.
+
+A reader older than this change that meets a unit with `rows: null`, a `quarantine` or `report`
+member or a nested path cannot load its descriptor and treats the leaf as occupied
+(`publication_target_occupied`); it never overwrites the unit. A rerun of the same run id on
+such a reader therefore refuses, and a new run id is unaffected.
 
 Under the destination lock, held from the first read to the bind:
 
@@ -476,6 +564,13 @@ bind the stage is gone when the call returns, and a killed child leaves nothing 
 admits and reads the tables back the same way, and nothing is published.
 
 ## Named limits
+
+- **DL1, `delivery_links_unsupported`.** A delivery claims each member with a hard link and
+  tightens it to `0600` on its own descriptor. A target that cannot hard-link (errno `EPERM`,
+  `EOPNOTSUPP`, `ENOTSUP`, `ENOSYS` or `EXDEV`), or that ignores `chmod`, fails at `open` with
+  `publication_failed`, before any writer runs. The probe makes a file, sets `0644` and reads
+  `0644` back, claims it, and must read `0600` back. A late write through a descriptor the writer
+  kept open after `complete()`, and NFS silly-rename names, are not caught (V2-LOG).
 
 - **L1u, a crash during parent creation under a narrowing umask.** If the process is killed
   between creating a parent and repairing its owner bits, under a umask that strips one, the

@@ -9,12 +9,13 @@ survivor count and the resulting score are a conservative lower bound: some
 mutants counted "survived" here are in fact killed by tests outside this file.
 
 TQ crown-jewels pass, 2026-07-26. `nested` wraps a child strategy and applies it
-at a JSONPath target inside each JSON cell: parse -> locate leaves (`jsonpath_ng`)
+at a JSONPath target inside each JSON cell: parse -> locate leaves (`TargetPath.find`)
 -> collect into one Series -> run the child once (batch) -> write each masked
 value back at its own path -> re-serialize. Malformed JSON emits a
 `QualityWarning` and passes through; a no-match path is left unchanged with no
-warning (sparse paths are valid); overlapping matches (recursive/wildcard
-selectors) are ordered deepest-first and flagged with a typed warning.
+warning (sparse paths are valid); a column where no cell matches raises
+`nested_target_matched_nothing`. The target grammar has no recursive selector, so
+matches never overlap and the overlap warning is no longer raised (NESTED-FREEZE).
 
 A mutmut run produced **303 mutants, 188 killed + 37 timeout, 78 survived**
 (baseline caught = 225/303 = 74%, counting timeouts as caught; the bare-kill

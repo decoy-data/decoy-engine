@@ -27,7 +27,8 @@ HEAD = "b" * 40
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
 GATE_CONTEXT = "engine-gate/verdict"
 
-# The 16 names GitHub showed for native-companion.yml in run 42170946535, plus two path-scope jobs.
+# The 16 names GitHub showed for native-companion.yml in run 42170946535, plus the two path-scope
+# jobs and core-companion-wide: 19 in all.
 NATIVE_NAMES = [
     "companion-wheel-linux (3.10, x86_64)",
     "companion-wheel-linux (3.10, aarch64)",
@@ -43,12 +44,18 @@ NATIVE_NAMES = [
     "companion-wheel-macos (3.12)",
     "companion-rust-lint",
     "core-companion-present",
+    "core-companion-wide",
     "companion-fuzz-sanitizer",
     "core-companion-absent",
     "native-changes",
     "companion-wheel-macos-ok",
 ]
-NATIVE_MERGE = [n for n in NATIVE_NAMES if not n.startswith("companion-wheel-macos (")]
+# core-companion-wide runs on push, schedule and dispatch only, so it cannot be a merge check.
+NATIVE_MERGE = [
+    n
+    for n in NATIVE_NAMES
+    if not n.startswith("companion-wheel-macos (") and n != "core-companion-wide"
+]
 CI_NAMES = [
     "packaging-gate",
     "ml-gate",

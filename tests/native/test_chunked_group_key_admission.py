@@ -21,6 +21,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked_profile
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution.native import _chunked_evidence, _dispatch, _operator_step
@@ -134,6 +135,7 @@ def test_static_route_decision_admits_group_key() -> None:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert f"{_STRATEGY}_not_native" not in (decision.reroute_reason or "")
     assert decision.native_admitted is True
@@ -151,6 +153,7 @@ def test_the_evidence_planner_plans_the_companion_for_group_key() -> None:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert {p.column: p.planned_backend for p in plans}[TARGET] == "rust_companion"
 
@@ -173,6 +176,7 @@ def test_the_defensive_refusal_sites_still_honor_a_non_empty_veto_set(
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert decision.native_admitted is False
     assert f"{strategy}_not_native_chunked_route:{TARGET}" in (decision.reroute_reason or "")
@@ -182,6 +186,7 @@ def test_the_defensive_refusal_sites_still_honor_a_non_empty_veto_set(
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert {p.column: p.planned_backend for p in plans}[TARGET] == "pandas_oracle"
 
@@ -511,6 +516,7 @@ def test_preflight_carries_the_raw_hex_kernel_only_for_an_admitted_group_key() -
             first_schema=table.schema,
             unconfigured_policy="warn",
             registry=get_default_registry(),
+            siblings=NO_SOURCES,
         )
 
     admitted = preflight(config)
@@ -673,6 +679,7 @@ def test_a_group_key_fk_key_stays_rejected_and_not_natively_admitted() -> None:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert decision.native_admitted is False
     assert decision.reroute_reason == "fk_relationship_not_native_route"

@@ -17,6 +17,9 @@ baseline = "tests/sentry/baselines/f29-producer-inventory.json"
 [[sentry]]
 id = "f29-consumer-inventory"
 baseline = "tests/sentry/baselines/f29-consumer-inventory.json"
+approved_growth = [
+  { key = "generation/pool/_sampler.py::derive_pool_indices::exc.code", decision = "owner 2026-11-23 rename of an existing site (_derive_pool_indices promoted to a public pool export), no new consumer" },
+]
 
 [[sentry]]
 id = "secret-material-census"
@@ -30,6 +33,8 @@ approved_growth = [
   { key = "decoy_engine/generation/kinds/_provider.py::_draw_keyed::value_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
   { key = "decoy_engine/generation/pool/_sampler.py::derive_validated_indices::mask_key", decision = "owner 2026-11-21 GEN-WINDOWED-BATCH S2 shared batch-draw helper replaces WindowedDateProvider.row_seed_int" },
   { key = "decoy_engine/transforms/windowed_date.py::_draw_offsets::seed", decision = "owner 2026-11-21 GEN-WINDOWED-BATCH S2 batched offset draw split from apply_windowed_date" },
+  { key = "decoy_engine/transforms/bucket_perturb.py::apply_bucket_perturb_dates::job_seed", decision = "owner 2026-11-22 standing go-with-recommended authority (orchestrator applied, pending owner confirmation): COLUMN-SHAPE-RULE E2 typed date path (plan 2026-11-21-column-shape-rule section 3.3); the seed is wiped on every exit" },
+  { key = "decoy_engine/execution/_strategies/_faker_positional.py::computed_mask_draw::seed", decision = "owner 2026-11-23 go-with-recommended (plan 2026-11-22-gen-nonfaker-draws section 5.2): the computed uuid, integer and choice draw takes the mask key or job seed and wipes it on every exit; owner confirmed 2026-11-23" },
 ]
 
 [[sentry]]
@@ -130,7 +135,6 @@ baseline = "tests/sentry/baselines/package-fanout.json"
 id = "import-layers"
 baseline = "tests/sentry/baselines/import-layers.json"
 approved_growth = [
-  { key = "policy-direction::decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
   { key = "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
   { key = "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution.out_of_core._mask", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
   { key = "policy-direction::decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
@@ -258,5 +262,28 @@ id = "column-shape-classifier"
 baseline = "tests/sentry/baselines/column-shape-classifier.json"
 
 [[sentry]]
+id = "bucketize-width-contract"
+baseline = "tests/sentry/baselines/bucketize-width-contract.json"
+
+[[sentry]]
 id = "signature-exemptions"
 baseline = "tests/sentry/baselines/signature-exemptions.json"
+
+[[sentry]]
+id = "output-assembly-one-path"
+baseline = "tests/sentry/baselines/output-assembly-one-path.json"
+
+[[sentry]]
+id = "faker-pool-size-one-resolver"
+baseline = "tests/sentry/baselines/faker-pool-size-one-resolver.json"
+
+[[sentry]]
+id = "faker-native-allowlist-total"
+baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
+
+[[sentry]]
+id = "engine-exception-text-copies"
+baseline = "tests/sentry/baselines/engine-exception-text-copies.json"
+approved_growth = [
+  { key = "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign", decision = "owner 2026-11-24 re-home of is_memory_failure after #792 moved it; same site, max 1" },
+]

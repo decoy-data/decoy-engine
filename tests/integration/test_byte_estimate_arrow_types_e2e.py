@@ -31,6 +31,7 @@ from decoy_engine.execution._mem_estimate import (
 from decoy_engine.keyprovider import SecretKeyProvider
 from decoy_engine.profile import profile_source
 from decoy_engine.profile._readers import LazySource
+from tests._column_shapes import INT_DECL
 from tests._declared_schema import declare_rest
 from tests.native._rev9_type_catalogue import CATALOGUE
 from tests.unit.execution._transform_testkit import fk_config, fk_tables
@@ -249,7 +250,12 @@ def _fk_pure_mask_with_temporal(
                     "name": "parent",
                     "columns": [
                         _faker_col("id"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "bucketize",
+                            "provider_config": {"width": 10},
+                            **INT_DECL,
+                        },
                         _passthrough("d"),
                         _passthrough("tz"),
                     ],
@@ -305,7 +311,6 @@ _REFUSED_WITH_ESTIMATE_OFF = frozenset(
         "map",
         "dense_union",
         "sparse_union",
-        "fixed_size_list",
         "fixed_shape_tensor",
         "dictionary_float16",
         "ree_string_view",

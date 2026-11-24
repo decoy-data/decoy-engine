@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionAdapter, ExecutionResult
     from decoy_engine.execution._pipeline_context import PipelineRunContext, RouteDecision
     from decoy_engine.execution._planner import ExecutionPlan
+    from decoy_engine.execution.pipeline import ResidentFit
     from decoy_engine.generation.pool import PoolCache
     from decoy_engine.keyprovider import KeyProvider
     from decoy_engine.plan._types import Plan
@@ -153,6 +154,7 @@ def _execute_admitted(
     pool_cache: PoolCache,
     native_threads: int,
     chunked_dispatcher_enabled: bool,
+    resident_fit: ResidentFit | None = None,
 ) -> ExecutionResult | None:
     """Everything past the cheap admission gate: build the LIVE (D4)
     `PhysicalPlanInputs`, compile the real physical plan, run the remaining
@@ -168,6 +170,7 @@ def _execute_admitted(
 
     from decoy_engine.execution import _pipeline_finalize, _pipeline_route_exec
     from decoy_engine.execution._adapter import ExecutionResult
+    from decoy_engine.execution._chunked_carry import passthrough_columns
     from decoy_engine.execution._unified_slice_evidence import (
         assemble_node_evidence,
         reconstruct_source_shaped_output,
@@ -212,6 +215,7 @@ def _execute_admitted(
             out_of_core_budget_bytes=out_of_core_budget_bytes,
             engine_version=engine_version,
             chunked_dispatcher_enabled=chunked_dispatcher_enabled,
+            resident_fit=resident_fit,
         )
         physical_plan = compile_physical_plan(inputs)
 
@@ -285,10 +289,15 @@ def _execute_admitted(
 
         # `candidate.source` is the resident `pa.Table`; the `is not` identity check above
         # narrows its static type to a union for the rest of the function, so cast it back.
-        source_schema = cast("pa.Table", candidate.source).schema
+        source_table = cast("pa.Table", candidate.source)
+        source_schema = source_table.schema
         outputs = reconstruct_source_shaped_output(
             table=candidate.table,
             frame=candidate.source_frame,
+            source=source_table,
+            untouched=passthrough_columns(
+                config, table=candidate.table, names=source_schema.names, registry=registry
+            ),
             masked_table=shadow_result.outputs[candidate.table],
             nodes=physical_table.nodes,
             when_selected=when.selected,
@@ -460,4 +469,5 @@ def maybe_run_unified_slice(
         pool_cache=pool_cache,
         native_threads=ctx.native_threads,
         chunked_dispatcher_enabled=ctx.chunked_dispatcher_enabled,
+        resident_fit=decision.resident_fit,
     )

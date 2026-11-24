@@ -11,7 +11,8 @@ import errno
 import os
 import re
 from collections.abc import Callable, Iterable, Iterator
-from typing import Any, NewType, TypeVar
+from dataclasses import dataclass
+from typing import Any, Literal, NewType, TypeVar
 
 from decoy_engine.fileaccess._types import (
     DenialKind,
@@ -26,6 +27,11 @@ _MAX_KEY = 256
 _TRUNCATED = "...[truncated]"
 T = TypeVar("T")
 _RESOURCE_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.ENOMEM})
+_CHAIN_DEPTH = 16
+
+# The one value-free text for a memory failure the engine recognises by wording. It matches the
+# worker's `Wrapping \S+ failed` pattern, so a rebuilt error still classifies as out of memory.
+MEMORY_TEXT = "Unknown error: Wrapping <value> failed"
 
 # A descriptor path (`/proc/self/fd/<n>`, `/dev/fd/<n>`) is the locator a strict policy hands a
 # library. The specific one is redacted by pair, but a third-party message may name a different
@@ -98,17 +104,82 @@ def redact_locators(text: str, pairs: Iterable[tuple[str, str]]) -> str:
     return _FD_PATH_RE.sub(_FD_REDACTED, out)
 
 
+def _is_typed_memory(exc: BaseException) -> bool:
+    if isinstance(exc, MemoryError):
+        return True
+    if isinstance(exc, OSError) and exc.errno == errno.ENOMEM:
+        return True
+    return _is_duckdb_out_of_memory(exc)
+
+
+def _is_duckdb_out_of_memory(exc: BaseException) -> bool:
+    """DuckDB's OOM, recognised by its own class hierarchy so nothing is imported on the failure
+    path (a capped worker has no headroom to load DuckDB). The native module raises
+    `_duckdb.OutOfMemoryException`; the `duckdb` wrapper re-exports the same class, and either may
+    be unloaded when it is raised. Pinned against duckdb 1.5.4, where `__module__` is `_duckdb`."""
+    return any(
+        cls.__name__ == "OutOfMemoryException"
+        and cls.__module__.partition(".")[0] in ("duckdb", "_duckdb")
+        for cls in type(exc).__mro__
+    )
+
+
+# The under-cap failure shapes fk_memory_probe documents evidence for: OpenSSL's EVP_MD_CTX copy
+# (hashlib, masking the FK key) and Arrow's arrow-to-pandas value conversion raise their own error
+# type under a hard cap instead of MemoryError, and glibc's per-thread TLS setup aborts the
+# process outright. See fk_memory_probe.py for the reproduction evidence.
+MEMORY_ERROR_MARKERS: tuple[str, ...] = (
+    "not able to copy ctx",
+    "digital envelope routines",
+)
+MEMORY_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"Unknown error: Wrapping \S+ failed"),
+)
+GLIBC_TLS_OOM_MARKER = "cannot allocate memory for thread-local data"
+
+
+def typed_memory_member(exc: BaseException) -> BaseException | None:
+    """The first typed memory error in `exc` or its `__cause__`/`__context__` links, else None.
+
+    Native code at the cap can surface exhaustion wrapped: an Arrow cancellation reaches Python
+    as `KeyboardInterrupt` raised while a `MemoryError` was being handled. Only the TYPE of each
+    link is read, never its message. Bounded and cycle-safe. The one chain walker."""
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    while pending and len(seen) < _CHAIN_DEPTH:
+        link = pending.pop()
+        if id(link) in seen:
+            continue
+        seen.add(id(link))
+        if _is_typed_memory(link):
+            return link
+        pending.extend(x for x in (link.__cause__, link.__context__) if x is not None)
+    return None
+
+
+def is_memory_failure(exc: BaseException) -> bool:
+    """True iff `exc` is one of the documented under-cap failure shapes.
+
+    The isolated worker calls this to self-classify a caught exception as `oom_killed` (exits 0
+    with a clean diagnostic) versus `crashed` (a genuine bug, reported as data in the result
+    envelope but NOT hidden behind an OOM label). A typed memory error anywhere in the
+    `__cause__`/`__context__` chain counts; a bare `KeyboardInterrupt` with no memory-typed link
+    stays `crashed`. Imports nothing, so it is safe at the memory cap."""
+    if typed_memory_member(exc) is not None:
+        return True
+    message = str(exc)
+    if any(marker in message for marker in MEMORY_ERROR_MARKERS):
+        return True
+    return any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
+
+
 def passes_by_type(exc: Exception) -> bool:
     """Failures the caller classifies by TYPE keep their class under a strict policy: memory
     pressure, and a full disk or quota. Masking them as a read failure would break OOM
     handling and disk-quota reporting."""
-    if isinstance(exc, MemoryError):
+    if _is_typed_memory(exc):
         return True
-    if isinstance(exc, OSError) and exc.errno in _RESOURCE_ERRNOS:
-        return True
-    import duckdb
-
-    return isinstance(exc, duckdb.OutOfMemoryException)
+    return isinstance(exc, OSError) and exc.errno in _RESOURCE_ERRNOS
 
 
 def resurface_scrubbed(exc: Exception) -> Exception | None:
@@ -126,6 +197,56 @@ def resurface_scrubbed(exc: Exception) -> Exception | None:
     return rebuilt if is_memory_failure(rebuilt) else None
 
 
+def _errno_rebuild(exc: OSError) -> OSError:
+    """`exc` rebuilt from its errno alone: the canonical text and no filename."""
+    code = exc.errno or 0
+    try:
+        return type(exc)(code, os.strerror(code))
+    except Exception:
+        return OSError(code, os.strerror(code))
+
+
+def _fixed_text_rebuild(exc: BaseException) -> BaseException | None:
+    """`exc`'s own type around `MEMORY_TEXT`, or None when the constructor refuses it or the
+    result no longer reads as a memory failure."""
+    try:
+        rebuilt = type(exc)(MEMORY_TEXT)
+    except Exception:
+        return None
+    return rebuilt if is_memory_failure(rebuilt) else None
+
+
+FailureKind = Literal["typed_memory", "resource", "text_memory"]
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifiedFailure:
+    """A recognised memory or resource failure. `fresh` is the value-free replacement (no chain,
+    no filename, fixed text), or None when the type cannot be rebuilt. Raise it after the
+    `except` block closes, `from None`, as `deny` advises: raising inside the block sets
+    `__context__` to the original error."""
+
+    kind: FailureKind
+    fresh: BaseException | None
+
+
+def classified_failure(exc: BaseException) -> ClassifiedFailure | None:
+    """Classify `exc` for a boundary that must not forward its text, or None when it is none of
+    these. A typed memory error anywhere in the chain wins; then a direct disk or quota
+    `OSError`; then a direct failure the worker recognises by wording. Build the result in the
+    handler and raise `fresh` outside it (see `ClassifiedFailure`)."""
+    member = typed_memory_member(exc)
+    if member is not None:
+        if isinstance(member, OSError):
+            return ClassifiedFailure("typed_memory", _errno_rebuild(member))
+        return ClassifiedFailure("typed_memory", _fixed_text_rebuild(member))
+    if isinstance(exc, OSError) and exc.errno in _RESOURCE_ERRNOS:
+        return ClassifiedFailure("resource", _errno_rebuild(exc))
+    if isinstance(exc, Exception) and is_memory_failure(exc):
+        return ClassifiedFailure("text_memory", _fixed_text_rebuild(exc))
+    return None
+
+
 def _resurface(exc: Exception) -> Exception | None:
     """The exception to raise for a failure the caller must still classify, or None when it
     is an ordinary library failure (a read error).
@@ -134,7 +255,7 @@ def _resurface(exc: Exception) -> Exception | None:
     filename the library puts there. Text-recognised failures go through `resurface_scrubbed`
     because that text can carry a cell value."""
     if isinstance(exc, OSError) and exc.errno in _RESOURCE_ERRNOS:
-        return type(exc)(exc.errno, os.strerror(exc.errno or 0))
+        return _errno_rebuild(exc)
     if passes_by_type(exc):
         return exc
     return resurface_scrubbed(exc)

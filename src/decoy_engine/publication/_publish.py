@@ -31,15 +31,12 @@ from __future__ import annotations
 
 import errno
 import hashlib
-import mmap
 import os
-import stat
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from decoy_engine import reasons
 from decoy_engine.fileaccess import (
@@ -50,12 +47,10 @@ from decoy_engine.fileaccess import (
     LeafTooLarge,
     LockTimeout,
     LockUnavailable,
-    is_valid_component,
 )
 from decoy_engine.publication._descriptor import (
     DESCRIPTOR_NAME,
     MAX_DESCRIPTOR_BYTES,
-    Artifact,
     Descriptor,
     DescriptorVault,
     build_descriptor,
@@ -63,7 +58,18 @@ from decoy_engine.publication._descriptor import (
     descriptor_digest,
     encode_descriptor,
 )
-from decoy_engine.publication._types import CommitReceipt, Outcome, PublicationRequest
+from decoy_engine.publication._members import (
+    Member,
+    check_member_paths,
+    measure_members,
+    stage_is_closed,
+)
+from decoy_engine.publication._types import (
+    CommitReceipt,
+    Outcome,
+    PublicationRequest,
+    lock_reason,
+)
 from decoy_engine.publication._vault_order import (
     FsyncFailed,
     VaultConflict,
@@ -166,28 +172,8 @@ def _read_stored(out: OutputDir) -> _Stored:
     return _Stored("descriptor", stored, descriptor_digest(data))
 
 
-def _measure_one(txn: OutputTxn, component: str) -> Artifact:
-    """Size, SHA-256 and Parquet footer row count of one staged file, read through the stage.
-
-    The file is mapped read-only and hashed in one call, so a large table costs page cache, not
-    a heap copy."""
-    fd = txn.open_file(component)
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_size == 0:  # an empty file is no Parquet table
-            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
-        with mmap.mmap(fd, 0, access=mmap.ACCESS_READ) as mapped:
-            sha256 = hashlib.sha256(mapped).hexdigest()
-        size = st.st_size
-        with os.fdopen(os.dup(fd), "rb") as fh:
-            rows = pq.ParquetFile(fh).metadata.num_rows
-    finally:
-        os.close(fd)
-    return Artifact(path=component, role="table", rows=rows, sha256=sha256, size=size)
-
-
-def _measure(txn: OutputTxn, tables: Sequence[str], request: PublicationRequest) -> _Measured:
-    artifacts = [_measure_one(txn, component) for component in tables]
+def _measure(txn: OutputTxn, members: Sequence[Member], request: PublicationRequest) -> _Measured:
+    artifacts = measure_members(txn, members)
     descriptor = build_descriptor(
         operation_id=request.operation_id, artifacts=artifacts, vault=None
     )
@@ -205,12 +191,32 @@ def check_request(request: PublicationRequest, tables: Sequence[str] = ()) -> li
     if request.vault is not None and not isinstance(request.vault.writer, VaultWriter):
         raise TypeError("request.vault.writer must be a VaultWriter")
     names = list(tables)
-    if any(type(n) is not str for n in names) or len(set(names)) != len(names):
-        raise ValueError("invalid tables")
-    # Casefolded: macOS and Windows file systems treat a case variant as the same member.
-    if any(n.casefold() in _RESERVED_FOLDED for n in names):
-        raise ValueError("invalid tables")
+    check_member_paths(names, "invalid tables")
     return names
+
+
+def _require_parquet(names: Sequence[str]) -> None:
+    """`tables` and `publish_tables` bind Parquet files, and a Parquet table records its footer
+    row count, which the descriptor ties to the `.parquet` name (`has_row_count`)."""
+    if not all(n.endswith(".parquet") for n in names):
+        raise ValueError("invalid tables")
+
+
+def _unit_members(
+    request: PublicationRequest, tables: Sequence[str], members: Sequence[Member]
+) -> list[Member]:
+    """The one member list of a unit, from `tables` or from `members` (never both), checked as a
+    whole before any lock or stage read."""
+    listed_members = list(members)
+    names = check_request(request, tables)
+    _require_parquet(names)
+    if names and listed_members:
+        raise ValueError("pass tables or members, not both")
+    if any(type(m) is not Member for m in listed_members):
+        raise ValueError("invalid members")
+    unit = listed_members or [Member(name, "table") for name in names]
+    check_member_paths([m.path for m in unit], "invalid members")
+    return unit
 
 
 def _check_stage(out: OutputDir, txn: OutputTxn) -> None:
@@ -229,45 +235,48 @@ def publish_unit(
     request: PublicationRequest,
     *,
     tables: Sequence[str] = (),
+    members: Sequence[Member] = (),
 ) -> CommitReceipt:
     """Bind the staged unit in ``txn`` (a ``publication`` directory stage of ``out``) whose
-    files are exactly the Parquet tables named in ``tables``, or judge it against what the
-    destination already holds. The stage is aborted on every exit but a bind."""
+    files are exactly ``members`` (or ``tables``, each a ``table`` member), or judge it against
+    what the destination already holds. The stage is aborted on every exit but a bind."""
     try:
         _check_stage(out, txn)
-        names = check_request(request, tables)
-        return _locked(out, txn, request, names)
+        unit = _unit_members(request, tables, members)
+        return _locked(out, txn, request, unit)
     finally:
         txn.abort()  # a no-op after publish
 
 
 def _locked(
-    out: OutputDir, txn: OutputTxn, request: PublicationRequest, tables: list[str]
+    out: OutputDir, txn: OutputTxn, request: PublicationRequest, members: list[Member]
 ) -> CommitReceipt:
     try:
         with out.lock(request.lock_timeout_s):
-            return _judge_and_bind(out, txn, request, tables)
+            return _judge_and_bind(out, txn, request, members)
     except LockTimeout as exc:
-        return _receipt(
-            request, "refused", reasons.decoy.PUBLICATION_LOCK_TIMEOUT, os_error=exc.errno_name
-        )
+        return _receipt(request, "refused", lock_reason(exc), os_error=exc.errno_name)
     except LockUnavailable as exc:
-        return _receipt(
-            request, "refused", reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE, os_error=exc.errno_name
-        )
+        return _receipt(request, "refused", lock_reason(exc), os_error=exc.errno_name)
 
 
 def _judge_and_bind(
-    out: OutputDir, txn: OutputTxn, request: PublicationRequest, tables: list[str]
+    out: OutputDir, txn: OutputTxn, request: PublicationRequest, members: list[Member]
 ) -> CommitReceipt:
     stored = _read_stored(out)
     failure: str | None = None
     try:
-        new = _measure(txn, tables, request)
+        # A stage with any entry no member names is refused before the vault or the bind.
+        new = (
+            _measure(txn, members, request)
+            if stage_is_closed(txn, [m.path for m in members])
+            else None
+        )
     except (OSError, pa.ArrowException) as exc:  # unreadable or not a Parquet table
         failure = _errno_name(exc) if isinstance(exc, OSError) else None
     else:
-        return _judge(out, txn, request, stored, new)
+        if new is not None:
+            return _judge(out, txn, request, stored, new)
     return _receipt(request, "failed", reasons.decoy.PUBLICATION_FAILED, os_error=failure)
 
 
@@ -438,10 +447,11 @@ def publish_tables(
 
     names = check_request(request, list(tables))
     # The caller's suffix can complete a reserved name from a harmless key, so the derived
-    # components pass the same check, before any I/O.
-    components = check_request(request, [f"{name}{suffix}" for name in names])
-    if not all(map(is_valid_component, components)) or len(set(components)) != len(components):
-        raise ValueError("invalid tables")
+    # components pass the same check, before any I/O. A table is staged flat.
+    components = [f"{name}{suffix}" for name in names]
+    check_request(request, components)
+    _require_parquet(components)
+    check_member_paths(components, "invalid tables", flat=True)
     failure: str | None = None
     try:
         txn = out.begin("dir", "exclusive", label="publication")

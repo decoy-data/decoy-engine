@@ -32,6 +32,7 @@ from decoy_engine.errors import ConfigError
 from decoy_engine.execution import ParquetTransactionalSink
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.execution._pipeline_routing import _sequential_eligible
+from tests._column_shapes import INT_DECL
 from tests._declared_schema import declare_rest
 
 _N = 20
@@ -100,7 +101,12 @@ def _fk_pure_mask_config(tmp_path: Path) -> dict[str, Any]:
                     "name": "parent",
                     "columns": [
                         _faker_col("id", "ns"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "bucketize",
+                            "provider_config": {"width": 10},
+                            **INT_DECL,
+                        },
                     ],
                 },
                 {"name": "child", "columns": [_faker_col("parent_id", "ns")]},

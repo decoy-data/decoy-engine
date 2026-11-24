@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.declared_casting._boundary import open_cast_run
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.execution import (
@@ -58,6 +59,7 @@ from decoy_engine.execution._mixed_fk_bridge import resolve_generate_parent_fk_c
 from decoy_engine.execution._mixed_static import MixedStaticPlan, write_order
 from decoy_engine.execution._stitch import stitch_generate_mask_outputs
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
+from decoy_engine.execution.pipeline import store_resident_fit
 from decoy_engine.execution.pipeline._post_scan import attach_cast_run
 from decoy_engine.profile._readers import LazySource
 
@@ -120,6 +122,9 @@ def _fall_back(
         route_reason=f"{reasons.route.MIXED_RUNTIME_DECLINED}:{reason}",
         mixed=None,
     )
+    # The replaced decision is priced like any no-FK full-frame one, with the generated tables
+    # still live, before the lazy mask sources are read whole.
+    declined = store_resident_fit(ctx, declined, generate_outputs.values())
     return _pipeline_full_frame.run_full_frame_route(
         ctx, declined, pregenerated=generate_outputs, pregenerated_warnings=generate_warnings
     )
@@ -236,6 +241,7 @@ def _run_admitted(
                     expected=static.source_facts.get(name),
                     preresolved=carrier if carrier and carrier.table == name else None,
                     cast_run=cast_run,
+                    sources=NO_SOURCES,
                 )
             )
             mask_outputs.update(outputs)

@@ -10,7 +10,10 @@ from decoy_engine.execution.native._draw_sites_gen import (
     GEN_KIND_DRAW_SITES,
     GEN_SUBSTRATE_DRAW_SITES,
 )
-from decoy_engine.execution.native._draw_sites_gen_pool import GEN_POOL_DRAW_SITES
+from decoy_engine.execution.native._draw_sites_gen_pool import (
+    COMPUTED_DRAW_SITES,
+    GEN_POOL_DRAW_SITES,
+)
 from decoy_engine.execution.native._draw_sites_mask import MASK_DRAW_SITES, MASK_FORMULA_DRAW_SITE
 from decoy_engine.execution.native._draw_sites_provider_backed import PROVIDER_BACKED_DRAW_SITES
 from decoy_engine.execution.native._draw_sites_tokenize import TOKENIZE_DRAW_SITES
@@ -24,6 +27,7 @@ _FAMILY_ORDER = (
     GEN_POOL_DRAW_SITES,
     TOKENIZE_DRAW_SITES,
     GEN_KIND_DRAW_SITES,
+    COMPUTED_DRAW_SITES,
 )
 
 
@@ -36,7 +40,7 @@ def test_catalogue_is_the_family_modules_in_order() -> None:
 
 
 def test_family_sizes() -> None:
-    assert [len(family) for family in _FAMILY_ORDER] == [16, 14, 4, 1, 1, 3, 1, 2]
+    assert [len(family) for family in _FAMILY_ORDER] == [16, 14, 4, 1, 1, 3, 1, 2, 4]
 
 
 def test_protocol_reexports_the_record_type_and_enums() -> None:

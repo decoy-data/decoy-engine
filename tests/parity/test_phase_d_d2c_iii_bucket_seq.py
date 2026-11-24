@@ -204,12 +204,6 @@ def _decline_cases() -> list[tuple[str, pa.Array, Any, str]]:
             bucket_seed("month"),
             "bucket_perturb_source_not_string:d_date32:date32[day]",
         ),
-        (
-            "d_noformat",
-            strs(["2024-03-05", None, "2021-11-14", "2022-02-02"]),
-            bucket_seed("month", None),
-            "bucket_perturb_config_declined:d_noformat:bucket_perturb_requires_date_format",
-        ),
     ]
     for name, (fmt, values) in TZ_COLUMNS.items():
         cases.append(
@@ -237,6 +231,21 @@ def test_a_declined_column_runs_python_with_a_value_free_reason(
     assert kernel.calls == []
     assert result.outputs["P"].equals(run_full(shape).outputs["P"])
     assert "2024" not in repr(result.quality_metrics)
+
+
+def test_a_missing_format_is_refused_by_both_routes_never_detected() -> None:
+    """COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (detection removed): text
+    with no `date_format` is `column_shape_required` at plan compile, and a run that skips
+    compile stops in the handler. The sequential route declines the column (pinned by `admit`
+    above) and the handler raises the same code the full-frame route does."""
+    shape = bucket_payload_shape(
+        {"d_noformat": (strs(["2024-03-05", None, "2021-11-14"]), bucket_seed("month", None))}
+    )
+    with pytest.raises(ExecutionError) as native:
+        run_seq(shape)
+    with pytest.raises(ExecutionError) as python:
+        run_full(shape)
+    assert native.value.code == python.value.code == "bucket_perturb_requires_date_format"
 
 
 @pytest.mark.parametrize(

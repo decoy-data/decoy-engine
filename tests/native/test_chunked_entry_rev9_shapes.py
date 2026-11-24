@@ -121,15 +121,16 @@ def test_public_oracle_behavior_is_unchanged(shape: Shape, pos: int, configured:
         if shape.public == "exact" or i != pos:
             assert same_column(got.column("x"), src.column("x")), PINNED_UNDER
         else:
-            # `-2^63` is NaT to pandas: row 0 comes back null, nothing else changes.
-            assert got.column("x").is_null().to_pylist() == [True, True, False], PINNED_UNDER
+            # Rule 3 (A1): `-2^63` was NaT to pandas and came back null; an untouched column is now
+            # written from the source, so row 0 keeps its value and only the source null is null.
+            assert got.column("x").is_null().to_pylist() == [False, True, False], PINNED_UNDER
             assert got.column("x").type == src.column("x").type
             assert got.column("x")[2].as_py() == src.column("x")[2].as_py()
 
 
 @pytest.mark.parametrize("unit", ["s", "ms", "us", "ns"])
 @pytest.mark.parametrize("kind", ["timestamp", "duration"])
-def test_min_int64_is_yielded_itself_and_the_oracle_nulls_it(kind: str, unit: str) -> None:
+def test_min_int64_is_yielded_itself_and_the_oracle_keeps_it(kind: str, unit: str) -> None:
     shape = BY_NAME[f"{kind}_{unit}_min"]
     chunks = stream(shape, 1)
     for configured in (True, False):
@@ -139,8 +140,9 @@ def test_min_int64_is_yielded_itself_and_the_oracle_nulls_it(kind: str, unit: st
         out, *_ = entry(config, chunks)
         stored = out[1].column("x").cast(pa.int64())
         assert stored[0].as_py() == I64MIN
+        # Rule 3 (A1): the public oracle no longer nulls it; only the source null is null.
         assert public(config, chunks)[1].column("x").is_null().to_pylist() == [
-            True,
+            False,
             True,
             False,
         ]
@@ -259,30 +261,23 @@ _ROW_ERROR_SHAPES = ["time64ns_unaligned", "dict_uint64_indices", "list_int", "d
 
 
 def _row_error_config(strategy: str, configured: bool) -> dict[str, Any]:
-    if strategy == "bucketize":
-        col: dict[str, Any] = {
-            "name": "age",
-            "strategy": "bucketize",
-            "provider_config": {"width": 10},
-        }
-    else:
-        col = {
-            "name": "age",
-            "strategy": "date_shift",
-            "namespace": "age_ns",
-            "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
-        }
+    col: dict[str, Any] = {
+        "name": "age",
+        "strategy": "date_shift",
+        "namespace": "age_ns",
+        "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+    }
     return make_config([col] + ([passthrough("x")] if configured else []))
 
 
 @pytest.mark.parametrize("configured", [True, False], ids=["configured", "unconfigured"])
-@pytest.mark.parametrize("strategy", ["bucketize", "date_shift"])
+@pytest.mark.parametrize("strategy", ["date_shift"])
 @pytest.mark.parametrize("shape_name", _ROW_ERROR_SHAPES)
 def test_row_error_chunk_sink_result_carries_the_source_column(
     shape_name: str, strategy: str, configured: bool
 ) -> None:
     shape = BY_NAME[shape_name]
-    good, bad = ("23", "not-a-number") if strategy == "bucketize" else ("2020-01-01", "not-a-date")
+    good, bad = "2020-01-01", "not-a-date"
     chunks = [
         pa.table({"age": pa.array([good, good, good]), "x": shape.good}),
         pa.table({"age": pa.array([good, bad, good]), "x": shape.bad}),

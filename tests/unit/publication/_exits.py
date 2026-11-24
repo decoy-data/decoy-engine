@@ -139,13 +139,20 @@ def run_exit(
         elif case == "E13_chain_fsync_after_rename_fails":
             parent_key = key(parent)
             Recorder(monkeypatch, fail=lambda e: e == ("fsync", parent_key))
-        if case == "E10_descriptor_write_fails":  # a producer planted the descriptor's name
-            from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+        if case == "E10_descriptor_write_fails":  # the disk fills as the descriptor is created
+            from decoy_engine.fileaccess._local import LocalOutputTxn
+            from decoy_engine.fileaccess._output import RootedOutputTxn
 
-            txn = out.begin("dir", "exclusive", label="publication")
-            arrow_adapter.write_table(one[table], txn, table)
-            os.close(txn.create_file(DESCRIPTOR))
-            receipt = publish_unit(out, txn, request, tables=[table])
+            for cls in (RootedOutputTxn, LocalOutputTxn):
+                real = cls.create_file
+
+                def failing(self: Any, component: str, _real: Any = real) -> int:
+                    if component == DESCRIPTOR:
+                        raise OSError(errno.ENOSPC, f"no space {OSMARK}")
+                    return _real(self, component)
+
+                monkeypatch.setattr(cls, "create_file", failing)
+            receipt = publish_tables(out, one, request)
         elif case == "E10_staged_table_not_parquet":
             txn = out.begin("dir", "exclusive", label="publication")
             fd = txn.create_file(table)

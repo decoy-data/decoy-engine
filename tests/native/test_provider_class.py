@@ -24,7 +24,9 @@ from decoy_engine.providers_v2 import (
 )
 
 _REGISTRY = get_default_registry()
-_ALL_CLASSES: frozenset[ProviderClass] = frozenset({"pool_native", "python_only", "reject_large"})
+_ALL_CLASSES: frozenset[ProviderClass] = frozenset(
+    {"pool_native", "computed_native", "python_only", "reject_large"}
+)
 
 
 class _StubAdapter:
@@ -58,7 +60,13 @@ def test_faker_poolable_provider_is_pool_native() -> None:
 
 
 def test_faker_non_poolable_provider_is_python_only() -> None:
-    assert classify_provider("uuid", None) == "python_only"
+    assert classify_provider("address_full", None) == "python_only"
+    assert classify_provider("lorem_text", None) == "python_only"
+
+
+def test_faker_computed_draw_provider_is_computed_native() -> None:
+    for name in ("uuid", "random_int_range", "random_choice"):
+        assert classify_provider(name, None) == "computed_native", name
 
 
 def test_decoy_native_identifier_provider_is_pool_native() -> None:
@@ -126,11 +134,15 @@ def test_faker_provider_class_follows_the_registry_poolable_flag() -> None:
         if _REGISTRY.get_capabilities(name).backend_type == "faker"
     ]
     assert faker_providers, "expected faker providers in the default registry"
-    poolable = {n for n in faker_providers if _REGISTRY.get_capabilities(n).poolable}
-    non_poolable = set(faker_providers) - poolable
+    computed = {n for n in faker_providers if _REGISTRY.get_capabilities(n).draw == "computed"}
+    poolable = {n for n in faker_providers if _REGISTRY.get_capabilities(n).poolable} - computed
+    non_poolable = set(faker_providers) - poolable - computed
     assert poolable and non_poolable, "expected both poolable and non-poolable faker providers"
+    assert computed, "expected computed-draw faker providers"
     for name in poolable:
         assert classify_provider(name, None) == "pool_native", name
+    for name in computed:
+        assert classify_provider(name, None) == "computed_native", name
     for name in non_poolable:
         assert classify_provider(name, None) == "python_only", name
 

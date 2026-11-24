@@ -197,7 +197,8 @@ def faker_pool_precondition_met(node: Any) -> bool:
     """Whether a `faker` node's resolved config is the ONE deterministic,
     partition-independent variant the chunked native route can select
     per-chunk (JC-5): `deterministic: true`, `cardinality_mode: reuse`, an
-    explicit `namespace`, and an explicit `pool_size`.
+    explicit `namespace`. The pool size is not part of admission: an absent `pool_size`
+    resolves to the default through `effective_pool_size`, the same as on the oracle.
 
     This is the minimal safety guard Task 3.1 needs so ITS OWN admission
     change cannot widen scope ahead of the chunked route's admission
@@ -222,9 +223,7 @@ def faker_pool_precondition_met_seed(seed: ColumnSeed) -> bool:
         return False
     if seed.cardinality_mode not in _PARTITION_INDEPENDENT_CARDINALITY_MODES:
         return False
-    if not seed.namespace:
-        return False
-    return seed.pool_size is not None
+    return bool(seed.namespace)
 
 
 def native_pool_rejection(node: Any, name: str, strategy: str) -> str | None:

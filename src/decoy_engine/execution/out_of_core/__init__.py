@@ -4,6 +4,7 @@ from decoy_engine.execution.out_of_core._batch_join import ChildFkBatchJoiner
 from decoy_engine.execution.out_of_core._budget import (
     OutOfCoreBudget,
     check_temp_disk_budget,
+    detect_effective_memory_bytes,
     resolve_budget,
     resolve_conservative_ooc_budget_bytes,
     resolve_ooc_memory_limit,
@@ -50,6 +51,7 @@ __all__ = [
     "build_parent_key_relation_from_tables",
     "check_out_of_core_compatibility",
     "check_temp_disk_budget",
+    "detect_effective_memory_bytes",
     "mask_batch",
     "mask_child_fk",
     "mask_child_fk_fail",

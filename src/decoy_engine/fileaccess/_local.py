@@ -1,18 +1,11 @@
 """`LocalFileAccess`: today's ambient semantics, the no-policy CLI default.
 
 Paths are plain paths relative to the CWD, symlinks are followed, `display` is the path, and
-every open is lazy so a missing file fails inside the library call with the same text it
-always had. Output transactions use ordinary path calls (a stage directory in the target's
-parent, one `os.replace`), which is exactly what the sinks did before the policy existed.
-This module (with its output-chain openers in `_local_chain.py`) is the one place ambient
-opens of caller or config paths are allowed.
-
-On POSIX, directories on an output chain come from the creators in `_output.py` (F22 5.0
-rule 1, through `_local_chain.py`): the deepest existing ancestor is opened by path, links
-followed as before, and each missing component is made under it by `make_parent_dir_at`; stage
-directories come from `make_stage_dir_at`. A `DIRECTORY_PUBLISH_LABELS` publish (F22 5.1)
-fsyncs the stage tree, renames, then fsyncs the parent and each directory above it up to the
-mount boundary (5.0 rule D). The win32 arm keeps the plain path calls.
+every open is lazy so a missing file fails inside the library call with the same text it always
+had. Output transactions use ordinary path calls (a stage directory in the target's parent, one
+`os.replace`), as the sinks did before the policy existed. This module (with `_local_chain.py`)
+is the one place ambient opens of caller or config paths are allowed. A durable directory
+publish fsyncs the stage tree, renames, then fsyncs each directory above it up to the mount.
 """
 
 from __future__ import annotations
@@ -42,6 +35,7 @@ from decoy_engine.fileaccess._local_chain import (
     _make_stage_dir,
     _open_dir,
     _publish_durable_dir,
+    link_noclobber_beside,
 )
 from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
@@ -55,6 +49,8 @@ from decoy_engine.fileaccess._output import (
     create_private_child_at,
     make_stage_dir_at,
 )
+from decoy_engine.fileaccess._stage_claim import StageClaim, parent_identity_of
+from decoy_engine.fileaccess._stage_walk import PathStageWalk, StageLife
 from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
     FileRequest,
@@ -158,22 +154,24 @@ class LocalDirHandle:
         self.close()
 
 
-class _LocalStageDir:
+class _LocalStageDir(PathStageWalk, StageClaim):
     """Name-taking operations over one stage directory, by path."""
 
     strict = False
 
-    def __init__(self, path: Path, display: str, *, private: bool = False) -> None:
+    def __init__(
+        self, path: Path, display: str, *, private: bool = False, life: StageLife | None = None
+    ) -> None:
         self._dir = path
         self.display = display
         self._display = display
-        self._finished = False
+        self._life = life or StageLife()
         self._private = private  # files 0600 with the owner bits restored (F22 Q8)
 
     def _check(self, *components: str) -> None:
         """Refuse a name that would leave the stage. Length and NUL are left to the operating
         system so the ambient policy raises the same errors a plain path write always did."""
-        if self._finished:
+        if self._life.finished:
             raise FileAccessUnavailable("output transaction is finished")
         for component in components:
             if not component or component in (".", "..") or "/" in component:
@@ -203,7 +201,9 @@ class _LocalStageDir:
                 _close(make_stage_dir_at(parent, component))
             finally:
                 _close(parent)
-        return _LocalStageDir(self._dir / component, self._display, private=self._private)
+        return _LocalStageDir(
+            self._dir / component, self._display, private=self._private, life=self._life
+        )
 
     def remove(self, component: str) -> None:
         self._check(component)
@@ -222,8 +222,7 @@ class _LocalStageDir:
 
 
 def _sync_dir(directory: Path) -> None:
-    """Best-effort fsync of a directory so a rename into it survives a crash. A directory that
-    cannot be opened, synced or closed is skipped: the rename has already published."""
+    """Best-effort fsync of a directory after a rename; any failure is skipped (already published)."""
     try:
         fd = os.open(directory, _osflags.RDONLY | _osflags.CLOEXEC)
     except OSError:
@@ -296,6 +295,7 @@ class LocalOutputTxn(_LocalStageDir):
         self._target = target
         self.owner = owner
         self._kind = kind
+        self._walkable = kind == "dir"
         self._mode = mode
         self._label = self.label = label
         self._staged_file: Path | None = None
@@ -306,8 +306,7 @@ class LocalOutputTxn(_LocalStageDir):
             raise FileAccessUnavailable("the label does not fit this stage kind or mode")
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS and sys.platform != "win32"
         self._created: list[str] = []
-        # A durable stage is created and published through its parent's descriptor, opened
-        # before the stage exists, so no step after the link can fail for want of one.
+        # A durable stage publishes through a parent descriptor opened before the stage exists.
         self._parent_fd = -1
         self._held = HeldStage()  # a publication stage's descriptor, holding its lock
         stage: Path | None = None
@@ -368,11 +367,9 @@ class LocalOutputTxn(_LocalStageDir):
         return super().create_file(component)
 
     def _create_durable_stage(self) -> int:
-        """Open the parent, then create the stage beside the leaf through the private-file
-        choke point (mode exactly 0600). A failure here leaves nothing and keeps the ambient
-        error shape: the class and the target's path."""
-        # Before any syscall: the shared publish validates the leaf too, but only after the
-        # stage exists, and a refusal there would leave it.
+        """Create the 0600 stage beside the leaf through the private-file choke point; a failure
+        leaves nothing and keeps the ambient error shape (the class and the target's path)."""
+        # Validate first: the shared publish checks the leaf only after the stage exists.
         validate_component(self._target.name, "fileaccess.stage")
         name = f"{STAGE_PREFIX[self._label]}{secrets.token_hex(6)}"
         failed: OSError | None = None
@@ -404,7 +401,7 @@ class LocalOutputTxn(_LocalStageDir):
         staged = self._staged_file
         if staged is None:  # pragma: no cover - checked by publish
             raise FileAccessUnavailable("nothing was staged")
-        self._finished = True
+        self._life.end()
         try:
 
             def rename() -> None:
@@ -416,9 +413,8 @@ class LocalOutputTxn(_LocalStageDir):
             self._close_parent()
 
     def _writes_through(self) -> bool:
-        """An existing special file (`/dev/null`) or symlink is written in place, as the
-        un-staged writer always did, because a stage beside it cannot be created or renamed
-        over it."""
+        """A special file (`/dev/null`) or symlink is written in place, as the un-staged writer
+        always did: a stage beside it cannot be renamed over it."""
         return self._target.is_symlink() or (self._target.exists() and not self._target.is_file())
 
     def local_stage_path(self) -> str:
@@ -427,14 +423,15 @@ class LocalOutputTxn(_LocalStageDir):
         return str(self._stage)
 
     def publish(self) -> None:
-        if self._finished:
+        if self._life.finished:
             raise FileAccessUnavailable("output transaction is finished")
         if self._kind == "dir":
             if self._stage is None:  # pragma: no cover - a dir stage always has one
                 raise FileAccessUnavailable("output transaction is finished")
             if self._durable_dir:
                 _publish_durable_dir(self._stage, self._held, self._target)
-                self._stage, self._finished = None, True
+                self._stage = None
+                self._life.end()
                 strict = len(self._created) + 1
                 _durable._sync_bound(lambda: _sync_up(self._target.parent, strict))
                 return
@@ -444,7 +441,7 @@ class LocalOutputTxn(_LocalStageDir):
                 _ensure_dirs(self._target.parent)
             os.replace(self._stage, self._target)
             self._stage = None
-            self._finished = True
+            self._life.end()
             return
         staged = self._staged_file
         if staged is None:
@@ -453,24 +450,24 @@ class LocalOutputTxn(_LocalStageDir):
             self._publish_durable()
             return
         if self._direct:
-            self._finished = True
+            self._life.end()
             return
         if self._mode == "replace":
             os.replace(staged, self._target)
-            self._finished = True
+            self._life.end()
             _sync_dir(self._target.parent)
             return
         occupied = False
         try:
-            os.link(staged, self._target)
+            link_noclobber_beside(staged, self._target)
         except FileExistsError:
             occupied = True
         if occupied:  # raised outside the handler: the link error (both paths) never rides
             with contextlib.suppress(OSError):
                 staged.unlink(missing_ok=True)
-            self._finished = True
+            self._life.end()
             raise FileExistsError(errno.EEXIST, "output exists")
-        self._finished = True
+        self._life.end()
         try:
             os.unlink(staged)
         except OSError as exc:
@@ -481,9 +478,9 @@ class LocalOutputTxn(_LocalStageDir):
             )
 
     def abort(self) -> None:
-        if self._finished:
+        if self._life.finished:
             return
-        self._finished = True
+        self._life.end()
         if self._stage is not None:
             shutil.rmtree(self._stage, ignore_errors=True)
             self._stage = None
@@ -508,9 +505,12 @@ class LocalOutputDir:
 
     def __init__(self, req: FileRequest) -> None:
         self._target = Path(req.locator)
-        self.display = req.locator
-        self.locator = req.locator
+        self.display = self.locator = req.locator
+        self.leaf = self._target.name
         self._field_key = req.field_key
+
+    def parent_identity(self) -> tuple[int, int]:
+        return parent_identity_of(self._parent_fd)
 
     def begin(
         self,

@@ -177,10 +177,24 @@ def test_a_split_with_a_resident_group_or_extra_frame_stays_resident(
 
 
 def test_a_group_row_error_leaves_the_sink_untouched(tmp_path: Path) -> None:
-    # `bucketize` over a text column keeps the group resident (its source is not a null-free
-    # number) and records a format error for the cell that is not a number.
-    bad = pa.table({"d": pa.array(["12"] * (mt.BIG - 1) + ["not-a-number"])})
-    cols = [{"name": "d", "strategy": "bucketize", "provider_config": {"width": 10}}]
+    # `shuffle` keeps the group resident, and `date_shift` over the text column `e` records a
+    # format error for the cell that is not a date.
+    n = mt.BIG
+    bad = pa.table(
+        {
+            "d": pa.array([f"2020-01-{1 + i % 28:02d}" for i in range(n)]),
+            "e": pa.array(["2020-01-12"] * (n - 1) + ["not-a-date"]),
+        }
+    )
+    cols = [
+        {"name": "d", "strategy": "shuffle"},
+        {
+            "name": "e",
+            "strategy": "date_shift",
+            "namespace": "e_ns",
+            "provider_config": {"date_format": "%Y-%m-%d"},
+        },
+    ]
     cfg, sources = mt.build_job(
         tmp_path,
         {"a": (mt.std_columns("a_ns"), mt.string_table(mt.BIG, "a")), "c": (cols, bad)},
@@ -238,7 +252,7 @@ def _worker_job(tmp_path: Path) -> tuple[dict[str, Any], pa.Table]:
 def _payload(cfg: dict[str, Any], tmp_path: Path, name: str, **kwargs: Any) -> dict[str, Any]:
     return {
         "config": cfg,
-        "sources": {"t": cfg["sources"]["t"]["path"]},
+        "sources": {"t": {"format": "parquet", "path": cfg["sources"]["t"]["path"]}},
         "kwargs": {
             "engine_version": "b6a-worker",
             "auto_chunk_threshold_rows": 1_000,
