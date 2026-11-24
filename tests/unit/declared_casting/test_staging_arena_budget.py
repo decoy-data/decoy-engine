@@ -37,7 +37,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Windows cells a
 
 
 @pytest.fixture(autouse=True)
-def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_env_clean: None) -> Path:
     root = tmp_path / "tmp"
     root.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(root))

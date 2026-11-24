@@ -93,7 +93,7 @@ class _Recorder:
 
 
 @pytest.fixture
-def recorder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Recorder:
+def recorder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_env_clean: None) -> _Recorder:
     base = tmp_path / "tmp"
     base.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(base))

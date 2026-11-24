@@ -145,6 +145,7 @@ def _flag_definition(tree: ast.Module) -> set[int]:
     return {id(n) for n in ast.walk(defs[0])}
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 @pytest.mark.parametrize("cell", ["names", "open_name", "create_choke_point"])
 def test_arena_prefix_used_only_by_open(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cell: str

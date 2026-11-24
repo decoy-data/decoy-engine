@@ -51,6 +51,7 @@ def test_budget_is_none_when_disk_usage_fails(
     assert resolve_temp_disk_budget(tmp_path) is None
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 def test_route_budget_follows_temp_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, measured: list[Path]
 ) -> None:
