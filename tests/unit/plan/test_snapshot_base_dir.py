@@ -191,7 +191,10 @@ def test_an_unreadable_relative_snapshot_names_the_path_tried_and_the_rule(
     (a / "snap.json").unlink()
     code, message = _error(stat_config(), base_dir=a)
     assert code == UNREADABLE
-    assert "Statistical snapshot unreadable." in message
+    assert "'snap.json'" in message
+    # The resolved path is config-derived, so it stays out of the text; the rule hint is fixed.
+    assert str(a / "snap.json") not in message
+    assert "config file's folder" in message
 
 
 def test_an_absolute_snapshot_keeps_the_plain_message(folders: tuple[Path, Path]) -> None:
@@ -384,13 +387,14 @@ def test_at_e1_2_compile_wraps_a_non_utf8_snapshot_like_a_truncated_one(tmp_path
         _compile(config)
     code, text = caught.value.code, str(caught.value)
     assert code == UNREADABLE
+    assert "snap.json" in text
     assert not [leak for leak in ("\xff", "0xff", "\u00ff", "position", "codec") if leak in text]
 
 
 def test_at_e1_5_compile_truncated_snapshot_unchanged(tmp_path: Path) -> None:
     code, text = _error(_bad_snapshot_config(tmp_path, b'{"a": '))
     assert code == UNREADABLE
-    assert "Statistical snapshot unreadable." in text
+    assert "snapshot_file" in text and "could not be read." in text
 
 
 def test_at_e1_6_load_snapshot_second_site_raises_the_same_code(tmp_path: Path) -> None:

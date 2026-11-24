@@ -63,7 +63,7 @@ from typing import NamedTuple
 
 from packaging.utils import canonicalize_name
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import fileaccess, reasons, safe_output
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileRequest, FileRole
 from decoy_engine.quality.dp_certified_stacks import CERTIFIED_ROWS
@@ -491,7 +491,7 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
             code=reasons.quality.DP_LOCK_PARSE_ERROR,
             message=(
                 f"could not read/parse lockfile {fileaccess.shown(str(path), 'dp.lock_path')!r}: "
-                f"{type(exc).__name__}"
+                f"{safe_output.safe_error_type(exc).value}"
             ),
         ) from exc
 

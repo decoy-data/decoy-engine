@@ -76,7 +76,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import fileaccess, reasons, safe_output
 from decoy_engine.config import FILE_SOURCE_PATH_FIELDS
 from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._errors import ExecutionError
@@ -333,7 +333,7 @@ def estimate_job_capacity(
             code=_SOURCE_UNPROFILABLE_CODE,
             message=(
                 "a declared source could not be read or parsed while estimating "
-                f"capacity ({type(exc).__name__}); the file may be truncated, "
+                f"capacity ({safe_output.safe_error_type(exc).value}); the file may be truncated, "
                 "corrupt, or not the declared format."
             ),
         ) from exc

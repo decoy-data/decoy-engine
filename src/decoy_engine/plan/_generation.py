@@ -23,13 +23,14 @@ import base64
 import binascii
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import fileaccess, reasons, safe_output
 from decoy_engine.contracts.distribution_snapshot import ACCEPTED_SCHEMA_VERSIONS
 from decoy_engine.fileaccess import FileRole
 from decoy_engine.plan._checks_dp import verify_dp_snapshots
@@ -129,31 +130,42 @@ def snapshot_schema_failure(parsed: Any, shown: str) -> Any:
     )
 
 
-def _unreadable_message(
-    shown: str, locator: str, declared: str, base_dir: str | Path | None, cause: str
-) -> str:
-    """The unreadable-snapshot text. With a `base_dir` and a relative value it names where the
-    read went and the rule; the resolved path is displayed through `fileaccess.shown`."""
-    if locator == declared:
-        return f"snapshot_file {shown!r} could not be read: {cause}"
-    where = fileaccess.shown(locator, "snapshot_file")
-    return (
-        f"snapshot_file {shown!r} could not be read at {where!r} "
-        f"(a relative path is read from the config file's folder): {cause}"
-    )
+def _unreadable_message(shown: str, locator: str, declared: str, cause_type: str) -> str:
+    """The unreadable-snapshot text: the shown name and the exception class, never its text.
+
+    A relative value (`locator` differs from `declared`) also gets the fixed rule hint; the
+    resolved path stays out because it is config-derived.
+    """
+    text = f"snapshot_file {shown!r} could not be read: {cause_type}"
+    if locator != declared:
+        text += " (relative snapshot_file paths resolve against the config file's folder)"
+    return text
+
+
+def statistical_refusal_text(code: str, declared: str) -> str:
+    """The text a compile refusal of a statistical column carries: the registry summary, so no
+    exception text reaches it. An unreadable snapshot also names the shown file and, for a
+    relative value, the fixed rule hint; the config-derived path stays out."""
+    summary: str = reasons.lookup(code)[0].summary
+    if code != reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE:
+        return summary
+    shown = fileaccess.shown(declared, fileaccess.position_key("snapshot_file"))
+    text = f"snapshot_file {shown!r} could not be read."
+    if not os.path.isabs(declared):
+        text += " Relative snapshot_file paths resolve against the config file's folder."
+    return text
 
 
 @dataclass(frozen=True)
 class PinnedRead:
     """One artifact read: its bytes and digest, or (`raw` is None) why it could not be read.
 
-    `cause` is the error text a snapshot report carries (the locator redacted under a strict
-    policy); `cause_type` is the exception class name alone, for a report that must carry no text.
+    `cause_type` is the exception class name alone: the exception text can name the file or hold
+    file content, so no report carries it.
     """
 
     raw: bytes | None
     sha256: str = ""
-    cause: str = ""
     cause_type: str = ""
     # Byte size of a file over the cap (then `raw` is None and nothing was kept).
     oversize: int = 0
@@ -169,26 +181,20 @@ def read_pinned_artifact(
     """Read one declared file once under `role`: the one read step snapshots and lookups share.
 
     Resolves a relative path from `base_dir`, reads through the file policy, and keeps the
-    strict/ambient failure split (a strict policy's own errors propagate; the failure is recorded
+    failure split (a strict policy's own errors propagate; the failure class is recorded
     after the handler closes so no library error is attached). A file over `cap` comes back with
     `oversize` set and is not kept: the caller raises its own coded refusal. Nothing is truncated.
     """
-    shown = fileaccess.shown(declared, field_key)
     locator = fileaccess.config_relative(declared, base_dir)
-    failure: tuple[str, str] | None = None
+    failure_type: str | None = None
     try:
         raw = fileaccess.read_all(role, locator, field_key)
     except OSError as exc:
         if fileaccess.keeps_class(exc):
             raise
-        if fileaccess.is_ambient():
-            return PinnedRead(None, cause=str(exc), cause_type=type(exc).__name__)
-        failure = (
-            fileaccess.redact_locators(str(exc), [(declared, shown), (locator, shown)]),
-            type(exc).__name__,
-        )
-    if failure is not None:
-        return PinnedRead(None, cause=failure[0], cause_type=failure[1])
+        failure_type = safe_output.safe_error_type(exc).value
+    if failure_type is not None:
+        return PinnedRead(None, cause_type=failure_type)
     if len(raw) > cap:
         return PinnedRead(None, oversize=len(raw))
     return PinnedRead(raw, sha256=hashlib.sha256(raw).hexdigest())
@@ -284,7 +290,7 @@ def read_and_pin_snapshots(
         if read.raw is None:
             failures[path] = StatisticalSpecError(
                 code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=_unreadable_message(shown, locator, path, base_dir, read.cause),
+                message=_unreadable_message(shown, locator, path, read.cause_type),
             )
             continue
         raw = read.raw

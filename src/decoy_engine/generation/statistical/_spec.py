@@ -185,15 +185,10 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
     except OSError as exc:
         if fileaccess.keeps_class(exc):
             raise
-        if fileaccess.is_ambient():
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=f"snapshot_file {shown!r} could not be read: {safe_output.safe_error_type(exc).value}",
-            ) from exc
-        failure = fileaccess.redact_locators(str(exc), [(path, shown)])
+        failure = safe_output.safe_error_type(exc).value
     if failure is not None:
         # Strict: raised after the handler closes, so the library error is neither cause nor
-        # context (its text can name the file).
+        # context (its text can name the file). The message holds the class label only.
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
             message=f"snapshot_file {shown!r} could not be read: {failure}",

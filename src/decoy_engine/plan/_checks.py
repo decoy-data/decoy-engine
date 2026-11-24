@@ -335,7 +335,7 @@ def check_statistical_columns(
     """
     from decoy_engine.generation.statistical import check_degenerate, load_spec, spec_to_dict
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
-    from decoy_engine.plan._generation import resolve_pinned_snapshot
+    from decoy_engine.plan._generation import resolve_pinned_snapshot, statistical_refusal_text
 
     pinned = pinned or {}
     column_specs: list[tuple[str, str, str, dict[str, Any]]] = []
@@ -386,7 +386,7 @@ def check_statistical_columns(
                     raise PlanCompileError(
                         code=exc.code,
                         path=f"tables.{table_name}.generate_columns.{col_name}",
-                        message=reasons.lookup(exc.code)[0].summary,
+                        message=statistical_refusal_text(exc.code, snapshot_file),
                     ) from exc
                 # condition_on ordering is checked by plan/checks/_generate_columns.py.
                 column_specs.append((table_name, col_name, snapshot_file, spec_to_dict(spec)))
