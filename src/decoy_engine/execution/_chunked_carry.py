@@ -195,26 +195,16 @@ def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any)
     rebuilt from each node's plan slice, so a column a handler writes beyond the node's own
     (a composite's canonical outputs) is touched here as it is there. A passthrough node, `when:`
     or not, leaves its column as the source held it; every other node masks its own columns."""
-    from decoy_engine.execution._adapter import provider_config_to_dict
-    from decoy_engine.plan._types import ColumnSeed
+    from decoy_engine.execution._runner import node_entry
 
     entries: list[dict[str, Any]] = []
     masked: set[str] = set()
     for node in nodes:
-        seed = node.plan_slice
-        if not isinstance(seed, ColumnSeed):  # a composite FK group: every column is masked
+        entry = node_entry(node)
+        if entry is None:  # a composite FK group: every column is masked
             masked |= set(node.columns)
             continue
-        entries.append(
-            {
-                "name": node.columns[0] if node.columns else None,
-                "strategy": seed.strategy,
-                "provider": seed.provider,
-                "provider_config": provider_config_to_dict(seed.provider_config),
-                "coherent_with": list(seed.coherent_with),
-                "when": seed.when,
-            }
-        )
+        entries.append(entry)
         if node.kind != "scalar" or node.strategy != "passthrough":
             masked |= set(node.columns)
     written = handler_written_columns(entries, registry)

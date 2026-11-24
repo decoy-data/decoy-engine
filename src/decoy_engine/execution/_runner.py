@@ -326,7 +326,7 @@ def source_snapshot_columns(plan: Plan, registry: ProviderRegistry) -> dict[str,
     for node in build_work_list(plan, registry):
         if node.table not in reads:
             continue
-        names, unknown = _node_written_columns(node, registry)
+        names, unknown = node_written_columns(node)
         written[node.table] |= reads[node.table] if unknown else names
     for table, cols in reads.items():
         hit = cols & written[table]
@@ -335,23 +335,39 @@ def source_snapshot_columns(plan: Plan, registry: ProviderRegistry) -> dict[str,
     return out
 
 
-def _node_written_columns(node: WorkNode, registry: ProviderRegistry) -> tuple[set[str], bool]:
-    """`(columns the node writes, whether its writes cannot be named)`."""
+def node_entry(node: WorkNode) -> dict[str, Any] | None:
+    """The config-entry view of a `ColumnSeed` node (None for a composite FK group), the shape
+    the `column_access` declarations read."""
     from decoy_engine.execution._adapter import provider_config_to_dict
-    from decoy_engine.execution._column_access import column_access
 
-    names = set(_writer_output_columns(node))
     seed = node.plan_slice
     if not isinstance(seed, ColumnSeed):
-        return names, False
-    entry = {
-        "name": node.columns[0],
+        return None
+    return {
+        "name": node.columns[0] if node.columns else None,
         "strategy": seed.strategy,
         "provider": seed.provider,
-        "coherent_with": list(seed.coherent_with),
         "provider_config": provider_config_to_dict(seed.provider_config),
+        "coherent_with": list(seed.coherent_with),
+        "when": seed.when,
     }
-    access = column_access(entry, registry)
+
+
+def node_written_columns(node: WorkNode) -> tuple[frozenset[str], bool]:
+    """The ONE answer to "which columns does this work node write": `(columns, unknown)`.
+
+    The node's own outputs plus whatever the `column_access` declaration adds (a composite also
+    writes its provider's canonical output columns, which no config entry names). `unknown`
+    means the declaration cannot name the writes. The writer map, and so the ordering edges, the
+    `when:` snapshot set and the carry's untouched set all read this one declaration.
+    """
+    from decoy_engine.execution._column_access import declared_access
+
+    names = frozenset(_writer_output_columns(node))
+    entry = node_entry(node)
+    if entry is None:
+        return names, False
+    access = declared_access(entry, node.kind == "composite")
     return names | access.writes, access.writes_unknown
 
 
@@ -397,7 +413,7 @@ def _writer_node_map(work: list[WorkNode]) -> dict[tuple[str, str], set[_NodeKey
     """
     writer: dict[tuple[str, str], set[_NodeKey]] = defaultdict(set)
     for node in work:
-        for col in _writer_output_columns(node):
+        for col in node_written_columns(node)[0]:
             writer[(node.table, col)].add(node.key)
     return writer
 
@@ -416,16 +432,9 @@ def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
     plan_slice = node.plan_slice
     if node.kind != "scalar" or not isinstance(plan_slice, ColumnSeed):
         return frozenset()
-    from decoy_engine.execution._adapter import provider_config_to_dict
     from decoy_engine.execution._column_access import scalar_creating_reads
 
-    entry = {
-        "name": node.columns[0] if node.columns else None,
-        "strategy": plan_slice.strategy,
-        "provider_config": provider_config_to_dict(plan_slice.provider_config),
-        "coherent_with": list(plan_slice.coherent_with),
-    }
-    return scalar_creating_reads(entry)
+    return scalar_creating_reads(node_entry(node) or {})
 
 
 def column_dependency_edges(work: list[WorkNode]) -> dict[_NodeKey, set[_NodeKey]]:

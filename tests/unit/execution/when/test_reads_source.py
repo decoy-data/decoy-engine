@@ -286,7 +286,8 @@ def test_a_column_no_node_writes_is_read_live() -> None:
 def test_w3_the_snapshot_is_aligned_by_label_on_a_reindexed_frame() -> None:
     df = _frame()
     df.index = pd.Index([10, 20])
-    snap = pd.Series(["idle", "active"], index=df.index, name="status")
+    # The snapshot holds the same labels in the reverse order: label 10 was "idle", 20 "active".
+    snap = pd.Series(["active", "idle"], index=pd.Index([20, 10]), name="status")
     ctx = _Ctx({"t": frozenset({"status"})}, {("t", "status"): snap})
     out, _ = run_with_when_gate(
         RedactHandler(),
@@ -516,3 +517,53 @@ def test_a_job_whose_source_has_one_row_label_repeated_runs_on_the_oracle_routes
     finally:
         adapter_mod.to_pandas_fk_safe = orig
     assert out.column("zz_target").to_pylist() == ["REDACTED", "t1"]
+
+
+def test_a_derived_column_waits_for_the_composite_that_writes_its_driver() -> None:
+    """`a_summary` sorts before the `first_name` composite, which writes `email` though no entry
+    names it: the writer map must order the composite first and `a_summary` must read its value
+    (Codex R3). One declaration answers "what does this node write" for ordering and snapshots."""
+    from decoy_engine.execution import PandasExecutionAdapter
+    from decoy_engine.execution._runner import build_work_list, order_work
+    from decoy_engine.providers_v2 import get_default_registry
+    from decoy_engine.relationships._graph import RelationshipGraph
+    from decoy_engine.relationships._namespace import NamespaceBinding, NamespaceRegistry
+
+    reg = get_default_registry()
+    graph = RelationshipGraph(edges=(), ordering=())
+    plan = _seed_plan(
+        [
+            ("first_name", _composite_seed()),
+            (
+                "a_summary",
+                _seed_of("derived", provider_config=(("expression", 'concat(email, "!")'),)),
+            ),
+        ]
+    )
+    order = [n.columns for n in order_work(build_work_list(plan, reg), graph)]
+    assert order.index(("first_name",)) < order.index(("a_summary",))
+    n = 4
+    table = pa.table(
+        {
+            "first_name": pa.array([f"F{i}" for i in range(n)]),
+            "last_name": pa.array([f"L{i}" for i in range(n)]),
+            "email": pa.array([f"u{i}@x.test" for i in range(n)]),
+            "a_summary": pa.array(["x"] * n),
+        }
+    )
+    out = (
+        PandasExecutionAdapter()
+        .run_single(
+            plan,
+            table,
+            registry=reg,
+            relationship_graph=graph,
+            namespace_registry=NamespaceRegistry(
+                bindings=(NamespaceBinding("nm", (("t", ("first_name",)),)),)
+            ),
+        )
+        .output
+    )
+    emails = out.column("email").to_pylist()
+    assert emails != table.column("email").to_pylist()  # the composite did mask email
+    assert out.column("a_summary").to_pylist() == [e + "!" for e in emails]

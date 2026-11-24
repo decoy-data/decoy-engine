@@ -16,3 +16,8 @@ Out-of-core still refuses `when:`.
 
 A route that forgets the pre-mask snapshot of a `when:` column fails with the new runtime error
 `when_source_snapshot_missing`. No supported route does.
+
+A column that reads a composite's output (`derived` over `email`, written by a
+`composite_name_email` node keyed on `first_name`) now runs after that composite and reads its
+value. Before, it could run first and read the source value. The writer map behind the ordering,
+the `when:` snapshots and the carry's untouched set is now one declaration.

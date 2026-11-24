@@ -376,17 +376,17 @@ def column_access(entry: Mapping[str, Any], registry: Any) -> ColumnAccess:
     `registry` is the one `build_work_list` receives: it decides whether the entry is a
     composite node, so a caller registry that rebinds or adds a composite is honored.
     """
-    provider = entry.get("provider")
-    if _is_composite(provider, registry):
-        declare = SURFACE_DECLARATIONS.get(f"composite:{provider}")
-        access = _WRITES_UNKNOWN if declare is None else declare(entry)
-        # The when gate is not applied to composite nodes, but the declaration stays
-        # conservative: the predicate's names count as read too.
-        return _with_when(access, entry)
-    declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
-    # An undeclared strategy may write anything: fail closed.
-    access = _WRITES_UNKNOWN if declare is None else declare(entry)
-    return _with_when(access, entry)
+    return declared_access(entry, _is_composite(entry.get("provider"), registry))
+
+
+def declared_access(entry: Mapping[str, Any], composite: bool) -> ColumnAccess:
+    """`column_access` for a caller that already knows whether the entry is a composite node
+    (a `WorkNode` records it in `kind`), so it needs no registry."""
+    key = f"composite:{entry.get('provider')}" if composite else f"scalar:{entry.get('strategy')}"
+    declare = SURFACE_DECLARATIONS.get(key)
+    # An undeclared provider or strategy may write anything: fail closed. A composite's `when:`
+    # is not gated, but its names count as read too.
+    return _with_when(_WRITES_UNKNOWN if declare is None else declare(entry), entry)
 
 
 def _with_when(access: ColumnAccess, entry: Mapping[str, Any]) -> ColumnAccess:
