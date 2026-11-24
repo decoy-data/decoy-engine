@@ -252,21 +252,35 @@ def _read(batch: pa.RecordBatch, column: str) -> pd.Series:
 
 
 def _aligned(
-    left: Iterator[pa.RecordBatch], right: Iterator[pa.RecordBatch]
-) -> Iterator[tuple[pa.RecordBatch, pa.RecordBatch]]:
-    """Pairs of batches of equal length covering both streams in order."""
+    left: Iterator[pa.RecordBatch],
+    right: Iterator[pa.RecordBatch],
+    on_length_mismatch: Callable[[], None],
+) -> Iterator[tuple[pa.RecordBatch | None, pa.RecordBatch]]:
+    """Pairs of batches of equal length covering both streams in order.
+
+    The right stream is the output: every one of its rows is yielded, with `None` for the source
+    batch once the source has ended, so no output row goes uninspected. When the two streams turn
+    out to differ in length, positional identity is meaningless and `on_length_mismatch` runs."""
     a = b = None
     while True:
-        if a is None or a.num_rows == 0:
+        while a is None or a.num_rows == 0:
             a = next(left, None)
-        if b is None or b.num_rows == 0:
+            if a is None:
+                break
+        while b is None or b.num_rows == 0:
             b = next(right, None)
-        if a is None or b is None:
-            # Exhaust both so the row-count check sees every row, not a prefix.
-            for _ in left:
+            if b is None:
+                break
+        if b is None:
+            if a is not None:
+                on_length_mismatch()
+            for _ in left:  # drain so the row-count check sees every source row
                 pass
-            for _ in right:
-                pass
+            return
+        if a is None:
+            on_length_mismatch()
+            yield None, b
+            yield from ((None, rest) for rest in right)
             return
         n = min(a.num_rows, b.num_rows)
         if n:
@@ -374,7 +388,17 @@ def column_facts(
     if aligned and source is not None and compared:
         src_read, src_verify = _counted(source)
         checks.append(src_verify)
-        pairs = _aligned(src_read.read(compared, batch_rows), out_read.read(wanted, batch_rows))
+
+        def lengths_differ() -> None:
+            # Positional identity is void: fail closed on every compared column.
+            for c in compared:
+                tallies[c].error = _NOT_INSPECTABLE_CODE
+
+        pairs = _aligned(
+            src_read.read(compared, batch_rows),
+            out_read.read(wanted, batch_rows),
+            lengths_differ,
+        )
     else:
         compared = []
         pairs = ((None, b) for b in out_read.read(wanted, batch_rows))

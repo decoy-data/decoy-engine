@@ -562,3 +562,75 @@ def test_an_object_column_with_nat_keeps_the_identity_rate_of_the_real_values():
     out = pd.DataFrame({"ssn": pd.Series(values, dtype=object)})
     report = _parity({"t": src}, {"t": out}, _cfg(("ssn", "faker")))
     assert report["residual_pii"][0]["source_identity_rate"] == 1.0
+
+
+def _short_source(table: pa.Table) -> TableBatches:
+    """Declares `table`'s rows but reads back only the first one (a source that may drop rows,
+    so the row-count check does not refuse it)."""
+    full = from_table("t", table)
+
+    def read(columns: Sequence[str], batch_rows: int) -> Iterator[pa.RecordBatch]:
+        for batch in full.read(columns, batch_rows):
+            yield batch.slice(0, 1)
+            return
+
+    return replace(full, read=read, drops_rows=True)
+
+
+def test_output_rows_past_a_short_source_are_still_inspected(tmp_path: Path):
+    # The second output date is year 10000, which pandas cannot hold: the check must fail closed
+    # on it even though the source stream ended after one row.
+    day = pa.array([19000, 2_932_897], pa.date32())
+    src = pa.table({"d": pa.array([19000, 19001], pa.date32())})
+    out = pa.table({"d": day})
+    report = run_post_mask_tables(
+        {"t": _short_source(src)},
+        {"t": from_table("t", out)},
+        config=_cfg(("d", "hash")),
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    assert report["error_count"] >= 1
+    assert any(f["column"] == "d" and f["severity"] == "error" for f in report["residual_pii"])
+
+
+def test_a_source_that_reads_short_marks_identity_unavailable(tmp_path: Path):
+    src = pa.table({"e": ["a@x.com", "b@x.com"]})
+    out = pa.table({"e": ["a@x.com", "c@x.com"]})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["e"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )["e"]
+    assert facts.identity_error is not None
+    assert facts.comparable_rows == 0 and not facts.bytes_identical
+
+
+def test_a_stored_index_column_gets_the_same_verdict_on_the_resident_and_batch_gates(
+    tmp_path: Path,
+):
+    from decoy_engine.execution.pipeline._post_scan_suite import suite_frames
+
+    emails = [f"user{i}@realmail.com" for i in range(20)]
+    frame = pd.DataFrame({"email": emails, "n": range(20)}).set_index("email")
+    table = pa.Table.from_pandas(frame)
+    assert table.schema.names[-1] == "email"  # stored as a physical field
+    config = _cfg(("email", "redact"))
+    src_frames, out_frames = suite_frames({"t": table}, {"t": table}, ["t"])
+    resident = run_post_mask(src_frames, out_frames, config=config)
+    batch = run_post_mask_tables(
+        {"t": from_table("t", table)},
+        {"t": from_table("t", table)},
+        config=config,
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    assert batch["fail_count"] >= 1
+    for report in (resident, batch):
+        report.pop("generated_at")
+    assert resident["fail_count"] == batch["fail_count"]
+    assert resident["residual_pii"] == batch["residual_pii"]

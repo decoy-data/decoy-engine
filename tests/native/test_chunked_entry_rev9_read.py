@@ -13,7 +13,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from decoy_engine import run_mask_chunked
+from decoy_engine import reasons, run_mask_chunked
 from decoy_engine.execution import _pandas_adapter
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
@@ -785,9 +785,11 @@ def test_stock_adapter_subclass_is_not_wrapped_either() -> None:
         adapter=Sub(),
     )
     next(gen)
-    with pytest.raises(Exception) as info:
+    with pytest.raises(ExecutionError) as info:
         next(gen)
-    assert type(info.value).__name__ == "ExecutionError"
+    assert info.value.code == reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE
+    assert info.value.column == "x"
+    assert info.value.code != CODE
 
 
 # ---------------------------------------------------------------------------

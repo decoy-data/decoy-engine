@@ -122,3 +122,22 @@ def test_a_date_pandas_cannot_hold_fails_the_profile_with_a_coded_value_free_err
             assert "out of bounds" not in text.lower()
         assert err.__cause__ is None
         assert err.__context__ is None
+
+
+def test_invalid_utf8_in_a_supplied_string_column_fails_coded_and_value_free(
+    tmp_path: Path,
+) -> None:
+    data = b"ok\xff\xfesecret"
+    offsets = pa.array([0, 2, len(data)], pa.int32()).buffers()[1]
+    bad = pa.Array.from_buffers(pa.string(), 2, [None, offsets, pa.py_buffer(data)])
+    table = pa.table({"s": bad, "n": [1, 2]})
+    for residency in ("bounded", "full"):
+        with pytest.raises(ExecutionError) as exc:
+            profile_source(
+                _config(tmp_path), seed=1, residency=residency, supplied_sources={"s": table}
+            )
+        err = exc.value
+        assert err.code == reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE
+        assert err.column == "s"
+        assert "secret" not in str(err) + repr(err)
+        assert err.__cause__ is None and err.__context__ is None

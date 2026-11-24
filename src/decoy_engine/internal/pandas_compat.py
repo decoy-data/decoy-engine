@@ -77,8 +77,17 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
 
 
 # A value pandas cannot hold raises ValueError (a date past year 9999; ArrowInvalid is a subclass,
-# as is a sub-microsecond time64) or, defensively, OverflowError.
-_UNREPRESENTABLE: Final = (ValueError, OverflowError)
+# as is a sub-microsecond time64), OverflowError, or a bare ArrowException (a string with invalid
+# UTF-8: "Wrapping <cell text> failed"). Every one quotes the cell.
+_UNREPRESENTABLE: Final = (pa.ArrowException, ValueError, OverflowError)
+
+
+def _is_resource_failure(exc: BaseException) -> bool:
+    """Memory pressure and a full disk keep their own type: they say nothing about a value."""
+    from decoy_engine.fileaccess._errors import passes_by_type
+
+    return isinstance(exc, Exception) and passes_by_type(exc)
+
 
 _Mapper = Callable[[pa.DataType], pd.api.extensions.ExtensionDtype | None]
 
@@ -94,13 +103,16 @@ def _fail(on_unrepresentable: Callable[[Any], NoReturn], column: str | None) -> 
 def _first_failing_column(table: pa.Table, types_mapper: _Mapper | None) -> str | None:
     """The first column that does not convert alone, or None when every one does.
 
-    Any exception from a probe counts as that column failing: its text may quote a cell and is
-    dropped here, never chained.
+    A recognized conversion failure counts as that column failing: its text may quote a cell and
+    is dropped here, never chained. A resource failure, or any other exception, propagates as
+    itself.
     """
     for position, name in enumerate(table.column_names):
         try:
             table.column(position).to_pandas(types_mapper=types_mapper)
-        except Exception:
+        except _UNREPRESENTABLE as exc:
+            if _is_resource_failure(exc):
+                raise
             return name
     return None
 
@@ -127,8 +139,9 @@ def arrow_to_frame(
     _no_widening(widen)
     try:
         return table.to_pandas(types_mapper=types_mapper)
-    except _UNREPRESENTABLE:
-        pass
+    except _UNREPRESENTABLE as exc:
+        if _is_resource_failure(exc):
+            raise
     # Probed outside the handler above, so no exception raised from here carries a context
     # that quotes the value.
     _fail(on_unrepresentable, _first_failing_column(table, types_mapper))
@@ -146,8 +159,9 @@ def arrow_to_series(
     _no_widening(widen)
     try:
         return array.to_pandas(types_mapper=types_mapper)
-    except _UNREPRESENTABLE:
-        pass
+    except _UNREPRESENTABLE as exc:
+        if _is_resource_failure(exc):
+            raise
     _fail(on_unrepresentable, name)
 
 

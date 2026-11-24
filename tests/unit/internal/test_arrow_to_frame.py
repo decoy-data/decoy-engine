@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import traceback
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, NoReturn
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.internal.pandas_compat import (
@@ -123,8 +125,8 @@ class _FakeTable:
         return _FakeColumn(self._probe_error)
 
 
-def test_a_probe_that_raises_another_type_still_reaches_the_callback_value_free() -> None:
-    fake: Any = _FakeTable(RuntimeError("cell 2932897 is bad"))
+def test_a_probe_that_raises_an_arrow_exception_still_reaches_the_callback_value_free() -> None:
+    fake: Any = _FakeTable(pa.ArrowException("Wrapping cell 2932897 failed"))
     with pytest.raises(_RefusedError) as caught:
         arrow_to_frame(fake, on_unrepresentable=_refuse)
     exc = caught.value
@@ -141,3 +143,60 @@ def test_no_single_failing_column_calls_the_callback_with_none() -> None:
     assert exc.column is None
     assert exc.__cause__ is None and exc.__context__ is None
     assert "2932897" not in "".join(traceback.format_exception(exc))
+
+
+@pytest.mark.parametrize("probe_error", [MemoryError("2932897"), pa.ArrowMemoryError("2932897")])
+def test_a_resource_failure_in_a_probe_propagates_as_itself_without_context(
+    probe_error: Exception,
+) -> None:
+    fake: Any = _FakeTable(probe_error)
+    with pytest.raises(type(probe_error)) as caught:
+        arrow_to_frame(fake, on_unrepresentable=_refuse)
+    assert caught.value is probe_error
+    assert caught.value.__context__ is None
+
+
+def test_a_resource_failure_in_the_conversion_propagates_as_itself() -> None:
+    class _Oom:
+        column_names = ("ok",)
+
+        def to_pandas(self, **_kwargs: object) -> pd.DataFrame:
+            raise pa.ArrowMemoryError("out of memory")
+
+    fake: Any = _Oom()
+    with pytest.raises(MemoryError):
+        arrow_to_frame(fake, on_unrepresentable=_refuse)
+    with pytest.raises(MemoryError):
+        arrow_to_series(fake, on_unrepresentable=_refuse, name="ok")
+
+
+def _invalid_utf8_table() -> pa.Table:
+    data = b"ok\xff\xfesecret"
+    offsets = pa.array([0, 2, len(data)], pa.int32()).buffers()[1]
+    column = pa.Array.from_buffers(pa.string(), 2, [None, offsets, pa.py_buffer(data)])
+    return pa.table({"n": [1, 2], "s": column})
+
+
+def _assert_value_free(exc: BaseException) -> None:
+    text = "".join(traceback.format_exception(exc)) + repr(exc) + str(exc)
+    assert "secret" not in text and "\ufffd" not in text and "Wrapping" not in text
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert not getattr(exc, "__notes__", None)
+
+
+@pytest.mark.parametrize("entry", ["frame", "series", "pair"])
+def test_invalid_utf8_from_a_parquet_file_reaches_the_callback_value_free(
+    entry: str, tmp_path: Path
+) -> None:
+    path = tmp_path / "t.parquet"
+    pq.write_table(_invalid_utf8_table(), path)
+    table = pq.read_table(path)
+    with pytest.raises(_RefusedError) as caught:
+        if entry == "frame":
+            arrow_to_frame(table, on_unrepresentable=_refuse)
+        elif entry == "series":
+            arrow_to_series(table.column("s"), on_unrepresentable=_refuse, name="s")
+        else:
+            arrow_to_frame_pair(table, table, on_unrepresentable=_refuse)
+    assert caught.value.column == "s"
+    _assert_value_free(caught.value)
