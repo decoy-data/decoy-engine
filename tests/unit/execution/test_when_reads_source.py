@@ -204,9 +204,11 @@ _SENTINEL = "SENTINEL-ORIGINAL-VALUE"
 class _Ctx:
     """Test double with the fields the gate reads from a real StrategyContext."""
 
-    def __init__(self, columns: Any, snapshots: dict[tuple[str, str], pd.Series]) -> None:
+    def __init__(
+        self, columns: Any, snapshots: dict[tuple[str, str], pd.Series], table: str = "t"
+    ) -> None:
         self.row_errors: list[Any] = []
-        self.current_table = "t"
+        self.current_table = table
         self.source_snapshot_columns = columns
         self.group_anchor_snapshots = snapshots
 
@@ -294,3 +296,25 @@ def test_w3_the_snapshot_is_aligned_by_label_on_a_reindexed_frame() -> None:
         ctx,  # type: ignore[arg-type]
     )
     assert out["email"].tolist() == ["a", "REDACTED"]
+
+
+@pytest.mark.parametrize("table", ["", "other"], ids=["empty_table", "unknown_table"])
+def test_a_snapshot_set_without_the_running_table_never_reads_the_live_frame(table: str) -> None:
+    """An empty table name cannot look the set up, so the gate fails closed. A table the set
+    does not name has no written read column: its reads are original values, read live."""
+    df = _frame()
+    snap = pd.Series(["active", "idle"], index=df.index, name="status")
+    ctx = _Ctx({"t": frozenset({"status"})}, {("t", "status"): snap}, table=table)
+    run = lambda: run_with_when_gate(
+        RedactHandler(),
+        df,
+        "email",
+        _seed("status == 'hashed2'"),
+        ctx,  # type: ignore[arg-type]
+    )
+    if table == "":
+        with pytest.raises(StrategyError) as info:
+            run()
+        assert info.value.code == "when_source_snapshot_missing"
+    else:
+        assert run()[0]["email"].tolist() == ["a", "REDACTED"]

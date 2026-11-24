@@ -155,3 +155,16 @@ def test_the_gate_frame_comes_from_when_source_frame() -> None:
         and any(isinstance(t, ast.Name) and t.id == "source" for t in n.targets)
     ]
     assert len(assigned) == 1 and assigned[0].startswith("when_source_frame(")
+
+
+def test_the_unified_slice_passes_the_candidate_source_frame() -> None:
+    """`compute_when_masks` must get the candidate's source frame, never a frame the run masked."""
+    tree = ast.parse((_SRC / "_unified_slice.py").read_text())
+    args = [
+        ast.unparse(n.args[0])
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "compute_when_masks"
+    ]
+    assert args == ["candidate.source_frame"]

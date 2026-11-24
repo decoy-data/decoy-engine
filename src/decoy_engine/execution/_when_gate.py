@@ -471,8 +471,8 @@ def when_source_frame(
         reads = when_column_refs(parse_when_cached(expression))
     except ValidationError:
         return df  # `_eval_predicate` raises the coded grammar error
-    if snapshot_set is None:
-        raise _snapshot_missing(strategy, table)
+    if snapshot_set is None or (snapshot_set and not table):
+        raise _snapshot_missing(strategy, table)  # no set, or no table to look the set up by
     snapped = [r.column for r in reads if r.column in snapshot_set.get(table, ())]
     snapped = [c for c in snapped if c in df.columns]
     if not snapped:
@@ -524,17 +524,9 @@ def run_with_when_gate(
         require_same_rows(rows, out, column=column, strategy=plan.strategy, table=table)
         return out, warnings
 
-    # Codex P2 FAIL-CLOSED VALIDATION BYPASSED BY A ZERO-MATCH `when` GATE
-    # remediation: a handler's own fail-closed preflight (e.g. CodeSetHandler
-    # loading/validating its corpus) normally runs inside `handler.run()`,
-    # which the `not mask.any()` short-circuit below never reaches. That let
-    # a column referencing a missing/invalid corpus succeed silently
-    # whenever its `when:` predicate happened to match zero rows. A handler
-    # that needs config/data validated regardless of match count exposes an
-    # optional `preflight(plan, ctx) -> None` method; call it unconditionally
-    # here, BEFORE the short-circuit, so it always runs while the handler's
-    # own `run()` (reached only on a non-empty match) still does the real
-    # per-row work and evidence stamping unchanged.
+    # A handler's fail-closed preflight (e.g. CodeSetHandler validating its corpus) would be
+    # skipped by the zero-match short-circuit below, so a missing corpus passed silently when the
+    # predicate matched no row. Call the optional `preflight(plan, ctx)` first, always.
     preflight = getattr(handler, "preflight", None)
     if preflight is not None:
         preflight(plan, ctx)
@@ -552,11 +544,8 @@ def run_with_when_gate(
     sub_df, warnings = handler.run(sub_df, column, plan, gated_context(ctx, column, positions))
     # Before the index-aligned write-back below, which would turn a dropped row into a null.
     require_same_rows(sub_rows, sub_df, column=column, strategy=plan.strategy, table=table)
-    # B1: remap subset-relative row-error indices to full-table positions
-    # BEFORE they leave the gate (see _remap_gated_row_errors). The k-th
-    # mask-True row's full-table position is positions[k], and the handler
-    # records positions 0..len(sub_df)-1 into the subset in the same order
-    # (our row-error producers preserve row order).
+    # B1: remap subset-relative row-error indices to full-table positions before they leave the
+    # gate: the k-th mask-True row sits at positions[k] and row errors keep row order.
     if len(ctx.row_errors) > err_start:
         # `.tolist()` (only on the rare error path) gives a plain Sequence.
         _remap_gated_row_errors(ctx, err_start, positions.tolist())
