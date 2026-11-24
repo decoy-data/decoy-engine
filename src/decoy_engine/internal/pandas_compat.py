@@ -10,6 +10,7 @@ every pre-existing baseline digest.
 
 from __future__ import annotations
 
+import importlib
 import re
 from collections.abc import Callable, Iterable
 from typing import Any, Final, NoReturn
@@ -17,6 +18,9 @@ from typing import Any, Final, NoReturn
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+
+# Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
+pc: Any = importlib.import_module("pyarrow.compute")
 
 # pandas-3 default datetime inference resolution is 'us' where 1.5-2.x
 # always produced 'ns'. Resolution is uniform within one pandas version,
@@ -42,6 +46,39 @@ def canonical_dtype_label(dtype: Any) -> str:
     if m:
         return f"datetime64[ns{m.group(2) or ''}]"
     return label
+
+
+# Arrow integer value pandas reads as NaT in a timestamp or duration column.
+_ARROW_INT64_MIN = -(2**63)
+
+
+def arrow_missing_mask(arr: pa.Array) -> pa.Array:
+    """Rows pandas reads as missing: Arrow nulls, NaN, and the int64 minimum in a timestamp."""
+    mask = pc.is_null(arr)
+    if pa.types.is_floating(arr.type):
+        mask = pc.or_(mask, pc.is_nan(arr))
+    if pa.types.is_timestamp(arr.type) or pa.types.is_duration(arr.type):
+        mask = pc.or_kleene(mask, pc.equal(arr.cast(pa.int64()), _ARROW_INT64_MIN))
+    return pc.fill_null(mask, True)
+
+
+def arrow_dtype_label(t: pa.DataType, has_missing: bool, canonical: Any) -> str:
+    """The dtype label pandas gives the column an Arrow column of type `t` converts to."""
+    if pa.types.is_integer(t):
+        return "float64" if has_missing else str(t)
+    if pa.types.is_boolean(t):
+        return "object" if has_missing else "bool"
+    if pa.types.is_floating(t):
+        return {16: "float16", 32: "float32", 64: "float64"}[t.bit_width]
+    if pa.types.is_timestamp(t):
+        # The pandas dtype names a zone through its tzinfo (`pytz.FixedOffset(330)` for
+        # "+05:30"), so ask pyarrow for the dtype it converts to instead of formatting `tz`.
+        return str(canonical(str(t.to_pandas_dtype())))
+    if pa.types.is_duration(t):
+        return f"timedelta64[{t.unit}]"
+    if pa.types.is_dictionary(t):
+        return "category"
+    return "object"
 
 
 def utc_naive_datetimes(series: pd.Series) -> pd.Series:

@@ -16,7 +16,6 @@ re-decide).
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +32,8 @@ from decoy_engine.execution._residency_warning import (
     residency_quality_warning,
 )
 from decoy_engine.execution._sequential import run_sequential
+from decoy_engine.execution.out_of_core import resolve_temp_disk_budget
+from decoy_engine.fileaccess import scratch_root
 
 if TYPE_CHECKING:
     from decoy_engine.execution._output_projection import UnconfiguredColumnPolicy
@@ -51,29 +52,6 @@ __all__ = [
     "run_out_of_core_route",
     "run_sequential_route",
 ]
-
-
-# OOC-D: the runtime temp-disk cap (`_budget.check_temp_disk_budget`, enforced
-# inside `run_fk_out_of_core` at each table boundary) is sized off free disk
-# at dispatch time, not the whole free amount -- concurrent processes/jobs on
-# the same host are also writing to the same filesystem, so reserving a slice
-# rather than claiming 100% of what `shutil.disk_usage` reports right now
-# leaves headroom for exactly that concurrent writer. Matches the spirit of
-# `_budget.py`'s own conservative-fraction conventions (`_HOST_RAM_FRACTION`
-# etc.) applied to disk instead of memory.
-_TEMP_DISK_SAFETY_FRACTION = 0.9
-
-
-def resolve_temp_disk_budget() -> int | None:
-    """The runtime temp-disk cap: a safety fraction of the free space at the out-of-core temp
-    root, or `None` when the count is undetectable (the cap is then left unset rather than
-    newly blocking a job the route would otherwise have run)."""
-    from decoy_engine.execution.out_of_core._spill_estimate import default_ooc_temp_root
-
-    try:
-        return int(shutil.disk_usage(default_ooc_temp_root()).free * _TEMP_DISK_SAFETY_FRACTION)
-    except OSError:
-        return None
 
 
 def execution_telemetry(
@@ -274,8 +252,8 @@ def run_out_of_core_route(
 
     Disk (OOC-D): `temp_disk_budget_bytes` is threaded into `run_fk_out_of_core`
     as `_TEMP_DISK_SAFETY_FRACTION` (0.9) of the free space `shutil.disk_usage`
-    reports at `_spill_estimate.default_ooc_temp_root()` -- the SAME root the
-    runner's own `protected_scratch_dir` default lands under absent an explicit
+    reports at `fileaccess.scratch_root()` -- the SAME root the
+    runner's own scratch arena lands under absent an explicit
     `temp_dir`, so this budget and the runner's actual spill target are the
     same filesystem. This is what makes the runner's existing `check_temp_
     disk_budget` runtime cap (already called at each table boundary once a
@@ -389,7 +367,7 @@ def run_out_of_core_route(
     # one `run_fk_out_of_core` spills under by default -- so `check_temp_disk_
     # budget` (already called at each table boundary inside the runner) is
     # enforced on the pipeline path, not just callers that pass this directly.
-    temp_disk_budget_bytes = resolve_temp_disk_budget()
+    temp_disk_budget_bytes = resolve_temp_disk_budget(scratch_root())
 
     # SPRINT-1 Part B: the hybrid memory capacity preflight, an advisory
     # build-floor check plus a hard fan-in guard underneath Part A's

@@ -8,6 +8,7 @@ from decoy_engine.execution.out_of_core._budget import (
     resolve_budget,
     resolve_conservative_ooc_budget_bytes,
     resolve_ooc_memory_limit,
+    resolve_temp_disk_budget,
     temp_disk_bytes,
 )
 from decoy_engine.execution.out_of_core._compat import (
@@ -60,6 +61,7 @@ __all__ = [
     "resolve_budget",
     "resolve_conservative_ooc_budget_bytes",
     "resolve_ooc_memory_limit",
+    "resolve_temp_disk_budget",
     "run_fk_out_of_core",
     "temp_disk_bytes",
 ]

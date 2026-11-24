@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
+from decoy_engine._pandas_meta import arrow_columns
 from decoy_engine.config import PipelineConfig, PipelineConfigError
 from decoy_engine.fileaccess import FileAccess
 from decoy_engine.profile._csv_reader import (
@@ -70,14 +71,6 @@ def declared_columns(config: Mapping[str, Any], table: str) -> tuple[str, ...]:
             if child.get("table") == table and isinstance(cols, list) and len(cols) > 1:
                 names.extend(c for c in cols if isinstance(c, str))
     return tuple(dict.fromkeys(names))
-
-
-def arrow_columns(schema: pa.Schema) -> tuple[str, ...]:
-    """Column names of an Arrow schema, without a stored pandas index field."""
-    from decoy_engine.execution._transforms import stored_index_fields
-
-    index = stored_index_fields(schema)
-    return tuple(n for n in schema.names if n not in index)
 
 
 @fileaccess.entry_point
