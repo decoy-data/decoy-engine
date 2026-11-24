@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution.pipeline._subset_stage import SubsetStageScope
     from decoy_engine.keyprovider import KeyProvider
     from decoy_engine.plan._types import Plan
+    from decoy_engine.plan.column_access import TableWrites
     from decoy_engine.profile._types import Profile
     from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships import RelationshipGraph
@@ -90,6 +91,7 @@ class PipelineRunContext:
     plan: Plan
     profile: Profile
     graph: RelationshipGraph
+    writes: dict[str, TableWrites]  # the writer query over `graph` and `registry`
     namespace_registry: Any
     registry: ProviderRegistry
     key_provider: KeyProvider | None
@@ -310,9 +312,8 @@ def build_run_context(
     has_mask_table = any(kind == "mask" for kind in table_kinds.values())
     has_generate_table = any(kind == "generate" for kind in table_kinds.values())
 
-    # DE-03: resolve the output-projection policy once; generate-kind tables ride
-    # through the mask adapter as echoed sources and are exempt (declared by their
-    # generate config, not the mask plan). Threaded into every emission route.
+    # DE-03: resolve the output-projection policy once; generate-kind tables ride through the
+    # mask adapter as echoed sources, exempt (declared by their generate config, not the plan).
     projection_policy = resolve_unconfigured_column_policy(config)
     generate_output_tables = frozenset(
         name for name, kind in table_kinds.items() if kind == "generate"
@@ -320,9 +321,8 @@ def build_run_context(
 
     # F13: admit the keyed-mask secret from configuration alone BEFORE any source is read, so a
     # missing, inaccessible, expired or invalid secret fails closed while the source is untouched.
-    # A programmatic `key_provider` wins over `global_settings.mask_secret_ref`. There is no
-    # `job_seed` fallback for keyed work in any release phase. The owner (`secret_scope`) is
-    # closed by `run_pipeline` on every exit path.
+    # A programmatic `key_provider` wins over `global_settings.mask_secret_ref`; there is no
+    # `job_seed` fallback for keyed work. `run_pipeline` closes `secret_scope` on every exit.
     from decoy_engine.keyprovider import mask_key_from_provider
 
     admitted = secret_scope.adopt(
@@ -382,10 +382,9 @@ def build_run_context(
     # Late defense in depth: the compiled plan may not need more than admission covered.
     assert_plan_requirements_admitted(plan, admitted)
     resolved_key_provider = admitted.key_provider
-    # DE-02 (Codex BLOCKER 5 / item 6a): the token vault holds reversible plaintext
-    # PII and must be encrypted under the SAME resolved mask key as the masking
-    # run. Fail closed (shared guard) if a caller-supplied vault writer is keyed
-    # differently, or is not the standard VaultWriter contract.
+    # DE-02: the token vault holds reversible plaintext PII and must be encrypted under the SAME
+    # resolved mask key as the run. Fail closed (shared guard) if a caller-supplied vault writer
+    # is keyed differently, or is not the standard VaultWriter contract.
     if vault_writer is not None:
         from decoy_engine.vault import assert_vault_writer_keyed
 
@@ -418,6 +417,7 @@ def build_run_context(
         plan=plan,
         profile=profile,
         graph=graph,
+        writes=facts.writes(config, resolved_registry),
         namespace_registry=facts.namespace_registry,
         registry=resolved_registry,
         key_provider=resolved_key_provider,

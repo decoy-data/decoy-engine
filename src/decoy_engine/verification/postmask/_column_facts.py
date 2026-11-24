@@ -30,8 +30,12 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
-from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.internal.pandas_compat import exact_int_types_mapper
+from decoy_engine.plan.column_access import (
+    TableWrites,
+    config_child_keys,
+    written_columns_by_table,
+)
 from decoy_engine.profiling import KEY_BATCH_ROWS, column_distinct, passes_through
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.verification.postmask._stream_input import TableBatches, key_batches
@@ -452,18 +456,15 @@ def value_facts(
     return {c: t.done() for c, t in tallies.items()}
 
 
-def masked_columns(config: Mapping[str, Any]) -> dict[str, frozenset[str] | None]:
-    """Per configured table, every column some entry names or writes, or None when an entry's
-    writes cannot be named (then any column may be written).
-
-    The writes come from the declarations execution itself honors (`handler_written_columns`),
-    so a joint_mask entry on one column counts the sibling columns it also writes."""
-    masked: dict[str, frozenset[str] | None] = {}
-    for table in config.get("tables") or []:
-        if not isinstance(table, Mapping) or not isinstance(table.get("name"), str):
-            continue
-        entries = [c for c in table.get("columns") or [] if isinstance(c, Mapping)]
-        written = handler_written_columns(entries, get_default_registry())
-        named = {c["name"] for c in entries if isinstance(c.get("name"), str)}
-        masked[table["name"]] = None if written is None else written | named
-    return masked
+def standalone_writes(
+    config: Mapping[str, Any], schemas: Mapping[str, Sequence[str]]
+) -> dict[str, TableWrites]:
+    """The writer query for a caller with no compiled run: the tables' field names, the edges
+    the config expands to and the default provider registry, the inputs a run with that config
+    compiles. Relationships that do not expand give no answer, so no column is proven unwritten."""
+    edges = config_child_keys(config)
+    if edges is None:
+        return {}
+    return written_columns_by_table(
+        config, schemas=schemas, edges=edges, registry=get_default_registry()
+    )

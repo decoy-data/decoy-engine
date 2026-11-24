@@ -15,13 +15,13 @@ import numpy as np
 import pyarrow as pa
 from pandas.core.computation.parsing import clean_column_name
 
-from decoy_engine.execution._column_access import has_when
 from decoy_engine.execution._when_gate import _eval_predicate
 from decoy_engine.execution.native._when_admission import (
     parsed_when,
     when_native_rejection,
 )
 from decoy_engine.expressions._when_parser import when_column_refs
+from decoy_engine.plan.column_access import has_when
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence

@@ -41,11 +41,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine.contracts.column_shape import SourceFacts
-from decoy_engine.execution._runner import (
-    WorkNode,
-    build_work_list,
-    provider_is_composite,
-)
+from decoy_engine.execution._runner import WorkNode, build_work_list
 from decoy_engine.execution.native._capabilities import (
     StrategyCapabilities,
     capabilities_for,
@@ -68,6 +64,7 @@ from decoy_engine.execution.native._requirements import (
 )
 from decoy_engine.plan import compile_plan
 from decoy_engine.plan._seed_envelope import composite_fk_relationships
+from decoy_engine.plan.column_access import provider_is_composite
 from decoy_engine.providers_v2 import get_default_registry
 
 

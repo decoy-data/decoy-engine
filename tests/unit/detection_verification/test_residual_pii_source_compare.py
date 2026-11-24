@@ -21,6 +21,7 @@ import pytest
 from decoy_engine.fileaccess import FileAccessReadError
 from decoy_engine.verification.postmask import _column_facts as facts_module
 from decoy_engine.verification.postmask import from_table, run_post_mask
+from decoy_engine.verification.postmask._column_facts import standalone_writes
 from decoy_engine.verification.postmask.residual_pii import (
     _frame_column_facts,
     check_residual_pii,
@@ -28,6 +29,12 @@ from decoy_engine.verification.postmask.residual_pii import (
 )
 
 _EMAILS = [f"user{i}@realmail.com" for i in range(100)]
+
+
+def _findings(facts, config, failed=None):
+    """`residual_pii_findings` with the writer query the frame path computes for these tables."""
+    schemas = {table: list(columns) for table, columns in facts.items()}
+    return residual_pii_findings(facts, config, failed, writes=standalone_writes(config, schemas))
 
 
 def _cfg(strategy: str | None, column: str = "email") -> dict:
@@ -306,7 +313,7 @@ def _both_paths(src_cols: dict, out_cols: dict, config: dict, tmp_path: Path, mo
         scratch=tmp_path,
         memory_limit="256MB",
     )
-    batch = residual_pii_findings({"t": batch_facts}, config)
+    batch = _findings({"t": batch_facts}, config)
     return frame, batch, frame_facts, batch_facts
 
 

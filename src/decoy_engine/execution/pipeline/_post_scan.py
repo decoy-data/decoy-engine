@@ -71,6 +71,7 @@ from decoy_engine.verification.postmask import (
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
     from decoy_engine.execution._pipeline_context import PipelineRunContext
+    from decoy_engine.plan.column_access import TableWrites
     from decoy_engine.profiling.model_pack import DetectorSet
     from decoy_engine.verification.postmask import TableBatches
     from decoy_engine.verification.postmask.distribution import DistributionInput
@@ -89,8 +90,7 @@ __all__ = [
 _NOT_RUN: Final = "PostScanGateNotRun"
 
 
-# A smaller cap starves DuckDB's hash join even at 100k keys (it fails to pin a block), so a small
-# run budget never takes the key scan below this.
+# Below this cap DuckDB's hash join fails to pin a block even at 100k keys.
 _FLOOR_MB: Final = 128
 
 
@@ -107,36 +107,32 @@ class PostScanGate:
         deferred: bool = False,
         sources: Mapping[str, pa.Table | LazySource] | None = None,
         detectors: DetectorSet | None = None,
+        writes: Mapping[str, TableWrites] | None = None,
     ) -> None:
         self.required = post_scan_gate_applies(config)
-        # The post-scan models `run_pipeline` loaded strictly at run start; they read resident
-        # outputs only, so a model ask keeps its run resident (`post_scan_resident_reason`).
+        # Post-scan models loaded strictly at run start; they read resident outputs only.
         self._detectors = detectors
+        self._writes = writes  # the run's writer query; None makes the runner compute it
         # True on a route whose inputs or output the gate cannot read back yet: the run is then
         # checked report-only, as before the gate, and says so on its result.
         self.deferred = deferred and self.required
-        # Set when a commit arrives for a sink the gate cannot read back: the run delivers
-        # through it as it would without the gate, deferred, and says so on its result.
+        # A commit to a sink the gate cannot read back: delivered unchecked, deferred, said so.
         self.output_unreadable = False
         self.ran = False
         self.report: dict[str, Any] | None = None
         self.verdict: PostScanVerdict | None = None
         self._config = config
         self._budget_bytes = budget_bytes
-        # Key columns of the parent rows quarantine removed. Kept only in memory, so a child
-        # that pointed at one is told apart from an orphan the run introduced; never reported.
+        # Key columns of parent rows quarantine removed, in memory only: such a child is no orphan.
         self._quarantined: dict[tuple[str, tuple[str, ...]], list[pa.Table]] = {}
-        # Footer facts of each lazy input, taken before any route read it: a re-read refuses a
-        # file that changed in between.
+        # Footer facts of each lazy input before any read: a re-read refuses a changed file.
         self._source_facts = source_facts or {}
-        # The run's inputs, as the caller gave them: a commit with no resident output reads
-        # them back to compare. Declared casting is applied to them on that re-read.
+        # The caller's inputs, re-read (with declared casting) by a commit with no resident output.
         self._sources = sources or {}
         self._cast_run: Any = None
         # Writes that carry row values (the quarantine file), held until the verdict passes.
         self._held: list[Callable[[], None]] = []
-        # Baselines of tables only the route reads: key and cast columns of each table the
-        # route loaded, copied once into scratch Parquet as the route read them.
+        # Key and cast columns of each table only the route reads, copied once to scratch Parquet.
         self._teed: dict[str, LazySource] = {}
         self._scratch = ExitStack()
         self._scratch_root: Path | None = None
@@ -286,6 +282,7 @@ class PostScanGate:
                 {n: outputs[n].to_pandas() for n in masked},
                 config=dict(self._config),
                 detectors=self._detectors,
+                writes=self._writes,
             )
             raise_if_ner_blocked(self.report, ner_findings=post_scan_ner_findings(self._config))
 
@@ -366,6 +363,7 @@ class PostScanGate:
                     scratch=scratch,
                     memory_limit=self.memory_limit,
                     distribution=self._distribution_input(masked, self._sources, True),
+                    writes=self._writes,
                 )
 
         return suite
@@ -438,6 +436,7 @@ class PostScanGate:
             detectors=self._detectors,
             keys=keys,
             distribution=self._distribution_input(masked, sources, raw_sources),
+            writes=self._writes,
         )
 
     def _distribution_input(
@@ -525,6 +524,7 @@ def bind_gate(ctx: PipelineRunContext, route: str | None = None) -> Iterator[Pos
         deferred=deferred,
         sources=ctx.caller_sources,
         detectors=ctx.post_scan_detectors,
+        writes=ctx.writes,
     )
     token = _ACTIVE.set(gate)
     try:

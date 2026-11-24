@@ -19,14 +19,6 @@ import pytest
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
 from decoy_engine.errors import PipelineValidationError
-from decoy_engine.execution._column_access import (
-    OWN_TARGET_CREATES,
-    OWN_TARGET_SOURCE,
-    SURFACE_DECLARATIONS,
-    ColumnAccess,
-    _union,
-    created_columns,
-)
 from decoy_engine.execution._guards import prepare_declared_execution_sources
 from decoy_engine.execution._isolated_run import run_pipeline_isolated
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
@@ -37,6 +29,14 @@ from decoy_engine.execution.physical._shadow_diff_codes import (
     ShadowDifference,
 )
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan.column_access._declarations import (
+    OWN_TARGET_CREATES,
+    OWN_TARGET_SOURCE,
+    SURFACE_DECLARATIONS,
+    ColumnAccess,
+    _union,
+    created_columns,
+)
 from decoy_engine.profile import DeclarationRequest, profile_source
 from decoy_engine.providers_v2 import get_default_registry
 from tests._keyed_secret import THROWAWAY_KEY_PROVIDER

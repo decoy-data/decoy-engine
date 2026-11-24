@@ -14,7 +14,7 @@ import pytest
 
 from decoy_engine import run_pipeline
 from decoy_engine.config import PipelineConfig
-from decoy_engine.execution._column_access import created_columns
+from decoy_engine.plan.column_access import created_columns
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.reason_adapter import reason_from_exception
 from tests.unit.execution.test_created_target_contract import (
@@ -134,7 +134,7 @@ def test_forced_out_of_core_refuses_a_derive_chain_with_the_coded_reason(tmp_pat
 
 
 def test_ordering_keeps_value_reads_when_the_when_predicate_is_unreadable() -> None:
-    from decoy_engine.execution._column_access import scalar_creating_reads
+    from decoy_engine.plan.column_access import scalar_creating_reads
 
     entry = {
         "name": "aa_tgt",
@@ -147,7 +147,7 @@ def test_ordering_keeps_value_reads_when_the_when_predicate_is_unreadable() -> N
 
 
 def test_a_when_predicate_adds_no_ordering_edge() -> None:
-    from decoy_engine.execution._column_access import scalar_creating_reads
+    from decoy_engine.plan.column_access import scalar_creating_reads
 
     entry = {**_derived("aa_tgt", "z_driver + 1"), "when": "b_gate > 0"}
     assert scalar_creating_reads(entry) == {"z_driver"}
@@ -197,7 +197,7 @@ def test_transform_expression_readers_keep_the_generic_scanner(
     """A1 control: `_transforms` and `_derive_created` read the broad pandas-expression
     language through `predicate_names`, not the closed `when:` grammar. Routing either site
     through `parse_when` turns this red."""
-    from decoy_engine.execution._column_access import SURFACE_DECLARATIONS
+    from decoy_engine.plan.column_access import SURFACE_DECLARATIONS
 
     def table(expression: str) -> dict[str, Any]:
         ops = [{"op": "derive", "column": "t", "expression": expression}]

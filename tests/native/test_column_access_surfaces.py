@@ -21,13 +21,6 @@ import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.contracts.column_shape import NO_SOURCES
-from decoy_engine.execution import _column_access
-from decoy_engine.execution._column_access import (
-    SIBLING_REFERENCE_KEYS,
-    SURFACE_DECLARATIONS,
-    ColumnAccess,
-    column_access,
-)
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.execution._runner import build_work_list
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
@@ -38,6 +31,13 @@ from decoy_engine.generation.composite._city_state_zip import CompositeCityState
 from decoy_engine.generation.composite._name_email import CompositeNameEmail
 from decoy_engine.generation.composite._person import CompositePerson
 from decoy_engine.generation.composite._provider import CompositeProvider
+from decoy_engine.plan.column_access import (
+    SIBLING_REFERENCE_KEYS,
+    SURFACE_DECLARATIONS,
+    ColumnAccess,
+    column_access,
+)
+from decoy_engine.plan.column_access import _declarations as _column_access
 from decoy_engine.providers_v2 import get_default_registry
 from tests._declared_schema import chunked_entry_kwargs
 
@@ -676,7 +676,7 @@ def test_untouched_columns_agree_with_the_column_access_registry(case: str) -> N
     `handler_written_columns` plus the own column of every non-passthrough entry; any column a
     handler writes or a strategy masks is touched, everything else is untouched."""
     from decoy_engine.execution._chunked_carry import passthrough_columns, untouched_columns
-    from decoy_engine.execution._column_access import handler_written_columns
+    from decoy_engine.plan.column_access import handler_written_columns
 
     columns, data, _required = _corpus()[case]
     names = list(data)
@@ -730,7 +730,7 @@ def test_composite_writes_include_every_coherent_with_column() -> None:
 def test_a_registry_composite_without_a_declaration_has_unknown_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_column_access, "_is_composite", lambda provider, registry: True)
+    monkeypatch.setattr(_column_access, "provider_is_composite", lambda provider, registry: True)
     assert column_access({"name": "x", "provider": "composite_stub"}, REG).writes_unknown is True
 
 

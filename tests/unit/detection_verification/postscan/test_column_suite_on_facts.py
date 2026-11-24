@@ -24,7 +24,7 @@ from decoy_engine.verification.postmask import (
 )
 from decoy_engine.verification.postmask import _column_facts as column_facts_module
 from decoy_engine.verification.postmask import runner as runner_module
-from decoy_engine.verification.postmask._column_facts import column_facts
+from decoy_engine.verification.postmask._column_facts import column_facts, standalone_writes
 from decoy_engine.verification.postmask.policy_validation import (
     check_policy_validation,
     policy_findings,
@@ -38,6 +38,12 @@ CANARY = "CANARY-7f3a"
 LIMIT = "256MB"
 EMAILS = [f"user{i}@realmail.com" for i in range(100)]
 FAKE = [f"fake{i}@masked.example" for i in range(100)]
+
+
+def _findings(facts, config, failed=None):
+    """`residual_pii_findings` with the writer query the frame path computes for these tables."""
+    schemas = {table: list(columns) for table, columns in facts.items()}
+    return residual_pii_findings(facts, config, failed, writes=standalone_writes(config, schemas))
 
 
 def _cfg(*columns: tuple[str, str]) -> dict[str, Any]:
@@ -133,7 +139,7 @@ FIXTURES = {
 def test_the_facts_checks_equal_the_resident_frame_checks(name: str, size: int, tmp_path: Path):
     src, out, config = FIXTURES[name]
     src_t, out_t, facts = _facts(src, out, size, tmp_path)
-    assert residual_pii_findings(facts, config) == check_residual_pii(
+    assert _findings(facts, config) == check_residual_pii(
         {"t": out}, config, source_frames={"t": src}
     )
     assert policy_findings(config, src_t, out_t, facts) == check_policy_validation(
@@ -156,7 +162,7 @@ def test_run_post_mask_reports_what_the_frame_checks_report(name: str):
 def test_a_table_without_a_source_gets_the_detector_findings_only(tmp_path: Path):
     _src, out, config = FIXTURES["unconfigured"]
     _s, _o, facts = _facts(None, out, 7, tmp_path)
-    (finding,) = residual_pii_findings(facts, config)
+    (finding,) = _findings(facts, config)
     assert finding.source_compared is False and finding.severity == "warning"
     assert (
         policy_findings(config, {}, {"t": from_table("t", pa.Table.from_pandas(out))}, facts) == []
@@ -169,7 +175,7 @@ def test_a_column_near_min_rate_escalates_as_on_the_resident_path(tmp_path: Path
     src_df, out_df = pd.DataFrame({"email": EMAILS}), pd.DataFrame({"email": out})
     config = _cfg(("email", "faker"))
     src_t, out_t, facts = _facts(src_df, out_df, 7, tmp_path)
-    (finding,) = residual_pii_findings(facts, config)
+    (finding,) = _findings(facts, config)
     assert finding.severity == "warning"
     assert finding.source_identity_rate == 0.06
     assert [finding] == check_residual_pii({"t": out_df}, config, source_frames={"t": src_df})
@@ -186,7 +192,7 @@ def test_an_integer_column_holding_a_null_is_read_as_whole_numbers(tmp_path: Pat
     config = _cfg(("zip", "faker"))
     src_t, out_t = from_table("t", src), from_table("t", out)
     facts = {"t": column_facts(src_t, out_t, ["zip"], scratch=tmp_path, memory_limit=LIMIT)}
-    moved = residual_pii_findings(facts, config)
+    moved = _findings(facts, config)
     old = check_residual_pii({"t": out.to_pandas()}, config, source_frames={"t": src.to_pandas()})
     assert [f.detector_id for f in moved] == ["us_zip"]
     assert old == []

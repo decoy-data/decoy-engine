@@ -48,6 +48,9 @@ from decoy_engine.expressions._safe_eval import (
     safe_eval,
 )
 
+# The closed `when:` grammar: the column-access declarations read a predicate's names from it.
+from decoy_engine.expressions._when_parser import parse_when, when_column_refs
+
 __all__ = [
     "BASE_GLOBALS",
     "EVALUATED_NODE_TYPES",
@@ -59,5 +62,7 @@ __all__ = [
     "evaluate",
     "formula_is_evaluable",
     "make_mask_globals",
+    "parse_when",
     "safe_eval",
+    "when_column_refs",
 ]

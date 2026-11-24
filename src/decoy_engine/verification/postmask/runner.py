@@ -31,10 +31,15 @@ from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.internal.pandas_missing import is_null_cell
+from decoy_engine.plan.column_access import TableWrites
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
 from decoy_engine.verification.postmask import _model_findings
 from decoy_engine.verification.postmask._blocked import severity_counts
-from decoy_engine.verification.postmask._column_facts import ColumnFacts, column_facts
+from decoy_engine.verification.postmask._column_facts import (
+    ColumnFacts,
+    column_facts,
+    standalone_writes,
+)
 from decoy_engine.verification.postmask._keys import KeyResult
 from decoy_engine.verification.postmask._stream_input import TableBatches, from_table
 from decoy_engine.verification.postmask.distribution import (
@@ -72,6 +77,7 @@ def run_post_mask(
     detectors: DetectorSet | None = None,
     keys: Sequence[KeyResult] | None = None,
     distribution: DistributionInput | None = None,
+    writes: Mapping[str, TableWrites] | None = None,
 ) -> dict[str, Any]:
     """Run all three post-mask check categories + assemble the report.
 
@@ -95,6 +101,8 @@ def run_post_mask(
             FK findings derive from these. None counts them here from the two frame dicts.
         distribution: what the `post_scan.distribution` check reads; `None` runs no check and the
             report has no `distribution` section.
+        writes: the run's writer query (`written_columns_by_table`). None computes it from the
+            config, the output field names and the default registry (`standalone_writes`).
 
     Returns:
         A post-scan-integrity/v3 report dict. JSON-serializable (every
@@ -126,6 +134,7 @@ def run_post_mask(
             tables_checked=tuple(str(name) for name in output_frames),
             models=(output_frames, detectors) if detectors is not None else None,
             distribution=distribution,
+            writes=writes,
         )
 
 
@@ -138,6 +147,7 @@ def run_post_mask_tables(
     scratch: Path,
     memory_limit: str,
     distribution: DistributionInput | None = None,
+    writes: Mapping[str, TableWrites] | None = None,
 ) -> dict[str, Any]:
     """`run_post_mask` over tables the run holds as batches. The caller counted the declared keys
     (`check_keys`) and owns `scratch`; the column suite reads the tables in bounded batches. Regex
@@ -152,6 +162,7 @@ def run_post_mask_tables(
         memory_limit=memory_limit,
         tables_checked=tuple(str(name) for name in output_tables),
         distribution=distribution,
+        writes=writes,
     )
 
 
@@ -252,6 +263,7 @@ def _assemble(
     tables_checked: tuple[str, ...],
     models: tuple[Mapping[str, pd.DataFrame], DetectorSet] | None = None,
     distribution: DistributionInput | None = None,
+    writes: Mapping[str, TableWrites] | None = None,
 ) -> dict[str, Any]:
     residual_pii: list[ResidualPIIFinding] = []
     fk_preservation: list[FKPreservationFinding] = []
@@ -283,7 +295,11 @@ def _assemble(
     failed = {**failed, **suite_failed}
 
     try:
-        residual_pii = check_residual_pii(facts, config, failed)
+        if writes is None:
+            writes = standalone_writes(
+                config, {n: t.schema.names for n, t in output_tables.items()}
+            )
+        residual_pii = check_residual_pii(facts, config, failed, writes=writes)
     except Exception as exc:
         if passes_through(exc):
             raise

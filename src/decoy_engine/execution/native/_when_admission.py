@@ -26,7 +26,6 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.execution._column_access import column_access, has_when
 from decoy_engine.execution.native._route_decline_codes import (
     CodedDecline,
     RouteDeclineCode,
@@ -37,6 +36,7 @@ from decoy_engine.expressions._when_parser import (
     parse_when,
     when_column_refs,
 )
+from decoy_engine.plan.column_access import column_access, has_when
 
 NOT_NATIVE_CODE = reasons.runtime.WHEN_PREDICATE_NOT_NATIVE
 OUTSIDE_SUBSET_CODE = reasons.runtime.WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET
@@ -68,7 +68,7 @@ def parsed_when(entry: Mapping[str, Any]) -> WhenExpr | None:
 def _node_key(entry: Mapping[str, Any], registry: Any) -> tuple[str, ...]:
     """The work node's sort key (`order_work` orders by `(table, columns)`, and the chunked
     route has no relationship edges, so this order is the execution order)."""
-    from decoy_engine.execution._runner import provider_is_composite
+    from decoy_engine.plan.column_access import provider_is_composite
 
     name = str(entry.get("name", ""))
     if provider_is_composite(entry.get("provider"), registry):

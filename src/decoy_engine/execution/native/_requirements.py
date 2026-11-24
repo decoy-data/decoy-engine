@@ -22,7 +22,6 @@ from typing import Any, Literal
 import pyarrow as pa
 
 from decoy_engine.execution._adapter import provider_config_to_dict
-from decoy_engine.execution._column_access import SIBLING_REFERENCE_KEYS
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._strategies._redact import redact_with_is_string
 from decoy_engine.execution.native._capabilities import (
@@ -32,6 +31,7 @@ from decoy_engine.execution.native._capabilities import (
 from decoy_engine.plan._checks_truncate import check_truncate_config
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import ColumnSeed
+from decoy_engine.plan.column_access import SIBLING_REFERENCE_KEYS
 
 FallbackPolicy = Literal["native", "python_only", "reject_large"]
 

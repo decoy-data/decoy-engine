@@ -44,19 +44,21 @@ mask provably did not move anything); constant-source columns
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 
 from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
+from decoy_engine.plan.column_access import TableWrites, may_write
 from decoy_engine.profiling import passes_through
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
     DetectorRate,
     canonical_cells,
     identity_counts,
-    masked_columns,
+    standalone_writes,
 )
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
@@ -93,12 +95,8 @@ _DESTROYS_PATTERN: frozenset[str] = frozenset(
 # hold a name after it ran.
 _WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"})
 
-# Dennis M12 fix (2026-06-01): strategies that explicitly leave the
-# column untouched. A detector hit on these is expected -- the user
-# deliberately marked the column as a passthrough -- so it's classified
-# 'info' (a confirmation), not 'warning'. Without this, every
-# passthrough column that matched any detector emitted a false-positive
-# residual-PII warning.
+# Strategies that leave the column untouched: a hit is the operator's choice, graded 'info'.
+# The cell is the source cell only when no other writer owns the column (`may_write`).
 _NO_OP_BY_DESIGN: frozenset[str] = frozenset({"passthrough"})
 
 # Strategies that REPLACE values per-cell: positional identity with the
@@ -132,23 +130,11 @@ def check_residual_pii(
 ) -> list[ResidualPIIFinding]:
     """Scan masked output for surviving PII patterns.
 
-    Args:
-        output_frames: ``{table_name: post-mask DataFrame}``.
-        config: the validated pipeline config dict (from
-            ``PipelineConfig.model_dump()``).
-        source_frames: ``{table_name: pre-mask DataFrame}``. When
-            supplied, detector-flagged columns are compared positionally
-            against source and severity escalates on output==source
-            identity (see module docstring). When ``None``, behavior
-            degrades to detector-plus-strategy classification only --
-            real leaks on PII-like-producer strategies are then
-            invisible, so callers that have the source should pass it.
-
-    Returns:
-        List of ResidualPIIFinding. Empty list if nothing matched.
-        Severity is classified based on the column's configured
-        masking strategy (or absence of one), then escalated by the
-        source comparison when evidence of a leak exists.
+    `config` is the validated pipeline config dict. With `source_frames`, each detector-flagged
+    column is compared positionally with its source and the severity escalates on identity (see
+    the module docstring); without it a leak on a PII-like producer is invisible. Severity comes
+    from the configured strategy, then the source comparison. The writer query is the one a run
+    with this config compiles (`standalone_writes`).
     """
     facts = {
         table_name: {
@@ -157,7 +143,8 @@ def check_residual_pii(
         }
         for table_name, df in output_frames.items()
     }
-    return residual_pii_findings(facts, config)
+    schemas = {name: [str(c) for c in df.columns] for name, df in output_frames.items()}
+    return residual_pii_findings(facts, config, writes=standalone_writes(config, schemas))
 
 
 def _frame_column_facts(
@@ -484,9 +471,12 @@ def residual_pii_findings(
     output_facts: Mapping[str, Mapping[str, ColumnFacts]],
     config: Mapping[str, Any],
     failed_tables: Mapping[str, str] | None = None,
+    *,
+    writes: Mapping[str, TableWrites],
 ) -> list[ResidualPIIFinding]:
     """`check_residual_pii` from column facts: `{table: {column: ColumnFacts}}` over the output,
-    in column order. The decision tables are the ones the frame check uses."""
+    in column order. `writes` is the run's writer query (`written_columns_by_table`): only a
+    table it proves leaves a column unwritten lets a passthrough skip the source comparison."""
     strategy_by_col = {key: entry["strategy"] for key, entry in configured_columns(config).items()}
     # Table presence comes from the config's table list, not from the (table, column) strategy
     # lookup, so "table absent" and "table present, column absent" stay distinct.
@@ -506,17 +496,16 @@ def residual_pii_findings(
         )
         for table, error in (failed_tables or {}).items()
     ]
-    masked = masked_columns(config)
     for table_name, columns in output_facts.items():
         for col_name, fact in columns.items():
             configured = strategy_by_col.get((table_name, col_name))
-            failed_compare = fact.identity_error is not None and configured not in _NO_OP_BY_DESIGN
+            written = may_write(writes, table_name, col_name)
+            # A passthrough leaves its cell alone only when nothing else writes the column.
+            exempt = configured in _NO_OP_BY_DESIGN and not written
             if not fact.detectors:
-                # A comparison that raised on a column some entry writes is reported with no
-                # detector hit too: the check could not run. A column no entry writes was never
-                # masked, so its comparison is not the check's to report.
-                written = masked.get(table_name, frozenset())
-                if failed_compare and (written is None or col_name in written):
+                # A comparison that raised on a column the run may have written is reported with
+                # no detector hit too: the check could not run.
+                if fact.identity_error is not None and written:
                     findings.append(
                         ResidualPIIFinding(
                             table=table_name,
@@ -530,53 +519,18 @@ def residual_pii_findings(
                     )
                 continue
             top = fact.detectors[0]
-            table_present = table_name in config_tables
-            severity, message = _classify(top.detector_id, configured, table_present)
             # Identity needs comparable rows; none means no source column or a row-count mismatch.
-            compared = fact.comparable_rows > 0 and configured not in _NO_OP_BY_DESIGN
+            compared = fact.comparable_rows > 0 and not exempt
             rate = fact.identical_rows / fact.comparable_rows if compared else None
-            if (
-                rate is not None
-                and configured in _WHOLE_CELL_DESTROYS
-                and all(d.detector_id in NAME_HINT_GATED_DETECTORS for d in fact.detectors)
-            ):
-                # Every hit is a loose regex held back by a column-name hint, so the source
-                # comparison, not the hit, says whether the mask fired.
-                severity, message = _grade_gated(
-                    identical_rows=fact.identical_rows,
-                    comparable_rows=fact.comparable_rows,
-                    detector_id=top.detector_id,
-                    strategy=str(configured),
-                )
-            elif rate is not None:
-                # An uncounted source distinct is unknown, neither constant nor varied: grade it
-                # both ways, and when the constant-source cutoff changes the grade the check
-                # could not decide. A failed output count says nothing about the source.
-                counts = (1, 2) if fact.source_distinct_failed else (fact.source_distinct,)
-                overrides = {
-                    _escalate(
-                        configured=configured,
-                        identity_rate=rate,
-                        identical_count=fact.identical_rows,
-                        src_distinct=distinct,
-                        detector_confidence=top.confidence,
-                        detector_id=top.detector_id,
-                        table_present=table_present,
-                    )
-                    for distinct in counts
-                }
-                if len(overrides) > 1:
-                    severity = "error"
-                    message = _compare_raised(top.detector_id, str(fact.distinct_error))
-                elif (override := next(iter(overrides))) is not None and (
-                    _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
-                ):
-                    severity, message = override
-            elif failed_compare:
-                # The source comparison could not run, so the escalation this column may need is
+            grade = _Grade(fact, configured, table_name in config_tables, rate)
+            if rate is not None and fact.source_distinct_failed:
+                severity, message = grade.unknown_diversity()
+            elif rate is None and fact.identity_error is not None and not exempt:
+                # The comparison could not run, so the escalation this column may need is
                 # unknown. Say so at error severity rather than report a clean "not compared".
-                severity = "error"
-                message = _compare_raised(top.detector_id, str(fact.identity_error))
+                severity, message = "error", _compare_raised(top.detector_id, fact.identity_error)
+            else:
+                severity, message = grade.known(fact.source_distinct)
             findings.append(
                 ResidualPIIFinding(
                     table=table_name,
@@ -592,3 +546,55 @@ def residual_pii_findings(
                 )
             )
     return findings
+
+
+@dataclass(frozen=True)
+class _Grade:
+    """One detector-flagged column's grade, from the hit, the strategy and the source comparison."""
+
+    fact: ColumnFacts
+    configured: str | None
+    table_present: bool
+    rate: float | None
+
+    def known(self, src_distinct: int) -> tuple[Severity, str]:
+        """The final grade for a known source distinct count: the base class, the gated path,
+        then an escalation that may only raise the severity."""
+        fact, top = self.fact, self.fact.detectors[0]
+        base = _classify(top.detector_id, self.configured, self.table_present)
+        if self.rate is None:
+            return base
+        if self.configured in _WHOLE_CELL_DESTROYS and all(
+            d.detector_id in NAME_HINT_GATED_DETECTORS for d in fact.detectors
+        ):
+            # Every hit is a loose regex held back by a column-name hint, so the source
+            # comparison, not the hit, says whether the mask fired.
+            return _grade_gated(
+                identical_rows=fact.identical_rows,
+                comparable_rows=fact.comparable_rows,
+                detector_id=top.detector_id,
+                strategy=str(self.configured),
+            )
+        override = _escalate(
+            configured=self.configured,
+            identity_rate=self.rate,
+            identical_count=fact.identical_rows,
+            src_distinct=src_distinct,
+            detector_confidence=top.confidence,
+            detector_id=top.detector_id,
+            table_present=self.table_present,
+        )
+        if override is not None and _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[base[0]]:
+            return override
+        return base
+
+    def unknown_diversity(self) -> tuple[Severity, str]:
+        """An uncounted source is neither constant nor varied: grade it as both. When the final
+        severities agree that severity stands with the base message; when they differ the check
+        could not decide. A failed output count says nothing about the source."""
+        top, constant, varied = self.fact.detectors[0], self.known(1), self.known(2)
+        if constant == varied:
+            return constant
+        if constant[0] == varied[0]:
+            return constant[0], _classify(top.detector_id, self.configured, self.table_present)[1]
+        return "error", _compare_raised(top.detector_id, str(self.fact.distinct_error))

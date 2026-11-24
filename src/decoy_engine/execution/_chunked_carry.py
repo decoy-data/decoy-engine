@@ -28,12 +28,12 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._field_names import repeated_names
-from decoy_engine.execution._column_access import (
+from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.plan.column_access import (
     handler_written_columns,
     has_when,
     touched_columns,
 )
-from decoy_engine.execution._errors import ExecutionError
 
 PASSTHROUGH_UNREPRESENTABLE_CODE = reasons.runtime.CHUNKED_PASSTHROUGH_VALUE_UNREPRESENTABLE
 
@@ -67,7 +67,7 @@ def read_set(
     """The passthrough columns pandas code may read or write (rule R2).
 
     The union of every configured entry's `column_access` declaration (`when:` predicate
-    names, sibling-reference fields, composite outputs; see `_column_access`), the entry's
+    names, sibling-reference fields, composite outputs; see `plan.column_access`), the entry's
     own `name` excluded. A written column counts as read: carrying it would let
     `CarryPlan.reattach` overwrite the handler's output with the source value. If any
     declaration cannot be computed, every passthrough column is read."""

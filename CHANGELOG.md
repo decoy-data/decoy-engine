@@ -12,7 +12,8 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 ### Fixed
 
 - the resident-frame residual-PII check now reports an error finding when its source comparison raises, as the batch check already did; before, the failure read as a clean check.
-- both residual-PII checks report a source comparison that raised on a column some entry writes (a joint_mask sibling included) even when no detector fires on it. Both checks now compare and count list, map and struct cells in one form, so a list never equals its one element and a constant list counts as one value on either path. A source distinct count that failed is no longer read as a varied source: when it would change the grade, the finding is an error.
+- both residual-PII checks report a source comparison that raised on a column the run may write, even when no detector fires on it. One writer query (`decoy_engine.plan.column_access.written_columns_by_table`) names the written columns per table: each entry's own target, joint_mask siblings, composite bundles, `derive` targets and every FK child key column. `run_pipeline` asks it once, over the run's own graph and registry, and the post-scan reads that answer. A passthrough column is exempt from the source comparison only when the query proves no other writer owns it, so a passthrough on a joint_mask sibling, an FK child key or a table with an unknown writer is now compared. Both checks compare and count list, map and struct cells in one form, so a list never equals its one element and a constant list counts as one value on either path.
+- a source distinct count that failed is no longer read as a varied source. The column is graded as both a constant and a varied source; when the two final grades differ the finding is an error, and when they agree that grade stands, so unchanged hash output with an email hit stays `fail`.
 
 ## [0.28.3] - 2026-11-22
 

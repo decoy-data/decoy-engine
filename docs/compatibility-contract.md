@@ -1233,6 +1233,12 @@ only this site moves.
   `SequentialAdapter.run` and `OutOfCoreAdapter.run`); a caller that passed none must now pass
   it. `run_pipeline` is unchanged: its resident auto-chunk lane calls guard-free cores and runs the
   post-scan itself.
+  PM-1a (2026-11) adds the keyword-only `writes=` to `run_post_mask` and `run_post_mask_tables`
+  (default `None`, so existing calls are unchanged): the run's writer query, which says per table
+  which columns may have been written. `None` computes it from the config and the output field
+  names. A passthrough column that another writer may own is now source-compared, so a
+  comparison that raised on it is an `error` finding where it was quiet. The private
+  `execution._column_access` module moved to `decoy_engine.plan.column_access`.
   SCAN-ML M4 (2026-11) adds `PostScanBlockedError` and model findings in the post-scan.
   `run_post_mask` takes a keyword `detectors` (a `DetectorSet`); `None`, the default and the
   platform hook's call, runs the regex detectors as before. `run_pipeline` with

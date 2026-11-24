@@ -10,6 +10,7 @@ import pandas as pd
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
+from decoy_engine.plan.column_access import PASSTHROUGH_OUTPUT_IS_INPUT
 
 
 class PassthroughHandler:
@@ -20,8 +21,9 @@ class PassthroughHandler:
     join_safe: bool = False
     wizard_options: tuple[StrategyOption, ...] = ()
     offer_in_wizard: bool = True
-    # `run` returns the frame unchanged, so an output cell is the input cell (lifecycle estimate).
-    output_is_input: bool = True
+    # `run` returns the frame unchanged, so an output cell is the input cell. The fact is the
+    # plan's, so the lifecycle estimate and the post-scan writer query read the same one.
+    output_is_input: bool = PASSTHROUGH_OUTPUT_IS_INPUT
 
     def run(
         self,

@@ -173,6 +173,7 @@ from decoy_engine.execution._guards import (  # re-exported: the core's declarat
 )
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan.column_access import composite_provider_offenders
 from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
 
 from . import _chunked_bucket_perturb as bucket_perturb_gate
@@ -189,7 +190,6 @@ from ._chunked_fk import (
     CHUNK_SAFE_STRATEGIES,
     gate_fk_child_edges,
 )
-from ._column_access import composite_provider_offenders
 from ._errors import vault_requires_resident_output
 from ._transforms_gate import reject_per_table_transforms
 from .native import _faker_positional_admission as faker_gate

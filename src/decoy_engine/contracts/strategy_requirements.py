@@ -21,6 +21,7 @@ from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 __all__ = [
     "REQUIREMENTS_BY_STRATEGY",
     "SHAPE_REQUIREMENTS_BY_STRATEGY",
+    "SIBLING_REFERENCE_KEYS",
     "ShapeRequirement",
     "StrategyRequirement",
     "lookup_path",
@@ -31,6 +32,11 @@ __all__ = [
     "shape_mismatch_message",
     "shape_requirement_for",
 ]
+
+
+# provider_config keys that name a sibling column for any strategy. The column-access
+# declarations and `native/_requirements._required_input_columns` both read this one tuple.
+SIBLING_REFERENCE_KEYS: tuple[str, ...] = ("group_by", "order_by", "anchor", "reference_column")
 
 
 @dataclass(frozen=True)

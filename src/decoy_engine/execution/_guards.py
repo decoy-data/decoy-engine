@@ -23,7 +23,6 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._field_names import repeated_names
-from decoy_engine.execution._column_access import created_columns
 from decoy_engine.execution._errors import (
     ExecutionError,
     declared_table_dropped,
@@ -32,6 +31,7 @@ from decoy_engine.execution._errors import (
 from decoy_engine.execution._runner import build_work_list
 from decoy_engine.execution._transforms import TransformError
 from decoy_engine.plan._checks import _INT_NULL_REJECTED_STRATEGIES
+from decoy_engine.plan.column_access import created_columns
 from decoy_engine.profile import (
     DeclarationRequest,
     PreparedDeclaredSources,
