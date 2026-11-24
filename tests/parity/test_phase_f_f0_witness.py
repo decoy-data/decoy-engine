@@ -460,8 +460,8 @@ def _mutated_sampler_trip(
     monkeypatch: pytest.MonkeyPatch, replace: Any, *, compiled: Any, evidence: str
 ) -> None:
     witness = w.SamplerWitness(monkeypatch, compiled=compiled, compiled_evidence=evidence)
-    inner = _sampler._derive_pool_indices
-    monkeypatch.setattr(_sampler, "_derive_pool_indices", replace(inner))
+    inner = _sampler.derive_pool_indices
+    monkeypatch.setattr(_sampler, "derive_pool_indices", replace(inner))
     pool = w.marked_value_pool()
     out = witness.sample(pool, _int_source(), _NS, _SEED)
     with pytest.raises(w.WitnessError, match="marked result"):
@@ -587,7 +587,7 @@ def test_unwrapped_production_sampler_really_uses_the_compiled_kernel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No marking at all: a counting wrapper on the production loader shows the compiled kernel is
-    what `_derive_pool_indices` calls for an admitted source when the companion is installed."""
+    what `derive_pool_indices` calls for an admitted source when the companion is installed."""
     calls: list[str] = []
     real = _sampler.compiled_index_kernel()
     assert real is not None
