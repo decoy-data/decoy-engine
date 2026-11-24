@@ -119,3 +119,28 @@ def _canonicalize_source(value: Any) -> bytes:
     # Default: string / object dtype. NFC normalization for cross-client
     # input stability.
     return unicodedata.normalize("NFC", str(value)).encode("utf-8")
+
+
+def canonicalize_typed_array(array: Any) -> tuple[Any, Any]:
+    """The `_canonicalize_source` key of every row of a typed Arrow array, computed in Arrow.
+
+    Returns `(keys, failed)`: `keys` is a `pa.string()` array whose UTF-8 bytes equal
+    `_canonicalize_source(value)` for each usable row (the compiled `derive_index_batch` takes a
+    string array), null for a null or failed row; `failed` marks the non-null rows that have no
+    key because Python cannot represent them. A `date32` key is its ISO date (`date.isoformat()`);
+    a day outside years 1 to 9999 fails before any formatting.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    from decoy_engine.transforms.date_shift import date32_days, date32_in_range
+
+    if array.type != pa.date32():
+        raise TypeError(f"no typed canonical key for {array.type}")
+
+    days, valid = date32_days(array)
+    failed = valid & ~date32_in_range(days)
+    if failed.any():
+        # Null the failed rows BEFORE the cast, so no unrepresentable day reaches the formatter.
+        array = pc.if_else(pa.array(failed), pa.scalar(None, pa.date32()), array)  # type: ignore[attr-defined, unused-ignore]
+    return array.cast(pa.string()), failed

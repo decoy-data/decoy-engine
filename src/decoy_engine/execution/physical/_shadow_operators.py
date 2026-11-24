@@ -274,13 +274,13 @@ def _bound_params(
                 raise AssertionError("date_shift node reached run_operator with no KeyBinding")
             if (
                 not isinstance(params, DateShiftParams)
-                or params.date_format is None
+                or (params.date_format is None) == (params.shape is None)
                 or params.min_days is None
                 or params.max_days is None
             ):  # pragma: no cover - C0 binds all three together with the KeyBinding
                 raise AssertionError(
                     "date_shift node reached run_operator with no resolved "
-                    "date_format/min_days/max_days"
+                    "date_format-or-shape/min_days/max_days"
                 )
             if column is None:
                 # The records must name their column; a caller that cannot say which

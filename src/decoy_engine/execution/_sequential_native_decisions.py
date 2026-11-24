@@ -59,6 +59,13 @@ class ColumnDecision:
     def native(self) -> bool:
         return self.backend == RUST_COMPANION
 
+    def book_preserved(self, preserved: Any) -> int:
+        """Count the sentinel rows the native path kept (a boolean mask) and return the count."""
+        count = int(preserved.sum())
+        self.counts_preserved = True
+        self.preserved_rows += count
+        return count
+
     def entry(self) -> dict[str, Any]:
         calls_decide = self.strategy in (BUCKET_PERTURB, DATE_SHIFT) and self.native
         ran = self.native_calls > 0 if calls_decide else self.rows > 0

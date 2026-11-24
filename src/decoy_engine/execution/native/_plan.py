@@ -35,12 +35,12 @@ in `_requirements.py`.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import pyarrow as pa
 
-from decoy_engine.contracts.column_shape import SourceFacts
+from decoy_engine.contracts.column_shape import ColumnShape, SourceFacts
 from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
@@ -101,11 +101,14 @@ class NativeExecutionPlan:
     (inert: no execution path reads the field). ``nodes`` is the enriched native
     view. The parity-oracle route for a held node is expressed by its
     ``fallback_policy`` (``python_only`` sends it to the pinned pandas oracle).
+    ``date_shapes`` holds each typed ``date_shift`` column's plan shape (``(table, column)``
+    to ``DATE``), the one answer the chunked real-type gate reads.
     """
 
     engine_version: str
     nodes: tuple[NativePlanNode, ...]
     work_nodes: tuple[WorkNode, ...]
+    date_shapes: Mapping[tuple[str, str], ColumnShape] = field(default_factory=dict)
 
     def output_schema_for(self, table: str) -> pa.Schema | None:
         """Merge the per-node output schemas for ``table`` into one schema.
@@ -189,10 +192,19 @@ def compile_native_plan(
                 fallback_policy=req.fallback_policy,
             )
         )
+    from decoy_engine.declared_casting._boundary import plan_native_date_shape
+
+    date_shapes: dict[tuple[str, str], ColumnShape] = {}
+    for node in nodes:
+        if node.strategy == "date_shift" and node.kind == "scalar" and node.columns:
+            shape = plan_native_date_shape(plan, node.table, node.columns[0])
+            if shape is not None:
+                date_shapes[(node.table, node.columns[0])] = shape
     return NativeExecutionPlan(
         engine_version=engine_version,
         nodes=tuple(nodes),
         work_nodes=tuple(attached),
+        date_shapes=date_shapes,
     )
 
 

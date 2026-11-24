@@ -69,6 +69,11 @@ def assemble_column(strategy: str, parts: list[pa.Array]) -> pa.Array:
     """
     combined = pa.concat_arrays(parts)
     n = len(combined)
+    if strategy == "date_shift" and pa.types.is_date32(combined.type):
+        # A typed date_shift column keeps its source type: the unified slice hands it to the
+        # assembler as an Arrow column (`reconstruct_source_shaped_output`), never through
+        # pandas, so neither degenerate pandas rule below applies to it.
+        return combined
     if strategy in _TOKENIZING_STRATEGIES:
         # redact / truncate / hash emit strings the native kernel produced: an
         # empty column round-trips through the pandas oracle as `float64`, an

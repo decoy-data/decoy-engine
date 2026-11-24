@@ -1,0 +1,9 @@
+{
+ "sentry_id": "date-shift-one-arithmetic",
+ "created_in": "DATE-SHIFT-TYPED-S1",
+ "entries": {
+  "execution/_strategies/_date_shift.py::_shift_zoned": {
+   "reason": "DATE-SHIFT-TYPED S1: the zoned oracle path moves onto shift_typed_days in S2, which deletes this entry"
+  }
+ }
+}

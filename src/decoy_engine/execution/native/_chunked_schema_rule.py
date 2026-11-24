@@ -15,9 +15,10 @@ by definition the rule pins one type per column for the whole call:
   -> null), so this is a recorded route-dependent difference (see
   docs/compatibility-contract.md, ROUTE-OUTPUT-CONTRACT).
 - a native-admissible date_shift column (explicit format, a namespace, no `group_by`, no
-  `when:`, a string source): `string`, by the same cast. date_shift output is always a
-  strftime string, so pandas' empty -> float64 and all-null -> null are inference
-  artifacts. The decision reads only the config and the first chunk's type, never the
+  `when:`, a string source): `string`, by the same cast. Text sources give `string`; typed
+  sources keep their type: a `date32` source (plan shape `DATE`, no `preserve_values`) is
+  pinned to `date32` (`date_shift_typed_pinned_columns`). Pandas' empty -> float64 and
+  all-null -> null are inference artifacts either way. The decision reads only the config and the first chunk's type, never the
   companion, so both legs agree with or without it. The whole-frame route still resolves
   the type at assembly, so this is the same recorded route-dependent difference
   (docs/compatibility-contract.md, ROUTE-OUTPUT-CONTRACT).
@@ -196,6 +197,40 @@ def date_shift_pinned_columns(
     return frozenset(pinned)
 
 
+def date_shift_typed_pinned_columns(
+    configured: dict[str, dict[str, Any]], first_schema: pa.Schema, *, table: str
+) -> dict[str, pa.DataType]:
+    """The typed date_shift columns whose output is pinned to their source type.
+
+    A `date32` source is the resident type the plan's `DATE` shape names, so the column is
+    admitted by the typed half of `date_shift_config_rejection`, read from the first chunk's
+    real type, the same on both legs."""
+    from decoy_engine.contracts.column_shape import ColumnShape
+    from decoy_engine.execution.native._operator_config_rejections import (
+        date_shift_config_rejection,
+    )
+
+    pinned: dict[str, pa.DataType] = {}
+    for name, col in configured.items():
+        if col.get("strategy") != "date_shift" or _has_when(col):
+            continue
+        if name not in first_schema.names or first_schema.field(name).type != pa.date32():
+            continue
+        provider_config = col.get("provider_config")
+        reason = date_shift_config_rejection(
+            name,
+            table,
+            None,
+            namespace=col.get("namespace"),
+            provider_config=provider_config if isinstance(provider_config, dict) else {},
+            resident_sources={table: pa.schema([first_schema.field(name)]).empty_table()},
+            shape=ColumnShape.DATE,
+        )
+        if reason is None:
+            pinned[name] = pa.date32()
+    return pinned
+
+
 def group_key_pinned_columns(
     configured: dict[str, dict[str, Any]],
     first_schema: pa.Schema,
@@ -247,6 +282,8 @@ class SchemaRule:
     # a chunk whose values fit 32-bit offsets leaves as `string`; a value that cannot fit
     # promotes the column to `large_string` from then on.
     text_widths: dict[str, TextWidthState] = dataclasses.field(default_factory=dict)
+    # Typed date_shift columns pinned to their source type (`date_shift_typed_pinned_columns`).
+    typed_columns: dict[str, pa.DataType] = dataclasses.field(default_factory=dict)
 
 
 def build_schema_rule(
@@ -308,7 +345,10 @@ def build_schema_rule(
             passthrough[field.name] = field.type
             passthrough_fields[field.name] = field
     return SchemaRule(
-        string_columns=strings, passthrough_types=passthrough, passthrough_fields=passthrough_fields
+        string_columns=strings,
+        passthrough_types=passthrough,
+        passthrough_fields=passthrough_fields,
+        typed_columns=date_shift_typed_pinned_columns(configured, first.schema, table=table),
     )
 
 
@@ -358,6 +398,16 @@ def normalize_chunk(
                 column, pa.string(), table=table, name=name, chunk_index=chunk_index
             )
             field = pa.field(name, pa.string(), nullable=field.nullable)
+        elif name in rule.typed_columns and column.type != rule.typed_columns[name]:
+            target = rule.typed_columns[name]
+            # An empty or all-null chunk is pandas' float64/null inference artifact: it holds no
+            # value, so it becomes nulls of the pinned type. Anything else takes the checked cast.
+            column = (
+                pa.chunked_array([pa.nulls(len(column), target)])
+                if column.null_count == len(column)
+                else _safe_cast(column, target, table=table, name=name, chunk_index=chunk_index)
+            )
+            field = pa.field(name, target, nullable=field.nullable)
         arrays.append(column)
         fields.append(field)
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))

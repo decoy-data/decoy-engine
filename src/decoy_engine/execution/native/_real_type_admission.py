@@ -13,9 +13,9 @@ oracle, so `plan_native_route` checks them here once it has the first chunk:
 - a bucket_perturb column's real source type (the native operator takes exactly
   `string`; an Arrow `large_string` profiles as `object`, which maps back to
   `string`, so only the real schema can tell the two apart);
-- a date_shift column's real source type (the native operator takes exactly `string`,
-  and a non-string source keeps running on the oracle, which is what it ran on before
-  date_shift left the chunked veto set);
+- a date_shift column's real source type (the native text operator takes exactly `string`;
+  a column whose plan shape is a typed date takes the resident type that shape names,
+  `date32` for `DATE`, and any other type keeps running on the oracle);
 - a text_redact column's real source type (the native operator takes exactly `string`; the
   oracle stringifies any other cell, which the string-only kernel contract does not reproduce
   for a decimal, date or dictionary source, so a non-string source keeps running on the oracle);
@@ -37,15 +37,17 @@ chunk was accepted.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any, Final
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._chunked_group_key_gate import group_by_columns
 from decoy_engine.execution.native._operator_config_rejections import (
     group_key_sibling_type_admitted,
+    typed_date_shift_type_rejection,
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
 from decoy_engine.execution.native._route_decline_codes import CodedDecline, RouteDeclineCode, coded
@@ -90,6 +92,25 @@ def _providers(config: dict[str, Any], table: str) -> dict[str, Any]:
     return {}
 
 
+def typed_preserve(
+    config: dict[str, Any], shapes: Mapping[tuple[str, str], ColumnShape], table: str, column: str
+) -> bool:
+    """Whether `table.column` is a typed date_shift column (in the plan's `shapes`) whose config
+    lists `preserve_values`, the same predicate the config gate applies (`has_preserve_values`)."""
+    from decoy_engine.transforms.date_preserve import has_preserve_values
+
+    if (table, column) not in shapes:
+        return False
+    for table_cfg in config.get("tables") or ():
+        if not isinstance(table_cfg, dict) or table_cfg.get("name") != table:
+            continue
+        for col in table_cfg.get("columns") or ():
+            if isinstance(col, dict) and col.get("name") == column:
+                cfg = col.get("provider_config")
+                return has_preserve_values(cfg if isinstance(cfg, dict) else {})
+    return False
+
+
 def string_source_type_rejection(strategy: str, column: str, schema: pa.Schema) -> str | None:
     """The coded reason a `strategy` column's real source type is not the one its native
     operator takes, or None. categorical, bucket_perturb, date_shift and text_redact all take
@@ -131,10 +152,16 @@ def real_type_decline(
     *,
     table: str,
     profile: Any,
+    date_shapes: Mapping[tuple[str, str], ColumnShape] | None = None,
 ) -> CodedDecline | None:
     """The first real-type decline as its legacy reason plus a structured record, or None.
-    The column is the node under test, so attribution never reparses the reason string."""
+    The column is the node under test, so attribution never reparses the reason string.
+
+    `date_shapes` is the compiled plan's typed date_shift shapes (`NativeExecutionPlan`); a
+    date_shift column listed there is checked against the resident type its shape names, not
+    against `string`."""
     node_routes = tuple(node_routes)
+    shapes = date_shapes or {}
     # Only the hash columns are read from the resident table (`hash_config_rejection`
     # resolves one column's type). `Schema.empty_table` raises for a union or a
     # run-end-encoded string_view field, so building it over the whole schema would turn
@@ -167,6 +194,17 @@ def real_type_decline(
                 table,
                 column,
             )
+        elif node.strategy == "date_shift" and (table, column) in shapes:
+            reason = typed_date_shift_type_rejection(
+                column,
+                table,
+                shapes[(table, column)],
+                {table: pa.schema([first_schema.field(column)]).empty_table()},
+            )
+            if reason is not None:
+                return coded(
+                    reason, RouteDeclineCode.DATE_SHIFT_TYPED_TYPE_NOT_NATIVE, table, column
+                )
         elif node.strategy in _STRING_SOURCE_STRATEGIES:
             reason = string_source_type_rejection(node.strategy, column, first_schema)
             if reason is not None:
@@ -190,7 +228,10 @@ def real_type_rejection(
     *,
     table: str,
     profile: Any,
+    date_shapes: Mapping[tuple[str, str], ColumnShape] | None = None,
 ) -> str | None:
     """The coded reason an admitted table must run on the oracle, or None."""
-    decline = real_type_decline(config, node_routes, first_schema, table=table, profile=profile)
+    decline = real_type_decline(
+        config, node_routes, first_schema, table=table, profile=profile, date_shapes=date_shapes
+    )
     return None if decline is None else decline.reason

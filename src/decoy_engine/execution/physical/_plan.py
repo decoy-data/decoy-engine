@@ -140,7 +140,10 @@ class ExecutionBinding:
             self.pool_binding is not None
             or isinstance(params, CategoricalParams)
             or (isinstance(params, BucketPerturbParams) and params.bucket is not None)
-            or (isinstance(params, DateShiftParams) and params.date_format is not None)
+            or (
+                isinstance(params, DateShiftParams)
+                and (params.date_format is not None or params.shape is not None)
+            )
         )
 
     @property

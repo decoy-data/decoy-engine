@@ -276,3 +276,7 @@ baseline = "tests/sentry/baselines/faker-pool-size-one-resolver.json"
 [[sentry]]
 id = "faker-native-allowlist-total"
 baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
+
+[[sentry]]
+id = "date-shift-one-arithmetic"
+baseline = "tests/sentry/baselines/date-shift-one-arithmetic.json"

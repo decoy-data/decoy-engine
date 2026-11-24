@@ -309,6 +309,18 @@ pass (`decoy validate`) defers a column whose type it cannot see, so a missing `
 pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
 date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
 
+**Pre-GA output change (date_shift on `date32`, DATE-SHIFT-TYPED S1, 2026-11-24).** A `date_shift` column
+whose plan shape is `DATE` over a `date32` source runs natively on the unified slice, the chunked route and the
+sequential route (namespaced, no `group_by`, no `when:`, no `preserve_values`). Offsets and key bytes are
+unchanged for every usable row. B4: a `date32` value outside years 1 to 9999, or one shifted out of that range,
+is a `format_error` row error that keeps the source on the native routes and the oracle handler, where the job
+failed before; the full-frame route reads the column through pandas, which cannot hold such a date, and still
+fails the job (the one named route difference). B5: on the unified slice the output column keeps `date32` and goes
+to the output assembler as an Arrow column; on the chunked route the schema rule pins it to `date32`, not
+`string` (text sources still give `string`). `preserve_values` on a typed column declines with
+`date_shift_typed_preserve_not_native`, and a typed shape over any other resident type (`date64`) with
+`date_shift_typed_type_not_native`; both run on the oracle with today's output. The plan digest does not move.
+
 **Pre-GA correction (COLUMN-SHAPE E2, 2026-11-22).** `bucket_perturb` no longer detects a date format from
 its cells. A text column (CSV, fixed width, a string column, a `nested` child) with no `provider_config.date_format`
 is refused at plan compile with `plan/column_shape_required` (new, registered unreleased); the config-only pass
@@ -1016,7 +1028,7 @@ only this site moves.
   column (explicit non-empty `date_format` without `%z` or `%Z`, namespaced, no `group_by`,
   no `when:`, integer day bounds, `string` source) is shifted by the compiled index kernel.
   Its chunked output type is pinned to `string` on both chunked legs, with or without the
-  companion. Under ROUTE-OUTPUT-CONTRACT the whole-frame route still resolves the type at
+  companion; a typed `date32` source (DATE-SHIFT-TYPED S1) is pinned to `date32`. Under ROUTE-OUTPUT-CONTRACT the whole-frame route still resolves the type at
   assembly, so an empty column is `double` there and an all-null column is `null` there,
   while both are `string` on the chunked route; shifted values are unchanged. A non-null
   unparseable value fails closed with `RowErrorsFailedError` on both chunked legs, with

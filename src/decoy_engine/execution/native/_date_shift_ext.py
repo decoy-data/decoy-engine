@@ -33,7 +33,13 @@ the positions mean afterwards:
   and keeps the positions chunk-local, because the oracle chunked leg reports
   `row_index` within its chunk and never adds the chunk's global offset.
 
-v1 scope: STRING source, EXPLICIT `date_format` (no `%z`/`%Z`), no `group_by`,
+Typed sources (DATE-SHIFT-TYPED S1): a `date32` column whose plan shape is `DATE` keys each row
+on its ISO date (`canonicalize_typed_array`, the same bytes `_canonicalize_source` builds) and
+adds the days with `shift_typed_days`, the arithmetic the oracle calls too. The output stays
+`date32`; a row outside years 1 to 9999, before or after the shift, is a `format_error` that keeps
+its source value.
+
+v1 text scope: STRING source, EXPLICIT `date_format` (no `%z`/`%Z`), no `group_by`,
 integer `min_days`/`max_days` inside the pandas Timedelta range, on the full-frame
 route and, per chunk, on the chunked route. Every other shape declines to the
 oracle at admission (`date_shift_config_rejection`).
@@ -50,11 +56,13 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.generation.pool._canonicalize import canonicalize_typed_array
 from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as _BUCKET_REASON
-from decoy_engine.transforms.date_shift import order_window
+from decoy_engine.transforms.date_shift import order_window, shift_typed_days
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._index_ext import IndexDerivationKernel
@@ -144,20 +152,56 @@ def _derive_offsets(
         raise
 
 
+def _typed_date_shift(
+    col: pa.Array,
+    *,
+    min_days: int,
+    range_size: int,
+    mask_key: bytes,
+    namespace: str,
+    index_kernel: IndexDerivationKernel,
+    native_threads: int | None,
+    derive_calls: list[int] | None,
+) -> tuple[pa.Array, tuple[int, ...]]:
+    """The `DATE` shape: keyed offsets over the ISO keys, then the shared typed arithmetic.
+
+    A row with no key (null, or outside years 1 to 9999) derives no offset; `shift_typed_days`
+    flags it, and any row whose shifted day leaves that range, as failed."""
+    keys, _ = canonicalize_typed_array(col)
+    usable = keys.is_valid().to_numpy(zero_copy_only=False)
+    offsets = np.zeros(len(col), dtype=np.int64)
+    if usable.any():
+        drawn = _derive_offsets(
+            keys.filter(pa.array(usable)),
+            range_size=range_size,
+            mask_key=mask_key,
+            namespace=namespace,
+            index_kernel=index_kernel,
+            native_threads=native_threads,
+        )
+        offsets[usable] = drawn.astype(np.int64) + min_days
+    if derive_calls is not None:
+        derive_calls.append(int(usable.any()))
+    shifted, failed = shift_typed_days(col, offsets)
+    return shifted, tuple(int(i) for i in np.flatnonzero(failed))
+
+
 def native_date_shift(
     array: pa.Array | pa.ChunkedArray,
     *,
     min_days: int,
     max_days: int,
-    date_format: str,
+    date_format: str | None,
     mask_key: bytes | None,
     namespace: str,
     index_kernel: IndexDerivationKernel,
     native_threads: int | None = None,
     derive_calls: list[int] | None = None,
     preserved: np.ndarray[Any, Any] | None = None,
+    shape: ColumnShape | None = None,
 ) -> tuple[pa.Array, tuple[int, ...]]:
-    """Shift a `pa.string()` date column on the native lane (full-frame or one chunk).
+    """Shift a `pa.string()` date column, or a `date32` column whose plan `shape` is `DATE`, on
+    the native lane (full-frame or one chunk).
 
     Returns `(out, format_error_positions)`: `out` is pinned `pa.string()` (the
     whole-column null-shape reconciliation to the oracle's data-dependent type
@@ -175,6 +219,9 @@ def native_date_shift(
     filtered out before parsing, so they never reach the kernel, the date arithmetic or the
     whole-column strftime, are never format errors, and keep their source text. The returned
     positions are rebased to `array`.
+
+    A typed `shape` ignores `date_format` and returns the source type (`date32`); admission
+    declines `preserve_values` on a typed column, so `preserved` is never set with it.
     """
     try:
         if mask_key is None:  # pragma: no cover - require_mask_key never returns None
@@ -184,6 +231,21 @@ def native_date_shift(
             )
         min_days, range_size = resolve_shift_range(min_days, max_days)
         col = array.combine_chunks() if isinstance(array, pa.ChunkedArray) else array
+        if shape is not None:
+            if shape is not ColumnShape.DATE or preserved is not None:  # pragma: no cover
+                raise AssertionError("admission admits only a DATE shape without preserve_values")
+            return _typed_date_shift(
+                col,
+                min_days=min_days,
+                range_size=range_size,
+                mask_key=mask_key,
+                namespace=namespace,
+                index_kernel=index_kernel,
+                native_threads=native_threads,
+                derive_calls=derive_calls,
+            )
+        if date_format is None:  # pragma: no cover - admission requires a text format
+            raise AssertionError("text date_shift reached the kernel without a date_format")
         if preserved is not None and preserved.any():
             rest = pa.array(~preserved)
             computed, positions = native_date_shift(

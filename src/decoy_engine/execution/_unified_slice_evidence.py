@@ -26,7 +26,7 @@ from decoy_engine.execution import _unified_slice_admission as _admission
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._unified_slice import UnifiedSliceInvariantError
 from decoy_engine.execution.native import _chunked_evidence
-from decoy_engine.execution.native._operator_params import FakerParams
+from decoy_engine.execution.native._operator_params import DateShiftParams, FakerParams
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 
 if TYPE_CHECKING:
@@ -189,6 +189,10 @@ def _write_back_when(
     frame.loc[selected, column] = sub[column]
 
 
+def _is_typed_date_shift(params: Any) -> bool:
+    return isinstance(params, DateShiftParams) and params.shape is not None
+
+
 def reconstruct_source_shaped_output(
     *,
     table: str,
@@ -206,7 +210,10 @@ def reconstruct_source_shaped_output(
     # come from the source Arrow column, the rest through `from_pandas`.
     # A zero-row overlay of `to_pylist()` would give pandas `float64`, so an empty table assigns
     # `to_pandas()`, which carries the coordinator's empty dtype for the column.
+    # A typed date_shift column (its params carry the plan's date shape) goes to the assembler as
+    # the native Arrow column, so it keeps its source type and never round-trips through pandas.
     empty = masked_table.num_rows == 0
+    arrow_columns: dict[str, pa.ChunkedArray] = {}
     for node in nodes:
         if node.strategy == "passthrough":
             continue
@@ -215,12 +222,18 @@ def reconstruct_source_shaped_output(
         if node.execution is not None and node.execution.when_expression is not None:
             _write_back_when(frame, column, masked_col, _when_mask_of(node, when_selected))
             continue
+        if node.execution is not None and _is_typed_date_shift(node.execution.params):
+            arrow_columns[column] = masked_col
+            continue
         frame[column] = masked_col.to_pandas() if empty else masked_col.to_pylist()
     from decoy_engine.execution._faker_degenerate_pin import pin_degenerate_to_string
 
     # C5c-ii option A: an all-null/empty admitted deterministic-Faker column over bool/int/uint is
     # `string` here too, matching the full-frame oracle so the flag-on/flag-off D9 parity holds.
     out = pin_degenerate_to_string(
-        table_from_pandas_keeping_source_types(frame, source, untouched), degenerate_pin
+        table_from_pandas_keeping_source_types(
+            frame, source, untouched, arrow_columns=arrow_columns
+        ),
+        degenerate_pin,
     )
     return {table: out}

@@ -155,17 +155,20 @@ def test_naive_datetime_digests_as_its_calendar_date() -> None:
 
 
 class _Seam:
-    """A sequential-native seam that counts the columns it is asked about."""
+    """A sequential-native seam that records the shape it is handed for each column."""
 
     def __init__(self) -> None:
-        self.asked = 0
+        self.shapes: list[ColumnShape | None] = []
 
-    def date_shift_column(self, *args: Any, **kwargs: Any) -> None:
-        self.asked += 1
+    def date_shift_column(
+        self, *args: Any, shape: ColumnShape | None = None, **kwargs: Any
+    ) -> None:
+        self.shapes.append(shape)
 
 
-def test_a_typed_column_never_reaches_the_sequential_native_seam() -> None:
-    """Kills: dropping the shape guard before `seq.date_shift_column`."""
+def test_the_sequential_native_seam_gets_the_plan_shape() -> None:
+    """Kills: dropping the shape from the seam call, which would run the text kernel (with no
+    format) on a typed column, or passing a shape for a text column."""
     from decoy_engine.execution._strategies._date_shift import DateShiftStrategyHandler
 
     seed = _seed()
@@ -176,11 +179,22 @@ def test_a_typed_column_never_reaches_the_sequential_native_seam() -> None:
     typed_ctx = _ctx({("t", "d"): ColumnShape.DATE})
     object.__setattr__(typed_ctx, "seq_native", typed_seam)
     DateShiftStrategyHandler().run(_frame([dt.date(2024, 1, 15)]), "d", seed, typed_ctx)
-    assert typed_seam.asked == 0
+    assert typed_seam.shapes == [ColumnShape.DATE]
     text_ctx = _ctx({})
     object.__setattr__(text_ctx, "seq_native", text_seam)
     DateShiftStrategyHandler().run(_frame(["2024-01-15"]), "d", with_format, text_ctx)
-    assert text_seam.asked == 1  # the seam is still asked about a text column
+    assert text_seam.shapes == [None]
+
+
+def test_the_sequential_admit_takes_the_typed_gate_only_from_the_plan_shape() -> None:
+    """Kills: inferring `DATE` from a `date32` pin. An F06-declared date column is cast to
+    `date32` before the route, but it has no plan date shape and must keep its text output."""
+    from decoy_engine.execution._sequential_native_ops import date_shift_op
+
+    admit = date_shift_op(lambda _t: None).admit
+    assert admit("d", pa.date32(), _seed(), ColumnShape.DATE) is None
+    # Without a shape the text gate runs, and a text gate wants a date_format first.
+    assert admit("d", pa.date32(), _seed()) == "date_shift_requires_date_format:d"
 
 
 @pytest.mark.parametrize("shape", list(ColumnShape))

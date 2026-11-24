@@ -37,6 +37,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR
@@ -389,13 +390,17 @@ def _bucket_apply(bound: BoundIndexKernel, values: pa.Array, call: BucketCall) -
     return NativeResult(out, positions)
 
 
-def _date_shift_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) -> str | None:
+def date_shift_admit(
+    column: str, input_type: pa.DataType, seed: ColumnSeed, shape: ColumnShape | None = None
+) -> str | None:
     """Why a date_shift column stays on Python, or None.
 
     Adapts the route-neutral `date_shift_config_rejection` to the SEQ admit signature: a
     one-field empty table stands in for the resident source so the type gate resolves the
     pinned Arrow type, and a config the handler would raise on declines so the handler raises
-    its own coded error on Python."""
+    its own coded error on Python. `shape` is the plan's typed date shape (None for text and for
+    an F06-declared date, which keeps its text output), so a typed column takes the typed half
+    of the gate (no format, no `preserve_values`)."""
     return date_shift_config_rejection(
         column,
         column,
@@ -403,6 +408,7 @@ def _date_shift_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) ->
         namespace=seed.namespace,
         provider_config=provider_config_to_dict(seed.provider_config),
         resident_sources={column: pa.schema([pa.field(column, input_type)]).empty_table()},
+        shape=shape,
     )
 
 
@@ -503,7 +509,7 @@ def date_shift_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:
         DATE_SHIFT,
         SEQ_DATE_SHIFT_DISPOSITION_KEY,
         load_kernel,
-        _date_shift_admit,
+        date_shift_admit,
         _date_shift_apply_unused,
     )
 
@@ -584,6 +590,7 @@ __all__ = [
     "bucket_perturb_op",
     "bucket_row_errors",
     "categorical_op",
+    "date_shift_admit",
     "date_shift_op",
     "date_shift_row_errors",
     "faker_op",

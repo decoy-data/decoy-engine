@@ -491,6 +491,7 @@ def run_kernel_step(
             min_days=params.min_days,
             max_days=params.max_days,
             date_format=params.date_format,
+            shape=params.shape,
             mask_key=mask_key,
             namespace=params.namespace or "",
             index_kernel=_index_kernel_for(params, index_kernel),

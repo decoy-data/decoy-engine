@@ -265,11 +265,20 @@ def _native_route(
         )
     col_seed_by_name = dict(table_seed.per_column)
     unconfigured_set = frozenset(unconfigured)
+    from decoy_engine.declared_casting._boundary import plan_native_date_shape
+
+    # The plan's typed date shapes, the same answer admission read (`NativeExecutionPlan`).
+    date_shapes = {
+        name: shape
+        for name in col_seed_by_name
+        if (shape := plan_native_date_shape(plan, table, name)) is not None
+    }
     params_by_column = resolve_params_by_column(
         col_seed_by_name,
         categorical_by_column,
         excluded=unconfigured_set | stored_index,
         table=table,
+        date_shapes=date_shapes,
     )
 
     # The oracle's own predicate function decides each `when:` column's rows (see `_when_mask`).
