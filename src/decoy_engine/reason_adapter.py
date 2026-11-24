@@ -53,6 +53,7 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.execution._errors", "DeclaredCastRouteError", "route"),
     ("decoy_engine.execution._errors", "DeclaredCastValueError", "runtime"),
     ("decoy_engine.execution._errors", "QuarantineError", "runtime"),
+    ("decoy_engine.errors", "ParquetFixedListNullError", "runtime"),
     ("decoy_engine.errors", "FixedWidthRecordOverlongError", "runtime"),
     ("decoy_engine.plan.validate._consolidator", "PlanCheckError", "plan"),
     ("decoy_engine.generation.statistical._spec", "StatisticalSpecError", "plan"),
