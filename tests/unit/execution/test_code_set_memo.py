@@ -147,8 +147,9 @@ def _customer_corpus(tmp_path: pathlib.Path) -> str:
     pq.write_table(
         pa.table(
             {
-                "code": pa.array(["A01", "A02", "B01", "B02"], type=pa.string()),
-                "chapter": pa.array(["A", "A", "B", "B"], type=pa.string()),
+                "code": pa.array(["A01", "A02", "B01", "B02", "C01"], type=pa.string()),
+                # Chapter C holds one code, so C01 hits the sole-member-bucket error.
+                "chapter": pa.array(["A", "A", "B", "B", "C"], type=pa.string()),
             }
         ),
         str(path),
@@ -226,6 +227,29 @@ class TestAt1Parity:
             new = _snapshot(CodeSetHandler().run, df, plan)
         assert new == base
 
+    @pytest.mark.parametrize("opts", _OPTION_SETS)
+    def test_sole_member_bucket_interleaved_and_repeated(
+        self, tmp_path: pathlib.Path, opts: dict
+    ) -> None:
+        plan = _seed(
+            {
+                "code_set": "ab",
+                "mode": "mask",
+                "chapter_preserve": True,
+                "corpus_source": _customer_corpus(tmp_path),
+            }
+        )
+        # C01 is the only code in chapter C: a per-value error, repeated,
+        # with a success, an absent chapter and a null between.
+        vals = ["C01", "A01", "C01", "U07", None, "C01", "B02", "U07", "A02"]
+        df = pd.DataFrame({"c": pd.Series(vals, dtype=object)})
+        with _option_context(opts):
+            base = _snapshot(_base_run, df, plan)
+            new = _snapshot(CodeSetHandler().run, df, plan)
+        assert new == base
+        reasons = [e[3] for e in base[-1]]
+        assert sum("code_set_sole_member_bucket" in r for r in reasons) == 3
+
     def test_two_calls_two_namespaces_two_corpora(self, tmp_path: pathlib.Path) -> None:
         # M3: a module-level memo would leak the first call's codes.
         df = pd.DataFrame({"c": pd.Series(["A01", "B01", "A01"], dtype=object)})
@@ -296,6 +320,31 @@ class TestAt2CallCounts:
             pd.DataFrame({"c": pd.Series([None, None], dtype=object)}), "c", plan, _ctx()
         )
         assert calls == []
+
+    @pytest.mark.parametrize("chapter_preserve", [False, True])
+    def test_first_value_fatal_raises_like_base(
+        self, tmp_path: pathlib.Path, calls: list[str], chapter_preserve: bool
+    ) -> None:
+        # A one-row corpus is a corpus-level defect, not a per-value one: the
+        # first non-null value must fail the job with base's class, code and text.
+        path = tmp_path / "one.parquet"
+        pq.write_table(pa.table({"code": ["A01"], "chapter": ["A"]}), str(path))
+        plan = _seed(
+            {
+                "code_set": "one",
+                "mode": "mask",
+                "chapter_preserve": chapter_preserve,
+                "corpus_source": f"customer:{path}",
+            }
+        )
+        df = pd.DataFrame({"c": pd.Series([None, "A01", "A01", "X"], dtype=object)})
+        base = _snapshot(_base_run, df, plan)
+        calls.clear()
+        new = _snapshot(CodeSetHandler().run, df, plan)
+        assert new == base
+        if not chapter_preserve:
+            assert base[0] == "raise"
+        assert calls == ["A01"] or base[0] != "raise"
 
     def test_fatal_precedence_same_row_errors_before_raise(self, tmp_path: pathlib.Path) -> None:
         plan = _seed(
@@ -510,3 +559,85 @@ class TestAt1RouteEntries:
         # The memo route called the scalar function once per distinct value.
         assert len(new_calls) == len(set(new_calls)) > 0
         assert len(calls) > len(new_calls)
+
+
+def _chunked_config() -> dict[str, Any]:
+    from decoy_engine.config import PipelineConfig
+
+    return PipelineConfig.model_validate(
+        {
+            "version": 2,
+            "global_settings": {"seed": 4242},
+            "sources": {
+                "t": {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": "/nonexistent/t.csv",
+                }
+            },
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [
+                        {
+                            "name": "c",
+                            "strategy": "code_set",
+                            "namespace": "cs",
+                            "provider_config": {"code_set": "icd10"},
+                        }
+                    ],
+                }
+            ],
+            "targets": {"t": {"type": "file", "format": "csv", "path": "/nonexistent/out.csv"}},
+        }
+    ).model_dump()
+
+
+def _run_chunked() -> tuple[list, Any]:
+    from decoy_engine import run_mask_pipeline_chunked
+    from decoy_engine.execution._chunked_code_set import aggregate_chunk_code_set_corpora
+    from tests._declared_schema import declared_schema
+
+    cfg = _chunked_config()
+    # Two chunks that split the repeats of I10, E11.9 and J45.
+    vals = ["I10", "E11.9", None, "I10", "J45", "E11.9", "I10", "J45", "ZZZ", "I10"]
+    chunks = [
+        pa.table({"c": pa.array(vals[:4], type=pa.string())}),
+        pa.table({"c": pa.array(vals[4:], type=pa.string())}),
+    ]
+    sink: list[Any] = []
+    out = list(
+        run_mask_pipeline_chunked(
+            cfg,
+            chunks,
+            table="t",
+            source_schema=declared_schema(cfg, "t"),
+            engine_version="csn-s1-test",
+            chunk_result_sink=sink,
+        )
+    )
+    rows = [v for t in out for v in t.column("c").to_pylist()]
+    return rows, aggregate_chunk_code_set_corpora(sink)
+
+
+class TestAt1ChunkedRoute:
+    """AT-1(b) chunked entry: two chunks that split repeats, memo vs old loop."""
+
+    def test_chunked_output_and_evidence_equal_old_loop(
+        self, monkeypatch: pytest.MonkeyPatch, calls: list[str]
+    ) -> None:
+        new_rows, new_ev = _run_chunked()
+        new_calls = list(calls)
+        calls.clear()
+        monkeypatch.setattr(
+            CodeSetHandler, "run", lambda self, df, col, plan, ctx: _base_run(df, col, plan, ctx)
+        )
+        base_rows, base_ev = _run_chunked()
+        assert new_rows == base_rows
+        assert new_ev == base_ev
+        assert new_ev.get("code_set_corpora")
+        # The memo is per call (per chunk): a repeat in the second chunk is a
+        # new call, so the chunk-split values are masked twice, never shared.
+        assert len(new_calls) < len(calls)
+        assert new_calls.count("I10") == 2

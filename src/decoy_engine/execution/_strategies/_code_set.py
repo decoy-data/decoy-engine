@@ -260,8 +260,11 @@ class CodeSetHandler:
                         memo_bytes += size
                     else:
                         memo_open = False
-                # Drop the key before the next str(value) is built, so two
-                # oversized keys are never alive together.
+                # Drop the local name before the next str(value) is built. On a
+                # miss that frees the string unless the memo stored it. On a hit
+                # for a failed value the name is not deleted here; that string
+                # equals one `failed` already holds (and counted against the byte
+                # cap), so the transient copy adds at most one stored-size key.
                 del key
             if reason is not None:
                 # Sprint 2 honesty pack (D7): a per-value defect. Record it
