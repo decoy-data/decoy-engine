@@ -216,6 +216,10 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
     ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
+    # The post-scan runner and residual_pii take the writer query's answer, `TableWrites`, a
+    # union alias defined in the private `plan.column_access._writes` and re-exported by
+    # `decoy_engine.plan.column_access`. Same CI-E1 class as the entries above.
+    ("py:class", "decoy_engine.plan.column_access.TableWrites"),
     # Owner 2026-11-19: the experimental review functions import StarterConfig
     # from its public package; listed here for the same CI-E1 reason.
     ("py:class", "decoy_engine.profiling.StarterConfig"),

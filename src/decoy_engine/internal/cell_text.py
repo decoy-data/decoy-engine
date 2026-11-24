@@ -17,10 +17,12 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine._error_base import DecoyError
+
 _BYTES = (bytes, bytearray, memoryview)
 
 
-class UnreadableCellError(ValueError):
+class UnreadableCellError(DecoyError, ValueError):
     """A cell that cannot be read as text. The text is fixed, so no cell bytes reach a finding,
     a report or a log."""
 

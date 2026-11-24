@@ -14,6 +14,7 @@ __all__ = [
     "CATEGORICAL_WEIGHTS_NONPOSITIVE",
     "CATEGORICAL_WEIGHTS_SHAPE",
     "CATEGORICAL_WEIGHT_BELOW_RESOLUTION",
+    "CELL_UNREADABLE",
     "CHECKSUM_INVALID",
     "CODE_SET_GEN_REQUIRES_NAMESPACE",
     "COLUMN_SHAPE_REQUIRED",
@@ -432,6 +433,11 @@ RECORD_KIND_RESERVED = _d("record_kind_reserved", "Record kind reserved.", since
 _d = _catalog.runtime("ScanSourceError")
 
 SCAN_SOURCE_FAILED = _d("scan_source_failed", "A table could not be scanned.", since="1.10.0")
+
+# A detector or post-scan check met bytes that are not UTF-8; the summary names no cell.
+_d = _catalog.runtime("UnreadableCellError")
+
+CELL_UNREADABLE = _d("cell_unreadable", "A cell could not be read as text.", since=UNRELEASED)
 
 # An explicit `post_scan.integrity: true` is never run unchecked: these refuse what it cannot judge.
 _d = _catalog.runtime("ExecutionError")
