@@ -15,7 +15,8 @@ these tables instead of declining them. Their evidence no longer lists
 Out-of-core still refuses `when:`.
 
 A route that forgets the pre-mask snapshot of a `when:` column fails with the new runtime error
-`when_source_snapshot_missing`. No supported route does.
+`when_source_snapshot_missing`. No supported route does. A `when:` that names a column an earlier
+node creates (not in the source) still fails with `when_expression_error`, as before.
 
 Work order is unchanged: the order of masking nodes is the order it was before, a plan raises
 `cyclic_work_ordering` exactly when it did, and nodes write into the live frame one at a time.

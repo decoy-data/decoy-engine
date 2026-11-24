@@ -16,7 +16,7 @@ import pytest
 
 from decoy_engine import run_mask_chunked
 from decoy_engine.errors import RowErrorsFailedError
-from decoy_engine.execution import _pandas_adapter
+from decoy_engine.execution import _fk_keys
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.profile import _walk
 from tests.native._b8_support import run_mask_chunked_below_gate
@@ -175,7 +175,7 @@ class _Spy:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         spy = self
         real_run = PandasExecutionAdapter.run
-        real_conv = _pandas_adapter.to_pandas_fk_safe
+        real_conv = _fk_keys.to_pandas_fk_safe
         real_walk = _walk.walk_dataframe
 
         def run(self: Any, plan: Any, sources: Any, **kw: Any) -> Any:
@@ -191,7 +191,7 @@ class _Spy:
             return real_walk(df, *a, **kw)
 
         monkeypatch.setattr(PandasExecutionAdapter, "run", run)
-        monkeypatch.setattr(_pandas_adapter, "to_pandas_fk_safe", conv)
+        monkeypatch.setattr(_fk_keys, "to_pandas_fk_safe", conv)
         monkeypatch.setattr(_walk, "walk_dataframe", walk)
 
 

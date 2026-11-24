@@ -189,10 +189,8 @@ def test_a_real_value_cycle_still_raises_on_every_entry_point() -> None:
     assert err.value.code == "cyclic_work_ordering"
 
 
-@pytest.mark.parametrize("with_bundle", [False, True], ids=["creator-only", "with-bundle"])
-def test_zero_match_creator_supplies_missing_target(with_bundle: bool) -> None:
-    """5. A gated creator that matches no row still admits its missing target: the column
-    exists and is null, and a bundle can fill it."""
+def test_a_zero_match_creator_leaves_its_target_absent() -> None:
+    """5. A gated creator that matches no row never writes: the column is absent, as on main."""
     table = pa.table(
         {
             "first_name": pa.array(FIRST),
@@ -201,16 +199,27 @@ def test_zero_match_creator_supplies_missing_target(with_bundle: bool) -> None:
         }
     )
     creator = ("email", ws.derived('concat(last_name, "@x.test")', when="flag == 'y'"))
-    per_column = [("first_name", ws.bundle()), creator] if with_bundle else [creator]
-    outs = [run(ws.plan(per_column), table) for run in (ws.run, ws.run_sequential)]
-    assert outs[0].column_names == outs[1].column_names
-    for out in outs:
-        emails = out.column("email").to_pylist()
-        assert len(emails) == N
-        if with_bundle:
-            assert emails == ws.bundle_oracle(FIRST)["email"]
-        else:
-            assert emails == [None] * N
+    for run in (ws.run, ws.run_sequential):
+        assert "email" not in run(ws.plan([creator]), table).column_names
+
+
+def test_a_bundle_output_the_zero_match_creator_never_made_is_refused_as_on_main() -> None:
+    """5b. Main raises `composite_output_column_missing` when the bundle needs a column that a
+    gated creator, matching no row, never created. S2a keeps that; S2b may change it."""
+    from decoy_engine.execution._errors import ExecutionError
+
+    table = pa.table(
+        {
+            "first_name": pa.array(FIRST),
+            "last_name": pa.array([f"L{i}" for i in range(N)]),
+            "flag": pa.array(["n"] * N),
+        }
+    )
+    creator = ("email", ws.derived('concat(last_name, "@x.test")', when="flag == 'y'"))
+    for run in (ws.run, ws.run_sequential):
+        with pytest.raises(ExecutionError) as err:
+            run(ws.plan([("first_name", ws.bundle()), creator]), table)
+        assert err.value.code == "composite_output_column_missing"
 
 
 def _two_joint_writers(tmp_path: Path, first: str, second: str) -> pa.Table:

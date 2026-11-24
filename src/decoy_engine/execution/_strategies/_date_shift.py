@@ -81,7 +81,7 @@ from decoy_engine.execution._adapter import (
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
-from decoy_engine.execution.work_order.rows import snapshot_rows
+from decoy_engine.execution.work_order.rows import misaligned_message, snapshot_rows
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
@@ -193,14 +193,13 @@ class DateShiftStrategyHandler:
             # are compile-rejected for group_by, so the frame is the whole table) and fails closed
             # on a count mismatch instead of reindexing, so an execution route not yet supported
             # for group_by is a loud error, never a silent mis-anchor.
-            snapshot = snapshot_rows(
-                ctx,
-                ctx.current_table,
-                group_by,
-                len(col),
-                strategy="date_shift",
-                misaligned=reasons.runtime.DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED,
-            )
+            snapshot = snapshot_rows(ctx, ctx.current_table, group_by)
+            if snapshot is not None and len(snapshot) != len(col):
+                raise StrategyError(
+                    code=reasons.runtime.DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED,
+                    strategy="date_shift",
+                    message=misaligned_message(ctx.current_table),
+                )
             if snapshot is None:
                 raise StrategyError(
                     code=reasons.runtime.DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING,

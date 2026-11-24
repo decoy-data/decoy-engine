@@ -624,16 +624,21 @@ def test_a_column_created_before_the_composite_that_overwrites_it(created: str, 
     n = 4
     source = [f"R{i}" for i in range(n)]
     table = pa.table({"first_name": pa.array([f"F{i}" for i in range(n)]), read: pa.array(source)})
-    out = _run_name_email(plan, table, RelationshipGraph(edges=(), ordering=()), "first_name")
-    assert out.column(read).to_pylist() != source  # the composite ran
+    graph = RelationshipGraph(edges=(), ordering=())
     if created == "email":
-        # The creator sorts before the bundle (queue order) and runs first, so the bundle's
-        # value is the final value of the column.
+        # The creator sorts before the bundle (queue order) and runs first; the bundle's value
+        # is the final value of the column.
+        out = _run_name_email(plan, table, graph, "first_name")
+        assert out.column(read).to_pylist() != source  # the composite ran
         assert not any(v.endswith("!") for v in out.column(created).to_pylist())
     else:
-        # The creator runs after the bundle (queue order), reading the bundle's email, and
-        # replaces the bundle's `last_name`.
-        assert out.column(created).to_pylist() == [e + "!" for e in out.column(read).to_pylist()]
+        # The bundle runs first (queue order) and needs `last_name`, which the source lacks. Main
+        # refuses this with `composite_output_column_missing`; S2a keeps main's order and error.
+        from decoy_engine.execution._errors import ExecutionError
+
+        with pytest.raises(ExecutionError) as err:
+            _run_name_email(plan, table, graph, "first_name")
+        assert err.value.code == "composite_output_column_missing"
 
 
 @pytest.mark.parametrize("sequential", [False, True], ids=["full-frame", "sequential"])

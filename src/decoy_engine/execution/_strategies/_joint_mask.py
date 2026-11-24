@@ -24,7 +24,7 @@ import pandas as pd
 from decoy_engine import fileaccess, reasons
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.execution.work_order.rows import snapshot_rows
+from decoy_engine.execution.work_order.rows import misaligned_message, snapshot_rows
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.joint_mask import JointMaskConfig, apply_joint_mask
@@ -65,14 +65,13 @@ class JointMaskHandler:
         # snapshot every joint_mask key_by (`source_anchor_columns`).
         key_series = None
         if mode == "mask":
-            key_series = snapshot_rows(
-                ctx,
-                ctx.current_table,
-                joint_cfg.key_by,
-                len(df),
-                strategy="joint_mask",
-                misaligned=reasons.runtime.JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED,
-            )
+            key_series = snapshot_rows(ctx, ctx.current_table, joint_cfg.key_by)
+            if key_series is not None and len(key_series) != len(df):
+                raise StrategyError(
+                    code=reasons.runtime.JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED,
+                    strategy="joint_mask",
+                    message=misaligned_message(ctx.current_table),
+                )
             if key_series is None:
                 # Fail closed whenever the required pre-mask snapshot is absent, regardless of
                 # whether key_by happens to be a live-frame column. Without the snapshot the only

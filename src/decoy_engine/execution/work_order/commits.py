@@ -1,20 +1,19 @@
-"""Creator-target preparation for one run.
+"""Gated write-back and per-run state.
 
-Each node runs in place and in order, as on main. Before the first dispatch of a table, every
-scalar that creates its own target (`derived`, `group_key` and the like) gets an index-aligned
-null column when the source lacks it, so a gate that matches nothing leaves the column in place
-and a bundle can fill it.
+Each node runs in place and in order, as on main. A creator's column (`derived`, `group_key`)
+is created when its node writes it, so column order and dtype are main's.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from decoy_engine.execution.work_order.compile import WorkOrder
+from decoy_engine.execution.work_order.when_reads import reject_when_on_created
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
@@ -50,15 +49,9 @@ class WorkOrderRun:
         self.order = order
         self.selection = Selection()
 
-    def begin_table(self, table: str, frame: pd.DataFrame) -> None:
-        """Add each missing creator target as an index-aligned null column. An FK child resolves
-        its own columns and creates nothing."""
-        for op in self.order.ops.values():
-            if op.table != table or op.kind == "fk":
-                continue
-            col = op.node.columns[0]
-            if op.creates and col not in frame.columns:
-                frame[col] = pd.Series([None] * len(frame), index=frame.index, dtype=object)
+    def begin_table(self, table: str, source_columns: Iterable[str]) -> None:
+        """Refuse a `when:` that names a column a node creates (see `reject_when_on_created`)."""
+        reject_when_on_created(self.order, table, source_columns)
 
     def dispatch(
         self,

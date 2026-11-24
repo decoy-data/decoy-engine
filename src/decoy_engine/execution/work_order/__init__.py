@@ -1,7 +1,8 @@
 """Work order: what each node does, and in what order.
 
 `operations` resolves every node once (the one write authority), `compile` makes the one ordering
-decision every entry point shares (main's `order_work`), and `commits` prepares creator targets.
+decision every entry point shares (main's `order_work`), `commits` is the gated write-back and
+per-run state, and `when_reads` refuses a `when:` on a created column.
 """
 
 from decoy_engine.execution.work_order.commits import Selection, WorkOrderRun

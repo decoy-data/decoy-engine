@@ -244,10 +244,9 @@ class PandasExecutionAdapter:
         )
 
         run_state = WorkOrderRun(order)
-        for t, frame in frames.items():
-            run_state.begin_table(t, frame)
         node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
         for t, frame in frames.items():
+            run_state.begin_table(t, sources[t].column_names)
             register_exact_int_sources(ctx, t, sources[t], frame, order)
 
         # FK-parent columns are snapshotted pre-mask so an FK child can rebuild

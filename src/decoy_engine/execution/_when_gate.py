@@ -478,15 +478,8 @@ def when_source_frame(
     for col in snapped:
         # By position: `snapshot_rows` fails closed on a length mismatch and never aligns by label.
         # `ctx.gate_positions` is None here (the predicate sees the whole frame).
-        snapshot = snapshot_rows(
-            ctx,
-            table,
-            col,
-            len(df),
-            strategy=strategy,
-            misaligned=reasons.runtime.WHEN_SOURCE_SNAPSHOT_MISSING,
-        )
-        if snapshot is None:
+        snapshot = snapshot_rows(ctx, table, col)
+        if snapshot is None or len(snapshot) != len(df):
             raise _snapshot_missing(strategy, table)
         src[col] = snapshot.array
     return src

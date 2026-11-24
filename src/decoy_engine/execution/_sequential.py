@@ -416,6 +416,7 @@ def run_sequential(
                 df, kept_index = masking_frame(src, lossless.for_table(table, src))
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
+                run_state.begin_table(table, src.column_names)
                 register_exact_int_sources(ctx, table, src, df, order)
                 native_run.prepare_table(plan, table, src.schema, graph)
                 # C5c-ii: capture the degenerate-Faker pin set from the SOURCE schema before
@@ -445,7 +446,6 @@ def run_sequential(
                     if col in df.columns:
                         ctx.group_anchor_snapshots[(table, col)] = df[col].copy()
 
-                run_state.begin_table(table, df)
                 table_records_list: list[RowErrorRecord] = []
                 for node in nodes_by_table.get(table, ()):
                     with decline_composite_chain(ordered, graph, table):

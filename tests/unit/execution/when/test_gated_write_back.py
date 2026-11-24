@@ -17,6 +17,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._when_gate import run_with_when_gate
 from tests.unit.execution.when import _write_support as ws
 
@@ -45,15 +46,87 @@ def test_a_gated_group_key_absent_from_the_source_matches_main(route: str) -> No
     assert out.column("gk").to_pylist() == ["335fdb386ac7e514", None, "35371bf110f7307c", None]
 
 
+_WIDE = pa.table(
+    {
+        "flag": ["y", "n", "y", "n"],
+        "g": ["a", "a", "b", "b"],
+        "n": [1, 2, 3, 4],
+        "f": [1.5, 2.5, 3.5, 4.5],
+    }
+)
+
+
+def _run_wide(route: str, plan: Any) -> pa.Table:
+    return ROUTES[route](plan, _WIDE, bound=(("g",),))
+
+
 @pytest.mark.parametrize("route", sorted(ROUTES))
-def test_a_zero_match_creator_target_is_an_all_null_column_of_type_null(route: str) -> None:
-    """Case 5 and L3. Main left the column absent; S2 allocates a missing creator target before
-    dispatch so a bundle can fill it, and the unmatched column is an all-null `null` column on
-    both routes. Any change to that type is a reviewed change."""
-    out = _run(route, ws.plan([("tgt", ws.derived('concat(g, "!")', when="flag == 'zz'"))]))
-    assert out.column_names == ["flag", "g", "tgt"]
-    assert out.schema.field("tgt").type == pa.null()
-    assert out.column("tgt").to_pylist() == [None] * 4
+def test_a_zero_match_creator_leaves_the_column_absent_as_main_does(route: str) -> None:
+    """Case 5 and L3. A creator whose gate selects no row never writes, so the column is absent,
+    exactly as on main (`8ee461e0f`)."""
+    out = _run_wide(route, ws.plan([("tgt", ws.derived("n + 1", when="flag == 'zz'"))]))
+    assert out.column_names == ["flag", "g", "n", "f"]
+
+
+@pytest.mark.parametrize("route", sorted(ROUTES))
+@pytest.mark.parametrize(
+    ("expression", "arrow_type", "values"),
+    [
+        ("n + 1", pa.float64(), [2.0, None, 4.0, None]),
+        ("f * 2", pa.float64(), [3.0, None, 7.0, None]),
+        ("n > 2", pa.bool_(), [False, None, True, None]),
+    ],
+    ids=["int", "float", "bool"],
+)
+def test_a_partial_gated_creator_keeps_mains_dtype_and_values(
+    route: str, expression: str, arrow_type: pa.DataType, values: list[Any]
+) -> None:
+    """Main's output at `8ee461e0f`: ints widen to float64 with NaN for the unmatched rows."""
+    out = _run_wide(route, ws.plan([("tgt", ws.derived(expression, when="flag == 'y'"))]))
+    assert out.column_names == ["flag", "g", "n", "f", "tgt"]
+    assert out.schema.field("tgt").type == arrow_type
+    assert out.column("tgt").to_pylist() == values
+
+
+_CREATORS = {
+    "two": (
+        [("zz", ws.derived('concat(g, "!")')), ("aa", ws.derived('concat(g, "?")'))],
+        ["aa", "zz"],
+    ),
+    "three": (
+        [
+            ("zz", ws.derived('concat(g, "!")')),
+            ("mm", ws.derived('concat(g, "#")')),
+            ("aa", ws.derived('concat(g, "?")')),
+        ],
+        ["aa", "mm", "zz"],
+    ),
+    "chain": (
+        [("b2", ws.derived('concat(a2, "?")')), ("a2", ws.derived('concat(g, "!")'))],
+        ["a2", "b2"],
+    ),
+}
+
+
+@pytest.mark.parametrize("route", sorted(ROUTES))
+@pytest.mark.parametrize("case", sorted(_CREATORS))
+def test_created_columns_come_out_in_mains_order(route: str, case: str) -> None:
+    """A creator's column is made when its node runs, so the order is main's, not allocation order."""
+    per_column, created = _CREATORS[case]
+    out = _run_wide(route, ws.plan(per_column))
+    assert out.column_names == ["flag", "g", "n", "f", *created]
+
+
+@pytest.mark.parametrize("route", sorted(ROUTES))
+def test_a_when_naming_a_created_column_is_a_when_expression_error(route: str) -> None:
+    """Main refused it with `when_expression_error`; the snapshot code is for a route that forgot
+    a snapshot, not for this."""
+    plan = ws.plan(
+        [("tgt", ws.derived('concat(g, "!")')), ("g", ws.seed("redact", when="tgt == 'a!'"))]
+    )
+    with pytest.raises(StrategyError) as info:
+        _run(route, plan)
+    assert info.value.code == "when_expression_error"
 
 
 def _main_stitch(df: pd.DataFrame, mask: pd.Series, sub: pd.DataFrame, outputs: tuple[str, ...]):
