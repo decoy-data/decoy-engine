@@ -13,6 +13,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any, NewType, TypeVar
 
+from decoy_engine.errors import ConnectorError
 from decoy_engine.fileaccess._types import (
     DenialKind,
     FileAccessDenied,
@@ -143,9 +144,9 @@ def _resurface(exc: Exception) -> Exception | None:
 def guarded(display: str, strict: bool, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """Run a library call. Under a strict policy a library failure becomes the typed
     `FileAccessReadError` naming only `display`; memory and disk-resource failures keep
-    their class; a denial from inside passes unchanged. Under the local policy the call is
-    made as it is, so CLI text is unchanged. The new error is raised after the `except`
-    block closes so no library error is left as its `__context__`."""
+    their class; a denial or a connector error from inside passes unchanged. Under the local
+    policy the call is made as it is, so CLI text is unchanged. The new error is raised after
+    the `except` block closes so no library error is left as its `__context__`."""
     return guarded_with_parser_errors(display, strict, (), fn, *args, **kwargs)
 
 
@@ -171,6 +172,10 @@ def guarded_with_parser_errors(
     except (FileAccessDenied, FileAccessReadError, FileAccessUnavailable, StopIteration):
         # FileAccessUnavailable is only raised at the policy/open and txn layers today, never by a
         # library read/write of an open handle; passing it through is defensive, not load-bearing.
+        raise
+    except ConnectorError:
+        # Raised by the engine's own stream under the library (a cloud range read), with fixed
+        # text and a kind the caller branches on; a read error would lose both.
         raise
     except parser_errors:
         raise

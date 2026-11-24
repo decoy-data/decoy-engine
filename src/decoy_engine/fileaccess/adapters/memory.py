@@ -1,9 +1,11 @@
-"""A `FileHandle` over bytes the engine already holds, for the pandas and Arrow adapters.
+"""`FileHandle`s over bytes the engine holds or streams itself, for the pandas and Arrow adapters.
 
 A pinned artifact (a lookup file) is read once through the policy and kept in the plan. Parsing
-it later must not open the path again, so the adapters get this handle instead: it stands for
-those bytes, names only a config position, and is always strict, so a library failure becomes the
-one value-free `FileAccessReadError` whatever policy read the file.
+it later must not open the path again, so the adapters get a `MemoryHandle` instead: it stands
+for those bytes and names only a config position. A cloud object is read through a
+`StreamHandle` over the engine's own ranged stream. Both handles are strict whatever policy is
+in force, so a library failure becomes the one value-free `FileAccessReadError`; a connector
+error raised by the stream itself passes through with its kind (see `guarded`).
 """
 
 from __future__ import annotations
@@ -58,12 +60,11 @@ class MemoryHandle:
 class StreamHandle:
     """A `FileHandle` over a readable byte stream the engine opened itself (a cloud object).
 
-    Not strict: a connector failure raised from inside the stream must reach the caller with
-    its own class and kind, which the strict mapping would turn into a read error. The stream
-    is handed to the library once; nothing here touches a file system.
+    Strict, so a parser failure on the object's bytes leaves without its text. The stream is
+    handed to the library once; nothing here touches a file system.
     """
 
-    strict = False
+    strict = True
 
     def __init__(self, stream: BinaryIO, display: str) -> None:
         self._stream = stream

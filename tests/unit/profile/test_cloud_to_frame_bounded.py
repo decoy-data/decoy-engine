@@ -380,3 +380,24 @@ def test_csv_sample_total_capped(monkeypatch: pytest.MonkeyPatch, provider: str)
     _value_free(info.value)
     assert ledger.fetched <= 64 * MiB
     assert max(ledger.responses) <= PIECE and ledger.all_closed()
+
+
+_MALFORMED = {
+    "csv": b"a,t\n1,zz_marker\n2,zz_marker,zz_marker\n",
+    "parquet": b"PAR1" + MARKER * 64 + b"\x10\x00\x00\x00PAR1",
+}
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+@pytest.mark.parametrize("fmt", sorted(_MALFORMED))
+def test_malformed_object_leaves_as_value_free_read_error(
+    monkeypatch: pytest.MonkeyPatch, provider: str, fmt: str
+) -> None:
+    from decoy_engine.fileaccess import FileAccessReadError
+
+    _serve(monkeypatch, provider, _MALFORMED[fmt])
+    with pytest.raises(FileAccessReadError) as info:
+        _source(provider, fmt).to_frame()
+    _value_free(info.value)
+    assert str(info.value) == f"file could not be read: {provider.upper()}"
+
