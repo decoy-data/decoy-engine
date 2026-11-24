@@ -24,3 +24,5 @@ untouched set read one write declaration; the ordering reads what dispatch reall
 A composite that is an FK child writes only its own column, so it adds no edge for the rest of its
 bundle. A column that a `derived` (or other creating) entry adds and a composite also writes is
 created first and then takes the composite's value.
+
+Fixed: a `when:` predicate or a derived expression that read a bundle's output, a creator's target, or a column rewritten by a joint mask now sees the value the plan's ordering defines instead of a stale source value. A plan whose columns used to fail with `cyclic_work_ordering` because of a creator, a bundle and a foreign key sharing columns now runs, and a real value cycle still raises that code.
