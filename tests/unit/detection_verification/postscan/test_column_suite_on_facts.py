@@ -652,3 +652,34 @@ def test_a_stored_index_gets_the_same_verdict_on_the_resident_and_batch_gates(
     assert resident["residual_pii"] == batch["residual_pii"]
     failed = {f["column"] for f in batch["residual_pii"] if f["severity"] == "fail"}
     assert failed == {c for c, _ in columns}
+
+
+@pytest.mark.parametrize("arrow_type", [pa.int64(), pa.uint64()])
+def test_big_nullable_integers_get_the_same_verdict_on_the_resident_and_batch_gates(
+    arrow_type: pa.DataType, tmp_path: Path
+):
+    from decoy_engine.execution.pipeline._post_scan_suite import suite_frames
+
+    big = 2**53
+    src = pa.table({"n": pa.array([big, big + 2, None], arrow_type)})
+    out = pa.table({"n": pa.array([big + 1, big + 2, None], arrow_type)})
+    config = _cfg(("n", "redact"))
+    src_frames, out_frames = suite_frames({"t": src}, {"t": out}, ["t"])
+    resident = run_post_mask(src_frames, out_frames, config=config)
+    batch = run_post_mask_tables(
+        {"t": from_table("t", src)},
+        {"t": from_table("t", out)},
+        config=config,
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    for report in (resident, batch):
+        report.pop("generated_at")
+    assert resident == batch
+    # Compared exactly, the columns differ in one row, so they are not byte-identical.
+    facts = column_facts(
+        from_table("t", src), from_table("t", out), ["n"], scratch=tmp_path, memory_limit=LIMIT
+    )["n"]
+    assert not facts.bytes_identical
+    assert (out_frames["t"]["n"].astype(object).dropna().tolist()) == [big + 1, big + 2]

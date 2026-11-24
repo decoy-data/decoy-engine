@@ -13,7 +13,7 @@ import pyarrow as pa
 
 from decoy_engine._execution_error import post_scan_not_inspectable
 from decoy_engine.execution._pipeline_sources import materialize_source
-from decoy_engine.internal.pandas_compat import arrow_to_frame_pair
+from decoy_engine.internal.pandas_compat import arrow_to_frame_pair, exact_int_types_mapper
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -42,11 +42,13 @@ def suite_frames(
     out: dict[str, pd.DataFrame] = {}
     for name in tables:
         # Physical field names, never the pandas index metadata: a stored index (named or not) is a
-        # column the batch gate reads by name, so the frame checks must read it the same way.
+        # column the batch gate reads by name, so the frame checks must read it the same way. The batch
+        # reader's integer mapper keeps a null-bearing integer column exact beyond 2**53.
         src[name], out[name] = arrow_to_frame_pair(
             materialize_source(sources[name]),
             outputs[name],
             on_unrepresentable=post_scan_not_inspectable(name),
             ignore_metadata=True,
+            types_mapper=exact_int_types_mapper,
         )
     return src, out
