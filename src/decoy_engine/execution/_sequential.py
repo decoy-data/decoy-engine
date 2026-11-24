@@ -440,12 +440,10 @@ def run_sequential(
                             if col in df.columns and (table, col) not in source_snapshots:
                                 source_snapshots[(table, col)] = df[col].copy()
 
-                # HC-3a P1 #1: snapshot this table's date_shift group_by anchor
-                # columns pre-mask (before its node loop below masks anything),
-                # so the handler anchors on immutable source ids. Same-table
-                # lifetime only; evicted with the frame after the node loop.
-                ctx.group_anchor_snapshots.update(
-                    take_source_snapshots(order, group_anchor_cols, table, df)
+                # HC-3a P1 #1: snapshot this table's source-read columns pre-mask, so handlers
+                # read immutable source values. Same-table lifetime; evicted with the frame.
+                ctx.group_anchor_snapshots |= take_source_snapshots(
+                    order, group_anchor_cols, table, df
                 )
 
                 table_records_list: list[RowErrorRecord] = []

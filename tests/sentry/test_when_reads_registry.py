@@ -22,12 +22,12 @@ def test_compile_once_allowlist_is_a_registered_source() -> None:
         "defects/test_compile_once.py",
         "ALLOWED",
     )
-    baseline = json.loads((bs.BASELINES / "compile-once.json").read_text(encoding="utf-8"))
+    baseline = json.loads(bs.baseline_path("compile-once").read_text(encoding="utf-8"))
     assert set(baseline["entries"]) == source.keys()
 
 
 def test_lossless_int_baseline_has_no_conversion_helper_key() -> None:
-    entries = json.loads((bs.BASELINES / "lossless-int-columns.json").read_text(encoding="utf-8"))[
+    entries = json.loads(bs.baseline_path("lossless-int-columns").read_text(encoding="utf-8"))[
         "entries"
     ]
     assert not [k for k in entries if k.endswith("::masking_frame")]

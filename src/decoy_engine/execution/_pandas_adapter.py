@@ -216,7 +216,7 @@ class PandasExecutionAdapter:
         # a column the converted input lacks, for every table, before any node runs.
         group_anchor_snapshots: dict[tuple[str, str], pd.Series] = {}
         for t, frame in frames.items():
-            group_anchor_snapshots.update(take_source_snapshots(order, group_anchor_cols, t, frame))
+            group_anchor_snapshots |= take_source_snapshots(order, group_anchor_cols, t, frame)
 
         cache = pool_cache if pool_cache is not None else PoolCache()
         ctx = StrategyContext(

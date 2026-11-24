@@ -256,7 +256,6 @@ _PINNED_RUN_CALLS = frozenset(
         "frames.items",
         "converted.items",
         "frozenset",
-        "group_anchor_snapshots.update",
         "key_error_rows.setdefault",
         "lossless.for_table",
         "lossless_int_columns",
