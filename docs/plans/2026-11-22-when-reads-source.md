@@ -1,4 +1,6 @@
-Status: plan (revision 2.3, 2026-11-24, revised after PR #783 review at `0fdf6d5a9`).
+Status: plan (revision 2.4, 2026-11-24, revised after PR #783 round-cap NO-GO at `880ec2afc`).
+
+**Change note, revision 2.4 (2026-11-24).** PR #783 hit the three-round review cap. Each round found a new bug in the same area, so the plan did not pin the invariants that area depends on. Revision 2.4 names three root classes (row addressing, buffer ownership, declared reads), makes each one impossible by construction, and adds a red-first test per finding plus a sweep test per class. It also re-cuts S2: S2a keeps today's refusal of cyclic plans, and the cyclic fallback (ranked commits and value dependencies) moves to S2b with the carry guard. See "Revision 2.4" at the end. Where it conflicts with "Write and ordering model", revision 2.4 wins.
 
 # WHEN-READS-SOURCE: a `when:` condition reads the original value on every route
 
@@ -691,3 +693,248 @@ local aliases to the evaluator’s defining symbol. Pin the allowed (path, funct
 and source-frame provenance for each call. Seed each spelling in an unauthorized
 caller and with a live frame in an authorized caller. Each fixture must be rejected.
 Keep a valid source-frame call as a passing control.
+
+## Revision 2.4 (2026-11-24): root classes and the S2a/S2b cut
+
+Read at PR #783 head `880ec2afc` (branch `feat/when-reads-source-s2`). Paths are relative to
+`src/decoy_engine/execution/` unless they start with `tests/`.
+
+### Why the review cap was hit
+
+The last three Codex rounds on #783 found, in order: a snapshot set built from a different
+selection than dispatch; equal-cell and losing-writer errors in the ranked commits; and now a
+duplicate-index failure, a copy-on-write crash and a bundle that keys from the wrong surname.
+Each fix closed one instance and left the class open. The three V1 findings on `880ec2afc`
+reduce to three classes:
+
+| Root class | Finding on `880ec2afc` | Where the class is open today |
+|---|---|---|
+| R1. Rows are addressed by index label where the gate selected by position | 1: gated joint mask on a stored index `[7, 7]` gets both source keys | `_strategies/_joint_mask.py:104` (`key_series.loc[df.index]`), `_when_gate.py:489` (`snapshot.loc[df.index]`), `_when_gate.py:556` and `:579` (`df.loc[mask]`, label-aligned write-back) |
+| R2. Code writes into an array it does not own | 2: partial ranked write raises "assignment destination is read-only" under copy-on-write | `work_order/commits.py:138` borrows `source.to_numpy(dtype=object)` and `:147` assigns into it |
+| R3. A writer's reads are not declared, and a missing declaration means "reads nothing" | 3: a deterministic bundle runs before the writer of its key column | `work_order/operations.py:124` gives a composite `masked_reads=frozenset()`; `scalar_creating_reads` returns empty for every non-creator, so only creators have value dependencies |
+
+The two design findings belong to the same family as R3: more than one place answers "what
+does this node do". Finding 4: dispatch calls `relationship_graph.parents_of` again
+(`_pandas_adapter.py:388`) and `source_snapshot_columns` rebuilds and resolves the work list
+(`_runner.py:330`). Finding 5: the resolver repeats `creates_own_target` twice
+(`work_order/operations.py:96`, `:128`) and imports `ColumnSeed` and `QualityWarning` from
+private modules.
+
+### Invariants (behavior by construction)
+
+**I1. One compiled decision per entry invocation.** Each entry point (`run_single` through the
+pandas adapter, `run_sequential`, `classify_job`) calls `compile_work_order` exactly once, before
+it builds snapshots. Every consumer takes the resulting `WorkOrder` or its records: the snapshot
+set, dispatch, gated stitching, creator preparation and (in S2b) commits and carry. After
+compilation, no code in `_pandas_adapter.py`, `_sequential.py`, `_runner.py`, `_when_gate.py` or
+`work_order/` calls `parents_of`, `resolve_operation(s)`, `build_work_list` or a
+`SURFACE_DECLARATIONS` lookup for a node it is executing. Concretely:
+
+- `source_snapshot_columns(order: WorkOrder) -> dict[str, frozenset[str]]` replaces the
+  `(plan, registry, graph)` signature. It returns, per table, every `source_reads` column of
+  every handler operation (the anchors `joint_mask` `key_by` and `date_shift` `group_by`,
+  snapshotted always, as today) plus every `when:` read that some operation of that table writes
+  (a wildcard writes all of them). `source_anchor_columns` becomes a projection of the same
+  records or is deleted; `_fk_keys.py:370` reads the same function.
+- `_dispatch_node` takes the FK edges from `ResolvedOperation.fk_edges`. `current_operation` is
+  never `None` during dispatch: a standalone call compiles its own one-node order first.
+- The resolver calls `creates_own_target` (`_column_access.py:402`) and imports `ColumnSeed` and
+  `QualityWarning` from their package exports.
+
+**I2. Rows are carried by position from the gate to every consumer.** The gate computes
+`positions = selected_positions(mask)` once. Everything after that uses those positions:
+
+- The handler frame is `df.iloc[positions]` (labels kept for row-error remapping only).
+- One helper, `snapshot_rows(ctx, table, column, n_rows)` in `_when_gate.py` (or a new
+  `work_order/rows.py` if `_when_gate.py` is at its ceiling), is the only reader of
+  `ctx.group_anchor_snapshots`. It returns `snapshot.iloc[ctx.gate_positions]` when the call is
+  gated, else the whole snapshot after checking `len(snapshot) == n_rows`. It returns a NumPy
+  array or a Series with a fresh `RangeIndex`, so a caller cannot align it by label. A length
+  mismatch raises the reader's existing misaligned code (`joint_mask_key_by_snapshot_misaligned`,
+  `date_shift_group_anchor_snapshot_misaligned`, `when_source_snapshot_missing`).
+- `when_source_frame`, `_strategies/_joint_mask.py` and `_strategies/_date_shift.py` read
+  snapshots only through `snapshot_rows`. The label checks at `_when_gate.py:480-489` and
+  `_joint_mask.py:93-104` are deleted.
+- Write-back is positional: for each output column, assign the handler's values with
+  `iloc[positions, col_pos]` (after the existing string and numeric widening checks), never
+  `df.loc[mask, col] = series`.
+
+Behavior: a frame with a duplicate, non-monotonic or non-integer stored index masks exactly as
+the same rows under a `RangeIndex`, and keeps its index. Failure mode: a snapshot whose length
+differs from the frame fails closed with the reader's coded error; nothing realigns by label.
+
+**I3. Execution owns every buffer it writes.** One helper, `owned_values(series) -> np.ndarray`
+in `work_order/` (`series.to_numpy(dtype=object, copy=True)`, or the typed equivalent), is the
+only producer of an array that execution code later assigns into. A saved version is immutable
+once saved: a rebuild starts from `owned_values(source)` or from `saved.copy()`, never from a
+view. Snapshots stay `Series.copy()` (deep) as today. Behavior: every route gives the same output
+with `pd.options.mode.copy_on_write` off and on. The engine does not pin the option off for
+masking runs; a host process may turn it on, and pandas 3 makes it the only mode.
+
+**I4. Every operation declares its reads, by phase, with no empty default.** Reads have three
+phases, and the declaration states each:
+
+- `source_reads`: read from the pre-mask snapshot (the `when:` predicate, `joint_mask` `key_by`,
+  `date_shift` `group_by`).
+- `masked_reads`: a sibling column read at its value at dispatch (derived drivers, a
+  deterministic bundle's first sorted group column at `_strategies/_composite.py:130`, sibling
+  references and `coherent_with` members that a handler reads).
+- `reads_own_target`: the handler reads the prior version of its own target (truncate, hash and
+  every strategy whose `own_target` is `source`).
+
+`ColumnAccess` gains a `source_reads` field; `reads` stays the union of all reads, so chunk carry
+keeps its meaning. `ResolvedOperation` holds `source_reads`, `masked_reads` and
+`reads_own_target` as fields with no defaults, filled by one function in `operations.py` from the
+declaration for every kind: scalar, creating scalar, composite and FK (an FK reads its child tuple
+and parent columns, which the record already names through `fk_edges`). A declaration with
+`reads_unknown` makes the operation read every column of its table at its dispatch value. The
+compatibility sort keeps `order_creates` and `order_reads` exactly as today, so no plan that
+orders today changes order. In S2a the masked reads feed only the record and its tests; S2b's
+fallback dependencies consume them.
+
+### The S2a/S2b cut
+
+The cyclic fallback (rank-ordered commits, value dependencies, per-component fallback, child-tuple
+assembly) is new capability: on `main`, a plan whose ordering constraints form a cycle raises
+`cyclic_work_ordering`. It is not needed for the `when:` contract, and it is where findings 2 and
+3 and both earlier commit findings live. S2a therefore ships without it.
+
+**S2a (PR #783, merge target).** The `when:` source read on every pandas route, native admission
+without the removed decline, the one resolver (I1, I4 records), positional rows (I2), owned
+buffers on the S2a paths (I3), creator-target preparation on both routes, the zero-match creator,
+and findings 4 and 5. Every entry point raises `cyclic_work_ordering` for exactly the plans whose
+compatibility sort is cyclic, as `main` does. `WorkOrder.fallback_keys`, `fallback_edges`,
+`commit_rank` and the save, rebuild, publish and child-assembly parts of `WorkOrderRun` leave
+the S2a branch. Findings 4 and 5 stay in S2a because S2a already edits every line they name, and
+because the snapshot set is the S2a feature: it must come from the same records dispatch uses.
+
+**S2b (next PR, on top of S2a).** The cyclic fallback rebuilt on I3 and I4, the exact-integer
+version binding (acceptance case 14), per-chunk buffer release (case 15), predicate-sentry
+alias normalization, and the existing carry-guard scope unchanged (planner and stock chunk carry
+take resolved writes; the secondary-output guard at `_chunked_carry.py:228-245`). The S2b guard
+for ranked commits uses a fixture whose compiled order has a non-empty `fallback_keys`, and the
+test asserts that precondition first.
+
+Acceptance cases from "Red-first acceptance" that need the fallback move to S2b: 3, 4 (all
+variants), 17 (the derived variant), 20, and the head tests
+`test_equal_cell_write_still_wins_the_rank`, `test_reader_waits_for_the_winning_email` and
+`tests/unit/execution/when/test_fallback_scope.py`. In S2a each of these fixtures becomes one
+parametrized control, `test_cyclic_plan_is_refused_on_every_entry_point`, which asserts
+`cyclic_work_ordering` from `classify_job`, `run_single` and `run_sequential`. The builder lists
+any other test whose fixture compiles with a non-empty `fallback_keys` on `880ec2afc` and moves
+it the same way. Every other case (1, 2, 5 to 13, 16, 17 passthrough variant, 18, 19, 21) stays
+in S2a.
+
+A plan that sorts on `main` and raises `cyclic_work_ordering` on S2a blocks the merge. The fix is
+to correct the write or read declaration that added the edge, not to restore the fallback. T3 and
+the golden suites (W9) are the check.
+
+### Acceptance tests (red first)
+
+Each red-first test fails on `880ec2afc` with the stated assertion and passes on the slice head.
+Record the red run in the PR body.
+
+S2a:
+
+- **F1 `test_gated_joint_mask_on_duplicate_index`** in
+  `tests/unit/execution/when/test_positional_rows.py`. Two rows with stored index `[7, 7]`,
+  `a_status` redacted first, a joint mask keyed on `k` and gated on `a_status == 'go'` where only
+  the second row matches. Run through `run_single` and `run_sequential`. Expect: success, the
+  joint outputs on row 2 equal the reference tuple for row 2's source key, row 1 keeps its source
+  values, and the output index is `[7, 7]`. Red today: `ValueError: Length of values (2) does not
+  match length of index (1)` on both routes.
+- **F2 control `test_cyclic_plan_is_refused_on_every_entry_point[gated_partial_email]`.** The
+  case 4 fixture with the derived email gated on `first_name == 'F0'`, run with copy-on-write on.
+  Expect `cyclic_work_ordering` from all three entry points. Red today: `ValueError: assignment
+  destination is read-only` from both pandas routes.
+- **F3 control `test_cyclic_plan_is_refused_on_every_entry_point[bundle_key_after_joint]`.** The
+  indirect creator cycle with the bundle keyed on `last_name` and a joint writer that sets every
+  surname to `JOINT`. Expect `cyclic_work_ordering` from all three entry points. Red today: both
+  pandas routes return four distinct emails.
+- **F4 `test_dispatch_and_snapshots_use_the_compiled_order`** in
+  `tests/sentry/defects/test_resolved_operation_writes.py`. After `compile_work_order` returns,
+  replace `RelationshipGraph.parents_of`, `resolve_operations` and `build_work_list` with
+  functions that raise, then run the case 21 fixture and a gated joint-mask fixture through both
+  pandas routes. Expect success and the case 21 output. Red today: dispatch calls `parents_of`
+  at `_pandas_adapter.py:388` and the snapshot helper calls `resolve_operations`.
+- **F5** is a cleanup with no behavior change. The resolver's two creator checks become one
+  `creates_own_target` call, and the R3 sweep asserts the creator flag of every resolved record
+  equals `creates_own_target` for its entry.
+
+S2b:
+
+- **F2 `test_partial_ranked_write_with_copy_on_write`.** The F2 fixture. Expect, on both pandas
+  routes with copy-on-write off and on, the rank-winning email on every row and the derived email
+  only where the gate matched.
+- **F3 `test_bundle_keys_from_its_key_writer_in_fallback`.** The F3 fixture. Expect every email to
+  equal the bundle oracle keyed on `JOINT` (one repeated email). Removing the bundle's
+  `masked_reads` must turn it red.
+
+### Sweep tests (one per class)
+
+- **R1 sweep, `tests/unit/execution/when/test_positional_rows.py` (S2a).** Parametrize over every
+  snapshot reader (`when:` gate with a masked read column, gated and ungated `joint_mask`, ungated
+  `date_shift` with `group_by`) by index shape (`RangeIndex`, duplicate labels, non-monotonic
+  integers, strings) by route (`run_single`, `run_sequential`). Expect the output values to equal
+  the `RangeIndex` run row by row, and the output index to equal the input index. Plus
+  `tests/sentry/defects/test_positional_snapshot_reads.py`: an AST check that
+  `group_anchor_snapshots` is read only inside `snapshot_rows`, and that `_when_gate.py`,
+  `_strategies/_joint_mask.py`, `_strategies/_date_shift.py` and `work_order/` contain no `.loc[`
+  subscript whose key is a boolean mask or an `.index` attribute. A seeded `.loc[df.index]` in
+  each file must fail it.
+- **R2 sweep (S2a).** A new `tests/unit/execution/when/conftest.py` autouse fixture parametrized
+  on `mode.copy_on_write` `False` and `True` runs the whole `when/` package and the work-order
+  unit tests both ways. Plus `tests/sentry/defects/test_owned_buffers.py`: in `work_order/` and
+  `_when_gate.py`, every subscript assignment into a name bound to a NumPy array requires that the
+  name was bound by `owned_values(...)` or `.copy()` in the same function. A seeded
+  `values = source.to_numpy(); values[p] = x` must fail it. The conftest is a shared test-config
+  change, so the slice runs T3 at its merge head, as it already does.
+- **R3 sweep, `tests/sentry/defects/test_declared_reads.py` (S2a).** A table maps every scalar and
+  composite key of `SURFACE_DECLARATIONS` to a representative entry whose config names sentinel
+  columns in every field the handler reads (`key_by`, `group_by`, `expression`, `column`,
+  `columns`, `coherent_with`, bundle columns, sibling reference keys) and to the expected phase of
+  each sentinel. The test fails if a declaration key has no row, if a sentinel is missing from the
+  declared reads, or if its phase differs. It also checks that `ResolvedOperation` has no default
+  for `source_reads`, `masked_reads` or `reads_own_target`, and that for every row the resolved
+  record carries the declared reads unchanged for scalar, creating and composite kinds. Mutation:
+  make the composite declaration return no `masked_reads` (red), and make `resolve_operation`
+  drop masked reads for non-creators (red).
+
+### Mutations (S2a final head)
+
+`snapshot_rows` reads by label (`.loc[df.index]`) instead of position: F1 and the R1 sweep red.
+Write-back uses `df.loc[mask, col]`: R1 sweep red on duplicate labels. `owned_values` returns
+`to_numpy(copy=False)`: R2 sweep red under copy-on-write on any path that writes into it, and the
+AST guard red. `_dispatch_node` calls `parents_of` again: F4 red. `source_snapshot_columns`
+re-resolves the work list: F4 red. `compile_work_order` retries a cyclic sort: the F2 and F3
+controls red. The earlier S2 mutations (section 9 and "Write and ordering model") still apply to
+the cases that stay in S2a.
+
+### What the #783 builder changes on the existing branch
+
+On `feat/when-reads-source-s2`, as new commits on top of `880ec2afc` (no rebase, no force-push):
+
+1. Remove the cyclic fallback from S2a: `compile_work_order` re-raises `cyclic_work_ordering`;
+   delete `WorkOrder.fallback_keys`, `fallback_edges`, `commit_rank`, `_components` and the
+   save, rebuild, publish and child-assembly code in `work_order/commits.py`. Keep creator-target
+   preparation and `Selection`. Keep the moved code on a local branch for S2b.
+2. Move the fallback tests listed above to the S2b branch and add the parametrized refusal
+   control with the F2 and F3 fixtures.
+3. Add `snapshot_rows`, route the three snapshot readers through it, make the gate subset and
+   write-back positional, and add F1 and the R1 sweep and sentry.
+4. Add `owned_values`, the copy-on-write conftest and the owned-buffer sentry; fix any path the
+   sweep turns red.
+5. Add `source_reads` to `ColumnAccess` and the three read fields to `ResolvedOperation`, fill
+   them in one resolver function that calls `creates_own_target`, and add the R3 sweep.
+6. Compile once per entry, build `source_snapshot_columns` from the `WorkOrder`, dispatch FK
+   from `op.fk_edges`, and add F4. Fix the two private imports.
+7. Tighten `tests/unit/execution/when/test_exact_int_rewrite.py:55` to the exact code
+   `float_canonicalization_unsupported` (Codex V2-LOG).
+8. Update the PR body: the new S2a scope, the moved tests and why, the red runs, and the S2b list
+   (fallback, case 14, case 15, predicate-sentry aliases, carry guard).
+
+Size: S2a loses about 150 source lines from `work_order/` and gains about 60 (helpers, read
+fields). `_when_gate.py` stays at or under 600; if `snapshot_rows` does not fit, it goes in
+`work_order/rows.py`. Review: Codex then Dennis on the S2a head, as before. Test scope: T0 per
+edit, T1 plus the named tests and sentries per commit, T3 at the merge head diffed against the
+saved main baseline.
