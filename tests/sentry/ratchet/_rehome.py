@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 
@@ -57,7 +56,7 @@ def _site_parts(key: str) -> tuple[str, str, str] | None:
     return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
 
 
-def site_gone(root: Path, key: str, tree: Any) -> bool:
+def site_gone(key: str, tree: Any, read_head: Callable[[str], str | None]) -> bool:
     """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
 
     ``<file>`` is relative to ``src/``. Proof by AST: the qualified def or class is missing, or it
@@ -72,20 +71,23 @@ def site_gone(root: Path, key: str, tree: Any) -> bool:
     file, qualname, name = parts
     if not all(q.isidentifier() for q in qualname.split(".")):
         return False
-    path = root / "src" / file
-    if not path.is_file():
+    try:
+        text = read_head(f"src/{file}")  # the checkout reader: no links, proven absence only
+        nodes = [] if text is None else _qualname_nodes(ast.parse(text), qualname)
+    except Exception:
+        return False
+    if text is None:
         return tree.has_file(f"src/{file}")
-    nodes = _qualname_nodes(ast.parse(path.read_text(encoding="utf-8")), qualname)
     return not any(_mentions(n, name) for node in nodes for n in ast.walk(node))
 
 
 def rehomes(
-    root: Path,
     tree: Any,
     grown: frozenset[str],
     head_entries: dict[str, object],
     lost: dict[str, object],
     max_of: Callable[[object], int | None],
+    read_head: Callable[[str], str | None],
 ) -> tuple[frozenset[str], list[str]]:
     """Split ``grown`` into declared 1:1 moves of ``lost`` keys, and the rest.
 
@@ -106,7 +108,7 @@ def rehomes(
         same_name = old_parts is not None and new_parts is not None and old_parts[2] == new_parts[2]
         if len(keys) != 1 or not same_name or old not in lost or max_of(lost[old]) is not None:
             continue
-        if site_gone(root, old, tree):
+        if site_gone(old, tree, read_head):
             remaining.discard(keys[0])
             report.append(f"re-homed {old} -> {keys[0]} (declared in moved_from; old site gone)")
     return frozenset(remaining), report

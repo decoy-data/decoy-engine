@@ -16,6 +16,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
+from stat import S_ISDIR, S_ISLNK, S_ISREG
 from types import ModuleType
 from typing import Any
 
@@ -88,25 +89,134 @@ class BaseTree:
     def has_file(self, path: str) -> bool:
         return self.types.get(path) == "blob"
 
-    def read(self, path: str) -> str | None:
-        """Text of ``path`` at the base, ``None`` when the listing omits it, else it must read."""
-        kind = self.types.get(path)
-        if kind is None:
-            return None
-        if kind != "blob" or self.modes[path] == "120000":  # a symlink is never read through
-            raise BaseReadError(path, self.side)
-        try:
-            return _git(
-                self.root, path, "cat-file", "blob", f"{self.sha}:{path}", side=self.side
-            ).decode("utf-8")
-        except (BaseReadError, UnicodeDecodeError):
-            raise BaseReadError(path, self.side) from None
+    def children(self, directory: str) -> list[str]:
+        """Names directly below ``directory`` in the listing."""
+        prefix = directory + "/"
+        return sorted(
+            n[len(prefix) :]
+            for n in self.types
+            if n.startswith(prefix) and "/" not in n[len(prefix) :]
+        )
 
-    def require(self, path: str) -> str:
-        text = self.read(path)
-        if text is None:
-            raise BaseReadError(path, self.side)
-        return text
+    def blob(self, path: str) -> bytes:
+        """Raw bytes of a listed blob; the caller has already checked its kind and mode."""
+        return _git(self.root, path, "cat-file", "blob", f"{self.sha}:{path}", side=self.side)
+
+
+class InputReadError(Exception):
+    """An input could not be read the one allowed way; ``side`` is ``head`` or ``base``."""
+
+    def __init__(self, what: str, side: str) -> None:
+        super().__init__(what)
+        self.what, self.side = what, side
+
+
+class Side:
+    """Where inputs come from: the checkout (``tree`` is ``None``) or a commit's tree.
+
+    HEAD and BASE use the same ``kind_of``, ``open_input`` and ``list_entries`` below, so a mode
+    or link policy cannot differ between them.
+    """
+
+    def __init__(self, name: str, root: Path, tree: BaseTree | None = None) -> None:
+        self.name, self.root, self.tree = name, root, tree
+
+
+def _probe(side: Side, rel: str) -> str | None:
+    """The one guarded stat of a single path: ``dir``, ``file``, ``link``, ``other``, or ``None``
+    when the path is proven absent. Any other stat error propagates to the caller's guard."""
+    if side.tree is None:
+        try:
+            mode = os.lstat(side.root / rel).st_mode
+        except FileNotFoundError:
+            return None
+        if S_ISLNK(mode):
+            return "link"
+        return "dir" if S_ISDIR(mode) else "file" if S_ISREG(mode) else "other"
+    kind = side.tree.types.get(rel)
+    if kind is None:
+        return None
+    if kind == "tree":
+        return "dir"
+    mode_text = side.tree.modes[rel]
+    if kind == "blob" and mode_text in {"100644", "100755"}:
+        return "file"
+    return "link" if mode_text == "120000" else "other"
+
+
+def kind_of(side: Side, path: str) -> str | None:
+    """``dir`` or ``file`` for a path whose every ancestor is a plain directory, ``None`` when it
+    is proven absent. A link or special file at any depth, a bad path or a stat error raises
+    ``InputReadError``."""
+    try:
+        pure = PurePosixPath(path)
+        if (
+            not path
+            or "\\" in path
+            or str(pure) != path
+            or pure.is_absolute()
+            or ".." in pure.parts
+        ):
+            raise ValueError("not a plain relative path")
+        for n in range(1, len(pure.parts) + 1):
+            kind = _probe(side, "/".join(pure.parts[:n]))
+            if kind is None:
+                return None
+            if kind not in {"dir", "file"} or (kind == "file" and n < len(pure.parts)):
+                raise ValueError("a link, a special file or a file used as a directory")
+        return kind
+    except Exception:
+        raise InputReadError(path, side.name) from None
+
+
+def open_input(side: Side, path: str) -> str | None:
+    """UTF-8 text of a regular file, ``None`` when proven absent; any other failure raises."""
+    kind = kind_of(side, path)
+    if kind is None:
+        return None
+    try:
+        if kind != "file":
+            raise ValueError("not a regular file")
+        if side.tree is not None:
+            data = side.tree.blob(path)
+        else:
+            fd = os.open(side.root / path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd, "rb") as handle:
+                data = handle.read()
+        return data.decode("utf-8")
+    except Exception:
+        raise InputReadError(path, side.name) from None
+
+
+def list_entries(side: Side, directory: str) -> list[str]:
+    """Every regular ``.json`` file below ``directory``, nested folders included, sorted.
+
+    A proven absent directory holds none. Every directory is checked before descent, and a link,
+    a special file or any listing error raises ``InputReadError``.
+    """
+    if kind_of(side, directory) is None:
+        return []
+    try:
+        if side.tree is not None:
+            names = side.tree.children(directory)
+        else:
+            with os.scandir(side.root / directory) as it:
+                names = sorted(entry.name for entry in it)
+        out: list[str] = []
+        for name in names:
+            child = f"{directory}/{name}"
+            kind = kind_of(side, child)
+            if kind == "dir":
+                out += list_entries(side, child)
+            elif kind == "file" and name.endswith(".json"):
+                out.append(child)
+            elif kind is None:
+                raise ValueError("listed but gone")
+        return out
+    except InputReadError:
+        raise
+    except Exception:
+        raise InputReadError(directory, side.name) from None
 
 
 def safe_path(path: object, baseline_dir: str) -> bool:
@@ -124,10 +234,8 @@ def safe_path(path: object, baseline_dir: str) -> bool:
     )
 
 
-def registry_present(base_rows: int, head_exists: bool, head_rows: int) -> list[str]:
-    """The registry file must exist and keep at least one row when the base had rows."""
-    if base_rows and not head_exists:
-        return ["registry file is missing; the base registry listed sentries"]
+def registry_present(base_rows: int, head_rows: int) -> list[str]:
+    """A HEAD registry keeps at least one row when the base had rows."""
     if base_rows and not head_rows:
         return ["registry has no [[sentry]] rows; the base registry listed sentries"]
     return []
@@ -323,12 +431,15 @@ def outside_sentries(text: str) -> list[str] | None:
     return None
 
 
+def is_test_filename(name: str) -> bool:
+    """``test_*.py``: the one definition of a test file name (sentry membership and gate pins)."""
+    return name.startswith("test_") and name.endswith(".py")
+
+
 def is_sentry_glob(path: str) -> bool:
     """``tests/sentry/**/test_*.py``: the one definition of sentry-file membership."""
     parts = PurePosixPath(path).parts
-    return (
-        parts[:2] == ("tests", "sentry") and parts[-1].startswith("test_") and path.endswith(".py")
-    )
+    return parts[:2] == ("tests", "sentry") and is_test_filename(parts[-1])
 
 
 def sentry_set(files: Iterable[str], manifest: str | None) -> set[str] | None:
@@ -339,13 +450,21 @@ def sentry_set(files: Iterable[str], manifest: str | None) -> set[str] | None:
     return {f for f in files if is_sentry_glob(f)} | set(outside)
 
 
+def _manifest(side: Side) -> str | None:
+    try:
+        return open_input(side, MANIFEST)
+    except InputReadError:
+        raise BaseReadError(MANIFEST, side.name) from None
+
+
 def sentry_file_findings(root: Path, tree: BaseTree, retired_files: set[str]) -> list[str]:
     """Sentry test files of the base tree that are gone at head without a rename or retirement.
 
     The head set comes from the HEAD commit, the same one rename detection diffs, and is then
-    limited to files still on disk, so an untracked copy cannot stand in for a deleted file.
+    limited to files still in the checkout, found by the guarded stat: only proven absence counts
+    as removal, and an unreadable path is a finding.
     """
-    base_set = sentry_set(tree.files(), tree.read(MANIFEST))
+    base_set = sentry_set(tree.files(), _manifest(Side("base", root, tree)))
     if base_set is None:
         raise BaseReadError(MANIFEST)
     base_set = {p for p in base_set if tree.has_file(p)}
@@ -353,15 +472,23 @@ def sentry_file_findings(root: Path, tree: BaseTree, retired_files: set[str]) ->
     if head_sha is None:
         raise BaseReadError("the head commit", "head")
     head_tree = BaseTree(root, head_sha, "head")
-    head_set = sentry_set(head_tree.files(), head_tree.read(MANIFEST))
+    head_set = sentry_set(head_tree.files(), _manifest(Side("head", root, head_tree)))
     if head_set is None:
         return [f"{MANIFEST}: OUTSIDE_SENTRIES is not a literal tuple of strings"]
-    head_set = {p for p in head_set if head_tree.has_file(p) and os.path.isfile(root / p)}
+    checkout, findings, present = Side("head", root), [], set()
+    for path in sorted(p for p in head_set if head_tree.has_file(p)):
+        try:
+            if kind_of(checkout, path) == "file":
+                present.add(path)
+        except InputReadError:
+            findings.append(f"{path}: sentry test file cannot be read at head")
+            present.add(path)
+    head_set = present
     gone = sorted(base_set - head_set)
     if not gone:
-        return []
+        return findings
     renamed = _renames(root, tree.sha)
-    return [
+    return findings + [
         f"{path}: sentry test file was removed without a rename inside the sentry set "
         "or a fresh [retired_files] decision"
         for path in gone

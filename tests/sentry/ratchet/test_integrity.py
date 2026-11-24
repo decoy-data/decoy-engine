@@ -185,14 +185,18 @@ def test_emptied_registry_file_fails(repo: Path) -> None:
 
 @pytest.mark.parametrize(
     "how, needle",
-    [("delete", "registry file is missing"), ("empty", "registry has no [[sentry]] rows")],
+    [
+        ("delete", "is missing"),
+        ("empty", "is empty"),
+        ("comment", "registry has no [[sentry]] rows"),
+    ],
 )
 def test_registry_required_after_last_baseline_removed(repo: Path, how: str, needle: str) -> None:
     (repo / A).unlink()
     if how == "delete":
         (repo / REG).unlink()
     else:
-        _write(repo, REG, "")
+        _write(repo, REG, "" if how == "empty" else "# no sentries\n")
     _assert_red(repo, needle)
 
 
@@ -577,8 +581,7 @@ def test_a_base_checker_change_row_with_a_non_string_value_fails_closed(repo: Pa
 
 
 GLOB = "test_*.py"
-# test_gate_pins asks "does this directory hold any test file", which is not membership.
-GATE_PINS_CALL = ("tests/sentry/test_gate_pins.py", "test_every_pinned_path_exists_and_is_a_test")
+GATE_PINS = "tests/sentry/test_gate_pins.py"
 
 
 def _glob_sites(sources: dict[str, str]) -> list[tuple[str, str, str]]:
@@ -601,53 +604,38 @@ def _glob_sites(sources: dict[str, str]) -> list[tuple[str, str, str]]:
     return sites
 
 
-def _unexempt(sites: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
-    """Drop the one exempt call; a second call of any shape, even in that function, stays."""
-    kept, seen = [], False
-    for site in sites:
-        if site[:2] == GATE_PINS_CALL and not seen and "rglob" in site[2]:
-            seen = True
-        else:
-            kept.append(site)
-    return kept
-
-
 def test_no_second_sentry_membership_predicate_exists() -> None:
     sources = {
         p.relative_to(_ROOT).as_posix(): p.read_text(encoding="utf-8")
         for top in ("tests", "scripts")
         for p in (_ROOT / top).rglob("*.py")
     }
-    assert _unexempt(_glob_sites(sources)) == []
-
-
-EXEMPT_FUNC = "def test_every_pinned_path_exists_and_is_a_test():\n"
+    assert _glob_sites(sources) == []
 
 
 def test_guard_sees_the_keyword_form_of_the_glob() -> None:
     seeded = {"tests/x.py": 'def f(root):\n    return root.rglob(pattern="test_*.py")\n'}
-    assert _unexempt(_glob_sites(seeded)) != []
+    assert len(_glob_sites(seeded)) == 1
 
 
-def test_guard_sees_a_second_glob_in_the_exempt_file() -> None:
-    gate_pins = GATE_PINS_CALL[0]
+def test_guard_sees_a_duplicate_at_the_former_gate_pins_site() -> None:
     seeded = {
-        gate_pins: EXEMPT_FUNC
-        + '    t.rglob("test_*.py")\n\ndef other(t):\n    t.rglob("test_*.py")\n'
+        GATE_PINS: "def test_every_pinned_path_exists_and_is_a_test():\n"
+        '    return any(t.rglob("test_*.py"))\n'
     }
-    assert [s[1] for s in _unexempt(_glob_sites(seeded))] == ["other"]
+    assert [s[1] for s in _glob_sites(seeded)] == ["test_every_pinned_path_exists_and_is_a_test"]
 
 
-def test_guard_sees_a_second_glob_in_the_exempt_function() -> None:
-    seeded = {
-        GATE_PINS_CALL[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n    t.glob("test_*.py")\n'
-    }
-    assert len(_unexempt(_glob_sites(seeded))) == 1
+def test_gate_pins_use_the_shared_test_name_predicate(tmp_path: Path) -> None:
+    from tests.sentry.test_gate_pins import _has_a_test
 
-
-def test_guard_accepts_the_one_exempt_call() -> None:
-    seeded = {GATE_PINS_CALL[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n'}
-    assert _unexempt(_glob_sites(seeded)) == []
+    (tmp_path / "pkg" / "deep").mkdir(parents=True)
+    (tmp_path / "pkg" / "deep" / "test_x.py").write_text("", encoding="utf-8")
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "lookalike" / "test_y.py").mkdir(parents=True)  # a directory named like a test
+    assert _has_a_test(tmp_path / "pkg")
+    assert not _has_a_test(tmp_path / "empty")
+    assert not _has_a_test(tmp_path / "lookalike")
 
 
 # --- review round 4: approval strength, head-side read errors, malformed head registry ----------
