@@ -22,6 +22,7 @@ from decoy_engine._pandas_meta import bounded_column_facts
 from decoy_engine.internal.pandas_compat import (
     arrow_dtype_label,
     arrow_missing_mask,
+    arrow_strings_restore_as_text,
     canonical_dtype_label,
 )
 
@@ -59,7 +60,7 @@ def arrow_column_profile(
     from decoy_engine.profile._types import ColumnProfile
     from decoy_engine.profile._walk import observed_shape
 
-    arr = _normalize(column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column)
+    arr = _normalize(_one_array(column))
     t = arr.type
     missing = pc.fill_null(pc.is_null(arr), True) if pandas_dtype else arrow_missing_mask(arr)
     valid = arr.filter(pc.invert(missing))
@@ -72,6 +73,8 @@ def arrow_column_profile(
         values = values.cast(pa.float64(), safe=False)
     if pa.types.is_floating(values.type):
         values = pc.if_else(pc.equal(values, 0.0), pa.scalar(0.0, values.type), values)
+        # NaNs with different IEEE payloads are one value to pandas; fold them to one NaN.
+        values = pc.if_else(pc.is_nan(values), pa.scalar(float("nan"), values.type), values)
     distinct: int | None
     if pa.types.is_null(values.type):
         distinct = 0  # no kernel for the null type; pandas counts zero values
@@ -115,6 +118,17 @@ def arrow_column_profile(
     )
 
 
+def _one_array(column: pa.Array | pa.ChunkedArray) -> pa.Array:
+    """The column as one array. Dictionary chunks keep their own dictionaries, so a narrow index
+    type (`int8`) cannot hold the union of them: widen it first, as pandas' categorical does."""
+    if not isinstance(column, pa.ChunkedArray):
+        return column
+    t = column.type
+    if pa.types.is_dictionary(t) and t.index_type.bit_width < 32 and column.num_chunks > 1:
+        column = column.cast(pa.dictionary(pa.int32(), t.value_type, t.ordered))
+    return column.combine_chunks()
+
+
 def _normalize(arr: pa.Array) -> pa.Array:
     """The representation pandas sees, using only types the compute kernels handle:
     an extension type is its storage (as `to_pandas` converts it), a run-end-encoded
@@ -151,6 +165,8 @@ def _is_pandas_string(arr: pa.Array, null_count: int) -> bool:
     t = arr.type
     if pa.types.is_dictionary(t):
         return is_text(t.value_type) and len(arr.dictionary) > 0
+    if is_text(t) and arrow_strings_restore_as_text():
+        return True  # `future.infer_string`: a plain Arrow string column is a string dtype
     return is_text(t) and null_count == 0
 
 

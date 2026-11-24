@@ -62,6 +62,15 @@ def arrow_missing_mask(arr: pa.Array) -> pa.Array:
     return pc.fill_null(mask, True)
 
 
+def arrow_strings_restore_as_text() -> bool:
+    """Whether `to_pandas` gives a plain Arrow string column a string dtype (pandas 3, or
+    `future.infer_string` on 2.x), so a missing value does not make it an object column."""
+    try:
+        return bool(pd.get_option("future.infer_string"))
+    except KeyError:  # the option is gone: pandas 3 and later always infer strings
+        return True
+
+
 def arrow_dtype_label(t: pa.DataType, has_missing: bool, canonical: Any) -> str:
     """The dtype label pandas gives the column an Arrow column of type `t` converts to."""
     if pa.types.is_integer(t):

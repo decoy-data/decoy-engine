@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
+import re
 from pathlib import Path
 from typing import Any
 
@@ -95,7 +96,26 @@ def test_at2_a_missing_value_beside_the_bad_one(
 # ------------------------------------------------------------------ AT-3 parity
 
 
-def _same_as_pandas(table: pa.Table, kind: str, tmp_path: Path, mp: Any, **kw: Any) -> None:
+# Catalogue cases (suffix `_null` and `_nonull` dropped) where the pandas oracle itself raises for
+# some reader: the pandas path cannot hold them, so only the bounded walk is checked. Any other
+# oracle failure fails the test, because a silent skip hid lost coverage.
+ORACLE_REFUSES = frozenset(
+    {
+        "cat_dense_union",
+        "cat_sparse_union",
+        "cat_dictionary_float16",
+        "cat_fixed_shape_tensor",
+        "cat_large_list_view",
+        "cat_list_view",
+        "cat_ree_string_view",
+        "cat_time64_ns",
+    }
+)
+
+
+def _same_as_pandas(
+    table: pa.Table, kind: str, tmp_path: Path, mp: Any, *, refused: bool = False, **kw: Any
+) -> None:
     try:
         data = parquet_bytes(table)
     except (pa.ArrowNotImplementedError, pa.ArrowInvalid, pa.ArrowTypeError):
@@ -105,10 +125,13 @@ def _same_as_pandas(table: pa.Table, kind: str, tmp_path: Path, mp: Any, **kw: A
     reader = make_reader(kind, table, data, tmp_path, mp)
     try:
         if kind == "resident":
-            table.to_pandas()  # a table pandas cannot hold is AT-8's cell, not parity
+            table.to_pandas()
         oracle = oracle_profile(reader, kind, **kw)
     except Exception:
-        pytest.skip("pandas refuses this column; the bounded walk is not held to it")
+        if not refused:
+            raise  # an oracle failure is a failed test, never a skip
+        bounded_profile(reader, kind, **kw)  # pandas cannot hold it; the bounded walk still must
+        return
     assert_same_profile(bounded_profile(reader, kind, **kw), oracle, kind)
 
 
@@ -138,7 +161,8 @@ def test_at3_every_type_profiles_as_the_pandas_walk_does(
     arr = PARITY[case]
     table = pa.table({"x": arr, "s": pa.array([f"v{i}" for i in range(len(arr))])})
     sample = len(arr) if ratio == "total_equals_sample" else max(1, len(arr) // 10)
-    _same_as_pandas(table, kind, tmp_path, monkeypatch, sample_rows=sample)
+    refused = re.sub(r"_(no)?null$", "", case) in ORACLE_REFUSES
+    _same_as_pandas(table, kind, tmp_path, monkeypatch, refused=refused, sample_rows=sample)
 
 
 @pytest.mark.parametrize("kind", READER_KINDS)
