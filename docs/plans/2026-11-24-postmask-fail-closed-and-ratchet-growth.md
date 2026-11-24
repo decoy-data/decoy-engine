@@ -165,9 +165,12 @@ keys and uses the same unordered field/value encoding as a struct or unique-key 
 Use schema or paired evidence to identify map pairs. Without schema evidence, give sequences of key/value tuples the unordered map encoding.
 Resolve this convention once for both inputs, before comparison or distinct counting.
 Ordinary lists retain order. Apply the missingness rules below first.
-For each comparable pair, check both cells for possible loss of precision or other evidence.
-If either side may have lost evidence, count the pair as identical even when the surviving keys differ.
-Compare exact keys when both sides retain the evidence. If the source
+Compare exact keys when both cells retain the evidence.
+For a lossy pair, count it as identical only if both cells could represent the same value.
+Otherwise count it as different. If an int64 output rounded to a float, the source integer
+must round to that float. Apply the same rule with the sides swapped when the source rounded.
+If both cells rounded, their sets of possible integers must overlap.
+If the source
 representation could have merged distinct values, mark source diversity Unknown. This
 includes lossy frame conversion and map encoding without schema evidence. Apply PM-1a's
 unknown-diversity grade. Only proven constant sources qualify for the constant exemption.
@@ -223,7 +226,7 @@ A schema-only assertion cannot catch a masked sibling overwritten by source rest
 | Comparison fails on a proven passthrough | No comparison error. A detector hit keeps its normal info grade | `residual_pii.py:436-444,513-537` |
 | Typed conversion or comparison fails after an earlier batch succeeded | Clear partial identity counts for that column. Other columns finish. Propagate pass-through exceptions | `_column_facts.py:378-390,410-412`, `residual_pii.py:180-194` |
 | Source missing, unequal lengths, or no comparable rows | No comparison error. Preserve detector-only grading | `residual_pii.py:252-268,534-537` |
-| Nested nulls, reordered keys, NaN or adjacent large integers | Lossless inputs match the reference counts. Count a comparable pair as identical if either side may have lost evidence | `_column_facts.py:238-268`, `residual_pii.py:175-190` |
+| Nested nulls, reordered keys, NaN or adjacent large integers | Lossless inputs match the reference counts. Count a lossy pair as identical only if the retained evidence permits a match | `_column_facts.py:238-268`, `residual_pii.py:175-190` |
 | Lossy source evidence gives one key for identical output | Mark diversity Unknown. Use the PM-1a grade and deny the policy constant exemption | `residual_pii.py:298-299`, `policy_validation.py:237-249` |
 | Source count fails after comparison succeeded | Keep identity counts. Equal final grades stand. Different final grades give one error | `residual_pii.py:538-579` |
 | Output count alone fails | Grade with the known source count | `_column_facts.py:400-404`, `postscan/test_column_suite_on_facts.py:508` |
@@ -263,6 +266,10 @@ A schema-only assertion cannot catch a masked sibling overwritten by source rest
   `[2**60 + 1, None]`. Expect one comparable row and zero identical rows on each path.
   Keep the existing list-to-scalar case as a pin. Treat a singleton list as its scalar to break it. Restoring pandas `map` must fail the integer case.
   See `_column_facts.py:238-268` and `test_residual_pii_source_compare.py:313-332`.
+  Compare nullable int64 source `[1, 2, null]` with output `[2**60 + 1, 2**60 + 257, null]`.
+  On default pandas frames, neither rounded output could represent its paired source.
+  Expect two comparable rows, zero identical rows and `bytes_identical=False`.
+  Policy validation must return info for the changed output.
 - **PM-1b property test (red-before).** Generate paired Arrow schemas and logical rows with Hypothesis
   (`pyproject.toml:182-192`). Include nullable int64 versus float64, string versus large_string,
   dictionary versus plain, decimal scales and signed zero. Pair True with 1.
@@ -284,6 +291,10 @@ A schema-only assertion cannot catch a masked sibling overwritten by source rest
   null on both sides to force default `to_pandas()` to round the two comparable values.
   Expect two identical rows. Require the PM-1a Unknown grade on the frames and no
   constant-source policy info. The Arrow gate must still count two distinct source keys.
+  Include the disjoint nullable int64 case above as a fixed property example.
+  Generate pairs whose possible integer sets after rounding are disjoint.
+  Require zero identical rows for those pairs, even after swapping source and output.
+  Counting every lossy pair as identical must fail the disjoint case.
   Compare comparable and identical counts, whole-column equality,
   both distinct counts, failure flags and findings (`test_residual_pii_source_compare.py:286-320`).
   Require one distinct source key for reordered maps in separate batches. Restore raw DuckDB
