@@ -2,9 +2,9 @@
 
 A stub strategy `z_aux` declares a secondary output `aux` that no config entry, node column or
 ordinary handler declaration names. The declaration is injected where the resolver reads it, and
-each consumer must act on `aux`: the ordering edges, the predicate snapshot set, both carry
-callers, the gated stitch and the ranked commit. A consumer that kept its own write list would
-miss it. An AST guard keeps raw declaration lookups inside the resolver and its registry helpers.
+each consumer must act on `aux`: the predicate snapshot set, both carry callers and the gated
+stitch. A consumer that kept its own write list would miss it. (Ordering is main's `order_work`
+and its writer map, unchanged in S2a, so it is covered by the differential test instead.) An AST guard keeps raw declaration lookups inside the resolver and its registry helpers.
 """
 
 from __future__ import annotations
@@ -21,8 +21,7 @@ from decoy_engine.execution import _column_access as ca
 from decoy_engine.execution._chunked_carry import passthrough_columns, untouched_columns
 from decoy_engine.execution._runner import build_work_list, source_snapshot_columns
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
-from decoy_engine.execution.work_order import compile_work_order, resolve_operations
-from decoy_engine.execution.work_order.ranks import dependency_edges
+from decoy_engine.execution.work_order import compile_work_order
 from tests.unit.execution.when import _write_support as ws
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine" / "execution"
@@ -68,17 +67,12 @@ def _table() -> pa.Table:
     )
 
 
-def test_ordering_edge_follows_the_secondary_output(aux_declared: None) -> None:
-    work = build_work_list(_plan(), ws.REG)
-    edges = dependency_edges(resolve_operations(work, ws.NO_GRAPH))
-    assert ("t", ("owner",)) in edges[("t", ("z_reader",))]
-
-
 def test_predicate_snapshot_set_includes_the_secondary_output(aux_declared: None) -> None:
     plan = ws.plan(
         [("owner", ws.seed("z_aux")), ("z_gated", ws.seed("redact", when="aux == 'a0'"))]
     )
-    assert "aux" in source_snapshot_columns(plan, ws.REG, ws.NO_GRAPH)["t"]
+    order = compile_work_order(build_work_list(plan, ws.REG), ws.NO_GRAPH)
+    assert "aux" in source_snapshot_columns(order)["t"]
 
 
 def test_both_carry_callers_treat_the_secondary_output_as_touched(aux_declared: None) -> None:
@@ -97,9 +91,7 @@ def test_gated_stitch_and_exact_selection_cover_the_secondary_output(aux_declare
     assert out.column("aux").to_pylist() == ["AUX", "a1", "AUX", "a3"]
 
 
-def test_the_ranked_commit_covers_the_secondary_output(aux_declared: None) -> None:
-    """A cycle (a derived pair reading each other's creator output through `aux`'s writer) is not
-    needed: the compile result already ranks `aux` under the owner's rank."""
+def test_the_compiled_record_carries_the_secondary_output(aux_declared: None) -> None:
     order = compile_work_order(build_work_list(_plan(), ws.REG), ws.NO_GRAPH)
     assert "aux" in order.ops[("t", ("owner",))].writes
     out = ws.run(_plan(), _table())
@@ -124,10 +116,7 @@ _PINNED_CALLERS: dict[str, set[tuple[str, str]]] = {
         ("_transforms.py", "reject_config_references_stored_index"),
     },
     # One ordering decision: nothing else sorts the work list.
-    "order_work": {
-        ("work_order/compile.py", "compile_work_order"),
-        ("work_order/compile.py", "_components"),
-    },
+    "order_work": {("work_order/compile.py", "compile_work_order")},
 }
 
 
@@ -168,13 +157,3 @@ def _callers(name: str) -> set[tuple[str, str]]:
 def test_raw_write_declaration_lookups_are_pinned(name: str) -> None:
     """A new caller of a raw declaration reader fails here until it is pinned with its reason."""
     assert _callers(name) <= _PINNED_CALLERS[name]
-
-
-def test_dispatch_wrapper_publishes_before_and_saves_after() -> None:
-    """The run's dispatch wrapper makes exactly these calls: `before`, the node dispatch, `after`."""
-    from decoy_engine.execution.work_order import WorkOrderRun
-
-    tree = ast.parse(Path(WorkOrderRun.dispatch.__code__.co_filename).read_text())
-    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "dispatch")
-    calls = {ast.unparse(c.func) for c in ast.walk(fn) if isinstance(c, ast.Call)}
-    assert calls == {"self.before", "call", "self.after"}

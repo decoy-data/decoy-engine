@@ -57,7 +57,7 @@ from decoy_engine.execution._fk_keys import (
     fk_nullable_int_array,
     lossless_fk_int_values,
     lossless_int_columns,
-    to_pandas_fk_safe,
+    masking_frame,
 )
 from decoy_engine.execution._fk_resolve import (
     cascade_row_errors,
@@ -199,11 +199,15 @@ class PandasExecutionAdapter:
         # anchors, top_code, group_key siblings, declared integers, columns a `when:` reads) is
         # named by the ONE `lossless_int_columns`, so a null never widens it to float64 and rounds
         # a value beyond 2**53. Every other column is unaffected.
-        group_anchor_cols = source_snapshot_columns(plan, registry, relationship_graph)
-        lossless = lossless_int_columns(plan, registry, relationship_graph)
-        frames: dict[str, pd.DataFrame] = {
-            t: to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
+        order = compile_work_order(build_work_list(plan, registry), relationship_graph)
+        ordered = list(order.ordered)
+        group_anchor_cols = source_snapshot_columns(order)
+        lossless = lossless_int_columns(plan, registry, relationship_graph, ordered)
+        converted = {
+            t: masking_frame(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
         }
+        frames: dict[str, pd.DataFrame] = {t: frame for t, (frame, _kept) in converted.items()}
+        kept_indexes = {t: kept for t, (_frame, kept) in converted.items()}
         conversion_ms = (time.perf_counter() - t0) * 1000.0
         # HC-3a P1 #1: snapshot each group_by anchor column PRE-MASK (before the
         # node loop mutates any frame), keyed by (table, col), so the handler
@@ -239,16 +243,12 @@ class PandasExecutionAdapter:
             column_shapes=plan_column_shapes(plan),
         )
 
-        order = compile_work_order(build_work_list(plan, registry), relationship_graph)
-        ordered = list(order.ordered)
-        run_state = WorkOrderRun(order, relationship_graph)
+        run_state = WorkOrderRun(order)
         for t, frame in frames.items():
             run_state.begin_table(t, frame)
         node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
         for t, frame in frames.items():
-            register_exact_int_sources(
-                ctx, t, sources[t], frame, (n for n in ordered if n.table == t)
-            )
+            register_exact_int_sources(ctx, t, sources[t], frame, order)
 
         # FK-parent columns are snapshotted pre-mask so an FK child can rebuild
         # the parent source->masked key map. Parents always mask before children
@@ -312,8 +312,6 @@ class PandasExecutionAdapter:
                         rec.row_index
                     ] = rec.trigger
 
-        run_state.finish(frames)
-
         # DE-03: fail-closed output projection before the point of no return. A
         # generate-kind table rides through `frames` as an echoed source, declared
         # by its generate config not the mask plan, so it is exempt.
@@ -339,6 +337,7 @@ class PandasExecutionAdapter:
                         t,
                     ),
                     [c for (table, c) in ctx.native_date_columns if table == t],
+                    kept_index=kept_indexes[t],
                 )
                 for t, f in frames.items()
             },
@@ -383,9 +382,11 @@ class PandasExecutionAdapter:
         # table identity (CodeSetHandler evidence keying) can read it. ctx is frozen;
         # object.__setattr__ is the sanctioned path (see StrategyContext.current_table).
         object.__setattr__(ctx, "current_table", node.table)
-        object.__setattr__(ctx, "current_operation", run.order.ops[node.key] if run else None)
+        # One compiled record per node: a standalone call compiles its own one-node order first.
+        op = (run.order if run else compile_work_order([node], relationship_graph)).ops[node.key]
+        object.__setattr__(ctx, "current_operation", op)
         df = frames[node.table]
-        child_edges = relationship_graph.parents_of(node.table, node.columns)
+        child_edges = op.fk_edges
         if child_edges:
             with timed_strategy("fk_resolve", ",".join(node.columns)):
                 return self._resolve_fk_node(
@@ -437,9 +438,14 @@ class PandasExecutionAdapter:
             # plan_slice.when is None (byte-identical to calling handler.run()
             # directly). When set, it evaluates the predicate via numexpr
             # (scope-clamped per Dennis C1) and routes only matching rows through.
-            outs, sel = (run.order.ops[node.key].outputs, run.selection) if run else ((), None)
             frames[node.table], node_warnings = run_with_when_gate(
-                handler, df, node.columns[0], plan_slice, ctx, outs, sel
+                handler,
+                df,
+                node.columns[0],
+                plan_slice,
+                ctx,
+                op.outputs,
+                run.selection if run else None,
             )
         return node_warnings
 

@@ -45,6 +45,8 @@ from decoy_engine.execution._gated_string_guard import (
     widen_numeric_target_for_strings,
 )
 from decoy_engine.execution._row_errors import RowError
+from decoy_engine.execution.work_order.commits import stitch_rows
+from decoy_engine.execution.work_order.rows import snapshot_rows
 from decoy_engine.expressions._when_parser import (
     Compare,
     InList,
@@ -82,7 +84,7 @@ def _remap_gated_row_errors(
     """Rewrite subset-relative RowError indices to full-table positions.
 
     BLOCKER B1 (dennis review 2026-07-04): the `when:` gate hands the
-    handler a SUBSET frame (`df.loc[mask]` / `frame.filter(mask)`), so the
+    handler a SUBSET frame (`df.iloc[positions]` / `frame.filter(mask)`), so the
     handler records ``RowError.row_index`` positional in that subset. The
     pipeline + quarantine machinery (`_pipeline.py` D8, `quarantine.py` D9)
     consume ``row_index`` as a FULL-TABLE position. Left unremapped, a gated
@@ -344,7 +346,7 @@ def _aliased_frame(pdf: pd.DataFrame, aliases: Mapping[str, WhenRead]) -> pd.Dat
     raises its own undefined-name error for it, exactly as it did on the unaliased frame.
     """
     alias_of = {read.column: alias for alias, read in aliases.items()}
-    sub = pdf.loc[:, pdf.columns.isin(list(alias_of))]
+    sub = pdf.iloc[:, pdf.columns.isin(list(alias_of))]
     return sub.set_axis([alias_of[c] for c in sub.columns], axis=1)
 
 
@@ -474,20 +476,19 @@ def when_source_frame(
         return df
     src = df.copy(deep=False)
     for col in snapped:
-        snapshot = ctx.group_anchor_snapshots.get((table, col))
+        # By position: `snapshot_rows` fails closed on a length mismatch and never aligns by label.
+        # `ctx.gate_positions` is None here (the predicate sees the whole frame).
+        snapshot = snapshot_rows(
+            ctx,
+            table,
+            col,
+            len(df),
+            strategy=strategy,
+            misaligned=reasons.runtime.WHEN_SOURCE_SNAPSHOT_MISSING,
+        )
         if snapshot is None:
             raise _snapshot_missing(strategy, table)
-        if not snapshot.index.equals(df.index):
-            # Label lookup is only sound for one-to-one unique labels (a reordered frame).
-            if not (
-                snapshot.index.is_unique
-                and df.index.is_unique
-                and snapshot.index.isin(df.index).all()
-                and len(snapshot) == len(df)
-            ):
-                raise _snapshot_missing(strategy, table)
-            snapshot = snapshot.loc[df.index]
-        src[col] = snapshot
+        src[col] = snapshot.array
     return src
 
 
@@ -544,14 +545,17 @@ def run_with_when_gate(
     positions = selected_positions(mask)
     if selection is not None:
         selection.positions = positions
-    if not mask.any():
+    if not positions.size:
         return df, []
 
-    sub_df = df.loc[mask].copy()
+    # Rows travel by position from here on: the handler sees `df.iloc[positions]` (labels kept
+    # for the row-count check), snapshots are read at the same positions (`snapshot_rows`) and the
+    # results are written back at them. A label lookup mis-selects rows on a repeated label.
+    sub_df = df.iloc[positions].copy()
     sub_rows = sub_df.index
     err_start = len(ctx.row_errors)
     sub_df, warnings = handler.run(sub_df, column, plan, gated_context(ctx, column, positions))
-    # Before the index-aligned write-back below, which would turn a dropped row into a null.
+    # Before the write-back below, which would turn a dropped row into a null.
     require_same_rows(sub_rows, sub_df, column=column, strategy=plan.strategy, table=table)
     # B1: remap subset-relative row-error indices to full-table positions before they leave the
     # gate: the k-th mask-True row sits at positions[k] and row errors keep row order.
@@ -560,22 +564,17 @@ def run_with_when_gate(
         _remap_gated_row_errors(ctx, err_start, positions.tolist())
     # Stitch every column the handler WROTE back for the selected rows, not just the dispatch
     # `column`: `outputs` is the node's resolved write set (a multi-column joint_mask writes its
-    # whole `columns` config). Copying only the dispatch column left the other outputs at their
-    # source value for the gated rows, a silent partial mask.
+    # whole `columns` config). An output the handler did not return is skipped. A returned column
+    # the frame lacks (a creator such as group_key) is created, with a missing value on every
+    # row the gate did not select, as `df.loc[mask, col] = ...` always did.
     for out_col in dict.fromkeys((column, *outputs)):
         if out_col not in sub_df.columns:
             continue
-        if out_col in df.columns:  # a handler may create a new column (e.g. group_key)
+        produced = sub_df[out_col]
+        if out_col in df.columns:
             reject_gated_string_on_numeric(
-                df[out_col],
-                sub_df[out_col],
-                mask,
-                table=table,
-                column=out_col,
-                strategy=plan.strategy,
+                df[out_col], produced, mask, table=table, column=out_col, strategy=plan.strategy
             )
-            widen_numeric_target_for_strings(df, out_col, sub_df[out_col])
-        # Index-aligned: sub_df carries the gated rows' source index labels, so
-        # each retained row writes back to its own row in the full frame.
-        df.loc[mask, out_col] = sub_df[out_col]
+            widen_numeric_target_for_strings(df, out_col, produced)
+        stitch_rows(df, out_col, produced, positions)
     return df, warnings

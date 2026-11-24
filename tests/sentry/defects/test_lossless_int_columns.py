@@ -52,8 +52,10 @@ ALLOWED: dict[str, dict[tuple[str, str], str]] = {
         ): "the Faker null mask's set",
     },
     "to_pandas_fk_safe": {
-        ("execution/_pandas_adapter.py", "PandasExecutionAdapter.run"): "ingestion",
-        ("execution/_sequential.py", "run_sequential"): "ingestion",
+        (
+            "execution/_fk_keys.py",
+            "masking_frame",
+        ): "ingestion: both full-frame routes convert here",
         ("execution/_unified_slice_admission.py", "cheap_admission"): "ingestion",
         ("execution/native/_when_mask.py", "when_mask"): "converts the columns a predicate reads",
         ("execution/native/_faker_null_mask.py", "faker_missing_mask"): "converts one column",

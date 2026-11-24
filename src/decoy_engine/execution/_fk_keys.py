@@ -70,6 +70,7 @@ from decoy_engine.internal.pandas_compat import (
 )
 
 if TYPE_CHECKING:
+    from decoy_engine.execution._runner import WorkNode
     from decoy_engine.plan._types import Plan
     from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships._graph import RelationshipEdge
@@ -345,7 +346,12 @@ class LosslessInts:
         }
 
 
-def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> LosslessInts:
+def lossless_int_columns(
+    plan: Plan,
+    registry: ProviderRegistry,
+    graph: Any,
+    work: Iterable[WorkNode] | None = None,
+) -> LosslessInts:
     """Every column that must ingest as an exact nullable integer, per table.
 
     The ONE construction of the set every Arrow-to-pandas ingestion site passes to
@@ -356,20 +362,22 @@ def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> 
     """
     from decoy_engine.declared_casting._boundary import declared_integer_columns
     from decoy_engine.execution._runner import (
+        _nodes,
         group_key_group_by_columns,
         source_anchor_columns,
         top_code_columns,
         when_read_columns,
     )
 
+    nodes = list(_nodes(plan, registry, work))
     exact: dict[str, set[str]] = {}
     for edge in graph.edges:
         for table in (edge.parent_table, edge.child_table):
             exact[table] = exact.get(table, set()) | fk_columns_for_table(graph.edges, table)
     for source in (
-        source_anchor_columns(plan, registry),
-        top_code_columns(plan, registry),
-        group_key_group_by_columns(plan, registry),
+        source_anchor_columns(plan, registry, nodes),
+        top_code_columns(plan, registry, nodes),
+        group_key_group_by_columns(plan, registry, nodes),
         declared_integer_columns(plan),
     ):
         for table, cols in source.items():
@@ -454,6 +462,20 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
     )
 
 
+def masking_frame(table: pa.Table, lossless: Collection[str]) -> tuple[pd.DataFrame, pd.Index]:
+    """`to_pandas_fk_safe(table, lossless)` as a masking frame, plus the index it arrived with.
+
+    Masking addresses rows by position (a `when:` gate selects positions, snapshots are read by
+    position), so the frame carries a fresh `RangeIndex` where label and position coincide, even
+    when the source stored duplicate, unsorted or stepped labels. The stored index is returned
+    for the output assembly to put back (`table_from_pandas_keeping_source_types(kept_index=)`).
+    """
+    frame = to_pandas_fk_safe(table, lossless)
+    kept = frame.index
+    frame.index = pd.RangeIndex(len(frame))
+    return frame, kept
+
+
 def _rebuilds_with_source_type(arrow_type: pa.DataType) -> bool:
     """The nested types a Parquet source can hold and `pa.array(..., type=...)` rebuilds exactly
     from pandas cells. List views and unions are left out: Parquet cannot store them."""
@@ -479,5 +501,6 @@ __all__ = [
     "lossless_fk_int_values",
     "lossless_int_columns",
     "lossless_int_columns_from_config",
+    "masking_frame",
     "to_pandas_fk_safe",
 ]

@@ -64,13 +64,7 @@ def run_preflight(
     # check, so a keyed out-of-core job can never run off job_seed at GA from any entry point.
     mask_key = OpaqueBox(require_mask_key(plan, key_provider))
     assert_vault_inputs(vault_writer, config, mask_key.open()[0])
-    order = compile_plan_order(plan, registry, relationship_graph)
-    if order.fallback:  # no ordinary order: this route cannot run the plan
-        raise ExecutionError(
-            code=reasons.runtime.CYCLIC_WORK_ORDERING,
-            message="the work nodes have no ordinary order; out-of-core cannot run this plan",
-        )
-    work = list(order.ordered)
+    work = list(compile_plan_order(plan, registry, relationship_graph).ordered)
     # Schema-only read (a LazySource's schema is cached), so a forced out-of-core
     # job with a non-string faker source refuses here, before any scratch dir or
     # sink write, rather than aborting mid-run (B4).

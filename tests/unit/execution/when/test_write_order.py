@@ -1,9 +1,9 @@
-"""Write and ordering model, acceptance tests 1 to 5, 7, 10, 12 and 16, plus the composite
-commit-boundary guard.
+"""Write and ordering acceptance tests (plan revision 2.6: S2a keeps main's ordering).
 
-Plan: `docs/plans/2026-11-22-when-reads-source.md`, "Write and ordering model". Each column
-commits in dispatch rank and the last writer wins. Every plan that runs today keeps today's
-output; the new ordering applies only where today's sort raises a cycle.
+Plan: `docs/plans/2026-11-22-when-reads-source.md`. Every expected value here is the output of
+`main` at `8ee461e0f` for the same fixture, with each `when:` predicate read from the source:
+handlers run one at a time in main's `order_work` order and write into the live frame. The
+fallback tests (ranked commits, value dependencies) belong to S2b.
 """
 
 from __future__ import annotations
@@ -78,29 +78,31 @@ A_REF = ["O2?", "O0?", "O3?", "O1?"]
 
 
 def test_fk_child_keeps_todays_a_ref_output() -> None:
-    """2. Characterization. The queue runs derived last_name, then a_ref, then the bundle, so the
-    child maps through the derived `other + "?"` value (the known gap `FK-FINAL-PARENT-READ`
-    stays out of S2). last_name is the bundle's fixed-seed output. Remapping a_ref to the bundle
-    surnames must fail here."""
+    """2. Characterization of main. The queue runs derived last_name, then a_ref, then the
+    bundle: the child maps through the derived `other + "?"` value (the known gap
+    `FK-FINAL-PARENT-READ` stays out of S2) and the derived surname stays, because the bundle
+    does not overwrite a column it ran before. Remapping a_ref to the bundle surnames must fail
+    here."""
     _, out = _surname_run("a_ref")
     assert out.column("a_ref").to_pylist() == A_REF
-    assert out.column("last_name").to_pylist() == ws.bundle_oracle(FIRST)["last_name"]
+    assert out.column("last_name").to_pylist() == [f"O{i}?" for i in range(N)]
+    assert out.column("email").to_pylist() == ws.bundle_oracle(FIRST)["email"]
 
 
 def test_renaming_child_preserves_todays_output() -> None:
-    """7. The queue runs z_ref after the bundle: it holds the bundle surnames of rows 2, 0, 3, 1.
-    Every other column is the same in both runs."""
+    """7. Characterization of main. Renaming the child to `z_ref` changes only its own column's
+    spelling, not its value: main's queue gives it the same derived values as `a_ref`. Every other
+    column is the same in both runs."""
     _, a_out = _surname_run("a_ref")
     _, z_out = _surname_run("z_ref")
-    oracle = ws.bundle_oracle(FIRST)["last_name"]
-    assert z_out.column("z_ref").to_pylist() == [oracle[i] for i in (2, 0, 3, 1)]
+    assert z_out.column("z_ref").to_pylist() == A_REF
     others = [c for c in a_out.column_names if c != "a_ref"]
     assert z_out.select(others).to_pydict() == a_out.select(others).to_pydict()
 
 
 def test_fk_child_bypasses_derived_creator() -> None:
     """3. `email` resolves through the `first_name` parent map. Its derived expression is never
-    run, so it adds no read of `other` and no creator edge against the bundle."""
+    run, so the plan sorts as on main and the bundle's generated email is final."""
     table = pa.table(
         {
             "first_name": pa.array(FIRST),
@@ -110,15 +112,11 @@ def test_fk_child_bypasses_derived_creator() -> None:
         }
     )
     seed_plan = ws.plan([("first_name", ws.bundle()), ("email", ws.derived('concat(other, "#")'))])
-    graph = ws.fk_graph("first_name", "email")
-    # The configured creator still forms today's cycle, so the run uses the fallback order.
-    from decoy_engine.execution._runner import build_work_list
-    from decoy_engine.execution.work_order import compile_work_order
-
-    assert compile_work_order(build_work_list(seed_plan, ws.REG), graph).fallback
-    out = ws.run(seed_plan, table, graph)
-    assert out.column("email").to_pylist() == out.column("first_name").to_pylist()
-    assert out.column("last_name").to_pylist() == ws.bundle_oracle(FIRST)["last_name"]
+    oracle = ws.bundle_oracle(FIRST)
+    for run in (ws.run, ws.run_sequential):
+        out = run(seed_plan, table, ws.fk_graph("first_name", "email"))
+        assert out.column("email").to_pylist() == oracle["email"]
+        assert out.column("last_name").to_pylist() == oracle["last_name"]
 
 
 def _indirect_table(email: list[str]) -> pa.Table:
@@ -145,35 +143,34 @@ def _indirect_plan(with_view: bool = False) -> object:
 
 
 def test_indirect_creator_reads_after_bundle() -> None:
-    """4. `email` (creator, overwritten by the bundle) reads `summary`, which reads the bundle's
-    `last_name`. Today's constraints form a cycle; the commit ranks put the creator's email
-    below the bundle while evaluation waits for `summary`. Every entry point agrees."""
+    """4. `email` (creator) reads `summary`, which reads the bundle's `last_name`. As on main, the
+    queue runs the bundle, then `summary`, then the derived `email`, so the creator's value is
+    final. Every entry point agrees."""
     source = [f"u{i}@x.test" for i in range(N)]
     table = _indirect_table(source).drop_columns(["z_view"])
     oracle = ws.bundle_oracle(FIRST)
     for run in (ws.run, ws.run_sequential):
         out = run(_indirect_plan(), table)
         assert out.column("summary").to_pylist() == [s + "!" for s in oracle["last_name"]]
-        assert out.column("email").to_pylist() == oracle["email"]
+        assert out.column("email").to_pylist() == [s + "!@x.test" for s in oracle["last_name"]]
     assert ws.classify(_indirect_plan(), table).mode == "pandas_fallback"
 
 
-def test_equal_cell_write_still_wins_the_rank() -> None:
-    """4b. The bundle's email equals the cell already there on every row: the bundle still selects
-    every row, so its email beats the lower-ranked derived email."""
+def test_a_source_email_equal_to_the_bundle_email_changes_nothing() -> None:
+    """4b. The source email already equals the bundle's email on every row: main's order still
+    ends on the derived email, so the output is the same as for any other source email."""
     oracle = ws.bundle_oracle(FIRST)
     out = ws.run(_indirect_plan(), _indirect_table(oracle["email"]).drop_columns(["z_view"]))
-    assert out.column("email").to_pylist() == oracle["email"]
+    assert out.column("email").to_pylist() == [s + "!@x.test" for s in oracle["last_name"]]
 
 
 @pytest.mark.parametrize("run", [ws.run, ws.run_sequential], ids=["adapter", "sequential"])
-def test_reader_waits_for_the_winning_email(run: object) -> None:
-    """4c. `z_view` reads `email`: it must see the winning (bundle) email even though the derived
-    email writer was evaluated last."""
+def test_a_reader_sees_the_email_it_follows(run: object) -> None:
+    """4c. `z_view` reads `email`: it runs after the derived email and reads its value."""
     table = _indirect_table([f"u{i}@x.test" for i in range(N)])
     out = run(_indirect_plan(with_view=True), table)  # type: ignore[operator]
     emails = out.column("email").to_pylist()
-    assert emails == ws.bundle_oracle(FIRST)["email"]
+    assert emails == [s + "!@x.test" for s in ws.bundle_oracle(FIRST)["last_name"]]
     assert out.column("z_view").to_pylist() == [e + "!" for e in emails]
 
 
@@ -341,11 +338,9 @@ def _email_fixture() -> pa.Table:
 
 
 def test_fk_child_distinguishes_parent_and_joint_writes(tmp_path: Path) -> None:
-    """17. A city joint mask before the bundle writes the second row's original first_name to
-    every email. In the cycle fixture the FK reads that joint write (not the source email, not
-    the bundle's generated email, which supplies the parent key and is skipped), so every email
-    is the second row's masked first_name. With a passthrough email the plan sorts today: the
-    FK reads the bundle's email and preserves it."""
+    """17. A city joint mask writes the second row's original first_name to every email. On main
+    the bundle runs after the joint mask in both variants, so the bundle's generated email is
+    final whether the configured email is derived or passthrough."""
     ref = ws.reference(tmp_path / "c.parquet", city=["CITY"], email=[FIRST[1]])
     oracle = ws.bundle_oracle(FIRST)
     graph = ws.fk_graph("first_name", "email")
@@ -357,10 +352,11 @@ def test_fk_child_distinguishes_parent_and_joint_writes(tmp_path: Path) -> None:
             ("city", ws.joint(ref, ["city", "email"])),
         ]
 
-    out = ws.run(ws.plan(seeds(ws.derived('concat(other, "#")'))), _email_fixture(), graph)
-    assert out.column("email").to_pylist() == [oracle["first_name"][1]] * N
-    out = ws.run(ws.plan(seeds(ws.seed("passthrough"))), _email_fixture(), graph)
-    assert out.column("email").to_pylist() == oracle["email"]
+    for email in (ws.derived('concat(other, "#")'), ws.seed("passthrough")):
+        for run in (ws.run, ws.run_sequential):
+            out = run(ws.plan(seeds(email)), _email_fixture(), graph)
+            assert out.column("email").to_pylist() == oracle["email"]
+            assert out.column("city").to_pylist() == ["CITY"] * N
 
 
 def test_self_fk_reads_shared_tenant_before_commit() -> None:
@@ -390,8 +386,9 @@ def test_self_fk_reads_shared_tenant_before_commit() -> None:
 
 
 def test_bundle_keys_on_resolved_fk_child() -> None:
-    """19. test 2 with `a_ref` in the bundle's group: the bundle runs after the FK and is keyed
-    by the resolved child values, not the source ones."""
+    """19. Characterization of main: with `a_ref` in the bundle's group the queue runs the bundle
+    before the FK resolves `a_ref`, so the bundle is keyed by the source child values. The child
+    maps as in test 2 (`FK-FINAL-PARENT-READ`)."""
     table, _ = _surname_fixture("a_ref")
     seed_plan = ws.plan(
         [
@@ -404,29 +401,19 @@ def test_bundle_keys_on_resolved_fk_child() -> None:
         seed_plan, table, ws.fk_graph("last_name", "a_ref"), bound=(("a_ref", "first_name"),)
     )
     assert out.column("a_ref").to_pylist() == A_REF
-    keyed = pa.table(
-        {
-            "first_name": pa.array(A_REF),
-            "last_name": pa.array([f"s{i}" for i in range(N)]),
-            "email": pa.array([f"e{i}" for i in range(N)]),
-            "a_ref": pa.array(A_REF),
-        }
-    )
     expected = ws.run(
         ws.plan([("first_name", ws.bundle(coherent_with=("a_ref",)))]),
-        keyed,
+        table,
         bound=(("a_ref", "first_name"),),
     )
-    for column in ("first_name", "last_name", "email"):
+    for column in ("first_name", "email"):
         assert out.column(column).to_pylist() == expected.column(column).to_pylist()
-    assert not set(A_REF) & set(out.column("last_name").to_pylist())
 
 
 @pytest.mark.parametrize("first_declared", ["first_name", "second"])
 def test_multi_parent_fk_uses_one_child_tuple(first_declared: str) -> None:
-    """20. Two parents of one child: the first sorted parent (first_name) wins a key both maps
-    hold, the second resolves what only it holds, and a miss is preserved. The old sort raises
-    on this cycle."""
+    """20. Two parents of one child. The plan sorts on main, with the bundle's generated email
+    final in either declaration order (an FK child's own derived expression never runs)."""
     table = pa.table(
         {
             "first_name": pa.array(FIRST),
@@ -436,7 +423,7 @@ def test_multi_parent_fk_uses_one_child_tuple(first_declared: str) -> None:
             "other": pa.array([f"O{i}" for i in range(N)]),
         }
     )
-    oracle = ws.bundle_oracle(FIRST)["first_name"]
+    oracle = ws.bundle_oracle(FIRST)["email"]
     edges = tuple(
         ws.RelationshipEdge("t", (parent,), "t", ("email",), "nm", ws.OrphanPolicy.PRESERVE)
         for parent in ("first_name", "second")
@@ -454,7 +441,7 @@ def test_multi_parent_fk_uses_one_child_tuple(first_declared: str) -> None:
         graph,
         bound=(("first_name",), ("second",)),
     )
-    assert out.column("email").to_pylist() == [oracle[0], "O1!", "miss", oracle[3]]
+    assert out.column("email").to_pylist() == oracle
 
 
 @pytest.mark.parametrize("run", [ws.run, ws.run_sequential], ids=["full-frame", "sequential"])
@@ -480,34 +467,3 @@ def test_fk_composite_provider_snapshots_child_ref(run: object) -> None:
     out = run(seed_plan, table, graph, bound=(("ref",),))  # type: ignore[operator]
     assert out.column("ref").to_pylist() == ["X", "X"]
     assert out.column("z_secret").to_pylist() == ["REDACTED", "two"]
-
-
-def test_a_plan_that_orders_today_keeps_its_order_with_an_fk_child_creator() -> None:
-    """The compatibility sort keeps the configured creator's driver edge for an FK child: `email`
-    still waits for the node that writes `z_other`, as the unchanged sort has it."""
-    from decoy_engine.execution._runner import build_work_list
-    from decoy_engine.execution.work_order import compile_work_order
-
-    seed_plan = ws.plan(
-        [
-            ("email", ws.derived('concat(z_other, "#")')),
-            ("z_other", ws.seed("redact")),
-            ("parent", ws.seed("redact")),
-        ]
-    )
-    order = compile_work_order(build_work_list(seed_plan, ws.REG), ws.fk_graph("parent", "email"))
-    names = [n.columns[0] for n in order.ordered]
-    assert not order.fallback
-    assert names.index("z_other") < names.index("email")
-
-
-def test_out_of_core_admission_declines_a_plan_with_no_ordinary_order() -> None:
-    """M1. Admission goes through the one ordering decision: a plan only the fallback order can
-    run is declined (not raised), so it falls back to a route that can run it."""
-    from decoy_engine.execution._pipeline_routing_signals import out_of_core_admission
-
-    seed_plan = ws.plan([("first_name", ws.bundle()), ("email", ws.derived('concat(other, "#")'))])
-    accepted, code = out_of_core_admission(
-        seed_plan, registry=ws.REG, graph=ws.fk_graph("first_name", "email")
-    )
-    assert (accepted, code) == (False, "cyclic_work_ordering")

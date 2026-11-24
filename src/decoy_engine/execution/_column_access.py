@@ -59,6 +59,9 @@ class ColumnAccess:
 
     reads: frozenset[str] = frozenset()
     writes: frozenset[str] = frozenset()
+    # The subset of `reads` the handler takes from the pre-mask snapshot (`joint_mask` `key_by`,
+    # `date_shift` `group_by`); the rest are read at their value when the handler runs.
+    source_reads: frozenset[str] = frozenset()
     reads_unknown: bool = False
     writes_unknown: bool = False
     # `source` unless the strategy writes its own target without reading it. The default is the
@@ -175,8 +178,18 @@ def _derived_aggregate(entry: Mapping[str, Any]) -> ColumnAccess:
 def _joint_mask(entry: Mapping[str, Any]) -> ColumnAccess:
     pc = _provider_config(entry)
     key = pc.get("key_by")
-    reads = _siblings(entry) | (frozenset({key}) if isinstance(key, str) and key else frozenset())
-    return ColumnAccess(reads=reads, writes=_strings(pc.get("columns")))
+    anchor = frozenset({key}) if isinstance(key, str) and key else frozenset()
+    return ColumnAccess(
+        reads=_siblings(entry) | anchor, writes=_strings(pc.get("columns")), source_reads=anchor
+    )
+
+
+def _date_shift(entry: Mapping[str, Any]) -> ColumnAccess:
+    from decoy_engine.execution._runner import group_by_sibling
+
+    group_by = group_by_sibling(_provider_config(entry))
+    anchor = frozenset({group_by}) if group_by else frozenset()
+    return ColumnAccess(reads=_siblings(entry) | anchor, source_reads=anchor)
 
 
 def _nested(entry: Mapping[str, Any]) -> ColumnAccess:
@@ -214,6 +227,7 @@ def _union(a: ColumnAccess, b: ColumnAccess) -> ColumnAccess:
     return ColumnAccess(
         reads=a.reads | b.reads,
         writes=a.writes | b.writes,
+        source_reads=a.source_reads | b.source_reads,
         reads_unknown=a.reads_unknown or b.reads_unknown,
         writes_unknown=a.writes_unknown or b.writes_unknown,
         # Differing own-target claims fall back to reading the source, the fail-closed side.
@@ -344,6 +358,7 @@ SURFACE_DECLARATIONS: dict[str, Declaration] = {
     },
     "scalar:derived": _creates(_derived),
     "scalar:derived_aggregate": _creates(_derived_aggregate),
+    "scalar:date_shift": _date_shift,
     "scalar:joint_mask": _joint_mask,
     "scalar:nested": _nested,
     **{f"composite:{name}": _composite(_fixed_outputs(name)) for name in _FIXED_COMPOSITES},

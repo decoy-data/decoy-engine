@@ -15,6 +15,8 @@ from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
 
+pytestmark = pytest.mark.usefixtures("copy_on_write")
+
 _REG = get_default_registry()
 _GRAPH = RelationshipGraph(edges=(), ordering=())
 _NS = NamespaceRegistry(bindings=())
@@ -432,7 +434,7 @@ class TestGroupAnchorSnapshotMisalignedFailsClosed:
     supported route the indexes are identical by construction; this proves the
     guard fires when that invariant is violated."""
 
-    def test_misaligned_snapshot_index_raises(self) -> None:
+    def test_misaligned_snapshot_length_raises(self) -> None:
         import pandas as pd
 
         from decoy_engine.execution._adapter import StrategyContext
@@ -454,11 +456,12 @@ class TestGroupAnchorSnapshotMisalignedFailsClosed:
             job_seed=(0x1).to_bytes(8, "big"),
         )
         object.__setattr__(ctx, "current_table", "t")
-        # A snapshot whose index does NOT match the frame's (0,1,2) -> misaligned.
+        # Rows are carried by position, so only the row count can disagree: a two-row snapshot
+        # for the three-row frame is misaligned.
         object.__setattr__(
             ctx,
             "group_anchor_snapshots",
-            {("t", "pid"): pd.Series(["p1", "p1", "p2"], index=[10, 11, 12])},
+            {("t", "pid"): pd.Series(["p1", "p1"], index=[10, 11])},
         )
         with pytest.raises(StrategyError) as exc:
             DateShiftStrategyHandler().run(df, "d", seed, ctx)

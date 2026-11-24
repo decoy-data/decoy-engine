@@ -149,7 +149,7 @@ from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
 from decoy_engine.execution._chunked_carry import untouched_columns
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
-from decoy_engine.execution._fk_keys import lossless_int_columns, to_pandas_fk_safe
+from decoy_engine.execution._fk_keys import lossless_int_columns, masking_frame
 from decoy_engine.execution._guards import run_chunk_ingest_guards
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
@@ -308,7 +308,7 @@ def run_sequential(
     graph = relationship_graph
     order = compile_work_order(build_work_list(plan, registry), graph)
     ordered = list(order.ordered)
-    run_state = WorkOrderRun(order, graph)
+    run_state = WorkOrderRun(order)
     node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
     nodes_by_table: dict[str, list[WorkNode]] = {}
     for node in ordered:
@@ -318,8 +318,8 @@ def run_sequential(
 
     # HC-3a: per-table source reads (`source_snapshot_columns`): group_by anchors, key_by keys and
     # written `when:` reads. Unioned into the FK-safe column set at load, snapshotted pre-mask below.
-    group_anchor_cols = source_snapshot_columns(plan, registry, graph)
-    lossless = lossless_int_columns(plan, registry, graph)
+    group_anchor_cols = source_snapshot_columns(order)
+    lossless = lossless_int_columns(plan, registry, graph, ordered)
 
     # A parent key map is retained until every child table that references it has
     # been processed; this makes multi-parent and diamond graphs safe.
@@ -413,10 +413,10 @@ def run_sequential(
                 # silently widens to float64 on this table-at-a-time load either.
                 # HC-3a P1 #2: date_shift group_by anchor columns get the same
                 # lossless int+null path (union into the FK-safe set).
-                df = to_pandas_fk_safe(src, lossless.for_table(table, src))
+                df, kept_index = masking_frame(src, lossless.for_table(table, src))
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
-                register_exact_int_sources(ctx, table, src, df, nodes_by_table.get(table, ()))
+                register_exact_int_sources(ctx, table, src, df, order)
                 native_run.prepare_table(plan, table, src.schema, graph)
                 # C5c-ii: capture the degenerate-Faker pin set from the SOURCE schema before
                 # `src` is released; applied to this table's output after from_pandas below.
@@ -479,7 +479,6 @@ def run_sequential(
                             rec.row_index
                         ] = rec.trigger
 
-                run_state.finish(frames, table)
                 # Per-table fail-loud classification stays here (after the loop),
                 # so a table raises on any uncovered record BEFORE its parent map
                 # is pre-built, BEFORE it is written to the sink, and BEFORE its
@@ -530,6 +529,7 @@ def run_sequential(
                             table,
                         ),
                         [c for (t, c) in ctx.native_date_columns if t == table],
+                        kept_index=kept_index,
                     ),
                     faker_pin,
                 )

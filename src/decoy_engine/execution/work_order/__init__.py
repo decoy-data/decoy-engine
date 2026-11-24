@@ -1,8 +1,7 @@
-"""Work order: what each node does, in what order, and which write wins each cell.
+"""Work order: what each node does, and in what order.
 
-`operations` resolves every node once (the one write authority), `ranks` holds the ordering edges
-and the ordinary sort, `compile` makes the one ordering decision every entry point shares, and
-`commits` prepares creator targets and commits each column in rank order.
+`operations` resolves every node once (the one write authority), `compile` makes the one ordering
+decision every entry point shares (main's `order_work`), and `commits` prepares creator targets.
 """
 
 from decoy_engine.execution.work_order.commits import Selection, WorkOrderRun

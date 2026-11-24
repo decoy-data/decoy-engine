@@ -51,6 +51,8 @@ from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
 
+pytestmark = pytest.mark.usefixtures("copy_on_write")
+
 _REG = get_default_registry()
 _GRAPH = RelationshipGraph(edges=(), ordering=())
 _NS = NamespaceRegistry(bindings=())

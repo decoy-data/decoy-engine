@@ -93,6 +93,7 @@ def table_from_pandas_keeping_source_types(
     untouched: Collection[str],
     keep_types: Collection[str] = (),
     arrow_columns: Mapping[str, pa.Array | pa.ChunkedArray] | None = None,
+    kept_index: pd.Index | None = None,
 ) -> pa.Table:
     """The one place a masked pandas frame becomes an output table.
 
@@ -106,6 +107,9 @@ def table_from_pandas_keeping_source_types(
     The frame must still be the source's rows: same count and an index still in source order (no row
     dropped or reordered since the source was read), and its remaining columns in source order. A
     mismatch raises `ExecutionError` before any output exists; the message carries counts only.
+    With `kept_index` (the stored index `masking_frame` set aside), the frame is a masking frame:
+    its index must still be `RangeIndex(len(kept_index))`, so a dropped or reordered row takes the
+    same error path, and it then takes the kept labels as they are, with no sort or alignment.
     With `source=None` there is nothing to keep, and the whole frame converts."""
     if source is None:
         return pa.Table.from_pandas(frame, preserve_index=False)
@@ -115,6 +119,15 @@ def table_from_pandas_keeping_source_types(
     # index, so the frame no longer holds it. The output drops it, unless a rule left it untouched
     # (a configured passthrough column is never dropped).
     stored_index = _stored_index_names(source)
+    if kept_index is not None:
+        if frame.shape[0] != len(kept_index) or not frame.index.equals(
+            pd.RangeIndex(len(kept_index))
+        ):
+            raise _rows_changed(
+                f"The frame no longer holds the source rows in order ({n_rows} rows).",
+            )
+        frame = frame.copy(deep=False)
+        frame.index = kept_index
     if frame.shape[0] != n_rows:
         raise _rows_changed(
             f"The frame has {frame.shape[0]} rows and the source has {n_rows}.",

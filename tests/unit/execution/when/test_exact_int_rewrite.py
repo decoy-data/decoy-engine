@@ -53,7 +53,9 @@ def test_faker_keys_from_the_rewritten_integers_or_fails_closed(
     try:
         out = run(ws.plan([("city", joint), ("n", _faker())]), _table(SRC_N), bound=(("n",),))
     except Exception as exc:
-        assert getattr(exc, "code", None), type(exc).__name__
+        assert getattr(exc, "code", None) == "float_canonicalization_unsupported", type(
+            exc
+        ).__name__
         assert str(BIG) not in str(exc) and str(BIG + 1) not in str(exc)
         return
     assert out.column("n").to_pylist() == oracle.column("n").to_pylist()

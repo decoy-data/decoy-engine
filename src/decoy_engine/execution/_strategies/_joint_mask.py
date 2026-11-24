@@ -24,6 +24,7 @@ import pandas as pd
 from decoy_engine import fileaccess, reasons
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution.work_order.rows import snapshot_rows
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.joint_mask import JointMaskConfig, apply_joint_mask
@@ -64,14 +65,19 @@ class JointMaskHandler:
         # snapshot every joint_mask key_by (`source_anchor_columns`).
         key_series = None
         if mode == "mask":
-            key_series = ctx.group_anchor_snapshots.get((ctx.current_table, joint_cfg.key_by))
+            key_series = snapshot_rows(
+                ctx,
+                ctx.current_table,
+                joint_cfg.key_by,
+                len(df),
+                strategy="joint_mask",
+                misaligned=reasons.runtime.JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED,
+            )
             if key_series is None:
-                # Fail closed whenever the required pre-mask snapshot is absent,
-                # regardless of whether key_by happens to be a live-frame column.
-                # Without the snapshot the only fallback is a masked live read or
-                # the synthetic null key, both of which silently select the wrong
-                # reference tuple. A missing snapshot means key_by names no source
-                # column or an adapter failed to snapshot it: either way, raise.
+                # Fail closed whenever the required pre-mask snapshot is absent, regardless of
+                # whether key_by happens to be a live-frame column. Without the snapshot the only
+                # fallback is a masked live read or the synthetic null key, both of which silently
+                # select the wrong reference tuple.
                 raise StrategyError(
                     code=reasons.runtime.JOINT_MASK_KEY_BY_SNAPSHOT_MISSING,
                     strategy="joint_mask",
@@ -83,25 +89,6 @@ class JointMaskHandler:
                         "adapter snapshots pre-mask."
                     ),
                 )
-            # The snapshot spans the FULL pre-mask table; the frame the handler
-            # sees may be a `when`-gated subset (df.loc[mask]), which keeps the
-            # source index labels. Align the snapshot to those rows by index label
-            # (the group_anchor_snapshots contract) so a partial `when` selection
-            # keys each retained row off its OWN source value, not row 0..len-1. A
-            # frame label the snapshot does not carry is a real misalignment: fail
-            # closed rather than key off the wrong source row.
-            if not df.index.isin(key_series.index).all():
-                raise StrategyError(
-                    code=reasons.runtime.JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED,
-                    strategy="joint_mask",
-                    message=(
-                        f"joint_mask key_by {joint_cfg.key_by!r}: the pre-mask source "
-                        "snapshot does not row-align with the frame being masked (the "
-                        "frame carries rows absent from the snapshot), so keyed selection "
-                        "would be wrong. The run fails closed."
-                    ),
-                )
-            key_series = key_series.loc[df.index]
         updated_df = apply_joint_mask(
             df,
             joint_cfg,

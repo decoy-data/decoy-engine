@@ -19,17 +19,19 @@ PandasExecutionAdapter (later slice) consumes them.
 
 from __future__ import annotations
 
+import heapq
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
-from decoy_engine.execution.work_order.operations import resolve_operations
-from decoy_engine.execution.work_order.ranks import dependency_edges, kahn_sorted
+from decoy_engine import reasons
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.plan._types import ColumnSeed, GroupSeed
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._requirements import NodeRequirements
+    from decoy_engine.execution.work_order import WorkOrder
     from decoy_engine.plan._types import Plan
     from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships import RelationshipGraph
@@ -149,7 +151,16 @@ def build_work_list(plan: Plan, registry: ProviderRegistry) -> list[WorkNode]:
     return work
 
 
-def date_shift_group_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def _nodes(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None
+) -> Iterable[WorkNode]:
+    """The caller's compiled nodes, or the work list of a standalone caller that holds none."""
+    return build_work_list(plan, registry) if work is None else work
+
+
+def date_shift_group_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of sibling columns named by a `date_shift` `group_by` (HC-3a).
 
     A `group_by` anchor column has the same two requirements as an FK-parent
@@ -167,7 +178,7 @@ def date_shift_group_columns(plan: Plan, registry: ProviderRegistry) -> dict[str
     from decoy_engine.execution._adapter import provider_config_to_dict
 
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.kind != "scalar" or node.strategy != "date_shift":
             continue
         if not isinstance(node.plan_slice, ColumnSeed):
@@ -178,7 +189,9 @@ def date_shift_group_columns(plan: Plan, registry: ProviderRegistry) -> dict[str
     return out
 
 
-def top_code_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def top_code_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of columns masked by `top_code` (HC-3b).
 
     A top_code column must ingest LOSSLESSLY (nullable Int64), never via a bare
@@ -192,7 +205,7 @@ def top_code_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[st
     float64 on every route already, so no chunk-dependent widening arises).
     """
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.kind != "scalar" or node.strategy != "top_code":
             continue
         for col in node.columns:
@@ -208,7 +221,9 @@ def group_by_sibling(provider_config: Mapping[str, Any] | None) -> str | None:
     return group_by if isinstance(group_by, str) and group_by else None
 
 
-def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def group_key_group_by_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of sibling columns named by a `group_key` `group_by` (Trap B).
 
     A group_by column needs the same lossless-ingest treatment as an FK
@@ -227,7 +242,7 @@ def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[s
     from decoy_engine.execution._adapter import provider_config_to_dict
 
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.kind != "scalar" or node.strategy != "group_key":
             continue
         if not isinstance(node.plan_slice, ColumnSeed):
@@ -238,7 +253,9 @@ def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[s
     return out
 
 
-def joint_mask_key_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def joint_mask_key_by_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of `joint_mask` `key_by` SOURCE-key columns (cross-column V1).
 
     `key_by` selects the reference tuple off the SOURCE key value (its docstring:
@@ -253,7 +270,7 @@ def joint_mask_key_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[st
     from decoy_engine.execution._adapter import provider_config_to_dict
 
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.strategy != "joint_mask" or not isinstance(node.plan_slice, ColumnSeed):
             continue
         key_by = provider_config_to_dict(node.plan_slice.provider_config).get("key_by")
@@ -262,7 +279,9 @@ def joint_mask_key_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[st
     return out
 
 
-def source_anchor_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def source_anchor_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """All columns a strategy reads at their immutable SOURCE value through the
     pre-mask `ctx.group_anchor_snapshots`: `date_shift` `group_by` anchors plus
     `joint_mask` `key_by` source keys. Both read a sibling's source value via the
@@ -271,8 +290,9 @@ def source_anchor_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, s
     checklist). `group_key`'s `group_by` is NOT here: it reads the MASKED value
     under an ordering edge, not a source snapshot.
     """
-    out = date_shift_group_columns(plan, registry)
-    for table, cols in joint_mask_key_by_columns(plan, registry).items():
+    nodes = list(_nodes(plan, registry, work))
+    out = date_shift_group_columns(plan, registry, nodes)
+    for table, cols in joint_mask_key_by_columns(plan, registry, nodes).items():
         out.setdefault(table, set()).update(cols)
     return out
 
@@ -310,31 +330,128 @@ def when_read_columns(plan: Plan) -> dict[str, frozenset[str]]:
     return out
 
 
-def source_snapshot_columns(
-    plan: Plan, registry: ProviderRegistry, graph: RelationshipGraph
-) -> dict[str, frozenset[str]]:
-    """Every column snapshotted pre-mask: `source_anchor_columns` plus each `when:`-read column
-    that some node writes. A `when:` column no node writes keeps its original value in the live
-    frame, so it costs no copy. Both snapshot sites call this in place of `source_anchor_columns`.
+def source_snapshot_columns(order: WorkOrder) -> dict[str, frozenset[str]]:
+    """Every column snapshotted pre-mask, from the compiled `order` alone: each operation's
+    `source_reads` (the `joint_mask` `key_by` and `date_shift` `group_by` anchors, always) plus
+    each `when:`-read column that some operation writes. A `when:` column no node writes keeps
+    its original value in the live frame, so it costs no copy. Both snapshot sites call this.
 
     What a node writes comes from its resolved operation (`work_order.operations`), the one
-    answer dispatch, ordering, carry and commits share: an FK child writes its child key whatever
-    handler it is configured with. A node whose writes cannot be named snapshots every column its
-    table's `when:` reads.
+    answer dispatch and ordering share: an FK child writes its child key whatever handler it is
+    configured with. A node whose writes cannot be named snapshots every column its table's
+    `when:` reads.
     """
-    from decoy_engine.execution.work_order.operations import resolve_operations
-
-    out = {t: frozenset(c) for t, c in source_anchor_columns(plan, registry).items()}
-    reads = when_read_columns(plan)
-    written: dict[str, set[str]] = defaultdict(set)
-    for op in resolve_operations(build_work_list(plan, registry), graph).values():
-        if op.table in reads:
-            written[op.table] |= reads[op.table] if op.wildcard else op.writes
-    for table, cols in reads.items():
-        hit = cols & written[table]
+    out: dict[str, set[str]] = defaultdict(set)
+    reads: dict[str, set[str]] = defaultdict(set)
+    for op in order.ops.values():
+        if op.source_reads:
+            out[op.table] |= op.source_reads
+        if isinstance(op.node.plan_slice, ColumnSeed):
+            reads[op.table] |= when_columns_of([op.node.plan_slice.when])
+    for op in order.ops.values():
+        hit = reads[op.table] if op.wildcard else reads[op.table] & op.writes
         if hit:
-            out[table] = out.get(table, frozenset()) | hit
-    return out
+            out[op.table] |= hit
+    return {t: frozenset(c) for t, c in out.items() if c}
+
+
+def _writer_output_columns(node: WorkNode) -> tuple[str, ...]:
+    """Every column `node` WRITES, for the writer map (not its dispatch identity).
+
+    A composite bundle and a composite-FK group already carry their full output
+    set in `node.columns`. A scalar node writes its single column EXCEPT
+    `joint_mask`: it is a multi-column transform (`apply_joint_mask` writes every
+    column in its `columns` config in one pass), yet its work node keys on just
+    the dispatch column (the first sorted output). Register all of its configured
+    outputs so a dependent on a NON-dispatch output (e.g. a `derived` reading one
+    of zip/city/state) still resolves to the joint_mask node and gets its edge.
+    """
+    if node.strategy == "joint_mask" and isinstance(node.plan_slice, ColumnSeed):
+        from decoy_engine.execution._adapter import provider_config_to_dict
+
+        cols = provider_config_to_dict(node.plan_slice.provider_config).get("columns")
+        if cols:
+            return tuple(cols)
+    return node.columns
+
+
+def _writer_node_map(work: list[WorkNode]) -> dict[tuple[str, str], set[_NodeKey]]:
+    """Map each written (table, column) to the keys of ALL nodes that WRITE it.
+
+    Not column=node (the cross-column ordering trap): a composite provider is a
+    bundle node whose `columns` holds several outputs, so every one of them maps
+    to that ONE bundle key; a scalar node (`derived`/`group_key`) maps its single
+    output column to itself, and a `joint_mask` node maps EVERY column it writes
+    (`_writer_output_columns`), not only its dispatch column.
+
+    The value is a SET, not a single key: the production compiler emits a
+    joint_mask group as one per-output-column node, each carrying the full
+    `columns` config, so several nodes write the SAME output column. A plain
+    last-write-wins map kept only the last node in CONFIG order, leaving a
+    dependent ordered after one arbitrary writer while the OTHER writers (and so
+    the column's final value) still ran later -- a stale read under a non-trivial
+    execution order. Recording every writer makes a dependent wait on all of
+    them, so it reads the column's final value whichever writer the topo sort
+    places last. A dependent's driver ref resolves through this map to the nodes
+    that must all run first.
+    """
+    writer: dict[tuple[str, str], set[_NodeKey]] = defaultdict(set)
+    for node in work:
+        for col in _writer_output_columns(node):
+            writer[(node.table, col)].add(node.key)
+    return writer
+
+
+def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
+    """The same-table sibling columns `node` reads for their MASKED value, so it
+    must be ordered AFTER them (the cross-column V1 ordering edge).
+
+    Only a scalar node whose strategy creates its own target from other columns has
+    such drivers. Their names come from `scalar_creating_reads`, the same declaration
+    `created_columns` admits a created column by, so a column accepted as created is
+    ordered after every column it reads, for every creating strategy. Every other node
+    (including `joint_mask`, whose `key_by` is a SOURCE read via snapshot) imposes no
+    ordering edge.
+    """
+    plan_slice = node.plan_slice
+    if node.kind != "scalar" or not isinstance(plan_slice, ColumnSeed):
+        return frozenset()
+    from decoy_engine.execution._adapter import provider_config_to_dict
+    from decoy_engine.execution._column_access import scalar_creating_reads
+
+    entry = {
+        "name": node.columns[0] if node.columns else None,
+        "strategy": plan_slice.strategy,
+        "provider_config": provider_config_to_dict(plan_slice.provider_config),
+        "coherent_with": list(plan_slice.coherent_with),
+    }
+    return scalar_creating_reads(entry)
+
+
+def column_dependency_edges(work: list[WorkNode]) -> dict[_NodeKey, set[_NodeKey]]:
+    """The cross-column ordering channel for `order_work`: dependent-node key ->
+    the keys of the nodes that write its MASKED driver columns.
+
+    A driver column ref resolves to its writer node(s) through `_writer_node_map`
+    (per-provider representation, not column=node). A ref whose column no node
+    writes (an unmasked passthrough source) imposes no edge -- its live value is
+    already its source value -- and a self-ref is skipped. A column written by a
+    MULTI-ENTRY joint_mask group has several writers; the dependent waits on all
+    of them so it reads the final value, not whichever writer a lexicographic
+    accident ran before it. SOURCE-read drivers (`joint_mask` `key_by`) are
+    deliberately absent: they read a pre-mask snapshot, so they need no ordering
+    edge. Reusing `order_work`'s own topo sort + cycle backstop (no parallel
+    scheduler); derived-derived cycles are still caught at plan time by
+    `check_derived_column_refs`.
+    """
+    writer = _writer_node_map(work)
+    deps: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
+    for node in work:
+        for col in _masked_driver_columns(node):
+            for writer_key in writer.get((node.table, col), ()):
+                if writer_key != node.key:
+                    deps[node.key].add(writer_key)
+    return deps
 
 
 def order_work(
@@ -359,17 +476,6 @@ def order_work(
     constraints, so FK ordering stays dominant; a cross-column edge that
     contradicts an FK edge is a genuine cycle and raises `cyclic_work_ordering`.
     """
-    by_key: dict[_NodeKey, WorkNode] = {w.key: w for w in work}
-    return kahn_sorted(by_key, ordering_deps(work, relationship_graph, column_deps))
-
-
-def ordering_deps(
-    work: list[WorkNode],
-    relationship_graph: RelationshipGraph,
-    column_deps: Mapping[_NodeKey, set[_NodeKey]] | None = None,
-) -> dict[_NodeKey, set[_NodeKey]]:
-    """Every ordering constraint of `order_work`: FK edges, R17 composite edges and the
-    cross-column channel (`column_deps`, derived from the resolved operations when None)."""
     by_key: dict[_NodeKey, WorkNode] = {w.key: w for w in work}
     deps: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
 
@@ -405,11 +511,7 @@ def ordering_deps(
     # Cross-column V1: a dependent waits on the node(s) writing its MASKED
     # drivers, so the read is intentional (not lexicographic luck). FK edges
     # above stay dominant: these only add constraints.
-    col_deps = (
-        dependency_edges(resolve_operations(work, relationship_graph))
-        if column_deps is None
-        else column_deps
-    )
+    col_deps = column_dependency_edges(work) if column_deps is None else column_deps
     for dependent, drivers in col_deps.items():
         if dependent not in by_key:
             continue
@@ -417,4 +519,55 @@ def ordering_deps(
             if driver in by_key:
                 deps[dependent].add(driver)
 
-    return deps
+    return _kahn_sorted(by_key, deps)
+
+
+def _kahn_sorted(
+    by_key: dict[_NodeKey, WorkNode], deps: dict[_NodeKey, set[_NodeKey]]
+) -> list[WorkNode]:
+    """Deterministic topological sort: at each step take the sorted-smallest node
+    whose dependencies are all placed. Total order, byte-stable across runs.
+
+    QA-10 F9 (2026-06-01): heapq-based Kahn replaces the prior O(n^2)
+    "scan all keys + sort the ready set" loop. Pre-fix every
+    topological step did a full `sorted(k for k in keys if ...)`,
+    yielding O(n^2 log n) total work. Post-fix maintains a min-heap
+    of ready nodes + an indegree counter; each node is pushed/popped
+    once for O((n+e) log n) total. Output is byte-identical to the
+    prior implementation (both yield the lexicographically smallest
+    topological order). Same fix shape as QA-8 F1 closure on the
+    relationship-graph builder.
+    """
+    keys = set(by_key)
+    if not keys:
+        return []
+    # Build reverse adjacency + indegree counter so each placement
+    # only revisits the children of the just-placed node, not the
+    # full key set.
+    rev: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
+    indegree: dict[_NodeKey, int] = {k: 0 for k in keys}
+    for child, parents in deps.items():
+        if child not in keys:
+            continue
+        for parent in parents:
+            if parent not in keys:
+                continue
+            rev[parent].add(child)
+            indegree[child] += 1
+    ready_heap: list[_NodeKey] = [k for k in keys if indegree[k] == 0]
+    heapq.heapify(ready_heap)
+    placed: list[_NodeKey] = []
+    while ready_heap:
+        nxt = heapq.heappop(ready_heap)
+        placed.append(nxt)
+        for child in sorted(rev[nxt]):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                heapq.heappush(ready_heap, child)
+    if len(placed) < len(keys):
+        unplaced = sorted(k for k in keys if indegree[k] > 0)
+        raise ExecutionError(
+            code=reasons.runtime.CYCLIC_WORK_ORDERING,
+            message=f"cycle in work-node dependencies; unresolved: {unplaced!r}",
+        )
+    return [by_key[k] for k in placed]

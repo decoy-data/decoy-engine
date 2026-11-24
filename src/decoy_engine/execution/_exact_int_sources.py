@@ -10,7 +10,7 @@ those. The canonical bytes then equal those of the same value in a null-free int
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -24,7 +24,8 @@ from decoy_engine.plan._types import ColumnSeed
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import StrategyContext
     from decoy_engine.execution._runner import WorkNode
-    from decoy_engine.relationships import RelationshipGraph
+    from decoy_engine.execution.work_order import WorkOrder
+    from decoy_engine.execution.work_order.operations import NodeKey, ResolvedOperation
 
 
 def _widened_int_column(source: pa.Table, frame: pd.DataFrame, column: str) -> bool:
@@ -48,18 +49,16 @@ def exact_int_faker_sources(
     source: pa.Table,
     frame: pd.DataFrame,
     nodes: Iterable[WorkNode],
-    graph: RelationshipGraph | None = None,
+    ops: Mapping[NodeKey, ResolvedOperation] | None = None,
 ) -> dict[tuple[str, str], pa.ChunkedArray]:
     """Original Arrow columns for the table's exact-int Faker and ungated hash columns.
 
     `nodes` are the table's work nodes in the adapter's real dispatch order. A column an
-    earlier node writes (its own column or a secondary output such as a joint mask's) no longer
-    holds the converted source, so it is not registered: a stale source key can never be read.
-    The write set is the node's resolved operation.
+    node writes (its own column or a secondary output such as a joint mask's) no longer holds
+    the converted source, so it is not registered: a stale source key can never be read. The
+    write set is the node's compiled record in `ops`; a caller with no compiled order gets the
+    node's own columns, as before.
     """
-    from decoy_engine.execution.work_order import resolve_operation
-    from decoy_engine.relationships import RelationshipGraph as _Graph
-
     out: dict[tuple[str, str], pa.ChunkedArray] = {}
     written: set[str] = set()
     for node in nodes:
@@ -78,10 +77,9 @@ def exact_int_faker_sources(
             and _widened_int_column(source, frame, column)
         ):
             out[(table, column)] = source.column(column)
-        written.update(
-            resolve_operation(node, graph or _Graph(edges=(), ordering=())).writes
-            | set(node.columns)
-        )
+        written.update(node.columns)
+        if ops is not None:
+            written |= ops[node.key].writes
     return out
 
 
@@ -90,11 +88,13 @@ def register_exact_int_sources(
     table: str,
     source: pa.Table,
     frame: pd.DataFrame,
-    nodes: Iterable[WorkNode],
+    order: WorkOrder,
 ) -> None:
-    """Record the table's exact-int Faker columns on the context, for its frame's lifetime."""
-    graph = ctx.relationship_graph
-    ctx.exact_int_sources.update(exact_int_faker_sources(table, source, frame, nodes, graph))
+    """Record the table's exact-int Faker columns on the context, for its frame's lifetime.
+    The table's nodes and their writes come from the compiled `order`, so no node is resolved
+    again here."""
+    nodes = (n for n in order.ordered if n.table == table)
+    ctx.exact_int_sources.update(exact_int_faker_sources(table, source, frame, nodes, order.ops))
 
 
 def release_table(sources: dict[tuple[str, str], pa.ChunkedArray], table: str) -> None:

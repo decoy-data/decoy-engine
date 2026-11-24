@@ -29,6 +29,8 @@ from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, Re
 from decoy_engine.relationships._namespace import NamespaceRegistry
 from tests.unit.execution import _auto_chunk_support as support
 
+pytestmark = pytest.mark.usefixtures("copy_on_write")
+
 _REG = get_default_registry()
 _N = 40
 _REF = "us_zip5_city_state"

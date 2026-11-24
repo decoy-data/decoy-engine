@@ -288,10 +288,11 @@ def test_a_column_no_node_writes_is_read_live() -> None:
     assert out["email"].tolist() == ["a", "REDACTED"]
 
 
-def test_w3_the_snapshot_is_aligned_by_label_on_a_reindexed_frame() -> None:
+def test_w3_the_snapshot_is_read_by_position_not_by_label() -> None:
     df = _frame()
     df.index = pd.Index([10, 20])
-    # The snapshot holds the same labels in the reverse order: label 10 was "idle", 20 "active".
+    # The snapshot's labels run the other way. Rows are carried by position, so the label order
+    # is irrelevant: position 0 was "active" and position 1 "idle".
     snap = pd.Series(["active", "idle"], index=pd.Index([20, 10]), name="status")
     ctx = _Ctx({"t": frozenset({"status"})}, {("t", "status"): snap})
     out, _ = run_with_when_gate(
@@ -301,7 +302,7 @@ def test_w3_the_snapshot_is_aligned_by_label_on_a_reindexed_frame() -> None:
         _seed("status == 'active'"),
         ctx,  # type: ignore[arg-type]
     )
-    assert out["email"].tolist() == ["a", "REDACTED"]
+    assert out["email"].tolist() == ["REDACTED", "b"]
 
 
 @pytest.mark.parametrize("table", ["", "other"], ids=["empty_table", "unknown_table"])
@@ -368,6 +369,13 @@ def _composite_seed() -> ColumnSeed:
     )
 
 
+def _order(plan: Any, registry: Any) -> Any:
+    from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.execution.work_order import compile_work_order
+
+    return compile_work_order(build_work_list(plan, registry), _NO_GRAPH)
+
+
 def test_a_composite_nodes_provider_output_is_snapshotted_for_a_when() -> None:
     """A lone `composite_name_email` keyed on `first_name` also writes `email`; a later
     `when: email == 'active'` still selects by the source email (Codex R2, V1)."""
@@ -384,7 +392,7 @@ def test_a_composite_nodes_provider_output_is_snapshotted_for_a_when() -> None:
             ("zz_target", _seed_of("redact", when="email == 'active'")),
         ]
     )
-    assert "email" in source_snapshot_columns(plan, reg, _NO_GRAPH).get("t", frozenset())
+    assert "email" in source_snapshot_columns(_order(plan, reg)).get("t", frozenset())
     n = 6
     emails = ["active" if i % 2 == 0 else f"u{i}@x.test" for i in range(n)]
     table = pa.table(
@@ -428,7 +436,7 @@ def test_every_column_a_handler_declares_written_is_snapshotted_when_read(provid
         plan = _seed_plan(
             [(outputs[0], head), ("zz_target", _seed_of("redact", when=f"{read} == 'x'"))]
         )
-        assert read in source_snapshot_columns(plan, get_default_registry(), _NO_GRAPH).get(
+        assert read in source_snapshot_columns(_order(plan, get_default_registry())).get(
             "t", frozenset()
         ), (
             provider,
@@ -446,7 +454,7 @@ def test_an_unknown_writer_snapshots_every_column_the_table_reads() -> None:
             ("zz_target", _seed_of("redact", when="status == 'x'")),
         ]
     )
-    assert source_snapshot_columns(plan, get_default_registry(), _NO_GRAPH).get("t") == {"status"}
+    assert source_snapshot_columns(_order(plan, get_default_registry())).get("t") == {"status"}
 
 
 def test_duplicate_row_labels_select_by_position_on_the_full_frame_and_chunked_oracle(
@@ -479,10 +487,11 @@ def test_duplicate_row_labels_select_by_position_on_the_full_frame_and_chunked_o
     assert info.value.code == "when_source_snapshot_missing"
 
 
-def test_a_derived_column_waits_for_the_composite_that_writes_its_driver() -> None:
+def test_a_derived_column_reads_the_live_frame_in_mains_queue_order() -> None:
     """`a_summary` sorts before the `first_name` composite, which writes `email` though no entry
-    names it: the writer map must order the composite first and `a_summary` must read its value
-    (Codex R3). One declaration answers "what does this node write" for ordering and snapshots."""
+    names it. S2a keeps main's ordering exactly (`order_work`, no edge from the bundle's other
+    outputs), so `a_summary` runs first and reads the source email, as it does on main
+    (`WRS-S2B-BUNDLE-KEY-EDGE` tracks the missing edge)."""
     from decoy_engine.execution import PandasExecutionAdapter
     from decoy_engine.execution._runner import build_work_list, order_work
     from decoy_engine.providers_v2 import get_default_registry
@@ -501,7 +510,7 @@ def test_a_derived_column_waits_for_the_composite_that_writes_its_driver() -> No
         ]
     )
     order = [n.columns for n in order_work(build_work_list(plan, reg), graph)]
-    assert order.index(("first_name",)) < order.index(("a_summary",))
+    assert order.index(("a_summary",)) < order.index(("first_name",))
     n = 4
     table = pa.table(
         {
@@ -524,9 +533,10 @@ def test_a_derived_column_waits_for_the_composite_that_writes_its_driver() -> No
         )
         .output
     )
-    emails = out.column("email").to_pylist()
-    assert emails != table.column("email").to_pylist()  # the composite did mask email
-    assert out.column("a_summary").to_pylist() == [e + "!" for e in emails]
+    assert out.column("email").to_pylist() != table.column("email").to_pylist()  # the bundle ran
+    assert out.column("a_summary").to_pylist() == [
+        e + "!" for e in table.column("email").to_pylist()
+    ]
 
 
 def _run_name_email(plan: Any, table: pa.Table, graph: Any, *columns: str) -> pa.Table:
@@ -616,8 +626,14 @@ def test_a_column_created_before_the_composite_that_overwrites_it(created: str, 
     table = pa.table({"first_name": pa.array([f"F{i}" for i in range(n)]), read: pa.array(source)})
     out = _run_name_email(plan, table, RelationshipGraph(edges=(), ordering=()), "first_name")
     assert out.column(read).to_pylist() != source  # the composite ran
-    # It ran after the creator, so the bundle's value is the final value of the column.
-    assert not any(v.endswith("!") for v in out.column(created).to_pylist())
+    if created == "email":
+        # The creator sorts before the bundle (queue order) and runs first, so the bundle's
+        # value is the final value of the column.
+        assert not any(v.endswith("!") for v in out.column(created).to_pylist())
+    else:
+        # The creator runs after the bundle (queue order), reading the bundle's email, and
+        # replaces the bundle's `last_name`.
+        assert out.column(created).to_pylist() == [e + "!" for e in out.column(read).to_pylist()]
 
 
 @pytest.mark.parametrize("sequential", [False, True], ids=["full-frame", "sequential"])

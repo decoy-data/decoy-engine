@@ -17,15 +17,13 @@ Out-of-core still refuses `when:`.
 A route that forgets the pre-mask snapshot of a `when:` column fails with the new runtime error
 `when_source_snapshot_missing`. No supported route does.
 
-A column that reads a composite's output (`derived` over `email`, written by a
-`composite_name_email` node keyed on `first_name`) now runs after that composite and reads its
-value. Before, it could run first and read the source value. The `when:` snapshots and the carry's
-untouched set read one write declaration; the ordering reads what dispatch really writes from it.
-A composite that is an FK child writes only its own column, so it adds no edge for the rest of its
-bundle. A column that a `derived` (or other creating) entry adds and a composite also writes is
-created first and then takes the composite's value.
+Work order is unchanged: the order of masking nodes is the order it was before, a plan raises
+`cyclic_work_ordering` exactly when it did, and nodes write into the live frame one at a time.
 
-Fixed: a `when:` predicate or a derived expression that read a bundle's output, a creator's target, or a column rewritten by a joint mask now sees the value the plan's ordering defines instead of a stale source value. A plan whose columns used to fail with `cyclic_work_ordering` because of a creator, a bundle and a foreign key sharing columns now runs, and a real value cycle still raises that code.
+Fixed: a `when:` gate, a gated `joint_mask` and a `date_shift` with `group_by` now pick rows and
+their pre-mask source values by position. A source that stores a repeated, unsorted or string
+index (a Parquet file written from a pandas frame) no longer gives a gated joint mask both source
+keys, and the stored index comes back unchanged in the output.
 
 Added: the runtime reason code `runtime/when_source_snapshot_missing` (value-free) is raised when a route evaluates a `when:` without the pre-mask snapshot of a column it reads.
 

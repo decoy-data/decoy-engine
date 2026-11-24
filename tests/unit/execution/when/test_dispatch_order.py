@@ -94,43 +94,11 @@ def _two_table_plan() -> object:
     return SimpleNamespace(seed_envelope=envelope)
 
 
-def test_unknown_writer_is_table_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """6. A strategy whose writes cannot be named may write any column of ITS OWN table: a
-    reader in that table waits for it and sees its replacement; a reader in another table gets no
-    edge from it."""
-    from decoy_engine.execution._runner import build_work_list
-    from decoy_engine.execution._strategies import SCALAR_HANDLERS
-    from decoy_engine.execution.work_order import resolve_operations
-    from decoy_engine.execution.work_order.ranks import dependency_edges
-
-    class Stub:
-        name = "z_stub"
-
-        def run(self, df, column, plan, ctx):  # type: ignore[no-untyped-def]
-            df["drv"] = ["STUB"] * len(df)
-            return df, []
-
-    monkeypatch.setitem(SCALAR_HANDLERS, "z_stub", Stub())
-    table = pa.table(
-        {
-            "drv": pa.array(["src"] * N),
-            "reader": pa.array(["x"] * N),
-            "z_stub": pa.array(["y"] * N),
-        }
-    )
-    plan = ws.plan([("reader", ws.derived('concat(drv, "!")')), ("z_stub", ws.seed("z_stub"))])
-    assert ws.run(plan, table).column("reader").to_pylist() == ["STUB!"] * N
-    work = build_work_list(_two_table_plan(), ws.REG)
-    edges = dependency_edges(resolve_operations(work, ws.NO_GRAPH))
-    assert ("t", ("z_stub",)) in edges[("t", ("reader",))]
-    assert ("t", ("z_stub",)) not in edges.get(("u", ("reader",)), set())
-
-
 def test_three_writers_share_one_order(tmp_path: Path) -> None:
-    """13. A bundle, a joint mask and a derived creator all write `last_name`. The creator runs
-    before the bundle that overwrites it. With the joint node keyed `city` it runs first and the
-    bundle's surname wins; keyed `zip` it runs after the bundle and its surname wins. A fixed
-    bundle priority would fail the second run."""
+    """13. A bundle, a joint mask and a derived creator all write `last_name`. The queue decides,
+    as on main: with the joint node keyed `city` the derived surname runs last and wins; keyed
+    `zip` the joint mask runs last and its surname wins. A fixed writer priority would fail one
+    of the two runs."""
     table = pa.table(
         {
             "k": pa.array([f"k{i}" for i in range(N)]),
@@ -142,8 +110,7 @@ def test_three_writers_share_one_order(tmp_path: Path) -> None:
             "drv": pa.array([f"d{i}" for i in range(N)]),
         }
     )
-    oracle = ws.bundle_oracle(FIRST)["last_name"]
-    for key_column, expected in (("city", oracle), ("zip", ["JOINT"] * N)):
+    for key_column, expected in (("city", [f"d{i}?" for i in range(N)]), ("zip", ["JOINT"] * N)):
         ref = ws.reference(
             tmp_path / f"{key_column}.parquet", **{key_column: ["J"], "last_name": ["JOINT"]}
         )
@@ -166,6 +133,7 @@ def test_faker_never_keys_from_a_stale_integer_source(tmp_path: Path) -> None:
     after an earlier writer, and the job either keys from the written values or refuses."""
     from decoy_engine.execution._exact_int_sources import exact_int_faker_sources
     from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.execution.work_order import resolve_operations
     from decoy_engine.relationships import RelationshipGraph
 
     ref = ws.reference(tmp_path / "r.parquet", city=["JC"], n=[7])
@@ -182,5 +150,6 @@ def test_faker_never_keys_from_a_stale_integer_source(tmp_path: Path) -> None:
     frame = source.to_pandas()
     graph = RelationshipGraph(edges=(), ordering=())
     ordered = sorted(nodes, key=lambda n: n.columns)  # city's joint mask first, then n
-    assert ("t", "n") not in exact_int_faker_sources("t", source, frame, ordered, graph)
-    assert ("t", "n") in exact_int_faker_sources("t", source, frame, [ordered[-1]], graph)
+    ops = resolve_operations(ordered, graph)
+    assert ("t", "n") not in exact_int_faker_sources("t", source, frame, ordered, ops)
+    assert ("t", "n") in exact_int_faker_sources("t", source, frame, [ordered[-1]], ops)

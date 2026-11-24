@@ -13,13 +13,15 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from decoy_engine.errors import ValidationError
 from decoy_engine.execution._column_access import (
-    OWN_TARGET_CREATES,
-    SURFACE_DECLARATIONS,
+    OWN_TARGET_SOURCE,
+    ColumnAccess,
     column_access,
+    creates_own_target,
     declared_access,
-    scalar_creating_reads,
 )
+from decoy_engine.expressions._when_parser import parse_when_cached, when_column_refs
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
@@ -36,8 +38,15 @@ class ResolvedOperation:
     `writes` are the columns the node may replace (rows chosen by its gate, if any). `wildcard`
     means the writes cannot be named: the node may replace any column of its table. `creates` is
     true for a scalar that writes its own target without reading it, so the target may be absent
-    from the source until the node runs. `masked_reads` are sibling columns read at their masked
-    value (the ordering edge); `source_reads` are the columns its `when:` reads at the original.
+    from the source until the node runs.
+
+    Reads come in three phases, each declared by the handler's `column_access` row: `source_reads`
+    are anchor columns taken from the pre-mask snapshot (`joint_mask` `key_by`, `date_shift`
+    `group_by`), `masked_reads` are sibling columns read at their value when the node runs, and
+    `reads_own_target` means the handler reads the prior version of its own target.
+    `reads_unknown` means the declaration cannot name its reads, so every column of the table is
+    read at its dispatch value. The `when:` predicate reads are separate: they come from the
+    node's seed (`_runner.source_snapshot_columns`).
     """
 
     node: WorkNode
@@ -46,14 +55,11 @@ class ResolvedOperation:
     wildcard: bool
     creates: bool
     gated: bool
+    source_reads: frozenset[str]
     masked_reads: frozenset[str]
+    reads_own_target: bool
+    reads_unknown: bool
     fk_edges: tuple[RelationshipEdge, ...] = ()
-    # The creator flag and masked reads of the handler the node is CONFIGURED with, kept for the
-    # compatibility sort: a plan that orders today keeps its order, so an FK child's configured
-    # creator still adds its edges there. Value dependencies (`creates`, `masked_reads`) discard
-    # a bypassed handler's reads and flag.
-    order_creates: bool = False
-    order_reads: frozenset[str] = frozenset()
 
     @property
     def key(self) -> NodeKey:
@@ -72,7 +78,7 @@ class ResolvedOperation:
 
 def _entry(node: WorkNode) -> dict[str, object] | None:
     from decoy_engine.execution._adapter import provider_config_to_dict
-    from decoy_engine.plan._types import ColumnSeed
+    from decoy_engine.plan import ColumnSeed
 
     seed = node.plan_slice
     if not isinstance(seed, ColumnSeed):
@@ -87,59 +93,66 @@ def _entry(node: WorkNode) -> dict[str, object] | None:
     }
 
 
-def _configured_order(
-    node: WorkNode, entry: dict[str, object] | None
-) -> tuple[bool, frozenset[str]]:
-    """`(creates, masked reads)` of the scalar handler a node is configured with."""
-    if entry is None or node.kind != "scalar":
-        return False, frozenset()
-    declare = SURFACE_DECLARATIONS.get(f"scalar:{node.strategy}")
-    creates = declare is not None and declare(entry).own_target == OWN_TARGET_CREATES
-    return creates, scalar_creating_reads(entry)
+def _when_reads(entry: dict[str, object]) -> frozenset[str]:
+    """The columns the entry's `when:` reads, which `ColumnAccess.reads` also holds."""
+    when = entry.get("when")
+    if not isinstance(when, str) or not when.strip():
+        return frozenset()
+    try:
+        return frozenset(r.column for r in when_column_refs(parse_when_cached(when)))
+    except ValidationError:
+        return frozenset()
+
+
+def _declared(
+    node: WorkNode, entry: dict[str, object], access: ColumnAccess
+) -> tuple[frozenset[str], frozenset[str], bool, bool]:
+    """`(source reads, masked reads, reads own target, reads unknown)` from the declaration."""
+    # A scalar's own column is not a sibling read. A deterministic bundle reads its first sorted
+    # group column, which is one of its own outputs, so a composite keeps it.
+    own_column = set(node.columns) if node.kind == "scalar" else set()
+    masked = access.reads - access.source_reads - _when_reads(entry) - own_column
+    own = node.kind == "scalar" and access.own_target == OWN_TARGET_SOURCE
+    return access.source_reads, frozenset(masked), own, access.reads_unknown
 
 
 def resolve_operation(node: WorkNode, graph: RelationshipGraph) -> ResolvedOperation:
     """Resolve one node. FK resolution is checked first, as dispatch does."""
     from decoy_engine.execution._chunked_carry import passthrough_leaves_input
-    from decoy_engine.plan._types import ColumnSeed
+    from decoy_engine.plan import ColumnSeed
 
     own = frozenset(node.columns)
     edges = graph.parents_of(node.table, node.columns)
     gated = isinstance(node.plan_slice, ColumnSeed) and node.plan_slice.when is not None
     entry = _entry(node)
+    none = frozenset[str]()
     if edges:
-        creates, reads = _configured_order(node, entry)
         return ResolvedOperation(
-            node, "fk", own, False, False, False, frozenset(), edges, creates, reads
+            node, "fk", own, False, False, False, none, none, False, False, edges
         )
     if entry is None:  # a composite FK group with no edge: dispatch refuses it
-        return ResolvedOperation(node, "composite", own, False, False, False, frozenset())
+        return ResolvedOperation(
+            node, "composite", own, False, False, False, none, none, False, False
+        )
     composite = node.kind == "composite"
     access = declared_access(entry, composite)
+    source, masked, reads_own, unknown = _declared(node, entry, access)
     if composite:
         # A bundle writes exactly its provider's outputs; a `coherent_with` member outside them
         # is group identity, not a write.
         writes = access.writes if not access.writes_unknown else own
         return ResolvedOperation(
-            node, "composite", writes, access.writes_unknown, False, gated, frozenset()
-        )
+            node, "composite", writes, access.writes_unknown, False, gated,
+            source, masked, False, unknown,
+        )  # fmt: skip
     if node.strategy == "passthrough" and passthrough_leaves_input():
-        return ResolvedOperation(node, "passthrough", frozenset(), False, False, gated, frozenset())
-    declare = SURFACE_DECLARATIONS.get(f"scalar:{node.strategy}")
-    creates = declare is not None and declare(entry).own_target == OWN_TARGET_CREATES
-    reads = scalar_creating_reads(entry)
+        return ResolvedOperation(
+            node, "passthrough", none, False, False, gated, source, masked, False, unknown
+        )
     return ResolvedOperation(
-        node,
-        "scalar",
-        own | access.writes,
-        access.writes_unknown,
-        creates,
-        gated,
-        reads,
-        (),
-        creates,
-        reads,
-    )
+        node, "scalar", own | access.writes, access.writes_unknown, creates_own_target(entry),
+        gated, source, masked, reads_own, unknown,
+    )  # fmt: skip
 
 
 def resolve_operations(
