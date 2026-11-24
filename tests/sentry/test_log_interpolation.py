@@ -17,46 +17,16 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from tests.sentry.safe_output._tagger import (
+    RISKY_NAMES,
+    SINK_RISKY,
+    own_nodes,
+    risky_in,
+    tainted_names,
+)
+
 SRC = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 
-# Variable names that hold exceptions, data values or user expressions by convention.
-RISKY_NAMES = frozenset(
-    {
-        "exc",
-        "e",
-        "err",
-        "error",
-        "ex",
-        "value",
-        "v",
-        "val",
-        "values",
-        "cell",
-        "row",
-        "expression",
-        "expr",
-        "formula",
-        "text",
-        "data",
-        "sample",
-        "raw",
-        "record",
-        "item",
-        "line",
-        "content",
-        # Geographic quasi-identifiers taken straight from rows (HIPAA Safe Harbor zip3/zip5).
-        # Exact names, not a `zip*` wildcard, so unrelated identifiers stay clean.
-        "z3",
-        "z5",
-        "zip3",
-        "zip5",
-        "zipcode",
-        "prefix",
-    }
-)
-# Names that hold child-process output. Only the error sinks below treat them as risky, because
-# `stderr`/`stdout` are routine, harmless names in code that does not build a user-facing error.
-SINK_RISKY = RISKY_NAMES | {"stderr", "stdout"}
 # Functions whose return value IS the user-visible error text. Their bodies are held to the
 # same standard as a sink: a builder that returns the exception message leaks through every
 # caller, so the check sits at the definition rather than at each call.
@@ -65,7 +35,6 @@ ERROR_TEXT_BUILDERS = frozenset(
 )
 _LEVELS = frozenset({"debug", "info", "warning", "warn", "error", "exception", "critical", "log"})
 _EXCEPTION_MARKER = "<exception traceback>"
-_COUNT_METHODS = frozenset({"count", "nunique", "sum", "size", "__len__"})
 
 # (module path relative to decoy_engine, qualified function name, variable) -> (count, reason).
 ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
@@ -120,79 +89,13 @@ def _is_logger_call(node: ast.Call, aliases: frozenset[str] = frozenset()) -> bo
     )
 
 
-def _root_name(value: ast.expr) -> str | None:
-    """The variable an expression reads through attributes and subscripts; None if a call
-    sits on the path (`type(exc).__name__` reads the type, not the exception)."""
-    while isinstance(value, (ast.Attribute, ast.Subscript)):
-        if isinstance(value, ast.Attribute) and value.attr == "__class__":
-            return None  # exc.__class__.__name__ is the type, like type(exc).__name__
-        value = value.value
-    return value.id if isinstance(value, ast.Name) else None
-
-
-def _risky_in(value: ast.expr, risky: frozenset[str]) -> list[str]:
-    """Every risky name `value` exposes as text, directly or through formatting. All of them
-    count, so adding a second risky value to an allowlisted message is still a new finding."""
-    if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)):
-        root = _root_name(value)
-        if root is not None:
-            return [root] if root in risky else []
-        base: ast.expr = value
-        while isinstance(base, (ast.Attribute, ast.Subscript)):
-            base = base.value
-        # `str(exc)[:200]` still exposes the text; `type(exc).__name__` stays exempt because
-        # `type` is not a formatting call.
-        # A sliced f-string (`f"{exc}"[:500]`) exposes the same text as the f-string itself.
-        return _risky_in(base, risky) if not isinstance(base, ast.Name) else []
-    children: list[ast.expr] = []
-    if isinstance(value, ast.JoinedStr):
-        children = [p.value for p in value.values if isinstance(p, ast.FormattedValue)]
-    elif isinstance(value, ast.BinOp):
-        children = [value.left, value.right]
-    elif isinstance(value, ast.Starred):
-        children = [value.value]
-    elif isinstance(value, ast.BoolOp):
-        children = list(value.values)
-    elif isinstance(value, ast.IfExp):
-        children = [value.body, value.orelse]
-    elif isinstance(value, ast.Dict):
-        # Logging renders a dict's keys as well as its values.
-        children = [k for k in value.keys if k is not None] + list(value.values)
-    elif isinstance(value, ast.DictComp):
-        children = [value.key, value.value, *(g.iter for g in value.generators)]
-    elif isinstance(value, (ast.GeneratorExp, ast.ListComp, ast.SetComp)):
-        # The iterable counts too: conservative on purpose, since a false positive only costs
-        # an allowlist entry while `", ".join(str(x) for x in row)` must not pass.
-        children = [value.elt, *(g.iter for g in value.generators)]
-    elif isinstance(value, (ast.Tuple, ast.List, ast.Set)):
-        children = list(value.elts)
-    elif isinstance(value, ast.Call):
-        func = value.func
-        if (isinstance(func, ast.Name) and func.id in {"str", "repr", "format"}) or (
-            isinstance(func, ast.Attribute) and func.attr in {"format", "join"}
-        ):
-            children = [*value.args, *(k.value for k in value.keywords)]
-        elif isinstance(func, ast.Name) and func.id == "scrub_error_text":
-            # Returns the message with only the Arrow cell pattern removed: still the message.
-            children = list(value.args)
-        elif isinstance(func, ast.Attribute):
-            if func.attr in _COUNT_METHODS:
-                return []  # `row.count()`, `values.nunique()` log a number, not the data
-            # A method on a risky value (`row.items()`, `str(exc).strip()`) still exposes it.
-            root = _root_name(func.value)
-            if root is not None:
-                return [root] if root in risky else []
-            return _risky_in(func.value, risky)
-    return [hit for child in children for hit in _risky_in(child, risky)]
-
-
 def _risky_names_in_call(node: ast.Call, risky: frozenset[str]) -> list[str]:
-    found = [hit for arg in node.args for hit in _risky_in(arg, risky)]
+    found = [hit for arg in node.args for hit in risky_in(arg, risky)]
     found += [
         hit
         for keyword in node.keywords
         if keyword.arg in {"msg", "extra"}
-        for hit in _risky_in(keyword.value, risky)
+        for hit in risky_in(keyword.value, risky)
     ]
     func = node.func
     logs_traceback = isinstance(func, ast.Attribute) and func.attr == "exception"
@@ -227,40 +130,6 @@ def _findings(source: str, module: str) -> dict[tuple[str, str, str], int]:
     return found
 
 
-def _own_nodes(scope: ast.AST) -> list[ast.AST]:
-    """Nodes that belong to `scope` itself: nested defs and classes appear but are not entered."""
-    own: list[ast.AST] = []
-    pending = list(ast.iter_child_nodes(scope))
-    while pending:
-        node = pending.pop()
-        own.append(node)
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-            pending.extend(ast.iter_child_nodes(node))
-    return own
-
-
-def _tainted_names(own: list[ast.AST], risky: frozenset[str]) -> frozenset[str]:
-    """Names assigned from a risky expression, in source order, one pass.
-
-    Bounded on purpose: a single scope, plain `name = expr` / `name += expr` assignments, no
-    loops to a fixpoint, no cross-function flow. It is enough to follow
-    `stderr_tail = stderr.strip()...` into the `error=` that uses `stderr_tail`, which an
-    expression-only check cannot see because `stderr_tail` is not a risky name.
-    """
-    tainted: set[str] = set()
-    assigns = sorted(
-        (n for n in own if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign))),
-        key=lambda n: (n.lineno, n.col_offset),
-    )
-    for node in assigns:
-        if node.value is None:
-            continue
-        if _risky_in(node.value, risky | tainted):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            tainted |= {t.id for t in targets if isinstance(t, ast.Name)}
-    return frozenset(tainted)
-
-
 def _call_name(node: ast.Call) -> str:
     func = node.func
     return func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
@@ -290,11 +159,11 @@ def _sink_findings(source: str, module: str) -> dict[tuple[str, str, str], int]:
             found[key] = found.get(key, 0) + 1
 
     def scan(scope: ast.AST, qualname: str) -> None:
-        own = _own_nodes(scope)
+        own = own_nodes(scope)
         risky = SINK_RISKY | {
             n.name for n in own if isinstance(n, ast.ExceptHandler) and n.name is not None
         }
-        risky = risky | _tainted_names(own, risky)
+        risky = risky | tainted_names(own, risky)
         in_builder = (
             isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
             and scope.name in ERROR_TEXT_BUILDERS
@@ -306,13 +175,13 @@ def _sink_findings(source: str, module: str) -> dict[tuple[str, str, str], int]:
                 )
                 for keyword in node.keywords:
                     if sink is not None and keyword.arg == sink:
-                        add(qualname, f"{_call_name(node)}.{sink}", _risky_in(keyword.value, risky))
+                        add(qualname, f"{_call_name(node)}.{sink}", risky_in(keyword.value, risky))
             elif isinstance(node, ast.Dict) and _is_envelope_module(module):
                 for key_node, value in zip(node.keys, node.values, strict=True):
                     if isinstance(key_node, ast.Constant) and key_node.value == "error":
-                        add(qualname, "envelope.error", _risky_in(value, risky))
+                        add(qualname, "envelope.error", risky_in(value, risky))
             elif in_builder and isinstance(node, ast.Return) and node.value is not None:
-                add(qualname, "builder", _risky_in(node.value, risky))
+                add(qualname, "builder", risky_in(node.value, risky))
         for node in own:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 scan(node, node.name if qualname == "<module>" else f"{qualname}.{node.name}")
@@ -481,7 +350,7 @@ def test_sink_expression_check_alone_would_miss_the_pre_fix_tail() -> None:
     # Pins WHY assignment tracking exists: the expression names only `stderr_tail`/`stdout_tail`,
     # which are not risky by name, so checking the `error=` expression alone sees nothing.
     expr = ast.parse("f'{stderr_tail!r}'", mode="eval").body
-    assert _risky_in(expr, SINK_RISKY) == []
+    assert risky_in(expr, SINK_RISKY) == []
 
 
 def test_sink_flags_the_pre_fix_error_text_builder() -> None:

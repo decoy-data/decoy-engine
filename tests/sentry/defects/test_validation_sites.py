@@ -34,7 +34,7 @@ import pytest
 from pydantic import BaseModel
 
 import decoy_engine
-from tests.sentry.test_log_interpolation import RISKY_NAMES, _risky_in
+from tests.sentry.safe_output._tagger import RISKY_NAMES, risky_in
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
@@ -281,7 +281,7 @@ def classify(msg: ast.expr | None, parts: list[ast.expr] | None = None) -> str:
     parts = _interpolated(msg) if parts is None else parts
     if not parts:
         return "fixed"
-    if any(_risky_in(p, RISKY_NAMES) for p in parts):
+    if any(risky_in(p, RISKY_NAMES) for p in parts):
         return "value-bearing"
     roots = set().union(*(_roots(p) for p in parts))
     return "name-only" if roots <= STRUCTURAL_ROOTS else "unclassified"
