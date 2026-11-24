@@ -413,3 +413,100 @@ class TestAt6Caps:
             sys.getsizeof(a) + sys.getsizeof(b) + sys.getsizeof(d),
         )
         self._check(plan, [a, b, big, d, d], [a, b, big, d, d], calls)
+
+
+def _route_plan(column: str, seed: ColumnSeed) -> Any:
+    from types import SimpleNamespace
+
+    from decoy_engine.plan._types import SeedEnvelope, TableSeed
+
+    return SimpleNamespace(
+        seed_envelope=SeedEnvelope(
+            job_seed=_SEED,
+            per_table=(("t", TableSeed(per_column=((column, seed),), per_group=())),),
+        )
+    )
+
+
+def _nested_seed() -> ColumnSeed:
+    return ColumnSeed(
+        namespace=None,
+        strategy="nested",
+        provider=None,
+        backend_type="decoy_native",
+        backend_version="1",
+        cardinality_mode="reuse",
+        deterministic=False,
+        provider_config=(
+            ("target", "$.v"),
+            ("strategy", "code_set"),
+            ("strategy_config", {"code_set": "icd10", "mode": "mask"}),
+        ),
+        coherent_with=(),
+    )
+
+
+def _direct_seed() -> ColumnSeed:
+    return ColumnSeed(
+        namespace="cs",
+        strategy="code_set",
+        provider=None,
+        backend_type="decoy_native",
+        backend_version="1",
+        cardinality_mode="reuse",
+        deterministic=False,
+        provider_config=(("code_set", "icd10"), ("mode", "mask")),
+        coherent_with=(),
+    )
+
+
+_CODES = ["I10", "E11.9", None, "I10", "J45", "E11.9", "I10", "ZZZ"]
+
+
+def _run_route(route: str) -> tuple[list, Any]:
+    from decoy_engine.execution import PandasExecutionAdapter
+    from decoy_engine.providers_v2 import get_default_registry
+
+    kw: dict[str, Any] = {
+        "registry": get_default_registry(),
+        "relationship_graph": RelationshipGraph(edges=(), ordering=()),
+        "namespace_registry": NamespaceRegistry(bindings=()),
+    }
+    if route == "nested":
+        import json
+
+        cells = [None if c is None else json.dumps({"v": c}) for c in _CODES]
+        table = pa.table({"c": pa.array(cells, type=pa.string())})
+        plan = _route_plan("c", _nested_seed())
+    else:
+        table = pa.table({"c": pa.array(_CODES, type=pa.string())})
+        plan = _route_plan("c", _direct_seed())
+    adapter = PandasExecutionAdapter()
+    if route == "sequential":
+        result = adapter.run_sequential(plan, lambda _n: table, config={}, **kw)
+    else:
+        result = adapter.run(plan, {"t": table}, **kw)
+    return result.output.column("c").to_pylist() if result.output is not None else [], result
+
+
+class TestAt1RouteEntries:
+    """Nested and sequential routes through the adapter's real entry points."""
+
+    @pytest.mark.parametrize("route", ["full-frame", "nested", "sequential"])
+    def test_route_output_equals_old_loop(
+        self, route: str, monkeypatch: pytest.MonkeyPatch, calls: list[str]
+    ) -> None:
+        new_out, new_res = _run_route(route)
+        new_calls = list(calls)
+        calls.clear()
+        monkeypatch.setattr(
+            CodeSetHandler, "run", lambda self, df, col, plan, ctx: _base_run(df, col, plan, ctx)
+        )
+        base_out, base_res = _run_route(route)
+        assert new_out == base_out
+        assert new_res.quality_metrics.get("code_set_corpora") == base_res.quality_metrics.get(
+            "code_set_corpora"
+        )
+        # The memo route called the scalar function once per distinct value.
+        assert len(new_calls) == len(set(new_calls)) > 0
+        assert len(calls) > len(new_calls)
