@@ -17,9 +17,11 @@ import pandas as pd
 import pytest
 from faker.providers.person.en_US import Provider as _EnUs
 
+from decoy_engine.determinism import derive, resolve_seed
 from decoy_engine.generation._dob_anchor import age_on_anchor
 from decoy_engine.generation.composite import CompositeError
 from decoy_engine.generation.composite._person import CompositePerson
+from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import ProviderSpec
 
 _SEED = (0x0123456789).to_bytes(8, "big")
@@ -190,3 +192,19 @@ class TestOptionalFields:
             c.generate_bundle(_spec(), 3, deterministic=False)
         with pytest.raises(CompositeError):
             c.build_pool(_spec(), size=3)
+
+    def test_sex_is_the_low_bit_of_the_ext_derive_not_of_the_main_latent(self):
+        """Pins the second derive: sex comes from `namespace + "/ext"`, byte 0, low bit.
+
+        A sex read from the main latent (a different derive) would fail this on about half the
+        rows, and drawing both from one latent would couple sex to the other slots.
+        """
+        seed = resolve_seed(_SEED)
+        sources = [f"row{i}" for i in range(300)]
+        c = CompositePerson(
+            coherent_namespace="p", pool_size=100, optional_fields=frozenset({"sex"})
+        )
+        out = c.generate_bundle(_spec(), 300, source=pd.Series(sources), deterministic=True)
+        for src, sex in zip(sources, out["sex"], strict=True):
+            ext = derive(seed, "p/ext", _canonicalize_source(src))
+            assert sex == ("F" if ext[0] & 1 == 0 else "M")
