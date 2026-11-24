@@ -217,20 +217,14 @@ UPPER = re.compile(r"_*[A-Z][A-Z0-9_]*")
 def module_int_constants(sources: dict[str, str]) -> set[tuple[str, str]]:
     """``(file, NAME)`` of every module-level UPPER_CASE (private or not) integer literal, signed
     or not, in ``sources`` (``{path under tests/sentry: text}``)."""
+    parse = bs._limits().module_int_assignments
     found = set()
     for rel, text in sources.items():
-        for node in ast.parse(text).body:
-            if isinstance(node, ast.Assign):
-                names = [t for t in node.targets if isinstance(t, ast.Name)]
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                names = [node.target]
-            else:
-                continue
-            value = node.value
-            if isinstance(value, ast.UnaryOp) and isinstance(value.op, (ast.USub, ast.UAdd)):
-                value = value.operand
-            if isinstance(value, ast.Constant) and type(value.value) is int:
-                found |= {(rel, t.id) for t in names if UPPER.fullmatch(t.id)}
+        found |= {
+            (rel, name)
+            for name, value in parse(ast.parse(text)).items()
+            if value is not None and UPPER.fullmatch(name)
+        }
     return found
 
 
@@ -263,6 +257,8 @@ def test_every_module_int_is_a_bound_or_named() -> None:
         ("test_x.py", "NEW_FLOOR = -5\n"),
         ("test_x.py", "NEW_FLOOR: int = +5\n"),
         ("test_baseline_registry_sibling.py", "A = B = 7\n"),
+        ("test_x.py", "MIN_A, MIN_B = 59, -1186\n"),
+        ("test_x.py", "(MIN_A, (MIN_B, MIN_C)) = 1, (2, 3)\n"),
     ],
 )
 def test_the_discovery_scan_sees_each_spelling(path: str, text: str) -> None:
@@ -341,3 +337,37 @@ def test_a_misspelled_direction_fails_the_live_maps(monkeypatch: pytest.MonkeyPa
     for kind in ("max", "min"):
         with pytest.raises(ValueError, match="direction 'floor'"):
             bs.live_bounds(kind)
+
+
+def test_a_signed_and_a_paired_bound_are_read_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Discovery and the live read share one parser: a signed literal and a tuple-assigned pair
+    that discovery finds must also read, or a registered bound would raise instead of ratchet."""
+    (tmp_path / "test_new.py").write_text(
+        "_NEW_FLOOR = -5\nMIN_A, MIN_B = 59, 1186\n", encoding="utf-8"
+    )
+    mod = bs._limits()
+    mod.LIMITS = {
+        ("test_new.py", "_NEW_FLOOR"): "min",
+        ("test_new.py", "MIN_A"): "min",
+        ("test_new.py", "MIN_B"): "min",
+    }
+    monkeypatch.setattr(bs, "_limits", lambda: mod)
+    monkeypatch.setattr(bs, "SENTRY", tmp_path)
+    assert bs.live_bounds("min") == {
+        "test_new.py::_NEW_FLOOR": -5,
+        "test_new.py::MIN_A": 59,
+        "test_new.py::MIN_B": 1186,
+    }
+    found = module_int_constants({"test_new.py": (tmp_path / "test_new.py").read_text()})
+    assert found == {("test_new.py", n) for _, n in mod.LIMITS}
+
+
+def test_the_census_floors_are_discovered_and_registered() -> None:
+    """The tuple-assigned census floors are found by discovery and carry a recorded floor."""
+    found = module_int_constants(_sentry_sources())
+    lc = bs._limits()
+    for name in ("MIN_PACKAGES", "MIN_NAMES"):
+        assert ("release/test_public_census.py", name) in found
+        assert lc.LIMITS[("release/test_public_census.py", name)] == "min"

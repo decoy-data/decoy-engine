@@ -18,6 +18,14 @@
    "reason": "direct-module cap per package; a higher cap lets every package hold more modules",
    "max": 25
   },
+  "release/test_public_census.py::MIN_NAMES": {
+   "reason": "floor on the public names the export census walks; a lower floor lets the walk shrink unnoticed",
+   "min": 1186
+  },
+  "release/test_public_census.py::MIN_PACKAGES": {
+   "reason": "floor on the public packages the export census walks; a lower floor lets the walk skip a package unnoticed",
+   "min": 59
+  },
   "release/test_public_signatures.py::HEAD_FLOOR": {
    "reason": "floor on the public names the signature census maps; a lower floor lets the census shrink unnoticed",
    "min": 350

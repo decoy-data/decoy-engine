@@ -287,7 +287,7 @@ REBINDS = {
     "walrus in comprehension": "GOAL = 600\n[(GOAL := 9) for _ in [1]]\n",
     "del": "GOAL = 600\ndel GOAL\n",
     "tuple unpack": "GOAL = 600\nGOAL, OTHER = 900, 1\n",
-    "only a tuple unpack": "GOAL, OTHER = 600, 1\n",
+    "a tuple unpack of a call": "GOAL, OTHER = f()\n",
     "global rebind in a function": "GOAL = 600\n\ndef f():\n    global GOAL\n    GOAL = 900\n",
     "import": "GOAL = 600\nfrom os import sep as GOAL\n",
     "def": "GOAL = 600\n\ndef GOAL():\n    pass\n",
@@ -383,9 +383,11 @@ def test_a_plain_consumer_and_a_non_consumer_pass() -> None:  # pin
     assert lc.consumer_problems("EN_US_DIGEST_FLOOR = 1\n", "EN_US_DIGEST_FLOOR", HOME) == []
 
 
-def test_the_faker_consumer_enforces_the_recorded_floor() -> None:  # red-before
-    """At the recorded floor the check passes; one digest below it fails. A consumer that lowers
-    or re-derives the constant makes the second half pass and this test red."""
+@pytest.mark.parametrize("field_index", [0, 1], ids=["first_field", "second_field"])
+def test_the_faker_consumer_enforces_the_recorded_floor(field_index: int) -> None:  # red-before
+    """At the recorded floor the check passes; one pair below it fails, whichever of the two
+    fields is invalidated. A consumer that counts only one field, lowers or re-derives the
+    constant makes the second half pass and this test red."""
     import copy
 
     from tests.sentry.dependencies import _faker_output_lock_support as support
@@ -395,16 +397,17 @@ def test_the_faker_consumer_enforces_the_recorded_floor() -> None:  # red-before
     ]["min"]
     locales = copy.deepcopy(support._load_lock()["locales"])
     fields = support._fields("reflected")
+    assert len(fields) == 2
     have = sum(all(len(c[f]) == 64 for f in fields) for c in locales["en_US"]["reflected"].values())
     assert have >= floor
-    _degrade_to(locales, fields, have - floor)
+    _degrade_to(locales, fields[field_index], fields, have - floor)
     support._check_anchors_and_floor(locales)
-    _degrade_to(locales, fields, 1)
+    _degrade_to(locales, fields[field_index], fields, 1)
     with pytest.raises(AssertionError):
         support._check_anchors_and_floor(locales)
 
 
-def _degrade_to(locales: dict, fields: tuple[str, ...], count: int) -> None:
+def _degrade_to(locales: dict, field: str, fields: tuple[str, ...], count: int) -> None:
     from tests.sentry.dependencies._faker_lock_lists import ANCHORS
 
     anchors = {n for loc, s, n in ANCHORS if loc == "en_US" and s == "reflected"}
@@ -413,6 +416,20 @@ def _degrade_to(locales: dict, fields: tuple[str, ...], count: int) -> None:
         if done == count:
             return
         if name not in anchors and all(len(cell[f]) == 64 for f in fields):
-            cell[fields[0]] = "x"
+            cell[field] = "x"
             done += 1
     assert done == count
+
+
+@pytest.mark.parametrize(
+    "source, value",
+    [("_F = -5\n", -5), ("F = +5\n", 5), ("A, F = 1, -2\n", -2), ("F, A = 59, 1186\n", 59)],
+)
+def test_read_int_reads_signed_and_paired_literals(source: str, value: int) -> None:  # red-before
+    assert lc.read_int(source, "_F" if source.startswith("_F") else "F") == value
+
+
+@pytest.mark.parametrize("source", ["F = --5\n", "F, A = g()\n", "F, A = 1, 2, 3\n", "F = -True\n"])
+def test_read_int_refuses_a_signed_or_paired_non_literal(source: str) -> None:  # red-before
+    with pytest.raises(ValueError):
+        lc.read_int(source, "F")

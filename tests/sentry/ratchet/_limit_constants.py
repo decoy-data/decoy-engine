@@ -25,6 +25,8 @@ LIMITS: dict[tuple[str, str], str] = {
     ): "min",  # `>=` floor on digest pairs
     ("defects/test_faker_native_allowlist_total.py", "MIN_COPY"): "max",  # `>=` flags a copy
     ("_ratchet.py", "MIN_REASON"): "min",  # a reason under it fails
+    ("release/test_public_census.py", "MIN_PACKAGES"): "min",  # `>=` floor on packages walked
+    ("release/test_public_census.py", "MIN_NAMES"): "min",  # `>=` floor on public names walked
 }
 
 DIRECTIONS = ("max", "min")
@@ -91,35 +93,66 @@ def _count_bindings(node: ast.AST, name: str, live: bool) -> int:
     return total
 
 
+def int_literal(value: ast.AST | None) -> int | None:
+    """The value of a plain integer literal, signed or not (``5``, ``-5``, ``+5``); ``None`` for a
+    bool, a float, an expression or anything else. The one parser for discovery and live reads."""
+    if isinstance(value, ast.UnaryOp) and isinstance(value.op, (ast.USub, ast.UAdd)):
+        inner = int_literal(value.operand)
+        if inner is None or isinstance(value.operand, ast.UnaryOp):
+            return None
+        return -inner if isinstance(value.op, ast.USub) else inner
+    if isinstance(value, ast.Constant) and type(value.value) is int:
+        return value.value
+    return None
+
+
+def _paired(target: ast.AST, value: ast.AST | None, out: dict[str, int | None]) -> None:
+    """Match ``target`` to ``value``: a name takes the literal (or ``None`` when it is not one); a
+    tuple or list target takes a tuple or list value of the same length element by element."""
+    if isinstance(target, ast.Name):
+        out[target.id] = int_literal(value)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
+            for t, v in zip(target.elts, value.elts, strict=True):
+                _paired(t, v, out)
+        else:
+            for node in ast.walk(target):
+                if isinstance(node, ast.Name):
+                    out[node.id] = None
+
+
+def module_int_assignments(tree: ast.Module) -> dict[str, int | None]:
+    """Each name a module-level ``=`` or annotated assignment binds, with its integer literal or
+    ``None`` when the right side is not one. Chained targets (``A = B = 7``) and paired
+    tuple targets (``A, B = 1, 2``) count. A name bound twice keeps the last binding."""
+    out: dict[str, int | None] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                _paired(target, node.value, out)
+        elif isinstance(node, ast.AnnAssign):
+            _paired(node.target, node.value, out)
+    return out
+
+
 def read_int(source: str, constant: str) -> int:
     """The value of module-level ``NAME = <int>`` or ``NAME: int = <int>`` in ``source``, by ``ast``.
 
-    Python uses the last binding, so the name must have exactly one: any other binding (a second
-    assignment, ``+=``, unpacking, a loop or ``with`` target, ``:=``, ``del``, an import, a
-    ``def``, or a rebind in a function that declares it ``global``) raises, as does a bool, a
-    non-literal or a missing name. The module is never imported. The caller reads the file: this
-    package holds checker code, whose reads all go through ``_integrity``.
+    The literal may be signed and the name may sit in a chained or paired tuple assignment
+    (``A, B = 1, 2``). Python uses the last binding, so the name must have exactly one: any other
+    binding (a second assignment, ``+=``, unpacking of a non-literal, a loop or ``with`` target,
+    ``:=``, ``del``, an import, a ``def``, or a rebind in a function that declares it ``global``)
+    raises, as does a bool, a non-literal or a missing name. The module is never imported. The
+    caller reads the file: this package holds checker code, whose reads all go through
+    ``_integrity``.
     """
     tree = ast.parse(source)
     if _count_bindings(tree, constant, True) != 1:
         raise ValueError(f"{constant} must be bound exactly once at module level")
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        else:
-            continue
-        if any(isinstance(t, ast.Name) and t.id == constant for t in targets):
-            value = node.value
-            if (
-                isinstance(value, ast.Constant)
-                and isinstance(value.value, int)
-                and not isinstance(value.value, bool)
-            ):
-                return value.value
-            break
-    raise ValueError(f"{constant} is not a plain integer literal at module level")
+    value = module_int_assignments(tree).get(constant)
+    if value is None:
+        raise ValueError(f"{constant} is not a plain integer literal at module level")
+    return value
 
 
 def key_of(file: str, constant: str) -> str:
