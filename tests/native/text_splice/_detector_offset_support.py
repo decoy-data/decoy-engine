@@ -23,7 +23,7 @@ MATURIN = "maturin==1.15.0"  # the version native-companion.yml builds release w
 
 # The engine as it was one commit before S0 (origin/main when S0 was cut). AT-11 runs that core
 # against the new wheel, so it must not move with later commits.
-OLD_CORE_SHA = "9f7bb1f4a"
+OLD_CORE_SHA = "9f7bb1f4ad6f3ff95ad3328606cf1059ecb35aea"
 
 LIMIT = 64  # DETECTOR_OFFSET_LIMIT under the test feature
 OVERSIZED_EMAIL = "a" * (LIMIT - 5) + "@b.com"  # 65 bytes, one over the test limit
