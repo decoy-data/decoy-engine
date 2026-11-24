@@ -92,25 +92,6 @@ def _providers(config: dict[str, Any], table: str) -> dict[str, Any]:
     return {}
 
 
-def typed_preserve(
-    config: dict[str, Any], shapes: Mapping[tuple[str, str], ColumnShape], table: str, column: str
-) -> bool:
-    """Whether `table.column` is a typed date_shift column (in the plan's `shapes`) whose config
-    lists `preserve_values`, the same predicate the config gate applies (`has_preserve_values`)."""
-    from decoy_engine.transforms.date_preserve import has_preserve_values
-
-    if (table, column) not in shapes:
-        return False
-    for table_cfg in config.get("tables") or ():
-        if not isinstance(table_cfg, dict) or table_cfg.get("name") != table:
-            continue
-        for col in table_cfg.get("columns") or ():
-            if isinstance(col, dict) and col.get("name") == column:
-                cfg = col.get("provider_config")
-                return has_preserve_values(cfg if isinstance(cfg, dict) else {})
-    return False
-
-
 def string_source_type_rejection(strategy: str, column: str, schema: pa.Schema) -> str | None:
     """The coded reason a `strategy` column's real source type is not the one its native
     operator takes, or None. categorical, bucket_perturb, date_shift and text_redact all take
@@ -149,10 +130,10 @@ def real_type_decline(
     config: dict[str, Any],
     node_routes: Iterable[Any],
     first_schema: pa.Schema,
+    date_shapes: Mapping[tuple[str, str], ColumnShape] | None = None,
     *,
     table: str,
     profile: Any,
-    date_shapes: Mapping[tuple[str, str], ColumnShape] | None = None,
 ) -> CodedDecline | None:
     """The first real-type decline as its legacy reason plus a structured record, or None.
     The column is the node under test, so attribution never reparses the reason string.
@@ -232,6 +213,6 @@ def real_type_rejection(
 ) -> str | None:
     """The coded reason an admitted table must run on the oracle, or None."""
     decline = real_type_decline(
-        config, node_routes, first_schema, table=table, profile=profile, date_shapes=date_shapes
+        config, node_routes, first_schema, date_shapes, table=table, profile=profile
     )
     return None if decline is None else decline.reason

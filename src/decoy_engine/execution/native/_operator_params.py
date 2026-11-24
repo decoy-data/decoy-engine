@@ -340,7 +340,7 @@ def resolve_params_by_column(
     *,
     excluded: frozenset[str],
     table: str | None = None,
-    date_shapes: Mapping[str, ColumnShape] | None = None,
+    plan: Any = None,
 ) -> dict[str, OperatorParams]:
     """Parameters for every configured column of one table, resolved once for the whole run
     (defaults, coercions and namespaces never change between chunks).
@@ -349,8 +349,13 @@ def resolve_params_by_column(
     its strategy is not a native operator, or when it is a categorical the chunked entry did
     not prepare. The route then fails closed on the missing entry, as it did when it looked
     these up per chunk. `table` keys the default selection namespace of a position-keyed faker.
-    `date_shapes` maps each of the table's native date columns to its plan shape.
+    `plan` is the compiled plan; a typed date_shift column takes the shape it lists there.
     """
+    from decoy_engine.execution.native._date_shape_plan import table_date_shapes
+
+    date_shapes = (
+        {} if plan is None or table is None else table_date_shapes(plan, table, col_seed_by_name)
+    )
     params: dict[str, OperatorParams] = {}
     for name, seed in col_seed_by_name.items():
         if name in excluded or seed.strategy not in OPERATORS:
@@ -366,6 +371,6 @@ def resolve_params_by_column(
             provider_config=provider_config_to_dict(seed.provider_config),
             namespace=seed.namespace,
             prepared_categorical=prepared_categoricals.get(name),
-            date_shape=(date_shapes or {}).get(name) if seed.strategy == "date_shift" else None,
+            date_shape=date_shapes.get(name) if seed.strategy == "date_shift" else None,
         )
     return params
