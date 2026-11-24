@@ -7,14 +7,16 @@ with a coded error that carries no value.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
 import pyarrow as pa
 
 from decoy_engine._execution_error import post_scan_not_inspectable
 from decoy_engine.execution._pipeline_sources import materialize_source
 from decoy_engine.internal.pandas_compat import arrow_to_frame_pair
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 def suite_tables(
@@ -39,18 +41,12 @@ def suite_frames(
     src: dict[str, pd.DataFrame] = {}
     out: dict[str, pd.DataFrame] = {}
     for name in tables:
-        pair = arrow_to_frame_pair(
+        # Physical field names, never the pandas index metadata: a stored index (named or not) is a
+        # column the batch gate reads by name, so the frame checks must read it the same way.
+        src[name], out[name] = arrow_to_frame_pair(
             materialize_source(sources[name]),
             outputs[name],
             on_unrepresentable=post_scan_not_inspectable(name),
+            ignore_metadata=True,
         )
-        src[name], out[name] = (_with_physical_index_columns(f) for f in pair)
     return src, out
-
-
-def _with_physical_index_columns(frame: pd.DataFrame) -> pd.DataFrame:
-    """A stored pandas index is a physical column of the table: the batch gate reads it by name,
-    so the frame checks must see it as a column too, not as an index no check looks at."""
-    if isinstance(frame.index, pd.RangeIndex) or not any(n is not None for n in frame.index.names):
-        return frame
-    return frame.reset_index()

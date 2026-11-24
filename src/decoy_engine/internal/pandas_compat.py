@@ -84,7 +84,7 @@ _UNREPRESENTABLE: Final = (pa.ArrowException, ValueError, OverflowError)
 
 def _is_resource_failure(exc: BaseException) -> bool:
     """Memory pressure and a full disk keep their own type: they say nothing about a value."""
-    from decoy_engine.fileaccess._errors import passes_by_type
+    from decoy_engine.fileaccess import passes_by_type
 
     return isinstance(exc, Exception) and passes_by_type(exc)
 
@@ -128,17 +128,19 @@ def arrow_to_frame(
     on_unrepresentable: _OnUnrepresentable,
     widen: bool = False,
     types_mapper: _Mapper | None = None,
+    ignore_metadata: bool = False,
 ) -> pd.DataFrame:
     """Experimental: the one Arrow-to-pandas conversion of a table (source-read boundary, S1b).
 
     A column pandas cannot hold calls `on_unrepresentable(column)` (None when no single column
     reproduces the failure) after the conversion's own
     handler has closed, so the coded error it raises carries no pandas or Arrow text (which
-    quotes the value). Code outside this module does not call `to_pandas` itself.
+    quotes the value). `ignore_metadata` keeps every physical field a plain column under its own
+    name, instead of restoring a stored pandas index. Code outside this module does not call `to_pandas` itself.
     """
     _no_widening(widen)
     try:
-        return table.to_pandas(types_mapper=types_mapper)
+        return table.to_pandas(types_mapper=types_mapper, ignore_metadata=ignore_metadata)
     except _UNREPRESENTABLE as exc:
         if _is_resource_failure(exc):
             raise
@@ -172,12 +174,14 @@ def arrow_to_frame_pair(
     on_unrepresentable: _OnUnrepresentable,
     widen: bool = False,
     types_mapper: _Mapper | None = None,
+    ignore_metadata: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Experimental: a source table and its output converted together, one rule for both sides."""
     kwargs: dict[str, Any] = {
         "on_unrepresentable": on_unrepresentable,
         "widen": widen,
         "types_mapper": types_mapper,
+        "ignore_metadata": ignore_metadata,
     }
     return arrow_to_frame(source, **kwargs), arrow_to_frame(output, **kwargs)
 

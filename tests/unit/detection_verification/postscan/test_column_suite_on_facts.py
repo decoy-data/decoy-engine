@@ -609,17 +609,34 @@ def test_a_source_that_reads_short_marks_identity_unavailable(tmp_path: Path):
     assert facts.comparable_rows == 0 and not facts.bytes_identical
 
 
-def test_a_stored_index_column_gets_the_same_verdict_on_the_resident_and_batch_gates(
-    tmp_path: Path,
+def _stored_index_table(case: str) -> tuple[pa.Table, list[tuple[str, str]]]:
+    emails = [f"user{i}@realmail.com" for i in range(20)]
+    others = [f"person{i}@othermail.com" for i in range(20)]
+    if case == "named":
+        frame = pd.DataFrame({"email": emails, "n": range(20)}).set_index("email")
+        columns = [("email", "redact")]
+    elif case == "unnamed":
+        frame = pd.DataFrame({"n": range(20)}, index=pd.Index(emails))
+        columns = [("__index_level_0__", "redact")]
+    else:
+        # An index and a data column both called "email": Arrow keeps two distinct fields.
+        frame = pd.DataFrame({"email": emails}, index=pd.Index(others, name="email"))
+        columns = [("email", "redact"), ("__index_level_0__", "redact")]
+    return pa.Table.from_pandas(frame), columns
+
+
+@pytest.mark.parametrize("case", ["named", "unnamed", "collision"])
+def test_a_stored_index_gets_the_same_verdict_on_the_resident_and_batch_gates(
+    case: str, tmp_path: Path
 ):
     from decoy_engine.execution.pipeline._post_scan_suite import suite_frames
 
-    emails = [f"user{i}@realmail.com" for i in range(20)]
-    frame = pd.DataFrame({"email": emails, "n": range(20)}).set_index("email")
-    table = pa.Table.from_pandas(frame)
-    assert table.schema.names[-1] == "email"  # stored as a physical field
-    config = _cfg(("email", "redact"))
+    table, columns = _stored_index_table(case)
+    config = _cfg(*columns)
     src_frames, out_frames = suite_frames({"t": table}, {"t": table}, ["t"])
+    # Every physical field is a plain column under its own name, so the resident gate sees the
+    # column set the batch gate reads.
+    assert list(out_frames["t"].columns) == table.schema.names
     resident = run_post_mask(src_frames, out_frames, config=config)
     batch = run_post_mask_tables(
         {"t": from_table("t", table)},
@@ -629,8 +646,9 @@ def test_a_stored_index_column_gets_the_same_verdict_on_the_resident_and_batch_g
         scratch=tmp_path,
         memory_limit=LIMIT,
     )
-    assert batch["fail_count"] >= 1
     for report in (resident, batch):
         report.pop("generated_at")
-    assert resident["fail_count"] == batch["fail_count"]
+    assert resident["fail_count"] == batch["fail_count"] >= len(columns)
     assert resident["residual_pii"] == batch["residual_pii"]
+    failed = {f["column"] for f in batch["residual_pii"] if f["severity"] == "fail"}
+    assert failed == {c for c, _ in columns}
