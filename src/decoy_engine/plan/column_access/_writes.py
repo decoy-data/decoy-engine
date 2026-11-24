@@ -18,6 +18,7 @@ from decoy_engine.plan.column_access._declarations import (
     column_access,
     provider_is_composite,
 )
+from decoy_engine.plan.column_access._transform_ops import transform_op_writes
 
 
 @dataclass(frozen=True)
@@ -138,25 +139,14 @@ def _leaves_cell(entry: Mapping[str, Any], registry: Any) -> bool:
     return entry.get("strategy") == "passthrough" and PASSTHROUGH_OUTPUT_IS_INPUT
 
 
-# The transform ops that move or drop rows and columns and write no cell. `derive` writes its
-# target. Any other op is unclassified, so its table is `Unknown` until it is added to one side.
-NON_WRITING_OPS: frozenset[str] = frozenset({"filter", "sort", "limit", "dedupe", "drop_column"})
-
-
 def _derive_targets(ops: Iterable[Any]) -> frozenset[str] | None:
-    """Every `derive` target, or None when some op is malformed or not a known op."""
+    """Every column the ops write, or None when one of them is an unknown writer."""
     targets: set[str] = set()
     for op in ops:
-        if not isinstance(op, Mapping):
+        written = transform_op_writes(op)
+        if written is None:
             return None
-        kind = op.get("op")
-        if kind == "derive":
-            column = op.get("column")
-            if not isinstance(column, str):
-                return None
-            targets.add(column)
-        elif kind not in NON_WRITING_OPS:
-            return None
+        targets |= written
     return frozenset(targets)
 
 

@@ -36,6 +36,7 @@ from decoy_engine._nested_json import nested_children
 from decoy_engine.contracts.strategy_requirements import SIBLING_REFERENCE_KEYS
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import parse_when, when_column_refs
+from decoy_engine.plan.column_access._transform_ops import transform_op_writes
 
 # Whether an entry reads its own column from the source or produces it. A created column is
 # exempt from "declared but missing from the source" only through `created_targets`.
@@ -229,19 +230,25 @@ def _creates(declare: Declaration) -> Declaration:
 
 
 def _transforms(table_entry: Mapping[str, Any]) -> ColumnAccess:
-    """The table's `derive` ops in order: each target is written, and an expression reads the
-    source columns it names, or an earlier target (which is not a source read)."""
+    """The table's ops in order, classified by `transform_op_writes`: each `derive` target is
+    written, and an expression reads the source columns it names, or an earlier target (which is
+    not a source read)."""
     reads: set[str] = set()
     writes: set[str] = set()
     for op in table_entry.get("transforms") or []:
-        if not isinstance(op, Mapping) or op.get("op") != "derive":
+        written = transform_op_writes(op)
+        if written is None:
+            # A malformed or unknown op may read and write any column.
+            return ColumnAccess(
+                reads_unknown=True, writes_unknown=True, own_target=OWN_TARGET_CREATES
+            )
+        if not written:
             continue
         names = predicate_names(str(op.get("expression")))
         if names is None:
             return replace(_READS_UNKNOWN, own_target=OWN_TARGET_CREATES)
         reads |= names - writes
-        if isinstance(op.get("column"), str):
-            writes.add(op["column"])
+        writes |= written
     if not writes:
         return _NOTHING
     return ColumnAccess(

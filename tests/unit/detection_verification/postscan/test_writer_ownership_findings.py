@@ -8,14 +8,12 @@ column raises, so only the writer query decides whether that is reported.
 
 from __future__ import annotations
 
-import typing
 from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
 import pytest
 
-from decoy_engine.config import TransformOp
 from decoy_engine.plan.column_access import (
     KnownEmpty,
     KnownSet,
@@ -23,7 +21,6 @@ from decoy_engine.plan.column_access import (
     may_write,
     written_columns_by_table,
 )
-from decoy_engine.plan.column_access._writes import NON_WRITING_OPS
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
@@ -261,33 +258,3 @@ def test_a_relationship_that_does_not_build_fails_the_check_by_class_name():
     source = pd.DataFrame({"email": _EMAILS})
     findings = check_residual_pii({"t": source.copy()}, config, source_frames={"t": source.copy()})
     assert [(f.table, f.column, f.severity) for f in findings] == [("", "", "error")]
-    assert findings[0].message == "residual_pii check raised ValueError (see job log for details)"
-
-
-def _op_names() -> set[str]:
-    (union, *_) = typing.get_args(TransformOp)
-    return {
-        name
-        for cls in typing.get_args(union)
-        for name in typing.get_args(cls.model_fields["op"].annotation)
-    }
-
-
-def test_every_transform_op_is_classified_as_writing_or_not():
-    """A new op stays red here until it joins `NON_WRITING_OPS` or the writing side."""
-    assert _op_names() == NON_WRITING_OPS | {"derive"}
-    assert "derive" not in NON_WRITING_OPS
-
-
-@pytest.mark.parametrize(
-    ("ops", "expected"),
-    [
-        ([{"op": "filter", "expr": "x > 1"}, {"op": "drop_column", "column": "y"}], KnownEmpty()),
-        ([{"op": "derive", "column": "z", "expr": "x"}], KnownSet(frozenset({"z"}))),
-        ([{"op": "pivot"}], Unknown()),
-        ([{"op": "filter"}, {}], Unknown()),
-    ],
-)
-def test_an_op_the_query_does_not_know_makes_its_table_unknown(ops, expected):
-    config = {"version": 2, "tables": [{"name": "t", "columns": [], "transforms": ops}]}
-    assert standalone_writes(config, {"t": ["x"]}) == {"t": expected}

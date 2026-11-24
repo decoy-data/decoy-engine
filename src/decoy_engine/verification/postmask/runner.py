@@ -54,6 +54,7 @@ from decoy_engine.verification.postmask.fk_preservation import fk_findings
 from decoy_engine.verification.postmask.policy_validation import (
     policy_findings as check_policy_validation,
 )
+from decoy_engine.verification.postmask.residual_pii import residual_pii_error
 from decoy_engine.verification.postmask.residual_pii import (
     residual_pii_findings as check_residual_pii,
 )
@@ -303,16 +304,7 @@ def _assemble(
     except Exception as exc:
         if passes_through(exc):
             raise
-        residual_pii = [
-            ResidualPIIFinding(
-                table="",
-                column="",
-                detector_id="",
-                match_rate=0.0,
-                severity="error",
-                message=f"residual_pii check raised {type(exc).__name__} (see job log for details)",
-            )
-        ]
+        residual_pii = [residual_pii_error("", type(exc).__name__)]
 
     # Model passes sit outside the wrapper above: it would replace every regex finding with one
     # error row, and hide that the error came from a model.

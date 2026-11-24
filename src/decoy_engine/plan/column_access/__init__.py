@@ -23,6 +23,7 @@ from decoy_engine.plan.column_access._declarations import (
     scalar_creating_reads,
     touched_columns,
 )
+from decoy_engine.plan.column_access._transform_ops import transform_op_writes
 from decoy_engine.plan.column_access._writes import (
     ChildKey,
     KnownEmpty,
@@ -57,5 +58,6 @@ __all__ = [
     "provider_is_composite",
     "scalar_creating_reads",
     "touched_columns",
+    "transform_op_writes",
     "written_columns_by_table",
 ]

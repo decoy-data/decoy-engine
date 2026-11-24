@@ -43,13 +43,32 @@ HIGH_CONFIDENCE_WITH_HINT_FLOOR = 0.45  # content alongside a confirming name hi
 SAMPLE_MISS_LIMIT = 3
 
 
+class UnreadableCellError(ValueError):
+    """A cell that cannot be read as text. The text is fixed: a decode error names the cell's
+    bytes, so its message must not reach a finding, a report or a log."""
+
+    def __init__(self) -> None:
+        super().__init__("a cell could not be read as text")
+
+
+def _as_text(series: pd.Series) -> pd.Series:
+    try:
+        strs: pd.Series | None = series.dropna().astype(str)
+    except UnicodeError:
+        strs = None
+    if strs is None:
+        # Raised outside the handler, so the decode error is not chained as its context.
+        raise UnreadableCellError
+    return strs
+
+
 class PreparedValues:
     """Non-null, stringified, stripped column values held as uniques + counts."""
 
     __slots__ = ("codes", "counts", "n", "raw_uniques", "uniques")
 
     def __init__(self, series: pd.Series) -> None:
-        strs = series.dropna().astype(str)
+        strs = _as_text(series)
         codes, uniques = pd.factorize(strs, sort=False)
         self.n: int = len(strs)
         self.codes: np.ndarray = codes
