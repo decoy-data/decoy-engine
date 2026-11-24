@@ -16,7 +16,6 @@ writable authority over both operands before anything is linked, unlinked or chm
 
 from __future__ import annotations
 
-import contextlib
 import errno
 import os
 import stat
@@ -77,22 +76,35 @@ def _tighten(dst_fd: int, dst_name: str, before: os.stat_result) -> tuple[FileSe
     descriptor and read it back. Returns the seal, or `None` and the errno that stopped it
     (`EINVAL` for a refusal that is not an OS failure, `ENOTSUP` for a mode that did not hold)."""
     fd = -1
-    try:
-        fd = os.open(dst_name, _OPEN_FINAL, dir_fd=dst_fd)
-        now = os.fstat(fd)
-        same = (now.st_dev, now.st_ino) == (before.st_dev, before.st_ino)
-        if not (stat.S_ISREG(now.st_mode) and same and now.st_nlink == 1):
-            return None, errno.EINVAL
-        os.fchmod(fd, _FINAL_MODE)
-        held = os.fstat(fd)
-        if stat.S_IMODE(held.st_mode) != _FINAL_MODE:
-            return None, errno.ENOTSUP
-        return _seal_of_stat(held), 0
-    except OSError as exc:
-        return None, exc.errno or errno.EIO
-    finally:
-        if fd >= 0:
-            _close(fd)
+    if not _osflags.WINDOWS:  # the descriptor arm; Windows claims through the ambient arm
+        try:
+            fd = os.open(dst_name, _OPEN_FINAL, dir_fd=dst_fd)
+            now = os.fstat(fd)
+            same = (now.st_dev, now.st_ino) == (before.st_dev, before.st_ino)
+            if not (stat.S_ISREG(now.st_mode) and same and now.st_nlink == 1):
+                return None, errno.EINVAL
+            os.fchmod(fd, _FINAL_MODE)
+            held = os.fstat(fd)
+            if stat.S_IMODE(held.st_mode) != _FINAL_MODE:
+                return None, errno.ENOTSUP
+            return _seal_of_stat(held), 0
+        except OSError as exc:
+            return None, exc.errno or errno.EIO
+        finally:
+            if fd >= 0:
+                _close(fd)
+    return None, errno.ENOSYS
+
+
+def _unlink_at(dir_fd: int, name: str) -> int:
+    """Remove `name` beneath the held `dir_fd`. Returns 0 or the errno that stopped it."""
+    if not _osflags.WINDOWS:
+        try:
+            os.unlink(name, dir_fd=dir_fd)
+        except OSError as exc:
+            return exc.errno or errno.EIO
+        return 0
+    return errno.ENOSYS
 
 
 def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> FileSeal:
@@ -113,17 +125,12 @@ def claim_file_at(src_fd: int, src_name: str, dst_fd: int, dst_name: str) -> Fil
         raise FileAccessUnavailable("only a plain, singly linked file can be claimed")
     link_noclobber_at(src_fd, src_name, dst_fd, dst_name)
     seal: FileSeal | None = None
-    code = 0
-    try:
-        os.unlink(src_name, dir_fd=src_fd)
-    except OSError as exc:
-        code = exc.errno or errno.EIO
+    code = _unlink_at(src_fd, src_name)
     if not code:
         seal, code = _tighten(dst_fd, dst_name, before)
     if seal is not None:
         return seal
-    with contextlib.suppress(OSError):
-        os.unlink(dst_name, dir_fd=dst_fd)
+    _unlink_at(dst_fd, dst_name)
     if code in LINK_UNSUPPORTED or code == errno.ENOTSUP:
         raise LinkUnsupported(code)
     raise FileAccessUnavailable("the file could not be claimed")
@@ -171,11 +178,13 @@ class StageClaim:
 def _start_probe(fd: int) -> int:
     """Set the probe file to 0644 on its descriptor and read it back; close it. Returns 0 or the
     errno that says this file system does not hold a chmod."""
-    code = 0
+    code = errno.ENOSYS
     try:
-        os.fchmod(fd, _PROBE_START_MODE)
-        if stat.S_IMODE(os.fstat(fd).st_mode) != _PROBE_START_MODE:
-            code = errno.ENOTSUP
+        if not _osflags.WINDOWS:
+            code = 0
+            os.fchmod(fd, _PROBE_START_MODE)
+            if stat.S_IMODE(os.fstat(fd).st_mode) != _PROBE_START_MODE:
+                code = errno.ENOTSUP
     except OSError as exc:
         code = exc.errno or errno.EIO
     finally:

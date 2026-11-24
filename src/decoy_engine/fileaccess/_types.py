@@ -177,10 +177,10 @@ class LeafTooLarge(_ErrnoOnly, DecoyError):  # noqa: N818 - the plan's name
     summary = "file over the read limit"
 
 
-class LinkUnsupported(OSError):  # noqa: N818 - the one named limit, as the other plan-named errors
+class LinkUnsupported(DecoyError, OSError):  # noqa: N818 - the one named limit, as the plan names
     """The target cannot hard-link, or ignores `chmod`: the claim cannot give the member its
-    final identity. An `OSError` so a caller keyed on the errno still sees it; text is the errno
-    name only."""
+    final identity. A `DecoyError` that stays an `OSError`, so a caller keyed on the errno still
+    sees it; text is the errno name only."""
 
     def __init__(self, errno_value: int) -> None:
         self.errno_name = _errno.errorcode.get(errno_value, "EIO")

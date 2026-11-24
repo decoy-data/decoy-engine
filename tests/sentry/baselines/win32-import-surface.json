@@ -24,7 +24,7 @@
   },
   "decoy_engine/fileaccess/_durable.py::dir-fd": {
    "reason": "EW1 inventory, owner EW2: directory-descriptor fsync walk, POSIX arm lands in EW2",
-   "max": 6
+   "max": 5
   },
   "decoy_engine/fileaccess/_durable.py::geteuid": {
    "reason": "EW1 inventory, owner EW2: the chain owner walk is skipped on win32 by EW2",
@@ -44,7 +44,7 @@
   },
   "decoy_engine/fileaccess/_output.py::dir-fd": {
    "reason": "EW1 inventory, owner EW3: the dir_fd stage and publication paths get a win32 arm in EW3",
-   "max": 19
+   "max": 18
   },
   "decoy_engine/fileaccess/_output.py::fchmod": {
    "reason": "EW1 inventory, owner EW3: private-file creation gets a win32 arm in EW3 and EW4",

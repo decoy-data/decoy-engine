@@ -13,6 +13,7 @@ from __future__ import annotations
 import errno
 import os
 
+from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._types import LinkUnsupported
 
@@ -44,13 +45,19 @@ def link_noclobber_at(src_dir_fd: int, src_name: str, dst_dir_fd: int, dst_name:
     form) and an errno-only `OSError` for anything else."""
     validate_component(src_name, CREATOR_KEY)
     validate_component(dst_name, CREATOR_KEY)
-    code = 0
-    try:
-        os.link(
-            src_name, dst_name, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=False
-        )
-    except OSError as exc:
-        code = exc.errno or errno.EIO
-    except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend
-        code = errno.ENOSYS
+    code = errno.ENOSYS  # Windows has no descriptor form: the ambient arm links by path
+    if not _osflags.WINDOWS:
+        code = 0
+        try:
+            os.link(
+                src_name,
+                dst_name,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+                follow_symlinks=False,
+            )
+        except OSError as exc:
+            code = exc.errno or errno.EIO
+        except (NotImplementedError, TypeError):  # no descriptor or no-follow form on this backend
+            code = errno.ENOSYS
     raise_link_error(code)
