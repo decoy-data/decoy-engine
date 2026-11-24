@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.sentry.layout import BASELINE_PATH_CASES
+from tests.sentry.layout import REGISTRY_PATH_CASES
 from tests.sentry.ratchet._integrity import safe_path
 from tests.sentry.test_ratchet_check import (
     REG,
@@ -292,7 +292,7 @@ def test_decision_with_a_trailing_newline_is_refused(repo: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "path, safe", [c[1:] for c in BASELINE_PATH_CASES], ids=[c[0] for c in BASELINE_PATH_CASES]
+    "path, safe", [c[1:] for c in REGISTRY_PATH_CASES], ids=[c[0] for c in REGISTRY_PATH_CASES]
 )
 def test_safe_path_table(path: str, safe: bool) -> None:
     assert safe_path(path, BASELINE_DIR) is safe

@@ -1,7 +1,7 @@
 """Cases shared by both repos' ratchet meta-tests.
 
 ``MAX_VALUE_CASES``: ``(name, base max, head max, red)``; ``None`` means the entry carries no
-``max``. ``BASELINE_PATH_CASES``: ``(name, registry baseline path, safe)``; a safe path is a plain
+``max``. ``REGISTRY_PATH_CASES``: ``(name, registry baseline path, safe)``; a safe path is a plain
 relative path with at least one component below ``tests/sentry/baselines``. Both repos
 parametrize their ratchet meta-tests from these tables; the file is vendored byte for byte
 and pinned by ``test_vendored_files.py``.
@@ -18,7 +18,7 @@ MAX_VALUE_CASES: tuple[tuple[str, int | None, int | None, bool], ...] = (
     ("higher", 5, 6, True),
 )
 
-BASELINE_PATH_CASES: tuple[tuple[str, str, bool], ...] = (
+REGISTRY_PATH_CASES: tuple[tuple[str, str, bool], ...] = (
     ("plain file", "tests/sentry/baselines/a.json", True),
     ("nested file", "tests/sentry/baselines/sub/a.json", True),
     ("dotdot out of the directory", "tests/sentry/baselines/../../src/x.json", False),

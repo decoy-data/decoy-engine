@@ -16,7 +16,7 @@ LAYOUT = Path(__file__).resolve().parent
 
 PINS: dict[str, str] = {
     "_layout.py": "090676684a73bc90bb73240b1a3909434cd15ed8348c15bc365b7d764d94e96c",
-    "_ratchet_cases.py": "2ffc2b747e93a9604630ca60f12083007638cc39bb316754987c69550c142b2c",
+    "_ratchet_cases.py": "0305e162f7f3253ed66e90d135c0e511a8c00a95328a137ec6dc7b128115a68d",
 }
 
 
