@@ -315,10 +315,12 @@ def scratch_root() -> Path:
 def _takes_a_directory(base: str) -> bool:
     """Whether a protected directory can be made under ``base``; the probe is removed."""
     try:
-        _remove(_allocate(base, ".decoy-probe-"))
+        probe = _allocate(base, ".decoy-probe-")
+        _remove(probe)  # best effort; the check below is what counts
     except (OSError, ProtectedDirUnsafe):
         return False
-    return True
+    # A parent that allows create but denies delete would gain one directory per call.
+    return _lstat(probe) is None
 
 
 def _parent_base(parent: str | os.PathLike[str] | None) -> str:

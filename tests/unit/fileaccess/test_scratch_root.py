@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import tempfile
 from itertools import combinations
@@ -46,8 +47,9 @@ def test_scratch_root_is_one_function(tmp_path: Path, monkeypatch: pytest.Monkey
     assert scratch_root() == chosen
     assert Path(_parent_base(None)) == chosen
     assert default_ooc_temp_root() == chosen
-    with ScratchArena.fresh() as arena:
-        assert Path(arena.local_path()).parent == chosen
+    if sys.platform != "win32":  # the arena is POSIX-only until S1w
+        with ScratchArena.fresh() as arena:
+            assert Path(arena.local_path()).parent == chosen
 
 
 def test_scratch_root_without_variables_is_the_stdlib_default() -> None:
@@ -66,6 +68,10 @@ def test_scratch_root_refuses_unusable_tmpdir(
     _value_free(seen.value, var, bad)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows makes directories with CreateDirectoryW, not os.mkdir; the Windows lane covers it",
+)
 def test_scratch_root_refuses_a_denied_create(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -79,6 +85,17 @@ def test_scratch_root_refuses_a_denied_create(
         return real_mkdir(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "mkdir", deny)
+    with pytest.raises(ScratchRootUnusable) as seen:
+        scratch_root()
+    _value_free(seen.value, "TMPDIR", str(tmp_path))
+
+
+def test_scratch_root_refuses_a_parent_that_denies_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Create works, delete does not: each call would leave one more directory behind.
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)
     with pytest.raises(ScratchRootUnusable) as seen:
         scratch_root()
     _value_free(seen.value, "TMPDIR", str(tmp_path))

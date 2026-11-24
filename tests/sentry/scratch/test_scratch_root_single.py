@@ -48,11 +48,19 @@ def _what(node: ast.AST, scope: Scope, index: ProjectIndex, docs: set[int]) -> s
         if name in sinks.TEMP_ROOT_READS or name == CACHE:
             return name
     elif isinstance(node, ast.Call):
+        # `getattr(tempfile, "gettempdir")` resolves to the attribute it fetches.
+        got = resolve(node, scope, index)
+        if got in sinks.TEMP_ROOT_READS or got == CACHE:
+            return got
         if resolve(node.func, scope, index) in ENV_CALLS and node.args:
             return "a temp variable read" if _is_temp_var(node.args[0]) else None
     elif isinstance(node, ast.Subscript):
         if resolve(node.value, scope, index) == "os.environ" and _is_temp_var(node.slice):
             return "a temp variable read"
+    elif isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        names = {e.value for e in node.elts if isinstance(e, ast.Constant)}
+        if len(names & TEMP_VARS) >= 2:
+            return "a loop over the temp variables"
     elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
         if node.value == "/tmp" or node.value.startswith("/tmp/"):
             return "a /tmp path"
@@ -97,6 +105,12 @@ _SEEDS = {
     "env_subscript": "import os\n\n\ndef root():\n    return os.environ['TMPDIR']\n",
     "env_getenv": "import os\n\n\ndef root():\n    return os.getenv('TEMP')\n",
     "env_get": "import os\n\n\ndef root():\n    return os.environ.get('TMP')\n",
+    "getattr_gettempdir": "import tempfile\n\n\ndef root():\n    return getattr(tempfile, 'gettempdir')()\n",
+    "getattr_cache": "import tempfile\n\n\ndef root():\n    return getattr(tempfile, 'tempdir')\n",
+    "env_loop": (
+        "import os\n\n\ndef root():\n"
+        "    for name in ('TMPDIR', 'TEMP', 'TMP'):\n        os.environ.get(name)\n"
+    ),
     "slash_tmp": "def root():\n    return '/tmp'\n",
     "slash_tmp_child": "def root():\n    return '/tmp/decoy'\n",
 }

@@ -242,6 +242,11 @@ def run_fk_out_of_core(
     if _arena is None:
         _arena = owned = ScratchArena.fresh(under=temp_dir)
     root = Path(_arena.local_path())
+    if temp_disk_budget_bytes is None:
+        # A direct caller gets the same cap the route computes, measured where the arena landed.
+        from decoy_engine.execution._pipeline_route_exec import resolve_temp_disk_budget
+
+        temp_disk_budget_bytes = resolve_temp_disk_budget(root.parent)
     try:
         parent_relations: dict[RelationshipEdge, ParentKeyRelation] = {}
         outputs: dict[str, pa.Table] = {}

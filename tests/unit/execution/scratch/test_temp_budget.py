@@ -91,3 +91,32 @@ def test_route_budget_follows_temp_dir(
         )
     assert measured == [other]
     assert seen["temp_disk_budget_bytes"] == 900
+
+
+def test_direct_runner_call_derives_the_cap_from_its_arena_parent(
+    tmp_path: Path, measured: list[Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution._errors import ExecutionError
+    from decoy_engine.execution.out_of_core import run_fk_out_of_core
+    from tests.unit.execution.test_pipeline_route_exec_ooc_memory_preflight import (
+        _edge,
+        _graph,
+        _tiny_plan,
+        _tiny_registry,
+    )
+
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda path: (measured.append(Path(str(path))), _Usage(1, 1, 1))[1]
+    )
+    where = tmp_path / "explicit"
+    where.mkdir()
+    with pytest.raises(ExecutionError):
+        run_fk_out_of_core(
+            _tiny_plan(),
+            {"parent": pa.table({"id": ["p1", "p2"]}), "child": pa.table({"parent_id": ["p1"]})},
+            registry=_tiny_registry(),
+            relationship_graph=_graph(_edge("parent", "child")),
+            temp_dir=where,
+            config={},
+        )
+    assert measured == [where]
