@@ -1,8 +1,8 @@
-Status: plan (revision 4, 2026-11-24; section 13 replaces the per-site value-free patches with one source-read boundary after the PR #790 review cap)
+Status: plan (revision 5, 2026-11-24; section 14 applies Dennis R1 to the source-read boundary of section 13)
 
 # DATE-SHIFT-TYPED: `date_shift` on `date32` and zoned `timestamp` sources runs native, on the typed values
 
-Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: DATE-SHIFT-TYPED (group mask, 1.0), from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`) and the COLUMN-SHAPE-RULE row 19 follow-on (E1b merged in engine #751). Two slices, engine only. Depends on UF-DOMAIN S1 (`plan/uf-domain`, the one output assembler with its `arrow_columns` input).
+Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: DATE-SHIFT-TYPED (group mask, 1.0), from the V1 fast-path audit (vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`) and the COLUMN-SHAPE-RULE row 19 follow-on (E1b merged in engine #751). Five slices over two repos after revision 5: S1b-1, S1b-2, S1-CLI, S1 (#790) and S2 (section 14.11). Depends on UF-DOMAIN S1 (`plan/uf-domain`, the one output assembler with its `arrow_columns` input).
 
 Anchors: a path with no prefix is under `src/decoy_engine/` in this repository (decoy-engine). Read at engine `origin/main` `70881ad79` (0.28.3). Line numbers are at that head. Arrow behavior was probed with the engine venv (pyarrow 24.0.0).
 
@@ -245,6 +245,8 @@ Performance evidence (performance.md): 1,000,000-row `date32` and `timestamp[us,
 
 ## 13. Revision 4 (2026-11-24): one source-read boundary
 
+Revision 5 (section 14) replaces 13.3, 13.4, 13.5, 13.6 placement and 13.9, removes WITHHOLD and its tokens, and corrects the base of the site inventory. Read section 14 first.
+
 PR #790 (S1, head `a5c33ec0a`) reached the three-round review cap (development-loop REMEDIATE). Round 3 (Codex a3) found four more V1 sites of one rule: a source value pandas cannot hold (a date past year 9999, a time with non-zero nanoseconds) must never surface as text. Rounds 1 to 3 each closed the sites that review found. This section fixes the plan instead: one choke point for every Arrow-to-pandas conversion and every pandas file read, a guard that fails on any site outside it, and a report-boundary rule for the columns the choke point could not convert.
 
 ### 13.1 Defect class
@@ -390,11 +392,191 @@ That is above the 600-line limit for adding to #790, which is already 2,188 / -2
 
 If the S1b build passes 1,000 lines, the builder stops and reports (proportionality.md) instead of carrying it to review.
 
+## 14. Revision 5 (2026-11-24): Dennis R1 fixes to the source-read boundary
+
+Dennis R1 on revision 4 (`8428fc973`) was GO-WITH-FIXES: 0 BLOCKER, 4 HIGH, 6 MED, 3 LOW. Where this section and section 13 differ, this section wins. Section 13 stays as the record of revision 4.
+
+Probes for this section ran once with the engine venv (`python -I`, pyarrow 24.0.0, pandas 2.3.3). Base for S1b: `origin/main` at `4bc582d0a`.
+
+### 14.1 H4 decision: widen dates and times to a lossless pandas type, no tokens
+
+Choice: Dennis option (b), extended to time columns. WITHHOLD and its tokens are removed from the plan.
+
+Probe results:
+
+- `to_pandas(date_as_object=False)` converts `date32` and `date64` to `datetime64[ms]` with no loss over the whole `date32` range: day -1000000 gives `-768-02-04`, day 2932897 gives `10000-01-01`, and day 2**31-1 gives `5881580-07-11`. The default conversion raises `ValueError: year 10000 is out of range` (and `year -768 is out of range`).
+- `time64[ns]` with a non-zero nanosecond has no `to_pandas` option that works (`ArrowInvalid: Value 1 has non-zero nanoseconds`), and Arrow has no `time64` to `duration` cast. `array.view(pa.int64()).cast(pa.duration("ns")).to_pandas()` gives `timedelta64[ns]` (time since midnight) with no loss.
+- `timestamp[s]` and `duration[s]` at 2**62 already convert (to `datetime64[s]` and `timedelta64[s]`); they need nothing.
+- Risk check: `astype("datetime64[ns]")` on the widened column raises `OutOfBoundsDatetime: Out of bounds nanosecond timestamp: 10000-01-01 00:00:00` (value text). `pd.to_datetime(series, errors="coerce")` on a `datetime64[ms]` series keeps `ms` and does not raise. The three `to_datetime` sites in profiling at `4bc582d0a` (`profiling/_date_sniff.py:31`, `profiling/_distributions.py:105`, `profiling/sentinels.py:157`) all use `errors="coerce"`.
+
+Why (b):
+
+- The column keeps its meaning: real dates and times in a temporal dtype. A token column profiled as a 25-character string, ran detectors and models on hashes, could trip the free-text advisory, and made fidelity call it categorical (H4). With (b) none of that happens, so the per-consumer skip rules of option (a) are not needed.
+- No new value-bearing path is opened. The widened values follow the existing report rules for any date column (`VALUE_FIELDS`, default redaction).
+- M3 (token key scope, logical-type hashing, `top_values` stripping) no longer applies because there are no tokens. The paired-conversion part of M3 stays (14.4).
+- The ns-cast risk is guarded by a rule and a sentry (14.5).
+
+Rule: a column is "widened" only when its Arrow type is `date32`, `date64` or `time64[ns]` and its own default conversion fails. Columns that convert normally keep their normal dtype (`object` of `datetime.date` for dates), so profiles of in-range data do not change. Any other failing column goes to the caller's coded callback. No case falls back to text.
+
+### 14.2 The choke point (replaces 13.3)
+
+Module: `internal/pandas_compat.py` (unchanged). Names (L1: `source_frame` clashed with `candidate.source_frame`):
+
+- `arrow_to_frame(table, *, on_unrepresentable, widen=False, int_columns=(), types_mapper=None) -> pd.DataFrame`
+- `arrow_to_series(array, *, on_unrepresentable, widen=False, types_mapper=None) -> pd.Series`
+- `arrow_to_frame_pair(source, output, *, on_unrepresentable, widen=True, ...) -> tuple[pd.DataFrame, pd.DataFrame]`
+- `widened_columns(frame) -> Mapping[str, str]`: column name to original Arrow type string, read from `frame.attrs["decoy_engine.widened_columns"]`.
+
+`on_unrepresentable` is keyword-only and required: a callable `(column_name) -> NoReturn`. Every callback raises a registered coded error `from None` and names the column, never a value. The choke point calls it after the `except` block has closed, so `__context__` is `None` as well as suppressed. A callback that returns gives a value-free `TypeError("on_unrepresentable must raise")`.
+
+`widen=True` is allowed only for read-only consumers (profile, scan, fidelity, verification). Execution callers keep `widen=False`: they write frames back to Arrow, and `pa.Table.from_pandas` of a widened `date32` column gives `timestamp[ms]`, not `date32` (probed), which would change the output type. On those routes an unconvertible column stays a coded error, as guarantee 6 says.
+
+Algorithm:
+
+1. Try `table.to_pandas(...)` once. On success set `widened_columns = {}` and return.
+2. On `ValueError` or `ArrowInvalid` (a `ValueError` subclass), leave the handler and probe each column alone. `OverflowError` is still caught for safety but is not claimed by any test (14.8, M2).
+3. For each failing column: with `widen=True` and a widenable type, replace it on the original table by its widened conversion (dates through `date_as_object=False` on a one-column table; `time64[ns]` through the `int64` view and `duration[ns]`), keeping schema and field metadata, the stored index and column order (`set_column`, never `from_arrays`). Otherwise call `on_unrepresentable(column)`.
+4. Record `{column: str(arrow_type)}` in `attrs`.
+
+`table_to_pandas_exact_ints` becomes a call to `arrow_to_frame(widen=False)`. Its `on_unconvertible` integer callback is kept.
+
+Public export (H2): `arrow_to_frame`, `arrow_to_series`, `arrow_to_frame_pair` and `widened_columns` are exported from `decoy_engine` with an entry in `docs/compatibility-contract.md` marked pre-release, not frozen. "No new public export" in 13.3 is withdrawn. The engine re-pin for the CLI follows the engine repin checklist.
+
+### 14.3 Site inventory at the S1b base (replaces 13.4, H1)
+
+From `git grep` at `origin/main` `4bc582d0a` over `src/decoy_engine/**/*.py`, then read site by site. Comment and docstring hits are dropped (`config/_fixed_width.py:13`, `_chunked_fk_runtime.py:112`, `_fk_keys.py:434`, `_mask_group_c.py:530-531`, `_numeric_typing.py:412`, `pandas_compat.py:88`, `profile/_csv_reader.py:530`, `_fixed_width_reader.py:12-181`, `_readers.py:382`, `_readers_csv.py:40`).
+
+| # | Site at `4bc582d0a` | Converts | S1b slice | Disposition |
+|---|---|---|---|---|
+| 1 | `profile/_readers.py:414` `to_frame` | whole local source | S1b-2 | `arrow_to_frame(widen=True)`, profile callback |
+| 2 | `profile/_readers.py:495` | empty table from schema | S1b-2 | same |
+| 3 | `profile/_readers.py:499` head frame | sample batches | S1b-2 | same |
+| 4 | `profile/_readers_resident.py:20`, `:25`, `:29` `_frame_of` | resident sources; already has the string cast and `from_arrays` fallback (Codex V1-3 and V1-4 are on main) | S1b-2 | body deleted; calls `arrow_to_frame(widen=True)` |
+| 5 | `profile/_cloud_readers.py:270` S3, `:391` GCS `to_frame` | whole Parquet object | S1b-2 | `pq.read_table(io.BytesIO(...))` then `arrow_to_frame(widen=True)` |
+| 6 | `execution/_chunked_profile.py:45`, `:171` | first chunk, empty schema table | S1b-2 | `arrow_to_frame(widen=True)` |
+| 7 | `execution/_pipeline_finalize.py:186`, `:187` fidelity | source, output | S1b-2 | `arrow_to_frame_pair(widen=True)` |
+| 8 | `execution/pipeline/_post_scan.py:285-286`, `:435-436` | source, output | S1b-1 | `arrow_to_frame_pair`, fail-closed callback (14.4) |
+| 9 | `verification/postmask/_column_facts.py:209` `_series` | source, output batches | S1b-1 | `arrow_to_series`, fail-closed callback (14.4) |
+| 10 | `execution/pipeline/_source_types.py:60` | stored index columns | S1b-1 | `arrow_to_frame(widen=False)`, coded callback |
+| 11 | `execution/_unified_slice_evidence.py:218` | empty masked column | S1b-1 | `arrow_to_series`, coded callback |
+| 12 | `execution/native/_date_shift_ext.py:209`, `_bucket_perturb_ext.py:100`, `:277`, `_operator_step.py:279`, `out_of_core/_bucket_native.py:263`, `out_of_core/_mask_group_c.py:537` | string-typed kernel arrays | S1b-1 | `arrow_to_series`, coded callback |
+| 13 | `internal/pandas_compat.py:95`, `:101` | `to_pandas_fk_safe` (10 callers) and `generated_table_to_pandas` | S1b-1 | choke point body. `to_pandas_fk_safe(table, cols, *, table_name)` |
+| 14 | `profile/_cloud_readers.py:145`, `:318`, `:438` | CSV text | allowlist | reason: text parse, no Arrow temporal conversion |
+| 15 | `fileaccess/adapters/pandas.py:23`, `:28`, `:37`, `:44` | file-access guard wrappers | allowlist | reason: wrappers; their `src/` callers are scanned |
+
+Allowlist count: 7 at `4bc582d0a`. The ratchet baseline is the count the guard measures on the S1b-1 base, recorded in the guard file with that SHA. It may only go down. A change that raises it fails the guard unless the same diff lowers the recorded baseline's reviewer-signed entry list, which the guard does not allow to grow (M6). The count is never set to fit S1b's own sites: S1b-1 routes its sites, it does not allowlist them.
+
+#790 delta (applied when #790 rebases on S1b-2):
+
+| Site on #790 (`a5c33ec0a`) | Disposition |
+|---|---|
+| `profile/_frame.py:19`, `:24`, `:28` (new on #790) | file dropped in the rebase; its callers take the S1b-2 calls |
+| `profile/_readers.py:415`, `:496`, `:500`, `_readers_resident.py:34`, `:37` (moved lines) | already routed by S1b-2; rebase keeps main's version |
+| `execution/native/_date_shift_ext.py:270` (moved from `:209`) | keeps the S1b-1 call |
+| `execution/_unified_slice_evidence.py:228` (moved from `:218`) | keeps the S1b-1 call |
+| `_raise_if_source_value_unrepresentable` calls added on #790 | removed in the rebase (14.6) |
+
+Allowlist count on #790 after rebase: 7, the same as main. The guard runs on #790 and fails on any new bare site.
+
+### 14.4 Verification fails closed (H3)
+
+Post-scan (site 8) and post-mask (site 9) never inspect a stand-in for a value.
+
+- They call `arrow_to_frame_pair` / `arrow_to_series` with `widen=True`. A widened date or time is the real value, so identity and distinct checks still inspect it.
+- `arrow_to_frame_pair` widens the union of the columns widened on either side, on both sides (M3). Without it, a source `date32` at year 10000 widens to `datetime64[ms]` while the in-range output stays `datetime.date` objects, and pandas `==` across the two is always False, which reads as "changed" and passes an identity check that should fail.
+- Any column that cannot be converted goes to a fail-closed callback. Post-mask sets `identity_error` and `distinct_error` on that column's tally (`_column_facts.py:179-180`) to the new registered reason `postmask_column_not_inspectable`, and the gate result fails. Post-scan raises the new registered reason `post_scan_column_not_inspectable` naming table and column. Neither returns a pass for that column.
+
+### 14.5 Rules and guard for widened columns
+
+- Rule W1: no code in `profile/`, `profiling/`, `quality/`, `verification/` or `execution/pipeline/_post_scan.py` casts to nanosecond time (`datetime64[ns]`, `M8[ns]`, `timedelta64[ns]` on a widened column, `.as_unit("ns")`, `pd.to_datetime(..., unit=...)` without `errors="coerce"`). The guard (14.7) adds these spellings for those packages.
+- Rule W2: `profile_columns` reads `widened_columns(df)` and sets the existing inferred type from the Arrow type (`date` for `date32`/`date64`, `time` for `time64`), not from the pandas dtype. `FieldStats` gains `source_arrow_type: str | None` in `VALUE_FREE_FIELDS` (an Arrow type string carries no value). It replaces the `source_value_unrepresentable` flag of 13.5; there is no special redaction rule, because the values are real and the normal date rules apply.
+- Rule W3: `widened_columns` must survive every frame operation between a reader and its consumer. The R1 cells (14.8) list them. Where an operation drops `attrs` (pandas `concat` of frames with different `attrs`), the consumer re-reads it from the reader's frame before the operation.
+
+### 14.6 Deletion and reason code (L3)
+
+`execution/_pipeline_full_frame.py` `_raise_if_source_value_unrepresentable` (main `:56-95`, called at main `:234` and on #790 also at `_sequential.py:419`) is deleted in S1b-1. `to_pandas_fk_safe(..., table_name=...)` raises at the conversion instead. The reason code `FULL_FRAME_VALUE_UNREPRESENTABLE` (`reasons/runtime/_part1.py:203`) is kept and is now raised only from the `to_pandas_fk_safe` callback. Its text does not change.
+
+### 14.7 Guard placement and shapes (replaces 13.6 placement, M5)
+
+| Item | Path |
+|---|---|
+| choke point | `src/decoy_engine/internal/pandas_compat.py` (existing) |
+| engine guard | `tests/sentry/source_read/test_boundary.py` (new sub-package; flat `tests/sentry/` has 100 modules) |
+| guard allowlist | `tests/sentry/source_read/allowlist.toml` |
+| R1 unit tests | `tests/unit/internal/test_arrow_to_frame.py` |
+| R2 integration | `tests/integration/source_read/test_unrepresentable_values.py` (new sub-package) |
+| R3 profile cells | existing `tests/profiling/` value-redaction suite |
+| CLI guard | `tests/sentry/test_source_read_boundary.py` in the CLI repo, or its sentry sub-package if one exists at the slice base |
+
+Shapes: as 13.6, plus the W1 ns-cast spellings for the listed packages, plus `S3` and `GCS` real-caller mutations (14.8 R4).
+
+### 14.8 Acceptance test changes
+
+- R1 (S1b-1 and S1b-2):
+  - Callback cells (S1b-1): `date32` year 10000 with `widen=False` calls the callback with the column name; the coded error has `__cause__ is None`, `__context__ is None` and `__suppress_context__`; `str`, `repr` and the formatted traceback carry no `10000`, `2932897` or `-768`.
+  - `time64[ns]` cell: `ArrowInvalid` path, same assertions (M2).
+  - Widen cells (S1b-2): `date32` at days -1000000, 2932897 and 2**31-1, `date64` past 9999, and `time64[ns]` with nanoseconds, each single and repeated with a null: the result is `datetime64[ms]` or `timedelta64[ns]` with exact values, other columns equal their own conversion, `widened_columns` names the Arrow type. Stored index `stored_id`, a `timestamp[ns, Europe/London]` column and the range index are kept.
+  - `attrs` cells (M4): `iloc[:n]`, column selection, `sample(n, random_state=0)` and `reset_index()` keep `widened_columns`; `concat` of two frames with the same `attrs` keeps it; `concat` with different `attrs` drops it (pandas 2.3.3 behavior, asserted so a pandas change is seen), which is why W3 re-reads.
+  - Pair cell: source year-10000, output in range: both sides of `arrow_to_frame_pair` are `datetime64[ms]` and `==` is True on unchanged rows.
+  - Mutations: `from_arrays` rebuild (index cell red); widen every date column instead of failing ones only (in-range dtype cell red); pair without the union (pair cell red); drop `from None` (context cell red).
+  - The revision-4 `OverflowError` mutation is dropped. No `to_pandas` call on these types raises `OverflowError` at pandas 2.3.3 and pyarrow 24 (dates raise `ValueError`, `time64[ns]` raises `ArrowInvalid`). The only `OverflowError` seen is Python-object conversion (`to_pylist`, or `pd.ArrowDtype` then `astype(str)`: `date value out of range`), which is outside the choke point (14.9).
+- R2 additions:
+  - H3 (S1b-1): a year-10000 `date32` column in post-scan and in post-mask. With the output equal to the source on that column, the gate fails on identity, so a widened value is really inspected. With a monkeypatched converter that makes the column unconvertible, the gate fails closed with `post_scan_column_not_inspectable` / `postmask_column_not_inspectable`. Neither cell can return a pass. Mutation: a callback that returns a passing tally turns the second cell red.
+  - H4 (S1b-2), one assertion per consumer for a year-10000 `date32` column: `profile_columns` gives inferred type `date` and `source_arrow_type == "date32[day]"`; `walk_dataframe` runs the date detectors, not the string ones, and raises no free-text advisory; the `scan_set` models receive a `datetime64[ms]` column; the fidelity snapshot classifies the column as datetime, not categorical. Mutation: drop W2 (inferred type taken from the pandas dtype) turns the profile cell red.
+  - W1: a mutation adding `.astype("datetime64[ns]")` in `profiling/_distributions.py` turns the R2 profile cell red (`OutOfBoundsDatetime` with the date in its text) and the guard red.
+- R3: replaced. The redaction cells assert that a widened column follows the normal date rules in both `include_values` modes, and that `source_arrow_type` passes the value-free type walk.
+- R4 (M4): real-caller mutations for both S3 and GCS: restoring `pd.read_parquet(io.BytesIO(...))` in either `to_frame` turns the guard red. Plus a seeded bypass for each W1 spelling.
+
+### 14.9 Exception text and the F31 split (M1)
+
+Correction to the revision-4 V2-LOG note. At pyarrow 24 and pandas 2.3.3:
+
+- `to_pylist`, `as_py` and `pd.ArrowDtype` then `astype(str)` raise `OverflowError: date value out of range`. The message does not quote the year.
+- `to_numpy().tolist()` returns the day number (a value).
+- `str(array)`, an Arrow cast to string and `strftime` print the date (a value).
+- Arrow kernel errors quote values, for example `Casting from date32[day] to timestamp[ns] would result in out of bounds timestamp: 2932897`. This is its own value-bearing class: Arrow kernel error text.
+- `astype("datetime64[ns]")` on a widened column raises `OutOfBoundsDatetime` with the date (W1).
+
+Split of ownership (see F31-AUDIT, `docs/plans/2026-11-24-f31-audit.md`):
+
+- F31 `render_failure`, the sink boundary, owns exception text that reaches a sink (log, CLI, report, job record), whatever its source, including Arrow kernel text.
+- S1b owns two things only: a source read does not fail on a value pandas cannot hold, and statistics are computed on real, typed values. It does not try to scrub exception text in general.
+- Coded callbacks raise `from None` and the choke point calls them after the handler closes, so `__context__` is cleared. The older V2-LOG item about keeping the original in `__context__` stays deferred.
+
+### 14.10 CLI (H2)
+
+CLI sites, as given by the orchestrator at `decoy` `95362d16`:
+
+- `src/decoy/api.py:664` `table.to_pandas()` on mask outputs.
+- `src/decoy/cli/_sources.py:395` `pd.read_parquet` in `read_file`, called from `init.py:224`, `report.py:950-951`, `unmask.py:205` and `tokenize.py:649`.
+- `src/decoy/cli/io/_targets.py:540` `table.to_pandas()` for fixed width.
+
+The local `decoy` checkout's `origin/main` shows the same sites at `api.py:665`, `_sources.py:469` and `_targets.py:541`, plus `cli/gen/_fit.py:48` `pd.read_csv` (CSV text, allowlist with reason). The slice re-measures at its base.
+
+New slice S1-CLI: route the three sites through the exported `arrow_to_frame` (`read_file` becomes `pq.read_table` then `arrow_to_frame`), with callbacks that raise the CLI's coded errors (`widen=True` only for `report` and `init`, which are read-only). Add the CLI guard that mirrors the engine guard, with its own measured ratchet. Gate the CLI re-pin to the S1b-1 engine release on this slice. R2-CLI cells: `decoy init`, `report`, `unmask` and `tokenize` on a Parquet file with a year-10000 date: coded error or a correct result, and no `10000` in stdout, stderr or the job record.
+
+### 14.11 Slices and size (replaces 13.9)
+
+| Slice | Repo, base | Content | Lines (estimate) |
+|---|---|---|---|
+| S1b-1 | engine, `main` | choke point with required callback; every engine site routed (sites 8 to 13) with coded or fail-closed callbacks; `to_pandas_fk_safe(table_name)`; deletion (14.6); new reasons `postmask_column_not_inspectable`, `post_scan_column_not_inspectable`; public export and compatibility entry; guard and ratchet; R1 callback cells, R2 execution and H3 cells, R4 | about 450-500 |
+| S1b-2 | engine, `main` after S1b-1 | `widen=True` and `arrow_to_frame_pair` widening; `widened_columns` attrs; profile, resident, chunked-profile, cloud and fidelity readers (sites 1 to 7); `FieldStats.source_arrow_type` and W2; W1 guard spellings; R1 widen and attrs cells, R2 profile, scan and H4 cells, R3 | about 400 |
+| S1-CLI | CLI, `main` after the S1b-1 engine release | three CLI sites, CLI guard, R2-CLI cells, engine re-pin | about 250 |
+| S1 (#790) | engine, rebased on `main` after S1b-2 | the typed date-shift work; drop `profile/_frame.py` and the diagnosis calls; D1 to D3 (R5) | delta about +100 / -60 |
+| S2 | engine | as section 5 | as section 5 |
+
+S1b-1 and S1b-2 each go to `main`, not stacked. S1-CLI runs in parallel with S1b-2 once S1b-1 is released. If S1b-1 or S1b-2 passes 650 lines, the builder stops and reports.
+
+### 14.12 Not resolved here
+
+- H3 asked that a year-10000 date column in post-scan and post-mask give a closed, coded failure. With option (b) that column converts losslessly, so the checks inspect it and the gate fails only when the data fails. The fail-closed path is kept for columns that cannot be converted, but no real Arrow type reaches it today, so its R2 cell uses a monkeypatched converter. If the owner wants any widened column to fail the gate too, that is one callback change in S1b-1.
+- The CLI line numbers differ between the orchestrator's `95362d16` and the local `origin/main`; S1-CLI re-measures at its base.
+
 ## Deferred (V2-LOG)
 
 - **V2-LOG: sequential keeps typed dates in Arrow (option B for B4).** Sequential would keep an admitted typed `date32` column as Arrow, and `date_shift_column` would return Arrow instead of `to_pylist()`, so an out-of-range date becomes a quarantined row as on the unified slice. Deferred because the sequential frame is pandas end to end: the table is converted before any strategy runs and `to_pylist()` cannot hold year 10000, so the change touches the sequential frame model, not one strategy. V1 takes option A (coded job failure) instead.
 - **V2-LOG: the coded error keeps the original in `__context__`** (added 2026-11-24 after Codex a2). `raise ... from None` in `_pipeline_full_frame.py` hides the pandas exception from the printed traceback but leaves it on `__context__`, where a caller that walks the chain can still read the value text. V1 threat model (accidental leaks) is met because no V1 path prints or logs `__context__`; clearing it is hardening for V2, with option B.
 - **V2-LOG — sentry completeness.** The one-arithmetic AST sentry scans `execution/**/*.py`, so it catches the realistic bypass of restoring arithmetic in `_strategies/_date_shift.py` (`origin/main` lines 358-405), but it does not scan `transforms/`, where the approved `shift_typed_days` choke point lives (`transforms/date_shift.py:1-10`). Extending the scanner to distinguish the one allowed transform function from a second transform implementation is completeness hardening for V2; it does not change the V1 guard or verdict.
-- **V2-LOG: Python-object conversion of source values** (added 2026-11-24, revision 4). `to_pylist`, `as_py`, `to_pydict` and `to_numpy().tolist()` also fail on a date past year 9999 with a message that quotes the year. Section 13 guards Arrow-to-pandas conversion and pandas file reads only; the R2 public-entry matrix is the V1 evidence that no reachable path converts such a value this way. Extending the guard to these calls needs a type-aware rule (most of the 115 sites read string or numeric arrays) and is V2 hardening.
+- **V2-LOG: Python-object conversion of source values** (added 2026-11-24, revision 4; corrected in revision 5, see 14.9). `to_pylist` and `as_py` raise `OverflowError: date value out of range` (no year in the text); `to_numpy().tolist()` returns the day number; `str(array)`, Arrow casts to string and `strftime` print the date; Arrow kernel errors quote values. The guard covers Arrow-to-pandas conversion and pandas file reads only. Exception text at sinks belongs to F31 `render_failure`; extending the guard to Python-object conversion needs a type-aware rule and is V2 hardening.
 - **V2-LOG: deliberate evasion of the source-read guard** (added 2026-11-24, revision 4). `getattr(t, "to_pandas")`, `eval` and `importlib` spellings are out of the guard's listed shapes (recurring-defects #5 scope).
 - **V2-LOG: cloud CSV through the one CSV reader** (added 2026-11-24, revision 4). The three `pd.read_csv` calls in `profile/_cloud_readers.py` stay allowlisted in section 13. Routing them through `_csv_reader._read_csv_rows` removes three allowlist entries.
