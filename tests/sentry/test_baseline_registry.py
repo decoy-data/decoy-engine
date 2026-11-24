@@ -206,3 +206,30 @@ def test_the_scan_reaches_sentry_subfolders() -> None:
     names = {p.relative_to(bs.SENTRY).as_posix() for p in bs.SENTRY.rglob("*.py") if _scanned(p)}
     assert "layout/_scoped_changes.py" in names
     assert "layout/test_package_fanout.py" in names
+
+
+def test_every_module_int_is_a_bound_or_named() -> None:
+    """Every module-level UPPER_CASE integer literal under tests/sentry is a recorded bound or
+    carries a reason it is not one, so a new limit cannot sit outside the ratchet."""
+    lc = bs._limits()
+    known = set(lc.LIMITS) | set(lc.NOT_A_BOUND)
+    found = set()
+    for path in bs.SENTRY.rglob("*.py"):
+        rel = path.relative_to(bs.SENTRY).as_posix()
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.Assign):
+                names = [t for t in node.targets if isinstance(t, ast.Name)]
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                names = [node.target]
+            else:
+                continue
+            value = node.value
+            if (
+                isinstance(value, ast.Constant)
+                and type(value.value) is int
+                and not path.name.startswith("test_baseline_registry")
+            ):
+                found |= {(rel, t.id) for t in names if re.fullmatch(r"[A-Z][A-Z0-9_]*", t.id)}
+    assert sorted(found - known) == [], "an integer constant is neither a bound nor named"
+    assert sorted(known - found) == [], "a LIMITS or NOT_A_BOUND row names no constant"
+    assert not set(lc.LIMITS) & set(lc.NOT_A_BOUND)

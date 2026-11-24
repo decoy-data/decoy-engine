@@ -277,6 +277,39 @@ def test_read_int_handles_annassign_and_refuses_bool() -> None:  # red-before
             lc.read_int(src, name)
 
 
+REBINDS = {
+    "second assignment": "GOAL = 600\nGOAL = 900\n",
+    "augmented": "GOAL = 600\nGOAL += 300\n",
+    "inside if": "GOAL = 600\nif True:\n    GOAL = 900\n",
+    "for target": "GOAL = 600\nfor GOAL in [900]:\n    pass\n",
+    "with target": "GOAL = 600\nwith open('x') as GOAL:\n    pass\n",
+    "walrus": "GOAL = 600\n(GOAL := 900)\n",
+    "walrus in comprehension": "GOAL = 600\n[(GOAL := 9) for _ in [1]]\n",
+    "del": "GOAL = 600\ndel GOAL\n",
+    "tuple unpack": "GOAL = 600\nGOAL, OTHER = 900, 1\n",
+    "only a tuple unpack": "GOAL, OTHER = 600, 1\n",
+    "global rebind in a function": "GOAL = 600\n\ndef f():\n    global GOAL\n    GOAL = 900\n",
+    "import": "GOAL = 600\nfrom os import sep as GOAL\n",
+    "def": "GOAL = 600\n\ndef GOAL():\n    pass\n",
+    "except alias": "GOAL = 600\ntry:\n    pass\nexcept Exception as GOAL:\n    pass\n",
+    "chained with a tuple": "GOAL = (600, 1)\n",
+    "computed": "GOAL = 300 * 2\n",
+}
+
+
+@pytest.mark.parametrize("source", REBINDS.values(), ids=REBINDS.keys())
+def test_read_int_refuses_a_name_bound_twice_or_not_plainly(source: str) -> None:  # red-before
+    with pytest.raises(ValueError):
+        lc.read_int(source, "GOAL")
+
+
+def test_read_int_ignores_locals_and_accepts_chained_targets() -> None:  # pin
+    local = "GOAL = 600\n\ndef f():\n    GOAL = 1\n    return [GOAL for GOAL in range(2)]\n"
+    assert lc.read_int(local, "GOAL") == 600
+    assert lc.read_int("OTHER = GOAL = 7\n", "GOAL") == 7
+    assert lc.read_int("GOAL = 600\nXS = [GOAL for GOAL in range(2)]\n", "GOAL") == 600
+
+
 def test_bound_loosened_reads_both_directions() -> None:  # red-before
     assert _ratchet.bound_loosened({"max": 6}, {"max": 5})
     assert _ratchet.bound_loosened({}, {"max": 5})
