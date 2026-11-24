@@ -40,6 +40,7 @@ from decoy_engine import fileaccess
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import DirHandle, FileAccess, FileAccessDenied, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import serial
+from decoy_engine.safe_output import yaml_error_text
 
 _V1_DIR = Path(__file__).parent / "v1"
 _MANIFEST_NAME = "manifest.yaml"
@@ -220,6 +221,6 @@ def _read_yaml(handle: DirHandle, name: str, display: str) -> Any:
     try:
         return serial.yaml_safe_load(member)
     except yaml.YAMLError as exc:
-        raise NameHintLoaderError(f"could not parse {display}: {exc}") from exc
+        raise NameHintLoaderError(f"{display}: {yaml_error_text(exc)}") from exc
     finally:
         member.close()

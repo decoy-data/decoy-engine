@@ -51,6 +51,7 @@ from decoy_engine.profiling.model_pack.types import (
     PACK_FORMAT,
     ModelPackManifest,
 )
+from decoy_engine.safe_output import safe_error_type
 
 _log = logging.getLogger(__name__)
 
@@ -253,7 +254,9 @@ class ModelPackLoader:
             raw = json.loads(data.decode("utf-8"))
             return ModelPackManifest.from_dict(raw)
         except (json.JSONDecodeError, TypeError, KeyError) as exc:
-            raise ModelPackLoadError(f"Corrupt manifest.json in {self._label}: {exc}") from exc
+            raise ModelPackLoadError(
+                f"Corrupt manifest.json in {self._label}: {safe_error_type(exc).value}"
+            ) from exc
 
     def _check_format(self, manifest: ModelPackManifest) -> None:
         if manifest.format_version != PACK_FORMAT:
@@ -279,7 +282,9 @@ class ModelPackLoader:
         except OSError as exc:
             if fileaccess.keeps_class(exc):
                 raise
-            raise ModelPackLoadError(f"Cannot read model.joblib in {self._label}: {exc}") from exc
+            raise ModelPackLoadError(
+                f"Cannot read model.joblib in {self._label}: {safe_error_type(exc).value}"
+            ) from exc
         if weights is None:
             raise ModelPackLoadError(f"Missing model.joblib in {self._label}.")
         return weights
@@ -429,6 +434,6 @@ class ModelPackLoader:
             return dict(joblib.load(io.BytesIO(model_bytes)))
         except Exception as exc:
             raise ModelPackLoadError(
-                f"Failed to deserialise model.joblib: {exc}",
+                f"Failed to deserialise model.joblib: {safe_error_type(exc).value}",
                 cause="import" if isinstance(exc, ImportError) else "pack",
             ) from exc

@@ -42,6 +42,8 @@ from decoy_engine.errors import FpeUnencryptableError
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.fpe import (
     _CHARSETS,
+    FPE_CHARSET_DUPLICATE_TEXT,
+    FPE_CHARSET_NON_ASCII_TEXT,
     check_charset_ascii_printable,
     check_charset_unique,
 )
@@ -100,7 +102,10 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
                 raise PlanCompileError(
                     code=reasons.plan.FPE_CHARSET_DUPLICATE_SYMBOLS,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.charset",
-                    message=(f"fpe column {col_name!r} in table {table_name!r}: {exc}"),
+                    message=(
+                        f"fpe column {col_name!r} in table {table_name!r}: "
+                        f"{FPE_CHARSET_DUPLICATE_TEXT}"
+                    ),
                 ) from exc
             try:
                 check_charset_ascii_printable(resolved)
@@ -108,7 +113,10 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
                 raise PlanCompileError(
                     code=reasons.plan.FPE_CHARSET_NON_ASCII,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.charset",
-                    message=(f"fpe column {col_name!r} in table {table_name!r}: {exc}"),
+                    message=(
+                        f"fpe column {col_name!r} in table {table_name!r}: "
+                        f"{FPE_CHARSET_NON_ASCII_TEXT}"
+                    ),
                 ) from exc
             if len(resolved) < 2:
                 raise PlanCompileError(

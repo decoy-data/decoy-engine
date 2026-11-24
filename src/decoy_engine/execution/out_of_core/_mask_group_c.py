@@ -100,6 +100,7 @@ from decoy_engine.kernel._code_set import code_set_map
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.bucket_perturb import (
+    BUCKET_PERTURB_INVALID_CONFIG_TEXT,
     apply_bucket_perturb,
     validate_bucket_perturb_config,
 )
@@ -290,8 +291,8 @@ def _text_mask_array(
                 code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
                 strategy="text_mask",
                 message=(
-                    f"column {column!r}: {exc}. The engine fails closed rather than "
-                    "silently choose a sub_floor_span fallback."
+                    f"column {column!r}: a text span is outside the FPE domain of its charset. "
+                    "The engine fails closed rather than silently choose a sub_floor_span fallback."
                 ),
             ) from exc
         if unsupported:
@@ -439,7 +440,7 @@ def _bucket_perturb_array(
             raise StrategyError(
                 code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
                 strategy="bucket_perturb",
-                message=str(exc),
+                message=BUCKET_PERTURB_INVALID_CONFIG_TEXT,
             ) from exc
         date_format: str | None = cfg.get("date_format") or None
         if date_format is None:
@@ -519,7 +520,7 @@ def group_c_output_type(seed: ColumnSeed, cfg: dict[str, Any]) -> pa.DataType:
             raise StrategyError(
                 code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
                 strategy="bucket_perturb",
-                message=str(exc),
+                message=BUCKET_PERTURB_INVALID_CONFIG_TEXT,
             ) from exc
     return pa.string()
 

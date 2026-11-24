@@ -61,7 +61,9 @@ def declared_casting_from_dict(data: dict[str, Any]) -> DeclaredCastingPlan:
         try:
             contract = build_contract(dict(raw["contract"]))
         except DeclaredCastContractError as exc:
-            raise PlanCompileError(code=exc.code, path=path, message=exc.message) from None
+            raise PlanCompileError(
+                code=exc.code, path=path, message=reasons.lookup(exc.code)[0].summary
+            ) from None
         columns.append(
             PlanDeclaredColumn(
                 table=raw["table"],

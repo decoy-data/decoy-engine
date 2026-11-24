@@ -131,13 +131,10 @@ def test_r4_reference_table_errors() -> None:
     )
     missing = _raises(lambda: load_table("customer:nope.parquet"))
     assert isinstance(missing, ValueError)
-    assert _text(missing) == "failed to read Parquet at nope.parquet: nope.parquet"
+    assert _text(missing) == "failed to read Parquet at nope.parquet: FileNotFoundError"
     Path("bad.parquet").write_text("x")
     bad = _raises(lambda: load_table("customer:bad.parquet"))
-    assert _text(bad).startswith(
-        "failed to read Parquet at bad.parquet: Error creating dataset. Could not read schema "
-        "from 'bad.parquet'. Is this a 'parquet' file?: Could not open Parquet"
-    )
+    assert _text(bad) == "failed to read Parquet at bad.parquet: Exception"
     pq.write_table(pa.table({"x": [1]}), "noid.parquet")
     noid = _raises(lambda: load_table("customer:noid.parquet"))
     assert _text(noid) == (
@@ -203,7 +200,7 @@ def test_r3_snapshot_read_errors() -> None:
     assert isinstance(missing, StatisticalSpecError)
     assert _text(missing) == (
         "[statistical_snapshot_unreadable] snapshot_file 'nope.json' could not be read: "
-        "[Errno 2] No such file or directory: 'nope.json'"
+        "FileNotFoundError"
     )
     Path("s.json").write_text("{")
     bad = _raises(lambda: _load_snapshot("s.json"))
@@ -215,7 +212,7 @@ def test_r3_snapshot_read_errors() -> None:
     assert isinstance(digest, RuntimeError)
     assert _text(digest).startswith(
         "strategy_config_fingerprint: snapshot_file 'nope.json' is missing or unreadable "
-        "(FileNotFoundError: [Errno 2] No such file or directory: 'nope.json'); "
+        "(FileNotFoundError); "
     )
 
 

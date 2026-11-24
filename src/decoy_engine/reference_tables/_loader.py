@@ -30,6 +30,7 @@ from decoy_engine.fileaccess import (
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.reference_tables._registry import SHIPPED_TABLES, shipped_path
 from decoy_engine.reference_tables._types import ReferenceTable
+from decoy_engine.safe_output import safe_error_type
 
 _LOG = logging.getLogger(__name__)
 
@@ -115,7 +116,9 @@ def load_table(
         except Exception as exc:
             if fileaccess.keeps_class(exc):
                 raise
-            raise ValueError(f"failed to read Parquet at {handle.display}: {exc}") from exc
+            raise ValueError(
+                f"failed to read Parquet at {handle.display}: {safe_error_type(exc).value}"
+            ) from exc
     finally:
         handle.close()
     shown = handle.display

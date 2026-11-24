@@ -255,8 +255,8 @@ class TextMaskHandler:
                 code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
                 strategy="text_mask",
                 message=(
-                    f"column {column!r}: {exc}. The engine fails closed rather than "
-                    "silently choose a sub_floor_span fallback."
+                    f"column {column!r}: a text span is outside the FPE domain of its charset. "
+                    "The engine fails closed rather than silently choose a sub_floor_span fallback."
                 ),
             ) from exc
         if unsupported:

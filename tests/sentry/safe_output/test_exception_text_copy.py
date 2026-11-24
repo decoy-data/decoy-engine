@@ -9,8 +9,9 @@ fails on any difference between the live census and the file, so a removed copy 
 baseline lowered in the same change. Never raise an entry to pass: render the cause by type or
 reuse an existing reason code instead (docs/plans/2026-11-24-f31-audit.md, slice AE5).
 
-Two buckets are pinned apart. `audit` is the F31 audit census (100). `extra` holds shapes the
-audit did not count (an alias of an exception binding, a literal `getattr`).
+Two buckets are pinned apart. `audit` started at the F31 audit census (100); AE5 removed every
+copy into a raise message. `extra` holds shapes the audit did not count (an alias of an exception
+binding, a literal `getattr`).
 
 Messages name site keys only (file, function, rule), never the copied text.
 """
@@ -34,9 +35,8 @@ ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
 SENTRY_ID = "engine-exception-text-copies"
 BASELINE = _baseline_sources.baseline_path(SENTRY_ID)
-# The F31 audit figure. The audit bucket must still match it until AE5 lowers it, in the same
-# change that lowers the baseline entries.
-AUDIT_PARITY = 100
+# The F31 audit figure after AE5. A change that removes a copy lowers it with the baseline entries.
+AUDIT_PARITY = 52
 
 
 def _total(counts: dict[str, int], bucket: str) -> int:
@@ -51,6 +51,11 @@ def _total(counts: dict[str, int], bucket: str) -> int:
 def test_audit_bucket_matches_the_historical_census() -> None:
     live = census(scan_tree(SRC))
     assert _total(live, "audit") == AUDIT_PARITY
+
+
+def test_no_audit_copy_reaches_a_raise_message() -> None:
+    raises = sorted(c.key for c in scan_tree(SRC) if c.bucket == "audit" and c.sink == "raise")
+    assert raises == []
 
 
 # ---- the pin cannot move up or sideways (merge-base ratchet) -------------------------------------------------------

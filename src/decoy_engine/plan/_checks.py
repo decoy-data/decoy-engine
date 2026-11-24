@@ -386,7 +386,7 @@ def check_statistical_columns(
                     raise PlanCompileError(
                         code=exc.code,
                         path=f"tables.{table_name}.generate_columns.{col_name}",
-                        message=exc.message,
+                        message=reasons.lookup(exc.code)[0].summary,
                     ) from exc
                 # condition_on ordering is checked by plan/checks/_generate_columns.py.
                 column_specs.append((table_name, col_name, snapshot_file, spec_to_dict(spec)))

@@ -54,6 +54,12 @@ FORMAT_ERROR_REASON = "value is not a parseable date under bucket_perturb"
 # Supported bucket names and their corresponding date-truncation strategies.
 _VALID_BUCKETS = frozenset({"week", "month", "quarter"})
 VALID_BUCKETS = _VALID_BUCKETS  # public alias for the strategy catalog
+# The refusal text for a config `validate_bucket_perturb_config` rejects. Fixed, so a re-raise
+# never copies the validator's message (which can quote a configured value).
+BUCKET_PERTURB_INVALID_CONFIG_TEXT = (
+    f"bucket_perturb: provider_config is invalid. bucket must be one of {sorted(_VALID_BUCKETS)}; "
+    "check date_format and preserve_values."
+)
 
 # strftime directives by what they write back. bucket_perturb perturbs the
 # calendar date, so only DATE directives let a date survive the round trip; the
@@ -161,12 +167,17 @@ def _report_failed(
     failed: list[int],
     format_errors: list[int] | None,
     *,
-    cause: str = "do not parse under date_format",
+    out_of_range: bool = False,
 ) -> None:
     """Record failed positions, or refuse when the caller has nowhere to report them.
 
-    ``cause`` finishes the count in the refusal text; it never carries a value.
+    ``out_of_range`` picks which fixed phrase finishes the count in the refusal text.
     """
+    cause = (
+        "are not dates, or leave the years 1 to 9999"
+        if out_of_range
+        else "do not parse under date_format"
+    )
     if not failed:
         return
     if format_errors is None:
@@ -277,7 +288,7 @@ def apply_bucket_perturb_dates(
                 cells[i] = _perturb_date(cell, bucket, job_seed, namespace, cell.isoformat())
             except OverflowError:
                 failed.append(i)
-        _report_failed(failed, format_errors, cause="are not dates, or leave the years 1 to 9999")
+        _report_failed(failed, format_errors, out_of_range=True)
         return pd.Series(cells, index=series.index, dtype=object)
     except BaseException:
         del job_seed

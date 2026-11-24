@@ -333,7 +333,7 @@ def estimate_job_capacity(
             code=_SOURCE_UNPROFILABLE_CODE,
             message=(
                 "a declared source could not be read or parsed while estimating "
-                f"capacity ({type(exc).__name__}: {exc}); the file may be truncated, "
+                f"capacity ({type(exc).__name__}); the file may be truncated, "
                 "corrupt, or not the declared format."
             ),
         ) from exc

@@ -358,6 +358,12 @@ def validate_recorded_provenance(recorded: object) -> None:
         )
 
 
+# The keys a recorded provenance and its platform must carry, in lookup order. A missing key is
+# named from this tuple, never from the KeyError, so the message holds only engine text.
+_RECORD_KEYS = ("platform", "cpython", "fingerprint")
+_PLATFORM_KEYS = ("system", "machine", "implementation", "libc")
+
+
 def _coerce_recorded(recorded: object) -> Provenance:
     """Narrow a recorded provenance (a ``Provenance``, or a mapping with
     ``platform`` / ``cpython`` / ``fingerprint`` keys where ``platform`` is a
@@ -375,9 +381,10 @@ def _coerce_recorded(recorded: object) -> Provenance:
         cpython = recorded["cpython"]
         fingerprint = recorded["fingerprint"]
     except KeyError as exc:
+        missing = next((k for k in _RECORD_KEYS if k not in recorded), "?")
         raise ProvenanceError(
             code=reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
-            message=f"recorded provenance missing required key {exc.args[0]!r}",
+            message=f"recorded provenance missing required key {missing!r}",
         ) from exc
     if not isinstance(cpython, str) or not isinstance(fingerprint, str):
         raise ProvenanceError(
@@ -400,9 +407,10 @@ def _coerce_platform(value: object) -> PlatformTriple:
                 value["libc"],
             )
         except KeyError as exc:
+            missing = next((k for k in _PLATFORM_KEYS if k not in value), "?")
             raise ProvenanceError(
                 code=reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
-                message=f"recorded platform missing required key {exc.args[0]!r}",
+                message=f"recorded platform missing required key {missing!r}",
             ) from exc
     elif isinstance(value, (list, tuple)):
         if len(value) != 4:
@@ -481,7 +489,10 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
             raise
         raise ProvenanceError(
             code=reasons.quality.DP_LOCK_PARSE_ERROR,
-            message=f"could not read/parse lockfile {fileaccess.shown(str(path), 'dp.lock_path')!r}: {exc}",
+            message=(
+                f"could not read/parse lockfile {fileaccess.shown(str(path), 'dp.lock_path')!r}: "
+                f"{type(exc).__name__}"
+            ),
         ) from exc
 
     packages = lock.get("package")

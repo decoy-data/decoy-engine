@@ -12,7 +12,6 @@ fail-closed `StrategyError` the handler raises when a span cannot be FF1-encrypt
 from __future__ import annotations
 
 from decoy_engine import reasons
-from decoy_engine.errors import FpeUnencryptableError
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 
@@ -22,7 +21,7 @@ __all__ = [
 ]
 
 
-def text_mask_fail_closed_error(exc: FpeUnencryptableError, column: str) -> StrategyError:
+def text_mask_fail_closed_error(column: str) -> StrategyError:
     """The `StrategyError` a sub-floor fpe span with no `sub_floor_span` policy maps to.
 
     Reproduces `TextMaskHandler.run`'s `except FpeUnencryptableError` branch exactly (code,
@@ -32,7 +31,7 @@ def text_mask_fail_closed_error(exc: FpeUnencryptableError, column: str) -> Stra
         code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
         strategy="text_mask",
         message=(
-            f"column {column!r}: {exc}. The engine fails closed rather than "
-            "silently choose a sub_floor_span fallback."
+            f"column {column!r}: a text span is outside the FPE domain of its charset. "
+            "The engine fails closed rather than silently choose a sub_floor_span fallback."
         ),
     )

@@ -26,6 +26,7 @@ from decoy_engine import fileaccess, reasons
 from decoy_engine.fileaccess import FileAccess, FileAccessDenied, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.safe_output import safe_error_type
 from decoy_engine.transforms._codeset_index import SelectionIndexes, build_selection_indexes
 from decoy_engine.transforms._codeset_provenance import CODESET_REGISTRY, CodeSetProvenance
 
@@ -293,7 +294,7 @@ def _get_corpus_record(
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
                 path="provider_config.corpus_source",
-                message=f"failed to stat customer corpus at {handle.display}: {exc}",
+                message=f"failed to stat customer corpus at {handle.display}: {safe_error_type(exc).value}",
             ) from exc
         # Best-effort file identity, not a content hash (see the module-level
         # comment on `_customer_cache` for why ctime is included and a hash is
@@ -462,7 +463,10 @@ def _read_corpus_record(
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
                 path="provider_config.corpus_source",
-                message=f"failed to read corpus Parquet at {handle.display}: {exc}",
+                message=(
+                    f"failed to read corpus Parquet at {handle.display}: "
+                    f"{safe_error_type(exc).value}"
+                ),
             ) from exc
     finally:
         if owned:

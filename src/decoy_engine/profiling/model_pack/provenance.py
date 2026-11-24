@@ -73,6 +73,7 @@ from decoy_engine._canonical import canonical_json_bytes
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.profiling.model_pack import _packio
 from decoy_engine.profiling.model_pack.types import ModelPackManifest
+from decoy_engine.safe_output import safe_error_type
 
 _log = logging.getLogger(__name__)
 
@@ -174,7 +175,9 @@ def sign_pack(pack_dir: Path, key: bytes) -> str:
             # policy; the CLI still sees the path.
             if fileaccess.keeps_class(exc):
                 raise
-            raise ValueError(f"sign_pack: cannot read manifest in {shown}: {exc}") from exc
+            raise ValueError(
+                f"sign_pack: cannot read manifest in {shown}: {safe_error_type(exc).value}"
+            ) from exc
         digest = sign_manifest(manifest, key)
         raw["manifest_hmac"] = digest
         # Write canonically (sort_keys) so the on-disk manifest is stable across signings.

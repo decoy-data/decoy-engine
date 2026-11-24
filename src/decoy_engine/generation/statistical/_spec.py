@@ -47,7 +47,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import fileaccess, reasons, safe_output
 from decoy_engine.contracts import distribution_snapshot as dsc
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileRole
@@ -188,7 +188,7 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
         if fileaccess.is_ambient():
             raise StatisticalSpecError(
                 code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=f"snapshot_file {shown!r} could not be read: {exc}",
+                message=f"snapshot_file {shown!r} could not be read: {safe_output.safe_error_type(exc).value}",
             ) from exc
         failure = fileaccess.redact_locators(str(exc), [(path, shown)])
     if failure is not None:
