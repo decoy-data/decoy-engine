@@ -26,3 +26,5 @@ bundle. A column that a `derived` (or other creating) entry adds and a composite
 created first and then takes the composite's value.
 
 Fixed: a `when:` predicate or a derived expression that read a bundle's output, a creator's target, or a column rewritten by a joint mask now sees the value the plan's ordering defines instead of a stale source value. A plan whose columns used to fail with `cyclic_work_ordering` because of a creator, a bundle and a foreign key sharing columns now runs, and a real value cycle still raises that code.
+
+Added: the runtime reason code `runtime/when_source_snapshot_missing` (value-free) is raised when a route evaluates a `when:` without the pre-mask snapshot of a column it reads.

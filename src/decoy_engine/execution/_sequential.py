@@ -161,11 +161,7 @@ from decoy_engine.execution._publication_observer import (
     report_partial_publication,
 )
 from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
-from decoy_engine.execution._runner import (
-    WorkNode,
-    build_work_list,
-    source_snapshot_columns,
-)
+from decoy_engine.execution._runner import WorkNode, build_work_list, source_snapshot_columns
 from decoy_engine.execution._sequential_composite_chain import decline_composite_chain
 from decoy_engine.execution._sequential_native import SeqNativeRun
 from decoy_engine.execution._sequential_order import table_topo_order
@@ -320,10 +316,8 @@ def run_sequential(
 
     table_order = table_topo_order(plan, graph)
 
-    # HC-3a: per-table source-read columns (`source_snapshot_columns`): date_shift group_by anchors,
-    # joint_mask key_by keys and the written columns a `when:` reads. Each is an immutable source
-    # value: unioned into the table's FK-safe column set at load (lossless int+null) and
-    # snapshotted pre-mask into ctx.group_anchor_snapshots below.
+    # HC-3a: per-table source reads (`source_snapshot_columns`): group_by anchors, key_by keys and
+    # written `when:` reads. Unioned into the FK-safe column set at load, snapshotted pre-mask below.
     group_anchor_cols = source_snapshot_columns(plan, registry, graph)
     lossless = lossless_int_columns(plan, registry, graph)
 
@@ -485,7 +479,6 @@ def run_sequential(
                         ] = rec.trigger
 
                 run_state.finish(frames, table)
-
                 # Per-table fail-loud classification stays here (after the loop),
                 # so a table raises on any uncovered record BEFORE its parent map
                 # is pre-built, BEFORE it is written to the sink, and BEFORE its

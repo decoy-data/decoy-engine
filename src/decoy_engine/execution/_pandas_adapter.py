@@ -391,12 +391,9 @@ class PandasExecutionAdapter:
         other node masks via its scalar or composite handler. `key_error_rows`/
         `errored_keys_cache` (S2, default None) thread the quarantine-aware FK
         caches to `_resolve_fk_node`; non-FK nodes ignore them."""
-        # Codex P2 MULTI-TABLE EVIDENCE COLLISION remediation: stamp the
-        # in-flight table onto ctx BEFORE any handler dispatch (scalar,
-        # composite, or fk_resolve) so a scalar handler that needs table
-        # identity for evidence keying (CodeSetHandler) can read it. ctx is
-        # frozen; object.__setattr__ is the sanctioned mutation path (see
-        # StrategyContext.current_table).
+        # Stamp the in-flight table onto ctx BEFORE any handler dispatch so a handler that needs
+        # table identity (CodeSetHandler evidence keying) can read it. ctx is frozen;
+        # object.__setattr__ is the sanctioned path (see StrategyContext.current_table).
         object.__setattr__(ctx, "current_table", node.table)
         df = frames[node.table]
         child_edges = relationship_graph.parents_of(node.table, node.columns)
@@ -451,15 +448,9 @@ class PandasExecutionAdapter:
             # plan_slice.when is None (byte-identical to calling handler.run()
             # directly). When set, it evaluates the predicate via numexpr
             # (scope-clamped per Dennis C1) and routes only matching rows through.
-            op = run.order.ops[node.key] if run is not None else None
+            outs, sel = (run.order.ops[node.key].outputs, run.selection) if run else ((), None)
             frames[node.table], node_warnings = run_with_when_gate(
-                handler,
-                df,
-                node.columns[0],
-                plan_slice,
-                ctx,
-                op.outputs if op is not None else (),
-                run.selection if run is not None else None,
+                handler, df, node.columns[0], plan_slice, ctx, outs, sel
             )
         return node_warnings
 

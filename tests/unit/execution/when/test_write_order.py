@@ -115,29 +115,75 @@ def test_fk_child_bypasses_derived_creator() -> None:
     assert out.column("last_name").to_pylist() == ws.bundle_oracle(FIRST)["last_name"]
 
 
-def test_indirect_creator_reads_after_bundle() -> None:
-    """4. `email` (creator, overwritten by the bundle) reads `summary`, which reads the bundle's
-    `last_name`. Today's constraints form a cycle; the commit ranks put the creator's email
-    below the bundle while evaluation waits for `summary`."""
-    table = pa.table(
+def _indirect_table(email: list[str]) -> pa.Table:
+    return pa.table(
         {
             "first_name": pa.array(FIRST),
             "last_name": pa.array([f"L{i}" for i in range(N)]),
-            "email": pa.array([f"u{i}@x.test" for i in range(N)]),
+            "email": pa.array(email),
             "summary": pa.array(["x"] * N),
+            "z_view": pa.array(["v"] * N),
         }
     )
-    seed_plan = ws.plan(
-        [
-            ("first_name", ws.bundle()),
-            ("email", ws.derived('concat(summary, "@x.test")')),
-            ("summary", ws.derived('concat(last_name, "!")')),
-        ]
-    )
-    out = ws.run(seed_plan, table)
+
+
+def _indirect_plan(with_view: bool = False) -> object:
+    columns = [
+        ("first_name", ws.bundle()),
+        ("email", ws.derived('concat(summary, "@x.test")')),
+        ("summary", ws.derived('concat(last_name, "!")')),
+    ]
+    if with_view:
+        columns.append(("z_view", ws.derived('concat(email, "!")')))
+    return ws.plan(columns)
+
+
+def test_indirect_creator_reads_after_bundle() -> None:
+    """4. `email` (creator, overwritten by the bundle) reads `summary`, which reads the bundle's
+    `last_name`. Today's constraints form a cycle; the commit ranks put the creator's email
+    below the bundle while evaluation waits for `summary`. Every entry point agrees."""
+    source = [f"u{i}@x.test" for i in range(N)]
+    table = _indirect_table(source).drop_columns(["z_view"])
     oracle = ws.bundle_oracle(FIRST)
-    assert out.column("summary").to_pylist() == [s + "!" for s in oracle["last_name"]]
+    for run in (ws.run, ws.run_sequential):
+        out = run(_indirect_plan(), table)
+        assert out.column("summary").to_pylist() == [s + "!" for s in oracle["last_name"]]
+        assert out.column("email").to_pylist() == oracle["email"]
+    assert ws.classify(_indirect_plan(), table).mode == "pandas_fallback"
+
+
+def test_equal_cell_write_still_wins_the_rank() -> None:
+    """4b. The bundle's email equals the cell already there on every row: the bundle still selects
+    every row, so its email beats the lower-ranked derived email."""
+    oracle = ws.bundle_oracle(FIRST)
+    out = ws.run(_indirect_plan(), _indirect_table(oracle["email"]).drop_columns(["z_view"]))
     assert out.column("email").to_pylist() == oracle["email"]
+
+
+@pytest.mark.parametrize("run", [ws.run, ws.run_sequential], ids=["adapter", "sequential"])
+def test_reader_waits_for_the_winning_email(run: object) -> None:
+    """4c. `z_view` reads `email`: it must see the winning (bundle) email even though the derived
+    email writer was evaluated last."""
+    table = _indirect_table([f"u{i}@x.test" for i in range(N)])
+    out = run(_indirect_plan(with_view=True), table)  # type: ignore[operator]
+    emails = out.column("email").to_pylist()
+    assert emails == ws.bundle_oracle(FIRST)["email"]
+    assert out.column("z_view").to_pylist() == [e + "!" for e in emails]
+
+
+def test_a_real_value_cycle_still_raises_on_every_entry_point() -> None:
+    """4d. Two derived columns that each read the other's final value are a real cycle."""
+    from decoy_engine.execution._errors import ExecutionError
+
+    table = pa.table({"a": pa.array(["1"] * N), "b": pa.array(["2"] * N)})
+    cyclic = ws.plan([("a", ws.derived('concat(b, "!")')), ("b", ws.derived('concat(a, "?")'))])
+    for entry in (ws.run, ws.run_sequential):
+        with pytest.raises(ExecutionError) as err:
+            entry(cyclic, table, bound=(("a",),))
+        assert err.value.code == "cyclic_work_ordering"
+    with pytest.raises(ExecutionError) as err:
+        ws.classify(cyclic, table)
+    assert err.value.code == "cyclic_work_ordering"
 
 
 @pytest.mark.parametrize("with_bundle", [False, True], ids=["creator-only", "with-bundle"])
@@ -153,12 +199,15 @@ def test_zero_match_creator_supplies_missing_target(with_bundle: bool) -> None:
     )
     creator = ("email", ws.derived('concat(last_name, "@x.test")', when="flag == 'y'"))
     per_column = [("first_name", ws.bundle()), creator] if with_bundle else [creator]
-    out = ws.run(ws.plan(per_column), table)
-    emails = out.column("email").to_pylist()
-    if with_bundle:
-        assert emails == ws.bundle_oracle(FIRST)["email"]
-    else:
-        assert emails == [None] * N
+    outs = [run(ws.plan(per_column), table) for run in (ws.run, ws.run_sequential)]
+    assert outs[0].column_names == outs[1].column_names
+    for out in outs:
+        emails = out.column("email").to_pylist()
+        assert len(emails) == N
+        if with_bundle:
+            assert emails == ws.bundle_oracle(FIRST)["email"]
+        else:
+            assert emails == [None] * N
 
 
 def _two_joint_writers(tmp_path: Path, first: str, second: str) -> pa.Table:
@@ -400,3 +449,28 @@ def test_multi_parent_fk_uses_one_child_tuple(first_declared: str) -> None:
         bound=(("first_name",), ("second",)),
     )
     assert out.column("email").to_pylist() == [oracle[0], "O1!", "miss", oracle[3]]
+
+
+@pytest.mark.parametrize("run", [ws.run, ws.run_sequential], ids=["full-frame", "sequential"])
+def test_fk_composite_provider_snapshots_child_ref(run: object) -> None:
+    """21. A single-column FK child `ref` configured with the composite provider is resolved
+    through its parent map, so the later redaction gated on the original `ref` must read the
+    snapshot of `ref`, not the resolved value."""
+    table = pa.table(
+        {
+            "parent": pa.array(["A", "B"]),
+            "ref": pa.array(["A", "B"]),
+            "z_secret": pa.array(["one", "two"]),
+        }
+    )
+    seed_plan = ws.plan(
+        [
+            ("parent", ws.seed("redact", provider_config=(("redact_with", "X"),))),
+            ("ref", ws.bundle()),
+            ("z_secret", ws.seed("redact", when="ref == 'A'")),
+        ]
+    )
+    graph = ws.fk_graph("parent", "ref")
+    out = run(seed_plan, table, graph, bound=(("ref",),))  # type: ignore[operator]
+    assert out.column("ref").to_pylist() == ["X", "X"]
+    assert out.column("z_secret").to_pylist() == ["REDACTED", "two"]

@@ -115,3 +115,39 @@ def bundle_oracle(first_names: list[str]) -> dict[str, list[Any]]:
     )
     out = run(plan([("first_name", bundle())]), table)
     return {c: out.column(c).to_pylist() for c in ("first_name", "last_name", "email")}
+
+
+def run_sequential(
+    seed_plan: Any,
+    table: pa.Table,
+    graph: Any = NO_GRAPH,
+    bound: tuple[tuple[str, ...], ...] = (("first_name",),),
+) -> pa.Table:
+    """`run_sequential` over one table `t`, collected through a callable sink."""
+    bindings = (NamespaceBinding("nm", tuple(("t", cols) for cols in bound)),)
+    emitted: dict[str, pa.Table] = {}
+    PandasExecutionAdapter().run_sequential(
+        seed_plan,
+        lambda name: table,
+        config={},
+        registry=REG,
+        relationship_graph=graph,
+        namespace_registry=NamespaceRegistry(bindings=bindings),
+        sink=lambda name, out: emitted.__setitem__(name, out),
+    )
+    return emitted["t"]
+
+
+def classify(seed_plan: Any, table: pa.Table, graph: Any = NO_GRAPH) -> Any:
+    """`classify_job` over table `t` on the pandas substrate."""
+    from decoy_engine.execution._planner import classify_job
+
+    config = {"tables": [{"name": "t", "columns": [{"name": c} for c in table.column_names]}]}
+    return classify_job(
+        config,
+        plan=seed_plan,
+        registry=REG,
+        relationship_graph=graph,
+        substrate="pandas",
+        source_tables={"t": table},
+    )

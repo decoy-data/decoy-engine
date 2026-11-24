@@ -164,7 +164,7 @@ def _call_names(func: Callable[..., Any]) -> set[str]:
 
 
 def test_g3_dispatch_mask_node_calls_are_the_pinned_inventory() -> None:
-    assert _call_names(PandasExecutionAdapter._dispatch_mask_node) == _PINNED_DISPATCH_CALLS
+    assert _call_names(PandasExecutionAdapter._dispatch_node) == _PINNED_DISPATCH_CALLS
 
 
 def test_g3_work_node_kinds_are_the_pinned_set() -> None:
@@ -187,7 +187,7 @@ def test_g3_work_node_kinds_are_the_pinned_set() -> None:
 
 
 def test_g3_a_new_dispatch_call_would_be_noticed() -> None:
-    source = inspect.getsource(PandasExecutionAdapter._dispatch_mask_node)
+    source = inspect.getsource(PandasExecutionAdapter._dispatch_node)
     edited = source.replace(
         "        df = frames[node.table]\n",
         "        df = frames[node.table]\n        self._new_branch(df)\n",
@@ -259,7 +259,11 @@ _PINNED_RUN_CALLS = frozenset(
         "key_error_rows.setdefault",
         "lossless.for_table",
         "lossless_int_columns",
-        "order_work",
+        "compile_work_order",
+        "WorkOrderRun",
+        "list",
+        "run_state.begin_table",
+        "run_state.finish",
         "table_from_pandas_keeping_source_types",
         "untouched_columns",
         "apply_degenerate_faker_pin",
@@ -721,10 +725,10 @@ def test_composite_reads_the_first_sorted_group_column_and_writes_the_rest() -> 
     assert lone.reads == {"first_name"}
 
 
-def test_composite_writes_include_every_coherent_with_column() -> None:
-    # `z` is in the group but not in the bundle: declared anyway, never under-declared.
+def test_composite_writes_exclude_a_coherent_member_outside_the_bundle() -> None:
+    # `z` is group identity but not a bundle output, so the bundle never writes it.
     access = column_access(_custom("a", ["b", "z"], ["a", "b"]), REG)
-    assert access.writes == {"a", "b", "z"}
+    assert access.writes == {"a", "b"}
 
 
 def test_a_registry_composite_without_a_declaration_has_unknown_writes(
