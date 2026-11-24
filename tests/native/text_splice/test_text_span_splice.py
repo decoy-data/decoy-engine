@@ -574,8 +574,17 @@ def test_at6_the_real_companion_passes_its_own_probe() -> None:
     assert splice_mod.load_splice_kernel() is not None
 
 
-def test_the_probe_abi_literal_equals_the_crypto_loaders_pin() -> None:
+def test_the_probe_reads_the_crypto_loaders_abi_pin_and_holds_no_second_literal() -> None:
+    import ast
+    import inspect
+
     from decoy_engine.execution.native import _text_redact_kernel as mod
     from decoy_engine.execution.native._crypto_ext import _EXPECTED_ABI_VERSION
 
     assert mod._EXPECTED_ABI == _EXPECTED_ABI_VERSION
+    literals = [
+        n.value
+        for n in ast.walk(ast.parse(inspect.getsource(mod)))
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+    assert not [v for v in literals if v.startswith("decoy-native-abi")]

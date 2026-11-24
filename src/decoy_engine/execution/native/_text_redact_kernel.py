@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from decoy_engine.detection.detectors import _SPAN_DETECTORS, Span
+from decoy_engine.execution.native._crypto_ext import _EXPECTED_ABI_VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -113,9 +114,8 @@ class _CompiledTextRedactKernel:
 # from `text_span_splice_contract_version()`. Bump both when its arguments or result change.
 SPLICE_CONTRACT_VERSION = 1
 
-# The ABI tag this core runs against (`_crypto_ext._EXPECTED_ABI_VERSION`). Kept as a literal so
-# this module does not import the crypto loader; `test_text_span_splice.py` pins the two equal.
-_EXPECTED_ABI = "decoy-native-abi-3"
+# The ABI tag this core runs against: the crypto loader's one pin, so an ABI change is one edit.
+_EXPECTED_ABI = _EXPECTED_ABI_VERSION
 
 # The known-answer cells every probe runs. Synthetic: one match, one non-ASCII decline, one null.
 _KAT_CELLS = ["a@b.com", "café", None]

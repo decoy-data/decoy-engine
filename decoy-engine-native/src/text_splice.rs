@@ -13,10 +13,12 @@
 //! behind the boundary feature. Both legacy exports stay as they are; the new entry shares their
 //! detector sweep and writer in `text_mask`.
 
-use arrow_array::{Array, BooleanArray, LargeStringArray, StringArray};
+use arrow_array::{
+    Array, BooleanArray, GenericStringArray, LargeStringArray, OffsetSizeTrait, StringArray,
+};
 use arrow_buffer::{BooleanBuffer, NullBuffer, OffsetBuffer, ScalarBuffer};
 
-use crate::text_mask::{detect_splice_cell_out, SpanOut};
+use crate::text_mask::{detect_splice_cell_out, CellOutcome, SpanOut};
 use crate::text_redact::{CATALOG_LEN, SUPPORTED_IDS};
 
 /// The wire contract of `text_span_splice`. Bumped only when its arguments or result change.
@@ -183,12 +185,20 @@ where
             continue;
         };
         scratch.clear();
-        if !detect_splice_cell_out(text, &plan.indices, &outs, gap, &mut scratch) {
-            current.push_declined();
-            continue;
-        }
-        if scratch.len() > PIECE_BYTE_CEILING {
-            return Err(SpliceError::OutputInvalid);
+        match detect_splice_cell_out(
+            text,
+            &plan.indices,
+            &outs,
+            gap,
+            PIECE_BYTE_CEILING,
+            &mut scratch,
+        ) {
+            CellOutcome::Declined => {
+                current.push_declined();
+                continue;
+            }
+            CellOutcome::TooLarge => return Err(SpliceError::OutputInvalid),
+            CellOutcome::Written => {}
         }
         let fits = current
             .data
@@ -205,6 +215,16 @@ where
     Ok(pieces)
 }
 
+/// The bytes the array's own rows span, from its first and last offsets. `value_data()` is the
+/// whole backing buffer, which for a small slice of a large buffer would over-reserve.
+pub(crate) fn slice_bytes<O: OffsetSizeTrait>(array: &GenericStringArray<O>) -> usize {
+    let offsets = array.value_offsets();
+    match (offsets.first(), offsets.last()) {
+        (Some(first), Some(last)) => last.as_usize().saturating_sub(first.as_usize()),
+        _ => 0,
+    }
+}
+
 /// Splice an imported Arrow column. Only `Utf8` and `LargeUtf8` are accepted.
 pub fn splice_array(
     array: &dyn Array,
@@ -212,10 +232,10 @@ pub fn splice_array(
     ceiling: usize,
 ) -> Result<Vec<SplicePiece>, SpliceError> {
     if let Some(a) = array.as_any().downcast_ref::<StringArray>() {
-        return splice_rows(a.iter(), a.value_data().len(), plan, ceiling);
+        return splice_rows(a.iter(), slice_bytes(a), plan, ceiling);
     }
     if let Some(a) = array.as_any().downcast_ref::<LargeStringArray>() {
-        return splice_rows(a.iter(), a.value_data().len(), plan, ceiling);
+        return splice_rows(a.iter(), slice_bytes(a), plan, ceiling);
     }
     Err(SpliceError::UnsupportedType)
 }

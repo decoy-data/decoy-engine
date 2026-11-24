@@ -244,3 +244,30 @@ fn plan_accepts_identical_duplicates_and_rejects_bad_lengths_and_ids() {
         Some(SpliceError::UnknownDetector)
     );
 }
+
+#[test]
+fn the_allocation_hint_follows_the_slice_not_the_backing_buffer() {
+    // V1-2: a small slice of a large buffer must not reserve the whole buffer.
+    let big: Vec<String> = (0..1000)
+        .map(|i| format!("row{i:04}-{}", "x".repeat(100)))
+        .collect();
+    let array = StringArray::from(big);
+    let slice = array.slice(10, 2);
+    let slice = slice
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("string");
+    assert!(slice.value_data().len() > 100_000);
+    assert_eq!(
+        slice_bytes(slice),
+        slice.value(0).len() + slice.value(1).len()
+    );
+    let large = LargeStringArray::from(vec!["abc", "defg", "h"]);
+    let part = large.slice(1, 1);
+    let part = part
+        .as_any()
+        .downcast_ref::<LargeStringArray>()
+        .expect("large");
+    assert_eq!(slice_bytes(part), 4);
+    assert_eq!(slice_bytes(&StringArray::from(Vec::<&str>::new())), 0);
+}
