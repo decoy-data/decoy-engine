@@ -73,7 +73,7 @@ def test_a_kind_outside_the_table_reads_as_unexpected_and_keeps_the_class(
 def _seeded_with_a_chain(exc: BaseException) -> BaseException:
     exc.__cause__ = ValueError(f"cause {MARK}")
     exc.__context__ = KeyError(f"context {MARK}")
-    exc.add_note(f"note {MARK}")
+    exc.__notes__ = [f"note {MARK}"]  # add_note needs 3.11
     return exc
 
 
