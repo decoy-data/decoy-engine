@@ -46,6 +46,7 @@ from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
 )
+from decoy_engine.profile._frame import profile_frame
 from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
@@ -411,7 +412,7 @@ class ParquetFileSource(_PolicyBound):
         )
 
     def to_frame(self) -> pd.DataFrame:
-        return self._lazy().to_table().to_pandas()
+        return profile_frame(self._lazy().to_table())
 
 
 @dataclass(frozen=True)
@@ -492,11 +493,11 @@ def head_frame_from_batches(
         if gathered >= sample_rows:
             break
     if not collected:
-        return schema.empty_table().to_pandas()
+        return profile_frame(schema.empty_table())
     table = pa.Table.from_batches(collected)
     if table.num_rows > sample_rows:
         table = table.slice(0, sample_rows)
-    return table.to_pandas()
+    return profile_frame(table)
 
 
 # ---------------------------------------------------------------------

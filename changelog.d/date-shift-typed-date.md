@@ -15,7 +15,8 @@ A `date32` value outside years 1 to 9999, or one whose shift leaves that range, 
 the job. The full-frame and sequential routes read the whole table through pandas, which cannot
 hold such a date, so both fail the job with the coded error `full_frame_value_unrepresentable`,
 which names the table and column and no value. Before, sequential failed with an uncoded pandas
-error that quoted the year.
+error that quoted the year. Profiling now converts its source sample without raising on such
+a date, so the coded error also fires when the date is in the first rows.
 
 Two new route reason codes, registered unreleased: `date_shift_typed_preserve_not_native`
 (`preserve_values` on a typed column) and `date_shift_typed_type_not_native` (a typed shape over a

@@ -197,14 +197,23 @@ def test_an_empty_date32_column_keeps_its_type_on_every_route(tmp_path: Path) ->
 _PAST_DATE32_YEARS = 2932897
 
 
+# (rows, index of the bad date): first row and last row of a table larger than the profile
+# sample, and a one-row table, so the date is both inside and outside the sample.
+_POSITIONS = {"first": (120_000, 0), "only": (1, 0), "last": (120_000, 119_999)}
+
+
+@pytest.mark.parametrize("position", sorted(_POSITIONS))
 @pytest.mark.parametrize("route", ["sequential", "full_frame"])
 def test_an_out_of_range_date32_fails_the_pandas_routes_with_a_coded_error(
-    route: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    route: str, position: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """B4 (amended 2026-11-24): the routes that read a table through pandas cannot hold the
-    date, so the job fails with one coded error whose text carries no source value."""
-    n = 120_000
-    days = pa.array([0] * (n - 1) + [_PAST_DATE32_YEARS], pa.int32()).cast(pa.date32())
+    """B4 (amended 2026-11-24 after Codex a2): the routes that read a table through pandas
+    cannot hold the date, so the job fails with one coded error whose text carries no source
+    value. Every read before the route, profiling's sample included, must not raise first."""
+    n, bad = _POSITIONS[position]
+    raw = [0] * n
+    raw[bad] = _PAST_DATE32_YEARS
+    days = pa.array(raw, pa.int32()).cast(pa.date32())
     tables = {
         TABLE: pa.table({"id": pa.array([f"p{i}" for i in range(n)])}),
         "child": pa.table({"pid": pa.array([f"p{i}" for i in range(n)]), "d": days}),

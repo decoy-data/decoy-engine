@@ -319,7 +319,9 @@ is a `format_error` row error that keeps the source on the unified slice, the ch
 handler, where the job failed before. Under ROUTE-OUTPUT-CONTRACT the full-frame and sequential routes read the
 whole table through pandas before any strategy runs, and pandas cannot hold such a date in the source column, so
 both fail the job with `ExecutionError` `full_frame_value_unrepresentable` naming the table and column and no
-value (amended 2026-11-24 after Codex a1 round 3; before, sequential failed with an uncoded pandas error).
+value (amended 2026-11-24 after Codex a1 round 3; before, sequential failed with an uncoded pandas error). Profiling converts its source sample without
+raising on such a date, so the coded error holds when the date is inside the profile sample (amended 2026-11-24
+after Codex a2).
 B5: on the unified slice the output column keeps `date32` and goes to the output assembler as an Arrow column;
 on the chunked route the schema rule pins it to `date32`, not `string` (text sources still give `string`). `preserve_values` on a typed column declines with
 `date_shift_typed_preserve_not_native`, and a typed shape over any other resident type (`date64`) with
