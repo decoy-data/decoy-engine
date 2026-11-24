@@ -1,10 +1,10 @@
-Status: plan (revision 1, 2026-11-22)
+Status: plan (revision 2, 2026-11-24; re-anchored to engine main `cb06f318e`)
 
 # FPE-CHECKSUM-NATIVE: checksum-mode `fpe` runs in the Rust companion
 
 Owner: Cam. Author: Opus (plan author). Date: 2026-11-22. Roadmap row: FPE-CHECKSUM-NATIVE (group mask; V1 fast-path audit, vault `10_Projects/decoy/v1-fast-path-audit-2026-11-22.md`). Engine and its Rust companion `decoy-engine-native/`. The CLI gets it through its next engine pin bump.
 
-Anchors: a path with no prefix is under `src/decoy_engine/`; `native/` paths under `decoy-engine-native/` are named in full. Read at engine `origin/main` `70881ad79` (0.28.3). Must stay consistent with `plan/route-label-truth`, `plan/per-column-routing`, `plan/native-threads-default` and `plan/when-reads-source`.
+Anchors: a path with no prefix is under `src/decoy_engine/`; `native/` paths under `decoy-engine-native/` are named in full. Read at engine `origin/main` `cb06f318e` (re-anchored 2026-11-24; revision 1 read `70881ad79`). Must stay consistent with `plan/route-label-truth`, `plan/per-column-routing`, `plan/native-threads-default` and `plan/when-reads-source`.
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `profiles/local-operations.md`, `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `api-and-compatibility.md`, `security.md`, `performance.md`, `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md`.
 
@@ -23,13 +23,15 @@ Measured (audit, 2026-11-22): `fpe(..., checksum: npi)` takes 39.8 s per 120,000
 | `execution/_sequential_native_ops.py:254-257` | sequential decline `fpe_checksum_not_native:<column>` |
 | `execution/out_of_core/_fpe_native.py:46-51` | out-of-core decline, same text |
 
-Two more places depend on it: the kernel wrapper asserts no checksum reaches it (`execution/native/_fpe_ext.py:131-137`), and text_mask keeps its checksum detectors `pan` and `npi` off the kernel (`execution/native/_text_mask_native_fpe.py:45-51`).
+Two more places depend on it: the kernel wrapper asserts no checksum reaches it (`execution/native/_fpe_ext.py:131-137`), and text_mask keeps its checksum detectors `pan` and `npi` off the kernel (`execution/native/_text_mask_native_fpe.py:44-50`).
 
-The plumbing already carries the scheme to the kernel boundary: `FpeConfig.checksum` (`execution/native/_crypto_ext.py:151-189`), `FpeParams.checksum` (`execution/native/_operator_params.py:159`, `:263`) and `fpe_config_from_params`. The FFI entry `fpe_transform_batch` (`decoy-engine-native/src/arrow_ffi.rs:556-567`) has no checksum argument.
+The plumbing already carries the scheme to the kernel boundary: `FpeConfig.checksum` (`execution/native/_crypto_ext.py:151-189`), `FpeParams.checksum` (`execution/native/_operator_params.py:159`, `:263`) and `fpe_config_from_params`. The FFI entry `fpe_transform_batch` (`decoy-engine-native/src/arrow_ffi.rs:556-567`, which calls `fpe_transform_batch_checked` at `:491-502`) has no checksum argument. `arrow_ffi.rs` is 615 lines; the new argument adds about 6 lines to it and the checksum logic stays in the new modules.
 
-The oracle (`transforms/_fpe_checksum.py:68-232`, `_fpe_checksum_permute`) runs, per value, after `_fpe_value` strips separators (`transforms/fpe.py:405-445`):
+Two more modules read `checksum` but do not decide a route: the Python handlers that carry the scheme to the oracle, `execution/_strategies/_fpe.py:162` and `execution/out_of_core/_mask_group_b.py:145`. They are unchanged.
 
-1. unknown scheme: `FpeChecksumError` (plan check `check_fpe_checksum_scheme`, `plan/_checks.py:455`, catches it at compile);
+The oracle (`transforms/_fpe_checksum.py:68-232`, `_fpe_checksum_permute`) runs, per value, after `_fpe_value` strips separators (`transforms/fpe.py:357-466`):
+
+1. unknown scheme: `FpeChecksumError` (plan check `check_fpe_checksum_scheme`, `plan/_checks.py:457`, catches it at compile);
 2. `iban`: `FpeChecksumError` (also caught at compile as `fpe_checksum_iban_unsupported`);
 3. `_validate_scheme_length` (`transforms/_fpe_checksum.py:40`): exact lengths npi 10, isbn13 13, ean13 13, vin 17, gtin 8/12/13/14, luhn at least 2; else `fpe_checksum_unsupported`;
 4. forward only: `checksums.validate(scheme, s)` (`checksums.py:351`); false gives `fpe_checksum_invalid_source`;
@@ -37,7 +39,7 @@ The oracle (`transforms/_fpe_checksum.py:68-232`, `_fpe_checksum_permute`) runs,
 
 The FF1 call inside every branch is the same `_permute` that the non-checksum path uses, and the Rust kernel already reproduces it exactly (`decoy-engine-native/src/fpe.rs:174-245`, KAT-locked by `decoy-engine-native/tests/kat_fpe.rs`). Only the check-digit arithmetic and the branch layout are new.
 
-Check-digit sources (`checksums.py:57-330`): luhn, ean13, gtin and isbn13 delegate to python-stdnum (`pyproject.toml:116`, `python-stdnum>=2.2`); npi (CMS NPI standard, Luhn over the `80840` prefix) and vin (NHTSA 49 CFR 565 weights and transliteration) are hand-rolled because stdnum 2.2 has no module for either.
+Check-digit sources (`checksums.py:61-322`): luhn, ean13, gtin and isbn13 delegate to python-stdnum (`pyproject.toml:109`, `python-stdnum>=2.2`); npi (CMS NPI standard, Luhn over the `80840` prefix) and vin (NHTSA 49 CFR 565 weights and transliteration) are hand-rolled because stdnum 2.2 has no module for either.
 
 ## 2. Established solutions
 
@@ -50,7 +52,7 @@ Search run: Rust crates for check digits (`luhn`, `luhn3`, `checkdigit`, `isbn`,
 
 - `fpe.rs::permute`, `ResolvedConfig`, `fpe_one` and the per-row code channel: reused; the checksum branch calls `permute` with a digits (or VIN) `ResolvedConfig` built once per batch.
 - `fpe.rs::luhn_check_digit` (`:137`): moves into `checksum.rs` and is called from both places; `text_redact/validators.rs:13` `luhn_valid` keeps its own looser input rules (strip whitespace and dashes, at least 13 digits) because those are the detector's contract, but its mod-10 sum calls the shared function.
-- The FFI shape, per-row `(row_index, code)` errors and `_row_error` mapping in `execution/native/_fpe_ext.py:158`: reused; two new codes join the list.
+- The FFI shape, per-row `(row_index, code)` errors and `_row_error` mapping in `execution/native/_fpe_ext.py:159`: reused; two new codes join the list.
 - `FpeConfig.checksum`, `FpeParams.checksum`: already carried.
 - `native/_operator_config_rejections.py`: the existing home for config-level declines; the one checksum rule moves there.
 - Vector tooling `decoy-engine-native/vectors/generate_fpe_kat.py` and `tests/kat_fpe.rs`: extended, not copied.
@@ -94,7 +96,7 @@ The per-row outcomes 4 and 5 become row errors on the native routes exactly as t
 
 ### FK shapes
 
-- `fpe` on an FK key column (parent, child or composite part): stays on Python on every route (`docs/compatibility-contract.md:698`); checksum does not change that. K7.
+- `fpe` on an FK key column (parent, child or composite part): stays on Python on every route (`docs/compatibility-contract.md:768`); checksum does not change that. K7.
 - Non-key `fpe` column on an FK parent or child table: native on sequential and out-of-core, as today without checksum. K4.
 
 ### Fields
@@ -115,11 +117,11 @@ The per-row outcomes 4 and 5 become row errors on the native routes exactly as t
 
 ### Codes
 
-No new route or runtime reason code. `FPE_CHECKSUM_NOT_NATIVE` (`reasons/route/_part1.py:125`) stays registered for a scheme the registry does not list (none after S2; kept so a future scheme lands declined first). The kernel returns the existing runtime codes `fpe_checksum_unsupported` and `fpe_checksum_invalid_source` (`reasons/runtime/_part3.py:158`, `:358`) as per-row codes; `_fpe_ext.py` adds them to its known-code set so an unknown code still fails closed.
+No new route or runtime reason code. `FPE_CHECKSUM_NOT_NATIVE` (`reasons/route/_part1.py:128`) stays registered for a scheme the registry does not list (none after S2; kept so a future scheme lands declined first). The kernel returns the existing runtime codes `fpe_checksum_unsupported` and `fpe_checksum_invalid_source` (`reasons/runtime/_part3.py:174`, `:384`) as per-row codes; `_fpe_ext.py` adds them to its known-code set so an unknown code still fails closed.
 
 ## 5. Design
 
-1. **Registry fact.** `OperatorSpec` gains `checksum_schemes: frozenset[str] = frozenset()`. The fpe spec (`execution/_operator_registry.py:260-286`) sets it to the six schemes in S2. S1 leaves it empty.
+1. **Registry fact.** `OperatorSpec` gains `checksum_schemes: frozenset[str] = frozenset()`. The fpe spec (`execution/_operator_registry.py:277-301`) sets it to the six schemes in S2. S1 leaves it empty.
 2. **One rule.** `fpe_checksum_rejection(column, cfg) -> str | None` in `execution/native/_operator_config_rejections.py`: `None` when `cfg.get("checksum")` is falsy or in `OPERATORS["fpe"].checksum_schemes`; otherwise `fpe_checksum_not_native:<column>`. The four sites in section 1 call it; `_shadow_bindings.py` keeps its `None` return when the rule rejects. The sequential gate order "checksum, namespace, config, source type" (`_sequential_native_ops.py:253`) is kept by calling the rule first.
 3. **Wrapper.** `_fpe_ext.py:131-137` becomes: pass `checksum` through to the kernel; the assertion is replaced by "scheme in `checksum_schemes`" so a caller that skips admission fails closed with a coded error, not wrong output.
 4. **FFI.** `fpe_transform_batch` gains `checksum: Option<String>` (last positional, before `native_threads`). An unknown scheme string returns a whole-call error `fpe_checksum_unknown_scheme` (the plan check catches it first; this is the backstop). `ABI_VERSION` moves to `decoy-native-abi-4` (`decoy-engine-native/src/lib.rs:57`) and `_EXPECTED_ABI_VERSION` (`execution/native/_crypto_ext.py:359`) with it, so an old companion is refused instead of silently ignoring the argument.
@@ -135,7 +137,7 @@ Design notes: one fact (the registry field), one rule (the rejection function), 
 |---|---|---|---|---|
 | S1 | Fold the four declines into `fpe_checksum_rejection`; add `checksum_schemes` (empty); sentry K6. Behavior unchanged | `_operator_registry.py`, `_operator_config_rejections.py`, `_shadow_bindings.py`, `_real_type_admission.py`, `_sequential_native_ops.py`, `out_of_core/_fpe_native.py`, tests | source about 40 net negative, tests about 90 | none |
 | S2 | Rust `checksum.rs`, `fpe_checksum.rs`, FFI argument, abi-4, vector generator and KAT files, load probe, wrapper pass-through, registry set to six schemes, contract paragraph, changelog | `decoy-engine-native/src/{checksum.rs,fpe_checksum.rs,fpe.rs,arrow_ffi.rs,lib.rs,text_redact/validators.rs}`, `decoy-engine-native/vectors/generate_checksum_kat.py`, `decoy-engine-native/vectors/{checksum_kat.json,fpe_checksum_kat.json}`, `decoy-engine-native/tests/kat_checksum.rs`, `execution/native/_crypto_ext.py`, `_fpe_ext.py`, `_companion_status.py`, `_operator_registry.py`, docs, tests | Rust about 320, Python about 40, vectors generated, tests about 350 | S1 |
-| S3 (optional) | text_mask `pan` and `npi` detectors through the checksum kernel: drop the exclusion at `_text_mask_native_fpe.py:45-51` and pass the scheme | `_text_mask_native_fpe.py`, `_kernels_scalar.py` caller, tests | source about 25, tests about 120 | S2 |
+| S3 (optional) | text_mask `pan` and `npi` detectors through the checksum kernel: drop the exclusion at `_text_mask_native_fpe.py:44-50` and pass the scheme | `_text_mask_native_fpe.py`, `_kernels_scalar.py` caller, tests | source about 25, tests about 120 | S2 |
 
 Existing tests that assert a checksum decline flip (behavior change; names kept, each flip listed in the builder report): `tests/native/test_c6a_fpe_chunked.py`, `tests/native/test_obs2_decline_records.py` (keeps the code registered, flips the example), `tests/parity/test_phase_d_d2c_fpe_seq.py`, `tests/parity/test_phase_d_fpe_key_seq.py`, `tests/parity/test_phase_d_fpe_int_key_seq.py`, `tests/parity/test_ooc_fpe_native_routing.py`. The ABI bump and changed assertions are full-suite triggers, so S2 runs T3 on the merge head, on Linux and on the Mac (arm64 companion build).
 
@@ -159,12 +161,12 @@ Existing tests that assert a checksum decline flip (behavior change; names kept,
 | 2 | Strict wire and stored types | the FFI `checksum` argument | `Option<String>` matched against a closed enum in Rust; unknown string is a coded error | map unknown to luhn (K5 red) |
 | 3 | No exception context | the new coded errors | Rust codes carry no value; `_fpe_ext.py` keeps `from None` and value-free messages; existing value-free sentries | interpolate the source value into the unknown-scheme message (sentry red) |
 | 4 | Versioned read models | the vector files | each JSON file carries `schema_version` and a provenance block (generator, stdnum version, date); `kat_checksum.rs` refuses an unknown version | drop the version check (seeded old-version fixture passes, red) |
-| 5 | Normalized guard scanners | sentry K6 | parses the AST of `execution/` for any `.get("checksum")` or `["checksum"]` read outside `_operator_config_rejections.py`, `_operator_params.py`, `_crypto_ext.py`; catches attribute, subscript and `get` forms | add `if cfg.get("checksum"):` to `_shadow_bindings.py` (red); add it with a `getattr` alias (red) |
+| 5 | Normalized guard scanners | sentry K6 | parses the AST of `execution/` for any `.get("checksum")` or `["checksum"]` read outside a five-module allow set that belongs to this new sentry only (no existing allowlist or baseline grows): `_operator_config_rejections.py` (the rule), `_operator_params.py` and `_crypto_ext.py` (carry the scheme to the kernel), `_strategies/_fpe.py` and `out_of_core/_mask_group_b.py` (carry it to the oracle); catches attribute, subscript and `get` forms | add `if cfg.get("checksum"):` to `_shadow_bindings.py` (red); add it with a `getattr` alias (red) |
 | 6 | No reaching into private modules | tests read `checksums._VALIDATORS` | the generator and tests use the public `validate`/`calc_check_digit` only | n/a |
 | 7 | No hidden CI failures | Rust KAT and the Mac build | `cargo test` runs in the companion CI job; the gate records the arm64 build and `kat_checksum` result | n/a |
 | 8 | One input, one trust class per entry point | `fpe_transform_batch` | one caller class (the engine wrapper); no new entry point | n/a |
 | 9 | Mutations on the final head | named mutations below rerun after the last change | gate record | n/a |
-| 10 | Allowlisted helpers still checked | sentry K6 allowlist of three modules | each allowed module must actually read `checksum` (a stale entry fails) | remove the read from `_crypto_ext.py` (sentry red on stale entry) |
+| 10 | Allowlisted helpers still checked | sentry K6 own allow set of five modules | each allowed module must actually read `checksum` (a stale entry fails) | remove the read from `_crypto_ext.py` (sentry red on stale entry) |
 | 11 | No raised caps | no cap raised; `fpe.rs` must not grow past its size | review; `fpe.rs` diff limited to the dispatch line | n/a |
 
 ### Harness defect classes (`docs/handoffs/DEFECT-CATALOG.md`)
@@ -180,7 +182,7 @@ Existing tests that assert a checksum decline flip (behavior change; names kept,
 | 7 | Check then use | N/A: validation and permute run on the same in-memory value in one call | n/a | n/a | n/a |
 | 8 | Weak tests | a KAT built from the kernel itself | vectors come from python-stdnum and `decoy_engine.checksums`, never from Rust output; generator refuses to run without stdnum | K1 provenance check | regenerate vectors from Rust output (provenance check red) |
 | 9 | Refactor drift | S1 fold | S1 is behavior-preserving; existing decline tests pass unchanged on S1 | S1 test run | n/a |
-| 10 | Frozen contract drift | contract fpe paragraph, ABI string | contract text, abi-4, changelog fragment | K5, docs review | keep abi-3 with the new argument (K5 red) |
+| 10 | Frozen contract drift | contract fpe paragraph, ABI string | contract text, abi-4, changelog fragment `changelog.d/fpe-checksum-native.md` (format in `changelog.d/README.md`) | K5, docs review | keep abi-3 with the new argument (K5 red) |
 
 ## 9. Acceptance tests (each fails before its slice unless marked)
 
@@ -201,12 +203,16 @@ Performance evidence (performance.md): the audit probe (`fpe(checksum: npi)` at 
 
 No masked value changes on any route (K4 compares against the unchanged oracle). Named changes:
 
-1. **B1.** Checksum columns move from the full-frame oracle to the native routes, so on unified slice and chunked an empty or all-null column takes the native routes' type rules (the fpe `tokenizing` assembly, `execution/_operator_registry.py:270-274`) instead of the pandas one. Same reconciliation as non-checksum fpe today.
+1. **B1.** Checksum columns move from the full-frame oracle to the native routes, so on unified slice and chunked an empty or all-null column takes the native routes' type rules (the fpe `tokenizing` assembly, `execution/_operator_registry.py:287-291`) instead of the pandas one. Same reconciliation as non-checksum fpe today.
 2. **B2.** Companion ABI `decoy-native-abi-3` to `decoy-native-abi-4`: an older companion wheel no longer loads with a newer engine (it never shipped separately; the CLI bundles both).
 
 Fragment first line: `Breaking: fpe with a checksum scheme (luhn, npi, ean13, gtin, isbn13, vin) now runs in the native companion on every route, and the companion ABI is now decoy-native-abi-4.`
 
 `SEED_PROTOCOL_VERSION`, plan serialization and digests do not change.
+
+Public signatures (engine #763 sentry, `tests/sentry/release/test_public_signatures.py`): no public Python signature changes. `OperatorSpec` is private and the new field has a default; the FFI is not a public Python surface. `tests/sentry/baselines/signature-exemptions.json` is not touched. The Breaking line above still goes in the fragment because of B1 and B2.
+
+ABI pin sites S2 updates to the new tag (13 besides `lib.rs`): `decoy-engine-native/scripts/parity_smoke.py`, `execution/native/_crypto_ext.py`, `tests/native/{test_c6c_ii_text_redact_rust.py,test_crypto_ext_loader.py,test_group_key_ext.py,test_index_ext.py,test_native_ext_abi.py}`, `tests/parity/{test_ooc_fpe_native_real.py,test_ooc_text_redact_native_real.py,test_phase_d_d1a_hash_native.py,test_phase_d_d1b1_bucket_native.py,test_phase_d_d1b2_categorical_native.py,test_phase_d_dcomp_composite_ooc_real.py}`.
 
 ## 11. Pre-mortem
 
@@ -214,6 +220,7 @@ Fragment first line: `Breaking: fpe with a checksum scheme (luhn, npi, ean13, gt
 - VIN fallback: a charset with fewer than two VIN characters falls back to digits in the oracle. K2 includes a digits-only charset VIN.
 - The oracle's `validate` uses stdnum's input rules (it may strip spaces). Separators are stripped before it in both paths; K3's separator cells prove the kernel matches.
 - The arm64 Mac build fails on a new module. S2 gate builds on the Mac before merge.
+- Two rows bump the ABI. TEXT-REDACT-RUST-SPLICE also plans an ABI bump. Whichever S2 merges second takes the next tag (`abi-5`) and updates the same pin sites; the second builder merges main and re-runs K5 before its gate. Neither plan reuses a tag.
 
 ## 12. Owner questions
 
