@@ -9,6 +9,10 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+### Added
+
+- `decoy_engine.safe_output.SafeText` and `render_failure`: outbound failure text built from literals, approved slots, registry summaries or a type label, never from exception or data text. Documented internal until 1.0.
+
 ## [0.28.4] - 2026-11-23
 
 ### Breaking for consumers
