@@ -108,10 +108,12 @@ def test_facts_equal_whole_table_pandas(n: int, batch_rows: int, tmp_path: Path)
         f = facts[col]
         frame = _frame_column_facts("t", of["t"], col, sf)
         assert (f.source_rows, f.output_rows) == (n, n)
-        assert (f.identical_rows, f.comparable_rows) == (
-            frame.identical_rows,
-            frame.comparable_rows,
-        )
+        # Counted cell by cell in plain Python, apart from the helper both paths share.
+        pairs = list(zip(src[col].to_pylist(), out[col].to_pylist(), strict=True))
+        both = [(a, b) for a, b in pairs if a is not None and b is not None]
+        expected_counts = (sum(a == b for a, b in both), len(both))
+        assert (f.identical_rows, f.comparable_rows) == expected_counts
+        assert (frame.identical_rows, frame.comparable_rows) == expected_counts
         assert f.bytes_identical == policy[col].bytes_identical
         assert f.source_distinct == frame.source_distinct == policy[col].source_distinct
         assert f.output_distinct == policy[col].output_distinct

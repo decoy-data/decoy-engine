@@ -12,7 +12,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 ### Fixed
 
 - the resident-frame residual-PII check now reports an error finding when its source comparison raises, as the batch check already did; before, the failure read as a clean check.
-- both residual-PII checks report a source comparison that raised on a configured column even when no detector fires on it, and the resident-frame check now compares cells with the batch check's code, so a source of list cells gets the same finding on both.
+- both residual-PII checks report a source comparison that raised on a column some entry writes (a joint_mask sibling included) even when no detector fires on it. Both checks now compare and count list, map and struct cells in one form, so a list never equals its one element and a constant list counts as one value on either path. A source distinct count that failed is no longer read as a varied source: when it would change the grade, the finding is an error.
 
 ## [0.28.3] - 2026-11-22
 

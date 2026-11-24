@@ -319,15 +319,15 @@ def test_an_unconfigured_list_or_map_column_leaves_the_other_columns_findings(ce
     assert ("ssn", "fail") in {(f["column"], f["severity"]) for f in report["residual_pii"]}
 
 
-def test_a_configured_list_column_gets_its_own_policy_error_only():
+def test_a_configured_list_column_is_compared_like_any_other():
+    """List cells compare as lists on both paths, so a hash that left them unchanged fails."""
     frame = pa.table(
         {"ssn": SSN, "cells": pa.array([[1, 2], [3]] * 15, pa.list_(pa.int64()))}
     ).to_pandas()
     config = _cfg(("ssn", "faker"), ("cells", "hash"))
     report = run_post_mask({"t": frame}, {"t": frame}, config=config)
     by_column = {f["column"]: f for f in report["policy_validation"]}
-    assert by_column["cells"]["severity"] == "error"
-    assert "ValueError" in by_column["cells"]["message"]
+    assert by_column["cells"]["severity"] == "fail"
     assert by_column["ssn"]["severity"] == "fail"
     assert ("ssn", "fail") in {(f["column"], f["severity"]) for f in report["residual_pii"]}
 
@@ -404,16 +404,35 @@ def test_a_failed_source_comparison_is_an_error_finding_not_a_quiet_downgrade(
     assert "RuntimeError" in finding["message"] and CANARY not in repr(report)
 
 
-def test_a_failed_distinct_count_keeps_the_valid_identity_rate(monkeypatch: pytest.MonkeyPatch):
+def _distinct_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("distinct failed")
 
     monkeypatch.setattr(column_facts_module, "column_distinct", boom)
+
+
+def test_a_failed_distinct_count_that_decides_the_grade_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Full identity fails a varied source and is fine on a constant one, so an uncounted
+    source is neither: the check reports that it could not decide, and keeps the rate."""
+    _distinct_fails(monkeypatch)
     frame = pd.DataFrame({"email": EMAILS})
     report = run_post_mask({"t": frame}, {"t": frame}, config=_cfg(("email", "faker")))
     (finding,) = report["residual_pii"]
-    assert finding["severity"] == "fail" and finding["source_compared"] is True
-    assert finding["source_identity_rate"] == 1.0
+    assert finding["severity"] == "error" and finding["source_compared"] is True
+    assert finding["source_identity_rate"] == 1.0 and "RuntimeError" in finding["message"]
+
+
+def test_a_failed_distinct_count_that_cannot_change_the_grade_keeps_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _distinct_fails(monkeypatch)
+    src = pd.DataFrame({"email": EMAILS})
+    out = pd.DataFrame({"email": FAKE})
+    report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
+    (finding,) = report["residual_pii"]
+    assert finding["severity"] == "info" and finding["source_identity_rate"] == 0.0
 
 
 def test_a_column_converted_natively_on_one_side_only_still_compares_equal_values():

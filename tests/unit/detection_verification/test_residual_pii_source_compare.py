@@ -19,10 +19,10 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.fileaccess import FileAccessReadError
-from decoy_engine.internal.pandas_compat import exact_int_types_mapper
 from decoy_engine.verification.postmask import _column_facts as facts_module
 from decoy_engine.verification.postmask import from_table, run_post_mask
 from decoy_engine.verification.postmask.residual_pii import (
+    _frame_column_facts,
     check_residual_pii,
     residual_pii_findings,
 )
@@ -279,23 +279,17 @@ _OTHER_EMAILS = [f"fake{i}@masked.example" for i in range(100)]
 _RAISE = "raise-on-compare"
 
 
-def _frame_of(table: pa.Table) -> pd.DataFrame:
-    # The cells the batch path sees: list cells arrive as numpy arrays, as in `_series`.
-    return pd.DataFrame(
-        {c: table[c].to_pandas(types_mapper=exact_int_types_mapper) for c in table.column_names}
-    )
-
-
 def _with_raising_cells(series: pd.Series) -> pd.Series:
     return series.map(lambda v: _CellWhoseEqualityRaises() if v == _RAISE else v)
 
 
-def _both_paths(src_cells: list, out_cells: list, strategy: str, tmp_path: Path, monkeypatch):
-    """Findings from the frame check and the batch check on the same source and output."""
-    src = pa.table({"email": src_cells})
-    out = pa.table({"email": out_cells})
-    src_frame = _frame_of(src)
-    if _RAISE in src_cells:
+def _both_paths(src_cols: dict, out_cols: dict, config: dict, tmp_path: Path, monkeypatch):
+    """Findings and facts from the frame check and the batch check on one source and output.
+
+    The frame check gets the native Python cells (a list stays a list), as a caller's pandas
+    frame holds them; the batch check reads the same cells through Arrow."""
+    src_frame, out_frame = pd.DataFrame(src_cols), pd.DataFrame(out_cols)
+    if any(_RAISE in cells for cells in src_cols.values()):
         # Arrow cannot hold a cell whose equality raises, so both paths swap the marker cells
         # for one at the point each reads its cells.
         src_frame = src_frame.apply(_with_raising_cells)
@@ -303,56 +297,104 @@ def _both_paths(src_cells: list, out_cells: list, strategy: str, tmp_path: Path,
         monkeypatch.setattr(
             facts_module, "_series", lambda batch, c: _with_raising_cells(real_series(batch, c))
         )
-    frame = check_residual_pii(
-        {"t": _frame_of(out)}, _cfg(strategy), source_frames={"t": src_frame}
-    )
-    facts = facts_module.column_facts(
-        from_table("t", src),
-        from_table("t", out),
-        ["email"],
+    frame = check_residual_pii({"t": out_frame}, config, source_frames={"t": src_frame})
+    frame_facts = {c: _frame_column_facts("t", out_frame, c, {"t": src_frame}) for c in out_cols}
+    batch_facts = facts_module.column_facts(
+        from_table("t", pa.table(src_cols)),
+        from_table("t", pa.table(out_cols)),
+        list(out_cols),
         scratch=tmp_path,
         memory_limit="256MB",
     )
-    batch = residual_pii_findings({"t": facts}, _cfg(strategy))
-    return frame, batch
+    batch = residual_pii_findings({"t": batch_facts}, config)
+    return frame, batch, frame_facts, batch_facts
 
 
+def _compared(fact) -> tuple:
+    return (
+        fact.comparable_rows,
+        fact.identical_rows,
+        fact.source_distinct,
+        fact.source_distinct_failed,
+        fact.identity_error,
+    )
+
+
+_CONSTANT = [[_EMAILS[0]]] * 100
+# (source cells, output cells, severity on a faker column, identical rows, source distinct)
 _PARITY_CASES = {
-    "one-element lists": ([[e] for e in _EMAILS], _OTHER_EMAILS, "info"),
-    "one-element lists, leaked": ([[e] for e in _EMAILS], _EMAILS, "fail"),
-    "two-element lists": ([[e, "x"] for e in _EMAILS], _OTHER_EMAILS, "error"),
-    "equality raises": ([_RAISE] * 100, _OTHER_EMAILS, "error"),
+    "one-element lists": ([[e] for e in _EMAILS], _OTHER_EMAILS, "info", 0, 100),
+    # A list is not its one element, on either path.
+    "one-element lists, scalar output": ([[e] for e in _EMAILS], _EMAILS, "info", 0, 100),
+    "two-element lists": ([[e, "x"] for e in _EMAILS], _OTHER_EMAILS, "info", 0, 100),
+    "one constant list": (_CONSTANT, [_EMAILS[0]] * 100, "info", 0, 1),
+    "equality raises": ([_RAISE] * 100, _OTHER_EMAILS, "error", 0, 1),
 }
 
 
 class TestFrameAndBatchAgree:
-    """Codex R1 on #784: both real paths, one input, the same findings."""
+    """Codex R1 and R2 on #784: both real paths, one input, the same facts and findings."""
 
     @pytest.mark.parametrize("case", list(_PARITY_CASES))
     def test_same_findings_on_both_paths(self, case, tmp_path, monkeypatch):
-        src_cells, out_cells, severity = _PARITY_CASES[case]
-        frame, batch = _both_paths(src_cells, out_cells, "faker", tmp_path, monkeypatch)
+        src_cells, out_cells, severity, _, _ = _PARITY_CASES[case]
+        frame, batch, _, _ = _both_paths(
+            {"email": src_cells}, {"email": out_cells}, _cfg("faker"), tmp_path, monkeypatch
+        )
         assert frame == batch
         assert [f.severity for f in frame] == [severity]
 
-    @pytest.mark.parametrize("case", ["two-element lists", "equality raises"])
-    def test_failed_comparison_without_a_detector_hit_is_an_error(
-        self, case, tmp_path, monkeypatch
-    ):
+    @pytest.mark.parametrize("case", [c for c in _PARITY_CASES if c != "equality raises"])
+    def test_same_comparison_facts_on_both_paths(self, case, tmp_path, monkeypatch):
+        src_cells, out_cells, _, identical, distinct = _PARITY_CASES[case]
+        _, _, frame, batch = _both_paths(
+            {"email": src_cells}, {"email": out_cells}, _cfg("faker"), tmp_path, monkeypatch
+        )
+        expected = (100, identical, distinct, False, None)
+        assert _compared(frame["email"]) == _compared(batch["email"]) == expected
+
+    def test_failed_comparison_without_a_detector_hit_is_an_error(self, tmp_path, monkeypatch):
         """A column no detector flags still reports a comparison that raised."""
-        src_cells = _PARITY_CASES[case][0]
-        frame, batch = _both_paths(src_cells, _PLAIN, "faker", tmp_path, monkeypatch)
+        frame, batch, _, _ = _both_paths(
+            {"email": [_RAISE] * 100}, {"email": _PLAIN}, _cfg("faker"), tmp_path, monkeypatch
+        )
         assert frame == batch
         finding = _one(frame)
         assert finding.severity == "error"
         assert finding.detector_id == ""
         assert finding.source_compared is False
-        assert "realmail.com" not in finding.message
         assert "secret-cell-value" not in finding.message
 
     def test_passthrough_failed_comparison_without_a_detector_hit_stays_quiet(
         self, tmp_path, monkeypatch
     ):
-        src_cells = _PARITY_CASES["two-element lists"][0]
-        frame, batch = _both_paths(src_cells, _PLAIN, "passthrough", tmp_path, monkeypatch)
+        frame, batch, _, _ = _both_paths(
+            {"email": [_RAISE] * 100},
+            {"email": _PLAIN},
+            _cfg("passthrough"),
+            tmp_path,
+            monkeypatch,
+        )
         assert frame == batch == []
+
+    def test_a_column_a_mask_writes_but_no_entry_names_reports_a_failed_comparison(
+        self, tmp_path, monkeypatch
+    ):
+        """A joint_mask entry on `city` also writes `zip` and `state`, so a failed comparison on
+        `zip` is reported though no column entry names it. `note` no entry writes stays quiet."""
+        joint = {
+            "name": "city",
+            "strategy": "joint_mask",
+            "provider_config": {
+                "columns": ["zip", "city", "state"],
+                "reference": "us_zip5_city_state",
+                "key_by": "pid",
+            },
+        }
+        config = {"version": 2, "tables": [{"name": "t", "columns": [joint]}]}
+        src = {"zip": [_RAISE] * 100, "note": [_RAISE] * 100}
+        out = {"zip": _PLAIN, "note": _PLAIN}
+        frame, batch, _, _ = _both_paths(src, out, config, tmp_path, monkeypatch)
+        assert frame == batch
+        finding = _one(frame)
+        assert (finding.column, finding.severity) == ("zip", "error")

@@ -54,7 +54,9 @@ from decoy_engine.profiling import passes_through
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
     DetectorRate,
+    canonical_cells,
     identity_counts,
+    masked_columns,
 )
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
@@ -97,34 +99,18 @@ _WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"}
 # 'info' (a confirmation), not 'warning'. Without this, every
 # passthrough column that matched any detector emitted a false-positive
 # residual-PII warning.
-_NO_OP_BY_DESIGN: frozenset[str] = frozenset(
-    {
-        "passthrough",
-    }
-)
+_NO_OP_BY_DESIGN: frozenset[str] = frozenset({"passthrough"})
 
 # Strategies that REPLACE values per-cell: positional identity with the
 # source at scale means the mask did not fire. Mirrors the substitution
 # side of validation/post/_checks/_leakage.py.
-_SUBSTITUTION_STRATEGIES: frozenset[str] = frozenset(
-    {
-        "faker",
-        "date_shift",
-        "fpe",
-    }
-)
+_SUBSTITUTION_STRATEGIES: frozenset[str] = frozenset({"faker", "date_shift", "fpe"})
 
 # Strategies that legitimately re-emit source VALUES (in new positions /
 # proportions): only FULL positional identity is a failure signal.
 # Mirrors _VALUE_REUSE_STRATEGIES in _leakage.py, plus reference (parent
 # domain == source FK domain by design).
-_REUSES_SOURCE_VALUES: frozenset[str] = frozenset(
-    {
-        "shuffle",
-        "categorical",
-        "reference",
-    }
-)
+_REUSES_SOURCE_VALUES: frozenset[str] = frozenset({"shuffle", "categorical", "reference"})
 
 # Escalation thresholds for substitution strategies and unconfigured
 # columns. Faker/FPE positional self-maps are near-impossible at scale,
@@ -198,10 +184,10 @@ def _frame_column_facts(
                 raise
             identity_error = type(exc).__name__
         if comparable:
-            # A failed count (an unhashable list cell, say) leaves the identity counts standing,
-            # as a failed DuckDB count does on the batch path.
+            # Counted on the cells the comparison saw; a failed count leaves the identity counts
+            # standing, as a failed DuckDB count does on the batch path.
             try:
-                distinct = int(src.nunique(dropna=True))
+                distinct = int(canonical_cells(src).nunique(dropna=True))
             except Exception as exc:
                 if passes_through(exc):
                     raise
@@ -520,14 +506,17 @@ def residual_pii_findings(
         )
         for table, error in (failed_tables or {}).items()
     ]
+    masked = masked_columns(config)
     for table_name, columns in output_facts.items():
         for col_name, fact in columns.items():
             configured = strategy_by_col.get((table_name, col_name))
             failed_compare = fact.identity_error is not None and configured not in _NO_OP_BY_DESIGN
             if not fact.detectors:
-                # A configured column whose comparison raised is reported with no detector hit
-                # too: the check could not run. An unconfigured one with no hit was never checked.
-                if failed_compare and configured is not None:
+                # A comparison that raised on a column some entry writes is reported with no
+                # detector hit too: the check could not run. A column no entry writes was never
+                # masked, so its comparison is not the check's to report.
+                written = masked.get(table_name, frozenset())
+                if failed_compare and (written is None or col_name in written):
                     findings.append(
                         ResidualPIIFinding(
                             table=table_name,
@@ -560,21 +549,26 @@ def residual_pii_findings(
                     strategy=str(configured),
                 )
             elif rate is not None:
-                override = _escalate(
-                    configured=configured,
-                    identity_rate=rate,
-                    identical_count=fact.identical_rows,
-                    # An uncounted source distinct is unknown, not constant: keep it above the
-                    # constant-source cutoff so the valid identity rate still decides. A failed
-                    # output count says nothing about the source.
-                    src_distinct=max(fact.source_distinct, 2)
-                    if fact.source_distinct_failed
-                    else fact.source_distinct,
-                    detector_confidence=top.confidence,
-                    detector_id=top.detector_id,
-                    table_present=table_present,
-                )
-                if override is not None and (
+                # An uncounted source distinct is unknown, neither constant nor varied: grade it
+                # both ways, and when the constant-source cutoff changes the grade the check
+                # could not decide. A failed output count says nothing about the source.
+                counts = (1, 2) if fact.source_distinct_failed else (fact.source_distinct,)
+                overrides = {
+                    _escalate(
+                        configured=configured,
+                        identity_rate=rate,
+                        identical_count=fact.identical_rows,
+                        src_distinct=distinct,
+                        detector_confidence=top.confidence,
+                        detector_id=top.detector_id,
+                        table_present=table_present,
+                    )
+                    for distinct in counts
+                }
+                if len(overrides) > 1:
+                    severity = "error"
+                    message = _compare_raised(top.detector_id, str(fact.distinct_error))
+                elif (override := next(iter(overrides))) is not None and (
                     _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
                 ):
                     severity, message = override

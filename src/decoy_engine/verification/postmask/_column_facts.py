@@ -20,17 +20,20 @@ quarantine breaks. Aggregates only: no value reaches a field here.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
+from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.internal.pandas_compat import exact_int_types_mapper
 from decoy_engine.profiling import KEY_BATCH_ROWS, column_distinct, passes_through
+from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.verification.postmask._stream_input import TableBatches, key_batches
 
 
@@ -232,13 +235,35 @@ def _aligned(
         a, b = a.slice(n), b.slice(n)
 
 
+def _frozen(cell: Any) -> Any:
+    if isinstance(cell, list | tuple | np.ndarray):
+        return tuple(_frozen(v) for v in cell)
+    if isinstance(cell, dict):
+        return tuple((k, _frozen(v)) for k, v in cell.items())
+    if isinstance(cell, set | frozenset):
+        return frozenset(_frozen(v) for v in cell)
+    return cell
+
+
+def canonical_cells(series: pd.Series) -> pd.Series:
+    """`series` as object cells in the one form both checks compare and count.
+
+    A caller's frame holds a list cell as a Python list and a struct as a dict; the batch check
+    reads them through Arrow as a NumPy array, and a map as a list of key-value tuples. Each
+    container becomes a tuple (a set a frozenset), so a list equals the same list on either
+    path, never its one element, and is hashable for a distinct count."""
+    cells = series.astype(object)
+    # Only an object column can hold a container; a typed one is passed as it is.
+    return cells.map(_frozen) if series.dtype == object else cells
+
+
 def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
     """Comparable and identical row counts of a positional source-to-output comparison.
 
     The one comparison the frame check and the batch check both run, so the two cannot grade
     the same cells differently. Both series must share a positional index. A cell comparison
     that fails raises; the caller records the class name as the column's `identity_error`."""
-    src_o, out_o = src.astype(object), out.astype(object)
+    src_o, out_o = canonical_cells(src), canonical_cells(out)
     present = src_o.notna() & out_o.notna()
     return int(present.sum()), int((src_o[present] == out_o[present]).sum())
 
@@ -425,3 +450,20 @@ def value_facts(
             tallies[c].add(batch.column(batch.schema.get_field_index(c)))
     verify()
     return {c: t.done() for c, t in tallies.items()}
+
+
+def masked_columns(config: Mapping[str, Any]) -> dict[str, frozenset[str] | None]:
+    """Per configured table, every column some entry names or writes, or None when an entry's
+    writes cannot be named (then any column may be written).
+
+    The writes come from the declarations execution itself honors (`handler_written_columns`),
+    so a joint_mask entry on one column counts the sibling columns it also writes."""
+    masked: dict[str, frozenset[str] | None] = {}
+    for table in config.get("tables") or []:
+        if not isinstance(table, Mapping) or not isinstance(table.get("name"), str):
+            continue
+        entries = [c for c in table.get("columns") or [] if isinstance(c, Mapping)]
+        written = handler_written_columns(entries, get_default_registry())
+        named = {c["name"] for c in entries if isinstance(c.get("name"), str)}
+        masked[table["name"]] = None if written is None else written | named
+    return masked
