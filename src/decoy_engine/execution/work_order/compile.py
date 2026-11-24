@@ -111,7 +111,7 @@ def compile_work_order(work: list[WorkNode], graph: RelationshipGraph) -> WorkOr
     keys: set[NodeKey] = set()
     for nodes in cyclic:
         ordered += order_work(nodes, graph, fallback_edges(ops))
-        keys.update(n.key for n in nodes)
+        keys |= {n.key for n in nodes}
     return WorkOrder(tuple(ordered), ops, frozenset(keys))
 
 
