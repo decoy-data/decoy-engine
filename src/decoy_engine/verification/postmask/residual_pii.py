@@ -91,11 +91,10 @@ _SUBSTITUTION_STRATEGIES: frozenset[str] = frozenset({"faker", "date_shift", "fp
 # domain == source FK domain by design).
 _REUSES_SOURCE_VALUES: frozenset[str] = frozenset({"shuffle", "categorical", "reference"})
 
-# Escalation thresholds for substitution strategies and unconfigured
-# columns. Faker/FPE positional self-maps are near-impossible at scale,
-# so >=50% identity means the mask mostly did not fire; 5-50% surfaces
-# as a non-blocking warning (partial failure, operator review). The
-# min-rows floor keeps tiny frames from failing on coincidence.
+# Escalation thresholds for substitution strategies and unconfigured columns. Faker/FPE
+# positional self-maps are near-impossible at scale, so >=50% identity means the mask mostly
+# did not fire; 5-50% is a non-blocking warning. The min-rows floor keeps tiny frames from
+# failing on coincidence.
 _LEAK_FAIL_RATE = 0.5
 _LEAK_WARN_RATE = 0.05
 _LEAK_FAIL_MIN_ROWS = 3
