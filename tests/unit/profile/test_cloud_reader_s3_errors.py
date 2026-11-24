@@ -60,7 +60,7 @@ class _ReadFailing:
         self._exc = exc
 
     def head_object(self, **_kw: Any) -> dict:
-        return {"ContentLength": 10}
+        return {"ContentLength": 10, "ETag": '"v1"'}
 
     def get_object(self, **_kw: Any) -> dict:
         exc = self._exc
@@ -86,7 +86,7 @@ _STREAM = [
 
 
 @pytest.mark.parametrize(("exc", "kind"), _STREAM, ids=lambda v: type(v).__name__)
-@pytest.mark.parametrize("read", ["range", "full"])
+@pytest.mark.parametrize("read", ["range", "to_frame"])
 def test_profiler_body_read_failures_are_classified_and_unchained(
     monkeypatch: pytest.MonkeyPatch, exc: BaseException, kind: str, read: str
 ) -> None:

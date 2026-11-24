@@ -17,7 +17,7 @@ and the retry total equals the library's own default deadline.
 
 Named limit: the outbound sentry (``tests/sentry/test_outbound_clients.py``) matches
 calls by method name, so it does not see a bound method stored in a variable and
-called later (``download = blob.download_as_bytes; download()``), nor a client built
+called later (``reload = blob.reload; reload()``), nor a client built
 inside a third-party library the engine does not wrap, nor calls wrapped in
 ``functools.partial`` or made through ``google.cloud.storage.transfer_manager``. It scans ``src/decoy_engine``
 only; ``scripts/`` and ``testflight/`` are out of scope.
@@ -200,10 +200,65 @@ def gcs_reload(blob: Any) -> None:
     _guard(blob.reload, timeout=GCS_TIMEOUT, retry=gcs_retry())
 
 
-def gcs_download(blob: Any, *, start: int | None = None, end: int | None = None) -> bytes:
-    return _guard(
-        blob.download_as_bytes, start=start, end=end, timeout=GCS_TIMEOUT, retry=gcs_retry()
-    )
+def gcs_download(blob: Any, *, start: int, end: int, size: int, generation: int) -> bytes:
+    """Bytes ``start..end`` (inclusive) of one object version, read as a streamed ranged GET.
+
+    ``Blob.download_as_bytes`` buffers the whole response before returning, so a server that
+    ignores ``Range`` (200) or transcodes a gzip object would hand back the whole object. This
+    sends the media GET itself, checks status and headers before the body is touched, and
+    reads exactly the asked bytes. ``ifGenerationMatch`` pins the version: a changed object
+    answers 412, which becomes ``source_changed``. The whole GET is retried under
+    ``gcs_retry()``, so a dropped stream is asked again from ``start``.
+    """
+    if size == 0:
+        return b""
+    if not 0 <= start <= end < size:
+        raise ValueError("gcs_download: range outside the object")
+
+    def media_get() -> bytes:
+        client = blob.client
+        # SLF001 is not selected for src; the SDK has no public URL builder for a raw GET.
+        url = blob._get_download_url(client, if_generation_match=generation)
+        headers = {"Range": f"bytes={start}-{end}", "Accept-Encoding": "gzip"}
+        response = client._http.request(
+            "GET", url, headers=headers, stream=True, timeout=GCS_TIMEOUT
+        )
+        try:
+            return _ranged_body(response, start, end, size)
+        finally:
+            response.close()
+
+    retry = gcs_retry()
+    return _guard(media_get if retry is None else retry(media_get))
+
+
+def _ranged_body(response: Any, start: int, end: int, size: int) -> bytes:
+    """The body of one ranged media response, refused before any read unless it is exact."""
+    status = response.status_code
+    if status == 412:
+        raise source_changed("GCS")
+    if not 200 <= status < 300:
+        from google.api_core.exceptions import from_http_status
+
+        # 429 and 5xx come back as the types gcs_retry() retries.
+        raise from_http_status(status, "GCS media read failed")
+    headers = response.headers
+    encoding = headers.get("Content-Encoding") or "identity"
+    exact = headers.get("Content-Range") == f"bytes {start}-{end}/{size}"
+    if status != 206 or encoding != "identity" or not exact:
+        # An ignored range or a transcoded body: refuse before reading a byte of it.
+        raise _classified("GCS", "unexpected")
+    want, got = end - start + 1, 0
+    parts: list[bytes] = []
+    while got < want:
+        piece = response.raw.read(want - got, decode_content=False)
+        if not piece:
+            break
+        parts.append(piece)
+        got += len(piece)
+    if got != want:
+        raise source_changed("GCS")
+    return b"".join(parts)
 
 
 class _TranslatingFile:

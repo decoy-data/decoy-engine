@@ -53,3 +53,48 @@ class MemoryHandle:
 
     def __exit__(self, *exc: object) -> None:
         return None
+
+
+class StreamHandle:
+    """A `FileHandle` over a readable byte stream the engine opened itself (a cloud object).
+
+    Not strict: a connector failure raised from inside the stream must reach the caller with
+    its own class and kind, which the strict mapping would turn into a read error. The stream
+    is handed to the library once; nothing here touches a file system.
+    """
+
+    strict = False
+
+    def __init__(self, stream: BinaryIO, display: str) -> None:
+        self._stream = stream
+        self.display = display
+
+    def fileno(self) -> int:
+        raise io.UnsupportedOperation("a stream handle has no descriptor")
+
+    def library_path(self) -> Any:
+        return self._stream
+
+    def stat(self) -> os.stat_result:
+        raise io.UnsupportedOperation("a stream handle has no size")
+
+    def identity(self) -> str:
+        return self.display
+
+    def read_all(self, limit: int | None = None) -> bytes:
+        return self._stream.read() if limit is None else self._stream.read(limit)
+
+    def open_binary(self, opener: Callable[..., BinaryIO] | None = None) -> BinaryIO:
+        return self._stream
+
+    def open_text(self, encoding: str = "utf-8") -> TextIO:
+        return io.TextIOWrapper(self._stream, encoding=encoding)
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def __enter__(self) -> StreamHandle:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()

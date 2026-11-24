@@ -166,14 +166,18 @@ def _stream_blob(get_bucket, path: str) -> Iterator[bytes]:
     """The one GCS object read loop, shared by the source and the object store."""
     try:
         blob = get_bucket().blob(path)
-        # Blob.open returns a file-like wrapping an HTTPS stream;
-        # iterate in chunks for bounded memory use.
-        with _clients.gcs_open(blob, "rb") as remote:
-            while True:
-                chunk = remote.read(_DEFAULT_CHUNK_BYTES)
-                if not chunk:
-                    return
-                yield chunk
+        # Blob.open reads ahead 40 MiB per request; pinned 1 MiB ranges bound each response
+        # and keep every chunk on the generation the reload saw.
+        _clients.gcs_reload(blob)
+        if blob.size is None or blob.generation is None:
+            raise _clients.source_changed("GCS")
+        size, generation = int(blob.size), int(blob.generation)
+        for start in range(0, size, _DEFAULT_CHUNK_BYTES):
+            end = min(start + _DEFAULT_CHUNK_BYTES, size) - 1
+            yield _clients.gcs_download(
+                blob, start=start, end=end, size=size, generation=generation
+            )
+        return
     except ConnectorError:
         raise
     except Exception as exc:

@@ -34,6 +34,21 @@ from decoy_engine.profile._cloud_readers import (  # noqa: E402
 from decoy_engine.sdk import PermanentError, TransientError  # noqa: E402
 
 _ = install  # fixture re-export
+
+
+@pytest.fixture(autouse=True)
+def _short_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient media GET is retried for real; a short deadline keeps the matrix fast."""
+    from decoy_engine.connectors import _clients
+
+    real = _clients.gcs_retry
+    monkeypatch.setattr(_clients, "gcs_retry", lambda: _short(real()))
+
+
+def _short(policy: Any) -> Any:
+    return None if policy is None else policy.with_timeout(0.05).with_delay(0.01, 0.01)
+
+
 MSG = "zz_marker_bkt/zz_marker_obj https://zz-marker-host/b/zz_marker_bkt/o/zz_marker_obj"
 MARKERS = ("zz_marker", "zz-marker-host")
 
@@ -88,8 +103,8 @@ def test_check_detail_is_value_free(case: str, cls: type, install: Callable[...,
 CONNECTOR_POINTS: dict[str, tuple[str, Callable[[], Any]]] = {
     "list@iterate": ("list_iter", lambda: list(GCSFileSource(CFG).list())),
     "head@reload": ("reload", lambda: GCSFileSource(CFG).head("zz_marker_obj")),
-    "open@open": ("open", lambda: b"".join(GCSFileSource(CFG).open("zz_marker_obj"))),
-    "open@read": ("read", lambda: b"".join(GCSFileSource(CFG).open("zz_marker_obj"))),
+    "open@get": ("media_get", lambda: b"".join(GCSFileSource(CFG).open("zz_marker_obj"))),
+    "open@read": ("media_read", lambda: b"".join(GCSFileSource(CFG).open("zz_marker_obj"))),
     "write@write": ("write", lambda: GCSFileSink(CFG).write("zz_marker_obj", iter([b"x"]))),
     "write@close": ("close", lambda: GCSFileSink(CFG).write("zz_marker_obj", iter([b"x"]))),
 }
@@ -117,13 +132,13 @@ READER_POINTS: dict[str, tuple[str, Callable[[], Any], Callable[[], bytes]]] = {
         lambda: GcsCsvSource(_CSV).row_count(),
         lambda: CSV_BODY,
     ),
-    "GcsCsvSource.row_count@download": (
-        "download_as_bytes",
+    "GcsCsvSource.row_count@get": (
+        "media_get",
         lambda: GcsCsvSource(_CSV).row_count(),
         lambda: CSV_BODY,
     ),
-    "GcsCsvSource.to_frame@download": (
-        "download_as_bytes",
+    "GcsCsvSource.to_frame@read": (
+        "media_read",
         lambda: GcsCsvSource(_CSV).to_frame(),
         lambda: CSV_BODY,
     ),
@@ -132,13 +147,13 @@ READER_POINTS: dict[str, tuple[str, Callable[[], Any], Callable[[], bytes]]] = {
         lambda: GcsParquetSource(_PQ).schema(),
         parquet_body,
     ),
-    "GcsParquetSource.schema@download": (
-        "download_as_bytes",
+    "GcsParquetSource.schema@get": (
+        "media_get",
         lambda: GcsParquetSource(_PQ).schema(),
         parquet_body,
     ),
-    "GcsParquetSource.to_frame@download": (
-        "download_as_bytes",
+    "GcsParquetSource.to_frame@read": (
+        "media_read",
         lambda: GcsParquetSource(_PQ).to_frame(),
         parquet_body,
     ),
@@ -247,7 +262,8 @@ def test_open_errors_reach_the_connector_value_free(where: str, install: Callabl
 
     Driven through the public connector entries so it fails on the base by assertion.
     """
-    install(CSV_BODY, fail={where: gax_exc.ServiceUnavailable(MSG)})
+    point = "media_read" if where == "read" else where
+    install(CSV_BODY, fail={point: gax_exc.ServiceUnavailable(MSG)})
     raised: BaseException | None = None
     try:
         if where == "read":

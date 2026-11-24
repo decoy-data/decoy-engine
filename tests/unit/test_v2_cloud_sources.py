@@ -316,45 +316,11 @@ class TestCloudSourceEndToEnd:
         reads through the same Arrow path as file/s3."""
         pytest.importorskip("google.cloud.storage", reason="cloud extra not installed")
         from decoy_engine.profile import profile_source
+        from tests._cloud_fakes import FakeGcsSession, GcsObject, install_gcs
 
-        fake_csv = b"email\nx@a.com\ny@b.com\n"
-
-        class _FakeBlob:
-            # SC7a: the bounded GCS reader reads `blob.size` (a metadata fetch,
-            # not a download) for the CSV row estimate and ranged
-            # `download_as_bytes(start, end)` for the bounded sample window; the
-            # fake mirrors that surface (end is inclusive, matching GCS).
-            def __init__(self):
-                self.size = len(fake_csv)
-                self.calls = []
-
-            def reload(self, timeout=None, retry=None):
-                self.calls.append(("reload", timeout, retry))
-
-            def download_as_bytes(self, start=None, end=None, timeout=None, retry=None):
-                self.calls.append(("download_as_bytes", timeout, retry))
-                if start is None:
-                    return fake_csv
-                return fake_csv[start : (end + 1 if end is not None else None)]
-
-        class _FakeBucket:
-            def blob(self, name):
-                return _FakeBlob()
-
-        class _FakeClient:
-            def bucket(self, name):
-                return _FakeBucket()
-
-            # Q18 fix: production storage.Client supports the context-manager
-            # protocol; the mock must too so the with-block in _load_gcs_source
-            # exercises the realistic close path.
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-        monkeypatch.setattr("google.cloud.storage.Client", lambda *a, **kw: _FakeClient())
+        # The bounded reader pins the object generation and asks for byte ranges; the fake
+        # session answers both under a real storage.Client.
+        session = install_gcs(monkeypatch, FakeGcsSession(GcsObject(b"email\nx@a.com\ny@b.com\n")))
 
         config = _base_config()
         config["sources"] = {
@@ -371,6 +337,8 @@ class TestCloudSourceEndToEnd:
         profile = profile_source(config)
         assert len(profile.tables) == 1
         assert profile.tables[0].name == "customers"
+        assert session.ledger.data_requests
+        assert all(r["pin"] == "7" for r in session.ledger.data_requests)
 
     def test_s3_source_missing_object_surfaces_sdk_error_without_pii_leak(self, _moto_s3):
         """A missing key surfaces as the SDK's NoSuchKey ClientError. The

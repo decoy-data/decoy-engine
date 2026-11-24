@@ -65,6 +65,9 @@ class Recorder:
         self.fail = fail or {}
         self.calls: list[tuple[str, Any, Any]] = []
         self.client_kwargs: list[tuple[tuple, dict]] = []
+        # Media GET statuses served before the 206, and the retry a media GET runs under.
+        self.statuses: list[int] = []
+        self.active_retry: Any = MISSING
 
     def hit(self, point: str, timeout: Any = MISSING, retry: Any = MISSING) -> None:
         if point in _CALL_POINTS:
@@ -73,7 +76,7 @@ class Recorder:
             raise self.fail[point]
 
 
-_CALL_POINTS = {"get_bucket", "reload", "download_as_bytes", "open"}
+_CALL_POINTS = {"get_bucket", "reload", "media_get", "open"}
 
 
 class FakeFile:
@@ -99,27 +102,60 @@ class FakeFile:
         self.close()
 
 
+class FakeRaw:
+    """A media response body; ``media_read`` fails here, after the GET was answered."""
+
+    def __init__(self, rec: Recorder, data: bytes):
+        self.rec, self._buf = rec, io.BytesIO(data)
+
+    def read(self, n: int, decode_content: bool = True) -> bytes:
+        self.rec.hit("media_read")
+        return self._buf.read(n)
+
+
+class FakeMediaResponse:
+    def __init__(self, rec: Recorder, status: int, headers: dict[str, str], data: bytes):
+        self.status_code, self.headers, self.raw = status, headers, FakeRaw(rec, data)
+
+    def close(self) -> None:
+        return None
+
+
+class FakeHttp:
+    """The transport under ``gcs_download``: one ranged, generation-pinned media GET."""
+
+    def __init__(self, rec: Recorder):
+        self.rec = rec
+
+    def request(
+        self, method: str, url: str, headers: dict[str, str], stream: bool, timeout: Any = MISSING
+    ) -> FakeMediaResponse:
+        self.rec.hit("media_get", timeout, self.rec.active_retry)
+        if self.rec.statuses:
+            return FakeMediaResponse(self.rec, self.rec.statuses.pop(0), {}, b"")
+        assert "ifGenerationMatch=1" in url and stream
+        start, end = (int(v) for v in headers["Range"].removeprefix("bytes=").split("-"))
+        body = self.rec.body
+        rng = {"Content-Range": f"bytes {start}-{end}/{len(body)}"}
+        return FakeMediaResponse(self.rec, 206, rng, body[start : end + 1])
+
+
 class FakeBlob:
     def __init__(self, rec: Recorder, name: str):
         self.rec, self.name = rec, name
         self.size: int | None = None
+        self.generation: int | None = None
         self.content_type = "application/octet-stream"
         self.updated = None
+        self.client = type("FakeBlobClient", (), {"_http": FakeHttp(rec)})()
 
     def reload(self, timeout: Any = MISSING, retry: Any = MISSING) -> None:
         self.rec.hit("reload", timeout, retry)
         self.size = len(self.rec.body)
+        self.generation = 1
 
-    def download_as_bytes(
-        self,
-        start: int | None = None,
-        end: int | None = None,
-        timeout: Any = MISSING,
-        retry: Any = MISSING,
-    ) -> bytes:
-        self.rec.hit("download_as_bytes", timeout, retry)
-        body = self.rec.body
-        return body if start is None else body[start : (end + 1 if end is not None else None)]
+    def _get_download_url(self, client: Any, if_generation_match: Any = None) -> str:
+        return f"https://fake.invalid/o?alt=media&ifGenerationMatch={if_generation_match}"
 
     def open(self, mode: str, timeout: Any = MISSING, retry: Any = MISSING) -> FakeFile:
         self.rec.hit("open", timeout, retry)
@@ -167,11 +203,25 @@ class FakeClient:
 
 @pytest.fixture
 def install(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Recorder]:
-    """Patch ``google.cloud.storage.Client`` with a recording fake."""
+    """Patch ``google.cloud.storage.Client`` with a recording fake.
+
+    ``gcs_retry`` is spied so a media GET records the retry policy it actually ran under: the
+    raw request takes no ``retry`` argument, the engine wraps the call instead.
+    """
     from google.cloud import storage
+
+    from decoy_engine.connectors import _clients
+
+    real_retry = _clients.gcs_retry
 
     def _install(body: bytes = b"", fail: dict[str, BaseException] | None = None) -> Recorder:
         rec = Recorder(body, fail)
+
+        def spied_retry() -> Any:
+            policy = real_retry()
+            return None if policy is None else _RetrySpy(policy, rec)
+
+        monkeypatch.setattr(_clients, "gcs_retry", spied_retry)
 
         def _client(*args: Any, **kwargs: Any) -> FakeClient:
             rec.client_kwargs.append((args, kwargs))
@@ -181,6 +231,28 @@ def install(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Recorder]:
         return rec
 
     return _install
+
+
+class _RetrySpy:
+    """A retry policy that marks the calls it wraps; attributes read through to the policy."""
+
+    def __init__(self, policy: Any, rec: Recorder):
+        self._policy, self._rec = policy, rec
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._policy, name)
+
+    def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+        policy, rec = self._policy, self._rec
+
+        def marked(*args: Any, **kwargs: Any) -> Any:
+            previous, rec.active_retry = rec.active_retry, policy
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                rec.active_retry = previous
+
+        return policy(marked)
 
 
 CFG = GCSConfig(bucket=MARK_BKT, project="test-project")
@@ -218,6 +290,15 @@ def test_every_gcs_entry_passes_engine_timeout_and_retry(
         assert timeout == want_timeout, f"{entry}: {method} got timeout={timeout!r}"
         total = getattr(retry, "timeout", None)
         assert total == want_total, f"{entry}: {method} got retry={retry!r}"
+
+
+def test_media_get_retries_a_503_then_reads_the_range(install: Callable[..., Recorder]) -> None:
+    rec = install(CSV_BODY)
+    rec.statuses = [503]
+    assert len(GcsCsvSource(DESC_CSV).to_frame()) == 3
+    gets = [c for c in rec.calls if c[0] == "media_get"]
+    assert len(gets) == 2
+    assert all(retry is not MISSING for _, _, retry in gets)
 
 
 # ----- AT-C10d: a translated timeout is transient on the connector ---------------

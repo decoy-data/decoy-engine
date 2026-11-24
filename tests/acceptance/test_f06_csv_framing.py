@@ -116,111 +116,42 @@ def _cloud_cfg(kind: str) -> dict[str, Any]:
     }
 
 
-class _Body:
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-
-    def __enter__(self) -> _Body:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def read(self) -> bytes:
-        return self._data
-
-
-class _FakeS3:
-    def head_object(self, Bucket: str, Key: str) -> dict[str, int]:
-        return {"ContentLength": len(CLOUD_CSV)}
-
-    def get_object(self, Bucket: str, Key: str, Range: str | None = None) -> dict[str, Any]:
-        if Range is None:
-            return {"Body": _Body(CLOUD_CSV)}
-        _, _, span = Range.partition("=")
-        start, _, end = span.partition("-")
-        return {"Body": _Body(CLOUD_CSV[int(start) : int(end) + 1])}
-
-
-class _FakeBlob:
-    size = len(CLOUD_CSV)
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[object, object]] = []
-
-    def download_as_bytes(
-        self,
-        start: int | None = None,
-        end: int | None = None,
-        timeout: object = None,
-        retry: object = None,
-    ) -> bytes:
-        self.calls.append((timeout, retry))
-        return CLOUD_CSV if start is None else CLOUD_CSV[start : (end or 0) + 1]
-
-
-class _FakeGcs:
-    def __enter__(self) -> _FakeGcs:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def bucket(self, name: str) -> Any:
-        return type("_Bucket", (), {"blob": lambda self, obj: _FakeBlob()})()
-
-
 @pytest.fixture
 def cloud_reader(monkeypatch: pytest.MonkeyPatch) -> Any:
     """The real reader class for ``kind``, built through its production builder, over an
-    in-memory client (the only fake is the network)."""
+    in-memory store (the only fake is the network). Returns the reader and the store ledger."""
     from decoy_engine._lexeme import profile_descriptors
     from decoy_engine.profile import _cloud_readers as cr
+    from tests._cloud_fakes import FakeGcsSession, FakeS3, GcsObject, install_gcs, install_s3
     from tests.acceptance._f06_support import validate
 
-    def build(kind: str) -> Any:
+    def build(kind: str) -> tuple[Any, Any]:
         descriptor = profile_descriptors(validate(_cloud_cfg(kind)))["t"]
         if kind == "s3":
-            monkeypatch.setattr(cr._clients, "s3_client", lambda **_kw: _FakeS3())
+            ledger = install_s3(monkeypatch, FakeS3(CLOUD_CSV)).ledger
             reader = cr.build_s3_profile_source(descriptor)
             assert isinstance(reader, cr.S3CsvSource)
-            return reader
-        try:
-            import google.cloud.storage
-        except ImportError:  # the optional client is absent; the reader only needs `Client()`
-            import sys
-            import types
-
-            google = types.ModuleType("google")
-            cloud = types.ModuleType("google.cloud")
-            storage = types.ModuleType("google.cloud.storage")
-            google.cloud = cloud  # type: ignore[attr-defined]
-            cloud.storage = storage  # type: ignore[attr-defined]
-            for name, mod in (
-                ("google", google),
-                ("google.cloud", cloud),
-                ("google.cloud.storage", storage),
-            ):
-                monkeypatch.setitem(sys.modules, name, mod)
-        monkeypatch.setattr(
-            "google.cloud.storage.Client", lambda *a, **k: _FakeGcs(), raising=False
-        )
+            return reader, ledger
+        pytest.importorskip("google.cloud.storage")
+        ledger = install_gcs(monkeypatch, FakeGcsSession(GcsObject(CLOUD_CSV))).ledger
         reader = cr.build_gcs_profile_source(descriptor)
         assert isinstance(reader, cr.GcsCsvSource)
-        return reader
+        return reader, ledger
 
     return build
 
 
 @pytest.mark.parametrize("kind", ["s3", "gcs"])
 def test_cloud_csv_readers_honour_lexeme_columns(cloud_reader: Any, kind: str) -> None:
-    reader = cloud_reader(kind)
+    reader, ledger = cloud_reader(kind)
     sample = reader.sample_frame(10)
     full = reader.to_frame()
     for frame in (sample, full):
         assert frame["age"].tolist() == ["NA", "042", ""]  # exact lexemes, not NaN / int 42
         assert frame["note"].isna().tolist() == [True, False, True]  # undeclared: legacy NA
     assert str(reader.schema().field("age").type) in {"string", "large_string"}
+    data = ledger.data_requests
+    assert data and all(r["pin"] and r["range"] for r in data)
 
 
 @pytest.mark.parametrize("kind", ["s3", "gcs"])
@@ -231,7 +162,7 @@ def test_cloud_csv_reader_loses_the_lexeme_when_descriptor_plumbing_breaks(
     a regression that stops attaching ``lexeme_columns`` turns the test above red."""
     from decoy_engine._lexeme import LEXEME_KEY
 
-    reader = cloud_reader(kind)
+    reader, _ = cloud_reader(kind)
     reader._descriptor.pop(LEXEME_KEY)
     assert reader.to_frame()["age"].tolist() != ["NA", "042", ""]
 

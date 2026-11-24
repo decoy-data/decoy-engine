@@ -9,7 +9,6 @@ Labels: R1-R5, R7, R13 and R14 CHARACTERIZATION; R6 FAIL-BEFORE.
 
 from __future__ import annotations
 
-import io
 import re
 from pathlib import Path
 from typing import Any
@@ -56,67 +55,14 @@ def test_r1_local_csv_renames_a_repeated_header(tmp_path: Path) -> None:
 # ------------------------------------------------------------------ R2 cloud CSV (stubbed)
 
 
-class _Body(io.BytesIO):
-    pass
-
-
-class _FakeS3:
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-
-    def head_object(self, Bucket: str, Key: str) -> dict[str, Any]:
-        return {"ContentLength": len(self._data)}
-
-    def get_object(self, Bucket: str, Key: str, Range: str | None = None) -> dict[str, Any]:
-        if Range is None:
-            return {"Body": _Body(self._data)}
-        start, end = map(int, re.match(r"bytes=(\d+)-(\d+)", Range).groups())  # type: ignore[union-attr]
-        return {"Body": _Body(self._data[start : end + 1])}
-
-
-class _FakeBlob:
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-        self.size = len(data)
-
-    def reload(self) -> None: ...
-
-    def download_as_bytes(
-        self, start: int | None = None, end: int | None = None, **sdk_options: Any
-    ) -> bytes:
-        # Real google-cloud-storage accepts `timeout`, `retry` and more; the engine passes some.
-        if start is None:
-            return self._data
-        return self._data[start : (end or len(self._data) - 1) + 1]
-
-
-class _FakeGcsClient:
-    def __init__(self, data: bytes) -> None:
-        self._blob = _FakeBlob(data)
-
-    def __enter__(self) -> _FakeGcsClient:
-        return self
-
-    def __exit__(self, *exc: Any) -> None: ...
-
-    def bucket(self, name: str) -> Any:
-        blob = self._blob
-
-        class _Bucket:
-            def blob(self, object_name: str) -> _FakeBlob:
-                return blob
-
-        return _Bucket()
-
-
 def _stub_cloud(monkeypatch: pytest.MonkeyPatch, data: bytes, kind: str) -> None:
-    from decoy_engine.profile import _cloud_readers
+    from tests._cloud_fakes import FakeGcsSession, FakeS3, GcsObject, install_gcs, install_s3
 
     if kind == "s3":
-        monkeypatch.setattr(_cloud_readers._clients, "s3_client", lambda **_kw: _FakeS3(data))
+        install_s3(monkeypatch, FakeS3(data))
         return
-    storage = pytest.importorskip("google.cloud.storage")
-    monkeypatch.setattr(storage, "Client", lambda *a, **k: _FakeGcsClient(data))
+    pytest.importorskip("google.cloud.storage")
+    install_gcs(monkeypatch, FakeGcsSession(GcsObject(data)))
 
 
 def test_r2_cloud_csv_sample_helper_renames() -> None:
