@@ -272,7 +272,7 @@ format is house-specific (`owner YYYY-MM-DD reason`, regex `DECISION` in `_ratch
 - Helpers are loaded by path relative to `_ratchet.py`'s own `__file__`
   (`importlib.util.spec_from_file_location`), the way `ratchet_check.py` loads `_ratchet.py`. A
   base copy extracted to a temp dir therefore loads only the base helpers, never the head's.
-- Principles: no new abstraction; new rule functions join an existing pipeline.
+- RG-E1 A1 puts both input sources behind one reader. Integrity rules stay in the existing pipeline.
 
 Choke point: `_ratchet.check()`, run by `scripts/dev/ratchet_check.py` from the `sentry` gate step
 and from CI. Guard tests in `tests/sentry/ratchet/` run `ratchet_check.py` on temporary git repos
@@ -426,6 +426,104 @@ Size: about +170 helper, +15 `_ratchet.py`, +10 TOML, +250 tests, +1 CODEMAP row
 Test depth: T0 the ratchet test files; T1 impact selection for `tests/sentry`. Escalation trigger:
 test tooling (the ratchet is gate tooling), so the merge runs one full suite diffed against the
 stored main baseline.
+
+### RG-E1 amendment A1 (after round 3)
+
+**Decision.** Use option (b). Option (a) hardens the filesystem path but leaves BASE with
+a separate inventory and mode policy. On `aba823f37`, compare `_ratchet.py:415,447` with
+`ratchet/_integrity.py:96`. A1 replaces those paths. Both sides enumerate before comparing
+inventories, then open and validate each input through the same functions.
+
+**Placement and reader contract**
+
+| Owner | Responsibility |
+|---|---|
+| `tests/sentry/ratchet/_integrity.py` | Extend the existing tree reader here. It owns the single `list_entries(side, dir)`, `open_input(side, path)` and their shared guarded stat. |
+| `tests/sentry/_ratchet.py` | `load_side` calls the reader for BASE and HEAD. `parse_baseline` owns the JSON field checks. Remove the separate HEAD fetch and orphan scan. |
+| `tests/sentry/ratchet/test_malformed_registry.py` | Add the CLI cases and AST guard here. Reuse the scratch-repo helpers. |
+
+- BASE uses the resolved commit's checked, NUL-delimited `ls-tree` inventory and
+  `cat-file blob`. HEAD uses the current checkout, including unstaged edits and untracked
+  baselines. The working copy of a staged path supplies its current mode and bytes.
+  Keep the existing committed membership and rename checks for sentry test files.
+- Both operations validate plain relative paths and walk from the checkout or Git tree root.
+  Check every ancestor before descent, including the baseline directory itself. Require
+  directories for parents and regular files for reads (Git modes `100644` or `100755`).
+  Refuse links at any depth, special files and wrong-kind components. HEAD uses no-follow
+  stat and directory-relative, no-follow opens. BASE checks each component in its tree listing.
+- Use the same walk to inventory baseline JSON under the baseline directory on each side.
+  Validate nested directories before descent. Consume `os.scandir` under the guard, including
+  iteration. Any listing, stat, open, Git or UTF-8 error yields a side and path finding, exit 1.
+  Only proven absence yields “missing”. A file absent after it was listed is a read failure.
+  A proven absent baseline directory contains no candidates. Compare the inventory with all
+  original registry rows. Orphan JSON and missing named files fail, including during bootstrap.
+- Reuse guarded stat for the tracked `OUTSIDE_SENTRIES` probe (`_integrity.py:359`).
+  Only proven absence enters removal handling. Route rehome source reads and absence proofs
+  (`_rehome.py:76,78`) through the reader with the same checkout containment.
+- Apply one registry presence rule before parsing, waivers or comparisons. Present zero-byte
+  and whitespace-only files fail on either side. HEAD requires a registry. Only a proven
+  missing BASE registry permits bootstrap with a valid HEAD inventory. Preserve the existing
+  row-count rule and the transfer rules for new IDs in an established registry.
+- In `parse_baseline` (`_ratchet.py:179,185`), require a JSON object, a string `sentry_id`,
+  and an `entries` object with string keys and object values. Each entry requires a string
+  `reason`. Check optional `category` and `moved_from` as strings and `max` as an exact
+  integer (exclude booleans). Apply the same integer check to `min` when RG-E2 adds it.
+  If present, `created_in` must be a string, and a new baseline requires nonblank text.
+  Reject duplicate JSON keys at every depth. Check all documented types before identity,
+  reason, move or bound comparisons. No coercion or fallback for wrong types.
+
+**DESIGN** Remove the site exception. Extract the existing test filename check from
+`is_sentry_glob` in `ratchet/_integrity.py`. Use it for sentry membership and for gate-pins
+file and recursive directory checks (`test_gate_pins.py:36`). Gate pins still accepts a
+directory containing a test anywhere below it, including outside `tests/sentry`. Walk its
+files and apply the shared predicate. Remove `GATE_PINS_CALL` and `_unexempt`
+(`ratchet/test_integrity.py:608`). Assert the raw membership scan has no findings. Seed a
+duplicate at the former exempt site and require a finding there. Pin a nested test file, an
+empty directory and a directory named like a test with no test file inside. Keep the registry scanner
+and mirror checks (`test_baseline_registry.py:39,78`). Never widen an allowlist or ceiling.
+
+**V2-LOG** Keep `BROKEN_FILES`. Its tuples supply malformed test data.
+
+**V1 acceptance tests.** Run each case as a separate scratch Git repo through
+`scripts/dev/ratchet_check.py --root <repo> --base <sha>`. Capture exit status and the
+specific finding. Each red-before assertion below expects exit 1 where the round-three
+review observed 0 on `aba823f37`. Record the red runs before changing the reader.
+
+| Case | Fixture and assertion | Mutation killed |
+|---|---|---|
+| V1 listing | Leave one registered file readable by name and add an unregistered sibling. Confirm the orphan finding, then chmod the directory to `0111`. Run as an unprivileged user, verify listing gets EACCES, and require a HEAD listing finding. Restore permissions in teardown. | Convert a failed iteration to an empty list. |
+| V1 parent link | Move a valid baseline directory outside the checkout and symlink its old name to it. Keep every leaf regular and readable. Require a HEAD mode finding at the linked directory. | Check only the final component and follow the parent link. |
+| V1 stored identity | Use registry ID `"1"` with JSON number `1`. Put the bad JSON on HEAD alone, then on BASE alone with HEAD repaired. Require a finding for the affected side. A string ID passes. | Restore `str(sentry_id)`. |
+| V1 empty registry | Start with no BASE registry or JSON. Add an empty HEAD registry, then repeat with whitespace. Require the empty-file finding. Commit the same bytes and require BASE to fail too. A valid first inventory passes before and after commit. | Make the blank check BASE-only. |
+
+**Reader guard and mutation pins.** Scan the AST of `tests/sentry/_ratchet.py` and every
+`tests/sentry/ratchet/*.py`. Check all checker functions, including new helpers. Distinguish
+pytest fixture and test-driver I/O from reader code by module role. Checker code cannot
+delegate reads to test drivers. Resolve import aliases, bound calls and unbound method forms.
+Forbid `Path.glob/rglob`, `os.path.isfile/exists` and their pathlib equivalents throughout
+the reader. Permit raw `scandir/listdir/iterdir` only in the enumeration function, raw
+file opens and byte/text reads only in the open function, and raw stat only in guarded stat.
+Check the exact file and function for each primitive, including which functions may request Git tree and blob data through the existing Git runner.
+Seed one violation for each spelling in a sibling function and in a second module. A valid
+call to each guarded operation passes. The current glob, isfile and direct reads fail this guard.
+
+Run each following mutation separately on the final build head and record its failing test.
+
+- Skip BASE enumeration. A committed orphan with a repaired HEAD must fail on BASE.
+- Admit a symlink leaf, a linked ancestor, or a non-regular leaf, one mutation per mode rule.
+  Pin each side where representable, including a Git symlink in place of the registry parent.
+- Treat a failed stat or open as absence, one mutation per operation. Pin an unreadable
+  outside sentry parent with a fresh retirement and a listed but unreadable baseline.
+- Accept a missing HEAD registry, or bootstrap after a failed BASE registry read. Pin both.
+- Drop each JSON field check in turn. Supply a wrong type on each side, including null,
+  a boolean bound and a quoted integer. Remove the required-`entries` check and duplicate-key
+  hook separately. The existing missing-field and duplicate-key fixtures must catch each change.
+- Bypass each guarded operation in a reader helper. Its seeded AST check must fail.
+  Restore the gate-pins site filter. Its seeded duplicate must fail the guard test.
+
+Aim for 600 lines per hand-written file, with 700 as the hard maximum. The reader owner
+starts at 387 lines and the malformed-registry test file at 354. Keep
+`ratchet/test_integrity.py` (698) flat or smaller. Apply the builder brief's size rule.
 
 ## RG-E2. Bounds carry a max or min (engine, R2, one day)
 
