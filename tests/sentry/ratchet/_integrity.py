@@ -23,18 +23,18 @@ DECISION_TABLES = ("retired", "retired_files", "checker_change")
 class BaseReadError(Exception):
     """A file or list of the base commit could not be read; ``what`` names it."""
 
-    def __init__(self, what: str) -> None:
+    def __init__(self, what: str, side: str = "base") -> None:
         super().__init__(what)
-        self.what = what
+        self.what, self.side = what, side
 
 
-def _git(root: Path, what: str, *args: str) -> bytes:
+def _git(root: Path, what: str, *args: str, side: str = "base") -> bytes:
     res = subprocess.run(  # noqa: S603 - fixed argv, no shell
         ["git", "-C", str(root), *args],  # noqa: S607
         capture_output=True,
     )
     if res.returncode != 0:
-        raise BaseReadError(what)
+        raise BaseReadError(what, side)
     return res.stdout
 
 
@@ -51,9 +51,19 @@ def resolve_commit(root: Path, ref: str) -> str | None:
 class BaseTree:
     """One checked listing of the base commit, so "absent" is proven and never a read failure."""
 
-    def __init__(self, root: Path, sha: str) -> None:
-        self.root, self.sha = root, sha
-        raw = _git(root, "the base tree listing", "ls-tree", "-r", "-t", "-z", "--full-tree", sha)
+    def __init__(self, root: Path, sha: str, side: str = "base") -> None:
+        self.root, self.sha, self.side = root, sha, side
+        raw = _git(
+            root,
+            f"the {side} tree listing",
+            "ls-tree",
+            "-r",
+            "-t",
+            "-z",
+            "--full-tree",
+            sha,
+            side=side,
+        )
         self.types: dict[str, str] = {}
         for entry in raw.split(b"\0"):
             if not entry:
@@ -73,16 +83,18 @@ class BaseTree:
         if kind is None:
             return None
         if kind != "blob":
-            raise BaseReadError(path)
+            raise BaseReadError(path, self.side)
         try:
-            return _git(self.root, path, "cat-file", "blob", f"{self.sha}:{path}").decode("utf-8")
+            return _git(
+                self.root, path, "cat-file", "blob", f"{self.sha}:{path}", side=self.side
+            ).decode("utf-8")
         except (BaseReadError, UnicodeDecodeError):
-            raise BaseReadError(path) from None
+            raise BaseReadError(path, self.side) from None
 
     def require(self, path: str) -> str:
         text = self.read(path)
         if text is None:
-            raise BaseReadError(path)
+            raise BaseReadError(path, self.side)
         return text
 
 
@@ -159,10 +171,11 @@ def decisions(doc: dict[str, object]) -> dict[str, dict[str, str]]:
 
 def table_names(doc: dict[str, object]) -> dict[str, set[str]]:
     """Every key of each decision table, whatever its value type (freshness is about names)."""
-    return {
-        t: set(doc[t]) if isinstance(doc.get(t), dict) else set()  # type: ignore[arg-type]
-        for t in DECISION_TABLES
-    }
+    out: dict[str, set[str]] = {}
+    for t in DECISION_TABLES:
+        rows = doc.get(t)
+        out[t] = set(rows) if isinstance(rows, dict) else set()
+    return out
 
 
 def fresh(
@@ -306,8 +319,8 @@ def sentry_file_findings(root: Path, tree: BaseTree, retired_files: set[str]) ->
     base_set = {p for p in base_set if tree.has_file(p)}
     head_sha = resolve_commit(root, "HEAD")
     if head_sha is None:
-        raise BaseReadError("the head commit")
-    head_tree = BaseTree(root, head_sha)
+        raise BaseReadError("the head commit", "head")
+    head_tree = BaseTree(root, head_sha, "head")
     head_set = sentry_set(head_tree.files(), head_tree.read(MANIFEST))
     if head_set is None:
         return [f"{MANIFEST}: OUTSIDE_SENTRIES is not a literal tuple of strings"]

@@ -24,9 +24,11 @@ from tests.sentry.test_ratchet_check import (
     ROOT,
     SCRIPT,
     A,
+    _approve,
     _assert_red,
     _baseline,
     _git,
+    _grow,
     _registry,
     _run,
     _write,
@@ -646,3 +648,51 @@ def test_guard_sees_a_second_glob_in_the_exempt_function() -> None:
 def test_guard_accepts_the_one_exempt_call() -> None:
     seeded = {GLOB_EXEMPT[0]: EXEMPT_FUNC + '    t.rglob("test_*.py")\n'}
     assert _unexempt(_glob_sites(seeded)) == []
+
+
+# --- review round 4: approval strength, head-side read errors, malformed head registry ----------
+
+
+@pytest.mark.parametrize(
+    "weak",
+    [
+        "owner 2026-11-24 xxxxxxxxxx",
+        "owner 2026-11-24 todo todo.",
+        "owner 2026-11-24 12345678901234",
+    ],
+)
+def test_a_weak_approved_growth_decision_is_refused(repo: Path, weak: str) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [("m::new", weak)])
+    _assert_red(repo, "approved_growth for m::new needs a decision")
+
+
+def test_an_approved_growth_decision_of_fifteen_chars_passes(repo: Path) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [("m::new", "owner 2026-11-24 123456789012345")])
+    res = _run(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_a_head_tree_read_failure_says_head(repo: Path) -> None:
+    _write(repo, MANIFEST, _manifest(()))
+    base = _commit(repo, "manifest")
+    _write(repo, MANIFEST, _manifest((OUTSIDE,)))
+    _commit(repo, "manifest changes")
+    _unlink_object(repo, MANIFEST)
+    res = _run_from(repo, base)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"cannot read {MANIFEST} from the head commit" in res.stderr
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["this is = = broken\n", "[sentry]\nid = 'a'\n", "sentry = [1]\n", "sentry = 'a'\n"],
+    ids=["bad toml", "single table", "row not a table", "not an array"],
+)
+def test_a_malformed_head_registry_is_one_finding_not_a_traceback(repo: Path, text: str) -> None:
+    _write(repo, REG, text)
+    res = _run(repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Traceback" not in res.stderr
+    assert "registry: scripts/dev/sentry_registry.toml" in res.stderr

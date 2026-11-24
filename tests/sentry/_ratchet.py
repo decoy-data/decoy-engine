@@ -124,10 +124,10 @@ def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
                 findings.append(f"{sid}: approved_growth row has no key")
             elif _GLOB_CHARS & set(key):
                 findings.append(f"{sid}: approved_growth key {key} is a pattern; list exact keys")
-            elif not _decision_ok(decision):
+            elif decision_problem(decision):
                 findings.append(
                     f"{sid}: approved_growth for {key} needs a decision "
-                    "'owner YYYY-MM-DD <text of 10+ chars>'"
+                    f"'owner YYYY-MM-DD <reason of {MIN_REASON}+ chars>'"
                 )
             else:
                 out.setdefault(sid, {})[key] = decision
@@ -137,7 +137,7 @@ def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
 def decision_problem(decision: object) -> str | None:
     """Why ``decision`` is not an acceptable owner decision, or ``None`` when it is."""
     if not _decision_ok(decision):
-        return "needs a decision 'owner YYYY-MM-DD <text of 10+ chars>'"
+        return f"needs a decision 'owner YYYY-MM-DD <reason of {MIN_REASON}+ chars>'"
     if weak_reason(str(decision).split(" ", 2)[2]):
         return f"reason is empty, a placeholder or under {MIN_REASON} chars"
     return None
@@ -376,7 +376,19 @@ def check(
     try:
         return _check(root, helper.BaseTree(root, sha), helper, waiver_input)
     except helper.BaseReadError as exc:
-        return [f"cannot read {exc.what} from the base commit"], []
+        return [f"cannot read {exc.what} from the {exc.side} commit"], []
+
+
+def _registry_doc(text: str) -> tuple[dict[str, Any], str | None]:
+    """Parse a registry; the second value says why it is unusable (no file content, no TOML text)."""
+    try:
+        doc = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return {}, "is not valid TOML"
+    rows = doc.get("sentry", [])
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return {}, "must hold [[sentry]] as an array of tables"
+    return doc, None
 
 
 def _check(
@@ -385,11 +397,16 @@ def _check(
     reg_file = root / REGISTRY
     head_text = reg_file.read_text(encoding="utf-8") if reg_file.is_file() else ""
     base_text = tree.read(REGISTRY) or ""
+    head_doc, problem = _registry_doc(head_text)
+    if problem:
+        return [f"registry: {REGISTRY} {problem}"], []
+    base_doc, problem = _registry_doc(base_text)
+    if problem:
+        raise helper.BaseReadError(REGISTRY)
     head, findings = parse_registry(head_text)
     approvals, approval_findings = parse_approvals(head_text)
     findings += approval_findings
     base_reg = parse_registry(base_text)[0]
-    head_doc, base_doc = tomllib.loads(head_text), tomllib.loads(base_text)
     findings += helper.registry_present(
         len(base_doc.get("sentry", [])), reg_file.is_file(), len(head_doc.get("sentry", []))
     )
