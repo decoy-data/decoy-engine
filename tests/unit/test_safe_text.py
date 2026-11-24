@@ -227,24 +227,30 @@ def test_a_malformed_template_is_withheld(production: None) -> None:
 
 
 # The leaf imports nothing from decoy_engine (A19, part one; the layer contract is the second).
-def _runtime_imports(body: list[ast.stmt]) -> Iterator[ast.Import | ast.ImportFrom]:
-    """Imports that run at import time: everything except ``if TYPE_CHECKING:`` bodies."""
-    for node in body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            yield node
-        elif isinstance(node, ast.If):
-            test = node.test
-            if not (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"):
-                yield from _runtime_imports(node.body)
-            yield from _runtime_imports(node.orelse)
-        elif isinstance(node, (ast.Try, ast.With, ast.FunctionDef, ast.ClassDef)):
-            yield from _runtime_imports(node.body)
+def _runtime_imports(node: ast.AST) -> Iterator[ast.Import | ast.ImportFrom]:
+    """Every import in the tree except those in an ``if TYPE_CHECKING:`` body.
+
+    Walks all suites (try, except, else, finally, with, defs), so a fallback import in an
+    ``except ImportError`` handler is seen.
+    """
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        yield node
+        return
+    skip: list[ast.stmt] = []
+    if (
+        isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "TYPE_CHECKING"
+    ):
+        skip = node.body
+    for child in ast.iter_child_nodes(node):
+        if not any(child is s for s in skip):
+            yield from _runtime_imports(child)
 
 
-def test_the_leaf_imports_only_the_standard_library() -> None:
-    tree = ast.parse(_LEAF.read_text(encoding="utf-8"))
+def _non_stdlib_imports(source: str) -> list[str]:
     bad: list[str] = []
-    for node in _runtime_imports(tree.body):
+    for node in _runtime_imports(ast.parse(source)):
         if isinstance(node, ast.ImportFrom):
             roots = ["." * node.level + (node.module or "")] if node.level else [node.module or ""]
         else:
@@ -252,10 +258,20 @@ def test_the_leaf_imports_only_the_standard_library() -> None:
         bad += [
             r for r in roots if r.startswith(".") or r.split(".")[0] not in sys.stdlib_module_names
         ]
-    assert not bad
-    assert "typing_extensions" not in {
-        r for n in _runtime_imports(tree.body) for r in [getattr(n, "module", "")]
-    }
+    return bad
+
+
+def test_the_leaf_imports_only_the_standard_library() -> None:
+    assert _non_stdlib_imports(_LEAF.read_text(encoding="utf-8")) == []
+
+
+def test_the_import_walker_sees_every_suite_but_not_type_checking() -> None:
+    planted = (
+        "try:\n    import json\nexcept ImportError:\n    import typing_extensions\n"
+        "else:\n    import pandas\nfinally:\n    from . import sibling\n"
+        "if TYPE_CHECKING:\n    import numpy\nelse:\n    import yaml\n"
+    )
+    assert _non_stdlib_imports(planted) == ["typing_extensions", "pandas", ".", "yaml"]
 
 
 # E: pickle and the process pool.
@@ -430,3 +446,19 @@ def test_strict_applies_only_in_the_process_that_set_it(method: str) -> None:
     with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
         assert pool.submit(_worker_strict_active).result() is False
         assert pool.submit(_worker_withholds, _canary()).result() is True
+
+
+def _worker_set_strict_roundtrip() -> tuple[bool, bool, bool]:
+    first = _safe_text._set_strict(True)
+    second = _safe_text._set_strict(first)
+    return first, second, _safe_text._strict_active()
+
+
+def test_set_strict_returns_the_effective_value_in_a_forked_child() -> None:
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("fork is not available here")
+    assert _safe_text._strict is True  # the autouse fixture; the child inherits it raw
+    ctx = multiprocessing.get_context("fork")
+    with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+        # The child's effective strict is off, so save/restore must read False then True.
+        assert pool.submit(_worker_set_strict_roundtrip).result() == (False, True, False)

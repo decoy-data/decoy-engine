@@ -68,7 +68,8 @@ def _set_strict(on: bool) -> bool:
     runs non-strict like production.
     """
     global _strict, _strict_pid
-    previous, _strict, _strict_pid = _strict, on, os.getpid()
+    previous = _strict_active()  # the effective value: a forked child inherits a raw True
+    _strict, _strict_pid = on, os.getpid()
     return previous
 
 
