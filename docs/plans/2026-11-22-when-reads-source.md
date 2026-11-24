@@ -337,7 +337,7 @@ A write means a column whose cells dispatch may replace, including writes limite
 
 | Selected operation | Writes and reads |
 | --- | --- |
-| FK resolution, checked first | Read the child key visible at the FK's dispatch rank. Write exactly the child tuple. For the parent map, pair each original parent key with its final key from the same row. Use the current parent column where no snapshot exists. See `_pandas_adapter.py:533–566` and `:633–634`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
+| FK resolution, checked first | Start each child key component at its source value. Overlay earlier child commits in dispatch rank order on their selected rows. On a plan that orders today, include every earlier commit. If the old sort raises a cycle, skip child commits from nodes that supply a final component of this FK's parent key. Skip them only for this lookup. Use the resulting tuple for matching and orphan handling. Write exactly the child tuple. For the parent map, pair each original parent key with its final key from the same row. Use the current parent column where no snapshot exists. See `_pandas_adapter.py:533–566` and `:633–634`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
 | Scalar | Writes its target. A nested handler writes back its outer column. A multi-column `joint_mask` writes exactly its configured outputs. Its mask key reads source. A scalar `date_shift` with `group_by` needs the original group key in its table. Supply the aligned snapshot at `_strategies/_date_shift.py:190`. See `_column_access.py:347` and `_strategies/_joint_mask.py:119`. |
 | Creating scalar | Writes its target and can introduce it. Take masked drivers from the strategy declaration. This covers `derived`, `derived_aggregate`, `grouped_series`, `windowed_date` and `group_key`. See `_column_access.py:339` and `_column_access.py:409`. |
 | Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity and the deterministic source key. See `_column_access.py:266`, `_runner.py:113–115` (grouping), `_runner.py:127–136` (construction) and `_strategies/_composite.py:130`. |
@@ -364,7 +364,7 @@ For that case alone, rank by resolved operation class, then by node key. Commit
 wildcards first, then known non-bundle handlers, then bundles, then FK resolutions.
 Within each class the larger key writes last. Use these ranks for commits only.
 The required input checks below still reject a real value cycle. Never run handlers to
-choose ranks. Keep one ordering implementation in `_runner.py`.
+choose ranks. Keep one rank sort behind `order_work`.
 
 Evaluate each handler once when its input versions are ready. Collect its output values and
 selected row positions in isolation. The gate reads its predicate from the source. Preserve preflight, validation, warnings and row errors.
@@ -434,8 +434,11 @@ first kill the specified mutation, then restore it. Run the same tests green on 
    from the intermediate derived value. Using final keys on both sides of the parent map
    must fail that assertion.
 3. **V1** `test_fk_child_bypasses_derived_creator`. Resolve email from first_name while
-   its configured derived expression reads an unrelated column. Matching keys must yield
-   email equal to masked first_name. The bundle must still generate last_name.
+   its configured derived expression names an unrelated column. Keep the cycle fixture.
+   Source email holds the original first_name keys in row order. The bundle writes
+   first_name, last_name and email. Assert email equals masked first_name on every row.
+   Assert last_name matches the fixed-seed bundle oracle. Looking up the generated
+   email would preserve an orphan. The FK bypasses the derived expression.
 4. **V1** `test_indirect_creator_reads_after_bundle`. Supply all columns. Derive email
    from summary and summary from last_name. Assert success, summary equal to generated
    last_name plus "!", and email equal to the fixed-seed bundle oracle.
@@ -510,16 +513,43 @@ first kill the specified mutation, then restore it. Run the same tests green on 
     `state` at `original`. Have an earlier joint mask write `PA` to `state`.
     Use a parent key distinct from both values and set the orphan policy to `PRESERVE`.
     Assert that `run_single` returns `PA` in the child's `state` at `d74afd71c`.
-    Reading the child from source would return `original`.
+    The city writer leaves the parent key alone. Dropping its write would return `original`.
+17. **V1** `test_fk_child_distinguishes_parent_and_joint_writes`. Extend test 3.
+    Give each row a distinct original first_name and copy it to source email.
+    Run a city joint mask before the bundle. Its one-row reference writes the
+    second row's original first_name to every email. Choose distinct masked first names.
+    Assert every FK email equals the second row's masked first_name. A source read
+    would return different names across rows. A bundle read would preserve orphan emails.
+    Repeat with passthrough in place of derived on email. This plan orders today.
+    Assert every email matches the bundle-only email oracle under orphan preservation.
 
 ### Placement and removal
 
-| Existing location | Builder change |
+At `42436c973`, the FK edge for a_ref points to the derived last_name node.
+The ready queue places a_ref before the bundle. Test 2 gets the intermediate
+surname. In test 7, z_ref runs after the bundle and gets the final surname.
+Make FK evaluation wait for every final writer of its parent columns before
+building the map. Keep commit ranks fixed. Correcting a_ref changes a successful
+job's child output. Literal output parity for that case conflicts with tests 2 and 7.
+Tests 2 and 7 win. Today a_ref maps child keys through an intermediate parent value,
+so its child keys do not match the final parent column. That is a referential-integrity
+bug, so the output change is a fix. The engine is pre-GA, so no compatibility mode is kept.
+Add a CHANGELOG line under Fixed that names the changed case.
+
+Move existing code before adding logic. Current sizes and ceilings are
+`_runner.py` 598/600, `_when_gate.py` 600/600, `_pandas_adapter.py` 669/700
+and `_sequential.py` 677/680. Put the shared code in a named execution subpackage.
+Expose shared entry points through `execution/work_order/__init__.py`.
+
+| Location | Builder change |
 | --- | --- |
 | `_column_access.py:266` | Keep the surface registry. Remove coherent group names from composite writes. Resolve operations and their writes here. Reuse the provider's canonical or configured outputs. |
-| `_runner.py:356`, `_runner.py:382`, `_runner.py:449`, `_runner.py:470`, `_runner.py:527` | Keep the current WorkNode ordering constraints for compatibility ranks. Reuse their sort. Build the version dependencies from resolved operations. Keep the old conservative rank inputs where narrowing them would change a working order. |
+| `execution/work_order/ranks.py` | Move the current rank sort out of `_runner.py`. Keep `order_work` as its caller. |
+| `execution/work_order/versions.py` | Build the shared evaluation and commit dependencies from resolved operations. Use them for compile checks and execution. |
+| `execution/work_order/commits.py` | Move selected-row output stitching out of `_when_gate.py`. Move shared per-table commit work out of the adapter and sequential loops. Keep saved versions local to each run. |
+| `_runner.py:356`, `_runner.py:382`, `_runner.py:449`, `_runner.py:470`, `_runner.py:527` | Keep the current WorkNode ordering constraints for compatibility ranks. Use the extracted rank sort. Keep the old conservative rank inputs where narrowing them would change a working order. |
 | `_pandas_adapter.py:375`, `_when_gate.py:582`, `_strategies/_joint_mask.py:47` | Dispatch the resolved operation. Use its outputs for write-back and gated stitching. Remove the separate gated-output hook. |
 | `_runner.py:329`, `_chunked_carry.py:202` | Use resolved writes for predicate snapshots and for full-frame and sequential type preservation. A wildcard covers every predicate input in its table. |
 | `_chunked_carry.py:176`, `_column_access.py:527` | Feed the same write declaration into `passthrough_columns`. Replace the entry-based write union in `handler_written_columns`. Pass resolved writes to both `carried_columns` and `plan_carry` through this path. A wildcard disables carry for its table. |
 | `_chunked_carry.py:228–245` (chunk-carry guard) | Exercise the planner and stock chunk lane with an unconfigured source field. Have the shared declaration report it as a bundle output. Assert both carry decisions exclude it and the chunk output keeps its generated value. Assert an unread, untouched control is carried. Spy on the shared declaration during carry planning so a parallel union with the same result also fails. Bypassing the shared declaration at line 176 must turn the guard red. |
-| `tests/unit/execution/when/test_reads_source.py:572` | Extend the existing acceptance tests. Guard the commit boundary with a generated bundle containing an undeclared key. Removing the key check must turn the guard red. |
+| `tests/unit/execution/when/test_reads_source.py:572` | Use the S2 fixtures in `tests/unit/execution/when/_write_support.py`. Put the FK cases in the existing `test_write_order.py` beside it. Guard the commit boundary with a generated bundle containing an undeclared key. Removing the key check must turn the guard red. |
