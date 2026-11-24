@@ -627,7 +627,8 @@ class TestRawNullableIntegers:
         assert bare["i64"].dtype == np.float64
         assert bare["i64"].iloc[0] == bare["i64"].iloc[2]  # 2**53 + 1 collapsed onto 2**53
         plain = _run(single_table_config(tmp_path, tbl), tbl).outputs["t"]
-        assert plain.schema.field("i8").type == pa.float64()
+        # Rule 3 (A1): an untouched nullable int8 keeps its type on the no-transform route.
+        assert plain.schema.field("i8").type == pa.int8()
         neutral = _run(
             single_table_config(tmp_path, tbl, transforms=[{"op": "limit", "n": 4}]), tbl
         ).outputs["t"]

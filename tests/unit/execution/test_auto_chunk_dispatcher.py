@@ -111,9 +111,17 @@ def _non_routed_runs(tmp_path: Path) -> dict[str, tuple[dict[str, Any], dict[str
     return cases
 
 
-def _without_thread_record(result: Any) -> dict[str, Any]:
+def _without_thread_record(result: Any, *, plan_hashes: bool = True) -> dict[str, Any]:
     metrics = dict(result.quality_metrics)
     metrics["execution"] = {k: v for k, v in metrics["execution"].items() if k != "native_threads"}
+    if not plan_hashes and "unified_slice_activation" in metrics:
+        # The physical plan hash covers the kill switch (`chunked_dispatcher_off`, physical/_inputs.py),
+        # so it moves with that knob by design. Present only where the companion admits the table.
+        metrics["unified_slice_activation"] = {
+            k: v
+            for k, v in metrics["unified_slice_activation"].items()
+            if k not in ("plan_hash", "activation_hash")
+        }
     return metrics
 
 
@@ -130,8 +138,15 @@ def test_non_routed_jobs_have_equal_quality_metrics_for_any_valid_knobs(
             {"native_threads": 1024, "chunked_dispatcher_enabled": True},
         ):
             other = run_pipeline(cfg, sources=sources, **kwargs, **knobs)
-            # The thread record names the count the run used; it is the one field a knob moves.
-            assert _without_thread_record(other) == _without_thread_record(baseline), (name, knobs)
+            # The thread record names the count the run used, and the dispatcher kill switch is part of
+            # the physical plan hash by design. Those are the fields a knob moves; `hashed` leaves the
+            # hashes out of the comparison when the switch is off.
+            hashed = (
+                "chunked_dispatcher_enabled" not in knobs or knobs["chunked_dispatcher_enabled"]
+            )
+            assert _without_thread_record(other, plan_hashes=hashed) == _without_thread_record(
+                baseline, plan_hashes=hashed
+            ), (name, knobs)
             for table in baseline.outputs:
                 assert other.outputs[table].equals(baseline.outputs[table], check_metadata=True)
 

@@ -397,3 +397,22 @@ def test_trusted_execution_codes_match_the_physical_reasons_catalog():
     from decoy_engine.execution.physical._reasons import PRECOMPILATION_EXCLUDED_CODES
 
     assert _EXECUTION_CODES == PRECOMPILATION_EXCLUDED_CODES
+
+
+@pytest.mark.parametrize("with_marker", [False, True])
+def test_isolated_fixed_list_refusal(tmp_path, with_marker):
+    import pyarrow as pa
+
+    from tests.unit.execution._auto_chunk_support import fixed_list_job
+
+    dtype = pa.list_(pa.string() if with_marker else pa.int32(), 2)
+    first = [_SENTINEL, _SENTINEL] if with_marker else [0, 0]
+    last = first if with_marker else [2, 2]
+    cfg, sources = fixed_list_job(tmp_path, dtype, [first, None, last], first)
+    result = run_pipeline_isolated(cfg, sources, engine_version=_ENGINE_VERSION)
+    assert isinstance(result, IsolatedRunResult)
+    assert result.outcome == "crashed"
+    assert result.reason is not None and result.reason.code == "parquet_fixed_list_null"
+    assert result.error and all(
+        marker not in result.error for marker in (_SENTINEL, "[0, 0]", "[2, 2]", str(tmp_path))
+    )

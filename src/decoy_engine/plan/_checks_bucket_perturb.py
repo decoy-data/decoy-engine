@@ -18,13 +18,20 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
+from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.bucket_perturb import bucket_perturb_date_format_problem
 from decoy_engine.transforms.date_preserve import preserve_config_problem
 
 
 def _reject_if_unwritable(
-    provider_config: Any, *, column: str, table: str, path_prefix: str, where: str
+    provider_config: Any,
+    *,
+    column: str,
+    table: str,
+    path_prefix: str,
+    where: str,
+    shape: ColumnShape | None = None,
 ) -> None:
     if not isinstance(provider_config, dict):
         return
@@ -38,7 +45,7 @@ def _reject_if_unwritable(
             )
     # D1c: a malformed or unusable `preserve_values` is a config error even when no row is
     # read (a zero-row table or a `when:` that selects nothing).
-    problem = preserve_config_problem(provider_config)
+    problem = preserve_config_problem(provider_config, shape)
     if problem is not None:
         raise PlanCompileError(
             code=reasons.plan.BUCKET_PERTURB_PRESERVE_VALUES_INVALID,
@@ -47,13 +54,14 @@ def _reject_if_unwritable(
         )
 
 
-def check_bucket_perturb_config(config: dict[str, Any]) -> None:
+def check_bucket_perturb_config(config: dict[str, Any], shapes: ColumnShapes | None = None) -> None:
     """Reject bucket_perturb columns (and nested bucket_perturb children) whose
     `date_format` has no date directive, an unknown directive or a dangling `%`, or whose
     `preserve_values` is malformed or lacks a usable `date_format`.
 
     Config-only (no profile, no source data): safe in both compile branches and
-    in ``run_config_only_checks``. Validation never mutates.
+    in ``run_config_only_checks``. Validation never mutates. ``shapes`` says which columns are
+    native dates, whose ``preserve_values`` need no ``date_format``.
 
     Raises:
         PlanCompileError: ``bucket_perturb_date_format_unsupported`` or
@@ -75,7 +83,12 @@ def check_bucket_perturb_config(config: dict[str, Any]) -> None:
             prefix = f"tables.{table_name}.columns.{col_name}.provider_config"
             if strategy == "bucket_perturb":
                 _reject_if_unwritable(
-                    pc, column=col_name, table=table_name, path_prefix=prefix, where=""
+                    pc,
+                    column=col_name,
+                    table=table_name,
+                    path_prefix=prefix,
+                    where="",
+                    shape=(shapes or {}).get((table_name, col_name)),
                 )
             elif isinstance(pc, dict):
                 for child in nested_children(pc):

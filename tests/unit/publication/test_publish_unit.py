@@ -198,7 +198,7 @@ def test_exit_matrix_publish(
     if case == "E1_lock_unavailable":
         assert receipt.os_error == "ENOLCK"
     if case == "E10_descriptor_write_fails":
-        assert receipt.os_error == errno.errorcode[errno.EEXIST]
+        assert receipt.os_error == errno.errorcode[errno.ENOSPC]
     if binding == "bound":
         assert descriptor(run.leaf)["result_id"] == receipt.result_id
 

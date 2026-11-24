@@ -85,6 +85,9 @@ def test_the_core_takes_exactly_the_public_entry_parameters(entry: str) -> None:
     kinds = {p.kind for p in core.values()}
     assert inspect.Parameter.VAR_KEYWORD not in kinds, f"{name} takes **kwargs"
     entry_params = inspect.signature(inspect.unwrap(public)).parameters
-    assert [(p.name, p.kind, p.default) for p in core.values()] == [
+    # `sources` is the job's facts: the core takes them from its caller and the single-table
+    # public entry hands it `NO_SOURCES`, so it is the one parameter the entry does not repeat.
+    assert [(p.name, p.kind, p.default) for p in core.values() if p.name != "sources"] == [
         (p.name, p.kind, p.default) for p in entry_params.values()
     ]
+    assert "sources" not in entry_params

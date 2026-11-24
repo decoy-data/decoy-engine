@@ -209,7 +209,7 @@ def test_the_error_message_names_the_construct_and_never_echoes_literal_text() -
 
 def test_refs_are_sorted_unique_and_cover_every_branch() -> None:
     ast = parse_when("(b == 1 or a == 2) and not (c in [1] and a != 3) or 'x' == d")
-    assert when_column_refs(ast) == ("a", "b", "c", "d")
+    assert [r.column for r in when_column_refs(ast)] == ["a", "b", "c", "d"]
 
 
 # ---------------------------------------------------------------------------

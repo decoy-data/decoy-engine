@@ -26,6 +26,7 @@ from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
 from decoy_engine.execution.native._companion_status import native_companion_status
 from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
+from decoy_engine.plan import PlanCompileError
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
@@ -213,9 +214,12 @@ def _run(tmp_path: Path, values: list[Any], date_format: str | None, *, chunked:
 
 @pytest.mark.parametrize("chunked", [False, True], ids=["full-frame", "chunked"])
 def test_pipeline_refuses_when_format_resolves_to_none(tmp_path: Path, chunked: bool) -> None:
-    with pytest.raises(ExecutionError) as caught:
+    # COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on text:
+    # `date_format` required, else `column_shape_required`): plan compile refuses before any row
+    # is read. The transform and handler refusals stay as the backstop, pinned above.
+    with pytest.raises(PlanCompileError) as caught:
         _run(tmp_path, _NEVER_A_DATE * 2, None, chunked=chunked)
-    assert caught.value.code == reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT
+    assert caught.value.code == reasons.plan.COLUMN_SHAPE_REQUIRED
     _no_marker(str(caught.value))
 
 

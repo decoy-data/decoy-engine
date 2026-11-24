@@ -9,7 +9,7 @@ whether a bounded value pool can be pre-built and selected per row, or
 whether the provider only runs safely in Python. This module resolves that
 finer axis, per provider, from the live `ProviderRegistry`.
 
-Three classes, total over the registry:
+Four classes, total over the registry:
 
 - `pool_native`: a bounded value pool can be built once and selected
   natively per row. Faker-bound providers the registry marks
@@ -21,9 +21,13 @@ Three classes, total over the registry:
   unbounded output space. An SSN, EIN, NPI, and so on are all fixed-format,
   reproducible identifiers, exactly the "native identifier providers" this
   class is named for.
+- `computed_native`: drawn from keyed bits with no pool at all (`draw="computed"`
+  in the registry: `uuid`, `random_int_range`, `random_choice`). The draw is a pure
+  function of the key, so it has a kernel path and never builds a value pool. Its
+  argument facts live in `providers_v2._faker_draw_contracts`.
 - `python_only`: bounded and reproducible, but currently Python-executed.
-  Faker-bound providers the registry marks `poolable=False` (`uuid`,
-  `lorem_text`, `random_int_range`, `random_choice`, `address_full` --
+  Faker-bound providers the registry marks `poolable=False` (`lorem_text`,
+  `address_full` --
   their own capability entry says no bounded pool can be pre-built for
   them) and every `composite` provider. Task 0.2's `<composite>`
   `StrategyCapabilities` row (`_capabilities.py`) declares
@@ -49,7 +53,7 @@ from typing import Any, Literal
 
 from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
 
-ProviderClass = Literal["pool_native", "python_only", "reject_large"]
+ProviderClass = Literal["pool_native", "computed_native", "python_only", "reject_large"]
 
 # decoy_native routes deterministic mode around the PoolAdapter wrapper by
 # design (see the module docstring), so it classifies pool_native regardless
@@ -74,7 +78,7 @@ def classify_provider(
     """Classify how `provider_id` can execute.
 
     Total: every `provider_id` (registered, unregistered, or malformed)
-    returns one of `pool_native`, `python_only`, `reject_large`. Never
+    returns one of `pool_native`, `computed_native`, `python_only`, `reject_large`. Never
     raises.
 
     `provider_config` is accepted for interface parity with a possible
@@ -97,6 +101,8 @@ def classify_provider(
     if caps.backend_type in _ALWAYS_POOL_NATIVE_BACKENDS:
         return "pool_native"
     if caps.backend_type in _POOLABLE_FLAG_BACKENDS:
+        if caps.draw == "computed":
+            return "computed_native"
         return "pool_native" if caps.poolable else "python_only"
     if caps.backend_type in _ALWAYS_PYTHON_ONLY_BACKENDS:
         return "python_only"

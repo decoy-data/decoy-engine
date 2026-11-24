@@ -19,9 +19,11 @@ import yaml
 
 from decoy_engine.config import Dismissal, PipelineConfig, PostScanConfig, PreScanConfig
 from decoy_engine.contracts.column_shape import NO_SOURCES
-from decoy_engine.plan._compile import compile_plan
+from decoy_engine.plan._compile import _hash_config, compile_plan
+from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._serialize import plan_to_yaml
 from decoy_engine.profile._source import profile_source
+from tests._column_shapes import INT_DECL
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 BASELINE = json.loads((FIXTURES / "f06" / "legacy-compat-baseline.json").read_text())
@@ -74,7 +76,24 @@ def _compile(raw: dict[str, Any]) -> Any:
 
 
 def _hash(tmp_path: Path, **extra: Any) -> str:
-    return str(_compile(_raw(tmp_path, **extra)).pipeline_config_hash)
+    # The hash reads the config alone. E3 refuses the frozen undeclared bucketize column at compile.
+    return _hash_config(PipelineConfig.model_validate(_raw(tmp_path, **extra)).model_dump())
+
+
+def _compile_declared(raw: dict[str, Any]) -> Any:
+    """Compile with the recommended integer declaration on `age`, the one change E3 asks for."""
+    raw = copy.deepcopy(raw)
+    next(c for c in raw["tables"][0]["columns"] if c["name"] == "age").update(INT_DECL)
+    return _compile(raw)
+
+
+def _without_age_shape_and_hashes(plan: Any) -> dict[str, Any]:
+    out = yaml.safe_load(plan_to_yaml(plan))
+    for key in ("plan_version", "pipeline_config_hash", "profile_hash", "column_shapes"):
+        out.pop(key, None)
+    out.pop("declared_casting", None)
+    out["seed_envelope"]["per_table"]["p"]["per_column"].pop("age")
+    return out
 
 
 def test_f06_baseline_dump_hash_and_plan_are_unchanged(tmp_path: Path) -> None:
@@ -84,12 +103,19 @@ def test_f06_baseline_dump_hash_and_plan_are_unchanged(tmp_path: Path) -> None:
     del cfg["sources"]["p"]["has_header"]
     legacy_dump = json.dumps(cfg, sort_keys=True)
     assert hashlib.sha256(legacy_dump.encode()).hexdigest() == BASELINE["config_dump_sha256"]
-    plan = _compile(_raw(tmp_path))
-    assert plan.pipeline_config_hash == BASELINE["pipeline_config_hash"]
-    assert plan_to_yaml(plan) == BASELINE["plan_yaml_at_baseline"].replace(
-        "plan_version: 2", "plan_version: 5", 1
-    ).replace(_BASELINE_PROFILE_HASH, _SHAPED_PROFILE_HASH, 1)
-    with_models = _compile(
+    assert _hash(tmp_path) == BASELINE["pipeline_config_hash"]
+    # E3 refuses the frozen config (bucketize over undeclared text), so its plan cannot be compiled.
+    # With the recommended declaration on `age`, every other line is the frozen plan's.
+    with pytest.raises(PlanCompileError) as refused:
+        _compile(_raw(tmp_path))
+    assert refused.value.code == "column_shape_required"
+    plan = _compile_declared(_raw(tmp_path))
+    frozen = yaml.safe_load(BASELINE["plan_yaml_at_baseline"])
+    for key in ("plan_version", "pipeline_config_hash", "profile_hash"):
+        frozen.pop(key)
+    frozen["seed_envelope"]["per_table"]["p"]["per_column"].pop("age")
+    assert _without_age_shape_and_hashes(plan) == frozen
+    with_models = _compile_declared(
         _raw(tmp_path, post_scan={**FAIL_POST_SCAN, "dismissed": [NER_DISMISSAL]})
     )
     assert with_models.plan_compile.checks_passed == plan.plan_compile.checks_passed, (

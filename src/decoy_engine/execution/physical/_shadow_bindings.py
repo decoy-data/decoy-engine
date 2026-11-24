@@ -3,7 +3,7 @@
 Called from the compiler's `_build_nodes` at compile time, for exactly the
 native-admitted slice strategies the shadow coordinator shadows: passthrough,
 redact, truncate, keyed hash (Task 4.4), (Task 4.6 slice 1) deterministic
-faker over the frozen C1 provider allowlist, and (Phase 5 Track B)
+faker over the faker operator's provider allowlist, and (Phase 5 Track B)
 deterministic categorical over string categories, plus the two position-keyed
 variants (the seeded non-deterministic categorical and the non-deterministic REUSE
 faker), which `positional_categorical_bindable` / `positional_faker_bindable` admit
@@ -221,7 +221,7 @@ def positional_faker_bindable(
     plan_slice: ColumnSeed, table: str, column: str, inputs: PhysicalPlanInputs
 ) -> bool:
     """Whether a non-deterministic REUSE faker may bind natively: the chunked route's stage A
-    (explicit `pool_size`, allowlisted provider) over the raw config, plus the unified
+    (allowlisted provider) over the raw config, plus the unified
     domain's own conditions (`_faker_pool_bindable`: no `when:` or vault, a poolable
     provider, a resident string or numeric source, no FK relationship). The slice's own determinism and
     cardinality mode are checked too, so a config and a compiled seed that disagree decline."""
@@ -321,13 +321,14 @@ def execution_binding_for_slice_node(
         if caps.key_source is None or namespace is None or cfg.get("checksum"):
             return None
     elif strategy == "faker":
-        # JC-5 already guarantees deterministic + reuse + a namespace + a resolved pool_size;
+        # JC-5 already guarantees deterministic + reuse + a namespace; the pool size may be None
+        # and then resolves to the default inside `resolve_faker_pool_identity`;
         # the position-keyed variant needs no configured namespace (it defaults per column).
         # Captured into locals so mypy narrows them instead of re-reading `plan_slice.*`
         # after the predicate call below, which it cannot prove leaves them unchanged.
         pool_size = plan_slice.pool_size
         provider = plan_slice.provider
-        if caps.key_source is None or pool_size is None or (namespace is None and not positional):
+        if caps.key_source is None or (namespace is None and not positional):
             return None  # pragma: no cover - JC-5 already guarantees these
         if not isinstance(provider, str) or not provider:
             return None  # pragma: no cover - faker always compiles a provider

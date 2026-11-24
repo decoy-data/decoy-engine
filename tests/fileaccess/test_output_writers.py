@@ -113,3 +113,106 @@ def test_the_schema_is_sanitized_before_the_file_opens(
         with pytest.raises(TypeError):
             arrow_adapter.output_parquet_writer(txn, "t.parquet", bad)
         assert [p.name for p in stage.iterdir()] == [STAGE_MARKER]  # no table file, only the proof
+
+
+class _StructExtension(pa.ExtensionType):
+    def __init__(self):
+        super().__init__(pa.struct([("f", pa.list_(pa.int32(), 2))]), "test.fixed_list")
+
+    def __arrow_ext_serialize__(self):
+        return b""
+
+    @classmethod
+    def __arrow_ext_deserialize__(cls, storage_type, serialized):
+        return cls()
+
+
+def _fixed_list_column(shape, values):
+    fixed = pa.list_(pa.int32(), 2)
+    if shape == "fixed":
+        return pa.array(values, fixed)
+    if shape == "tensor":
+        return pa.ExtensionArray.from_storage(
+            pa.fixed_shape_tensor(pa.int32(), [2]), pa.array(values, fixed)
+        )
+    if shape == "null_parent":
+        return pa.StructArray.from_arrays(
+            [pa.array([[1, 2]] * len(values), fixed)],
+            names=["f"],
+            mask=pa.array([v is None for v in values]),
+        )
+    if shape in ("struct", "extension"):
+        ext = _StructExtension()
+        storage = pa.array([{"f": v} for v in values], ext.storage_type)
+        return storage if shape == "struct" else pa.ExtensionArray.from_storage(ext, storage)
+    if shape == "map":
+        return pa.array([[("k", v)] for v in values], pa.map_(pa.string(), fixed))
+    dtype = {
+        "list": pa.list_(fixed),
+        "large_list": pa.large_list(fixed),
+        "fixed_fixed": pa.list_(fixed, 1),
+    }[shape]
+    return pa.array([[v] for v in values], dtype)
+
+
+def _write_fixed(table, txn, method):
+    if method == "whole":
+        arrow_adapter.write_output_table(table, txn, "t.parquet")
+    else:
+        with arrow_adapter.output_parquet_writer(txn, "t.parquet", table.schema) as writer:
+            if method == "batch":
+                writer.write_batch(table.to_batches()[0])
+            else:
+                writer.write_table(table)
+
+
+@pytest.mark.parametrize("method", ["whole", "batch", "table"])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "fixed",
+        "struct",
+        "list",
+        "map",
+        "null_parent",
+        "tensor",
+        "extension",
+        "large_list",
+        "fixed_fixed",
+    ],
+)
+@pytest.mark.parametrize("nulls", [{0}, {1}, {2}, {0, 1, 2}])
+def test_output_refuses_fixed_list_null(tmp_path, method, shape, nulls):
+    from decoy_engine import errors
+
+    values = [None if i in nulls else [i, i] for i in range(3)]
+    table = pa.table({"x": _fixed_list_column(shape, values)})
+    with _stage(tmp_path) as (txn, _), pytest.raises(errors.DecoyError) as caught:
+        _write_fixed(table, txn, method)
+    assert isinstance(caught.value, errors.ParquetFixedListNullError)
+
+
+@pytest.mark.parametrize("method", ["whole", "batch", "table"])
+@pytest.mark.parametrize("shape", ["fixed", "struct", "list", "map", "large_list", "fixed_fixed"])
+@pytest.mark.parametrize("sliced", [False, True])
+def test_valid_fixed_list_output(tmp_path, method, shape, sliced):
+    values = [[1, 2], [3, 4]]
+    arr = (
+        _fixed_list_column(shape, [None, *values, None]).slice(1, 2)
+        if sliced
+        else _fixed_list_column(shape, values)
+    )
+    table = pa.table({"x": arr})
+    with _stage(tmp_path) as (txn, stage):
+        _write_fixed(table, txn, method)
+        assert pq.read_table(stage / "t.parquet").equals(table)
+
+
+def test_checked_writer_has_no_write(tmp_path):
+    with (
+        _stage(tmp_path) as (txn, _),
+        arrow_adapter.output_parquet_writer(
+            txn, "t.parquet", pa.schema([("x", pa.int32())])
+        ) as writer,
+    ):
+        assert not hasattr(writer, "write")

@@ -50,9 +50,19 @@ class PoolCapacityError(DecoyError):
       AND on_pool_exhaustion=fail.
     """
 
-    def __init__(self, *, code: str, message: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str = "",
+        pool_bytes: int | None = None,
+        max_bytes: int | None = None,
+    ) -> None:
         self.code = code
         self.message = message
+        # Structured only: never part of str(exc), so the text stays value-free.
+        self.pool_bytes = pool_bytes
+        self.max_bytes = max_bytes
         super().__init__(f"[{code}] {message}" if message else f"[{code}]")
 
 

@@ -27,11 +27,13 @@ GUARD_NAME = re.compile(
 )
 # A runtime guard with no descriptor needs a reason here. None today: every guard that matches
 # the pattern is reachable from a config column and has a mapping entry.
-EXCLUDED_GUARDS: dict[str, str] = {
-    reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT: (
-        "the run-time refusal comes first (COLUMN-SHAPE-RULE E0); the compile-time "
-        "requirement entry comes with E2, once detection is removed"
-    ),
+EXCLUDED_GUARDS: dict[str, str] = {}
+
+# A descriptor whose plan code is the generic `column_shape_required` has its run-time backstop
+# under the strategy's own code (plan 2026-11-21-column-shape-rule section 4, F4: `bucket_perturb`
+# keeps `runtime/bucket_perturb_requires_date_format`; the generic runtime twin is for E3).
+BACKSTOP_CODE: dict[str, str] = {
+    reasons.plan.COLUMN_SHAPE_REQUIRED: reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT,
 }
 
 # A deterministic column without a namespace is refused earlier by the namespace completeness
@@ -42,7 +44,7 @@ SATISFIED: dict[str, dict[str, Any]] = {
     "hash": {"namespace": "ns"},
     "fpe": {"namespace": "ns"},
     "date_shift": {"namespace": "ns", "provider_config": {"date_format": "%Y-%m-%d"}},
-    "bucket_perturb": {"namespace": "ns"},
+    "bucket_perturb": {"namespace": "ns", "provider_config": {"date_format": "%Y-%m-%d"}},
     "categorical": {"namespace": "ns", "provider_config": {"categories": ["a", "b"]}},
     "tokenize": {"namespace": "ns"},
     "shuffle": {"namespace": "ns", "deterministic": True},
@@ -202,7 +204,7 @@ def test_descriptors_hold_fixed_registered_values_only() -> None:
             assert isinstance(req, StrategyRequirement)
             assert not re.search(r"[{}%]", req.message)
             plan_spec = reasons.find("plan", req.code)
-            runtime_spec = reasons.find("runtime", req.code)
+            runtime_spec = reasons.find("runtime", BACKSTOP_CODE.get(req.code, req.code))
             assert plan_spec is not None and plan_spec.owner == "PlanCompileError", strategy
             assert runtime_spec is not None, strategy
     with pytest.raises(ValueError):
@@ -239,7 +241,11 @@ def test_catalog_refuses_a_namespace_requirement_the_handler_does_not_declare(
 
 
 def test_every_config_resolvable_runtime_guard_has_a_mapping_entry_or_a_reason() -> None:
-    mapped = {req.code for reqs in REQUIREMENTS_BY_STRATEGY.values() for req in reqs}
+    mapped = {
+        BACKSTOP_CODE.get(req.code, req.code)
+        for reqs in REQUIREMENTS_BY_STRATEGY.values()
+        for req in reqs
+    }
     found: set[str] = set()
     for path in SRC.rglob("*.py"):
         if "reasons" in path.relative_to(SRC).parts:

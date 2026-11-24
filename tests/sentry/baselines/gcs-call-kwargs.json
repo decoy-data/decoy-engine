@@ -126,7 +126,7 @@
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
     "decoy_engine/execution/_strategies/nested/_handler.py::NestedStrategyHandler.run::update::0": {
-      "reason": "jsonpath_ng JSONPath.update on a parsed document",
+      "reason": "MatchPath.update on a parsed document",
       "moved_from": "decoy_engine/execution/_strategies/_nested.py::NestedStrategyHandler.run::update::0"
     },
     "decoy_engine/execution/_transactional_sink.py::ParquetTransactionalSink._cleanup_staging::exists::0": {

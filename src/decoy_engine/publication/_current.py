@@ -130,7 +130,7 @@ class HeldPointer:
         store = self._store
         if store is None:
             raise RuntimeError("the pointer lock is no longer held")
-        payload = _encode(new)
+        payload = pointer_bytes(new)
         if payload is None:  # raised outside any handler: neither the value nor a cause rides
             raise ValueError("the pointer value is not one the reader accepts")
         result = store.replace_if(expected, payload)
@@ -152,6 +152,11 @@ class CurrentPointer:
             raise ValueError("the pointer store and its lock name different leaves")
         self._store = store
         self._lock = lock
+
+    @property
+    def leaf_dir(self) -> OutputDir:
+        """The pointer's own leaf capability, for the destination agreement check."""
+        return self._lock
 
     def read(self) -> PointerState:
         return self._store.read()
@@ -178,7 +183,12 @@ def read_value(raw: bytes | None, accept: Callable[[str], bool]) -> str | None:
     return value
 
 
-def _encode(value: str) -> bytes | None:
+def is_pointer_value(value: object) -> bool:
+    """Whether `swap` would write `value`: a caller checks a run id before it stages anything."""
+    return type(value) is str and pointer_bytes(value) is not None
+
+
+def pointer_bytes(value: str) -> bytes | None:
     """The bytes `swap` writes, or `None` when the reader (`_decode`) would refuse them."""
     try:
         payload = f"{value}\n".encode("ascii")
@@ -202,5 +212,6 @@ __all__ = [
     "PointerState",
     "PointerStore",
     "PointerUnreadable",
+    "pointer_bytes",
     "read_value",
 ]

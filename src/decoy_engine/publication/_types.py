@@ -26,7 +26,15 @@ from typing import TYPE_CHECKING, Final, Literal, get_args
 
 from decoy_engine import reasons
 from decoy_engine._error_base import DecoyError
-from decoy_engine.fileaccess import CommitUncertain
+from decoy_engine.fileaccess import (
+    CommitUncertain,
+    FileAccessDenied,
+    FileAccessUnavailable,
+    LockTimeout,
+    LockUnavailable,
+)
+from decoy_engine.reason_adapter import FILE_ACCESS_FIXED
+from decoy_engine.reasons import ReasonCode
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import OutputDir
@@ -34,8 +42,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_LOCK_TIMEOUT_S",
+    "LOCK_ERRORS",
     "MAX_COUNT",
     "OPERATION_ID_PATTERN",
+    "OPTIONAL_ROLES",
     "ROLES",
     "UNITS",
     "UNIT_IMMUTABLE_DIRECTORY",
@@ -48,10 +58,12 @@ __all__ = [
     "Role",
     "Unit",
     "VaultBinding",
+    "has_row_count",
     "is_count",
     "is_hex64",
     "is_operation_id",
     "is_token",
+    "lock_reason",
     "raise_for_outcome",
 ]
 
@@ -64,11 +76,14 @@ Outcome = Literal[
     "commit_uncertain",
 ]
 Unit = Literal["immutable_directory/v1"]
-Role = Literal["table"]
+Role = Literal["table", "quarantine", "report"]
 
 UNIT_IMMUTABLE_DIRECTORY: Final[Unit] = "immutable_directory/v1"
 UNITS: Final[tuple[str, ...]] = get_args(Unit)
 ROLES: Final[tuple[str, ...]] = get_args(Role)
+# Roles whose member may be absent from a delivered unit: a quarantine run with no rows writes no
+# sidecar. Every other member is required, and `StagedMember.omit` refuses it.
+OPTIONAL_ROLES: Final[tuple[str, ...]] = ("quarantine",)
 _OUTCOMES: Final[tuple[str, ...]] = get_args(Outcome)
 
 OPERATION_ID_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
@@ -79,10 +94,35 @@ _ERRNO_NAMES: Final = frozenset(errno.errorcode.values())
 MAX_COUNT: Final = 2**63 - 1
 DEFAULT_LOCK_TIMEOUT_S: Final = 30.0
 
+# The one map from a failed `OutputDir.lock` to its reason code. The first three read the table
+# `reason_adapter` classifies by, so the two never disagree; the last is what a strict or missing
+# policy raises at the lock.
+_LOCK_REASONS: Final = (
+    (LockTimeout, FILE_ACCESS_FIXED["LockTimeout"]),
+    (LockUnavailable, FILE_ACCESS_FIXED["LockUnavailable"]),
+    (FileAccessDenied, FILE_ACCESS_FIXED["FileAccessDenied"]),
+    (FileAccessUnavailable, reasons.decoy.PUBLICATION_LOCK_UNAVAILABLE),
+)
+LOCK_ERRORS: Final = tuple(kind for kind, _ in _LOCK_REASONS)
+
+
+def lock_reason(exc: BaseException) -> ReasonCode:
+    """The reason code for a lock failure. A handler calls this and keeps only the code."""
+    for kind, code in _LOCK_REASONS:
+        if isinstance(exc, kind):
+            return code
+    raise TypeError("not a lock failure")
+
 
 def is_operation_id(value: object) -> bool:
     # fullmatch, not a `$` anchor: `$` also matches before a trailing newline.
     return type(value) is str and _OPERATION_ID.fullmatch(value) is not None
+
+
+def has_row_count(path: str, role: str) -> bool:
+    """Whether a member carries a Parquet footer row count: a `table` named `*.parquet`. Every
+    other member (a CSV table, the quarantine file, the report) has `rows` of `None`."""
+    return role == "table" and path.endswith(".parquet")
 
 
 def is_hex64(value: object) -> bool:
@@ -114,13 +154,13 @@ class ArtifactSummary:
 
     role: Role
     size: int
-    rows: int
+    rows: int | None
     sha256: str
 
     def __post_init__(self) -> None:
         _require(is_token(self.role, ROLES), "role")
         _require(is_count(self.size), "size")
-        _require(is_count(self.rows), "rows")
+        _require(self.rows is None or is_count(self.rows), "rows")
         _require(is_hex64(self.sha256), "sha256")
 
 

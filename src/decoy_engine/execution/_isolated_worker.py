@@ -39,7 +39,8 @@ from decoy_engine.execution._isolated_common import (
     peak_rss_mb,
 )
 from decoy_engine.execution._pipeline import run_pipeline
-from decoy_engine.fileaccess import FileRequest, FileRole, write_private
+from decoy_engine.fileaccess import FileRequest, FileRole, capture, write_private
+from decoy_engine.fileaccess.adapters.arrow import ipc_read_path
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.verification.postmask import PostScanBlockedError
@@ -74,43 +75,29 @@ def _write_envelope_file(envelope: dict[str, Any], result_path: Path) -> None:
 
 
 def _load_sources(
-    manifest: dict[str, str], *, lazy: bool
-) -> dict[str, LazySource] | dict[str, pa.Table]:
-    """Load manifest sources, lazily or eagerly.
+    manifest: dict[str, dict[str, str]], *, lazy: bool
+) -> dict[str, LazySource | pa.Table]:
+    """Validate the whole handoff before opening files. Only Parquet supports LazySource."""
+    for entry in manifest.values():
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("path"), str)
+            or entry.get("format") not in ("ipc", "parquet")
+        ):
+            raise ValueError("Invalid isolated source manifest entry.")
 
-    Pre-TB-1 this always called `pq.read_table` here, materializing every
-    input table in the child BEFORE `run_pipeline` ever decides a route --
-    the root cause of the governed out-of-core path's measured ~2x memory
-    overhead (docs/plans/2026-07-12-track-b-completion-program.md's "two
-    defects" section): even a job that goes on to stream through
-    `run_fk_out_of_core` paid for a fully resident copy of its own input
-    first.
-
-    `_run` now passes `lazy=True` for every job. A non-relationship job used to stay
-    eager because the auto-chunk classifier refused a `LazySource`, so a lazy 200k-row
-    single-table job ran full-frame and crashed under a low rlimit. B6b admits a
-    `LazySource` to auto-chunk from its Parquet footer facts: it streams when the output
-    streams and is materialized once otherwise, so that regression cannot recur
-    (`_chunked_input`). `lazy=False` keeps the eager load for a direct caller.
-
-    `LazySource` (`decoy_engine.profile._readers`) is the SAME lazy-Parquet
-    handle the direct/profiling path already uses (`scripts/
-    fk_memory_probe.py`'s `_run_out_of_core`, `tests/perf_fixtures/
-    fk_relational.py`'s `lazy_sources`) -- constructing one here is just
-    wrapping a path string, no I/O, so this is cheap regardless of which
-    relationship-route the job ends up taking. `run_pipeline` (`_pipeline.
-    py`) resolves each `LazySource` at the point of use: the out-of-core
-    route consumes it directly (`run_fk_out_of_core` already accepts
-    `pa.Table | LazySource`), while sequential/full_frame -- routes that
-    legitimately need whole-table residency -- call `.to_table()` only
-    when they actually reach that point, never up front.
-    """
-    if lazy:
-        return {name: LazySource(Path(path)) for name, path in manifest.items()}
-    return {
-        name: pq.read_table(path)  # type: ignore[no-untyped-call, unused-ignore]
-        for name, path in manifest.items()
-    }
+    sources: dict[str, LazySource | pa.Table] = {}
+    for name, entry in manifest.items():
+        path = Path(entry["path"])
+        if entry["format"] == "ipc":
+            request = FileRequest(FileRole.SOURCE, "read", str(path), "isolated.sources")
+            with capture().open_read(request) as handle:
+                sources[name] = ipc_read_path(handle)
+        elif lazy:
+            sources[name] = LazySource(path)
+        else:
+            sources[name] = pq.read_table(path)  # type: ignore[no-untyped-call, unused-ignore]
+    return sources
 
 
 def _finalize_outputs(result: ExecutionResult, sink: StagingSink) -> list[str]:
@@ -162,7 +149,7 @@ def _run(payload: dict[str, Any]) -> dict[str, Any]:
 
     staging_output_dir = payload["staging_output_dir"]
     try:
-        # Every job loads lazily (B6b); see `_load_sources`'s docstring.
+        # Keep Parquet lazy until route selection.
         sources = _load_sources(payload.get("sources") or {}, lazy=True)
         # TB-1 fix #2: always hand run_pipeline a sink on the parent's stage. A route that
         # streams writes bounded batches straight through it; full_frame never touches it

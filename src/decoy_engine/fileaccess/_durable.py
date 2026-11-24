@@ -17,8 +17,10 @@ import errno
 import os
 import stat
 import time
+import weakref
 from collections.abc import Callable, Iterator
-from typing import TypeVar
+from dataclasses import dataclass
+from typing import Literal, NoReturn, TypeVar
 
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validate_component
@@ -29,13 +31,19 @@ from decoy_engine.fileaccess._output import (
     DURABLE_REPLACE_LABELS,
     _call,
     _close,
+    _open_existing_dir,
     _restore_missing_owner_bits,
+    link_noclobber_at,
 )
 from decoy_engine.fileaccess._types import (
     CommitUncertain,
+    FileAccessUnavailable,
+    FileSeal,
     LeafTooLarge,
+    LinkUnsupported,
     LockTimeout,
     LockUnavailable,
+    StageDir,
 )
 
 try:
@@ -58,6 +66,12 @@ def _leaf_flags() -> int:
     return _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.CLOEXEC | _osflags.NONBLOCK
 
 
+def _open_leaf_at(dir_fd: int, name: str) -> int:
+    """The one read-only open of `name` beneath the held `dir_fd`: never through a link, never
+    blocking on a FIFO. Every caller passes a name it already validated."""
+    return _call(os.open, name, _leaf_flags(), dir_fd=dir_fd)
+
+
 def _sync(dir_fd: int) -> None:
     """Best-effort fsync of the parent directory so a file rename survives a crash; a
     failure here never fails an output that has already been published."""
@@ -78,7 +92,7 @@ def _sync_tree(dir_fd: int) -> None:
             finally:
                 _close(child_fd)
         elif entry.is_file(follow_symlinks=False):
-            child_fd = _call(os.open, entry.name, _leaf_flags(), dir_fd=dir_fd)
+            child_fd = _open_leaf_at(dir_fd, entry.name)
             try:
                 _call(os.fsync, child_fd)
             finally:
@@ -88,7 +102,7 @@ def _sync_tree(dir_fd: int) -> None:
 
 def _sync_leaf_at(parent_fd: int, leaf: str) -> None:
     """fsync a bound leaf: its whole tree when it is a directory, else the file."""
-    leaf_fd = _call(os.open, leaf, _leaf_flags(), dir_fd=parent_fd)
+    leaf_fd = _open_leaf_at(parent_fd, leaf)
     try:
         if stat.S_ISDIR(os.fstat(leaf_fd).st_mode):
             _sync_tree(leaf_fd)
@@ -161,7 +175,7 @@ def _adopt_at(parent_fd: int, leaf: str, limit: int) -> bytes:
     """Read the regular file `leaf` beneath `parent_fd` (opened read-only, so a 0400 file opens,
     and never through a link) and fsync that same descriptor before returning its bytes, so the
     bytes handed back are the bytes made durable. Over `limit` raises `LeafTooLarge`."""
-    leaf_fd = _call(os.open, leaf, _leaf_flags(), dir_fd=parent_fd)
+    leaf_fd = _open_leaf_at(parent_fd, leaf)
     try:
         if not stat.S_ISREG(os.fstat(leaf_fd).st_mode):
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
@@ -299,7 +313,7 @@ def _read_member(
 def _read_member_at(parent_fd: int, leaf: str, component: str, limit: int) -> bytes:
     leaf_fd = _call(os.open, leaf, _DIR_FLAGS, dir_fd=parent_fd)
     try:
-        member_fd = _call(os.open, component, _leaf_flags(), dir_fd=leaf_fd)
+        member_fd = _open_leaf_at(leaf_fd, component)
         try:
             if not stat.S_ISREG(os.fstat(member_fd).st_mode):
                 raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
@@ -334,19 +348,33 @@ def discard_stage_at(dir_fd: int, name: str) -> None:
         pass
 
 
+def _unlink_at(dir_fd: int, name: str) -> int:
+    """Remove `name` beneath the held `dir_fd` (a name the caller already validated). Returns 0 or
+    the errno that stopped it."""
+    try:
+        os.unlink(name, dir_fd=dir_fd)
+    except OSError as exc:
+        return exc.errno or errno.EIO
+    return 0
+
+
 def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
     """The one durable exclusive publish: `link(2)` the fsynced stage to `leaf` (the
     compare-and-set), fsync the directory (the commit point), then drop the stage name.
 
-    Raises `FileExistsError` for an existing leaf and an errno-only `OSError` for any other
-    failure. Removal of the stage is attempted on every path (a failed removal is swallowed and leaves
-    only the encrypted 0600 stage); a leaf that was linked is never removed, so a directory
-    fsync failure reports an error with the vault kept."""
+    Raises `FileExistsError` for an existing leaf, `LinkUnsupported` for a file system that
+    cannot link, and an errno-only `OSError` for any other failure. Removal of the stage is
+    attempted on every path (a failed removal is swallowed and leaves only the encrypted 0600
+    stage); a leaf that was linked is never removed, so a directory fsync failure reports an
+    error with the vault kept."""
     validate_component(stage_name, _CREATOR_KEY)
     validate_component(leaf, _CREATOR_KEY)
     code = 0
+    unsupported = False
     try:
-        os.link(stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
+        link_noclobber_at(parent_fd, stage_name, parent_fd, leaf)
+    except LinkUnsupported as exc:
+        code, unsupported = exc.errno or errno.EIO, True
     except OSError as exc:
         code = exc.errno or errno.EIO
     if not code:
@@ -358,6 +386,8 @@ def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> Non
     discard_stage_at(parent_fd, stage_name)
     if code == errno.EEXIST:
         raise FileExistsError(errno.EEXIST, "output exists")
+    if unsupported:
+        raise LinkUnsupported(code)
     if code:
         raise OSError(code, os.strerror(code))
 
@@ -393,3 +423,146 @@ def _publish_labelled(
         publish_replace_durable(parent_fd, stage_name, leaf, rename)
     else:
         publish_exclusive_durable(parent_fd, stage_name, leaf)
+
+
+@dataclass(frozen=True, slots=True)
+class _Entry:
+    """One listing entry with its kind read at listing time and never through a link."""
+
+    name: str
+    _file: bool
+    _dir: bool
+    _link: bool
+
+    def is_file(self, *, follow_symlinks: bool = False) -> bool:
+        return self._file
+
+    def is_dir(self, *, follow_symlinks: bool = False) -> bool:
+        return self._dir
+
+    def is_symlink(self) -> bool:
+        return self._link
+
+    @property
+    def kind(self) -> Literal["file", "dir", "link", "other"]:
+        """The one closed kind of this entry, a link first."""
+        if self._link:
+            return "link"
+        if self._file:
+            return "file"
+        return "dir" if self._dir else "other"
+
+
+def entries_at(dir_fd: int) -> Iterator[_Entry]:
+    """The entries of the held directory `dir_fd`, kinds from the entry itself (`lstat` rules), so
+    a link inside the directory is a link and never what it points at. The one no-follow listing
+    for `DirHandle` and `StageDir`."""
+    with os.scandir(dir_fd) as it:
+        for entry in it:
+            is_file = entry.is_file(follow_symlinks=False)
+            is_dir = entry.is_dir(follow_symlinks=False)
+            # A link, a FIFO or a socket is neither: only those need an lstat to tell them apart.
+            is_link = not (is_file or is_dir) and stat.S_ISLNK(
+                entry.stat(follow_symlinks=False).st_mode
+            )
+            yield _Entry(entry.name, is_file, is_dir, is_link)
+
+
+class _FdBox:
+    """One descriptor, closed at most once by whichever of its owner or finalizer comes first."""
+
+    def __init__(self, fd: int) -> None:
+        self.fd = fd
+
+    def close(self) -> None:
+        fd, self.fd = self.fd, -1
+        if fd >= 0:
+            _close(fd)
+
+
+def _refuse_change() -> NoReturn:
+    raise FileAccessUnavailable("a read-only stage view refuses changes")
+
+
+class _ReadOnlyStageDir:
+    """The one read-only `StageDir` over a held child directory descriptor, shared by every stage
+    implementor. It owns the descriptor, checks the owning stage on every call, and refuses every
+    change."""
+
+    def __init__(
+        self,
+        fd: int,
+        display: str,
+        strict: bool,
+        live: Callable[[], bool],
+        register_close: Callable[[Callable[[], None]], object],
+    ) -> None:
+        self.display = display
+        self.strict = strict
+        self._box = _FdBox(fd)
+        self._live = live
+        self._register = register_close
+        register_close(self._box.close)
+        weakref.finalize(self, self._box.close)
+
+    def _held(self) -> int:
+        if self._box.fd < 0 or not self._live():
+            raise FileAccessUnavailable("output transaction is finished")
+        return self._box.fd
+
+    def open_subdir(self, component: str) -> StageDir:
+        return open_subdir_at(
+            self._held(), component, self._live, self._register, self.display, self.strict
+        )
+
+    def entries(self) -> Iterator[_Entry]:
+        return iter(list(entries_at(self._held())))
+
+    def open_file(self, component: str) -> int:
+        fd = self._held()
+        validate_component(component, self.display)
+        return _open_leaf_at(fd, component)
+
+    def create_file(self, component: str) -> int:
+        _refuse_change()
+
+    def create_dir(self, component: str) -> StageDir:
+        _refuse_change()
+
+    def remove(self, component: str) -> None:
+        _refuse_change()
+
+    def rename(self, src: str, dst: str) -> None:
+        _refuse_change()
+
+    def local_stage_path(self) -> str:
+        raise FileAccessUnavailable("a read-only stage view has no stage path")
+
+    def claim_from(self, source: StageDir, src_component: str, dst_component: str) -> FileSeal:
+        _refuse_change()
+
+    def seal_of(self, component: str) -> FileSeal | None:
+        from decoy_engine.fileaccess._stage_claim import seal_at
+
+        return seal_at(self._held(), component)
+
+    def __reduce__(self) -> tuple[object, ...]:
+        raise TypeError("a stage view cannot be serialized")
+
+
+def open_subdir_at(
+    dir_fd: int,
+    component: str,
+    live: Callable[[], bool],
+    register_close: Callable[[Callable[[], None]], object],
+    display: str,
+    strict: bool,
+) -> StageDir:
+    """The read-only stage over folder `component` of the held directory `dir_fd`, opened
+    without following a link (`ELOOP`, `ENOTDIR` for a link or a file). The view owns its
+    descriptor and hands its close to `register_close`, so the owning stage ends it."""
+    validate_component(component, display)
+    if not live():
+        raise FileAccessUnavailable("output transaction is finished")
+    fd = _open_existing_dir(dir_fd, component)
+    return _ReadOnlyStageDir(fd, display, strict, live, register_close)

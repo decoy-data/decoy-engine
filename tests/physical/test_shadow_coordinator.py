@@ -224,7 +224,8 @@ def test_planned_vs_actual_route_diff_is_raised_on_mismatch(
         ("hash", pa.string(), pa.float64()),
         ("passthrough", pa.int64(), pa.int64()),
         ("passthrough", pa.bool_(), pa.bool_()),
-        ("passthrough", pa.string(), pa.null()),
+        # Rule 4 (A1): passthrough keeps the source column.
+        ("passthrough", pa.string(), pa.string()),
     ],
 )
 def test_assemble_column_empty(
@@ -243,8 +244,9 @@ def test_assemble_column_empty(
         ("redact", pa.string(), pa.null()),
         ("truncate", pa.string(), pa.null()),
         ("hash", pa.string(), pa.null()),
-        ("passthrough", pa.int64(), pa.float64()),
-        ("passthrough", pa.string(), pa.null()),
+        # Rule 4 (A1): passthrough keeps the source column.
+        ("passthrough", pa.int64(), pa.int64()),
+        ("passthrough", pa.string(), pa.string()),
     ],
 )
 def test_assemble_column_all_null(
@@ -264,11 +266,12 @@ def test_assemble_column_normal_case_keeps_native_type() -> None:
     assert out.to_pylist() == ["a", None, "b"]
 
 
-def test_assemble_column_partial_null_int_passthrough_upcasts_to_float() -> None:
+def test_assemble_column_partial_null_int_passthrough_keeps_int() -> None:
+    # Rule 4 (A1): passthrough keeps the source column, no float upcast.
     parts = [pa.array([1, None, 3], type=pa.int64())]
     out = assemble_column("passthrough", parts)
-    assert out.type.equals(pa.float64())
-    assert out.to_pylist() == [1.0, None, 3.0]
+    assert out.type.equals(pa.int64())
+    assert out.to_pylist() == [1, None, 3]
 
 
 # ---------------------------------------------------------------------------

@@ -328,7 +328,7 @@ def _when_read_columns(
             if not isinstance(when, str):
                 continue
             try:
-                refs = when_column_refs(parse_when_cached(when))
+                refs = [r.column for r in when_column_refs(parse_when_cached(when))]
             except ValidationError:
                 continue  # the evaluator raises its coded error; nothing to protect here
             out[table] = out.get(table, set()) | set(refs)
@@ -494,69 +494,6 @@ def _rebuilds_with_source_type(arrow_type: pa.DataType) -> bool:
     )
 
 
-def _with_source_types(
-    table: pa.Table, schema: pa.Schema | None, names: Collection[str]
-) -> pa.Table:
-    """Give each named column its source Arrow type back where pandas lost it.
-
-    A date strategy hands pandas ``datetime.date`` cells, which Arrow reads as ``date32`` (so a
-    ``date64`` source changes type) and, for an all-null chunk, as ``null`` (so chunk schemas
-    differ). Only those two losses are repaired; any other type difference is left as it is.
-    """
-    if schema is None:
-        return table
-    for name in names:
-        if name not in table.column_names or name not in schema.names:
-            continue
-        want = schema.field(name).type
-        have = table.schema.field(name).type
-        if have != want and (
-            pa.types.is_null(have) or (pa.types.is_date64(want) and have == pa.date32())
-        ):
-            position = table.schema.get_field_index(name)
-            table = table.set_column(position, name, table.column(position).cast(want))
-    return table
-
-
-def table_from_pandas_keeping_source_types(
-    frame: pd.DataFrame,
-    schema: pa.Schema | None,
-    untouched: Collection[str],
-    keep_types: Collection[str] = (),
-) -> pa.Table:
-    """`pa.Table.from_pandas(frame)` that gives every untouched nested column (list, large list,
-    fixed-size list, struct, map) the source's field type back. pandas holds those cells as
-    dicts, arrays or tuple lists, so inference loses the type (int32 fields widen, an all-null
-    column becomes `null`) or cannot infer it at all (map). `schema` is the source table's and
-    `untouched` the columns no strategy changed (`_chunked_carry.untouched_columns`): a masked
-    column holds the strategy's own values and converts as it always did. `keep_types` names the
-    date columns whose source type is restored on the way out."""
-    rebuilt = (
-        sorted(
-            (
-                f
-                for f in schema
-                if _rebuilds_with_source_type(f.type)
-                and f.name in frame.columns
-                and f.name in untouched
-            ),
-            key=lambda f: frame.columns.get_loc(f.name),
-        )
-        if schema is not None
-        else []
-    )
-    arrays = {f.name: pa.array(frame[f.name], type=f.type, from_pandas=True) for f in rebuilt}
-    rest = frame.drop(columns=list(arrays))
-    if arrays and rest.shape[1] == 0:
-        # from_pandas of an empty-column frame has zero rows, so the frame's own count is kept here.
-        table = pa.table(arrays)
-    else:
-        table = pa.Table.from_pandas(rest, preserve_index=False)
-        for name, array in arrays.items():
-            table = table.add_column(frame.columns.get_loc(name), name, array)
-    return _with_source_types(table, schema, keep_types)
-
-
 __all__ = [
     "FK_KEY_DTYPE_UNSUPPORTED_CODE",
     "NULL_FK_KEY",
@@ -570,6 +507,5 @@ __all__ = [
     "lossless_fk_int_values",
     "lossless_int_columns",
     "lossless_int_columns_from_config",
-    "table_from_pandas_keeping_source_types",
     "to_pandas_fk_safe",
 ]
