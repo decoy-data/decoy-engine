@@ -19,9 +19,8 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import read_fixed_width
-from decoy_engine.execution import run_pipeline
-from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
+from decoy_engine.plan import PlanCompileError
 from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.progress import CallbackSink
@@ -147,20 +146,23 @@ def test_empty_fixed_width_file_writes_declared_types_on_every_route(
     assert _untouched(schema) == _untouched(lazy), route
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="hash on a zero-row frame gives double on the pandas lanes, string on chunked",
+_PANDAS_ZERO_ROW_HASH = pytest.mark.xfail(
+    strict=True, reason="hash on a zero-row frame gives double on the pandas lanes"
 )
-def test_the_hashed_column_of_an_empty_file_has_one_type_on_every_lane(tmp_path: Path) -> None:
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        pytest.param(r, marks=_PANDAS_ZERO_ROW_HASH) if r in {"full_frame", "lazy"} else r
+        for r in ROUTES
+    ],
+)
+def test_the_hashed_column_of_an_empty_file_is_string(tmp_path: Path, route: str) -> None:
     descriptor, path = _fixed_width(tmp_path)
     cfg = _config(descriptor, list(DECLARED))
-    types = {
-        route: _run(cfg, _fixed_width_source(descriptor, path, ROUTES[route][0]), route, tmp_path)
-        .field("h")
-        .type
-        for route in ROUTES
-    }
-    assert set(types.values()) == {pa.string()}, types
+    source = _fixed_width_source(descriptor, path, ROUTES[route][0])
+    assert _run(cfg, source, route, tmp_path).field("h").type == pa.string()
 
 
 @pytest.mark.parametrize("route", list(ROUTES))
