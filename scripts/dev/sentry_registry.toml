@@ -287,6 +287,9 @@ baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
 [[sentry]]
 id = "engine-exception-text-copies"
 baseline = "tests/sentry/baselines/engine-exception-text-copies.json"
+approved_growth = [
+  { key = "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign", decision = "owner 2026-11-24 re-home of is_memory_failure after #792 moved it; same site, max 1" },
+]
 
 # Owner decisions, each `"<id or path>" = "owner YYYY-MM-DD <reason of 15+ chars>"`. Printed by
 # `ratchet_check.py` as `decision` lines. A name already on the merge base does not count again.
