@@ -50,6 +50,10 @@ TRIAGED: dict[tuple[str, str], str] = {
     ("0.28.4", "`bucket_perturb` no longer detects a date format from the ce"): (
         "the Breaking bullet on bucket_perturb with no date_format covers it"
     ),
+    ("0.28.4", "The full-frame, sequential and unified-slice routes now buil"): (
+        "the Breaking bullet on untouched columns written as stored covers the change; the two new "
+        "ExecutionError codes fire only on an engine invariant no job input can cause"
+    ),
     ("0.28.4", "`bucket_perturb` now runs on a column that is already a date"): (
         "an addition: a typed date column now runs; the refusals named are its own and no earlier config ran there"
     ),

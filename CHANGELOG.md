@@ -13,6 +13,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ### Breaking for consumers
 
+- columns no rule changes are written exactly as stored in the source on every route (decimal and nullable int columns, and all-null or zero-row columns, keep their type, and a float NaN stays NaN instead of becoming null). Carried text still leaves as `string` while it fits 32-bit offsets, as before.
 - person name, email, phone and address faker providers (and the synthetic account, member and plan ids) now run on the native and chunked routes; an empty or all-null chunked output column, and a deterministic column over an all-null or empty int/bool source on any route, is typed string, and a non-string custom provider under one of these names fails on the chunked route.
 - a faker column with no pool_size now runs on the native and chunked routes; an empty or all-null chunked output column is typed string, a non-string custom person_first_name or person_last_name provider now fails on the chunked route but still reroutes on the unified slice, an out-of-core job whose faker pools exceed the pool budget now fails before the run starts, and `PoolCache` now charges each pool its measured bytes (string object sizes plus array slots) instead of a character-count estimate, so it evicts or raises `pool_exceeds_cache_budget` at different pool sizes, and `estimate_pool_bytes` is removed in favour of `measured_pool_bytes`.
 - `nested` `provider_config.target` accepts only a closed RFC 9535 subset, so `compile_plan` and `run_config_only_checks` now refuse with the new reason `plan.nested_target_unsupported` what used to compile: `$..x` and `$..*`, `,` unions, a target without `$` (including `($.a).b`), dot-quoted names, backtick selectors, `|`, `&` and `where`, `$['*']`, a slice step below 1, leading-zero and `-0` integers and integers beyond plus or minus 2^53 - 1 in an index or in a slice start, end or step (`$[01:]`, `$[-0:]`, `$[9007199254740992:]`), a quoted name with an invalid escape (`$['a\\qb']`), a raw control character or a raw unpaired surrogate inside quotes, `wherenot` and other words after a name, blank space outside a quoted name, member names with `-` or `@` or a leading digit, unquoted bracket names (`$[a]`, `$.a[b]`), a dot before a bracket (`$.x.[0]`, `$.[0]`, `$.a.[*]`), parentheses (`$.a.(b)`) and `$.$`; quoted-name escapes are now decoded per RFC 9535 2.3.1.2, so `$['a\nb']` selects the key `a` newline `b` and `$['a\'b']` selects `a'b` (they selected nothing); `.*` on any array, at any depth (`$.a.*`, `$.*.a`, `$.*.*`, `$[*].*`), now selects its items (it selected nothing); an array selector (`[*]`, an index, a slice, or `.*[0]` over objects) applied to an object, a scalar or an empty container (`$[5]` on `{"a":1}`, `$[0]` on `{}`, `$[*].a` on `5`, `"s"` or `{}`) used to pass the cell through and now fails the run with `nested_target_unwritable_container`; `$[-5]` on a 3-item array used to raise `IndexError` and now selects nothing; `nested_jsonpath_path_overlap` is no longer raised; the `jsonpath-ng` requirement is removed
@@ -21,6 +22,19 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - an engine older than this release refuses a `distribution-snapshot/v1` or `/v2` snapshot that holds `cell_format.char_class`, and refuses a pinned plan whose stored `cell_format` holds it, with `statistical_cell_format_invalid`; upgrade the engine or refit with the old one
 - a plain run now gives an untouched list, large list, fixed-size list, struct or map column its source type, not an inferred one.
 - removed the public names `LicenseError`, `LicenseExpiredError`, `FlagPauseSignal`, `get_default_executor` and `VALIDATION_CODES` from `decoy_engine`; use `decoy_engine.reasons.config` for codes and `select_execution_adapter` for the adapter
+
+### Changed (one output assembler, UF-DOMAIN S1, 2026-11-22)
+
+The full-frame, sequential and unified-slice routes now build output through one function,
+`table_from_pandas_keeping_source_types`. It takes the source table, writes each untouched column
+from the source Arrow column, and converts only the masked columns from pandas. Before, a
+`decimal(12,2)` column that no rule changed came back as `decimal(3,2)`, a nullable `int64`
+as `float64` on those routes, while the chunked route kept the source type. All routes now agree. The function checks that the frame still has the source's row
+count, index and column order, and raises an `ExecutionError` (`runtime/output_assembly_rows_changed` or `runtime/output_assembly_columns_mismatch`) before any output exists if it does not. A carried `Int64` or `string` column keeps its pandas dtype hint.
+
+### Added (pre-scan coverage verdict, PRE-SCAN-RUN E2, 2026-11-21)
+
+`decoy_engine.profiling.evaluate_pre_scan(config, core)` decides which flagged source columns a pipeline leaves unmasked: a column with no rule, a `passthrough` rule, or a rule gated by `when:` is uncovered, and a mask table the scan did not cover is a `not_scanned` finding. The `PreScanVerdict` holds names only and builds the `pre_scan` run result check. `PreScanBlockedError` and `PreScanFailedError` map to `pre_scan.uncovered_pii_blocked` and `pre_scan.profile_failed` in the reason adapter. No run calls it yet; the run-start step ships in the CLI.
 
 ### Changed (faker providers run native, FAKER-NATIVE-WIDEN, 2026-11-23)
 

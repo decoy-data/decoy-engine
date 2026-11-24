@@ -462,12 +462,12 @@ NONFK_FULL_FRAME_CAPACITY_EXCEEDED = _d(
 OUTPUT_ASSEMBLY_ROWS_CHANGED = _d(
     "output_assembly_rows_changed",
     "A masked frame no longer holds the rows of the source it was read from.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 OUTPUT_ASSEMBLY_COLUMNS_MISMATCH = _d(
     "output_assembly_columns_mismatch",
     "A masked frame no longer holds the columns of the source it was read from, in order.",
-    since=UNRELEASED,
+    since="1.34.0",
 )
 # A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
 # (a publication outcome) would name the wrong stage.

@@ -235,6 +235,82 @@
       "symbol": "NONFK_FULL_FRAME_CAPACITY_EXCEEDED"
     },
     {
+      "code": "output_assembly_columns_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A masked frame no longer holds the columns of the source it was read from, in order.",
+      "symbol": "OUTPUT_ASSEMBLY_COLUMNS_MISMATCH"
+    },
+    {
+      "code": "output_assembly_rows_changed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.34.0",
+      "summary": "A masked frame no longer holds the rows of the source it was read from.",
+      "symbol": "OUTPUT_ASSEMBLY_ROWS_CHANGED"
+    },
+    {
       "code": "when_masked_reference_unsupported",
       "context": [],
       "deprecated_in": null,
