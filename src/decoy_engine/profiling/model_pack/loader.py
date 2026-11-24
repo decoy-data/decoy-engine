@@ -230,8 +230,11 @@ class ModelPackLoader:
         try:
             return self.load()
         except ModelPackLoadError as exc:
+            cause = exc.cause  # closed engine-set value, never message text
             _log.warning(
-                "Model pack unavailable (%s); falling back to regex baseline", type(exc).__name__
+                "Model pack unavailable (%s, cause %s); falling back to regex baseline",
+                type(exc).__name__,
+                cause,
             )
             return None
         except Exception as exc:

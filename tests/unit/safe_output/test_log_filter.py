@@ -194,6 +194,91 @@ def test_filter_never_raises() -> None:
     assert _CANARY not in _FMT.format(record)
 
 
+def test_filter_clears_exc_info() -> None:
+    record = _record()
+    assert record.exc_info is not None
+    SafeRecordFilter().filter(record)
+    assert record.exc_info is None
+
+
+class _RawExcInfoFormatter(logging.Formatter):
+    """Renders `record.exc_info` itself, like python-json-logger does."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        info = record.exc_info
+        return f"{record.getMessage()} | {info[1] if info else ''}"
+
+
+def test_later_handler_rendering_exc_info_sees_no_canary() -> None:
+    engine, _ = _engine_handler()
+    buf = io.StringIO()
+    later = logging.StreamHandler(buf)
+    later.setFormatter(_RawExcInfoFormatter())
+    record = _record()
+    # Positive control: the raw formatter prints the canary from an unfiltered record.
+    assert _CANARY in _RawExcInfoFormatter().format(_record())
+    engine.handle(record)
+    later.handle(record)
+    assert buf.getvalue()
+    assert _CANARY not in buf.getvalue()
+
+
+def test_fallback_clears_live_exc_info() -> None:
+    record = _record("x %(e)s", (), exc=True)
+    record.args = _ExplodingArgs(e=ValueError(_CANARY))
+    assert record.exc_info is not None
+    assert SafeRecordFilter().filter(record) is True
+    assert record.exc_info is None
+    assert record.exc_text is None
+    assert _CANARY not in _FMT.format(record)
+    assert _CANARY not in _RawExcInfoFormatter().format(record)
+
+
+def _nested_arg(shape: str) -> object:
+    exc = ValueError(_CANARY)
+    return {
+        "list": [exc],
+        "tuple": (exc,),
+        "set": {exc},
+        "frozenset": frozenset({exc}),
+        "dict_value": {"k": exc},
+        "dict_key": {exc: "v"},
+    }[shape]
+
+
+@pytest.mark.parametrize("shape", ["list", "tuple", "set", "frozenset", "dict_value", "dict_key"])
+def test_exception_inside_container_arg_becomes_label(shape: str) -> None:
+    engine, buf = _engine_handler()
+    engine.handle(_record("x %s", (_nested_arg(shape),), exc=False))
+    out = buf.getvalue()
+    assert "ValueError" in out
+    assert _CANARY not in out
+
+
+@pytest.mark.parametrize("shape", ["list", "tuple", "dict_value", "dict_key"])
+def test_exception_inside_mapping_arg_container_becomes_label(shape: str) -> None:
+    engine, buf = _engine_handler()
+    record = _record("x %(c)s", (), exc=False)
+    record.args = {"c": _nested_arg(shape)}
+    engine.handle(record)
+    assert "ValueError" in buf.getvalue()
+    assert _CANARY not in buf.getvalue()
+
+
+def test_nested_tuple_in_args_becomes_label() -> None:
+    engine, buf = _engine_handler()
+    engine.handle(_record("x %s %s", ((ValueError(_CANARY),), "y"), exc=False))
+    assert _CANARY not in buf.getvalue()
+    assert "ValueError" in buf.getvalue()
+
+
+def test_dict_msg_with_exception_becomes_label() -> None:
+    engine, buf = _engine_handler()
+    engine.handle(_record({"err": ValueError(_CANARY)}, (), exc=False))
+    assert "ValueError" in buf.getvalue()
+    assert _CANARY not in buf.getvalue()
+
+
 def test_every_engine_handler_carries_the_filter() -> None:
     logger = logging.getLogger("decoy_engine")
     _configure_logger(logger, {"console": True})
@@ -227,4 +312,28 @@ def test_documented_gap_preformatted_text(shape: str) -> None:
     else:
         record = _record("%s", (str(exc),), exc=False)
     engine.handle(record)
+    assert _CANARY not in buf.getvalue()
+
+
+class _Wrapper:
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def __str__(self) -> str:
+        return str(self._exc)
+
+
+@pytest.mark.xfail(strict=True, reason="named in the module gap list; call sites are guarded")
+@pytest.mark.parametrize("shape", ["exc_args", "wrapper_str", "too_deep"])
+def test_documented_gap_uncatchable_shapes(shape: str) -> None:
+    engine, buf = _engine_handler()
+    exc = ValueError(_CANARY)
+    arg: object
+    if shape == "exc_args":
+        arg = exc.args
+    elif shape == "wrapper_str":
+        arg = _Wrapper(exc)
+    else:
+        arg = [[exc]]
+    engine.handle(_record("x %s", (arg,), exc=False))
     assert _CANARY not in buf.getvalue()

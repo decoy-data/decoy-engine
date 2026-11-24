@@ -8,7 +8,8 @@ record while it can still change what is printed.
 What the filter rewrites, in place on the record:
 
 - an exception in `msg` or in `args` (a tuple item or a mapping value) becomes its closed type
-  label (`safe_error_type`), so `%s` and `%r` print the label;
+  label (`safe_error_type`), so `%s` and `%r` print the label. The same holds one level inside
+  a list, tuple, set, frozenset or dict (keys and values) used as an argument or as `msg`;
 - live `exc_info` becomes a traceback of labels and `file:line, in function` frames, with no
   exception text, no source lines and no frame locals; `exc_info` is then cleared so the
   formatter cannot render the raw one;
@@ -16,9 +17,16 @@ What the filter rewrites, in place on the record:
   host formatter cached earlier never passes, while a second filtered handler prints the same
   safe traceback as the first.
 
-`stack_info` holds only code locations and is kept. Text already formatted into `msg` (an
-f-string, or `str(exc)` passed as an argument) cannot be told apart from any other text here;
-`tests/sentry/test_log_interpolation.py` guards those call sites instead.
+`stack_info` holds code locations and engine source lines (code, not data) and is kept.
+
+Gaps, each pinned by a strict xfail cell in `tests/unit/safe_output/test_log_filter.py`; the
+call-site guard `tests/sentry/test_log_interpolation.py` covers them instead:
+
+- text already formatted into `msg` (an f-string, or `str(exc)` passed as an argument), which
+  cannot be told apart from any other text here;
+- `exc.args` (or any part of an exception) passed as an argument, since it is plain data;
+- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`;
+- an exception nested deeper than one container level.
 """
 
 from __future__ import annotations
@@ -49,8 +57,25 @@ def _label(exc: BaseException) -> _Label:
     return _Label(safe_error_type(exc).value)
 
 
-def _safe(value: object) -> object:
+def _replace(value: object) -> object:
     return _label(value) if isinstance(value, BaseException) else value
+
+
+def _safe(value: object) -> object:
+    """`value` with exceptions swapped for labels, at the top and one container level down."""
+    if isinstance(value, BaseException):
+        return _label(value)
+    if isinstance(value, list):
+        return [_replace(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_replace(v) for v in value)
+    if isinstance(value, set):
+        return {_replace(v) for v in value}
+    if isinstance(value, frozenset):
+        return frozenset(_replace(v) for v in value)
+    if isinstance(value, dict):
+        return {_replace(k): _replace(v) for k, v in value.items()}
+    return value
 
 
 def _frames(tb: TracebackType | None) -> list[str]:
@@ -94,7 +119,7 @@ def _scrub(record: logging.LogRecord) -> None:
     if isinstance(args, tuple):
         record.args = tuple(_safe(a) for a in args)
     elif isinstance(args, Mapping):
-        record.args = {k: _safe(v) for k, v in args.items()}
+        record.args = {_replace(k): _safe(v) for k, v in args.items()}  # type: ignore[misc]
 
     exc = record.exc_info[1] if record.exc_info else None
     if exc is not None:
