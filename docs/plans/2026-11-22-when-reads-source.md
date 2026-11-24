@@ -337,10 +337,10 @@ A write means a column whose cells dispatch may replace, including writes limite
 
 | Selected operation | Writes and reads |
 | --- | --- |
-| FK resolution, checked first | Start each child key component at its source value. Overlay earlier child commits in dispatch rank order on their selected rows. On a plan that orders today, include every earlier commit. If the old sort raises a cycle, skip child commits from nodes that supply a final component of this FK's parent key. Skip them only for this lookup. Use the resulting tuple for matching and orphan handling. Write exactly the child tuple. For the parent map, pair each original parent key with its final key from the same row. Use the current parent column where no snapshot exists. See `_pandas_adapter.py:533–566` and `:633–634`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
+| FK resolution, checked first | Start each child key component at its source value. Overlay earlier child commits in dispatch rank order on their selected rows. On a plan that orders today, include every earlier commit. If the old sort raises a cycle, skip child commits from any node that supplies a final key component for any declared parent. Apply this skip once to the whole lookup. Merge parent maps in declared edge order. The first map containing a key wins. Look up one child tuple per row. Apply the shared orphan policy only on a miss. Write exactly the child tuple. See `_pandas_adapter.py:533–566`. Discard the bypassed handler's reads, outputs, gate and creator flag. A composite FK group requires an edge. See `_pandas_adapter.py:375`. |
 | Scalar | Writes its target. A nested handler writes back its outer column. A multi-column `joint_mask` writes exactly its configured outputs. Its mask key reads source. A scalar `date_shift` with `group_by` needs the original group key in its table. Supply the aligned snapshot at `_strategies/_date_shift.py:190`. See `_column_access.py:347` and `_strategies/_joint_mask.py:119`. |
 | Creating scalar | Writes its target and can introduce it. Take masked drivers from the strategy declaration. This covers `derived`, `derived_aggregate`, `grouped_series`, `windowed_date` and `group_key`. See `_column_access.py:339` and `_column_access.py:409`. |
-| Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity and the deterministic source key. See `_column_access.py:266`, `_runner.py:113–115` (grouping), `_runner.py:127–136` (construction) and `_strategies/_composite.py:130`. |
+| Composite | Writes exactly the fixed provider outputs or the columns in the custom bundle. Check all generated keys against that set before assignment. A `coherent_with` member outside the bundle contributes zero writes. Keep group identity. A deterministic bundle reads the first sorted group column at its dispatch rank. See `_column_access.py:266`, `_runner.py:113–115` (grouping), `_runner.py:127–136` (construction) and `_strategies/_composite.py:130`. |
 | Passthrough | Writes nothing. A gate may still read its predicate. See `_strategies/_passthrough.py:24`. |
 | Unknown writer | May write any column of its own table. Use one table-scoped wildcard. An unsupported handler still raises its existing error. See `_column_access.py:385` for the declaration, `_runner.py:411` for wildcard lookup and `_pandas_adapter.py:410–415` for the error. |
 
@@ -379,7 +379,17 @@ working overlap it reads the driver version available at its dispatch rank. A ha
 own target waits for the version just before its write. For example, a later unconditional
 `truncate(last_name)` reads the bundle's generated surname (`_strategies/_truncate.py:115–121`).
 A replacement that never reads its target can skip an unused prior version. Its earlier handler
-still runs. Resolve every component of an FK's final parent tuple before caching the parent map.
+still runs.
+
+Pair each original parent tuple with the selected parent versions from the same row.
+For a shared parent and child column in the same table, read the version just before this FK commits.
+Exclude the FK's own write from its wait set. Other parent components normally use their final versions.
+Reuse a cached map only for the same parent tuple and the same versions.
+
+On a plan that orders today, keep the bundle's read of the resolved child if it uses that child as its key.
+If waiting for the bundle would close a cycle, use the parent versions visible at the FK's old rank.
+The FK commits first. The bundle then reads the committed key. Test 19 pins this known limit.
+
 An unwritten input uses the source version. Source reads add no writer edges. Supply required
 anchor snapshots before evaluation, including the original group key for `date_shift`.
 
@@ -523,18 +533,41 @@ first kill the specified mutation, then restore it. Run the same tests green on 
     Repeat with passthrough in place of derived on email. This plan orders today.
     Assert every email matches the bundle-only email oracle under orphan preservation.
 
+18. **V1** `test_self_fk_reads_shared_tenant_before_commit`. In table t, resolve (tenant, manager)
+    against (tenant, id). Use tenants [A, A, B, B], ids [1, 2, 1, 2] as strings,
+    and managers [2, 1, 2, 1] as strings. Derive id as label plus "!".
+    Use labels [a1, a2, b1, b2]. Pin the successful output at `42436c973`.
+    Tenant and label keep their input values. Id is [a1!, a2!, b1!, b2!].
+    Manager is [a2!, a1!, b2!, b1!]. Waiting on the FK's tenant commit prevents this run.
+19. **V1** `test_bundle_keys_on_resolved_fk_child`. Repeat test 2 with
+    `coherent_with=("a_ref",)`. Bind the sorted bundle group to the same namespace.
+    At `42436c973`, a_ref is [O2?, O0?, O3?, O1?]. Assert that exact list.
+    Compare first_name, last_name and email with the fixed-seed bundle oracle keyed by that list.
+    Assert the child values are absent from final last_name. Waiting for the bundle rejects the job.
+    Reading source a_ref instead changes all three generated columns.
+20. **V1** `test_multi_parent_fk_uses_one_child_tuple`. Extend the cycle in test 3.
+    Use source first_name [F0, F1, F2, F3], email [F0, S, miss, F3] and second [F0, S, Q, R].
+    Derive second from [O0, O1, O2, O3] plus "!". Declare first_name and second as parents of email.
+    Only the bundle writes both a parent key and email. Use PRESERVE.
+    Let G0 and G3 be the generated first names for F0 and F3 from the bundle oracle.
+    With first_name declared first, assert email is [G0, O1!, miss, G3].
+    Reverse the edges and assert [O0!, O1!, miss, G3]. Both orders raise
+    `cyclic_work_ordering` at `42436c973`. Using generated email for the second
+    parent loses its S match. Replacing an existing map entry reverses the F0 winner.
+
 ### Placement and removal
 
 At `42436c973`, the FK edge for a_ref points to the derived last_name node.
 The ready queue places a_ref before the bundle. Test 2 gets the intermediate
 surname. In test 7, z_ref runs after the bundle and gets the final surname.
-Make FK evaluation wait for every final writer of its parent columns before
-building the map. Keep commit ranks fixed. Correcting a_ref changes a successful
-job's child output. Literal output parity for that case conflicts with tests 2 and 7.
-Tests 2 and 7 win. Today a_ref maps child keys through an intermediate parent value,
-so its child keys do not match the final parent column. That is a referential-integrity
-bug, so the output change is a fix. The engine is pre-GA, so no compatibility mode is kept.
-Add a CHANGELOG line under Fixed that names the changed case.
+Keep commit ranks fixed. The only output correction for a job that runs today is the
+independent surname lookup in tests 2 and 7. Correct a matched child's intermediate
+surname only when it is absent from the final parent column. Use the final surname
+from the same parent row. Preserve a child already present in the final parent column,
+including on a mixed input. Keep existing orphan outcomes. The z_ref run already has
+the final surname. Record the a_ref correction under Fixed in the CHANGELOG.
+Test 19 retains today's order and output. Its child still points to an intermediate
+surname because the final surname depends on that resolved child.
 
 Move existing code before adding logic. Current sizes and ceilings are
 `_runner.py` 598/600, `_when_gate.py` 600/600, `_pandas_adapter.py` 669/700
