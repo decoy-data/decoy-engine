@@ -395,12 +395,12 @@ def date_shift_admit(
 ) -> str | None:
     """Why a date_shift column stays on Python, or None.
 
-    Adapts the route-neutral `date_shift_config_rejection` to the SEQ admit signature: a
-    one-field empty table stands in for the resident source so the type gate resolves the
-    pinned Arrow type, and a config the handler would raise on declines so the handler raises
-    its own coded error on Python. `shape` is the plan's typed date shape (None for text and for
-    an F06-declared date, which keeps its text output), so a typed column takes the typed half
-    of the gate (no format, no `preserve_values`)."""
+    Adapts `date_shift_config_rejection` to the SEQ admit signature: a one-field empty table
+    stands in for the resident source, so the type gate sees the pinned Arrow type. `shape` is
+    the plan's typed date shape (None for text and an F06-declared date); a typed column takes
+    the typed gate, and a typed `when:` stays on Python with the other routes' code."""
+    if shape is not None and seed.when is not None:
+        return f"{reasons.runtime.WHEN_PREDICATE_NOT_NATIVE}:{column}"
     return date_shift_config_rejection(
         column,
         column,

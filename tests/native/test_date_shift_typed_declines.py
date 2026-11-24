@@ -16,6 +16,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_pipeline
+from decoy_engine.execution._sequential_native_ops import SEQ_DATE_SHIFT_DISPOSITION_KEY
 from tests.native._b8_support import (
     FORCE,
     assert_same_as_oracle,
@@ -83,6 +84,41 @@ def _unified(columns: list[dict[str, Any]], table: pa.Table, unified: bool, tmp:
     )
 
 
+def _sequential(columns: list[dict[str, Any]], table: pa.Table, tmp: Path) -> Any:
+    """`table` as the FK child of a one-key parent: the sequential route needs a relationship."""
+    n = table.num_rows
+    tables = {
+        "parent": pa.table({"id": pa.array([f"k{i}" for i in range(n)])}),
+        TABLE: table.append_column("pid", pa.array([f"k{i}" for i in range(n)])),
+    }
+    key = {"strategy": "hash", "namespace": "fk_t9"}
+    config = make_config(
+        [*columns, {"name": "pid", **key}],
+        extra_tables=[{"name": "parent", "columns": [{"name": "id", **key}]}],
+        relationships=[
+            {
+                "parent": {"table": "parent", "columns": ["id"]},
+                "children": [{"table": TABLE, "columns": ["pid"]}],
+                "orphan_policy": "preserve",
+                "namespace": "fk_t9",
+            }
+        ],
+    )
+    return run_pipeline(
+        with_parquet_sources(config, tables, tmp),
+        tables,
+        engine_version="t9",
+        key_provider=key_provider(),
+        execution_mode="sequential",
+        auto_chunk=False,
+    )
+
+
+def _sequential_backends(result: Any) -> list[tuple[str, str | None]]:
+    entries = result.quality_metrics.get(SEQ_DATE_SHIFT_DISPOSITION_KEY, [])
+    return [(e["executed_backend"], e.get("reason")) for e in entries if e["column"] == "d"]
+
+
 def _native_date_shift_nodes(result: Any) -> list[dict[str, Any]]:
     nodes = result.quality_metrics.get("unified_slice_activation", {}).get("nodes", {})
     return [
@@ -129,6 +165,10 @@ def test_t9_a_when_predicate_keeps_the_typed_column_off_native(tmp_path: Path) -
     off = _unified([column, *_PASS], table, False, tmp_path)
     assert _native_date_shift_nodes(on) == []
     assert on.outputs[TABLE].equals(off.outputs[TABLE])
+    seq = _sequential([column, *_PASS], table, tmp_path)
+    [(backend, reason)] = _sequential_backends(seq)
+    assert (backend, reason) == ("python_scalar", "when_predicate_not_native:d")
+    assert seq.outputs[TABLE].drop_columns(["pid"]).equals(off.outputs[TABLE])
 
 
 def test_t9_control_the_admitted_typed_column_runs_native_on_both_routes(tmp_path: Path) -> None:
@@ -139,3 +179,5 @@ def test_t9_control_the_admitted_typed_column_runs_native_on_both_routes(tmp_pat
     off = _unified([_ds(), *_PASS], table, False, tmp_path)
     assert len(_native_date_shift_nodes(on)) == 1
     assert on.outputs[TABLE].equals(off.outputs[TABLE])
+    seq = _sequential([_ds(), *_PASS], table, tmp_path)
+    assert [b for b, _ in _sequential_backends(seq)] == ["rust_companion"]
