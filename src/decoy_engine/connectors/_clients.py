@@ -235,7 +235,8 @@ def gcs_download(blob: Any, *, start: int, end: int, size: int, generation: int)
 def _ranged_body(response: Any, start: int, end: int, size: int) -> bytes:
     """The body of one ranged media response, refused before any read unless it is exact."""
     status = response.status_code
-    if status == 412:
+    # The URL names the generation just reloaded, so a 404 means that generation is gone.
+    if status in (404, 412):
         raise source_changed("GCS")
     if not 200 <= status < 300:
         from google.api_core.exceptions import from_http_status

@@ -148,6 +148,62 @@ def test_gcs_ignored_range_closes_before_body(monkeypatch: pytest.MonkeyPatch, k
     assert ledger.all_closed()
 
 
+_BAD_206 = {
+    "content_encoding_gzip": lambda s, e, n: {"Content-Encoding": "gzip"},
+    "wrong_start": lambda s, e, n: {"Content-Range": f"bytes {s + 1}-{e}/{n}"},
+    "wrong_end": lambda s, e, n: {"Content-Range": f"bytes {s}-{e - 1}/{n}"},
+    "wrong_total": lambda s, e, n: {"Content-Range": f"bytes {s}-{e}/{n + 1}"},
+    "short_content_range": lambda s, e, n: {"Content-Range": f"bytes {s}-{e}"},
+}
+
+
+def _gcs_refused(
+    monkeypatch: pytest.MonkeyPatch, kind: str, **kw: Any
+) -> tuple[Ledger, ConnectorError]:
+    data = _small_parquet() if kind == "parquet_to_frame" else _SMALL_CSV
+    ledger, _ = _serve(monkeypatch, "gcs", data, **kw)
+    with pytest.raises(ConnectorError) as info:
+        _gcs_read(kind)
+    _value_free(info.value)
+    assert ledger.data_requests, "no media GET was made"
+    assert ledger.body_bytes_read == 0 and ledger.eager_reads == 0
+    assert ledger.all_closed()
+    return ledger, info.value
+
+
+@pytest.mark.parametrize("kind", _GCS_READS)
+@pytest.mark.parametrize("bad", sorted(_BAD_206))
+def test_gcs_inexact_206_refused_before_body(
+    monkeypatch: pytest.MonkeyPatch, kind: str, bad: str
+) -> None:
+    _, err = _gcs_refused(monkeypatch, kind, reply=_BAD_206[bad])
+    assert (err.kind, str(err)) == ("unexpected", "Unexpected GCS error")
+
+
+@pytest.mark.parametrize("kind", _GCS_READS)
+def test_gcs_pinned_read_of_replaced_generation_is_source_changed(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    session: list[FakeGcsSession] = []
+
+    def replace_before_media(call: str, _kw: dict[str, Any]) -> None:
+        if call == "media_get":
+            session[0].obj.generation = 8
+
+    ledger, fake = _serve(
+        monkeypatch,
+        "gcs",
+        _small_parquet() if kind == "parquet_to_frame" else _SMALL_CSV,
+        on_request=replace_before_media,
+    )
+    session.append(fake)
+    with pytest.raises(ConnectorError) as info:
+        _gcs_read(kind)
+    assert info.value.kind == "source_changed"
+    _value_free(info.value)
+    assert ledger.body_bytes_read == 0 and ledger.all_closed()
+
+
 @pytest.mark.parametrize("kind", _GCS_READS)
 def test_gcs_ranged_control_reads_exact_bytes(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     data = _small_parquet() if kind == "parquet_to_frame" else _SMALL_CSV

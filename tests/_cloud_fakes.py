@@ -191,7 +191,10 @@ class Response:
     """A ``requests.Response`` stand-in: a raw body and its headers, nothing read yet."""
 
     def __init__(self, ledger: Ledger, status: int, headers: dict[str, str], raw: Body) -> None:
-        self.status_code, self.headers, self.raw = status, headers, raw
+        from requests.structures import CaseInsensitiveDict
+
+        self.status_code, self.raw = status, raw
+        self.headers: CaseInsensitiveDict[str] = CaseInsensitiveDict(headers)
         self._ledger = ledger
         self._content: bytes | None = None
         self.request = type("Req", (), {"method": "GET", "url": "https://fake.invalid/"})()
@@ -228,12 +231,16 @@ class Response:
 class FakeGcsSession:
     """The transport under a real ``storage.Client``: metadata JSON and ranged media GETs.
 
-    ``ignore_range=True`` answers a media GET with 200 and a lazy 64 MiB transcoded body,
-    no Content-Range and no Content-Length. ``statuses`` is a queue of statuses served to
-    media GETs before the normal answer. ``on_request`` sees each call first and may raise.
-    ``tamper(n, part)`` rewrites the body of the n-th media GET (from 1) after its headers are
-    set, as a store that lost bytes would. ``log`` gets one ``open`` per client built by
-    ``install_gcs`` and one ``close`` per close.
+    ``ignore_range=True`` answers a media GET with 200 and a lazy 64 MiB body, no
+    Content-Range and no Content-Length. ``reply(start, end, size)``
+    returns headers laid over a 206 answer, to serve a wrong Content-Range or a
+    Content-Encoding. A ``generation`` query
+    parameter that names a generation other than the current one answers 404, as GCS does.
+    ``statuses`` is a queue of statuses served to media GETs before the normal answer.
+    ``on_request`` sees each call first and may raise. ``tamper(n, part)`` rewrites the body
+    of the n-th media GET (from 1) after its headers are set, as a store that lost bytes
+    would. ``log`` gets one ``open`` per client built by ``install_gcs`` and one ``close``
+    per close.
     """
 
     def __init__(
@@ -242,6 +249,7 @@ class FakeGcsSession:
         ledger: Ledger | None = None,
         *,
         ignore_range: bool = False,
+        reply: Callable[[int, int, int], dict[str, str]] | None = None,
         statuses: list[int] | None = None,
         change_after: int | None = None,
         on_request: Callable[[str, dict[str, Any]], None] | None = None,
@@ -250,7 +258,7 @@ class FakeGcsSession:
         tamper: Callable[[int, bytes], bytes] | None = None,
     ) -> None:
         self.obj, self.ledger, self.ignore_range = obj, ledger or Ledger(), ignore_range
-        self._tamper = tamper
+        self._tamper, self._reply = tamper, reply
         self.log: list[str] = []
         self.statuses = list(statuses or [])
         self._change_after, self._on_request = change_after, on_request
@@ -297,16 +305,20 @@ class FakeGcsSession:
         n = len(self.ledger.data_requests)
         if self._change_after is not None and n > self._change_after:
             self.obj.generation = (self.obj.generation or 0) + 1
+        named = query.get("generation")
+        if named is not None and int(named) != self.obj.generation:
+            return Response(self.ledger, 404, {}, Body(self.ledger, b""))
         if pin is None or int(pin) != self.obj.generation:
             return Response(self.ledger, 412, {}, Body(self.ledger, b""))
         size = len(self.obj.data)
         span = _span(headers.get("Range"), size)
         if self.ignore_range or span is None:
-            transcoded = {"X-Goog-Stored-Content-Encoding": "gzip"}
-            return Response(self.ledger, 200, transcoded, Body(self.ledger, length=64 * MiB))
+            return Response(self.ledger, 200, {}, Body(self.ledger, length=64 * MiB))
         start, end = span
         part = self.obj.data[start : end + 1]
         hdrs = {"Content-Range": f"bytes {start}-{end}/{size}", "Content-Length": str(len(part))}
+        if self._reply is not None:
+            hdrs.update(self._reply(start, end, size))
         if self._tamper is not None:
             part = self._tamper(n, part)
         self.ledger.responses.append(len(part))
