@@ -12,7 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine.execution import PandasExecutionAdapter
-from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
+from decoy_engine.plan._types import ColumnSeed, GroupSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import (
     OrphanPolicy,
@@ -26,8 +26,12 @@ NO_GRAPH = RelationshipGraph(edges=(), ordering=())
 SEED = b"\xca\xfe" * 16
 
 
-def plan(per_column: list[tuple[str, ColumnSeed]], table: str = "t") -> Any:
-    seeds = TableSeed(per_column=tuple(per_column), per_group=())
+def plan(
+    per_column: list[tuple[str, ColumnSeed]],
+    table: str = "t",
+    groups: tuple[tuple[str, GroupSeed], ...] = (),
+) -> Any:
+    seeds = TableSeed(per_column=tuple(per_column), per_group=groups)
     return SimpleNamespace(seed_envelope=SeedEnvelope(job_seed=SEED, per_table=((table, seeds),)))
 
 

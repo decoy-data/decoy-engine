@@ -270,9 +270,9 @@ def _composite(outputs: Callable[[Mapping[str, Any]], frozenset[str] | None]) ->
         if written is None:
             return ColumnAccess(reads=frozenset(group[:1]), writes_unknown=True)
         # The deterministic key is the first sorted group column's source values.
-        return ColumnAccess(
-            reads=frozenset(group[:1]), writes=written | _strings(entry.get("coherent_with"))
-        )
+        # A `coherent_with` member the provider does not output is read as part of the group
+        # identity but never written.
+        return ColumnAccess(reads=frozenset(group[:1]), writes=written)
 
     return declare
 

@@ -131,8 +131,15 @@ class CompositeHandler:
         bundle = generator.generate_bundle(
             spec, len(df), source=source, deterministic=deterministic
         )
+        from decoy_engine.execution._column_access import declared_access
+        from decoy_engine.execution._runner import node_entry
+
+        entry = node_entry(node)
+        access = declared_access(entry, True) if entry is not None else None
+        declared = None if access is None or access.writes_unknown else access.writes
         for out_col, series in bundle.items():
-            if out_col not in df.columns:
+            # A generated key outside the declared outputs is refused before any assignment.
+            if out_col not in df.columns or (declared is not None and out_col not in declared):
                 # A composite that cannot write a declared output column is a
                 # wiring error, not a silent partial-write (Dennis slice-2h M1).
                 raise ExecutionError(

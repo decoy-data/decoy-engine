@@ -360,7 +360,7 @@ def node_written_columns(node: WorkNode) -> tuple[frozenset[str], bool]:
     canonical outputs, every column a `joint_mask` config lists). `unknown` means the
     declaration cannot name the writes. This is the conservative view: the `when:` snapshot set
     and the carry's untouched set read it as is and treat `unknown` as "every column". The
-    ordering edges read the dispatch view built on it, `_dispatch_writes`.
+    ordering edges read the dispatch view built on it, `dispatch_writes`.
     """
     from decoy_engine.execution._column_access import declared_access
 
@@ -369,10 +369,12 @@ def node_written_columns(node: WorkNode) -> tuple[frozenset[str], bool]:
     if entry is None:
         return names, False
     access = declared_access(entry, node.kind == "composite")
+    if node.kind == "composite" and not access.writes_unknown:
+        names = frozenset()  # a group member the provider does not output is read, not written
     return names | access.writes, access.writes_unknown
 
 
-def _dispatch_writes(node: WorkNode, graph: RelationshipGraph) -> tuple[frozenset[str], bool]:
+def dispatch_writes(node: WorkNode, graph: RelationshipGraph) -> tuple[frozenset[str], bool]:
     """`(columns, unknown)` that `_dispatch_mask_node` really writes for `node`, for the
     ordering edges. An extra edge can form a false cycle, so this view is exact where dispatch
     is known: an FK child resolves through its parent's key map before any handler runs, so it
@@ -382,7 +384,7 @@ def _dispatch_writes(node: WorkNode, graph: RelationshipGraph) -> tuple[frozense
     return node_written_columns(node)
 
 
-def _creates_own_target(node: WorkNode) -> bool:
+def node_creates_own_target(node: WorkNode) -> bool:
     """Whether `node` is a scalar that writes its own column without reading it, so the column
     may be absent from the source until the node runs."""
     from decoy_engine.execution._column_access import creates_own_target
@@ -391,16 +393,16 @@ def _creates_own_target(node: WorkNode) -> bool:
     return entry is not None and creates_own_target(entry)
 
 
-def _writer_node_map(
+def writer_node_map(
     work: list[WorkNode], graph: RelationshipGraph
 ) -> dict[tuple[str, str | None], set[_NodeKey]]:
-    """Each written (table, column) -> the keys of ALL nodes that write it (`_dispatch_writes`),
+    """Each written (table, column) -> the keys of ALL nodes that write it (`dispatch_writes`),
     so a dependent waits on every writer and reads the final value (a joint_mask group is one
     node per output, each writing every output). `(table, None)` holds the nodes whose writes
-    cannot be named: they may write any column, so `_writers_of` returns them for every one."""
+    cannot be named: they may write any column, so `writers_of` returns them for every one."""
     writer: dict[tuple[str, str | None], set[_NodeKey]] = defaultdict(set)
     for node in work:
-        names, unknown = _dispatch_writes(node, graph)
+        names, unknown = dispatch_writes(node, graph)
         if unknown:
             writer[(node.table, None)].add(node.key)
         for col in names:
@@ -408,13 +410,13 @@ def _writer_node_map(
     return writer
 
 
-def _writers_of(
+def writers_of(
     writer: Mapping[tuple[str, str | None], set[_NodeKey]], table: str, column: str
 ) -> set[_NodeKey]:
     return writer.get((table, column), set()) | writer.get((table, None), set())
 
 
-def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
+def masked_driver_columns(node: WorkNode) -> frozenset[str]:
     """The same-table sibling columns `node` reads for their MASKED value, so it
     must be ordered AFTER them (the cross-column V1 ordering edge).
 
@@ -433,7 +435,7 @@ def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
     return scalar_creating_reads(node_entry(node) or {})
 
 
-def _composite_overwrites(
+def composite_overwrites(
     work: list[WorkNode], writer: Mapping[tuple[str, str | None], set[_NodeKey]]
 ) -> dict[_NodeKey, set[_NodeKey]]:
     """Composite node -> the creating nodes whose column it also writes. The handler writes
@@ -446,7 +448,7 @@ def _composite_overwrites(
             continue
         composites = {k for k in keys if by_key[k].kind == "composite"}
         for k in keys - composites:
-            if _creates_own_target(by_key[k]):
+            if node_creates_own_target(by_key[k]):
                 for c in composites:
                     out[c].add(k)
     return out
@@ -458,20 +460,20 @@ def column_dependency_edges(
     """The cross-column ordering channel for `order_work`: dependent-node key ->
     the keys of the nodes that write its MASKED driver columns.
 
-    A driver resolves to its writers through `_writer_node_map`; a column no node writes adds
+    A driver resolves to its writers through `writer_node_map`; a column no node writes adds
     no edge, nor does a self-ref. SOURCE-read drivers (`joint_mask` `key_by`) read a snapshot.
-    A creator a composite overwrites (`_composite_overwrites`) runs first and gets no edge onto
+    A creator a composite overwrites (`composite_overwrites`) runs first and gets no edge onto
     that composite: what it read never reaches the output, and the edge could only form a
     cycle. Cycles fall to `order_work`'s topo sort and `check_derived_column_refs`.
     """
-    writer = _writer_node_map(work, graph)
-    overwrites = _composite_overwrites(work, writer)
+    writer = writer_node_map(work, graph)
+    overwrites = composite_overwrites(work, writer)
     deps: dict[_NodeKey, set[_NodeKey]] = defaultdict(set)
     for composite, creators in overwrites.items():
         deps[composite] |= creators
     for node in work:
-        for col in _masked_driver_columns(node):
-            for writer_key in _writers_of(writer, node.table, col):
+        for col in masked_driver_columns(node):
+            for writer_key in writers_of(writer, node.table, col):
                 if writer_key != node.key and node.key not in overwrites.get(writer_key, ()):
                     deps[node.key].add(writer_key)
     return deps

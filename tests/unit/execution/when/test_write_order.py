@@ -74,25 +74,28 @@ def _surname_run(child: str) -> tuple[pa.Table, pa.Table]:
     return table, ws.run(seed_plan, table, ws.fk_graph("last_name", child))
 
 
-def test_fk_reads_final_bundle_surname() -> None:
-    """2. The parent map pairs each ORIGINAL parent key with the FINAL key of its row, the
-    bundle's surname, never the intermediate derived value."""
-    table, out = _surname_run("a_ref")
-    oracle = ws.bundle_oracle(FIRST)["last_name"]
-    by_original = dict(zip(table.column("last_name").to_pylist(), oracle, strict=True))
-    children = out.column("a_ref").to_pylist()
-    assert children == [by_original[s] for s in table.column("a_ref").to_pylist()]
-    derived_values = {o + "?" for o in table.column("other").to_pylist()}
-    assert not derived_values & set(children)
+A_REF = ["O2?", "O0?", "O3?", "O1?"]
 
 
-def test_renaming_child_preserves_output() -> None:
-    """7. Renaming the FK child changes its key and so its place in the ready queue; it must
-    not change any output."""
+def test_fk_child_keeps_todays_a_ref_output() -> None:
+    """2. Characterization. The queue runs derived last_name, then a_ref, then the bundle, so the
+    child maps through the derived `other + "?"` value (the known gap `FK-FINAL-PARENT-READ`
+    stays out of S2). last_name is the bundle's fixed-seed output. Remapping a_ref to the bundle
+    surnames must fail here."""
+    _, out = _surname_run("a_ref")
+    assert out.column("a_ref").to_pylist() == A_REF
+    assert out.column("last_name").to_pylist() == ws.bundle_oracle(FIRST)["last_name"]
+
+
+def test_renaming_child_preserves_todays_output() -> None:
+    """7. The queue runs z_ref after the bundle: it holds the bundle surnames of rows 2, 0, 3, 1.
+    Every other column is the same in both runs."""
     _, a_out = _surname_run("a_ref")
     _, z_out = _surname_run("z_ref")
-    z_back = z_out.rename_columns(["a_ref" if c == "z_ref" else c for c in z_out.column_names])
-    assert z_back.to_pydict() == a_out.to_pydict()
+    oracle = ws.bundle_oracle(FIRST)["last_name"]
+    assert z_out.column("z_ref").to_pylist() == [oracle[i] for i in (2, 0, 3, 1)]
+    others = [c for c in a_out.column_names if c != "a_ref"]
+    assert z_out.select(others).to_pydict() == a_out.select(others).to_pydict()
 
 
 def test_fk_child_bypasses_derived_creator() -> None:
@@ -261,3 +264,139 @@ def test_bundle_with_an_undeclared_key_is_refused(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(ExecutionError) as exc:
         ws.run(ws.plan([("first_name", ws.bundle())]), table)
     assert exc.value.code == "composite_output_column_missing"
+
+
+# ---------------------------------------------------------------------------
+# FK children against joint, bundle and derived writers (tests 3, 17, 18, 19, 20).
+# ---------------------------------------------------------------------------
+
+
+def _email_fixture() -> pa.Table:
+    """Each row has a distinct original first_name, copied to its source email."""
+    return pa.table(
+        {
+            "k": pa.array([f"k{i}" for i in range(N)]),
+            "first_name": pa.array(FIRST),
+            "last_name": pa.array([f"L{i}" for i in range(N)]),
+            "email": pa.array(FIRST),
+            "city": pa.array([f"c{i}" for i in range(N)]),
+            "other": pa.array([f"O{i}" for i in range(N)]),
+        }
+    )
+
+
+def test_fk_child_distinguishes_parent_and_joint_writes(tmp_path: Path) -> None:
+    """17. A city joint mask before the bundle writes the second row's original first_name to
+    every email. In the cycle fixture the FK reads that joint write (not the source email, not
+    the bundle's generated email, which supplies the parent key and is skipped), so every email
+    is the second row's masked first_name. With a passthrough email the plan sorts today: the
+    FK reads the bundle's email and preserves it."""
+    ref = ws.reference(tmp_path / "c.parquet", city=["CITY"], email=[FIRST[1]])
+    oracle = ws.bundle_oracle(FIRST)
+    graph = ws.fk_graph("first_name", "email")
+
+    def seeds(email: ws.ColumnSeed) -> list[tuple[str, ws.ColumnSeed]]:
+        return [
+            ("first_name", ws.bundle()),
+            ("email", email),
+            ("city", ws.joint(ref, ["city", "email"])),
+        ]
+
+    out = ws.run(ws.plan(seeds(ws.derived('concat(other, "#")'))), _email_fixture(), graph)
+    assert out.column("email").to_pylist() == [oracle["first_name"][1]] * N
+    out = ws.run(ws.plan(seeds(ws.seed("passthrough"))), _email_fixture(), graph)
+    assert out.column("email").to_pylist() == oracle["email"]
+
+
+def test_self_fk_reads_shared_tenant_before_commit() -> None:
+    """18. A self-referencing composite FK (tenant, manager) -> (tenant, id) resolves against
+    the tenant as the source held it, before the FK writes it back."""
+    table = pa.table(
+        {
+            "tenant": pa.array(["A", "A", "B", "B"]),
+            "id": pa.array(["1", "2", "1", "2"]),
+            "manager": pa.array(["2", "1", "2", "1"]),
+            "label": pa.array(["a1", "a2", "b1", "b2"]),
+        }
+    )
+    edge = ws.RelationshipEdge(
+        "t", ("tenant", "id"), "t", ("tenant", "manager"), "nm", ws.OrphanPolicy.PRESERVE
+    )
+    graph = ws.RelationshipGraph(edges=(edge,), ordering=())
+    group = ws.GroupSeed(namespace="nm", coherent_columns=("tenant", "manager"))
+    seed_plan = ws.plan(
+        [("id", ws.derived('concat(label, "!")')), ("label", ws.seed("passthrough"))],
+        groups=(("manager__tenant", group),),
+    )
+    out = ws.run(seed_plan, table, graph, bound=(("tenant", "id"),))
+    assert out.column("tenant").to_pylist() == ["A", "A", "B", "B"]
+    assert out.column("id").to_pylist() == ["a1!", "a2!", "b1!", "b2!"]
+    assert out.column("manager").to_pylist() == ["a2!", "a1!", "b2!", "b1!"]
+
+
+def test_bundle_keys_on_resolved_fk_child() -> None:
+    """19. test 2 with `a_ref` in the bundle's group: the bundle runs after the FK and is keyed
+    by the resolved child values, not the source ones."""
+    table, _ = _surname_fixture("a_ref")
+    seed_plan = ws.plan(
+        [
+            ("first_name", ws.bundle(coherent_with=("a_ref",))),
+            ("last_name", ws.derived('concat(other, "?")')),
+            ("a_ref", ws.seed("passthrough")),
+        ]
+    )
+    out = ws.run(
+        seed_plan, table, ws.fk_graph("last_name", "a_ref"), bound=(("a_ref", "first_name"),)
+    )
+    assert out.column("a_ref").to_pylist() == A_REF
+    keyed = pa.table(
+        {
+            "first_name": pa.array(A_REF),
+            "last_name": pa.array([f"s{i}" for i in range(N)]),
+            "email": pa.array([f"e{i}" for i in range(N)]),
+            "a_ref": pa.array(A_REF),
+        }
+    )
+    expected = ws.run(
+        ws.plan([("first_name", ws.bundle(coherent_with=("a_ref",)))]),
+        keyed,
+        bound=(("a_ref", "first_name"),),
+    )
+    for column in ("first_name", "last_name", "email"):
+        assert out.column(column).to_pylist() == expected.column(column).to_pylist()
+    assert not set(A_REF) & set(out.column("last_name").to_pylist())
+
+
+@pytest.mark.parametrize("first_declared", ["first_name", "second"])
+def test_multi_parent_fk_uses_one_child_tuple(first_declared: str) -> None:
+    """20. Two parents of one child: the first sorted parent (first_name) wins a key both maps
+    hold, the second resolves what only it holds, and a miss is preserved. The old sort raises
+    on this cycle."""
+    table = pa.table(
+        {
+            "first_name": pa.array(FIRST),
+            "last_name": pa.array([f"L{i}" for i in range(N)]),
+            "email": pa.array(["F0", "S", "miss", "F3"]),
+            "second": pa.array(["F0", "S", "Q", "R"]),
+            "other": pa.array([f"O{i}" for i in range(N)]),
+        }
+    )
+    oracle = ws.bundle_oracle(FIRST)["first_name"]
+    edges = tuple(
+        ws.RelationshipEdge("t", (parent,), "t", ("email",), "nm", ws.OrphanPolicy.PRESERVE)
+        for parent in ("first_name", "second")
+    )
+    graph = ws.RelationshipGraph(edges=edges, ordering=())
+    columns = {
+        "first_name": ws.bundle(),
+        "second": ws.derived('concat(other, "!")'),
+        "email": ws.derived('concat(other, "#")'),
+    }
+    order = [first_declared, *[c for c in ("first_name", "second") if c != first_declared], "email"]
+    out = ws.run(
+        ws.plan([(c, columns[c]) for c in order]),
+        table,
+        graph,
+        bound=(("first_name",), ("second",)),
+    )
+    assert out.column("email").to_pylist() == [oracle[0], "O1!", "miss", oracle[3]]

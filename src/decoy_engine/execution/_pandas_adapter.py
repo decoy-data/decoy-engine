@@ -82,6 +82,11 @@ from decoy_engine.execution._strategies._fpe import FpeStrategyHandler
 from decoy_engine.execution._strategies._orphan import make_remap_fn
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._when_gate import run_with_when_gate
+from decoy_engine.execution.work_order import (
+    FallbackCommits,
+    allocate_creator_targets,
+    fallback_order,
+)
 from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -239,7 +244,16 @@ class PandasExecutionAdapter:
             column_shapes=plan_column_shapes(plan),
         )
 
-        ordered = order_work(build_work_list(plan, registry), relationship_graph)
+        work = build_work_list(plan, registry)
+        commits: FallbackCommits | None = None
+        try:
+            ordered = order_work(work, relationship_graph)
+        except ExecutionError as exc:
+            if exc.code != reasons.runtime.CYCLIC_WORK_ORDERING:
+                raise
+            ordered = fallback_order(work, relationship_graph)  # a value cycle raises again
+            commits = FallbackCommits(ordered, relationship_graph, frames)
+        allocate_creator_targets(ordered, frames, relationship_graph)
         node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
         for t, frame in frames.items():
             register_exact_int_sources(
@@ -279,6 +293,8 @@ class PandasExecutionAdapter:
             for node in ordered:
                 if node.table not in frames:
                     continue
+                if commits is not None:
+                    commits.before(node)
                 warnings.extend(
                     self._dispatch_mask_node(
                         node,
@@ -297,6 +313,8 @@ class PandasExecutionAdapter:
                 # fk_resolve all route through `_dispatch_mask_node`),
                 # attributing to node.table, so no row error is ever silently
                 # dropped regardless of which node produced it.
+                if commits is not None:
+                    commits.after(node)
                 batch = drain_row_errors(ctx.row_errors, table=node.table)
                 row_error_records.extend(batch)
                 # S2: fold into the key-error index; parents mask+drain before
@@ -305,6 +323,9 @@ class PandasExecutionAdapter:
                     key_error_rows.setdefault(rec.table, {}).setdefault(rec.column, {})[
                         rec.row_index
                     ] = rec.trigger
+
+        if commits is not None:
+            commits.commit()
 
         # DE-03: fail-closed output projection before the point of no return. A
         # generate-kind table rides through `frames` as an echoed source, declared
