@@ -140,6 +140,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("execution/_positional_keys.py", "row_positions"): _HELPER,
     ("execution/_positional_keys.py", "positional_key_array"): _HELPER,
     ("execution/_strategies/_faker_positional.py", "positional_pool_indices"): _HELPER,
+    ("execution/native/_operator_step.py", "sample_faker_array_positional"): _HELPER,
     ("execution/_transforms.py", "_reject_nested_keys"): _HELPER,
     ("execution/native/_crypto_reference.py", "_row_error"): _HELPER,
     ("generation/_pinned_compile.py", "_reject_column"): _HELPER,
@@ -219,6 +220,10 @@ NOT_POSITIONAL_SINKS: dict[tuple[str, str], str] = {
     ("execution/_positional_keys.py", "row_positions"): _KW_CODE,
     ("execution/_positional_keys.py", "positional_key_array"): _KW_CODE,
     ("execution/_strategies/_faker_positional.py", "positional_pool_indices"): (
+        "`domain_code` is a keyword the caller passes as a registered runtime symbol; the function "
+        "only forwards it to `positional_key_array`"
+    ),
+    ("execution/native/_operator_step.py", "sample_faker_array_positional"): (
         "`domain_code` is a keyword the caller passes as a registered runtime symbol; the function "
         "only forwards it to `positional_key_array`"
     ),

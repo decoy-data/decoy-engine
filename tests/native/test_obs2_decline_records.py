@@ -140,6 +140,7 @@ def test_serialized_code_values_are_pinned() -> None:
         "GROUP_KEY_SIBLING_MISSING": "group_key_sibling_missing",
         "GROUP_KEY_SIBLING_TYPE_NOT_NATIVE": "group_key_sibling_type_not_native",
         "FAKER_PROVIDER_OUTPUT_NOT_STRING": "faker_provider_output_not_string",
+        "FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED": "faker_computed_output_type_unsupported",
         "OTHER": "other",
     }
 

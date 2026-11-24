@@ -111,6 +111,17 @@ class FakerStrategyHandler:
             if plan.deterministic and plan.namespace is not None
             else resolve_selection_namespace(ctx, column, plan.namespace)
         )
+        # SEQ native seam: an admitted exact-string draw runs on the sequential kernels; every
+        # computed column is offered so a declined one books the rows pandas draws.
+        seq = getattr(ctx, "seq_native", None)
+        if seq is not None:
+            # Local import: the seam pulls in the native-ops/plan chain (see `_group_key`).
+            from decoy_engine.execution.sequential._computed_faker import computed_faker_column
+
+            picked = computed_faker_column(seq, ctx, df, column, plan, spec)
+            if picked is not None:
+                df[column] = picked
+                return df
         drawn = computed_mask_draw(
             sampling_source(ctx, column, df[column], deterministic=plan.deterministic),
             spec=spec,

@@ -59,7 +59,7 @@ from decoy_engine.execution.native._operator_step import (
     sample_faker_array_positional,
 )
 from decoy_engine.execution.native._real_type_admission import (
-    C1_PROVIDER_ALLOWLIST,
+    faker_provider_decline,
     string_source_type_rejection,
 )
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
@@ -415,8 +415,11 @@ def _faker_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) -> str 
     RNG state. A deterministic config the oracle rejects (no namespace) also declines, so the
     handler raises its own coded error. The built pool's output type is a separate check, made
     by the seam once the pool exists."""
-    if seed.provider not in C1_PROVIDER_ALLOWLIST:
-        return f"faker_provider_not_native:{column}:{seed.provider}"
+    provider_decline = faker_provider_decline(
+        column, seed.provider, provider_config_to_dict(seed.provider_config), runs_computed=True
+    )
+    if provider_decline is not None:
+        return provider_decline[0]
     if seed.deterministic:
         if not faker_pool_precondition_met_seed(seed):
             return f"faker_not_deterministic_reuse_variant:{column}"

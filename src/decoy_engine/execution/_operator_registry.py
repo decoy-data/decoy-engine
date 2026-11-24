@@ -227,6 +227,7 @@ _SPECS = (
                 "synthetic_account_number",
                 "synthetic_member_id",
                 "synthetic_plan_id",
+                "lorem_text",
             }
         ),
     ),

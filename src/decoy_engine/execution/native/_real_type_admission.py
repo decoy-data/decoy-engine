@@ -37,7 +37,7 @@ chunk was accepted.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any, Final
 
 import pyarrow as pa
@@ -46,6 +46,10 @@ from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._chunked_group_key_gate import group_by_columns
 from decoy_engine.execution.native._operator_config_rejections import (
     group_key_sibling_type_admitted,
+)
+from decoy_engine.execution.native._provider_class import (
+    computed_mask_spec,
+    computed_output_decline,
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
 from decoy_engine.execution.native._route_decline_codes import CodedDecline, RouteDeclineCode, coded
@@ -79,15 +83,44 @@ def _fpe_checksum_decline(config: dict[str, Any], table: str, column: str) -> st
     return None
 
 
-def _providers(config: dict[str, Any], table: str) -> dict[str, Any]:
+def _column_values(config: dict[str, Any], table: str, key: str) -> dict[str, Any]:
+    """`key` of every column entry of `table` in the raw config, by column name."""
     for table_cfg in config.get("tables") or ():
         if isinstance(table_cfg, dict) and table_cfg.get("name") == table:
             return {
-                c["name"]: c.get("provider")
+                c["name"]: c.get(key)
                 for c in table_cfg.get("columns") or ()
                 if isinstance(c, dict) and "name" in c
             }
     return {}
+
+
+def faker_provider_decline(
+    column: str,
+    provider: object,
+    provider_config: Mapping[str, Any] | None,
+    *,
+    runs_computed: bool,
+) -> tuple[str, RouteDeclineCode] | None:
+    """The reason and decline code a route gives a faker column's provider, or None to admit it.
+
+    A pool provider must be on the C1 allowlist. A computed draw (`uuid`, `random_int_range`,
+    `random_choice`) has no pool: a route that `runs_computed` admits it when its output is
+    exact `string`, and every route declines any other output type (E11 and E13). A route that
+    does not run computed draws yet declines an exact-string one as not native."""
+    spec = computed_mask_spec(provider, provider_config)
+    if spec is not None:
+        reason = computed_output_decline(column, provider, provider_config)
+        if reason is not None:
+            return reason, RouteDeclineCode.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED
+        if runs_computed:
+            return None
+    elif provider in C1_PROVIDER_ALLOWLIST:
+        return None
+    return (
+        f"faker_provider_not_native:{column}:{provider}",
+        RouteDeclineCode.FAKER_PROVIDER_NOT_NATIVE,
+    )
 
 
 def string_source_type_rejection(strategy: str, column: str, schema: pa.Schema) -> str | None:
@@ -144,7 +177,8 @@ def real_type_decline(
             [first_schema.field(n.column) for n in node_routes if n.strategy == "hash"]
         ).empty_table()
     }
-    providers = _providers(config, table)
+    providers = _column_values(config, table, "provider")
+    provider_configs = _column_values(config, table, "provider_config")
     group_by_of = group_by_columns(config, table)
     for node in node_routes:
         column = node.column
@@ -160,13 +194,13 @@ def real_type_decline(
             reason = hash_config_rejection(column, table, profile, resident_sources=resident)
             if reason is not None:
                 return coded(reason, RouteDeclineCode.HASH_CONFIG_REJECTED, table, column)
-        elif node.strategy == "faker" and providers.get(column) not in C1_PROVIDER_ALLOWLIST:
-            return coded(
-                f"faker_provider_not_native:{column}:{providers.get(column)}",
-                RouteDeclineCode.FAKER_PROVIDER_NOT_NATIVE,
-                table,
-                column,
+        elif node.strategy == "faker" and (
+            provider_decline := faker_provider_decline(
+                column, providers.get(column), provider_configs.get(column), runs_computed=False
             )
+        ):
+            reason, code = provider_decline
+            return coded(reason, code, table, column)
         elif node.strategy in _STRING_SOURCE_STRATEGIES:
             reason = string_source_type_rejection(node.strategy, column, first_schema)
             if reason is not None:

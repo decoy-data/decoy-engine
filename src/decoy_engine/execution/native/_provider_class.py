@@ -51,6 +51,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
+import pyarrow as pa
+
+from decoy_engine import reasons
+from decoy_engine.generation.pool import ComputedDrawSpec, draw_kwargs, parse_computed_draw
 from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
 
 ProviderClass = Literal["pool_native", "computed_native", "python_only", "reject_large"]
@@ -111,4 +115,36 @@ def classify_provider(
     return "reject_large"
 
 
-__all__ = ["ProviderClass", "classify_provider"]
+def computed_mask_spec(
+    provider: object, provider_config: Mapping[str, Any] | None
+) -> ComputedDrawSpec | None:
+    """The masking draw of a computed provider (`uuid`, `random_int_range`, `random_choice`),
+    or None for any other name or for arguments outside the contract (compile refuses those).
+
+    The one reader of a computed column's output type for every route: native admission, the
+    out-of-core schema and the route declines all take it from the returned spec."""
+    if not isinstance(provider, str):
+        return None
+    found = parse_computed_draw("mask", provider, draw_kwargs(provider_config))
+    return found if isinstance(found, ComputedDrawSpec) else None
+
+
+def computed_output_decline(
+    column: str, provider: object, provider_config: Mapping[str, Any] | None
+) -> str | None:
+    """The route decline reason (E11/E13) for a computed draw whose output is not exact `string`.
+
+    None for a pool provider and for an exact-string draw. The reason names the column and the
+    provider, never an argument value."""
+    spec = computed_mask_spec(provider, provider_config)
+    if spec is None or spec.output_type == pa.string():
+        return None
+    return f"{reasons.route.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED}:{column}:{spec.provider}"
+
+
+__all__ = [
+    "ProviderClass",
+    "classify_provider",
+    "computed_mask_spec",
+    "computed_output_decline",
+]

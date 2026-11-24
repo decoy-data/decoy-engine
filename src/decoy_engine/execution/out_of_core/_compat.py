@@ -15,8 +15,9 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.declared_casting._refusals import note_declined
-from decoy_engine.execution.native._real_type_admission import C1_PROVIDER_ALLOWLIST
+from decoy_engine.execution.native._real_type_admission import faker_provider_decline
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met
+from decoy_engine.execution.native._route_decline_codes import RouteDeclineCode
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
@@ -384,7 +385,20 @@ def _faker_conditional_rejection(
     is None, admission is shape-only and the per-table mask planner enforces the
     source type fail-closed as a backstop.
     """
-    if node.provider not in C1_PROVIDER_ALLOWLIST or not faker_pool_precondition_met(node):
+    cfg = dict(getattr(node.plan_slice, "provider_config", ()) or ())
+    provider_decline = faker_provider_decline(
+        node.columns[0], node.provider, cfg, runs_computed=True
+    )
+    if (
+        provider_decline is not None
+        and provider_decline[1] is RouteDeclineCode.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED
+    ):
+        return OutOfCoreRejection(
+            reasons.runtime.OUT_OF_CORE_FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED,
+            f"{node.table}.{node.columns}: out-of-core faker carries exact-string computed draws "
+            "only; this draw's output is another type, so the job reroutes to sequential/full-frame.",
+        )
+    if provider_decline is not None or not faker_pool_precondition_met(node):
         return OutOfCoreRejection(
             "out_of_core_faker_pool_unsupported",
             f"{node.table}.{node.columns}: out-of-core faker admits only deterministic REUSE with "
