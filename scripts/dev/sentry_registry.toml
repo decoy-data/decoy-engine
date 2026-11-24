@@ -263,6 +263,9 @@ baseline = "tests/sentry/baselines/lossless-int-columns.json"
 [[sentry]]
 id = "column-shape-classifier"
 baseline = "tests/sentry/baselines/column-shape-classifier.json"
+approved_growth = [
+  { key = "observed_shape::profile/arrow/_walk_arrow.py", decision = "owner 2026-11-24 standing: re-home after the Arrow profiler move; same site" },
+]
 
 [[sentry]]
 id = "bucketize-width-contract"

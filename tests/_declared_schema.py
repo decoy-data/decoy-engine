@@ -11,7 +11,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import declared_columns
-from decoy_engine.profile._declared_columns import arrow_columns
+from decoy_engine._pandas_meta import arrow_columns
 
 
 def declared_schema(config: Mapping[str, Any], table: str) -> pa.Schema:
