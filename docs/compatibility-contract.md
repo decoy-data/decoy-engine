@@ -1191,7 +1191,11 @@ only this site moves.
   that passes a sink must accept that shape; a caller that passes none, or sets
   `stream_chunked_output=False`, gets the resident outputs as before. Validators,
   quarantine, `fidelity_report` and `post_validation` keep the run resident, each with a
-  recorded reason. With `ParquetTransactionalSink` the published file is byte-identical to
+  recorded reason. (EXPECT-OFF-ROUTE S2, 2026-11-24: validators no longer decline the unified
+  slice, the mixed route or the physical drivers; they run on the output of the route chosen.
+  The physical plan hash no longer includes the validator count. A plain callable `sink` on a run
+  with validators receives each resident table once, after validation and the post-scan check.)
+  With `ParquetTransactionalSink` the published file is byte-identical to
   `pq.write_table` of the resident table whenever no row group was cut by the byte cap.
   `run_pipeline` now admits a `LazySource` in `sources` to auto-chunk and to the B7 split
   (2026-10-03, B6b). Routing reads each lazy table's Parquet footer once (row count, schema,

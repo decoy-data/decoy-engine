@@ -20,6 +20,9 @@ beside a capped sample of indices).
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -37,6 +40,54 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from decoy_engine.validators._fold import Fold
+
+
+_ACTIVE: ContextVar[ValidationSession | None] = ContextVar("decoy_validation_session", default=None)
+
+
+def active_validation_session() -> ValidationSession | None:
+    """The session bound to this run, or None outside ``bind_validation_session``."""
+    return _ACTIVE.get()
+
+
+@contextmanager
+def bind_validation_session(
+    config: dict[str, Any], *, key_state_budget: Callable[[], int | None]
+) -> Iterator[ValidationSession | None]:
+    """Bind one session for the run, or bind nothing when the config has no validators.
+
+    ``key_state_budget`` resolves the keyed folds' ceiling; it runs only when a session opens.
+    Opening validates every entry before any source is read, so a bad pattern or an unknown
+    validator name fails at the start of the run.
+    """
+    if not config.get("validators"):
+        yield None
+        return
+    session = ValidationSession(config, key_state_budget_bytes=key_state_budget())
+    token = _ACTIVE.set(session)
+    try:
+        yield session
+    finally:
+        _ACTIVE.reset(token)
+
+
+def run_resident_validation(
+    outputs: Mapping[str, pa.Table], config: dict[str, Any], sources: Mapping[str, Any]
+) -> ValidationReport | None:
+    """Validate resident outputs and return the report, or None when no validators are configured.
+
+    With a session bound to the run the outputs go through it, so the run's one report covers
+    them; without one this is the whole-table ``validate`` call.
+    """
+    if not config.get("validators"):
+        return None
+    session = active_validation_session()
+    if session is None:
+        from decoy_engine.validators import _registry
+
+        return _registry.validate(dict(outputs), config, sources=dict(sources))
+    session.observe_unobserved(outputs, sources)
+    return session.finish()
 
 
 class ValidationSession:
@@ -74,11 +125,20 @@ class ValidationSession:
             self._folds.append(fold)
         self._rows: dict[str, int] = {}
         self._complete: set[str] = set()
+        self._explicit_source_rows: dict[str, int] = {}
         self._elapsed = 0.0
         self._report: ValidationReport | None = None
 
     def observe(self, table: str, output: pa.Table, source: pa.Table | None = None) -> None:
-        """Feed one complete resident table, then mark it complete."""
+        """Feed one complete resident table, then mark it complete.
+
+        The first complete observer of a table owns its folds. A later observer of the same
+        table adds nothing, so a table reached by two completion steps is never counted twice.
+        """
+        if table in self._complete:
+            return
+        if source is not None:
+            self._explicit_source_rows[table] = source.num_rows
         self._feed(
             table, output, self._source_rows(table, source, self._rows.get(table, 0), output)
         )
@@ -94,6 +154,26 @@ class ValidationSession:
     ) -> None:
         """Feed a published batch with the raw batch it came from."""
         self._feed(table, output, source)
+
+    def observe_unobserved(
+        self, outputs: Mapping[str, pa.Table], sources: Mapping[str, pa.Table]
+    ) -> bool:
+        """Feed every resident table no observer has completed. True when it fed any."""
+        fed = False
+        for table, output in outputs.items():
+            if table not in self._complete:
+                source = sources.get(table)
+                self.observe(table, output, source if isinstance(source, pa.Table) else None)
+                fed = True
+        return fed
+
+    def unobserved_tables(self, tables: Iterable[str]) -> list[str]:
+        """The names in ``tables`` no observer has completed."""
+        return [table for table in tables if table not in self._complete]
+
+    def paired_tables(self) -> frozenset[str]:
+        """The tables a check reads a source for, so a caller loads only those sources."""
+        return frozenset().union(*(fold.paired_tables() for fold in self._folds))
 
     def table_complete(self, table: str) -> None:
         """The table has delivered every row; keyed folds may resolve what waited on it."""
@@ -152,12 +232,17 @@ class ValidationSession:
 
     def _check_pairing(self) -> None:
         """A paired check needs as many source rows as published rows, table by table."""
-        held: Mapping[str, Any] = self._sources or {}
+        held: dict[str, int] = {
+            name: tbl.num_rows
+            for name, tbl in (self._sources or {}).items()
+            if isinstance(tbl, pa.Table)
+        }
+        held.update(self._explicit_source_rows)
         for fold in self._folds:
             for table in fold.paired_tables():
-                source = held.get(table)
-                if table in self._rows and isinstance(source, pa.Table):
-                    if source.num_rows != self._rows[table]:
+                source_rows = held.get(table)
+                if table in self._rows and source_rows is not None:
+                    if source_rows != self._rows[table]:
                         raise ValidatorStateError(
                             code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
                             message=(

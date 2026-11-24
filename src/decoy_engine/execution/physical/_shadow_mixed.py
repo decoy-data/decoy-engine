@@ -339,10 +339,6 @@ def _require_no_disqualifying_job_settings(ctx: ShadowContext, config: dict[str,
     `derive_key`/`instance_default_locale`/`key_provider` are deliberately
     NOT checked here -- see the module docstring's "parity-proven, not
     admission-checked" note."""
-    if config.get("validators"):
-        raise ShadowDifference(
-            code=GENERATION_SHAPE_UNSUPPORTED, detail="config.validators is non-empty"
-        )
     if config.get("quarantine") is not None:
         raise ShadowDifference(
             code=GENERATION_SHAPE_UNSUPPORTED, detail="config.quarantine is not None"

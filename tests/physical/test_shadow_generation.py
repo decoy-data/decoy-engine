@@ -602,7 +602,6 @@ def _assert_declines(
             "subset",
             {"seeds": [{"table": "people", "mode": "sample", "key_columns": ["id"], "count": 1}]},
         ),
-        ("validators", [{"name": "fk_intact"}]),
         ("quarantine", {"output_path": "q.parquet"}),
         ("post_scan", {"integrity": True}),
     ],
@@ -611,7 +610,6 @@ def _assert_declines(
         "non-empty-relationships",
         "non-empty-namespaces",
         "non-none-subset",
-        "non-empty-validators",
         "non-none-quarantine",
         "post-scan-integrity-true",
     ],
@@ -623,6 +621,19 @@ def test_decline_job_scope_field(field: str, value: Any, monkeypatch: pytest.Mon
     decoded[field] = value
     physical_plan, ctx, _ = _dispatch_from_mutated_config(base_plan, decoded)
     _assert_declines(physical_plan, ctx, monkeypatch)
+
+
+def test_validators_are_admitted_and_change_no_output() -> None:
+    """EXPECT-OFF-ROUTE S2: a `validators:` list no longer declines the generation driver."""
+    config = _generate_config()
+    config["validators"] = [{"name": "fk_intact"}]
+    plan, ctx, snapshot = _admitted_dispatch(config)
+    result = ShadowCoordinator(ctx=ctx).run(plan, snapshot)
+    plain_plan, plain_ctx, plain_snapshot = _admitted_dispatch(_generate_config())
+    plain = ShadowCoordinator(ctx=plain_ctx).run(plain_plan, plain_snapshot)
+    assert set(result.outputs) == set(plain.outputs)
+    for name, table in plain.outputs.items():
+        assert result.outputs[name].equals(table)
 
 
 def test_decline_mask_secret_ref(monkeypatch: pytest.MonkeyPatch) -> None:

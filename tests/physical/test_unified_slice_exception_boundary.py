@@ -313,21 +313,10 @@ def test_base_exceptions_propagate_uncaught(
 
 # ---------------------------------------------------------------------------
 # Failure-mode 1's conditional proof (plan): cheap admission declines any
-# truthy validators/quarantine config, so finalize's quarantine-write branch
+# truthy quarantine config, so finalize's quarantine-write branch
 # is unreachable on the admitted path -- pinned here, not just asserted in
 # the plan prose.
 # ---------------------------------------------------------------------------
-
-
-def test_admission_declines_validators_so_finalize_write_branch_is_unreachable(
-    tmp_path: Path,
-) -> None:
-    source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
-    config, source = _build(tmp_path, [{"name": "c", "strategy": "passthrough"}], source)
-    profile, _ = _profile_and_plan(config, source)
-    config = dict(config)
-    config["validators"] = [{"name": "x"}]
-    assert _cheap_ok(config, profile, source) is None
 
 
 def test_admission_declines_quarantine_so_finalize_write_branch_is_unreachable(

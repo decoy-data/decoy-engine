@@ -384,10 +384,6 @@ def _require_no_disqualifying_runtime_features(ctx: ShadowContext) -> None:
         raise ShadowDifference(
             code=FULL_FRAME_RUNTIME_FEATURE_UNSUPPORTED, detail="ctx.fidelity_report"
         )
-    if ctx.validators_requested:
-        raise ShadowDifference(
-            code=FULL_FRAME_RUNTIME_FEATURE_UNSUPPORTED, detail="ctx.validators_requested"
-        )
     if ctx.quarantine_requested:
         raise ShadowDifference(
             code=FULL_FRAME_RUNTIME_FEATURE_UNSUPPORTED, detail="ctx.quarantine_requested"

@@ -46,6 +46,7 @@ __all__ = [
     "compute_post_validation",
     "finalize_validators_and_quarantine",
     "stamp_execution_metrics",
+    "stamp_validation",
 ]
 
 # `run_pipeline`'s execution-knob defaults. Owned here (not `_pipeline.py`,
@@ -376,6 +377,15 @@ def _unchecked_column_warnings(config: dict[str, Any], report: Any) -> list[Qual
     ]
 
 
+def stamp_validation(quality_metrics: dict[str, Any], config: dict[str, Any], report: Any) -> None:
+    """The one writer of `quality_metrics["validation"]`: the report, plus a warning for each
+    column `leak_check` was asked to check and did not."""
+    quality_metrics["validation"] = {"validators": dataclasses.asdict(report)}
+    unchecked = _unchecked_column_warnings(config, report)
+    if unchecked:
+        quality_metrics["validation"]["warnings"] = [dataclasses.asdict(w) for w in unchecked]
+
+
 def finalize_validators_and_quarantine(
     outputs: dict[str, pa.Table],
     *,
@@ -404,16 +414,11 @@ def finalize_validators_and_quarantine(
     sources it scans to the filtered output.
     """
     quarantine_removed: dict[str, set[int]] = {}
-    validators_config: list[Any] = config.get("validators") or []
-    v_report: Any = None
-    if validators_config:
-        from decoy_engine.validators._registry import validate as _run_validators
+    from decoy_engine.validators import run_resident_validation
 
-        v_report = _run_validators(outputs, config, sources=caller_sources)
-        quality_metrics["validation"] = {"validators": dataclasses.asdict(v_report)}
-        unchecked = _unchecked_column_warnings(config, v_report)
-        if unchecked:
-            quality_metrics["validation"]["warnings"] = [dataclasses.asdict(w) for w in unchecked]
+    v_report = run_resident_validation(outputs, config, caller_sources)
+    if v_report is not None:
+        stamp_validation(quality_metrics, config, v_report)
 
     if mask_row_errors:
         # Additive manifest key, counts only (no cell values -- trap T3).

@@ -69,7 +69,12 @@ from decoy_engine.errors import ValidatorFailedError
 from decoy_engine.validators._fold import FoldResult, assemble_report, finding_index_cap
 from decoy_engine.validators._registry import validate, validator_function
 from decoy_engine.validators._scope import plan_scope, unchecked_named_columns
-from decoy_engine.validators._session import ValidationSession
+from decoy_engine.validators._session import (
+    ValidationSession,
+    active_validation_session,
+    bind_validation_session,
+    run_resident_validation,
+)
 from decoy_engine.validators._types import (
     FINDING_INDEX_CAP,
     QuarantineSummary,
@@ -89,9 +94,12 @@ __all__ = [
     "ValidatorFailedError",
     "ValidatorFinding",
     "ValidatorResult",
+    "active_validation_session",
     "assemble_report",
+    "bind_validation_session",
     "finding_index_cap",
     "plan_scope",
+    "run_resident_validation",
     "unchecked_named_columns",
     "validate",
     "validator_function",

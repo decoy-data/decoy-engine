@@ -27,6 +27,8 @@ from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
 from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run, current_duckdb_run
 from decoy_engine.execution.pipeline._post_scan import attach_cast_run, tee_reader
+from decoy_engine.profile._readers import LazySource
+from decoy_engine.validators import ValidationSession, bind_validation_session
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
@@ -34,6 +36,8 @@ if TYPE_CHECKING:
     from decoy_engine.progress import ProgressChannel
 
 __all__ = [
+    "complete_resident_validation",
+    "deliver_resident_outputs",
     "emit_route",
     "execute_mixed_route",
     "execute_out_of_core_route",
@@ -56,6 +60,56 @@ def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> Pipelin
     return replace(ctx, post_scan_detectors=detectors)
 
 
+def _key_state_budget(ctx: PipelineRunContext) -> int:
+    """The validators' own memory ceiling, resolved once. It is not charged to the generation
+    ledger or the faker-pool carve."""
+    from decoy_engine.execution.out_of_core._budget import resolve_budget
+
+    return resolve_budget(ctx.out_of_core_budget_bytes).budget_bytes
+
+
+def complete_resident_validation(
+    session: ValidationSession, ctx: PipelineRunContext, result: ExecutionResult
+) -> ExecutionResult:
+    """Finish the run's validation over the outputs a resident route returned.
+
+    Tables no earlier observer completed are fed here; a table finalize already folded is not
+    fed again. A failure on tables fed here fails the run. A failure on tables finalize folded
+    was already judged there (raised, or covered by quarantine). The report is stored once.
+    """
+    from decoy_engine.errors import ValidatorFailedError
+    from decoy_engine.execution._pipeline_finalize import stamp_validation
+
+    wanted = session.paired_tables()
+    sources: dict[str, Any] = {
+        name: _psrc.materialize_source(src) if isinstance(src, LazySource) else src
+        for name, src in ctx.caller_sources.items()
+        if name in wanted and name in session.unobserved_tables(result.outputs)
+    }
+    fed = session.observe_unobserved(result.outputs, sources)
+    report = session.finish()
+    if fed and not report.passed:
+        raise ValidatorFailedError(report)
+    if "validation" not in result.quality_metrics:
+        stamp_validation(result.quality_metrics, ctx.config, report)
+    return result
+
+
+def deliver_resident_outputs(ctx: PipelineRunContext, result: ExecutionResult) -> None:
+    """Hand each resident output to a plain callable sink once, after validation and settle.
+
+    A callable cannot take a written table back, so nothing reaches it before every gate passed.
+    A sink with a transactional contract is never written here: its owner commits it.
+    """
+    from decoy_engine.execution._sequential import _has_transactional_write_contract
+
+    sink = ctx.sink
+    if sink is None or _has_transactional_write_contract(sink) or not callable(sink):
+        return
+    for name, table in result.outputs.items():
+        sink(name, table)
+
+
 def execute_route(
     ctx: PipelineRunContext, decision: RouteDecision, refusals: dict[Any, Any]
 ) -> ExecutionResult:
@@ -70,6 +124,9 @@ def execute_route(
     with (
         bind_duckdb_run(ctx.out_of_core_threads) as recorder,
         bind_gate(ctx, decision.route if ctx.has_mask_table else "full_frame") as gate,
+        bind_validation_session(
+            ctx.config, key_state_budget=lambda: _key_state_budget(ctx)
+        ) as session,
     ):
         # Before any sink write or route read: a callable sink delivers on `write`. The run
         # context and the gate's snapshot have already read source metadata.
@@ -92,7 +149,11 @@ def execute_route(
             result = execute_mixed_route(ctx, decision)
         else:
             result = _pipeline_full_frame.run_full_frame_route(ctx, decision)
+        if session is not None:
+            result = complete_resident_validation(session, ctx, result)
         result = settle(gate, ctx, result)
+        if session is not None and decision.route not in ("sequential", "out_of_core"):
+            deliver_resident_outputs(ctx, result)
         execution_block = result.quality_metrics.setdefault("execution", {})
         execution_block["native_threads"] = {
             "count": ctx.native_threads,

@@ -249,11 +249,7 @@ def cheap_admission(
         # slice returns early without it, so admitting an opted-in job would
         # silently skip post-validation while reporting success.
         return None
-    if (
-        config.get("validators")
-        or config.get("quarantine")
-        or post_scan_model_setting(config) is not None
-    ):
+    if config.get("quarantine") or post_scan_model_setting(config) is not None:
         return None
     if profile.relationships:
         return None

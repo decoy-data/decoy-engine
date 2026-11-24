@@ -411,10 +411,6 @@ def _require_pure_job_scope(config: dict[str, Any], generate_table_names: frozen
         raise ShadowDifference(
             code=GENERATION_SHAPE_UNSUPPORTED, detail="config.subset is not None"
         )
-    if config.get("validators"):
-        raise ShadowDifference(
-            code=GENERATION_SHAPE_UNSUPPORTED, detail="config.validators is non-empty"
-        )
     if config.get("quarantine") is not None:
         raise ShadowDifference(
             code=GENERATION_SHAPE_UNSUPPORTED, detail="config.quarantine is not None"

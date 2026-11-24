@@ -2382,6 +2382,13 @@ Results are persisted to the evidence manifest under
 `quality_metrics["validation"]["validators"]` as a serialised `ValidationReport`
 (frozen dataclass with `passed`, `validators_run`, `findings`, `elapsed_ms`).
 
+On the resident routes a `validators:` block does not change the route. The unified slice, the mixed route and the
+physical drivers run a validator-bearing job as they run it without validators, and the run's one
+validation session judges the output they produce. The streamed and bounded routes (auto-chunk
+streamed to a sink, sequential foreign-key, out-of-core and the multi-table split) still keep such a
+job resident. When a plain callable `sink` is passed with validators, the run stays resident and
+the callable receives each output table once, after every check passed.
+
 Fail-closed by default: any validator failure raises `ValidatorFailedError`
 (exported from `decoy_engine.errors`), which carries the `ValidationReport` for
 inspection. Enable `quarantine:` with the `validation_fail` trigger to route
