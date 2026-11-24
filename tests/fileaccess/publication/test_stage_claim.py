@@ -368,7 +368,9 @@ def test_an_ambient_publish_on_a_backend_without_a_descriptor_link_still_publish
     monkeypatch.setattr(os, "supports_dir_fd", frozenset(os.supports_dir_fd - {real}))
     txn, target, _ = _ambient_txn(tmp_path)
     txn.publish()
-    assert seen == [set()] and target.read_bytes() == b"sidecar\n"
+    # the descriptor form is tried first and answers ENOSYS; the plain two-path call carries it
+    assert seen[-1] == set() and set() not in seen[:-1]
+    assert target.read_bytes() == b"sidecar\n"
     assert _litter(tmp_path) == []
 
 

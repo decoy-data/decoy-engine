@@ -14,7 +14,6 @@ from __future__ import annotations
 import errno
 import os
 import secrets
-import sys
 from pathlib import Path
 
 from decoy_engine.fileaccess import _durable, _osflags
@@ -27,6 +26,7 @@ from decoy_engine.fileaccess._output import (
     make_parent_dir_at,
     make_stage_dir_at,
 )
+from decoy_engine.fileaccess._types import LinkUnsupported
 
 
 def _open_dir(directory: Path) -> int:
@@ -110,16 +110,18 @@ def _publish_durable_dir(stage: Path, held: HeldStage, target: Path) -> None:
 
 def link_noclobber_beside(staged: Path, target: Path) -> None:
     """Link `staged` to `target`, both names in one folder, without replacing `target`: the
-    ambient exclusive publish. A backend with descriptor links goes through the one primitive;
-    one without (Windows, or an `os.link` with no `dir_fd`) takes the plain two-path call, and
-    both answer through `raise_link_error`."""
-    if sys.platform != "win32" and os.link in os.supports_dir_fd:
-        parent_fd = _open_dir(target.parent)
-        try:
-            link_noclobber_at(parent_fd, staged.name, parent_fd, target.name)
-        finally:
-            _close(parent_fd)
+    ambient exclusive publish. The descriptor primitive goes first; a backend with no descriptor
+    form (Windows, or an `os.link` with no `dir_fd`) answers ENOSYS and takes the plain two-path
+    call. Both answer through `raise_link_error`."""
+    parent_fd = _open_dir(target.parent)
+    try:
+        link_noclobber_at(parent_fd, staged.name, parent_fd, target.name)
         return
+    except LinkUnsupported as exc:
+        if exc.errno != errno.ENOSYS:
+            raise
+    finally:
+        _close(parent_fd)
     code = 0
     try:
         os.link(staged, target)

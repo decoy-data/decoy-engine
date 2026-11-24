@@ -40,7 +40,6 @@ _SLOT_PROBE = "probe"
 _CREATOR_KEY = CREATOR_KEY
 _FINAL_MODE = 0o600
 _PROBE_START_MODE = 0o644
-_OPEN_FINAL = _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.CLOEXEC | _osflags.NONBLOCK
 
 
 def _seal_of_stat(st: os.stat_result) -> FileSeal:
@@ -75,10 +74,12 @@ def _tighten(dst_fd: int, dst_name: str, before: os.stat_result) -> tuple[FileSe
     """Open the final name, require the claimed inode with one link, set `0o600` on that
     descriptor and read it back. Returns the seal, or `None` and the errno that stopped it
     (`EINVAL` for a refusal that is not an OS failure, `ENOTSUP` for a mode that did not hold)."""
+    from decoy_engine.fileaccess._durable import _open_leaf_at  # lazy: _durable imports _output
+
     fd = -1
     if not _osflags.WINDOWS:  # the descriptor arm; Windows claims through the ambient arm
         try:
-            fd = os.open(dst_name, _OPEN_FINAL, dir_fd=dst_fd)
+            fd = _open_leaf_at(dst_fd, dst_name)
             now = os.fstat(fd)
             same = (now.st_dev, now.st_ino) == (before.st_dev, before.st_ino)
             if not (stat.S_ISREG(now.st_mode) and same and now.st_nlink == 1):
