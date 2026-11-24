@@ -183,8 +183,9 @@ def test_t8_native_keeps_a_year_10000_date_with_a_format_error() -> None:
 
 
 def test_t8_the_pandas_route_cannot_convert_a_year_10000_date() -> None:
-    """Recorded, not wanted: the full-frame route reads the column through pandas, which has no
-    year 10000, so that job fails before any strategy runs (plan section 3, B4)."""
+    """Recorded, not wanted: the full-frame and sequential routes read the column through pandas,
+    which has no year 10000, so that job fails before any strategy runs with a coded error (plan
+    section 3, B4, amended 2026-11-24; tests/parity/test_date_shift_typed_parity.py)."""
     with pytest.raises((ValueError, OverflowError)):
         pa.table({"d": _BEYOND}).to_pandas()
 

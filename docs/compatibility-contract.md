@@ -315,11 +315,13 @@ date columns keep their text output. Both new codes are registered unreleased. N
 whose plan shape is `DATE` over a `date32` source runs natively on the unified slice, the chunked route and the
 sequential route (namespaced, no `group_by`, no `when:`, no `preserve_values`). Offsets and key bytes are
 unchanged for every usable row. B4: a `date32` value outside years 1 to 9999, or one shifted out of that range,
-is a `format_error` row error that keeps the source on the native routes and the oracle handler, where the job
-failed before; the full-frame route reads the column through pandas, which cannot hold such a date, and still
-fails the job (the one named route difference). B5: on the unified slice the output column keeps `date32` and goes
-to the output assembler as an Arrow column; on the chunked route the schema rule pins it to `date32`, not
-`string` (text sources still give `string`). `preserve_values` on a typed column declines with
+is a `format_error` row error that keeps the source on the unified slice, the chunked route and the oracle
+handler, where the job failed before. Under ROUTE-OUTPUT-CONTRACT the full-frame and sequential routes read the
+whole table through pandas before any strategy runs, and pandas cannot hold such a date in the source column, so
+both fail the job with `ExecutionError` `full_frame_value_unrepresentable` naming the table and column and no
+value (amended 2026-11-24 after Codex a1 round 3; before, sequential failed with an uncoded pandas error).
+B5: on the unified slice the output column keeps `date32` and goes to the output assembler as an Arrow column;
+on the chunked route the schema rule pins it to `date32`, not `string` (text sources still give `string`). `preserve_values` on a typed column declines with
 `date_shift_typed_preserve_not_native`, and a typed shape over any other resident type (`date64`) with
 `date_shift_typed_type_not_native`; both run on the oracle with today's output. The plan digest does not move.
 

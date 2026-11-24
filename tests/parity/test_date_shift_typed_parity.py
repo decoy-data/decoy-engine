@@ -10,12 +10,16 @@ namespace gets the same offsets: the typed key is the ISO text.
 from __future__ import annotations
 
 import datetime as dt
+import logging
+import traceback
 from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pytest
 
 from decoy_engine import run_pipeline
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._sequential_native_ops import SEQ_DATE_SHIFT_DISPOSITION_KEY
 from tests.native._b8_support import assert_same_as_oracle, run_one, run_pair
 from tests.native._chunked_entry_support import (
@@ -187,3 +191,38 @@ def test_an_empty_date32_column_keeps_its_type_on_every_route(tmp_path: Path) ->
             assert got == pa.date32(), (rows, unified, got)
         chunked = run_one(config, [table])
         assert all(c.schema.field("d").type == pa.date32() for c in chunked.out), rows
+
+
+# Day 2932897 is 10000-01-01, one past the last day Python (and so pandas) can hold.
+_PAST_DATE32_YEARS = 2932897
+
+
+@pytest.mark.parametrize("route", ["sequential", "full_frame"])
+def test_an_out_of_range_date32_fails_the_pandas_routes_with_a_coded_error(
+    route: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """B4 (amended 2026-11-24): the routes that read a table through pandas cannot hold the
+    date, so the job fails with one coded error whose text carries no source value."""
+    n = 120_000
+    days = pa.array([0] * (n - 1) + [_PAST_DATE32_YEARS], pa.int32()).cast(pa.date32())
+    tables = {
+        TABLE: pa.table({"id": pa.array([f"p{i}" for i in range(n)])}),
+        "child": pa.table({"pid": pa.array([f"p{i}" for i in range(n)]), "d": days}),
+    }
+    kw: dict[str, Any] = {"execution_mode": route, "auto_chunk": False}
+    if route == "full_frame":
+        kw["unified_slice_enabled"] = False
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ExecutionError) as caught:
+        _run(_fk_config(), tables, tmp_path, **kw)
+    exc = caught.value
+    assert exc.code == "full_frame_value_unrepresentable", exc.code
+    assert "column 'd' holds a value pandas cannot represent" in str(exc)
+    texts = [
+        str(exc),
+        repr(exc),
+        "".join(traceback.format_exception(exc)),
+        caplog.text,
+    ]
+    for text in texts:
+        assert "10000" not in text and str(_PAST_DATE32_YEARS) not in text, text[-2000:]
