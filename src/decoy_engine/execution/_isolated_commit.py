@@ -51,6 +51,7 @@ from decoy_engine.fileaccess import (
     own_entry,
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.io.bounded_reader import UnsupportedColumnType
 from decoy_engine.publication import (
     CommitReceipt,
     PublicationRequest,
@@ -155,15 +156,31 @@ def _names_ok(names: object) -> TypeGuard[list[str]]:
     return len(set(components)) == len(components) and all(map(is_valid_component, components))
 
 
-def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, str]:
-    """Write each source table into the private work root, owner-only from creation, so the
-    child can read it whatever the umask; returns the manifest the payload carries."""
+def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, dict[str, str]]:
+    """Stage each table under an opaque name in the private work root.
+
+    Raises `UnsupportedColumnType` for a dictionary whose values are a dictionary or an extension
+    type: Arrow IPC cannot read those back, and Parquet takes no dictionary."""
+    for table in sources.values():
+        for field in table.schema:
+            kind = arrow_adapter.ipc_refusal(field.type)
+            if kind is not None:
+                raise UnsupportedColumnType(column=field.name, kind=kind)
     stage = handed_stage_dir(work_root, "isolated.sources")
-    manifest: dict[str, str] = {}
+    manifest = {}
     for index, (name, table) in enumerate(sources.items()):
-        component = f"s{index:04d}.parquet"  # opaque: a name can hold "/" or ".."
-        arrow_adapter.write_table(table, stage, component)
-        manifest[name] = str(work_root / component)
+        if all(arrow_adapter.parquet_holds_type(field.type) for field in table.schema):
+            fmt = "parquet"
+            component = f"s{index:04d}.parquet"
+            # Preserve list child names in the private handoff.
+            arrow_adapter.write_table(table, stage, component, use_compliant_nested_type=False)
+        else:
+            fmt = "ipc"
+            component = f"s{index:04d}.arrow"
+            # The stream format carries each chunk's own dictionary; the file format allows one.
+            with arrow_adapter.ipc_new_stream(stage, component, table.schema) as writer:
+                arrow_adapter.ipc_write_exact(writer, table)
+        manifest[name] = {"path": str(work_root / component), "format": fmt}
     return manifest
 
 

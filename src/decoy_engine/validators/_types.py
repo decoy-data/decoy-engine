@@ -20,6 +20,15 @@ Design constraints (per CLAUDE.md and engineering best-practices section 2.1):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, NamedTuple
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+
+# The most failing row positions one finding lists. The count beside them is exact. The cap
+# depends on the config (it is lifted under quarantine `validation_fail`, which removes the
+# rows), never on the route, so a report is the same on every route.
+FINDING_INDEX_CAP = 10_000
 
 
 @dataclass(frozen=True)
@@ -37,8 +46,11 @@ class ValidatorFinding:
         table: Output table name the finding refers to.
         column: Column name within ``table``, or None for table-level validators.
         failing_row_indices: 0-based row indices into the output table that
-            failed validation.
+            failed validation, in row order. At most ``FINDING_INDEX_CAP`` of them unless
+            quarantine ``validation_fail`` is configured.
         detail: Human-readable description of the failure.
+        failing_row_count: Exact number of failing rows. Left at -1 it is taken from
+            ``failing_row_indices``.
     """
 
     validator: str
@@ -46,6 +58,65 @@ class ValidatorFinding:
     column: str | None
     failing_row_indices: tuple[int, ...]
     detail: str = ""
+    failing_row_count: int = -1
+
+    def __post_init__(self) -> None:
+        if self.failing_row_count < 0:
+            object.__setattr__(self, "failing_row_count", len(self.failing_row_indices))
+
+
+class SkippedColumn(NamedTuple):
+    """One column or table a validator did not check, with the registered reason code."""
+
+    table: str
+    column: str | None
+    code: str
+
+
+@dataclass(frozen=True)
+class ValidatorResult:
+    """The outcome of one configured ``validators:`` entry, passes included.
+
+    ``checked`` lists the ``(table, column)`` pairs the entry looked at (``column`` is None for
+    a relationship check). ``status`` is ``skipped`` when the entry checked nothing and recorded
+    at least one skip.
+    """
+
+    validator: str
+    entry_index: int
+    status: Literal["passed", "failed", "skipped"]
+    checked: tuple[tuple[str, str | None], ...]
+    skipped: tuple[SkippedColumn, ...]
+    failing_row_count: int
+
+
+def result_status(
+    findings: tuple[ValidatorFinding, ...],
+    checked: tuple[tuple[str, str | None], ...],
+    skipped: tuple[SkippedColumn, ...],
+) -> Literal["passed", "failed", "skipped"]:
+    """The one rule for an entry's status: a finding fails it, checking nothing skips it.
+
+    An entry that checked nothing never reads as passed, whether or not it recorded why.
+    """
+    if findings:
+        return "failed"
+    if not checked:
+        return "skipped"
+    return "passed"
+
+
+@dataclass(frozen=True)
+class RowSpan:
+    """One run of rows fed to a fold, in published row order.
+
+    ``offset`` is the position of the first row in its whole table. ``source`` holds the
+    pre-mask rows at the same positions, or None when the fold reads no source.
+    """
+
+    offset: int
+    output: pa.Table | pa.RecordBatch
+    source: pa.Table | pa.RecordBatch | None = None
 
 
 @dataclass(frozen=True)
@@ -65,14 +136,15 @@ class ValidationReport:
         validators_run: Ordered tuple of validator names that were executed.
         findings: Tuple of ValidatorFinding for every failure found (empty
             when ``passed`` is True).
-        elapsed_ms: Wall-clock time in milliseconds for the full validation
-            phase.
+        elapsed_ms: Wall-clock time in milliseconds spent folding rows, summed over the run.
+        results: One ``ValidatorResult`` per configured entry, in config order.
     """
 
     passed: bool
     validators_run: tuple[str, ...]
     findings: tuple[ValidatorFinding, ...]
     elapsed_ms: float
+    results: tuple[ValidatorResult, ...] = ()
 
 
 @dataclass(frozen=True)

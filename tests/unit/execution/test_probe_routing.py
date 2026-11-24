@@ -39,6 +39,7 @@ from decoy_engine.execution._probe import (
     MIN_PLAUSIBLE_K_FULL_FRAME,
     ProbePoint,
     ProbeResult,
+    probe_peak_bytes,
 )
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.profile._types import ColumnProfile, TableProfile
@@ -683,3 +684,13 @@ class TestEndToEndWiring:
         assert recovered.quality_metrics["execution"]["execution_mode"] == "full_frame"
         for table in bounded.outputs:
             assert bounded.outputs[table].equals(recovered.outputs[table]), f"{table} differs"
+
+
+def test_fixed_list_probe_inconclusive(tmp_path):
+    from tests.unit.execution._auto_chunk_support import fixed_list_job
+
+    cfg, sources = fixed_list_job(tmp_path, pa.list_(pa.int32(), 2), [[0, 0], None, [2, 2]], [0, 0])
+    result = probe_peak_bytes(
+        cfg, sources, reference_table="t", target_rows=3, floor_rows=3, engine_version="fixed-list"
+    )
+    assert not result.conclusive and "outcome='crashed'" in result.reason

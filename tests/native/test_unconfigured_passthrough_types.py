@@ -45,6 +45,7 @@ from tests.native._chunked_entry_support import (
 from tests.native._rev9_type_catalogue import CATALOGUE
 from tests.unit.execution._auto_chunk_support import (
     TABLE,
+    fixed_list_job,
     make_cfg,
     pass_col,
     redact_col,
@@ -438,3 +439,39 @@ def test_catalogue_nested_types_are_placed(name: str, null: bool) -> None:
         out = run()
         assert out.schema.field("x").type == src.schema.field("x").type
         assert out.column("x").to_pylist() == src.column("x").to_pylist()
+
+
+@pytest.mark.parametrize("auto_chunk", [False, True])
+@pytest.mark.parametrize(
+    ("dtype", "values", "clean"),
+    [
+        (pa.list_(pa.int32(), 2), [[0, 0], None, [2, 2]], [0, 0]),
+        (pa.list_(pa.int64(), 1), [[0], None, [2]], [0]),
+        (pa.list_(pa.string(), 2), [["a", "b"], None, ["c", "d"]], ["a", "b"]),
+        (pa.list_(pa.int32(), 2), [[0, 0], None, [2, 2], None, [4, 4]], [0, 0]),
+    ],
+)
+def test_fixed_list_resident(tmp_path, auto_chunk, dtype, values, clean):
+    cfg, sources = fixed_list_job(tmp_path, dtype, values, clean)
+    result = run_pipeline(cfg, sources, auto_chunk=auto_chunk, engine_version="fixed-list")
+    assert str(result.outputs[TABLE]["x"].type) == str(dtype)
+    assert result.outputs[TABLE]["x"].to_pylist() == values
+
+
+@pytest.mark.parametrize(
+    ("nulls", "redact", "mode"),
+    [
+        ({0}, False, "auto"),
+        ({2}, False, "auto"),
+        ({0, 1, 2}, False, "auto"),
+        ({1}, True, "auto"),
+        ({1}, False, "full_frame"),
+    ],
+)
+def test_fixed_list_route(tmp_path, nulls, redact, mode):
+    dtype = pa.list_(pa.int32(), 2)
+    values = [None if i in nulls else [i, i] for i in range(3)]
+    cfg, sources = fixed_list_job(tmp_path, dtype, values, [0, 0], redact=redact)
+    result = run_pipeline(cfg, sources, execution_mode=mode, engine_version="fixed-list")
+    assert str(result.outputs[TABLE]["x"].type) == str(dtype)
+    assert result.outputs[TABLE]["x"].to_pylist() == values

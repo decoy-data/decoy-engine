@@ -15,7 +15,7 @@ only the tables still raw and a prepared table is never transformed twice.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pyarrow as pa
@@ -23,6 +23,7 @@ import pyarrow as pa
 from decoy_engine.execution import _transforms
 from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
 from decoy_engine.execution._transforms_table import apply_resident_table
+from decoy_engine.execution.pipeline import ResidentFit, check_pre_transform
 from decoy_engine.profile._readers import LazySource
 
 __all__ = ["PreparedSources", "prepare_resident_transforms", "prepare_transform_sources"]
@@ -32,11 +33,13 @@ __all__ = ["PreparedSources", "prepare_resident_transforms", "prepare_transform_
 class PreparedSources:
     """`sources` with every resident transform-bearing table replaced by its
     transformed table; `prepared` names them; `lazy` names the transform-bearing
-    tables that stay raw (lazy or loader-supplied)."""
+    tables that stay raw (lazy or loader-supplied). `pre_transform_fit` is the unverified
+    verdict of the bound checked before the copies, or `None` (see `check_pre_transform`)."""
 
     sources: dict[str, pa.Table | LazySource]
     prepared: frozenset[str]
     lazy: frozenset[str]
+    pre_transform_fit: ResidentFit | None = None
 
 
 def prepare_transform_sources(
@@ -73,7 +76,11 @@ def prepare_transform_sources(
         post_validation=post_validation,
         resolved_substrate=resolved_substrate,
     )
-    return prepare_resident_transforms(config, caller_sources)
+    # The one transform copy site: price it before the first whole-table pandas copy.
+    pre_transform_fit = check_pre_transform(config, caller_sources, graph, execution_mode)
+    return replace(
+        prepare_resident_transforms(config, caller_sources), pre_transform_fit=pre_transform_fit
+    )
 
 
 def prepare_resident_transforms(
