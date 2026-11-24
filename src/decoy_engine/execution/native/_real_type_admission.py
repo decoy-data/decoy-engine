@@ -45,6 +45,7 @@ import pyarrow as pa
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._chunked_group_key_gate import group_by_columns
 from decoy_engine.execution.native._operator_config_rejections import (
+    fpe_checksum_config_rejection,
     group_key_sibling_type_admitted,
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
@@ -65,8 +66,8 @@ _STRING_SOURCE_STRATEGIES: Final = frozenset(
 
 def _fpe_checksum_decline(config: dict[str, Any], table: str, column: str) -> str | None:
     """The coded reason an fpe column declines to the oracle for a configured `checksum` mode,
-    or None. Checksum modes stay on the Python path (C6a plan §3g): the compiled FF1 kernel has
-    no checksum path, so a column with `checksum` set runs the whole table on the oracle."""
+    or None. Finds the column's provider config and asks the one checksum decision
+    (`fpe_checksum_config_rejection`); a declined column runs the whole table on the oracle."""
     for table_cfg in config.get("tables") or ():
         if not isinstance(table_cfg, dict) or table_cfg.get("name") != table:
             continue
@@ -74,8 +75,8 @@ def _fpe_checksum_decline(config: dict[str, Any], table: str, column: str) -> st
             if not isinstance(col, dict) or col.get("name") != column:
                 continue
             pc = col.get("provider_config")
-            if isinstance(pc, dict) and pc.get("checksum"):
-                return f"fpe_checksum_not_native:{column}"
+            if isinstance(pc, dict):
+                return fpe_checksum_config_rejection(column, pc, context="payload")
     return None
 
 

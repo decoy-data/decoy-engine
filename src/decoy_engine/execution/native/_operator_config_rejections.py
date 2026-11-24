@@ -12,13 +12,14 @@ the same column.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import pyarrow as pa
 
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._categorical_prepared import prepare_categorical
 from decoy_engine.execution.native._requirements import resolve_input_arrow_type
+from decoy_engine.transforms.fpe import resolve_fpe_charset
 
 # Mirrors the oracle's `transforms.bucket_perturb._VALID_BUCKETS`; kept local to
 # avoid importing the transforms module into the planning boundary.
@@ -297,6 +298,56 @@ def text_redact_config_rejection(name: str, provider_config: Mapping[str, Any]) 
     return None
 
 
+_ASCII_DIGITS = "0123456789"
+_ASCII_ALPHANUM = _ASCII_DIGITS + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+# The oracle normalizes a checksum value before it validates it (stdnum `compact`, Unicode
+# digits, Python `upper`). The native path skips that normalization, so it admits only a charset
+# where every such step is the identity or ASCII uppercase: ASCII digits, and for vin ASCII
+# letters too.
+_NATIVE_CHECKSUM_ALPHABET: dict[str, str] = {"vin": _ASCII_ALPHANUM}
+
+FpeChecksumContext = Literal["payload", "key"]
+
+
+def fpe_checksum_rejection(
+    column: str,
+    scheme: str | None,
+    resolved_charset: str,
+    *,
+    context: FpeChecksumContext,
+) -> str | None:
+    """The coded reason an fpe column with a `checksum` scheme stays on the oracle, or None.
+
+    The one checksum decision: every route, the wrapper backstop and (later) text_mask detector
+    eligibility call it, so a scheme can only become native in one place. An absent scheme
+    passes. A key context declines first (FK parents and REMAP orphans stay on Python), then a
+    scheme the registry does not list, then any charset symbol outside the native alphabet."""
+    if not scheme:
+        return None
+    reason = f"fpe_checksum_not_native:{column}"
+    if context == "key":
+        return reason
+    if scheme not in OPERATORS["fpe"].checksum_schemes:
+        return reason
+    allowed = _NATIVE_CHECKSUM_ALPHABET.get(scheme, _ASCII_DIGITS)
+    if not resolved_charset or any(ch not in allowed for ch in resolved_charset):
+        return reason
+    return None
+
+
+def fpe_checksum_config_rejection(
+    column: str, provider_config: Mapping[str, Any], *, context: FpeChecksumContext
+) -> str | None:
+    """`fpe_checksum_rejection` for a provider-config mapping: reads the scheme, resolves the
+    charset without raising (config validation stays at its own gate) and forwards both."""
+    scheme = provider_config.get("checksum") or None
+    if scheme is None:
+        return None
+    spec = provider_config.get("charset", "digits")
+    charset = resolve_fpe_charset(spec) if isinstance(spec, str) else ""
+    return fpe_checksum_rejection(column, scheme, charset, context=context)
+
+
 def text_mask_config_rejection(name: str, provider_config: Mapping[str, Any]) -> str | None:
     """The coded reason a `text_mask` column cannot run natively, or None.
 
@@ -313,9 +364,12 @@ def text_mask_config_rejection(name: str, provider_config: Mapping[str, Any]) ->
 
 
 __all__ = [
+    "FpeChecksumContext",
     "bucket_perturb_config_rejection",
     "categorical_config_rejection",
     "date_shift_config_rejection",
+    "fpe_checksum_config_rejection",
+    "fpe_checksum_rejection",
     "group_key_config_rejection",
     "group_key_sibling_type_admitted",
     "is_deterministic_categorical",
