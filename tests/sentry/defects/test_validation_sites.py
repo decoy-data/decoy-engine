@@ -9,7 +9,7 @@ Two rules, both AST scans over ``src/decoy_engine``:
 2. Validator messages. A ``raise ValueError(<message>)`` in a module that defines a reachable
    public model must not interpolate a data value. The converter trusts validator text only for
    ``ConfigRuleError``, so each message is classified (the risky-name policy is
-   ``test_log_interpolation``'s) as fixed, name-only, value-bearing or unclassified. A call result
+   ``tests/sentry/safe_output``) as fixed, name-only, value-bearing or unclassified. A call result
    or opaque local is unclassified unless it comes straight from a producer function whose
    returns are classified and folded into the digest. Value-bearing, unclassified and plain
    ``ValueError`` sites must be zero. Each ``ConfigRuleError`` message is pinned by
@@ -34,7 +34,7 @@ import pytest
 from pydantic import BaseModel
 
 import decoy_engine
-from tests.sentry.safe_output._tagger import RISKY_NAMES, risky_in
+from tests.sentry.safe_output import RISKY_NAMES, risky_in
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"

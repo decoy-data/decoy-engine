@@ -17,7 +17,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from tests.sentry.safe_output._tagger import (
+from tests.sentry.safe_output import (
     RISKY_NAMES,
     SINK_RISKY,
     own_nodes,
