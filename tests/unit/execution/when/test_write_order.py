@@ -499,3 +499,15 @@ def test_a_plan_that_orders_today_keeps_its_order_with_an_fk_child_creator() -> 
     names = [n.columns[0] for n in order.ordered]
     assert not order.fallback
     assert names.index("z_other") < names.index("email")
+
+
+def test_out_of_core_admission_declines_a_plan_with_no_ordinary_order() -> None:
+    """M1. Admission goes through the one ordering decision: a plan only the fallback order can
+    run is declined (not raised), so it falls back to a route that can run it."""
+    from decoy_engine.execution._pipeline_routing_signals import out_of_core_admission
+
+    seed_plan = ws.plan([("first_name", ws.bundle()), ("email", ws.derived('concat(other, "#")'))])
+    accepted, code = out_of_core_admission(
+        seed_plan, registry=ws.REG, graph=ws.fk_graph("first_name", "email")
+    )
+    assert (accepted, code) == (False, "cyclic_work_ordering")

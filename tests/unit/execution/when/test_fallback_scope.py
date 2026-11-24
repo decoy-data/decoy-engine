@@ -189,3 +189,63 @@ def test_integer_fk_keys_keep_their_dtype_through_the_fallback_assembly(
     assert out.schema.field("mgr_id").type == pa.int64()
     assert out.column("pid").to_pylist() == [10, 20, 30, 40]
     assert out.column("mgr_id").to_pylist() == [30, 10, 40, None]
+
+
+@pytest.mark.parametrize("sequential", [False, True], ids=["full-frame", "sequential"])
+def test_fk_child_waits_for_a_late_sorting_parent_writer(sequential: bool) -> None:
+    """B1. The bundle is keyed on `zz_first`, so its node sorts after the derived `email`. The FK
+    child of `t.email` must still wait for it and map to the bundle's email."""
+    parent = _cyclic_table().append_column("zz_first", pa.array(FIRST))
+    cols = (
+        ("zz_first", ws.bundle()),
+        ("email", ws.derived('concat(summary, "@x.test")')),
+        ("summary", ws.derived('concat(last_name, "!")')),
+    )
+    child = pa.table(
+        {
+            "id": pa.array(["1", "2", "3", "4"]),
+            "email_ref": pa.array([SRC_EMAIL[i] for i in (2, 0, 3, 1)]),
+        }
+    )
+    edge = RelationshipEdge("t", ("email",), "o", ("email_ref",), "nm2", OrphanPolicy.PRESERVE)
+    bindings = (
+        NamespaceBinding("nm", (("t", ("zz_first",)),)),
+        NamespaceBinding("nm2", (("t", ("email",)), ("o", ("email_ref",)))),
+    )
+    out = _run_job(
+        {"o": (child, (("email_ref", ws.seed("passthrough")),)), "t": (parent, cols)},
+        RelationshipGraph(edges=(edge,), ordering=()),
+        bindings,
+        sequential,
+    )
+    emails = out["t"].column("email").to_pylist()
+    assert out["o"].column("email_ref").to_pylist() == [emails[i] for i in (2, 0, 3, 1)]
+
+
+def test_fk_child_depends_on_every_writer_of_its_parent_columns(tmp_path: Any) -> None:
+    """B1. In the fallback graph the FK child of `t.email` waits for each node that writes
+    `email`, including a joint mask that no other node depends on."""
+    from decoy_engine.execution._runner import build_work_list
+    from decoy_engine.execution.work_order import resolve_operations
+    from decoy_engine.execution.work_order.ranks import fallback_edges
+
+    ref = ws.reference(tmp_path / "r.parquet", zz_k=["J"], email=["JE"])
+    seed_plan = SimpleNamespace(
+        seed_envelope=SeedEnvelope(
+            job_seed=ws.SEED,
+            per_table=(
+                ("o", TableSeed(per_column=(("email_ref", ws.seed("passthrough")),), per_group=())),
+                (
+                    "t",
+                    TableSeed(
+                        per_column=(*CYCLE_COLUMNS, ("zz_k", ws.joint(ref, ["zz_k", "email"]))),
+                        per_group=(),
+                    ),
+                ),
+            ),
+        )
+    )
+    edge = RelationshipEdge("t", ("email",), "o", ("email_ref",), "nm2", OrphanPolicy.PRESERVE)
+    graph = RelationshipGraph(edges=(edge,), ordering=())
+    edges = fallback_edges(resolve_operations(build_work_list(seed_plan, ws.REG), graph))
+    assert ("t", ("zz_k",)) in edges[("o", ("email_ref",))]
