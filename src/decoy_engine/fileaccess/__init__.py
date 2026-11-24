@@ -53,6 +53,7 @@ from decoy_engine.fileaccess._protected_dir import (
     ProtectedDirUnsafe,
     open_protected_dir,
     protected_scratch_dir,
+    scratch_root,
 )
 from decoy_engine.fileaccess._read import keeps_class, read_all, read_checked, read_text, shown
 from decoy_engine.fileaccess._reclaim import reclaim_stages
@@ -207,6 +208,7 @@ __all__ = [
     "scope",
     "scratch_native",
     "scratch_native_iter",
+    "scratch_root",
     "scrub",
     "shown",
     "stage_entries",

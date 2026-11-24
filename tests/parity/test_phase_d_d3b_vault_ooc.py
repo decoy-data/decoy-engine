@@ -27,13 +27,13 @@ import pytest
 
 from decoy_engine.errors import ConfigError
 from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
-from decoy_engine.execution import _pipeline_route_exec as route_exec
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline_routing import decide_execution_route
 from decoy_engine.execution.native._crypto_ext import (
     CryptoExtensionUnavailableError,
     load_compiled_crypto_kernel,
 )
+from decoy_engine.execution.out_of_core import _budget as route_exec
 from decoy_engine.execution.out_of_core import _runner
 from decoy_engine.execution.out_of_core._stream_join import StreamFkJoiner
 from decoy_engine.execution.out_of_core._vault_collect import vault_ooc_safe

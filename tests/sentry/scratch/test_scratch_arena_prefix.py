@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.fa import sinks
 from tests.sentry.fa.resolve import ProjectIndex, Scope, resolve
 from tests.sentry.fa.rules import indexed_modules, scoped_nodes, source_modules
 from tests.sentry.fa.scan import scan_tree
@@ -29,8 +30,8 @@ OUTPUT = "decoy_engine/fileaccess/_output.py"
 OWNED_NAMES = frozenset({"ARENA_PREFIX", "_PENDING_PREFIX", "_MARKER", "_MAGIC"})
 # The sweep's step 1 test (plan 4.4), used with `re.fullmatch`.
 SWEEP_NAME = re.compile(r"decoy-arena-v1-[0-9a-f]{16}")
-ARENA_BANNED = frozenset(
-    {"os.mkdir", "os.makedirs", "tempfile.mkdtemp", "Path.mkdir", "os.chmod", "os.fchmod"}
+ARENA_BANNED = frozenset({"os.mkdir", "os.makedirs", "Path.mkdir", "os.chmod", "os.fchmod"}) | (
+    sinks.TEMP_CREATORS
 )
 CREATE_FLAGS = frozenset(
     {

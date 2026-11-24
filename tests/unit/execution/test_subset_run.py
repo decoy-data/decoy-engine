@@ -407,7 +407,7 @@ def _break_route(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _small_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(stage_mod, "resolve_temp_disk_budget", lambda: 1)
+    monkeypatch.setattr(stage_mod, "resolve_temp_disk_budget", lambda root: 1)
 
 
 def _io_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -462,7 +462,7 @@ def test_at27_the_budget_is_checked_after_every_batch(
 
     monkeypatch.setattr(_budget, "check_temp_disk_budget", second_fails)
     monkeypatch.setattr(stage_mod, "_BATCH_ROWS", 10)
-    monkeypatch.setattr(stage_mod, "resolve_temp_disk_budget", lambda: 10**9)
+    monkeypatch.setattr(stage_mod, "resolve_temp_disk_budget", lambda root: 10**9)
     cfg, _, lazy = sup.job(tmp_path)
     with _roots(monkeypatch) as roots, pytest.raises(ExecutionError) as info:
         _run(cfg, lazy)
