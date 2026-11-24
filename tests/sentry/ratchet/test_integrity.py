@@ -281,6 +281,12 @@ def test_decision_table_value_must_be_a_decision_string(repo: Path, table: str) 
     _assert_red(repo, f"{table} x:")
 
 
+def test_decision_with_a_trailing_newline_is_refused(repo: Path) -> None:
+    text = "owner 2026-11-24 enough reason text\\n"  # a TOML escape, so the value ends in a newline
+    _write(repo, REG, _registry({"a": A}) + _tables(retired={"x": text}))
+    _assert_red(repo, "retired x:")
+
+
 # --- baseline paths -----------------------------------------------------------------------------
 
 
