@@ -86,6 +86,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("errors.py", "FpeUnencryptableError.__init__"): _CTOR,
     ("errors.py", "PipelineValidationError.__init__"): _CTOR,
     ("errors.py", "ValidationError.__init__"): _CTOR,
+    ("errors.py", "ValidatorStateError.__init__"): _CTOR,
     ("_execution_error.py", "ExecutionError.__init__"): _CTOR,
     ("execution/_errors.py", "StrategyError.__init__"): _CTOR,
     ("execution/_mixed_admission.py", "MixedDeclineError.__init__"): _CTOR,
@@ -138,6 +139,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     # -- private helpers that forward a parameter --------------------------------------------
     ("execution/_positional_keys.py", "row_positions"): _HELPER,
     ("execution/_positional_keys.py", "positional_key_array"): _HELPER,
+    ("execution/_strategies/_faker_positional.py", "positional_pool_indices"): _HELPER,
     ("execution/_transforms.py", "_reject_nested_keys"): _HELPER,
     ("execution/native/_crypto_reference.py", "_row_error"): _HELPER,
     ("generation/_pinned_compile.py", "_reject_column"): _HELPER,
@@ -216,6 +218,10 @@ _KW_CODE = "`code` is keyword-only, so every caller is checked as a `code=` keyw
 NOT_POSITIONAL_SINKS: dict[tuple[str, str], str] = {
     ("execution/_positional_keys.py", "row_positions"): _KW_CODE,
     ("execution/_positional_keys.py", "positional_key_array"): _KW_CODE,
+    ("execution/_strategies/_faker_positional.py", "positional_pool_indices"): (
+        "`domain_code` is a keyword the caller passes as a registered runtime symbol; the function "
+        "only forwards it to `positional_key_array`"
+    ),
     ("execution/_transforms.py", "_reject_nested_keys"): _KW_CODE,
     ("plan/_checks_top_code.py", "_reject_unusable_bound"): _KW_CODE,
     ("generation/_pinned_compile.py", "_reject_column"): (

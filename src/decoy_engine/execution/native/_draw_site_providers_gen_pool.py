@@ -102,14 +102,62 @@ class FakerNondeterministicProvider(SourceKeyedHmacProvider):
         super().__init__(site, primitive="derive_index")
 
 
+class FakerComputedValueProvider(SourceKeyedHmacProvider):
+    """``mask.faker_computed_value``: a computed draw keyed on the source value.
+
+    The index is `derive_index(mask_key, namespace + "/computed:" + provider, canonical(value),
+    count)` for `random_int_range` and `random_choice`.
+    """
+
+    draw_site_id = "mask.faker_computed_value"
+
+    def __init__(self, site: DrawSite) -> None:
+        super().__init__(site, primitive="derive_index")
+
+
+class FakerComputedUuidValueProvider(SourceKeyedHmacProvider):
+    """``mask.faker_computed_uuid_value``: 16 bytes of `derive` keyed on the source value."""
+
+    draw_site_id = "mask.faker_computed_uuid_value"
+
+    def __init__(self, site: DrawSite) -> None:
+        super().__init__(site, primitive="derive")
+
+
+class FakerComputedUuidPositionProvider(SourceKeyedHmacProvider):
+    """``mask.faker_computed_uuid_position``: 16 bytes of `derive` keyed on the row number."""
+
+    draw_site_id = "mask.faker_computed_uuid_position"
+
+    def __init__(self, site: DrawSite) -> None:
+        super().__init__(site, primitive="derive")
+
+
+class FakerComputedPositionProvider(SourceKeyedHmacProvider):
+    """``mask.faker_computed_position``: the same draw keyed on the row's full-table number."""
+
+    draw_site_id = "mask.faker_computed_position"
+
+    def __init__(self, site: DrawSite) -> None:
+        super().__init__(site, primitive="derive_index")
+
+
 GEN_POOL_PROVIDER_CLASSES: tuple[type[DrawSiteProvider], ...] = (
     FakerPoolBuildLocalProvider,
     FakerPoolSelectionProvider,
     FakerNondeterministicProvider,
+    FakerComputedValueProvider,
+    FakerComputedPositionProvider,
+    FakerComputedUuidValueProvider,
+    FakerComputedUuidPositionProvider,
 )
 
 __all__ = [
     "GEN_POOL_PROVIDER_CLASSES",
+    "FakerComputedPositionProvider",
+    "FakerComputedUuidPositionProvider",
+    "FakerComputedUuidValueProvider",
+    "FakerComputedValueProvider",
     "FakerNondeterministicProvider",
     "FakerPoolBuildLocalProvider",
     "FakerPoolSelectionProvider",

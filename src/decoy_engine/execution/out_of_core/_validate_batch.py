@@ -5,7 +5,7 @@ this module follows the same shape, with the D3b vault collector (`_vault_collec
 structural twin: a cheap admission allowlist at routing time, a per-batch hook at each
 driver's mask step, one assembly step at run end. The per-cell verdicts are NOT
 re-implemented: each batch is checked by calling the registered validator function itself
-(`validators._registry._REGISTRY`) on one column occurrence, so a verdict cannot drift from
+(`decoy_engine.validators.validator_function`) on one column occurrence, so a verdict cannot drift from
 the full-frame oracle's. Only the report bookkeeping lives here.
 
 Report parity. `_registry.validate` emits one finding per failing configured
@@ -27,9 +27,8 @@ post-runtime Unicode differently from the Python oracle, which can change WHICH 
 emitted, not just its spelling. Incoming-FK child-key columns are RAW at the mask step and
 rewritten at the join, so a validator reading one would see the wrong value.
 
-Memory. Per-batch work is bounded by `batch_rows`. Retained state is the failing row
-positions, O(failing rows) and unbounded in the worst case; the routing fit-gate is a coarse
-envelope restriction, not a bound on findings residency.
+Memory. Per-batch work is bounded by `batch_rows`. Retained state per occurrence is an exact
+failing count plus at most `FINDING_INDEX_CAP` row positions, the same cap every route applies.
 
 Log hygiene: findings carry validator names, columns and row positions only, never cell text.
 """
@@ -47,8 +46,15 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.validators._registry import _REGISTRY
-from decoy_engine.validators._types import ValidationReport, ValidatorFinding
+from decoy_engine.validators import (
+    FoldResult,
+    SkippedColumn,
+    ValidationReport,
+    ValidatorFinding,
+    assemble_report,
+    finding_index_cap,
+    validator_function,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -193,13 +199,18 @@ def validators_ooc_safe(
 class ValidatorCollector:
     """Accumulates per-batch findings and assembles the oracle-identical report."""
 
-    def __init__(self, entries: list[dict[str, Any]], config: Mapping[str, Any]) -> None:
+    def __init__(
+        self,
+        entries: list[dict[str, Any]],
+        config: Mapping[str, Any],
+        schemas: Mapping[str, pa.Schema] | None = None,
+    ) -> None:
         self._config = dict(config)
         self._names = [entry["name"] for entry in entries]
         self._ordered: list[_Occurrence] = []
         self._by_table: dict[str, list[_Occurrence]] = {}
         for ordinal, entry in enumerate(entries):
-            fn = _REGISTRY[entry["name"]]
+            fn = validator_function(entry["name"])
             # Parameter validation (bad regex, missing allowed_values) raises before any
             # table is read, exactly as the oracle does even for empty output.
             fn({}, entry, self._config)
@@ -217,6 +228,16 @@ class ValidatorCollector:
                     self._by_table.setdefault(table, []).append(slot)
         self._rows_seen: dict[str, int] = {}
         self._failing: dict[_Key, array[int]] = {}
+        self._counts: dict[_Key, int] = {}
+        # A column the table has counts as checked even when the table has no rows, as on the
+        # full-frame route.
+        self._cap = finding_index_cap(config)
+        self._tables = set(schemas or {})
+        self._seen: set[_Key] = {
+            slot.key
+            for slot in self._ordered
+            if slot.table in (schemas or {}) and slot.column in (schemas or {})[slot.table].names
+        }
         self._first: dict[_Key, str] = {}
         self._elapsed = 0.0
 
@@ -232,36 +253,64 @@ class ValidatorCollector:
             for slot in slots:
                 if slot.column not in names:
                     continue
+                self._seen.add(slot.key)
                 for finding in slot.fn({table: as_table}, slot.entry, self._config):
                     failing = self._failing.setdefault(slot.key, array("q"))
                     self._first.setdefault(slot.key, finding.detail)
-                    failing.extend(offset + i for i in finding.failing_row_indices)
+                    self._counts[slot.key] = (
+                        self._counts.get(slot.key, 0) + finding.failing_row_count
+                    )
+                    room = len(finding.failing_row_indices) if self._cap is None else self._cap
+                    room -= len(failing)
+                    failing.extend(offset + i for i in finding.failing_row_indices[: max(room, 0)])
         self._elapsed += time.perf_counter() - started
+
+    def _outcome(self, ordinal: int, per_entry: dict[int, list[ValidatorFinding]]) -> FoldResult:
+        """What the entry checked, what it could not check and what it found."""
+        found = tuple(per_entry.get(ordinal, ()))
+        checked = tuple(
+            (s.table, s.column)
+            for s in self._ordered
+            if s.key[0] == ordinal and s.key in self._seen
+        )
+        skips: list[SkippedColumn] = []
+        tables = dict.fromkeys(s.table for s in self._ordered if s.key[0] == ordinal)
+        for table in tables:
+            if table not in self._tables:
+                skips.append(
+                    SkippedColumn(table, None, reasons.warning.VALIDATOR_SKIP_MISSING_TABLE)
+                )
+                continue
+            skips.extend(
+                SkippedColumn(table, s.column, reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN)
+                for s in self._ordered
+                if s.key[0] == ordinal and s.table == table and s.key not in self._seen
+            )
+        return FoldResult(found, checked, tuple(skips))
 
     def assemble(self) -> ValidationReport:
         """The `_registry.validate` report: findings in configured order, merged indices."""
         findings: list[ValidatorFinding] = []
+        per_entry: dict[int, list[ValidatorFinding]] = {}
         for slot in self._ordered:
             failing = self._failing.get(slot.key)
             if not failing:
                 continue
             # The validator's own wording, with its per-batch count swapped for the total.
+            count = self._counts[slot.key]
             detail = self._first[slot.key]
-            findings.append(
-                ValidatorFinding(
-                    validator=slot.name,
-                    table=slot.table,
-                    column=slot.column,
-                    failing_row_indices=tuple(failing),
-                    detail=_LEADING_COUNT.sub(str(len(failing)), detail, count=1),
-                )
+            found = ValidatorFinding(
+                validator=slot.name,
+                table=slot.table,
+                column=slot.column,
+                failing_row_indices=tuple(failing),
+                detail=_LEADING_COUNT.sub(str(count), detail, count=1),
+                failing_row_count=count,
             )
-        return ValidationReport(
-            passed=not findings,
-            validators_run=tuple(dict.fromkeys(self._names)),
-            findings=tuple(findings),
-            elapsed_ms=self._elapsed * 1000.0,
-        )
+            findings.append(found)
+            per_entry.setdefault(slot.key[0], []).append(found)
+        outcomes = [self._outcome(ordinal, per_entry) for ordinal in range(len(self._names))]
+        return assemble_report(self._names, outcomes, self._elapsed * 1000.0)
 
 
 def build_validator_collector(
@@ -288,7 +337,7 @@ def build_validator_collector(
                 "columns without quarantine; use execution_mode='full_frame' for this job."
             ),
         )
-    return ValidatorCollector(entries, config)
+    return ValidatorCollector(entries, config, schemas)
 
 
 def collect_batch_validation(
