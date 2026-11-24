@@ -531,6 +531,7 @@ import decoy_engine.fileaccess as fa
 from decoy_engine.execution import _isolated_common as c
 loaded_before = "duckdb" in sys.modules
 print("LOADED_BEFORE", loaded_before)
+modules_before = set(sys.modules)
 got = (
     fa.classified_failure(MemoryError("m")).kind,
     fa.classified_failure(ValueError("digital envelope routines m")).kind,
@@ -541,6 +542,7 @@ got = (
 )
 print("GOT", got)
 print("LOADED_AFTER", "duckdb" in sys.modules)
+print("ADDED", sorted(set(sys.modules) - modules_before))
 """
 
 
@@ -567,8 +569,55 @@ def test_classification_never_imports_a_module_on_the_failure_path() -> None:
     seen = _cold("")
     assert seen["GOT"] == _COLD_GOT
     assert seen["LOADED_AFTER"] == seen["LOADED_BEFORE"]
+    assert seen["ADDED"] == "[]"
 
 
 def test_classification_works_when_duckdb_cannot_be_loaded() -> None:
     seen = _cold("sys.modules['duckdb'] = None")
     assert seen["GOT"] == _COLD_GOT
+
+
+_NATIVE_OOM = """
+import sys
+import _duckdb
+conn = _duckdb.connect()
+conn.execute("SET memory_limit='10MB'")
+conn.execute("SET threads=1")
+try:
+    conn.execute("select list(repeat('x', 1000)) from range(2000000)").fetchall()
+except BaseException as exc:
+    caught = exc
+else:
+    raise SystemExit("no out-of-memory error was raised")
+print("NATIVE", type(caught).__module__, type(caught).__name__)
+import decoy_engine.fileaccess as fa
+print("WRAPPER_LOADED", "duckdb" in sys.modules)
+before = set(sys.modules)
+result = fa.classified_failure(caught)
+print("KIND", result.kind if result else None)
+print("FRESH", type(result.fresh).__name__ if result else None)
+print("PREDICATE", fa.is_memory_failure(caught))
+print("ADDED", sorted(set(sys.modules) - before))
+"""
+
+
+def test_a_native_duckdb_out_of_memory_error_is_memory_without_the_wrapper() -> None:
+    """`_duckdb` raises its own `OutOfMemoryException` while the Python `duckdb` wrapper is not
+    loaded; the classifier must still call it memory and import nothing."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(  # noqa: S603 - fixed argv, test-owned source
+        [sys.executable, "-c", _NATIVE_OOM],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    assert out.returncode == 0, out.stderr[-2000:] + out.stdout[-500:]
+    seen = dict(line.split(" ", 1) for line in out.stdout.splitlines())
+    assert seen["NATIVE"] == "_duckdb OutOfMemoryException"
+    assert seen["WRAPPER_LOADED"] == "False"
+    assert seen["KIND"] == "typed_memory" and seen["PREDICATE"] == "True"
+    assert seen["FRESH"] == "OutOfMemoryException"
+    assert seen["ADDED"] == "[]"
