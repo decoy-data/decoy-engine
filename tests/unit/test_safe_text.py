@@ -11,6 +11,7 @@ import functools
 import logging
 import multiprocessing
 import pickle
+import re
 import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor
@@ -127,7 +128,7 @@ def test_a_wrapper_in_a_mutmut_module_passes_the_literal_of_its_caller() -> None
 
 
 def test_the_same_wrapper_outside_mutmut_withholds_a_non_literal_argument() -> None:
-    wrap = _wrapper("decoy_engine.x")
+    wrap = _wrapper("someapp.x")
     with pytest.raises(TypeError):
         wrap(_canary())
     with pytest.raises(TypeError):
@@ -151,7 +152,7 @@ def test_a_mutmut_wrapper_calling_a_body_with_the_literal_passes() -> None:
 # A22: identity with a literal must not be a cache accident.
 def test_a_one_character_cell_equal_to_a_literal_is_withheld() -> None:
     literal = "a"
-    cell = b"a".decode()
+    cell = sys.intern(b"a".decode())  # 3.11 does not hand back the cached cell without this
     assert cell is literal  # CPython caches one-character strings
     with pytest.raises(TypeError):
         SafeText.const(cell)
@@ -245,3 +246,72 @@ def test_a_safe_text_crosses_a_process_pool_and_the_worker_withholds() -> None:
         assert isinstance(made, SafeText) and str(made) == "worker literal"
         assert pool.submit(_worker_echo, SafeText.const("sent text")).result() == "sent text"
         assert pool.submit(_worker_non_literal, _canary()).result() is WITHHELD
+
+
+def test_a_two_character_literal_is_the_shortest_that_passes() -> None:
+    assert str(SafeText.const("ok")) == "ok"
+
+
+def test_a_minted_text_cannot_be_changed_or_deleted() -> None:
+    text = SafeText.const("fixed text")
+    with pytest.raises(AttributeError):
+        text._text = "other"  # type: ignore[union-attr]
+    with pytest.raises(AttributeError):
+        del text._text  # type: ignore[union-attr]
+    assert str(text) == "fixed text"
+
+
+def test_equality_with_a_non_safe_text_defers_to_the_other_side() -> None:
+    text = SafeText.const("fixed text")
+    assert text.__eq__("fixed text") is NotImplemented
+    assert text != "fixed text"
+    assert text == SafeText.const("fixed text")
+
+
+def test_the_slot_refusal_names_the_line() -> None:
+    with pytest.raises(TypeError, match=r"test_safe_text:test_the_slot_refusal_names_the_line:\d+"):
+        SafeText.literal_template("hello {name}")
+
+
+def test_the_reprs_never_print_text() -> None:
+    assert repr(WITHHELD) == "WITHHELD"
+    assert repr(SafeText.const("secret-ish")) == "SafeText(<text>)"
+
+
+def test_hash_follows_the_text() -> None:
+    assert hash(SafeText.const("same text")) == hash("same text")
+    assert len({SafeText.const("same text"), SafeText.const("same text")}) == 1
+
+
+def test_a_deleted_attribute_message_says_immutable() -> None:
+    text = SafeText.const("fixed text")
+    with pytest.raises(AttributeError, match="^SafeText is immutable$"):
+        del text._text  # type: ignore[union-attr]
+
+
+def test_the_production_warning_names_module_function_and_line(
+    production: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="decoy_engine._safe_text"):
+        SafeText.const(_canary())
+    pattern = r"SafeText withheld a non-literal at \S+:test_the_production_warning_[a-z_]+:\d+$"
+    assert re.search(pattern, caplog.records[0].getMessage())
+
+
+def test_a_template_that_starts_with_a_slot_keeps_only_the_marker(production: None) -> None:
+    assert str(SafeText.literal_template("{x}")) == "<withheld>"
+
+
+def test_no_frame_means_no_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_safe_text.inspect, "currentframe", lambda: None)
+    assert _safe_text._caller_code() == (None, ("unknown", "unknown", 0))
+
+
+def test_an_error_while_walking_frames_means_no_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Broken:
+        @property
+        def f_globals(self) -> dict[str, Any]:
+            raise RuntimeError("broken frame")
+
+    monkeypatch.setattr(_safe_text.inspect, "currentframe", lambda: _Broken())
+    assert _safe_text._caller_code() == (None, ("unknown", "unknown", 0))

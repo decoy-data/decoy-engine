@@ -6,6 +6,11 @@ parameter can never become safe text. A failed check never keeps the argument: u
 switch (tests only) it raises ``TypeError`` naming the call site; otherwise it returns ``WITHHELD``
 and logs one value-free warning per call site. A value that passes discloses only that it equals a
 literal in the calling code. This leaf imports nothing from ``decoy_engine`` so any layer can use it.
+
+Two modes fail closed, by design. The strict fixture in ``tests/conftest.py`` is function-scoped, so
+session- and module-scoped fixtures and subprocesses run non-strict (they withhold and log instead
+of raising). Code rebuilt from an AST, such as pytest's assert rewriting, can change folded
+literals, so a check there can withhold text that looks like a literal in source.
 """
 
 from __future__ import annotations
@@ -105,6 +110,8 @@ class SafeText:
     __slots__ = ("_text",)
     _text: str
 
+    # Any, not ``SafeText | _Withheld``: a union would force every caller to narrow a direct
+    # ``SafeText(...)`` call, which is refused anyway. Public builders return the union.
     def __new__(cls, text: str = "", *, _key: object = None) -> Any:
         if _key is not _KEY:  # a direct SafeText(...) has no provenance
             return _refuse(_caller_code()[1])
@@ -128,6 +135,7 @@ class SafeText:
         paths: Mapping[str, Any] | None = None,
     ) -> SafeText | _Withheld:
         """A literal format string. AE1a1 has no safe slot type, so every slot is withheld."""
+        # ``names`` and ``paths`` are reserved for AE1a2 (safe slot types); unused here.
         code, site = _caller_code()
         if not _is_constant(fmt, code):
             return _refuse(site)
@@ -140,7 +148,9 @@ class SafeText:
             out.append(literal or "")
             if field is not None:
                 if _strict:
-                    raise TypeError(f"SafeText slot needs a safe value at {site[0]}:{site[1]}")
+                    raise TypeError(
+                        f"SafeText slot needs a safe value at {site[0]}:{site[1]}:{site[2]}"
+                    )
                 out.append(_SLOT_WITHHELD)
         return cls("".join(out), _key=_KEY)
 
@@ -151,7 +161,15 @@ class SafeText:
         return "SafeText(<text>)"  # a repr must not print the text into a log by accident
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, SafeText) and other._text == self._text
+        if not isinstance(other, SafeText):
+            return NotImplemented
+        return other._text == self._text
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("SafeText is immutable")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("SafeText is immutable")
 
     def __hash__(self) -> int:
         return hash(self._text)
