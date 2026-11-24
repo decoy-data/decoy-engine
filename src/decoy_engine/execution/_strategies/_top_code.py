@@ -44,6 +44,8 @@ survives.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, TypeGuard
 
@@ -130,6 +132,100 @@ def _parse_exact(value: Any) -> tuple[str, int]:
     return ("int", int(dec)) if dec == dec.to_integral_value() else ("frac", 0)
 
 
+@dataclass(frozen=True)
+class TopCodeSettings:
+    """The resolved top_code config: cap and over label, plus the optional floor and under label.
+
+    Built once from the column's config by ``resolve_top_code_settings``; the handler, the array
+    operator and the physical route all read these fields and never the raw config.
+    """
+
+    cap: int | float
+    over_label: str
+    floor: int | float | None
+    under_label: str | None
+
+
+def resolve_top_code_settings(cfg: Mapping[str, Any], column: str) -> TopCodeSettings:
+    """Resolve cap, labels and the optional floor from ``cfg``, failing closed.
+
+    An unresolvable bound, or a floor without its label, raises ``StrategyError`` rather than
+    leave a tail unmasked.
+    """
+    bound = TopCodeStrategyHandler._resolve_top_bound(dict(cfg))
+    if bound is None:
+        raise StrategyError(
+            code=reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE,
+            strategy="top_code",
+            message=(
+                f"column {column!r} uses top_code but neither a known "
+                f"preset ({cfg.get('preset')!r}) nor a resolvable numeric "
+                f"cap ({cfg.get('cap')!r}) with a non-empty over_label is "
+                "configured."
+            ),
+        )
+    floor, under_label = TopCodeStrategyHandler._resolve_bottom_bound(dict(cfg))
+    return TopCodeSettings(bound[0], bound[1], floor, under_label)
+
+
+def _classify_numeric(
+    nums: pd.Series, settings: TopCodeSettings
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+    """Over, under and in-range masks of a numeric series, and the in-range text.
+
+    The in-range string is canonical, not ``astype(str)`` of the raw column (see the module
+    docstring): an integral value prints without ``.0`` whatever dtype the column ingested as.
+    """
+    over_mask = nums.notna() & (nums > settings.cap)
+    if settings.floor is not None and settings.under_label is not None:
+        under_mask = nums.notna() & (nums < settings.floor)
+    else:
+        under_mask = pd.Series(False, index=nums.index)
+    in_range_mask = nums.notna() & ~over_mask & ~under_mask
+
+    if pd.api.types.is_integer_dtype(nums.dtype):
+        # Already ".0"-free and arbitrary-precision; no normalization.
+        in_range_str = nums.astype(str)
+    else:
+        # Float dtype (nulls widened it, or genuine floats): an integral
+        # value renders "67.0", so strip the ".0" via Python's
+        # arbitrary-precision int -- NOT a fixed-width `.astype("int64")`,
+        # which SILENTLY overflows/wraps negative above 2^63 (Dennis LOW).
+        n_float = nums.astype("float64")
+        integral = nums.notna() & np.isfinite(n_float) & (n_float == np.floor(n_float))
+        in_range_str = nums.astype(str)  # fractional / non-finite fallback
+        in_range_str[integral] = n_float[integral].map(lambda v: str(int(v)))
+    return over_mask, under_mask, in_range_mask, in_range_str
+
+
+def render_exceptional_top_code(nums: pd.Series, settings: TopCodeSettings) -> pd.Series:
+    """Labels for a few positions, rendered by the handler's own code with the dtype kept.
+
+    For the valid-NaN rows of a pandas extension column: an extension NaN is a present value that
+    prints ``nan``, while an ordinary float NaN is missing and comes back null.
+    """
+    over, under, in_range, in_range_str = _classify_numeric(nums, settings)
+    out = pd.Series(np.full(len(nums), None, dtype=object), index=nums.index)
+    out = out.where(~in_range, in_range_str)
+    out = out.where(~over, settings.over_label)
+    return out.where(~under, settings.under_label)
+
+
+def top_code_warning(column: str, over_count: int, under_count: int) -> QualityWarning | None:
+    """The audit warning for one column, or None when nothing was generalized.
+
+    The detail holds counts only. The counts are local to the frame or chunk they were taken on.
+    """
+    if not (over_count or under_count):
+        return None
+    return QualityWarning(
+        code=reasons.warning.TOP_CODE_GENERALIZED,
+        provider="top_code",
+        column=column,
+        detail={"over_count": over_count, "under_count": under_count},
+    )
+
+
 class TopCodeStrategyHandler:
     """Generalize the rare tail(s) of a numeric column into an aggregate label."""
 
@@ -153,23 +249,9 @@ class TopCodeStrategyHandler:
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
         require_shape_declared("top_code", column, ctx)
-        bound = self._resolve_top_bound(cfg)
-        if bound is None:
-            # Fail closed (mirrors bucketize's `_resolve_width is None` raise):
-            # an unresolvable bound must never leave the column unmasked.
-            raise StrategyError(
-                code=reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE,
-                strategy="top_code",
-                message=(
-                    f"column {column!r} uses top_code but neither a known "
-                    f"preset ({cfg.get('preset')!r}) nor a resolvable numeric "
-                    f"cap ({cfg.get('cap')!r}) with a non-empty over_label is "
-                    "configured."
-                ),
-            )
-        cap, over_label = bound
-
-        floor, under_label = self._resolve_bottom_bound(cfg)
+        settings = resolve_top_code_settings(cfg, column)
+        cap, over_label = settings.cap, settings.over_label
+        floor, under_label = settings.floor, settings.under_label
 
         col = df[column]
 
@@ -202,31 +284,7 @@ class TopCodeStrategyHandler:
                     )
                 )
 
-            over_mask = nums.notna() & (nums > cap)
-            if floor is not None and under_label is not None:
-                under_mask = nums.notna() & (nums < floor)
-            else:
-                under_mask = pd.Series(False, index=nums.index)
-            in_range_mask = nums.notna() & ~over_mask & ~under_mask
-
-            # Canonical, dtype-independent string for the in-range cells (see the
-            # module docstring's CRITICAL note): render from the COERCED numeric
-            # so the SAME value renders identically whether the column ingested as
-            # int64 (null-free chunk) or float64 (null-bearing chunk / substrate).
-            # `raw.astype(str)` would emit "67" vs "67.0" depending on the chunk's
-            # null content -- the CHUNK_SAFE byte-identity break Dennis reproduced.
-            if pd.api.types.is_integer_dtype(nums.dtype):
-                # Already ".0"-free and arbitrary-precision; no normalization.
-                in_range_str = nums.astype(str)
-            else:
-                # Float dtype (nulls widened it, or genuine floats): an integral
-                # value renders "67.0", so strip the ".0" via Python's
-                # arbitrary-precision int -- NOT a fixed-width `.astype("int64")`,
-                # which SILENTLY overflows/wraps negative above 2^63 (Dennis LOW).
-                n_float = nums.astype("float64")
-                integral = nums.notna() & np.isfinite(n_float) & (n_float == np.floor(n_float))
-                in_range_str = nums.astype(str)  # fractional / non-finite fallback
-                in_range_str[integral] = n_float[integral].map(lambda v: str(int(v)))
+            over_mask, under_mask, in_range_mask, in_range_str = _classify_numeric(nums, settings)
 
         # A null or non-null-uncoercible cell is carried through byte-for-byte
         # unchanged (null passthrough is not a leak; the uncoercible cell is the
@@ -250,19 +308,8 @@ class TopCodeStrategyHandler:
         # per-row map is not a scalar and carries row positions. Tracked as a known limitation
         # shared with any warning-emitting chunk-safe strategy; see
         # docs/backlog/chunked-audit-evidence-row-indices.md.
-        warnings: list[QualityWarning] = []
-        if len(over_positions) or len(under_positions):
-            warnings.append(
-                QualityWarning(
-                    code=reasons.warning.TOP_CODE_GENERALIZED,
-                    provider="top_code",
-                    column=column,
-                    detail={
-                        "over_count": len(over_positions),
-                        "under_count": len(under_positions),
-                    },
-                )
-            )
+        warning = top_code_warning(column, len(over_positions), len(under_positions))
+        warnings: list[QualityWarning] = [] if warning is None else [warning]
 
         return df, warnings
 
