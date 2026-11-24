@@ -17,6 +17,7 @@ capability_modules = [
   "decoy_engine/fileaccess/_stage_claim.py",
   "decoy_engine/fileaccess/_rooted.py",
   "decoy_engine/fileaccess/_output.py",
+  "decoy_engine/fileaccess/_rooted_dir.py",
   "decoy_engine/fileaccess/_preopened.py",
   "decoy_engine/fileaccess/_openat2.py",
   "decoy_engine/fileaccess/_durable.py",

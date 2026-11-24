@@ -325,7 +325,7 @@ class RootedFileAccess:
             os.close(fd)
 
     def output_dir(self, req: FileRequest) -> OutputDir:
-        from decoy_engine.fileaccess._output import RootedOutputDir
+        from decoy_engine.fileaccess._rooted_dir import RootedOutputDir
 
         if req.access != "write":
             raise deny(req.field_key)
