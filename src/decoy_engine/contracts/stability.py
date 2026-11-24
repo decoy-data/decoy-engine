@@ -56,13 +56,13 @@ EXPERIMENTAL_MODULE: Final = "decoy_engine.sdk"
 EXPERIMENTAL_OBJECTS: Final[tuple[tuple[str, str], ...]] = (
     ("decoy_engine.contracts.column_shape", "SourceFacts"),
     ("decoy_engine.internal.faker_setup", "atomic_swap_db_providers"),
-    ("decoy_engine.internal.pandas_compat", "arrow_to_frame"),
-    ("decoy_engine.internal.pandas_compat", "arrow_to_frame_pair"),
-    ("decoy_engine.internal.pandas_compat", "arrow_to_series"),
     ("decoy_engine.internal.faker_setup", "load_custom_providers"),
     ("decoy_engine.internal.faker_setup", "register_faker_list_provider"),
     ("decoy_engine.internal.faker_setup", "register_faker_provider"),
     ("decoy_engine.internal.faker_setup", "unregister_faker_provider"),
+    ("decoy_engine.internal.pandas_compat", "arrow_to_frame"),
+    ("decoy_engine.internal.pandas_compat", "arrow_to_frame_pair"),
+    ("decoy_engine.internal.pandas_compat", "arrow_to_series"),
     ("decoy_engine.providers_v2._faker_adapter", "register_faker_provider_v2"),
 )
 

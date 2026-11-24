@@ -38,18 +38,21 @@ def lazy_source_changed(table: str, detail: str) -> ExecutionError:
     )
 
 
-def _unrepresentable_text(column: str, table: str | None, note: str = "") -> str:
-    where = f"table {table!r} column {column!r}" if table is not None else f"column {column!r}"
+def _unrepresentable_text(column: str | None, table: str | None, note: str = "") -> str:
+    if column is None:
+        where = f"a column of table {table!r}" if table is not None else "a column"
+    else:
+        where = f"table {table!r} column {column!r}" if table is not None else f"column {column!r}"
     return f"{where} holds a value pandas cannot represent.{note}"
 
 
 # The `on_unrepresentable` callbacks of the source-read boundary (`arrow_to_frame`). Each names the
 # table (when known) and the column, never a value, and raises `from None` so no pandas or Arrow
 # text rides along. `column` is what the chunked diagnosis matches on.
-def source_column_unrepresentable(table: str | None = None) -> Callable[[str], NoReturn]:
+def source_column_unrepresentable(table: str | None = None) -> Callable[[str | None], NoReturn]:
     """The callback for a read with no stricter code of its own (profile, fidelity, kernels)."""
 
-    def raise_coded(column: str) -> NoReturn:
+    def raise_coded(column: str | None) -> NoReturn:
         raise ExecutionError(
             code=reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE,
             message=_unrepresentable_text(column, table),
@@ -59,10 +62,10 @@ def source_column_unrepresentable(table: str | None = None) -> Callable[[str], N
     return raise_coded
 
 
-def full_frame_unrepresentable(table: str | None, note: str) -> Callable[[str], NoReturn]:
+def full_frame_unrepresentable(table: str | None, note: str) -> Callable[[str | None], NoReturn]:
     """The callback of the pandas execution routes, which convert every source column."""
 
-    def raise_coded(column: str) -> NoReturn:
+    def raise_coded(column: str | None) -> NoReturn:
         raise ExecutionError(
             code=reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE,
             message=_unrepresentable_text(column, table, note),
@@ -72,10 +75,10 @@ def full_frame_unrepresentable(table: str | None, note: str) -> Callable[[str], 
     return raise_coded
 
 
-def post_scan_not_inspectable(table: str) -> Callable[[str], NoReturn]:
+def post_scan_not_inspectable(table: str) -> Callable[[str | None], NoReturn]:
     """The post-scan callback: the check fails closed on a column it cannot read."""
 
-    def raise_coded(column: str) -> NoReturn:
+    def raise_coded(column: str | None) -> NoReturn:
         raise ExecutionError(
             code=reasons.runtime.POST_SCAN_COLUMN_NOT_INSPECTABLE,
             message=_unrepresentable_text(column, table),
@@ -85,7 +88,7 @@ def post_scan_not_inspectable(table: str) -> Callable[[str], NoReturn]:
     return raise_coded
 
 
-def postmask_not_inspectable(column: str) -> NoReturn:
+def postmask_not_inspectable(column: str | None) -> NoReturn:
     """The post-mask callback; `column_facts` records the error on that column's tally."""
     raise ExecutionError(
         code=reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE,

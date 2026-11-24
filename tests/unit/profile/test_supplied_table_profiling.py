@@ -1,7 +1,7 @@
 """A supplied table with no descriptor is profiled through the same readers as a declared one.
 
 A resident table is sampled by slicing before any pandas conversion, a supplied file handle is
-read by the Parquet reader, and a value pandas cannot hold does not fail the profile.
+read by the Parquet reader, and a value pandas cannot hold fails the profile with a coded error.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
+from decoy_engine.execution import ExecutionError
 from decoy_engine.profile import _readers_resident, _source, profile_source
 from decoy_engine.profile._readers import LazySource, ParquetFileSource
 from decoy_engine.profile._readers_resident import ResidentTableSource
@@ -102,12 +104,21 @@ def test_a_resident_table_goes_through_the_resident_reader(
     assert ResidentTableSource in readers
 
 
-def test_a_date_pandas_cannot_hold_does_not_fail_the_profile(tmp_path: Path) -> None:
+def test_a_date_pandas_cannot_hold_fails_the_profile_with_a_coded_value_free_error(
+    tmp_path: Path,
+) -> None:
     far = pa.table({"d": pa.array([4_000_000, 4_000_001], pa.date32()), "n": [1, 2]})
     for residency in ("bounded", "full"):
-        profile = profile_source(
-            _config(tmp_path), seed=1, residency=residency, supplied_sources={"s": far}
-        )
-        s = _table_of(profile, "s")
-        assert [c.name for c in s.columns] == ["d", "n"]
-        assert s.row_count == 2
+        with pytest.raises(ExecutionError) as exc:
+            profile_source(
+                _config(tmp_path), seed=1, residency=residency, supplied_sources={"s": far}
+            )
+        err = exc.value
+        assert err.code == reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE
+        assert "'d'" in str(err)
+        # The cell text ("12932", the year, or pandas/Arrow wording) must not ride along.
+        for text in (str(err), repr(err)):
+            assert "4000000" not in text
+            assert "out of bounds" not in text.lower()
+        assert err.__cause__ is None
+        assert err.__context__ is None

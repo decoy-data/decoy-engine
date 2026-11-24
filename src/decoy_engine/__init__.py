@@ -48,6 +48,7 @@ import logging
 # The one NullHandler attach site; `_configure_logger` preserves it and never creates one.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
+from decoy_engine.arrow_frames import arrow_to_frame, arrow_to_frame_pair, arrow_to_series
 from decoy_engine.config import (
     FILE_SOURCE_PATH_FIELDS,
     Dismissal,
@@ -156,7 +157,6 @@ from decoy_engine.generation.pool import (
     get_default_pool_cache,
 )
 from decoy_engine.generation.synthesize import generate_tables
-from decoy_engine.internal.pandas_compat import arrow_to_frame, arrow_to_frame_pair, arrow_to_series
 from decoy_engine.keyprovider import (
     KeyedStrategyRequiresSecret,
     KeyProvider,

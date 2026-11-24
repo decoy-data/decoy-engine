@@ -566,9 +566,14 @@ def residual_pii_findings(
                     _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
                 ):
                     severity, message = override
-            elif fact.identity_error and configured not in _NO_OP_BY_DESIGN:
+            elif (
+                fact.identity_error
+                and fact.identity_error != _NOT_INSPECTABLE
+                and configured not in _NO_OP_BY_DESIGN
+            ):
                 # The source comparison could not run, so the escalation this column may need is
                 # unknown. Say so at error severity rather than report a clean "not compared".
+                # A column the check could not read already has its error finding above.
                 severity = "error"
                 message = (
                     f"column matched {top.detector_id!r} but the source comparison raised "

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import traceback
 from collections.abc import Callable
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pandas as pd
 import pyarrow as pa
@@ -21,12 +21,12 @@ _LEAKS = ("10000", "2932897", "-768", "non-zero nanoseconds")
 
 
 class _RefusedError(Exception):
-    def __init__(self, column: str) -> None:
+    def __init__(self, column: str | None) -> None:
         super().__init__(f"column {column}")
         self.column = column
 
 
-def _refuse(column: str) -> NoReturn:
+def _refuse(column: str | None) -> NoReturn:
     raise _RefusedError(column) from None
 
 
@@ -63,8 +63,8 @@ def test_in_range_table_equals_its_plain_conversion() -> None:
 
 
 def test_a_callback_that_returns_is_a_value_free_type_error() -> None:
-    def returns(_column: str) -> NoReturn:
-        return None  # type: ignore[return-value]
+    def returns(_column: str | None) -> NoReturn:
+        return None  # type: ignore[misc]
 
     with pytest.raises(TypeError, match="on_unrepresentable must raise") as caught:
         arrow_to_frame(_bad_table("date32"), on_unrepresentable=returns)
@@ -96,3 +96,48 @@ def test_series_and_pair_use_the_same_callback() -> None:
         arrow_to_frame_pair(good, bad, on_unrepresentable=_refuse)
     left, right = arrow_to_frame_pair(good, good, on_unrepresentable=_refuse)
     assert left.equals(right)
+
+
+class _FakeColumn:
+    def __init__(self, error: Exception | None) -> None:
+        self._error = error
+
+    def to_pandas(self, **_kwargs: object) -> pd.Series:
+        if self._error is not None:
+            raise self._error
+        return pd.Series([1])
+
+
+class _FakeTable:
+    """A table whose whole-table conversion raises a value-quoting ValueError."""
+
+    column_names = ("ok",)
+
+    def __init__(self, probe_error: Exception | None) -> None:
+        self._probe_error = probe_error
+
+    def to_pandas(self, **_kwargs: object) -> pd.DataFrame:
+        raise ValueError("out of bounds 2932897")
+
+    def column(self, _position: int) -> _FakeColumn:
+        return _FakeColumn(self._probe_error)
+
+
+def test_a_probe_that_raises_another_type_still_reaches_the_callback_value_free() -> None:
+    fake: Any = _FakeTable(RuntimeError("cell 2932897 is bad"))
+    with pytest.raises(_RefusedError) as caught:
+        arrow_to_frame(fake, on_unrepresentable=_refuse)
+    exc = caught.value
+    assert exc.column == "ok"
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert "2932897" not in "".join(traceback.format_exception(exc))
+
+
+def test_no_single_failing_column_calls_the_callback_with_none() -> None:
+    fake: Any = _FakeTable(None)
+    with pytest.raises(_RefusedError) as caught:
+        arrow_to_frame(fake, on_unrepresentable=_refuse)
+    exc = caught.value
+    assert exc.column is None
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert "2932897" not in "".join(traceback.format_exception(exc))

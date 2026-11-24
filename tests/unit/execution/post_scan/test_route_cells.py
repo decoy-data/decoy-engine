@@ -19,7 +19,7 @@ import pytest
 
 from decoy_engine.execution import run_pipeline_isolated
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.execution.pipeline import _post_scan, _post_scan_suite
 from decoy_engine.internal.memory_limit import require_megabytes
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _subset_run_support as subset_sup
@@ -175,7 +175,9 @@ def _watch_whole_reads(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list
     monkeypatch.setattr(pq, "read_table", trap("read_table", pq.read_table))
     monkeypatch.setattr(pq.ParquetFile, "read", trap("ParquetFile.read", pq.ParquetFile.read))
     monkeypatch.setattr(
-        _post_scan, "materialize_source", trap("materialize_source", _post_scan.materialize_source)
+        _post_scan_suite,
+        "materialize_source",
+        trap("materialize_source", _post_scan_suite.materialize_source),
     )
     scoped("check_keys")
     scoped("run_post_mask_tables")

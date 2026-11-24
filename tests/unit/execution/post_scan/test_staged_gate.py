@@ -22,7 +22,7 @@ from decoy_engine.config import post_scan_resident_reason
 from decoy_engine.execution import _transactional_sink
 from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.execution.pipeline import _post_scan, _post_scan_suite
 from decoy_engine.execution.pipeline._post_scan import PostScanGate
 from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.internal.memory_limit import require_megabytes
@@ -212,7 +212,9 @@ def _forbid_whole_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(pq, "read_table", trap("read_table", pq.read_table))
     monkeypatch.setattr(pq.ParquetFile, "read", trap("ParquetFile.read", pq.ParquetFile.read))
     monkeypatch.setattr(
-        _post_scan, "materialize_source", trap("materialize_source", _post_scan.materialize_source)
+        _post_scan_suite,
+        "materialize_source",
+        trap("materialize_source", _post_scan_suite.materialize_source),
     )
     real = PostScanGate.before_commit
 

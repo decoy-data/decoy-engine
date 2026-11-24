@@ -82,10 +82,27 @@ _UNREPRESENTABLE: Final = (ValueError, OverflowError)
 
 _Mapper = Callable[[pa.DataType], pd.api.extensions.ExtensionDtype | None]
 
+# The callback is told the failing column, or None when no single column reproduces the failure.
+_OnUnrepresentable = Callable[[str | None], NoReturn]
 
-def _fail(on_unrepresentable: Callable[[str], NoReturn], column: str) -> NoReturn:
+
+def _fail(on_unrepresentable: Callable[[Any], NoReturn], column: str | None) -> NoReturn:
     on_unrepresentable(column)
     raise TypeError("on_unrepresentable must raise")
+
+
+def _first_failing_column(table: pa.Table, types_mapper: _Mapper | None) -> str | None:
+    """The first column that does not convert alone, or None when every one does.
+
+    Any exception from a probe counts as that column failing: its text may quote a cell and is
+    dropped here, never chained.
+    """
+    for position, name in enumerate(table.column_names):
+        try:
+            table.column(position).to_pandas(types_mapper=types_mapper)
+        except Exception:
+            return name
+    return None
 
 
 def _no_widening(widen: bool) -> None:
@@ -96,30 +113,25 @@ def _no_widening(widen: bool) -> None:
 def arrow_to_frame(
     table: pa.Table,
     *,
-    on_unrepresentable: Callable[[str], NoReturn],
+    on_unrepresentable: _OnUnrepresentable,
     widen: bool = False,
     types_mapper: _Mapper | None = None,
 ) -> pd.DataFrame:
     """Experimental: the one Arrow-to-pandas conversion of a table (source-read boundary, S1b).
 
-    A column pandas cannot hold calls `on_unrepresentable(column)` after the conversion's own
+    A column pandas cannot hold calls `on_unrepresentable(column)` (None when no single column
+    reproduces the failure) after the conversion's own
     handler has closed, so the coded error it raises carries no pandas or Arrow text (which
     quotes the value). Code outside this module does not call `to_pandas` itself.
     """
     _no_widening(widen)
-    failed = None
     try:
         return table.to_pandas(types_mapper=types_mapper)
     except _UNREPRESENTABLE:
-        for position, name in enumerate(table.column_names):
-            try:
-                table.column(position).to_pandas(types_mapper=types_mapper)
-            except _UNREPRESENTABLE:
-                failed = name
-                break
-    if failed is None:
-        raise ValueError("an Arrow table could not be converted to pandas")
-    _fail(on_unrepresentable, failed)
+        pass
+    # Probed outside the handler above, so no exception raised from here carries a context
+    # that quotes the value.
+    _fail(on_unrepresentable, _first_failing_column(table, types_mapper))
 
 
 def arrow_to_series(
@@ -143,7 +155,7 @@ def arrow_to_frame_pair(
     source: pa.Table,
     output: pa.Table,
     *,
-    on_unrepresentable: Callable[[str], NoReturn],
+    on_unrepresentable: _OnUnrepresentable,
     widen: bool = False,
     types_mapper: _Mapper | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -160,7 +172,7 @@ def table_to_pandas_exact_ints(
     table: pa.Table,
     columns: Iterable[str],
     *,
-    on_unrepresentable: Callable[[str], NoReturn],
+    on_unrepresentable: _OnUnrepresentable,
     types_mapper: _Mapper = exact_int_types_mapper,
     on_unconvertible: Callable[[str], NoReturn] | None = None,
 ) -> pd.DataFrame:
