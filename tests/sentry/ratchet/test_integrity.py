@@ -516,3 +516,23 @@ def test_reason_predicate_is_shared_by_baselines_and_decisions(reason: str) -> N
     assert bool(_ratchet.reason_findings("p", base)) is weak
     if len(reason) >= 10:
         assert (_ratchet.decision_problem(f"owner 2026-11-24 {reason}") is not None) is weak
+
+
+def test_untracked_copy_of_a_listed_outside_sentry_does_not_pass(repo: Path) -> None:
+    _write(repo, MANIFEST, _manifest((OUTSIDE,)))
+    _write(repo, OUTSIDE, SENTRY_BODY)
+    base = _commit(repo, "outside sentry")
+    _git(repo, "rm", "-q", OUTSIDE)
+    _commit(repo, "delete the file, keep the list entry")
+    _write(repo, OUTSIDE, SENTRY_BODY)  # on disk, in no commit
+    _red_from(repo, base, f"{OUTSIDE}: sentry test file was removed")
+
+
+def test_waiver_covers_only_its_own_field(repo: Path) -> None:
+    rows = _registry({"a": A}).rstrip("\n") + '\nbypass = "yes"\nextra = "yes"\n\n'
+    both = {"bypass": DECISION, "extra": DECISION}
+    _write(repo, REG, rows + _tables(checker_change=both))
+    res = _run_env(repo, json.dumps([["a", "bypass"]]))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "a: unknown registry key extra" in res.stdout + res.stderr
+    assert "unknown registry key bypass" not in res.stdout + res.stderr
