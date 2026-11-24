@@ -208,7 +208,7 @@ def date_shift_config_rejection(
 # integer, bool, string, large_string, date, timestamp), and the operator itself
 # masks all of them byte-identically -- but the sibling MUST be an unmasked
 # passthrough node, and passthrough's own production resident set is exactly
-# {string, int64, bool} (`_unified_slice_resident_types._ADMITTED_RESIDENT_TYPES`).
+# {string, int64, bool} (`OPERATORS["passthrough"].resident_type_domain`).
 # So a large_string/int32/uint64/date/timestamp sibling could never activate
 # end-to-end anyway; admitting it here would over-advertise. Narrow to the
 # intersection so admission is honest; float/decimal/dictionary stay excluded
@@ -225,8 +225,9 @@ def group_key_sibling_types(
     return frozenset(t for t in (passthrough_types or frozenset()) if group_by_type_is_safe(t))
 
 
+_PASSTHROUGH_DOMAIN = OPERATORS["passthrough"].resident_type_domain
 _NATIVE_GROUP_KEY_SIBLING_TYPES = group_key_sibling_types(
-    OPERATORS["passthrough"].unified_resident_types
+    _PASSTHROUGH_DOMAIN.default.exact if _PASSTHROUGH_DOMAIN is not None else None
 )
 
 

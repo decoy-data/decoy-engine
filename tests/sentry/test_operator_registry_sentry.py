@@ -135,3 +135,31 @@ def test_every_required_kernel_has_an_availability_field() -> None:
     A kernel added to `RequiredKernel` without a `KernelAvailability` field would raise there
     after the sink was written, so the two sets must match."""
     assert set(get_args(RequiredKernel)) == {f.name for f in fields(KernelAvailability)}
+
+
+def test_t11_unified_admission_asks_the_one_descriptor() -> None:
+    """The unified slice selects no route-specific resident-type table: it makes one
+    `resident_type_domain.admits(...)` call, and the old derived tables are gone."""
+    admission = (EXEC_ROOT / "_unified_slice_admission.py").read_text(encoding="utf-8")
+    resident = (EXEC_ROOT / "_unified_slice_resident_types.py").read_text(encoding="utf-8")
+    tree = ast.parse(admission)
+    admits_calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "admits"
+    ]
+    assert len(admits_calls) == 1
+    for text in (admission, resident):
+        for old in (
+            "_ADMITTED_RESIDENT_TYPES",
+            "_POSITIONAL_RESIDENT_TYPES",
+            "_DETERMINISTIC_RESIDENT_TYPES",
+            "positional_resident_types",
+            "deterministic_resident_types",
+            "unified_resident_types",
+        ):
+            assert old not in text, old
+    # No direct strategy-specific type predicate for date_shift outside the registry.
+    assert '"date_shift"' not in admission or "pa.date32" not in admission
+    names = {f.name for f in fields(OPERATORS["date_shift"].__class__)}
+    assert "unified_resident_types" not in names

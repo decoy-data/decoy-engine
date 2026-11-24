@@ -244,7 +244,8 @@ def test_the_registry_entry_matches_the_plan() -> None:
     assert spec.planned_backend == ARROW_PYTHON
     assert spec.required_kernel is None
     assert spec.positive_kernel_evidence is False
-    assert spec.unified_resident_types == frozenset({pa.string()})
+    assert spec.resident_type_domain is not None
+    assert spec.resident_type_domain.default.exact == frozenset({pa.string()})
     assert spec.full_frame_assembly == "null_on_empty"
     assert spec.routed_diagnostics == frozenset()
     assert spec.provider_allowlist is None

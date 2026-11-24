@@ -199,14 +199,14 @@ def test_4_deterministic_faker_over_float_still_declines(tmp_path: Path, typ: pa
 
 def test_4_the_resident_domain_is_wider_only_for_a_bound_positional_node() -> None:
     from decoy_engine.execution._operator_registry import OPERATORS
-    from decoy_engine.execution._unified_slice_resident_types import positional_resident_types
     from decoy_engine.execution.native._operator_params import FakerParams
 
-    wider = OPERATORS["faker"].positional_resident_types
-    assert wider is not None and pa.int32() in wider
-    assert positional_resident_types("faker", FakerParams("ns", positional=True)) == wider
-    assert positional_resident_types("faker", FakerParams("ns")) is None
-    assert positional_resident_types("hash", FakerParams("ns", positional=True)) is None
+    faker = OPERATORS["faker"].resident_type_domain
+    hash_domain = OPERATORS["hash"].resident_type_domain
+    assert faker is not None and hash_domain is not None
+    assert faker.admits(pa.int32(), FakerParams("ns", positional=True))
+    assert not faker.admits(pa.float64(), FakerParams("ns"))
+    assert not hash_domain.admits(pa.int32(), FakerParams("ns", positional=True))
 
 
 def test_4_the_binder_takes_a_numeric_source_only_for_the_positional_variant(

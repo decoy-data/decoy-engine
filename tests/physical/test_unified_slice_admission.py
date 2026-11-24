@@ -734,7 +734,8 @@ def test_faker_operator_is_in_every_admission_table() -> None:
     assert adm.FAKER_OPERATOR_ID in adm._COMPANION_DEPENDENT_OPERATOR_IDS
     assert adm._OPERATOR_REQUIRED_KERNEL[adm.FAKER_OPERATOR_ID] == "index"
     # string only: the binder also accepts large_string, the slice must not.
-    assert adm._ADMITTED_RESIDENT_TYPES["faker"] == frozenset({pa.string()})
+    domain = OPERATORS["faker"].resident_type_domain
+    assert domain is not None and domain.default.exact == frozenset({pa.string()})
 
 
 @pytest.mark.skipif(

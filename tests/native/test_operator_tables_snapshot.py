@@ -14,7 +14,6 @@ import pyarrow as pa
 
 from decoy_engine.execution import _unified_slice_admission as admission
 from decoy_engine.execution import _unified_slice_evidence as evidence
-from decoy_engine.execution._unified_slice_resident_types import _ADMITTED_RESIDENT_TYPES
 from decoy_engine.execution.native import _operator_config_rejections as rejections
 from decoy_engine.execution.native._chunked_evidence import _COMPANION_STRATEGIES
 from decoy_engine.execution.native._dispatch import _INDEX_KERNEL_STRATEGIES
@@ -166,6 +165,13 @@ def test_slice_strategies_and_operator_id_by_strategy() -> None:
 
 
 def test_admitted_resident_types_has_nine_keys_and_no_group_key() -> None:
+    from decoy_engine.execution._operator_registry import OPERATORS, ResidentTypeRule
+
+    defaults = {
+        key: spec.resident_type_domain.default.exact
+        for key, spec in OPERATORS.items()
+        if spec.resident_type_domain is not None
+    }
     assert {
         "passthrough": frozenset({pa.string(), pa.int64(), pa.bool_()}),
         "redact": frozenset({pa.string()}),
@@ -174,14 +180,18 @@ def test_admitted_resident_types_has_nine_keys_and_no_group_key() -> None:
         "fpe": frozenset({pa.string()}),
         "categorical": frozenset({pa.string()}),
         "bucket_perturb": frozenset({pa.string()}),
-        "date_shift": frozenset({pa.string()}),
+        "date_shift": frozenset({pa.string(), pa.date32()}),
         "faker": frozenset({pa.string()}),
         "text_redact": frozenset({pa.string()}),
         "text_mask": frozenset({pa.string()}),
-    } == _ADMITTED_RESIDENT_TYPES
-    assert "group_key" not in _ADMITTED_RESIDENT_TYPES
-    assert type(_ADMITTED_RESIDENT_TYPES) is dict
-    assert all(type(v) is frozenset for v in _ADMITTED_RESIDENT_TYPES.values())
+    } == defaults
+    assert "group_key" not in defaults
+    assert all(type(v) is frozenset for v in defaults.values())
+    assert all(
+        type(spec.resident_type_domain.default) is ResidentTypeRule
+        for spec in OPERATORS.values()
+        if spec.resident_type_domain is not None
+    )
 
 
 def test_native_strategy_sets() -> None:
