@@ -32,7 +32,7 @@ from decoy_engine.execution._residency_warning import (
     residency_quality_warning,
 )
 from decoy_engine.execution._sequential import run_sequential
-from decoy_engine.execution.out_of_core._budget import resolve_temp_disk_budget
+from decoy_engine.execution.out_of_core import resolve_temp_disk_budget
 from decoy_engine.fileaccess import scratch_root
 
 if TYPE_CHECKING:

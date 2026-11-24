@@ -15,6 +15,8 @@ output is compared with the batch route's.
 from __future__ import annotations
 
 import dataclasses
+import shutil
+import sys
 from collections import namedtuple
 from pathlib import Path
 from typing import Any
@@ -24,11 +26,9 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
-from decoy_engine.execution import _pipeline_route_exec as route_exec
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core import _budget as budget_mod
 from decoy_engine.execution.out_of_core import _runner
-from decoy_engine.execution.out_of_core import _runner as runner_mod
 from decoy_engine.execution.out_of_core._batch_join import ChildFkBatchJoiner
 from decoy_engine.execution.out_of_core._reorder_budget import resolve_reorder_budgets
 from decoy_engine.execution.out_of_core._route_policy import REORDER_PARENT_KEY_THRESHOLD
@@ -131,15 +131,27 @@ class Spy:
         monkeypatch.setattr(StreamFkJoiner, "__init__", r_init)
 
 
+class _ShutilProxy:
+    """The real `shutil`, except that `disk_usage` called by the cap resolver returns a fixed
+    reading (or fails), so the real resolver turns the `OSError` into no cap. Every other disk
+    check in the budget module sees the real disk."""
+
+    def __init__(self, free: int | None) -> None:
+        self._free = free
+
+    def disk_usage(self, path: Any) -> Any:
+        if sys._getframe(1).f_code.co_name != "resolve_temp_disk_budget":
+            return shutil.disk_usage(path)
+        if self._free is None:
+            raise OSError("disk usage unavailable")
+        return _Usage(self._free * 2, self._free, self._free)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(shutil, name)
+
+
 def fixed_disk(monkeypatch: pytest.MonkeyPatch, free: int | None = FREE_DISK) -> None:
-    """The route's disk cap as a fixed reading (or none), without touching any other disk check."""
-
-    def cap(root: Path) -> int | None:
-        return None if free is None else int(free * budget_mod._TEMP_DISK_SAFETY_FRACTION)
-
-    # The runner derives its own cap when handed none, so both readers see the same disk.
-    monkeypatch.setattr(route_exec, "resolve_temp_disk_budget", cap)
-    monkeypatch.setattr(runner_mod, "resolve_temp_disk_budget", cap)
+    monkeypatch.setattr(budget_mod, "shutil", _ShutilProxy(free))
 
 
 def run(

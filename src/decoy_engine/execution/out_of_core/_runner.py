@@ -194,7 +194,12 @@ def run_fk_out_of_core(
     if cast_run is not None and not _staged and cast_run.tables() & set(sources):
         # F06: declared sources are cast once into typed sources (see `run_staged`), then this
         # function runs again over them.
-        return _declared.run_staged(run_fk_out_of_core, dict(locals()), _join_ooc._JOIN_BATCH_ROWS)
+        return _declared.run_staged(
+            run_fk_out_of_core,
+            dict(locals()),
+            _join_ooc._JOIN_BATCH_ROWS,
+            resolve_temp_disk_budget,
+        )
     pre = run_preflight(
         plan,
         sources,

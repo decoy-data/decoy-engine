@@ -165,7 +165,7 @@ module = "decoy_engine/execution/out_of_core/_budget.py"
 function = "resolve_temp_disk_budget"
 sink = "shutil.disk_usage"
 ordinal = 0
-rule = "the `root` argument: `fileaccess.scratch_root()` or the parent of the run's own scratch root"
+rule = "the `root` argument: `fileaccess.scratch_root()`, a run's own arena root, or the parent of the subset stage's scratch root"
 owner = "cam"
 reason = "free-disk probe on the engine's own temp filesystem"
 

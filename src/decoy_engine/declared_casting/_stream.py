@@ -262,7 +262,12 @@ def maybe_render_empty(run: DeclaredCastRun | None, table: str, out: pa.Table) -
     return run.rendered_schema(table, out.schema).empty_table()
 
 
-def run_staged(fn: Callable[..., Any], call: dict[str, Any], default_batch_rows: int) -> Any:
+def run_staged(
+    fn: Callable[..., Any],
+    call: dict[str, Any],
+    default_batch_rows: int,
+    resolve_cap: Callable[[Path], int | None],
+) -> Any:
     """Run ``fn(plan, sources, **rest)`` over typed copies of its declared sources.
 
     ``call`` is the caller's own keyword snapshot (``dict(locals())`` at its first line); the
@@ -274,7 +279,6 @@ def run_staged(fn: Callable[..., Any], call: dict[str, Any], default_batch_rows:
     Two arenas would each get the whole budget. The route never reclaims a handed arena; this
     opener does, on every exit.
     """
-    from decoy_engine.execution.out_of_core._budget import resolve_temp_disk_budget
     from decoy_engine.fileaccess import ScratchArena
 
     run = call["cast_run"]
@@ -285,7 +289,7 @@ def run_staged(fn: Callable[..., Any], call: dict[str, Any], default_batch_rows:
         batch_rows = call.get("batch_rows") or default_batch_rows
         # Before the first write: a direct caller passes no cap, and staging checks every batch.
         if call.get("temp_disk_budget_bytes") is None:
-            call["temp_disk_budget_bytes"] = resolve_temp_disk_budget(Path(arena.local_path()))
+            call["temp_disk_budget_bytes"] = resolve_cap(Path(arena.local_path()))
         staged = stage_declared_sources(
             run, sources, arena, batch_rows, call["temp_disk_budget_bytes"]
         )
