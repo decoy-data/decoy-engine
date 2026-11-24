@@ -977,13 +977,13 @@ owner = "cam"
 reason = "ambient CLI semantics: best-effort directory fsync after a published replace (main's fixed-width writer did it)"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn.publish"
+module = "decoy_engine/fileaccess/_local_chain.py"
+function = "link_noclobber_beside"
 sink = "os.link"
 ordinal = 0
-rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
+rule = "the stage name generated beside the FileRequest.locator of a request served by LocalFileAccess, and that locator"
 owner = "cam"
-reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
+reason = "ambient CLI semantics on a backend whose os.link has no dir_fd (Windows): the plain two-path link, mapped by the same errno helper as the descriptor form; never installed after forbid_ambient()"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
