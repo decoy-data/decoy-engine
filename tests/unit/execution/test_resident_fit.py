@@ -16,7 +16,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution.pipeline import lazy_spec, lower_bound_bytes, resident_spec
-from decoy_engine.execution.pipeline._resident_fit import (
+from decoy_engine.execution.pipeline._resident_bytes import (
     TableBytesSpec,
     input_bytes,
     pandas_bytes,

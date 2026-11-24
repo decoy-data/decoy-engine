@@ -22,7 +22,8 @@ from decoy_engine.execution import _pipeline_full_frame as full_frame
 from decoy_engine.execution import _pipeline_sources, run_pipeline
 from decoy_engine.execution import out_of_core as ooc
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution.pipeline import _lazy_input, lower_bound_bytes, resident_spec
+from decoy_engine.execution.pipeline import _lazy_input, lazy_spec, lower_bound_bytes, resident_spec
+from decoy_engine.execution.pipeline import _resident_bytes as rb
 from decoy_engine.execution.pipeline import _resident_fit as rf
 from decoy_engine.profile._readers import LazySource
 from tests.acceptance._f06_support import ISO_DATE, column, config, validate
@@ -59,7 +60,7 @@ def _clean(err: BaseException) -> None:
 
 def _footer_bytes(lazy: LazySource, *, pandas: bool) -> int:
     facts = lazy.footer_facts()
-    return lower_bound_bytes([rf.lazy_spec(facts.num_rows, facts.schema, charge_pandas=pandas)])
+    return lower_bound_bytes([lazy_spec(facts.num_rows, facts.schema, charge_pandas=pandas)])
 
 
 def _declared_job(tmp_path: Path, rows: int = ROWS) -> tuple[dict[str, Any], LazySource]:
@@ -424,7 +425,7 @@ def test_at_c20c_a_pandas_copy_that_shares_the_input_buffers_is_not_charged(
 ) -> None:
     """Mutation M-A2: charge the pandas frame in full; the refusal below then fires."""
     cfg, table = _arrow_backed_job(tmp_path, shared_strings=True)
-    need = rf.input_bytes([resident_spec(table, charge_pandas=False)])
+    need = rb.input_bytes([resident_spec(table, charge_pandas=False)])
     assert _lb(table) == need  # every pandas column shares: the bound is the input alone
     assert 2 * need > need  # the old double charge would exceed the ceiling set next
     _ceiling(monkeypatch, need)
@@ -437,7 +438,7 @@ def test_at_c20c_a_column_that_does_not_share_is_still_charged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, copies: list[str]
 ) -> None:
     cfg, table = _arrow_backed_job(tmp_path, shared_strings=False)
-    need = rf.input_bytes([resident_spec(table, charge_pandas=False)])
+    need = rb.input_bytes([resident_spec(table, charge_pandas=False)])
     assert _lb(table) == need + ROWS * 8  # the object column's pointers; `n` shares
     _ceiling(monkeypatch, need)
     with pytest.raises(ExecutionError) as caught:
@@ -465,7 +466,7 @@ def test_at_c20c_a_32_bit_offset_string_column_is_charged_its_widened_offsets(
         columns=[{"name": "s", "strategy": "redact"}],
     )
     ceiling = 30_000
-    assert rf.input_bytes([resident_spec(table, charge_pandas=False)]) < ceiling
+    assert rb.input_bytes([resident_spec(table, charge_pandas=False)]) < ceiling
     assert _lb(table) == 53_260  # measured: 20,484 input + 8 * (rows + 1 terminal offset)
     with pytest.raises(ExecutionError) as caught:
         rf.check_pre_transform(
@@ -481,7 +482,7 @@ def test_at_c20c_each_chunk_of_a_widened_string_column_adds_a_terminal_offset() 
     assert table.column("s").num_chunks == 3
     spec = resident_spec(table)
     assert spec.pandas_widened == frozenset({"s"})
-    assert rf.pandas_bytes([spec]) == (30 + 3) * 8
+    assert rb.pandas_bytes([spec]) == (30 + 3) * 8
 
 
 def test_at_c20c_a_binary_column_the_frame_reuses_is_not_charged(tmp_path: Path) -> None:
@@ -497,7 +498,7 @@ def test_at_c20c_a_binary_column_the_frame_reuses_is_not_charged(tmp_path: Path)
         transforms=[{"op": "limit", "n": 1}],
         columns=[{"name": "b", "strategy": "redact"}],
     )
-    assert _lb(table) == rf.input_bytes([resident_spec(table, charge_pandas=False)]) < 30_000
+    assert _lb(table) == rb.input_bytes([resident_spec(table, charge_pandas=False)]) < 30_000
     rf.check_pre_transform(
         cfg, {"t": table}, SimpleNamespace(edges=[]), "auto", kill_ceiling_bytes=30_000
     )
@@ -636,8 +637,8 @@ def test_at_c21_the_generated_tables_count_at_input_bytes_only(
     _ceiling(monkeypatch, lazy_full * 50)
     _run_mixed(cfg, sources)
     decision, kwargs = routed[-1]
-    generated = rf.input_bytes(
-        rf.resident_spec(t, charge_pandas=False) for t in kwargs["pregenerated"].values()
+    generated = rb.input_bytes(
+        resident_spec(t, charge_pandas=False) for t in kwargs["pregenerated"].values()
     )
     assert generated > 0
     assert decision.resident_fit.lower_bound_bytes == lazy_full + generated

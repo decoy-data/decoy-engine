@@ -13,15 +13,17 @@ from decoy_engine.execution.pipeline._cgroup import (
     select_mount,
 )
 from decoy_engine.execution.pipeline._host import detect_usable_cpus, native_thread_clamp
-from decoy_engine.execution.pipeline._resident_fit import (
-    ResidentFit,
+from decoy_engine.execution.pipeline._resident_bytes import (
     TableBytesSpec,
-    check_pre_read,
-    check_pre_transform,
     lazy_spec,
     lower_bound_bytes,
-    require_resident_fit,
     resident_spec,
+)
+from decoy_engine.execution.pipeline._resident_fit import (
+    ResidentFit,
+    check_pre_read,
+    check_pre_transform,
+    require_resident_fit,
     store_resident_fit,
 )
 from decoy_engine.execution.pipeline._route_summary import RouteSummary, route_summary
