@@ -232,11 +232,22 @@ def _aligned(
         a, b = a.slice(n), b.slice(n)
 
 
-def _add_identity(tally: _Tally, src: pd.Series, out: pd.Series) -> None:
+def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
+    """Comparable and identical row counts of a positional source-to-output comparison.
+
+    The one comparison the frame check and the batch check both run, so the two cannot grade
+    the same cells differently. Both series must share a positional index. A cell comparison
+    that fails raises; the caller records the class name as the column's `identity_error`."""
     src_o, out_o = src.astype(object), out.astype(object)
     present = src_o.notna() & out_o.notna()
-    tally.comparable += int(present.sum())
-    tally.identical += int((src_o[present] == out_o[present]).sum())
+    return int(present.sum()), int((src_o[present] == out_o[present]).sum())
+
+
+def _add_identity(tally: _Tally, src: pd.Series, out: pd.Series) -> None:
+    comparable, identical = identity_counts(src, out)
+    tally.comparable += comparable
+    tally.identical += identical
+    src_o, out_o = src.astype(object), out.astype(object)
     # A null is NaN in a float column and pd.NA in an Arrow-typed integer one; `equals` treats
     # NaN and None as one null but not NaN and pd.NA, so a float source against an int output of
     # the same numbers would read as different.

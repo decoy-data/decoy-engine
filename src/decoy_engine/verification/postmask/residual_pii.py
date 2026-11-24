@@ -51,7 +51,11 @@ import pandas as pd
 from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
 from decoy_engine.profiling import passes_through
-from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
+from decoy_engine.verification.postmask._column_facts import (
+    ColumnFacts,
+    DetectorRate,
+    identity_counts,
+)
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
 # Strategies whose output is EXPECTED to look like real PII. A detector
@@ -181,17 +185,27 @@ def _frame_column_facts(
     series = df[col_name]
     comparable = identical = distinct = 0
     identity_error: str | None = None
-    if source_frames is not None:
+    distinct_error: str | None = None
+    pair = _aligned_source(source_frames, table_name, col_name, series)
+    if pair is not None:
+        src, out = pair
+        # Each failure is the column's own and is recorded by class name only, as the batch
+        # check does: the message of a comparison error can carry a cell value.
         try:
-            identity = _source_identity(source_frames, table_name, col_name, series)
+            comparable, identical = identity_counts(src, out)
         except Exception as exc:
             if passes_through(exc):
                 raise
-            # Class name only: the message of a comparison error can carry a cell value.
             identity_error = type(exc).__name__
-        else:
-            if identity is not None:
-                identical, comparable, distinct = identity
+        if comparable:
+            # A failed count (an unhashable list cell, say) leaves the identity counts standing,
+            # as a failed DuckDB count does on the batch path.
+            try:
+                distinct = int(src.nunique(dropna=True))
+            except Exception as exc:
+                if passes_through(exc):
+                    raise
+                distinct_error = type(exc).__name__
     return ColumnFacts(
         table=table_name,
         column=col_name,
@@ -207,6 +221,8 @@ def _frame_column_facts(
             for m in run_all_detectors(series, col_name)
         ),
         identity_error=identity_error,
+        distinct_error=distinct_error,
+        source_distinct_failed=distinct_error is not None,
     )
 
 
@@ -247,38 +263,23 @@ def dismissible(finding: ResidualPIIFinding) -> bool:
     return finding.severity == "warning" and not is_source_identity_finding(finding)
 
 
-def _source_identity(
-    source_frames: dict[str, pd.DataFrame],
+def _aligned_source(
+    source_frames: dict[str, pd.DataFrame] | None,
     table_name: str,
     col_name: str,
     out_col: pd.Series,
-) -> tuple[int, int, int] | None:
-    """Positional out==src identity over comparable rows, or None.
-
-    Returns ``(identical_count, comparable_count, source_distinct)``. None
-    when the source lacks the table/column, row counts differ (a
-    row-count mismatch is policy_validation's M13 concern, not a leak
-    signal), or no row has both sides present. A comparison that fails
-    raises; the caller records it as the column's ``identity_error`` so
-    a crashed leak check never reads as a clean one.
-    """
+) -> tuple[pd.Series, pd.Series] | None:
+    """The source column and `out_col` on one positional index (QA-4 F6), or None when there is
+    no source column or the row counts differ (policy_validation's M13 concern, not a leak)."""
+    if source_frames is None:
+        return None
     src_df = source_frames.get(table_name)
     if src_df is None or col_name not in src_df.columns:
         return None
     src_col = src_df[col_name]
     if len(src_col) != len(out_col):
         return None
-    # Positional comparison regardless of index shape (QA-4 F6
-    # precedent in policy_validation).
-    src = src_col.reset_index(drop=True).astype(object)
-    out = out_col.reset_index(drop=True).astype(object)
-    both_present = src.notna() & out.notna()
-    comparable = int(both_present.sum())
-    if comparable == 0:
-        return None
-    identical = int((src[both_present] == out[both_present]).sum())
-    src_distinct = int(src.nunique(dropna=True))
-    return (identical, comparable, src_distinct)
+    return src_col.reset_index(drop=True), out_col.reset_index(drop=True)
 
 
 # With no config entry for the table (no `--config`, or a table the config omits) the engine
@@ -487,6 +488,12 @@ def _classify(
     )
 
 
+def _compare_raised(detector_id: str | None, error: str) -> str:
+    """The message of a failed source comparison: the class name only, as text can carry a value."""
+    hit = f"column matched {detector_id!r} but the" if detector_id else "the"
+    return f"{hit} source comparison raised {error} (see job log); a leak cannot be ruled out."
+
+
 def residual_pii_findings(
     output_facts: Mapping[str, Mapping[str, ColumnFacts]],
     config: Mapping[str, Any],
@@ -515,10 +522,25 @@ def residual_pii_findings(
     ]
     for table_name, columns in output_facts.items():
         for col_name, fact in columns.items():
+            configured = strategy_by_col.get((table_name, col_name))
+            failed_compare = fact.identity_error is not None and configured not in _NO_OP_BY_DESIGN
             if not fact.detectors:
+                # A configured column whose comparison raised is reported with no detector hit
+                # too: the check could not run. An unconfigured one with no hit was never checked.
+                if failed_compare and configured is not None:
+                    findings.append(
+                        ResidualPIIFinding(
+                            table=table_name,
+                            column=col_name,
+                            detector_id="",
+                            match_rate=0.0,
+                            severity="error",
+                            configured_strategy=configured,
+                            message=_compare_raised(None, str(fact.identity_error)),
+                        )
+                    )
                 continue
             top = fact.detectors[0]
-            configured = strategy_by_col.get((table_name, col_name))
             table_present = table_name in config_tables
             severity, message = _classify(top.detector_id, configured, table_present)
             # Identity needs comparable rows; none means no source column or a row-count mismatch.
@@ -556,14 +578,11 @@ def residual_pii_findings(
                     _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
                 ):
                     severity, message = override
-            elif fact.identity_error and configured not in _NO_OP_BY_DESIGN:
+            elif failed_compare:
                 # The source comparison could not run, so the escalation this column may need is
                 # unknown. Say so at error severity rather than report a clean "not compared".
                 severity = "error"
-                message = (
-                    f"column matched {top.detector_id!r} but the source comparison raised "
-                    f"{fact.identity_error} (see job log); a leak cannot be ruled out."
-                )
+                message = _compare_raised(top.detector_id, str(fact.identity_error))
             findings.append(
                 ResidualPIIFinding(
                     table=table_name,

@@ -16,7 +16,7 @@ from decoy_engine.profiling import column_distinct
 from decoy_engine.verification.postmask import from_table, key_batches
 from decoy_engine.verification.postmask._column_facts import column_facts
 from decoy_engine.verification.postmask.policy_validation import check_policy_validation
-from decoy_engine.verification.postmask.residual_pii import _source_identity
+from decoy_engine.verification.postmask.residual_pii import _frame_column_facts
 
 LIMIT = "256MB"
 COLUMNS = ["email", "code", "num", "same", "const"]
@@ -106,11 +106,14 @@ def test_facts_equal_whole_table_pandas(n: int, batch_rows: int, tmp_path: Path)
     assert set(facts) == set(COLUMNS)
     for col in COLUMNS:
         f = facts[col]
-        identical, comparable, src_distinct = _source_identity(sf, "t", col, of["t"][col])  # type: ignore[misc]
+        frame = _frame_column_facts("t", of["t"], col, sf)
         assert (f.source_rows, f.output_rows) == (n, n)
-        assert (f.identical_rows, f.comparable_rows) == (identical, comparable)
+        assert (f.identical_rows, f.comparable_rows) == (
+            frame.identical_rows,
+            frame.comparable_rows,
+        )
         assert f.bytes_identical == policy[col].bytes_identical
-        assert f.source_distinct == src_distinct == policy[col].source_distinct
+        assert f.source_distinct == frame.source_distinct == policy[col].source_distinct
         assert f.output_distinct == policy[col].output_distinct
         expected = [
             (m.detector_id, m.match_rate, m.confidence)

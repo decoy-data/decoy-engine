@@ -12,13 +12,16 @@ category set) never false-positives.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
+import pyarrow as pa
 import pytest
 
-from decoy_engine.detection.detectors import run_all_detectors
 from decoy_engine.fileaccess import FileAccessReadError
-from decoy_engine.verification.postmask import run_post_mask
-from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
+from decoy_engine.internal.pandas_compat import exact_int_types_mapper
+from decoy_engine.verification.postmask import _column_facts as facts_module
+from decoy_engine.verification.postmask import from_table, run_post_mask
 from decoy_engine.verification.postmask.residual_pii import (
     check_residual_pii,
     residual_pii_findings,
@@ -263,34 +266,93 @@ class TestIdentityComparisonRaises:
         with pytest.raises(FileAccessReadError):
             check_residual_pii(output, _cfg("faker"), source_frames=source)
 
-    def test_frame_and_facts_paths_agree_on_identity_error(self):
-        output = {"t": pd.DataFrame({"email": _EMAILS})}
-        frame = check_residual_pii(output, _cfg("faker"), source_frames=_raising_source())
-        detectors = tuple(
-            DetectorRate(m.detector_id, m.match_rate, m.confidence)
-            for m in run_all_detectors(output["t"]["email"], "email")
-        )
-        facts = {
-            "t": {
-                "email": ColumnFacts(
-                    table="t",
-                    column="email",
-                    source_rows=0,
-                    output_rows=len(_EMAILS),
-                    comparable_rows=0,
-                    identical_rows=0,
-                    bytes_identical=False,
-                    source_distinct=0,
-                    output_distinct=0,
-                    detectors=detectors,
-                    identity_error="TypeError",
-                )
-            }
-        }
-        assert residual_pii_findings(facts, _cfg("faker")) == frame
-
     def test_not_comparable_still_quiet(self):
         source = {"t": pd.DataFrame({"email": _EMAILS[:50]})}
         output = {"t": pd.DataFrame({"email": _EMAILS})}
         finding = _one(check_residual_pii(output, _cfg("faker"), source_frames=source))
         assert finding.severity != "error"
+
+
+# Output that fires no detector, so only the source comparison can speak for the column.
+_PLAIN = [f"item-{i}-zq" for i in range(100)]
+_OTHER_EMAILS = [f"fake{i}@masked.example" for i in range(100)]
+_RAISE = "raise-on-compare"
+
+
+def _frame_of(table: pa.Table) -> pd.DataFrame:
+    # The cells the batch path sees: list cells arrive as numpy arrays, as in `_series`.
+    return pd.DataFrame(
+        {c: table[c].to_pandas(types_mapper=exact_int_types_mapper) for c in table.column_names}
+    )
+
+
+def _with_raising_cells(series: pd.Series) -> pd.Series:
+    return series.map(lambda v: _CellWhoseEqualityRaises() if v == _RAISE else v)
+
+
+def _both_paths(src_cells: list, out_cells: list, strategy: str, tmp_path: Path, monkeypatch):
+    """Findings from the frame check and the batch check on the same source and output."""
+    src = pa.table({"email": src_cells})
+    out = pa.table({"email": out_cells})
+    src_frame = _frame_of(src)
+    if _RAISE in src_cells:
+        # Arrow cannot hold a cell whose equality raises, so both paths swap the marker cells
+        # for one at the point each reads its cells.
+        src_frame = src_frame.apply(_with_raising_cells)
+        real_series = facts_module._series
+        monkeypatch.setattr(
+            facts_module, "_series", lambda batch, c: _with_raising_cells(real_series(batch, c))
+        )
+    frame = check_residual_pii(
+        {"t": _frame_of(out)}, _cfg(strategy), source_frames={"t": src_frame}
+    )
+    facts = facts_module.column_facts(
+        from_table("t", src),
+        from_table("t", out),
+        ["email"],
+        scratch=tmp_path,
+        memory_limit="256MB",
+    )
+    batch = residual_pii_findings({"t": facts}, _cfg(strategy))
+    return frame, batch
+
+
+_PARITY_CASES = {
+    "one-element lists": ([[e] for e in _EMAILS], _OTHER_EMAILS, "info"),
+    "one-element lists, leaked": ([[e] for e in _EMAILS], _EMAILS, "fail"),
+    "two-element lists": ([[e, "x"] for e in _EMAILS], _OTHER_EMAILS, "error"),
+    "equality raises": ([_RAISE] * 100, _OTHER_EMAILS, "error"),
+}
+
+
+class TestFrameAndBatchAgree:
+    """Codex R1 on #784: both real paths, one input, the same findings."""
+
+    @pytest.mark.parametrize("case", list(_PARITY_CASES))
+    def test_same_findings_on_both_paths(self, case, tmp_path, monkeypatch):
+        src_cells, out_cells, severity = _PARITY_CASES[case]
+        frame, batch = _both_paths(src_cells, out_cells, "faker", tmp_path, monkeypatch)
+        assert frame == batch
+        assert [f.severity for f in frame] == [severity]
+
+    @pytest.mark.parametrize("case", ["two-element lists", "equality raises"])
+    def test_failed_comparison_without_a_detector_hit_is_an_error(
+        self, case, tmp_path, monkeypatch
+    ):
+        """A column no detector flags still reports a comparison that raised."""
+        src_cells = _PARITY_CASES[case][0]
+        frame, batch = _both_paths(src_cells, _PLAIN, "faker", tmp_path, monkeypatch)
+        assert frame == batch
+        finding = _one(frame)
+        assert finding.severity == "error"
+        assert finding.detector_id == ""
+        assert finding.source_compared is False
+        assert "realmail.com" not in finding.message
+        assert "secret-cell-value" not in finding.message
+
+    def test_passthrough_failed_comparison_without_a_detector_hit_stays_quiet(
+        self, tmp_path, monkeypatch
+    ):
+        src_cells = _PARITY_CASES["two-element lists"][0]
+        frame, batch = _both_paths(src_cells, _PLAIN, "passthrough", tmp_path, monkeypatch)
+        assert frame == batch == []

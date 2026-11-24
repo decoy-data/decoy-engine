@@ -12,6 +12,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 ### Fixed
 
 - the resident-frame residual-PII check now reports an error finding when its source comparison raises, as the batch check already did; before, the failure read as a clean check.
+- both residual-PII checks report a source comparison that raised on a configured column even when no detector fires on it, and the resident-frame check now compares cells with the batch check's code, so a source of list cells gets the same finding on both.
 
 ## [0.28.3] - 2026-11-22
 
