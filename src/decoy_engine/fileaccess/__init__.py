@@ -31,7 +31,15 @@ from decoy_engine.fileaccess._entry import (
     run_in_context,
     scope,
 )
-from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
+from decoy_engine.fileaccess._errors import (
+    MEMORY_TEXT,
+    ClassifiedFailure,
+    classified_failure,
+    encode_field_key,
+    redact_locators,
+    scrub,
+    typed_memory_member,
+)
 from decoy_engine.fileaccess._fdtree import (
     DESCRIPTOR_NAME,
     RESERVED_MEMBER_NAMES,
@@ -146,8 +154,10 @@ __all__ = [
     "DESCRIPTOR_NAME",
     "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
+    "MEMORY_TEXT",
     "RESERVED_MEMBER_NAMES",
     "STAGE_MARKER",
+    "ClassifiedFailure",
     "CleanupReport",
     "CommitUncertain",
     "DirHandle",
@@ -178,6 +188,7 @@ __all__ = [
     "at_position",
     "bind_iterator",
     "capture",
+    "classified_failure",
     "config_relative",
     "current",
     "encode_field_key",
@@ -210,5 +221,6 @@ __all__ = [
     "scrub",
     "shown",
     "stage_entries",
+    "typed_memory_member",
     "write_private",
 ]

@@ -60,11 +60,24 @@ _PHRASE: dict[ConnectorErrorKind, str] = {
 }
 
 
+def _text(provider: str, kind: ConnectorErrorKind) -> str:
+    """The one kind-to-text builder, shared by SDK translation and ``refreshed_error``."""
+    return f"Unexpected {provider} error" if kind == "unexpected" else f"{provider} {_PHRASE[kind]}"
+
+
 def _classified(provider: str, kind: ConnectorErrorKind) -> ConnectorError:
     """The one kind-to-class table: only ``transient`` is retried, every other kind is final."""
-    text = f"Unexpected {provider} error" if kind == "unexpected" else f"{provider} {_PHRASE[kind]}"
     cls = TransientError if kind == "transient" else PermanentError
-    return cls(text, kind=kind)
+    return cls(_text(provider, kind), kind=kind)
+
+
+def refreshed_error(exc: ConnectorError, provider: str) -> ConnectorError:
+    """A fresh copy of a caught ``TransientError`` or ``PermanentError``: same class, same
+    ``kind``, fixed text from the kind table, nothing chained. The class is kept as caught, so a
+    retryable error never turns final (and a final one never turns retryable)."""
+    kind = exc.kind
+    cls = TransientError if isinstance(exc, TransientError) else PermanentError
+    return cls(_text(provider, kind), kind=kind)
 
 
 def source_changed(provider: str) -> ConnectorError:

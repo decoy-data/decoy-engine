@@ -281,3 +281,212 @@ def test_a_field_key_is_encoded_once_across_pickle_round_trips() -> None:
         for _ in range(2):
             exc = pickle.loads(pickle.dumps(exc))  # noqa: S301 - round-trips our own object
         assert exc.field_key == once and once in str(exc)
+
+
+# ---- A1a: one classifier for memory and resource failures (AT-A2) ----
+
+MARK = "zz_marker_7f3a"
+
+
+def _all_text(exc: BaseException) -> str:
+    return f"{exc!s} {exc!r} {exc.args!r} {getattr(exc, 'filename', None)!r}"
+
+
+def _classify(exc: BaseException):  # type: ignore[no-untyped-def]
+    from decoy_engine.fileaccess import classified_failure
+
+    return classified_failure(exc)
+
+
+def test_the_canonical_memory_text_matches_the_worker_predicate() -> None:
+    from decoy_engine.execution._isolated_common import is_memory_failure
+    from decoy_engine.fileaccess import MEMORY_TEXT
+
+    assert MEMORY_TEXT == "Unknown error: Wrapping <value> failed"
+    assert is_memory_failure(ValueError(MEMORY_TEXT))
+
+
+def test_an_ordinary_failure_has_no_classification() -> None:
+    assert _classify(ValueError(f"bad value {MARK}")) is None
+    assert _classify(OSError(errno.ENOENT, MARK)) is None
+    assert _classify(FileAccessReadError("k")) is None
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: ValueError(f"digital envelope routines {MARK}"),
+        lambda: pa.ArrowInvalid(f"Unknown error: Wrapping {MARK} failed"),
+        lambda: RuntimeError(f"not able to copy ctx {MARK}"),
+    ],
+    ids=["openssl", "wrapping", "ctx"],
+)
+def test_text_matched_memory_gets_a_fixed_text_rebuild_of_the_outer_type(make) -> None:  # type: ignore[no-untyped-def]
+    from decoy_engine.execution._isolated_common import is_memory_failure
+    from decoy_engine.fileaccess import MEMORY_TEXT
+
+    exc = make()
+    result = _classify(exc)
+    assert result is not None and result.kind == "text_memory"
+    assert type(result.fresh) is type(exc) and str(result.fresh) == MEMORY_TEXT
+    assert MARK not in _all_text(result.fresh)
+    assert is_memory_failure(result.fresh)
+    assert result.fresh.__cause__ is None and result.fresh.__context__ is None
+
+
+def test_an_unrebuildable_text_failure_has_no_fresh_error() -> None:
+    from decoy_engine.fileaccess._errors import resurface_scrubbed
+
+    class OddError(Exception):
+        def __init__(self, a: int, b: int) -> None:
+            super().__init__(f"not able to copy ctx {MARK}")
+
+    exc = OddError(1, 2)
+    result = _classify(exc)
+    assert result is not None and result.kind == "text_memory" and result.fresh is None
+    assert resurface_scrubbed(exc) is None
+
+
+@pytest.mark.parametrize("kind", ["memory", "duckdb", "arrow"])
+def test_typed_memory_is_rebuilt_with_its_own_type_and_fixed_text(kind: str) -> None:
+    import duckdb
+
+    from decoy_engine.fileaccess import MEMORY_TEXT
+
+    exc: BaseException = {
+        "memory": MemoryError(MARK),
+        "duckdb": duckdb.OutOfMemoryException(MARK),
+        "arrow": pa.ArrowMemoryError(MARK),
+    }[kind]
+    result = _classify(exc)
+    assert result is not None and result.kind == "typed_memory"
+    assert type(result.fresh) is type(exc) and str(result.fresh) == MEMORY_TEXT
+    assert MARK not in _all_text(result.fresh)
+
+
+@pytest.mark.parametrize("link", ["__cause__", "__context__"])
+def test_typed_memory_in_the_chain_wins_over_the_outer_error(link: str) -> None:
+    from decoy_engine.fileaccess import MEMORY_TEXT
+
+    outer = RuntimeError(f"outer {MARK}")
+    setattr(outer, link, MemoryError(MARK))
+    result = _classify(outer)
+    assert result is not None and result.kind == "typed_memory"
+    assert type(result.fresh) is MemoryError and str(result.fresh) == MEMORY_TEXT
+    assert result.fresh.__cause__ is None and result.fresh.__context__ is None
+
+
+@pytest.mark.parametrize("where", ["direct", "__cause__", "__context__"])
+def test_enomem_keeps_its_errno_and_loses_the_filename(where: str) -> None:
+    from decoy_engine.execution._isolated_common import is_memory_failure
+
+    inner = OSError(errno.ENOMEM, MARK, f"/data/{MARK}.csv")
+    if where == "direct":
+        exc: BaseException = inner
+    else:
+        exc = RuntimeError(f"outer {MARK}")
+        setattr(exc, where, inner)
+    result = _classify(exc)
+    assert result is not None and result.kind == "typed_memory"
+    fresh = result.fresh
+    assert isinstance(fresh, OSError) and fresh.errno == errno.ENOMEM
+    assert fresh.strerror == os.strerror(errno.ENOMEM) and fresh.filename is None
+    assert MARK not in _all_text(fresh)
+    assert is_memory_failure(fresh)
+
+
+@pytest.mark.parametrize("code", [errno.ENOSPC, errno.EDQUOT])
+def test_disk_errors_keep_their_errno_and_are_not_memory(code: int) -> None:
+    from decoy_engine.execution._isolated_common import is_memory_failure
+
+    result = _classify(OSError(code, MARK, f"/data/{MARK}.bin"))
+    assert result is not None and result.kind == "resource"
+    fresh = result.fresh
+    assert isinstance(fresh, OSError) and fresh.errno == code
+    assert fresh.strerror == os.strerror(code) and fresh.filename is None
+    assert MARK not in _all_text(fresh)
+    assert not is_memory_failure(fresh)
+
+
+def test_a_disk_error_in_the_chain_is_not_classified() -> None:
+    outer = RuntimeError("outer")
+    outer.__cause__ = OSError(errno.ENOSPC, MARK)
+    assert _classify(outer) is None
+
+
+def test_a_typed_member_outranks_a_direct_text_match() -> None:
+    exc = ValueError(f"digital envelope routines {MARK}")
+    exc.__cause__ = MemoryError(MARK)
+    result = _classify(exc)
+    assert result is not None and result.kind == "typed_memory"
+    assert type(result.fresh) is MemoryError
+
+
+def test_the_chain_walker_keeps_its_bounds() -> None:
+    from decoy_engine.execution._isolated_common import is_memory_failure
+    from decoy_engine.fileaccess import typed_memory_member
+
+    member = MemoryError("m")
+    a, b = RuntimeError("a"), RuntimeError("b")
+    a.__cause__, b.__context__ = b, a  # a cycle
+    assert typed_memory_member(a) is None and not is_memory_failure(RuntimeError("x"))
+    b.__cause__ = member
+    assert typed_memory_member(a) is member and is_memory_failure(a)
+    head: BaseException = member
+    for _ in range(20):
+        nxt = RuntimeError("n")
+        nxt.__cause__ = head
+        head = nxt
+    assert typed_memory_member(head) is None and not is_memory_failure(head)
+
+
+def test_a_keyboard_interrupt_around_memory_error_is_typed_memory() -> None:
+    exc = KeyboardInterrupt()
+    exc.__context__ = MemoryError(MARK)
+    result = _classify(exc)
+    assert result is not None and result.kind == "typed_memory"
+    assert type(result.fresh) is MemoryError
+    assert _classify(KeyboardInterrupt()) is None
+
+
+@pytest.mark.parametrize("link", ["__cause__", "__context__"])
+def test_an_ordinary_outer_error_with_chained_memory_stays_ineligible_for_strict_callers(
+    link: str, rooted, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    """The strict rebuild decision is on the OUTER exception only, as on the base: a chained
+    MemoryError never makes the outer error keep its class, and `_load_txt` still returns []."""
+    from decoy_engine import fileaccess
+    from decoy_engine.fileaccess._errors import resurface_scrubbed
+    from decoy_engine.internal import faker_setup
+
+    outer = RuntimeError(f"outer {MARK}")
+    setattr(outer, link, MemoryError(MARK))
+    assert resurface_scrubbed(outer) is None
+    with fileaccess.scope(rooted):
+        assert fileaccess.keeps_class(outer) is False
+
+        def boom(directory, name):  # type: ignore[no-untyped-def]
+            raise outer
+
+        monkeypatch.setattr(faker_setup, "_read_child", boom)
+        assert faker_setup._load_txt(object(), "words.txt") == []  # type: ignore[arg-type]
+
+
+def test_strict_eligibility_is_unchanged_for_the_documented_shapes(rooted) -> None:  # type: ignore[no-untyped-def]
+    from decoy_engine import fileaccess
+    from decoy_engine.fileaccess._errors import resurface_scrubbed
+
+    class OddError(Exception):
+        def __init__(self, a: int, b: int) -> None:
+            super().__init__("not able to copy ctx")
+
+    with fileaccess.scope(rooted):
+        for exc in _memory_shapes():
+            assert fileaccess.keeps_class(exc) is True
+        assert fileaccess.keeps_class(OddError(1, 2)) is False
+        assert fileaccess.keeps_class(OSError(errno.ENOSPC, "x")) is True
+        assert fileaccess.keeps_class(ValueError("plain")) is False
+    assert resurface_scrubbed(ValueError("plain")) is None
+    assert resurface_scrubbed(OddError(1, 2)) is None
+    kept = resurface_scrubbed(pa.ArrowInvalid("Unknown error: Wrapping 5 failed"))
+    assert type(kept) is pa.ArrowInvalid
