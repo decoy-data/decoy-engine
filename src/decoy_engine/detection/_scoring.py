@@ -21,7 +21,7 @@ import pandas as pd
 
 from decoy_engine.detection.domains import domain_for
 from decoy_engine.detection.types import DetectorMatch
-from decoy_engine.internal.cell_text import cell_text
+from decoy_engine.internal.cell_text import column_text
 
 # ── thresholds ──
 #
@@ -44,22 +44,13 @@ HIGH_CONFIDENCE_WITH_HINT_FLOOR = 0.45  # content alongside a confirming name hi
 SAMPLE_MISS_LIMIT = 3
 
 
-def _as_text(series: pd.Series) -> pd.Series:
-    """Non-null cells as text, by the shared cell rule (`cell_text`). Only an object column can
-    hold bytes; the other dtypes keep the vectorised `astype(str)`."""
-    values = series.dropna()
-    if values.dtype == object:
-        return values.map(cell_text)
-    return values.astype(str)
-
-
 class PreparedValues:
     """Non-null, stringified, stripped column values held as uniques + counts."""
 
     __slots__ = ("codes", "counts", "n", "raw_uniques", "uniques")
 
     def __init__(self, series: pd.Series) -> None:
-        strs = _as_text(series)
+        strs = column_text(series)
         codes, uniques = pd.factorize(strs, sort=False)
         self.n: int = len(strs)
         self.codes: np.ndarray = codes
@@ -264,7 +255,7 @@ def _evaluate(
     return DetectorMatch(
         detector_id=detector_id,
         match_rate=round(rate, 4),
-        sample_misses=[str(m) for m in misses],
+        sample_misses=misses,
         format_pattern=format_pattern,
         format_pattern_complete=complete,
         confidence=confidence,

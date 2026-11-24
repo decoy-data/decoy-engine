@@ -1,0 +1,15 @@
+{
+ "sentry_id": "cell-text-names",
+ "created_in": "PR 784",
+ "entries": {
+  "verification/postmask/runner.py::_frame_table::str(c)": {
+   "reason": "a column name, matched between the two frames, not a cell"
+  },
+  "verification/postmask/runner.py::run_post_mask::str(name)": {
+   "reason": "a table name for tables_checked, not a cell"
+  },
+  "verification/postmask/runner.py::run_post_mask_tables::str(name)": {
+   "reason": "a table name for tables_checked, not a cell"
+  }
+ }
+}

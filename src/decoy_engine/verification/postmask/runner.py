@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
-from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,9 +28,8 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
-from decoy_engine.internal.cell_text import cell_text
+from decoy_engine.internal.cell_text import key_text
 from decoy_engine.internal.memory_limit import parse_megabytes
-from decoy_engine.internal.pandas_missing import is_null_cell
 from decoy_engine.plan.column_access import TableWrites
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
 from decoy_engine.verification.postmask import _model_findings
@@ -187,29 +185,7 @@ def _native(series: pd.Series) -> pa.Array | None:
 
 
 def _text(series: pd.Series) -> pa.Array:
-    return pa.array(
-        [None if is_null_cell(v) else _key(v) for v in series.tolist()], type=pa.string()
-    )
-
-
-def _key(value: object) -> str:
-    """Text that is equal for equal numbers whatever their type, as pandas `==` treats them: a
-    float 10001.0 and an int 10001 must not read as two values, or a leaked source value looks
-    changed."""
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, int):
-        return str(int(value))
-    if isinstance(value, float):
-        return str(int(value)) if value.is_integer() else repr(value)
-    if isinstance(value, Decimal):
-        if not value.is_finite():
-            return str(value)
-        if value == value.to_integral_value():
-            return str(int(value))
-        return format(value.normalize(), "f")
-    # Bytes read as the detectors read them, so a byte-encoded email is still an email.
-    return cell_text(value)
+    return pa.array(key_text(series), type=pa.string())
 
 
 def _frame_table(name: str, frame: pd.DataFrame, other: pd.DataFrame | None) -> TableBatches:
