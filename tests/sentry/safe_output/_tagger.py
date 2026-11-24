@@ -53,7 +53,17 @@ RISKY_NAMES = frozenset(
 # `stderr`/`stdout` are routine, harmless names in code that does not build a user-facing error.
 SINK_RISKY = RISKY_NAMES | {"stderr", "stdout"}
 
+# Builtins that turn an object into its text. Shared with the copy ratchet (`_copies.py`), so
+# "which calls format a value" is one edit.
+FORMAT_BUILTINS = frozenset({"str", "repr", "format"})
+
 COUNT_METHODS = frozenset({"count", "nunique", "sum", "size", "__len__"})
+
+
+def format_builtin(call: ast.Call) -> str | None:
+    """`str`, `repr` or `format` when `call` is a bare call of that builtin, else None."""
+    func = call.func
+    return func.id if isinstance(func, ast.Name) and func.id in FORMAT_BUILTINS else None
 
 
 def root_name(value: ast.expr) -> str | None:
@@ -104,7 +114,7 @@ def risky_in(value: ast.expr, risky: frozenset[str]) -> list[str]:
         children = list(value.elts)
     elif isinstance(value, ast.Call):
         func = value.func
-        if (isinstance(func, ast.Name) and func.id in {"str", "repr", "format"}) or (
+        if format_builtin(value) is not None or (
             isinstance(func, ast.Attribute) and func.attr in {"format", "join"}
         ):
             children = [*value.args, *(k.value for k in value.keywords)]

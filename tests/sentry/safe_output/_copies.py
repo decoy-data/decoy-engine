@@ -8,8 +8,16 @@ like an exception or annotated with an exception type. A copy is `str()`, `repr(
 ratchet does not read from docs/.
 
 The tagger in `_tagger.py` answers a different question (which names in an expression carry
-data), so the copy rules stay here and only share its one-edit idea: a rule change is one edit.
-Output is a location (file, line) and rule labels, never message text.
+data), so the exception-name classifier stays here. The `str`/`repr`/`format` predicate and the
+scope walk (`own_nodes`) come from the tagger, so there is one source for each.
+
+Two buckets, counted apart so extending coverage never rewrites the audit figure:
+  audit  the shapes the F31 audit census counted (binding is `except` or `param`);
+  extra  shapes found later: an alias of an exception binding (`last_exc = exc`, used after the
+         handler) and a literal `getattr(exc, "<text attr>", ...)`.
+`log.warning("%s", exc)` is not a copy here: test_log_interpolation.py owns that shape.
+
+Output is a location (file, function, line) and rule labels, never message text.
 """
 
 from __future__ import annotations
@@ -18,6 +26,8 @@ import ast
 from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
+
+from tests.sentry.safe_output._tagger import format_builtin, own_nodes
 
 PARAM_NAMES = frozenset({"exc", "err", "e", "error", "ex", "exception", "cause", "inner"})
 TEXT_ATTRS = frozenset(
@@ -62,7 +72,6 @@ LOG = frozenset({"debug", "info", "warning", "warn", "error", "exception", "crit
 TRACEBACK = frozenset(
     {"format_exc", "format_exception", "print_exc", "format_exception_only", "print_exception"}
 )
-STR_CALLS = frozenset({"str", "repr", "format"})
 
 
 class Copy(NamedTuple):
@@ -71,6 +80,16 @@ class Copy(NamedTuple):
     form: str
     binding: str
     sink: str
+    func: str = "<module>"
+
+    @property
+    def bucket(self) -> str:
+        return "extra" if self.binding == "alias" or self.form.startswith("getattr") else "audit"
+
+    @property
+    def key(self) -> str:
+        """Stable, value-free site key: no line number, no source text."""
+        return f"{self.bucket}::{self.file}::{self.func}::{self.form}::{self.sink}"
 
 
 def _exc_annotation(node: ast.expr | None) -> bool:
@@ -110,8 +129,17 @@ def _is_bound(node: ast.AST, bound: dict[str, str]) -> bool:
 def _form(node: ast.AST, bound: dict[str, str]) -> tuple[str, str] | None:
     if isinstance(node, ast.Call):
         func = ast.unparse(node.func)
-        if func in STR_CALLS and node.args and _is_bound(node.args[0], bound):
-            return f"{func}(exc)", bound[node.args[0].id]  # type: ignore[attr-defined]
+        builtin = format_builtin(node)
+        if builtin and node.args and _is_bound(node.args[0], bound):
+            return f"{builtin}(exc)", bound[node.args[0].id]  # type: ignore[attr-defined]
+        if (
+            func == "getattr"
+            and len(node.args) >= 2
+            and _is_bound(node.args[0], bound)
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in TEXT_ATTRS
+        ):
+            return f"getattr(exc.{node.args[1].value})", bound[node.args[0].id]  # type: ignore[attr-defined]
         if func.split(".")[-1] in TRACEBACK:
             return "traceback", "except"
     if isinstance(node, ast.FormattedValue) and _is_bound(node.value, bound):
@@ -127,7 +155,30 @@ def _form(node: ast.AST, bound: dict[str, str]) -> tuple[str, str] | None:
     return None
 
 
-def _visit(node: ast.AST, bound: dict[str, str], stack: list[ast.AST], rel: str) -> Iterator[Copy]:
+def _aliases(scope: ast.AST, bound: dict[str, str]) -> dict[str, str]:
+    """Names assigned straight from an exception binding of this scope: `last_exc = exc`.
+
+    Bounded on purpose: one scope, plain `name = bound_name` assignments in source order (so a
+    chain of aliases resolves), no flow through calls or containers. Seeded only by this
+    module's own bindings (handler names and exception-like parameters).
+    """
+    own = own_nodes(scope)
+    known = set(bound) | {n.name for n in own if isinstance(n, ast.ExceptHandler) and n.name}
+    found: dict[str, str] = {}
+    assigns = sorted(
+        (n for n in own if isinstance(n, ast.Assign)), key=lambda n: (n.lineno, n.col_offset)
+    )
+    for node in assigns:
+        if isinstance(node.value, ast.Name) and node.value.id in known | set(found):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id not in bound:
+                    found[target.id] = "alias"
+    return found
+
+
+def _visit(
+    node: ast.AST, bound: dict[str, str], stack: list[ast.AST], rel: str, func: str = "<module>"
+) -> Iterator[Copy]:
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
         bound = dict(bound)
         args = node.args
@@ -136,18 +187,34 @@ def _visit(node: ast.AST, bound: dict[str, str], stack: list[ast.AST], rel: str)
                 bound[arg.arg] = "param"
             else:
                 bound.pop(arg.arg, None)
+        if not isinstance(node, ast.Lambda):
+            bound = {**_aliases(node, bound), **bound}
+        name = getattr(node, "name", "<lambda>")
+        func = name if func == "<module>" else f"{func}.{name}"
+    elif isinstance(node, ast.ClassDef):
+        func = node.name if func == "<module>" else f"{func}.{node.name}"
     if isinstance(node, ast.ExceptHandler) and node.name:
         bound = {**bound, node.name: "except"}
     hit = _form(node, bound)
     if hit:
-        yield Copy(rel, getattr(node, "lineno", 0), hit[0], hit[1], _sink(stack))
+        yield Copy(rel, getattr(node, "lineno", 0), hit[0], hit[1], _sink(stack), func)
     for child in ast.iter_child_nodes(node):
-        yield from _visit(child, bound, [*stack, node], rel)
+        yield from _visit(child, bound, [*stack, node], rel, func)
 
 
 def scan_source(source: str, rel: str = "<memory>") -> list[Copy]:
     """Every exception-text copy in one module's source."""
-    return list(_visit(ast.parse(source), {}, [], rel))
+    tree = ast.parse(source)
+    return list(
+        _visit(
+            tree,
+            {
+                **_aliases(tree, {}),
+            },
+            [],
+            rel,
+        )
+    )
 
 
 def scan_tree(root: Path) -> list[Copy]:
@@ -158,3 +225,11 @@ def scan_tree(root: Path) -> list[Copy]:
             continue
         copies.extend(scan_source(path.read_text("utf-8"), str(path.relative_to(root))))
     return copies
+
+
+def census(copies: list[Copy]) -> dict[str, int]:
+    """Site key to how many copies share it. This is what the baseline records, as `max`."""
+    counts: dict[str, int] = {}
+    for copy in copies:
+        counts[copy.key] = counts.get(copy.key, 0) + 1
+    return dict(sorted(counts.items()))
