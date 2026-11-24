@@ -26,7 +26,6 @@ from __future__ import annotations
 import errno
 import functools
 import os
-import re
 import signal
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -39,7 +38,14 @@ from decoy_engine import reasons
 from decoy_engine.execution._isolated_memwatch import MemoryEvidence
 from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.execution._transactional_sink import StagedParquetWriter
-from decoy_engine.fileaccess import _osflags, handed_stage_dir, typed_memory_member
+from decoy_engine.fileaccess import (
+    GLIBC_TLS_OOM_MARKER,
+    MEMORY_ERROR_MARKERS,
+    MEMORY_ERROR_PATTERNS,
+    _osflags,
+    handed_stage_dir,
+    is_memory_failure,
+)
 from decoy_engine.internal.env_flags import env_flag
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.validation_result import CODES
@@ -154,25 +160,12 @@ CAPPED_ENV: dict[str, str] = {
     "OPENBLAS_NUM_THREADS": "1",
 }
 
-# Same three under-cap failure shapes fk_memory_probe documents evidence for
-# (the typed check is `fileaccess.typed_memory_member`; the markers, patterns and
-# `_GLIBC_TLS_OOM_MARKER` are below): pyarrow/numpy MemoryError subclasses and DuckDB's
-# own OutOfMemoryException are the common case; OpenSSL's EVP_MD_CTX copy
-# (hashlib, masking the FK key) and Arrow's arrow-to-pandas value conversion
-# both raise their own error type under a hard cap instead of MemoryError,
-# and glibc's per-thread TLS setup aborts the process outright. See
-# fk_memory_probe.py's inline comments for the full reproduction evidence;
-# reproduced here without re-deriving it.
-_MEMORY_ERROR_MARKERS: tuple[str, ...] = (
-    "not able to copy ctx",
-    "digital envelope routines",
-)
-_MEMORY_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"Unknown error: Wrapping \S+ failed"),
-)
+# The under-cap failure shapes live in `fileaccess` (one home, shared with the classifier there).
+_MEMORY_ERROR_MARKERS = MEMORY_ERROR_MARKERS
+_MEMORY_ERROR_PATTERNS = MEMORY_ERROR_PATTERNS
+_GLIBC_TLS_OOM_MARKER = GLIBC_TLS_OOM_MARKER
 _WRAPPING_OPEN = "Wrapping "
 _WRAPPING_CLOSE = " failed"
-_GLIBC_TLS_OOM_MARKER = "cannot allocate memory for thread-local data"
 
 # Stderr markers a driver-side (outside-the-process) classification checks
 # when a worker was killed too hard to self-report -- the SIGKILL/SIGABRT
@@ -225,23 +218,6 @@ def apply_mem_cap(cap_bytes: int, rlimit_kind: str) -> None:
     if resource is None:
         raise OSError(errno.ENOSYS, "a memory cap needs the resource module")
     resource.setrlimit(RLIMIT_KINDS[rlimit_kind], (cap_bytes, cap_bytes))
-
-
-def is_memory_failure(exc: BaseException) -> bool:
-    """True iff `exc` is one of the documented under-cap failure shapes.
-
-    Ported from `fk_memory_probe._is_memory_failure`: the worker calls this to self-classify
-    a caught exception as `oom_killed` (exits 0 with a clean diagnostic) versus `crashed`
-    (a genuine bug, reported as data in the result envelope but NOT hidden behind an OOM
-    label). A typed memory error anywhere in the `__cause__`/`__context__` chain counts; a
-    bare `KeyboardInterrupt` with no memory-typed link stays `crashed`.
-    """
-    if typed_memory_member(exc) is not None:
-        return True
-    message = str(exc)
-    if any(marker in message for marker in _MEMORY_ERROR_MARKERS):
-        return True
-    return any(pattern.search(message) for pattern in _MEMORY_ERROR_PATTERNS)
 
 
 def scrub_error_text(message: str) -> str:

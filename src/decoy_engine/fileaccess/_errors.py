@@ -10,6 +10,7 @@ from __future__ import annotations
 import errno
 import os
 import re
+import sys
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, Literal, NewType, TypeVar
@@ -109,9 +110,24 @@ def _is_typed_memory(exc: BaseException) -> bool:
         return True
     if isinstance(exc, OSError) and exc.errno == errno.ENOMEM:
         return True
-    import duckdb
+    # Never import on the failure path: a capped worker has no headroom to load DuckDB, and an
+    # error of this type cannot exist unless DuckDB is already loaded.
+    duckdb = sys.modules.get("duckdb")
+    return duckdb is not None and isinstance(exc, duckdb.OutOfMemoryException)
 
-    return isinstance(exc, duckdb.OutOfMemoryException)
+
+# The under-cap failure shapes fk_memory_probe documents evidence for: OpenSSL's EVP_MD_CTX copy
+# (hashlib, masking the FK key) and Arrow's arrow-to-pandas value conversion raise their own error
+# type under a hard cap instead of MemoryError, and glibc's per-thread TLS setup aborts the
+# process outright. See fk_memory_probe.py for the reproduction evidence.
+MEMORY_ERROR_MARKERS: tuple[str, ...] = (
+    "not able to copy ctx",
+    "digital envelope routines",
+)
+MEMORY_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"Unknown error: Wrapping \S+ failed"),
+)
+GLIBC_TLS_OOM_MARKER = "cannot allocate memory for thread-local data"
 
 
 def typed_memory_member(exc: BaseException) -> BaseException | None:
@@ -131,6 +147,22 @@ def typed_memory_member(exc: BaseException) -> BaseException | None:
             return link
         pending.extend(x for x in (link.__cause__, link.__context__) if x is not None)
     return None
+
+
+def is_memory_failure(exc: BaseException) -> bool:
+    """True iff `exc` is one of the documented under-cap failure shapes.
+
+    The isolated worker calls this to self-classify a caught exception as `oom_killed` (exits 0
+    with a clean diagnostic) versus `crashed` (a genuine bug, reported as data in the result
+    envelope but NOT hidden behind an OOM label). A typed memory error anywhere in the
+    `__cause__`/`__context__` chain counts; a bare `KeyboardInterrupt` with no memory-typed link
+    stays `crashed`. Imports nothing, so it is safe at the memory cap."""
+    if typed_memory_member(exc) is not None:
+        return True
+    message = str(exc)
+    if any(marker in message for marker in MEMORY_ERROR_MARKERS):
+        return True
+    return any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
 
 
 def passes_by_type(exc: Exception) -> bool:
@@ -169,8 +201,6 @@ def _errno_rebuild(exc: OSError) -> OSError:
 def _fixed_text_rebuild(exc: BaseException) -> BaseException | None:
     """`exc`'s own type around `MEMORY_TEXT`, or None when the constructor refuses it or the
     result no longer reads as a memory failure."""
-    from decoy_engine.execution._isolated_common import is_memory_failure
-
     try:
         rebuilt = type(exc)(MEMORY_TEXT)
     except Exception:
@@ -204,8 +234,6 @@ def classified_failure(exc: BaseException) -> ClassifiedFailure | None:
         return ClassifiedFailure("typed_memory", _fixed_text_rebuild(member))
     if isinstance(exc, OSError) and exc.errno in _RESOURCE_ERRNOS:
         return ClassifiedFailure("resource", _errno_rebuild(exc))
-    from decoy_engine.execution._isolated_common import is_memory_failure
-
     if isinstance(exc, Exception) and is_memory_failure(exc):
         return ClassifiedFailure("text_memory", _fixed_text_rebuild(exc))
     return None
