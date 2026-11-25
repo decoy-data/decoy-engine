@@ -47,9 +47,18 @@ def _job(route: str, tmp_path: Path, rows: int) -> tuple[dict[str, Any], pa.Tabl
     return support.make_cfg(columns, path=support.write_source(src, tmp_path / "s.parquet")), src
 
 
-def _live_results() -> int:
+def _all_results() -> list[ExecutionResult]:
     gc.collect()
-    return sum(1 for o in gc.get_objects() if isinstance(o, ExecutionResult))
+    return [o for o in gc.get_objects() if isinstance(o, ExecutionResult)]
+
+
+def _live_results(before: set[int]) -> int:
+    """Count `ExecutionResult` objects alive now that were not alive before the run.
+
+    Earlier tests on the same xdist worker can leave results alive (a parametrized exception
+    keeps its traceback frames), so the absolute count is not a property of this run.
+    """
+    return sum(1 for o in _all_results() if id(o) not in before)
 
 
 def _run_sampling(
@@ -61,17 +70,21 @@ def _run_sampling(
         support.remove_companion(monkeypatch)
     cfg, src = _job(route, tmp_path, rows)
     chunks = -(-rows // chunk)
+    # Hold the earlier results so their ids cannot be reused by results the run creates.
+    earlier = _all_results()
+    before = {id(o) for o in earlier}
     samples: list[int] = []
     holder: dict[str, b6b.b6a.ChunkSpy] = {}
 
     def before_pull(_table: str, index: int) -> None:
         if index in (chunks // 10, chunks - 2):
-            samples.append(_live_results())
+            samples.append(_live_results(before))
 
     holder["spy"] = b6b.b6a.ChunkSpy(monkeypatch, before_pull=before_pull)
     sink = b6b.CountingSink()
     b6b.run(cfg, {b6b.TABLE: src}, sink, chunk_size_rows=chunk, auto_chunk_threshold_rows=1)
     accumulator = holder["spy"].result_lists[b6b.TABLE]
+    del earlier
     return accumulator.retained(), samples
 
 
