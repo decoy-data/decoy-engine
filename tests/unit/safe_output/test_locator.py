@@ -64,23 +64,19 @@ def test_row_never_publishes_the_secret(row: dict[str, Any]) -> None:
 def _is_span_replacement(original: str, shown: str) -> bool:
     """`shown` is `original` with zero or more spans replaced by the marker (P1)."""
     pieces = shown.split(REDACTED)
-    if not original.startswith(pieces[0]):
-        return False
-    pos = len(pieces[0])
     if len(pieces) == 1:
         return original == shown
     tail = pieces[-1]
-    if not original.endswith(tail):
+    if not original.startswith(pieces[0]) or not original.endswith(tail):
         return False
-    limit = len(original) - len(tail)
+    pos = len(pieces[0])
     for piece in pieces[1:-1]:
-        # A replaced span may be empty only if the marker stood for nothing; the scanner never
-        # does that, so each marker covers at least one character.
+        # Each marker stands for at least one replaced character.
         found = original.find(piece, pos + 1)
         if found < 0:
             return False
         pos = found + len(piece)
-    return pos < limit or (pos == limit and len(pieces) > 1 and limit > pos - 1)
+    return len(original) - len(tail) >= pos + 1
 
 
 FRAGMENTS = [

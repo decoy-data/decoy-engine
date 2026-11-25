@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+_ID_SCHEMES = frozenset({"abfs", "abfss", "wasb", "wasbs", "sftp"})
+
+
 class LocatorKind(str, Enum):
     LOCAL = "local"
     DRIVE = "drive"
