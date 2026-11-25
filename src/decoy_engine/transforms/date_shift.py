@@ -7,12 +7,26 @@ could be reversed by search, was deleted (roadmap row 24zb). What stays is the c
 (``_COMMON_FORMATS``), imported by ``text_mask`` for date spans in free text (no column strategy
 detects a format: it is required), and the one shift-window resolver
 (``shift_window``, ``shift_window_problem``) that every date_shift route reads its bounds from.
+
+``shift_typed_days`` is the one arithmetic that adds days to a typed date: the native route
+calls it on the resident Arrow array and the oracle on an array built from its usable cells, so
+the two routes agree by construction (DATE-SHIFT-TYPED).
 """
 
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
+
 from decoy_engine import reasons
+
+# The bounds live with the other temporal bounds, below `profile/` in the import tiers, so the
+# profile read and this kernel share them; the names stay importable from here.
+from decoy_engine._arrow_types import DATE32_MAX_DAY as DATE32_MAX_DAY
+from decoy_engine._arrow_types import DATE32_MIN_DAY as DATE32_MIN_DAY
+from decoy_engine._arrow_types import date32_in_range as date32_in_range
 from decoy_engine.plan._errors import PlanCompileError
 
 # The handler's defaults when a config names no bound.
@@ -124,3 +138,34 @@ _COMMON_FORMATS = [
     "%Y-%m-%dT%H:%M:%S",
     "%Y-%m-%d %H:%M:%S",
 ]
+
+
+def date32_days(array: pa.Array) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    """`(days, valid)` of a `date32` array: the int64 day numbers (0 in a null slot) and the
+    non-null mask. Reading the physical integer never converts a value to Python."""
+    if array.type != pa.date32():
+        raise TypeError(f"expected a date32 array, got {array.type}")
+    days = pc.fill_null(array.cast(pa.int32()), 0).to_numpy(zero_copy_only=False)
+    valid = array.is_valid().to_numpy(zero_copy_only=False)
+    return days.astype(np.int64), valid
+
+
+def shift_typed_days(
+    array: pa.Array, offsets: np.ndarray[Any, Any]
+) -> tuple[pa.Array, np.ndarray[Any, Any]]:
+    """Add `offsets[i]` calendar days to every usable row of a `date32` array.
+
+    Returns `(shifted, failed)`. `shifted` keeps the source type; a null stays null. `failed`
+    marks the non-null rows whose source or shifted day is outside years 1 to 9999: those keep
+    their source value and the caller records a `format_error`. A failed row's offset is ignored,
+    so a caller that derives no offset for it may pass 0.
+    """
+    days, valid = date32_days(array)
+    if len(offsets) != len(days):
+        raise ValueError(f"{len(offsets)} offsets for {len(days)} rows")
+    shifted = days + np.asarray(offsets, dtype=np.int64)
+    ok = valid & date32_in_range(days) & date32_in_range(shifted)
+    failed = valid & ~ok
+    out_days = np.where(ok, shifted, days).astype(np.int32)
+    out = pa.array(out_days, type=pa.int32(), mask=~valid).cast(pa.date32())
+    return out, failed

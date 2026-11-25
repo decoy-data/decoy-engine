@@ -152,8 +152,10 @@ def when_native_rejection(
         or _column_rejection(dict(entry), registry, table=table, profile=None) is not None
     ):
         return f"{NOT_NATIVE_CODE}:{column}"
-    if schema is None or column not in schema.names or schema.field(column).type != pa.string():
-        return f"{NOT_NATIVE_CODE}:{column}"
+    if schema is None or column not in schema.names:
+        return when_target_rejection(column, None)
+    if (why := when_target_rejection(column, schema.field(column).type)) is not None:
+        return why
     ast = parsed_when(entry)
     if ast is None:
         return f"{OUTSIDE_SUBSET_CODE}:{column}"
@@ -174,6 +176,16 @@ def when_native_rejection(
         ref = read.column
         if ref != column and ref in written:
             return f"{READS_MASKED_CODE}:{column}:{ref}"
+    return None
+
+
+def when_target_rejection(column: str, target: pa.DataType | None) -> str | None:
+    """The one rule for which `when:` target columns can run natively: a `string` target only.
+
+    A typed target (a `date32` date_shift column) or an unknown one (None) stays on Python with
+    `when_predicate_not_native`. The unified, chunked and sequential routes all ask here."""
+    if target is None or target != pa.string():
+        return f"{NOT_NATIVE_CODE}:{column}"
     return None
 
 

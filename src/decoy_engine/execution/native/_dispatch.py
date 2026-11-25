@@ -84,7 +84,7 @@ from decoy_engine.execution.native._operator_params import (  # noqa: F401 -- re
     _resolve_truncate_keep,
 )
 from decoy_engine.execution.native._plan import compile_native_plan
-from decoy_engine.execution.native._real_type_admission import real_type_decline
+from decoy_engine.execution.native._real_type_admission import policy_decline, real_type_decline
 from decoy_engine.execution.native._requirements import (
     CHUNKED_ROUTE_VETOED_STRATEGIES,
     NATIVE_KERNEL_STRATEGIES,
@@ -239,6 +239,7 @@ def _static_route_decision(
     registry: Any = None,
     first_schema: pa.Schema | None = None,
     siblings: SourceFacts,
+    date_shapes: dict[tuple[str, str], Any] | None = None,
 ) -> NativeRouteEvidence:
     """Config/profile-only admission: no I/O, no compiled-extension probe.
 
@@ -274,6 +275,8 @@ def _static_route_decision(
         sources=table_source_facts(table, first_schema, siblings),
         resident_sources=sibling_resident_sources(config, table, first_schema),
     )
+    if date_shapes is not None:
+        date_shapes |= plan.date_shapes
     table_nodes = [n for n in plan.nodes if n.table == table]
     if not table_nodes:
         return _oracle_evidence(
@@ -327,13 +330,11 @@ def _static_route_decision(
                 continue
         no_kernel = node.strategy not in NATIVE_KERNEL_STRATEGIES
         no_pool_path = node.strategy not in NATIVE_POOL_STRATEGIES
-        # The seeded non-deterministic categorical and the non-deterministic REUSE faker resolve
-        # a non-native policy (the full-frame operators are source-keyed); this chunked-only
-        # route admits them, config only.
         positional = chunked_positional_column(config, table, node.strategy, column)
-        if node.fallback_policy != "native" and not positional:
-            reasons.append(f"fallback_policy_not_native:{column}:{node.fallback_policy}")
-            declines.append(column_decline(Decline.FALLBACK_POLICY_NOT_NATIVE, table, column))
+        policy = policy_decline(config, plan.date_shapes, node, table, column, positional)
+        if policy is not None:
+            reasons.append(policy.reason)
+            declines.append(policy.record)
         elif no_kernel and no_pool_path:
             # Defense in depth (see module docstring): `fallback_policy` already
             # encodes this via `_requirements.py`'s combined kernel-or-pool
@@ -436,6 +437,7 @@ def plan_native_route(
     configured column the source lacks always vetoes. `registry` is the run's provider
     registry; it decides which providers are composite nodes.
     """
+    shapes: dict[tuple[str, str], Any] = {}
     decision = _static_route_decision(
         config,
         profile,
@@ -444,6 +446,7 @@ def plan_native_route(
         registry=registry,
         first_schema=first_schema,
         siblings=siblings,
+        date_shapes=shapes,
     )
     # A declined `when:` column names the reroute reason even when another column would
     # have vetoed the table anyway: its meaning (leave unselected rows untouched)
@@ -543,7 +546,7 @@ def plan_native_route(
             # Admission rests on the first chunk's real Arrow types and each
             # provider's output type, never the profile's coarse dtype labels.
             real = real_type_decline(
-                config, decision.node_routes, first_schema, table=table, profile=profile
+                config, decision.node_routes, first_schema, shapes, table=table, profile=profile
             )
             if real is not None:
                 decision = _downgrade_to_oracle(decision, real.reason, real.record)

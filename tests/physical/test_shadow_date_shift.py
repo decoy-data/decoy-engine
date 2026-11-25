@@ -147,8 +147,13 @@ def _oracle_handler(
         cardinality_mode="reuse",
         provider_config=tuple(sorted(cfg.items())),
     )
+    # A text column: the plan lists no native date shape for it.
     ctx = SimpleNamespace(
-        mask_key=_MASK_KEY, row_errors=[], group_anchor_snapshots={}, current_table="t"
+        mask_key=_MASK_KEY,
+        row_errors=[],
+        group_anchor_snapshots={},
+        current_table="t",
+        native_date_shape=lambda _column: None,
     )
     df, _ = DateShiftStrategyHandler().run(
         pd.DataFrame({"c": pd.Series(values, dtype=object)}), "c", seed, ctx

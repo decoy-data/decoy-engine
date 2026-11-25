@@ -128,6 +128,57 @@ def test_typed_date_shapes_is_read_only_at_allowlisted_sites() -> None:
     assert not stale, f"allowlist entries that no longer read the set: {sorted(stale)}"
 
 
+# The plan-level native-date view is `declared_casting.plan_native_date_shapes`. Composing it
+# again from its parts (`native_date_shapes` over `plan_column_shapes` or
+# `declared_date_shift_columns`) outside `declared_casting/` is a second producer.
+_VIEW_PARTS = frozenset({"plan_column_shapes", "declared_date_shift_columns"})
+
+
+def _callee(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr
+    return None
+
+
+def _composed_views(sources: dict[str, str]) -> set[tuple[str, int]]:
+    found: set[tuple[str, int]] = set()
+    for rel, text in sources.items():
+        if rel.startswith("declared_casting/"):
+            continue
+        for node in ast.walk(ast.parse(text)):
+            if not isinstance(node, ast.Call) or _callee(node) != "native_date_shapes":
+                continue
+            # Positional and keyword arguments alike, at any depth of the argument expression.
+            given = [*node.args, *(k.value for k in node.keywords)]
+            if any(_callee(inner) in _VIEW_PARTS for arg in given for inner in ast.walk(arg)):
+                found.add((rel, node.lineno))
+    return found
+
+
+def test_the_plan_native_date_view_is_composed_only_in_declared_casting() -> None:
+    sources = {
+        p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8") for p in SRC.rglob("*.py")
+    }
+    assert not _composed_views(sources)
+
+
+def test_restoring_the_old_composition_in_a_caller_is_red() -> None:
+    """Mutation: the expression `typed_date_columns` held before `plan_native_date_shapes`."""
+    rel = "execution/_chunked_bucket_perturb.py"
+    text = (SRC / rel).read_text(encoding="utf-8")
+    old = "    return frozenset(column for (t, column) in plan_native_date_shapes(plan) if t == table)"
+    assert old in text
+    restored = text.replace(
+        old,
+        "    native = native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))\n"
+        "    return frozenset(column for (t, column) in native if t == table)",
+    )
+    assert len(_composed_views({rel: restored})) == 1
+
+
 def test_an_inline_native_date_derivation_in_a_caller_is_red() -> None:
     """Mutation: the producer's body pasted into a caller (the StrategyContext property)."""
     path = SRC / "execution/_adapter.py"
@@ -142,10 +193,20 @@ def test_an_inline_native_date_derivation_in_a_caller_is_red() -> None:
     }
     gate = (SRC / "execution/_chunked_bucket_perturb.py").read_text(encoding="utf-8")
     gate_inline = gate.replace(
-        "native = native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))",
-        "native = [k for k, v in plan_column_shapes(plan).items() if v in TYPED_DATE_SHAPES]",
+        "for (t, column) in plan_native_date_shapes(plan) if t == table",
+        "for (t, column), v in plan_column_shapes(plan).items()"
+        " if t == table and v in TYPED_DATE_SHAPES",
     )
     assert gate_inline != gate
     assert _unlisted_reads({"execution/_chunked_bucket_perturb.py": gate_inline}) == {
         ("execution/_chunked_bucket_perturb.py", "typed_date_columns")
     }
+
+
+def test_composing_the_view_with_keyword_arguments_is_red() -> None:
+    """Mutation: the same composition spelled with keywords, or one call deeper."""
+    keyword = "native_date_shapes(shapes=plan_column_shapes(plan), declared=set())"
+    nested = "native_date_shapes(dict(plan_column_shapes(plan)), declared_date_shift_columns(p))"
+    for spelling in (keyword, nested):
+        assert len(_composed_views({"execution/x.py": f"x = {spelling}\n"})) == 1, spelling
+    assert not _composed_views({"execution/x.py": "x = native_date_shapes(shapes, declared)\n"})

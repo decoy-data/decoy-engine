@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Final
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.declared_casting import plan_native_date_shape
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._operator_registry import (
     DETERMINISTIC_FAKER_SOURCE_TYPES,
@@ -287,8 +289,9 @@ def execution_binding_for_slice_node(
     # row-local, non-global); a future strategy added to SLICE_STRATEGIES
     # without updating the shadow coordinator's "no prepasses" contract
     # (C1) must fail loudly here rather than bind silently. date_shift declares
-    # no prepass: plan compile requires its date_format, and the declared-casting column that
-    # may lack one is rejected by `date_shift_config_rejection`, so it returned above.
+    # no prepass: a text column has its date_format (plan compile requires it), a typed one reads
+    # dates and needs none, and the declared-casting column that may lack one is rejected by
+    # `date_shift_config_rejection`, so it returned above.
     if (
         requirements.required_prepasses
     ):  # pragma: no cover - unreachable while SLICE_STRATEGIES stays prepass-free
@@ -308,6 +311,7 @@ def execution_binding_for_slice_node(
     # resolves defaults; it never declines.
     prepared: PreparedCategorical | None = None
     pool_binding: PoolBinding | None = None
+    date_shape: ColumnShape | None = None
     if strategy == "hash":
         if caps.key_source is None or namespace is None:
             # hash_requires_namespace is enforced upstream of the native
@@ -363,8 +367,11 @@ def execution_binding_for_slice_node(
     elif strategy in ("bucket_perturb", "date_shift"):
         if caps.key_source is None or namespace is None:
             return None  # pragma: no cover - config gate guarantees both
+        date_shape = (
+            plan_native_date_shape(inputs.plan, table, column) if strategy == "date_shift" else None
+        )
         date_format = cfg.get("date_format")
-        if not isinstance(date_format, str) or not date_format:
+        if date_shape is None and (not isinstance(date_format, str) or not date_format):
             return None  # pragma: no cover - config gate guarantees an explicit format
     elif strategy == "group_key":
         # group_key keys on a SIBLING column, not the target; `group_key_config_rejection`
@@ -384,6 +391,7 @@ def execution_binding_for_slice_node(
             provider_config=cfg,
             namespace=namespace,
             prepared_categorical=prepared,
+            date_shape=date_shape,
         )
     resolved_config: dict[str, Any] = dict(cfg)
     input_schema_column = column

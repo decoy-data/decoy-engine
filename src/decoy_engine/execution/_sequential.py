@@ -6,8 +6,7 @@ path). Each parent's narrow source->masked key map is built and retained BEFORE 
 wide frame is evicted, so children still resolve against it and all orphan policies
 keep working (unlike the streaming Option 1). On SUCCESS, output is byte-identical
 to `run` (tests/unit/execution/test_sequential_eviction.py); the win is peak
-memory, one table plus retained narrow key maps rather than every table full-width
-plus all outputs.
+memory, one table plus retained narrow key maps rather than every table full-width.
 
 Sink contract.
 
@@ -79,11 +78,9 @@ commit-marker that downstream readers must check before trusting ANY output
 of a run (tables or quarantine) as final -- this fix only makes the
 quarantine sidecar's OWN publish atomic and commit-gated, it does not add a
 cross-artifact "is this whole run really done" signal; (2)
-heterogeneous-sink idempotency/compensation (e.g. a sink that partially
-commits table A durably before failing on table B, where a retry needs to
-know A was already applied) -- out of scope here, which only closes the
-"quarantine published despite sink abort" leak for the existing
-single-sink-instance contract.
+heterogeneous-sink idempotency/compensation (a sink that commits table A durably
+before failing on table B) -- out of scope here, which only closes the "quarantine
+published despite sink abort" leak for the existing single-sink-instance contract.
 
 Lives in its own module so `_pandas_adapter.py` stays under the orchestration LOC
 cap. It reuses the adapter's per-node masking (`_dispatch_mask_node`) and parent-map
@@ -412,12 +409,15 @@ def run_sequential(
                 # The same guard list as run(), table-local (FK children exempt via graph).
                 run_chunk_ingest_guards(plan, {table: src}, registry, graph)
                 t0 = time.perf_counter()
-                # DE-10: same lossless-typing contract as the full-frame `run()`
-                # ingestion (execution/_fk_keys.py) -- an FK key column never
-                # silently widens to float64 on this table-at-a-time load either.
-                # HC-3a P1 #2: date_shift group_by anchor columns get the same
-                # lossless int+null path (union into the FK-safe set).
-                df = to_pandas_fk_safe(src, lossless.for_table(table, src))
+                # DE-10: the full-frame lossless-int contract (FK keys, date_shift anchors), and
+                # its coded error for a value pandas cannot hold (B4, a year-10000 date32).
+                try:
+                    df = to_pandas_fk_safe(src, lossless.for_table(table, src))
+                except Exception as exc:
+                    from decoy_engine.execution import _pipeline_full_frame as _ff
+
+                    _ff._raise_if_source_value_unrepresentable({table: src}, graph, exc)
+                    raise
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
                 register_exact_int_sources(ctx, table, src, df, nodes_by_table.get(table, ()))

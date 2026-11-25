@@ -62,8 +62,12 @@ def _raise_if_source_value_unrepresentable(
     (the same FK-safe way the oracle did) to find the offender and raise a coded
     `ExecutionError` naming it. If no single source column reproduces the failure
     -- so it was not the ingest conversion -- return and let the caller re-raise
-    the original exception unchanged."""
+    the original exception unchanged. The sequential route reads each table the same way and
+    calls this with that one table, so both pandas routes raise the same code."""
     from decoy_engine.execution._fk_keys import fk_columns_for_table, to_pandas_fk_safe
+
+    if not isinstance(exc, _ingest_conversion_errors()):
+        return
 
     edges = getattr(graph, "edges", ())
     for table, tbl in resident_sources.items():
@@ -83,8 +87,8 @@ def _raise_if_source_value_unrepresentable(
                 code=reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE,
                 message=(
                     f"table {table!r} column {name!r} holds a value pandas cannot represent. "
-                    "The full-frame pandas route converts every column to pandas; the default "
-                    "native (Rust) route keeps columns in Arrow and does not hit this limit."
+                    "This route converts every column to pandas; the default native (Rust) "
+                    "route keeps columns in Arrow and does not hit this limit."
                 ),
             ) from None
 

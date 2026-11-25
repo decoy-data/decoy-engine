@@ -21,6 +21,7 @@ from typing import Any, Literal
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._column_access import SIBLING_REFERENCE_KEYS
 from decoy_engine.execution._operator_registry import OPERATORS
@@ -307,12 +308,17 @@ def _output_arrow_schema(
     profile: Any,
     *,
     resident_sources: Mapping[str, Any] | None = None,
+    date_shape: ColumnShape | None = None,
 ) -> pa.Schema | None:
     if not caps.output_type_is_static:
         return None
     fields: list[pa.Field] = []
     for col in node.columns:
-        if node.strategy in _TYPE_PRESERVING:
+        # A typed date_shift column keeps its source type (a date stays a date), so it takes
+        # the same resident-authoritative type as passthrough.
+        if node.strategy in _TYPE_PRESERVING or (
+            node.strategy == "date_shift" and date_shape is not None
+        ):
             # passthrough's output type equals its input type, so this is the
             # site that makes passthrough's OUTPUT schema resident-authoritative
             # too (not only its input_schema): both come from the same call.
@@ -500,6 +506,7 @@ def _config_gate_rejection(
     profile: Any,
     *,
     resident_sources: Mapping[str, Any] | None = None,
+    date_shape: ColumnShape | None = None,
 ) -> str | None:
     """Dispatch to the config/type gate for `strategy_name`, or None for a
     strategy that has none. Shared with `native_route_eligibility` via the
@@ -562,6 +569,7 @@ def _config_gate_rejection(
             namespace=getattr(node.plan_slice, "namespace", None),
             provider_config=cfg,
             resident_sources=resident_sources,
+            shape=date_shape,
         )
     return None
 
@@ -592,8 +600,8 @@ def requirements_for(
 ) -> NodeRequirements:
     """Resolve one WorkNode's native execution requirements.
 
-    ``plan`` is accepted for future resolution needs (namespace bindings,
-    relationship edges) and is not read for the scalar node kinds today.
+    ``plan`` supplies a date_shift column's native date shape (`plan_native_date_shape`); the
+    other scalar node kinds do not read it today.
 
     ``resident_sources`` (Track A Option 2), when given, makes every physical
     type decision below resident-Arrow-authoritative rather than profile-
@@ -619,14 +627,23 @@ def requirements_for(
         kernel_reason = native_pool_rejection(node, column_name, strategy_name)
     else:
         kernel_reason = native_kernel_rejection(column_name, strategy_name)
+    from decoy_engine.declared_casting import plan_native_date_shape
+
+    # The plan's native date shape, read once here so the config gate and the output schema
+    # see the same answer. Only date_shift reads it in S1.
+    date_shape = (
+        plan_native_date_shape(plan, node.table, column_name)
+        if strategy_name == "date_shift" and node.columns
+        else None
+    )
     config_reason = _config_gate_rejection(
-        node, strategy_name, cfg, profile, resident_sources=resident_sources
+        node, strategy_name, cfg, profile, resident_sources=resident_sources, date_shape=date_shape
     )
     state_tables = tuple(t for t in (_STATE_TABLE_BY_STRATEGY.get(strategy_name),) if t is not None)
     return NodeRequirements(
         required_input_columns=_required_input_columns(node, cfg),
         output_arrow_schema=_output_arrow_schema(
-            node, caps, profile, resident_sources=resident_sources
+            node, caps, profile, resident_sources=resident_sources, date_shape=date_shape
         ),
         lowering_id=f"{node.kind}:{strategy_name}",
         required_prepasses=_required_prepasses(node, caps, cfg),

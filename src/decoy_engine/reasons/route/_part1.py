@@ -23,6 +23,8 @@ __all__ = [
     "CRYPTO_EXTENSION_UNAVAILABLE",
     "CRYPTO_EXT_UNAVAILABLE",
     "CUSTOM_PROVIDER_WITHOUT_DETERMINISTIC_CONTRACT",
+    "DATE_SHIFT_TYPED_PRESERVE_NOT_NATIVE",
+    "DATE_SHIFT_TYPED_TYPE_NOT_NATIVE",
     "DEPENDS_ON_EXCLUDED_COLUMN",
     "DETERMINISM_FRESH",
     "DISPATCHER_DISABLED",
@@ -122,6 +124,14 @@ FAKER_PROVIDER_OUTPUT_NOT_STRING = _d(
     "faker_provider_output_not_string", "Faker provider output not string."
 )
 FAKER_SCHEMA_NOT_GUARANTEED = _d("faker_schema_not_guaranteed", "Faker schema not guaranteed.")
+DATE_SHIFT_TYPED_PRESERVE_NOT_NATIVE = _d(
+    "date_shift_typed_preserve_not_native",
+    "Date shift preserve_values on a typed date source.",
+    since=UNRELEASED,
+)
+DATE_SHIFT_TYPED_TYPE_NOT_NATIVE = _d(
+    "date_shift_typed_type_not_native", "Date shift typed source type not native.", since=UNRELEASED
+)
 FAKER_SOURCE_NOT_STRING = _d("faker_source_not_string", "Faker source not string.")
 FALLBACK_POLICY_NOT_NATIVE = _d("fallback_policy_not_native", "Fallback policy not native.")
 FK_RELATIONSHIP = _d("fk_relationship", "FK relationship.")

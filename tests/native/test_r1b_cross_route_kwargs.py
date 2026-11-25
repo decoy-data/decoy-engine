@@ -419,6 +419,7 @@ SNAPSHOT: list[tuple[str, dict[str, Any], str, dict[str, Any]]] = [
             "namespace": "ns_d",
             "index_kernel": "<index_kernel>",
             "derive_calls": "<derive_calls>",
+            "shape": None,
         },
     ),
     (
@@ -437,6 +438,7 @@ SNAPSHOT: list[tuple[str, dict[str, Any], str, dict[str, Any]]] = [
             "namespace": "ns_d",
             "index_kernel": "<index_kernel>",
             "derive_calls": "<derive_calls>",
+            "shape": None,
         },
     ),
     (
@@ -456,6 +458,7 @@ SNAPSHOT: list[tuple[str, dict[str, Any], str, dict[str, Any]]] = [
             "namespace": "a/b",
             "index_kernel": "<index_kernel>",
             "derive_calls": "<derive_calls>",
+            "shape": None,
         },
     ),
 ]

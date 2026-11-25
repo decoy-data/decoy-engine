@@ -68,6 +68,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.contracts.column_shape import ColumnShape
@@ -81,11 +82,12 @@ from decoy_engine.execution._adapter import (
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
+from decoy_engine.generation.pool import canonicalize_typed_array
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.date_preserve import preserve_set_from_config
-from decoy_engine.transforms.date_shift import shift_window
+from decoy_engine.transforms.date_shift import shift_typed_days, shift_window
 
 
 def _is_declared(column: str, ctx: StrategyContext) -> bool:
@@ -230,9 +232,9 @@ class DateShiftStrategyHandler:
         # group_by is not native, but admission declines it, so the seam books the row and
         # returns None (reporting the honest python_scalar backend) rather than being gated out.
         seq = getattr(ctx, "seq_native", None)
-        # Admission declines a non-string source (`date_shift_source_not_string`), but a typed column
-        # must not even reach the seam: it has no format for the kernel and would be booked native.
-        if seq is not None and shape is None:
+        # Admission takes a string source with its format, or a `date32` source under the plan's
+        # `DATE` shape; the seam gets the shape so a typed column runs the typed kernel.
+        if seq is not None:
             native_out = seq.date_shift_column(
                 ctx,
                 df,
@@ -243,6 +245,7 @@ class DateShiftStrategyHandler:
                 max_days=max_days,
                 date_format=fmt,
                 preserve=preserve,
+                shape=shape,
             )
             if native_out is not None:
                 df[column] = native_out
@@ -371,10 +374,12 @@ def _shift_dates(
     min_days: int,
     range_size: int,
 ) -> tuple[list[Any], np.ndarray[Any, Any]]:
-    """The typed-date path: ``datetime.date`` plus a timedelta, with no pandas nanosecond bounds.
+    """The typed-date path: the shared `shift_typed_days` arithmetic, with no pandas bounds.
 
-    A date near 0001 or 9999 shifts like any other. A cell that is not a date, or whose shifted
-    date leaves the supported years, is a row error and keeps its source value.
+    A cell pass classifies each cell (null, `date`, `datetime` reduced to its date, other); the
+    usable cells form a `date32` array keyed by `canonicalize_typed_array`, the native route's own
+    key function. A cell that is not a date, or whose shifted date leaves years 1 to 9999, is a
+    row error and keeps its source value.
     """
     cells = list(col)
     source_null = col.isna().to_numpy()
@@ -388,15 +393,18 @@ def _shift_dates(
         if isinstance(cell, datetime.date):
             values[i] = cell
             usable[i] = True
+    dates = pa.array(values, type=pa.date32())
+    # The ISO key text; `_offsets` turns each into the same bytes `_canonicalize_source` would.
+    keys, _ = canonicalize_typed_array(dates)
     usable_idx = np.flatnonzero(usable)
-    shifts = _offsets(values, usable_idx, anchor_col, ctx, namespace, min_days, range_size)
-    failed = ~usable & ~source_null
-    for i in usable_idx:
-        try:
-            cells[i] = values[i] + datetime.timedelta(days=shifts[i])
-        except OverflowError:
-            failed[i] = True
-    return cells, np.flatnonzero(failed)
+    shifts = _offsets(
+        keys.to_pylist(), usable_idx, anchor_col, ctx, namespace, min_days, range_size
+    )
+    shifted, failed = shift_typed_days(dates, np.asarray(shifts, dtype=np.int64))
+    out = shifted.to_pylist()
+    for i in np.flatnonzero(usable & ~failed):
+        cells[i] = out[i]
+    return cells, np.flatnonzero(failed | (~usable & ~source_null))
 
 
 def _shift_rows(

@@ -38,12 +38,15 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.declared_casting import plan_native_date_shape
 from decoy_engine.execution._adapter import pandas_column_to_kernel_input
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR, RUST_COMPANION
@@ -85,6 +88,7 @@ from decoy_engine.execution._sequential_native_ops import (
     bucket_perturb_op,
     bucket_row_errors,
     categorical_op,
+    date_shift_admit,
     date_shift_op,
     date_shift_row_errors,
     faker_op,
@@ -196,9 +200,12 @@ class SeqNativeRun:
         seed: ColumnSeed,
         *,
         is_key: bool = False,
+        plan: Plan | None = None,
     ) -> ColumnDecision:
         bound = self._kernel(op)
         admit = op.key_admit if is_key and op.key_admit is not None else op.admit
+        if op.strategy == DATE_SHIFT and plan is not None:  # a typed column takes the typed gate
+            admit = partial(date_shift_admit, shape=plan_native_date_shape(plan, table, column))
         reason = admit(column, input_type, seed) if bound is not None else REASON_UNAVAILABLE
         native = bound is not None and reason is None
         return ColumnDecision(
@@ -250,7 +257,7 @@ class SeqNativeRun:
                     )
                 else:
                     self._decisions[(table, column)] = self._decide(
-                        op, table, column, input_type, seed
+                        op, table, column, input_type, seed, plan=plan
                     )
                 continue
             if is_child:
@@ -406,10 +413,7 @@ class SeqNativeRun:
             ctx.row_errors.extend(bucket_row_errors(column, result.errors))
             decision.native_calls += sum(call.derive_calls)
             if preserved is not None:
-                count = int(preserved.sum())
-                decision.counts_preserved = True
-                decision.preserved_rows += count
-                ctx.record_date_preserved(column, count)
+                ctx.record_date_preserved(column, decision.book_preserved(preserved))
             return result.values.to_pylist()
         except BaseException:
             del mask_key
@@ -524,19 +528,18 @@ class SeqNativeRun:
         max_days: int,
         date_format: str | None,
         preserve: PreserveSet | None,
+        shape: ColumnShape | None = None,
     ) -> list[Any] | None:
-        """The shifted dates for `df[column]`, positionally, or None when Python runs.
-
-        Unparseable cells keep their text and are appended to `ctx.row_errors` as the handler
-        does; the pipeline decides fail versus quarantine. Positions need no rebasing: the
-        kernel rebases past sentinel rows and the `when` gate maps back to table positions."""
+        """The shifted dates for `df[column]`, positionally, or None when Python runs. A plan
+        `shape` runs the typed kernel. Unparseable cells keep their text and go to
+        `ctx.row_errors` as in the handler; the pipeline decides fail versus quarantine."""
         try:
             gate = self.admitted(ctx, column, DATE_SHIFT, len(df))
             if gate is None:
                 return None
             decision, bound = gate
-            if date_format is None:  # pragma: no cover - admission requires an explicit format
-                raise AssertionError("date_shift admitted without a date_format.")
+            if (decision.pinned_type == pa.date32()) != (shape is not None):  # pragma: no cover
+                raise AssertionError("date_shift admitted with a pin that mismatches its shape.")
             preserved = preserve.mask(df[column]) if preserve is not None else None
             array = self._pinned_array(df[column], decision)
             derive_calls: list[int] = []
@@ -551,15 +554,12 @@ class SeqNativeRun:
                 native_threads=bound.native_threads,
                 derive_calls=derive_calls,
                 preserved=preserved,
+                shape=shape,
             )
             decision.native_calls += sum(derive_calls)
             ctx.row_errors.extend(date_shift_row_errors(column, positions))
-            if preserved is not None:
-                count = int(preserved.sum())
-                decision.counts_preserved = True
-                decision.preserved_rows += count
-                if count:  # the Python handler records a count only when a sentinel matched
-                    ctx.record_date_preserved(column, count)
+            if preserved is not None and (count := decision.book_preserved(preserved)):  # as Python
+                ctx.record_date_preserved(column, count)
             return out.to_pylist()
         except BaseException:
             del mask_key

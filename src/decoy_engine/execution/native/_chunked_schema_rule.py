@@ -15,9 +15,10 @@ by definition the rule pins one type per column for the whole call:
   -> null), so this is a recorded route-dependent difference (see
   docs/compatibility-contract.md, ROUTE-OUTPUT-CONTRACT).
 - a native-admissible date_shift column (explicit format, a namespace, no `group_by`, no
-  `when:`, a string source): `string`, by the same cast. date_shift output is always a
-  strftime string, so pandas' empty -> float64 and all-null -> null are inference
-  artifacts. The decision reads only the config and the first chunk's type, never the
+  `when:`, a string source): `string`, by the same cast. Text sources give `string`; typed
+  sources keep their type: a `date32` source (plan shape `DATE`, no `preserve_values`) is
+  pinned to `date32` (`date_shift_typed_pinned_columns`). Pandas' empty -> float64 and
+  all-null -> null are inference artifacts either way. The decision reads only the config and the first chunk's type, never the
   companion, so both legs agree with or without it. The whole-frame route still resolves
   the type at assembly, so this is the same recorded route-dependent difference
   (docs/compatibility-contract.md, ROUTE-OUTPUT-CONTRACT).
@@ -59,6 +60,7 @@ schema metadata.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,6 +69,7 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import group_by_sibling
@@ -196,6 +199,46 @@ def date_shift_pinned_columns(
     return frozenset(pinned)
 
 
+def date_shift_typed_pinned_columns(
+    configured: dict[str, dict[str, Any]],
+    first_schema: pa.Schema,
+    shapes: Mapping[str, ColumnShape],
+    *,
+    table: str,
+) -> dict[str, pa.DataType]:
+    """The typed date_shift columns whose output is pinned to their source type.
+
+    `shapes` is the compiled plan's native date shapes for `table` (`table_date_shapes`), the
+    one source of truth for "this column is a typed date": a column the plan does not list (an
+    F06-declared date, which keeps its text output) is never pinned, whatever type its first
+    chunk carries. A listed column is pinned when the typed half of `date_shift_config_rejection`
+    admits it under that shape over the first chunk's real type, the same on both legs."""
+    from decoy_engine.execution.native._operator_config_rejections import (
+        date_shift_config_rejection,
+    )
+
+    pinned: dict[str, pa.DataType] = {}
+    for name, col in configured.items():
+        if col.get("strategy") != "date_shift" or _has_when(col):
+            continue
+        if name not in shapes or name not in first_schema.names:
+            continue
+        provider_config = col.get("provider_config")
+        field = first_schema.field(name)
+        reason = date_shift_config_rejection(
+            name,
+            table,
+            None,
+            namespace=col.get("namespace"),
+            provider_config=provider_config if isinstance(provider_config, dict) else {},
+            resident_sources={table: pa.schema([field]).empty_table()},
+            shape=shapes[name],
+        )
+        if reason is None:
+            pinned[name] = field.type
+    return pinned
+
+
 def group_key_pinned_columns(
     configured: dict[str, dict[str, Any]],
     first_schema: pa.Schema,
@@ -247,6 +290,8 @@ class SchemaRule:
     # a chunk whose values fit 32-bit offsets leaves as `string`; a value that cannot fit
     # promotes the column to `large_string` from then on.
     text_widths: dict[str, TextWidthState] = dataclasses.field(default_factory=dict)
+    # Typed date_shift columns pinned to their source type (`date_shift_typed_pinned_columns`).
+    typed_columns: dict[str, pa.DataType] = dataclasses.field(default_factory=dict)
 
 
 def build_schema_rule(
@@ -256,6 +301,7 @@ def build_schema_rule(
     first: pa.Table,
     registry: Any,
     categorical_columns: frozenset[str] = frozenset(),
+    plan: Any = None,
 ) -> SchemaRule:
     """Classify `table`'s columns once, from the config and the first chunk.
 
@@ -268,7 +314,9 @@ def build_schema_rule(
     native-admissible group_key column by `group_key_pinned_columns`, a native-admissible
     text_redact column by `text_redact_pinned_columns`, a position-keyed faker column by
     `faker_positional_pinned_columns` and an admitted `when:` column by `when_pinned_columns`,
-    so every caller gets the pins without passing anything.
+    so every caller gets the pins without passing anything. A typed date_shift column is
+    pinned to its date type only from the compiled `plan`'s date shapes
+    (`date_shift_typed_pinned_columns`); a caller with no plan gets no typed pins.
 
     A column some handler writes (see `handler_written_columns`) is never a passthrough
     column here, so `normalize_chunk` cannot restore its source value."""
@@ -284,6 +332,9 @@ def build_schema_rule(
     written = handler_written_columns(
         [c for c in table_cfg.get("columns") or [] if isinstance(c, dict)], registry
     )
+    from decoy_engine.execution.native._real_type_admission import table_date_shapes
+
+    shapes = {} if plan is None else table_date_shapes(plan, table, first.schema.names)
     from decoy_engine.execution._faker_degenerate_pin import deterministic_faker_pin_columns
 
     strings = frozenset(n for n, c in configured.items() if _string_output_is_fixed(c))
@@ -308,7 +359,12 @@ def build_schema_rule(
             passthrough[field.name] = field.type
             passthrough_fields[field.name] = field
     return SchemaRule(
-        string_columns=strings, passthrough_types=passthrough, passthrough_fields=passthrough_fields
+        string_columns=strings,
+        passthrough_types=passthrough,
+        passthrough_fields=passthrough_fields,
+        typed_columns=date_shift_typed_pinned_columns(
+            configured, first.schema, shapes, table=table
+        ),
     )
 
 
@@ -358,6 +414,16 @@ def normalize_chunk(
                 column, pa.string(), table=table, name=name, chunk_index=chunk_index
             )
             field = pa.field(name, pa.string(), nullable=field.nullable)
+        elif name in rule.typed_columns and column.type != rule.typed_columns[name]:
+            target = rule.typed_columns[name]
+            # An empty or all-null chunk is pandas' float64/null inference artifact: it holds no
+            # value, so it becomes nulls of the pinned type. Anything else takes the checked cast.
+            column = (
+                pa.chunked_array([pa.nulls(len(column), target)])
+                if column.null_count == len(column)
+                else _safe_cast(column, target, table=table, name=name, chunk_index=chunk_index)
+            )
+            field = pa.field(name, target, nullable=field.nullable)
         arrays.append(column)
         fields.append(field)
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from itertools import pairwise
+from typing import Any
 
 import numpy as np
 import pyarrow as pa
@@ -252,3 +253,47 @@ def arrow_column_bytes(arrow_type: pa.DataType, rows: int, width: float) -> int:
     except ValueError:  # variable-width types have no bit width
         return int(rows * (_OFFSET_BYTES + width))
     return (rows * bit_width + 7) // 8
+
+
+# The date32 day numbers of 0001-01-01 and 9999-12-31: the years Python's `datetime.date` can
+# represent, and so the range every temporal bound below is built from.
+DATE32_MIN_DAY = -719_162
+DATE32_MAX_DAY = 2_932_896
+
+_TICKS_PER_DAY = {
+    "s": 86_400,
+    "ms": 86_400_000,
+    "us": 86_400_000_000,
+    "ns": 86_400_000_000_000,
+}
+_INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
+
+
+def temporal_bounds(kind: pa.DataType) -> tuple[int, int, int] | None:
+    """`(low, high, step)` for a temporal Arrow type: a value Python's `date`, `datetime` or
+    `time` can hold has a physical integer in `[low, high]` that is a multiple of `step`.
+    None for a type with no such bound (a duration, or any non-temporal type).
+
+    A zoned timestamp loses one day at each end, because its local wall time may fall a day
+    outside its UTC instant. A `time64[ns]` needs a whole microsecond: `datetime.time` stops there.
+    """
+    if kind == pa.date32():
+        return DATE32_MIN_DAY, DATE32_MAX_DAY, 1
+    if kind == pa.date64():
+        per = _TICKS_PER_DAY["ms"]
+        return DATE32_MIN_DAY * per, (DATE32_MAX_DAY + 1) * per - 1, 1
+    if pa.types.is_timestamp(kind):
+        per = _TICKS_PER_DAY[kind.unit]
+        margin = 1 if kind.tz else 0
+        low = (DATE32_MIN_DAY + margin) * per
+        high = (DATE32_MAX_DAY + 1 - margin) * per - 1
+        return max(low, _INT64_MIN), min(high, _INT64_MAX), 1
+    if pa.types.is_time(kind):
+        step = 1_000 if kind.unit == "ns" else 1
+        return 0, _TICKS_PER_DAY[kind.unit] - 1, step
+    return None
+
+
+def date32_in_range(days: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """Which date32 day numbers fall inside years 1 to 9999 (the `date32` row above)."""
+    return (days >= DATE32_MIN_DAY) & (days <= DATE32_MAX_DAY)

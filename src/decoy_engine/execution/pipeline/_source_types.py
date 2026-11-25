@@ -23,8 +23,10 @@ def _with_source_types(
     """Give each named column its source Arrow type back where pandas lost it.
 
     A date strategy hands pandas ``datetime.date`` cells, which Arrow reads as ``date32`` (so a
-    ``date64`` source changes type) and, for an all-null chunk, as ``null`` (so chunk schemas
-    differ). Only those two losses are repaired; any other type difference is left as it is.
+    ``date64`` source changes type). A column with no value at all (no rows, or only nulls) has
+    no cell to read a type from, so pandas infers ``null`` or ``double`` for it; such a column
+    becomes nulls of its source type. Only those losses are repaired; any other type difference
+    is left as it is.
     """
     if schema is None:
         return table
@@ -32,12 +34,14 @@ def _with_source_types(
         if name not in table.column_names or name not in schema.names:
             continue
         want = schema.field(name).type
-        have = table.schema.field(name).type
-        if have != want and (
-            pa.types.is_null(have) or (pa.types.is_date64(want) and have == pa.date32())
-        ):
-            position = table.schema.get_field_index(name)
-            table = table.set_column(position, name, table.column(position).cast(want))
+        position = table.schema.get_field_index(name)
+        column = table.column(position)
+        if column.type == want:
+            continue
+        if column.null_count == len(column):
+            table = table.set_column(position, name, pa.nulls(len(column), want))
+        elif pa.types.is_date64(want) and column.type == pa.date32():
+            table = table.set_column(position, name, column.cast(want))
     return table
 
 

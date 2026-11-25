@@ -294,6 +294,10 @@ approved_growth = [
   { key = "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign", decision = "owner 2026-11-24 re-home of is_memory_failure after #792 moved it; same site, max 1" },
 ]
 
+[[sentry]]
+id = "date-shift-one-arithmetic"
+baseline = "tests/sentry/baselines/date-shift-one-arithmetic.json"
+
 # Owner decisions, each `"<id or path>" = "owner YYYY-MM-DD <reason of 15+ chars>"`. Printed by
 # `ratchet_check.py` as `decision` lines. A name already on the merge base does not count again.
 [retired]

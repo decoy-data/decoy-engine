@@ -8,25 +8,10 @@ from typing import TYPE_CHECKING
 import pyarrow as pa
 
 from decoy_engine.profile._readers import RowCount
+from decoy_engine.profile.arrow import profile_frame as _frame_of
 
 if TYPE_CHECKING:
     import pandas as pd
-
-
-def _frame_of(table: pa.Table) -> pd.DataFrame:
-    """`table` as a DataFrame; a column pandas cannot hold (a date past year 9999, a
-    sub-microsecond time) is profiled as text, so the route that never converts still runs."""
-    try:
-        return table.to_pandas()
-    except (ValueError, OverflowError):
-        columns = []
-        for column in table.columns:
-            try:
-                column.to_pandas()
-            except (ValueError, OverflowError):
-                column = column.cast(pa.string())
-            columns.append(column)
-        return pa.Table.from_arrays(columns, names=table.column_names).to_pandas()
 
 
 @dataclass(frozen=True)

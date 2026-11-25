@@ -18,10 +18,10 @@ without a cycle. `native/_chunked_evidence.py` re-exports the vocabulary names.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 import pyarrow as pa
 
@@ -36,6 +36,8 @@ __all__ = [
     "RUST_COMPANION",
     "RUST_POOL_SELECT",
     "OperatorSpec",
+    "ResidentTypeDomain",
+    "ResidentTypeRule",
     "operator_spec",
 ]
 
@@ -56,13 +58,62 @@ RequiredKernel = Literal["crypto", "index", "raw_hex", "fpe"]
 AssemblyShape = Literal["tokenizing", "null_on_empty", "type_preserving"]
 
 
+# Named resident-type families, evaluated here and nowhere else. A family covers types that an
+# exact set cannot list (a timezone is a free string). Empty until a slice proves one.
+_RESIDENT_TYPE_FAMILIES: Final[Mapping[str, Callable[[pa.DataType], bool]]] = MappingProxyType({})
+
+
+@dataclass(frozen=True)
+class ResidentTypeRule:
+    """One admitted domain: an exact-type set plus any named families from the central vocabulary."""
+
+    exact: frozenset[pa.DataType]
+    families: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        unknown = self.families - _RESIDENT_TYPE_FAMILIES.keys()
+        if unknown:
+            raise ValueError(f"unknown resident-type families: {sorted(unknown)!r}")
+
+    def admits(self, resident_type: pa.DataType) -> bool:
+        return resident_type in self.exact or any(
+            _RESIDENT_TYPE_FAMILIES[name](resident_type) for name in self.families
+        )
+
+
+@dataclass(frozen=True)
+class ResidentTypeDomain:
+    """The resident types one operator admits, per keying variant.
+
+    `positional` applies to a position-keyed node (it reads only the null mask, so it admits
+    more); `deterministic` applies to a value-keyed node of an operator that has one (C5c-ii
+    Faker: string plus bool/int/uint). A variant left `None` falls back to `default`."""
+
+    default: ResidentTypeRule
+    positional: ResidentTypeRule | None = None
+    deterministic: ResidentTypeRule | None = None
+
+    def rule_for(self, params: Any) -> ResidentTypeRule:
+        """The rule for a node bound with `params` (a node's `positional` flag picks the variant)."""
+        variant = self.positional if getattr(params, "positional", False) else self.deterministic
+        return variant if variant is not None else self.default
+
+    def admits(self, resident_type: pa.DataType, params: Any) -> bool:
+        """Whether a node bound with `params` admits a target column of `resident_type`."""
+        return self.rule_for(params).admits(resident_type)
+
+
+def _exact(types: frozenset[pa.DataType]) -> ResidentTypeDomain:
+    return ResidentTypeDomain(default=ResidentTypeRule(exact=types))
+
+
 @dataclass(frozen=True)
 class OperatorSpec:
     """The facts about one native slice operator that more than one module needs.
 
-    `unified_resident_types` is the target-column type domain the unified slice admits;
-    `None` means "no target type gate", which is group_key (its admission checks the
-    sibling column instead, so it has no entry in the derived table).
+    `resident_type_domain` is the target-column type domain the unified slice admits, asked
+    only through `ResidentTypeDomain.admits`; `None` means "no target type gate", which is
+    group_key (its admission checks the sibling column instead).
     `required_kernel` names the compiled kernel the operator loads, `None` for the
     pure-Arrow operators. `positive_kernel_evidence` marks operators whose "compiled kernel
     ran" claim must be observed rather than inferred. `routed_diagnostics` lists the
@@ -74,16 +125,9 @@ class OperatorSpec:
     planned_backend: str
     required_kernel: RequiredKernel | None
     positive_kernel_evidence: bool
-    unified_resident_types: frozenset[pa.DataType] | None
+    resident_type_domain: ResidentTypeDomain | None
     full_frame_assembly: AssemblyShape
     provider_allowlist: frozenset[str] | None = None
-    # The wider source-type domain of the position-keyed variant, which reads only its source's
-    # null mask. `None` means the variant has no domain of its own.
-    positional_resident_types: frozenset[pa.DataType] | None = None
-    # The source-type domain of the DETERMINISTIC variant, which keys from the source VALUE
-    # (C5c-ii: string plus bool/int/uint). `None` means the operator has no deterministic domain
-    # of its own, so the plain `unified_resident_types` applies.
-    deterministic_resident_types: frozenset[pa.DataType] | None = None
     # Diagnostic obligations the unified-slice coordinator actually ROUTES for this
     # operator. A coordinator policy, not a capability fact: an operator whose
     # capabilities declare any diagnostic outside this set declines the unified slice.
@@ -136,7 +180,7 @@ _SPECS = (
         planned_backend=ARROW_PYTHON,
         required_kernel=None,
         positive_kernel_evidence=False,
-        unified_resident_types=frozenset({pa.string(), pa.int64(), pa.bool_()}),
+        resident_type_domain=_exact(frozenset({pa.string(), pa.int64(), pa.bool_()})),
         full_frame_assembly="type_preserving",
     ),
     OperatorSpec(
@@ -146,7 +190,7 @@ _SPECS = (
         planned_backend=ARROW_PYTHON,
         required_kernel=None,
         positive_kernel_evidence=False,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=_exact(_STRING_ONLY),
         full_frame_assembly="tokenizing",
     ),
     OperatorSpec(
@@ -156,7 +200,7 @@ _SPECS = (
         planned_backend=ARROW_PYTHON,
         required_kernel=None,
         positive_kernel_evidence=False,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=_exact(_STRING_ONLY),
         full_frame_assembly="tokenizing",
     ),
     OperatorSpec(
@@ -166,7 +210,7 @@ _SPECS = (
         planned_backend=ARROW_PYTHON,
         required_kernel=None,
         positive_kernel_evidence=False,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=_exact(_STRING_ONLY),
         # The oracle assigns an object column, so an empty or all-null result is Arrow null.
         full_frame_assembly="null_on_empty",
     ),
@@ -177,7 +221,7 @@ _SPECS = (
         planned_backend=ARROW_PYTHON,
         required_kernel=None,
         positive_kernel_evidence=False,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=_exact(_STRING_ONLY),
         # The handler assigns a fresh object column, so an empty or all-null result is Arrow
         # null on the full-frame route (same as text_redact); the chunked route pins string.
         full_frame_assembly="null_on_empty",
@@ -194,7 +238,7 @@ _SPECS = (
         planned_backend=RUST_COMPANION,
         required_kernel="crypto",
         positive_kernel_evidence=True,
-        unified_resident_types=frozenset({pa.string(), pa.int64()}),
+        resident_type_domain=_exact(frozenset({pa.string(), pa.int64()})),
         full_frame_assembly="tokenizing",
     ),
     OperatorSpec(
@@ -204,10 +248,12 @@ _SPECS = (
         planned_backend=RUST_POOL_SELECT,
         required_kernel="index",
         positive_kernel_evidence=True,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=ResidentTypeDomain(
+            default=ResidentTypeRule(exact=_STRING_ONLY),
+            positional=ResidentTypeRule(exact=_STRING_ONLY | POSITIONAL_FAKER_SOURCE_TYPES),
+            deterministic=ResidentTypeRule(exact=_STRING_ONLY | DETERMINISTIC_FAKER_SOURCE_TYPES),
+        ),
         full_frame_assembly="tokenizing",
-        positional_resident_types=_STRING_ONLY | POSITIONAL_FAKER_SOURCE_TYPES,
-        deterministic_resident_types=_STRING_ONLY | DETERMINISTIC_FAKER_SOURCE_TYPES,
         # The string-pool providers proven by tests/parity/test_faker_native_widen.py. Every
         # other pool_native provider is rejected with a coded reason rather than silently
         # admitted; tests/sentry/defects/test_faker_native_allowlist_total.py walks the live
@@ -237,7 +283,7 @@ _SPECS = (
         planned_backend=RUST_COMPANION,
         required_kernel="index",
         positive_kernel_evidence=False,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=_exact(_STRING_ONLY),
         full_frame_assembly="tokenizing",
     ),
     OperatorSpec(
@@ -247,7 +293,7 @@ _SPECS = (
         planned_backend=RUST_COMPANION,
         required_kernel="index",
         positive_kernel_evidence=False,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=_exact(_STRING_ONLY),
         # Differs from the tokenizing operators only on an empty column: it passes its
         # source object series through, which becomes an Arrow null column.
         full_frame_assembly="null_on_empty",
@@ -260,7 +306,7 @@ _SPECS = (
         planned_backend=RUST_COMPANION,
         required_kernel="raw_hex",
         positive_kernel_evidence=False,
-        unified_resident_types=None,
+        resident_type_domain=None,
         full_frame_assembly="tokenizing",
     ),
     OperatorSpec(
@@ -270,7 +316,9 @@ _SPECS = (
         planned_backend=RUST_COMPANION,
         required_kernel="index",
         positive_kernel_evidence=False,
-        unified_resident_types=_STRING_ONLY,
+        # A typed `date32` source (plan shape DATE) shifts natively too (DATE-SHIFT-TYPED S1);
+        # the config rejection checks the plan shape against the resident type.
+        resident_type_domain=_exact(_STRING_ONLY | {pa.date32()}),
         full_frame_assembly="tokenizing",
         routed_diagnostics=frozenset({"reduce_row_error:format_error"}),
     ),
@@ -283,7 +331,7 @@ _SPECS = (
         # The compiled FF1 kernel runs over the source column, so its "the compiled kernel
         # ran" claim is observed (like hash), never inferred.
         positive_kernel_evidence=True,
-        unified_resident_types=_STRING_ONLY,
+        resident_type_domain=_exact(_STRING_ONLY),
         # The handler assigns a fresh Python list (`df[column] = out`), so an empty column
         # rounds through pandas as float64, an all-null one as null, an all-empty one as string
         # -- exactly the tokenizing reconciliation (C6a plan §3i). fpe stays OUT of the chunked

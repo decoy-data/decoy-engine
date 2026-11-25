@@ -12,10 +12,12 @@ the same column.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._categorical_prepared import prepare_categorical
 from decoy_engine.execution.native._requirements import resolve_input_arrow_type
@@ -143,6 +145,73 @@ def _date_shift_bound_rejection(name: str, key: str, value: Any) -> str | None:
     return None
 
 
+def _date_shift_window_rejection(name: str, provider_config: dict[str, Any]) -> str | None:
+    # Imported lazily: the transform module pulls in pandas, which the planning boundary keeps
+    # off its module-load path.
+    from decoy_engine.transforms.date_shift import WINDOW_BOUND_KEYS, shift_window_problem
+
+    for key in WINDOW_BOUND_KEYS:
+        reason = _date_shift_bound_rejection(name, key, provider_config.get(key, _ABSENT))
+        if reason is not None:
+            return reason
+    problem = shift_window_problem(provider_config)
+    if problem is not None:
+        return f"date_shift_{problem}:{name}"
+    return None
+
+
+# The resident type each typed date shape runs natively over. S1 admits `date32` under `DATE`; a
+# shape missing here (TIMESTAMP_TZ until S2) declines every resident type.
+_TYPED_DATE_SHIFT_RESIDENT: Final[Mapping[ColumnShape, pa.DataType]] = MappingProxyType(
+    {ColumnShape.DATE: pa.date32()}
+)
+
+
+def _typed_date_shift_rejection(
+    name: str,
+    table: str,
+    shape: ColumnShape,
+    provider_config: dict[str, Any],
+    resident_sources: Mapping[str, Any] | None,
+) -> str | None:
+    """The typed half of `date_shift_config_rejection`: window bounds, no `preserve_values`, and
+    the resident type the shape names. Only a resident table is read for the type (never the
+    profile's coarse label); without one the decision defers to the route's real-type gate."""
+    reason = typed_date_shift_preserve_rejection(name, provider_config)
+    if reason is not None:
+        return reason
+    reason = _date_shift_window_rejection(name, provider_config)
+    if reason is not None:
+        return reason
+    return typed_date_shift_type_rejection(name, table, shape, resident_sources)
+
+
+def typed_date_shift_preserve_rejection(
+    name: str, provider_config: Mapping[str, Any]
+) -> str | None:
+    """The coded reason a typed `date_shift` column with `preserve_values` runs on the oracle,
+    or None. The one check for both the config gate and the route's policy decline."""
+    from decoy_engine.transforms.date_preserve import has_preserve_values
+
+    if has_preserve_values(provider_config):
+        return f"date_shift_typed_preserve_not_native:{name}"
+    return None
+
+
+def typed_date_shift_type_rejection(
+    name: str, table: str, shape: ColumnShape, resident_sources: Mapping[str, Any] | None
+) -> str | None:
+    """The coded reason a typed `date_shift` column's resident type is not the one its shape
+    runs natively over, or None (also None when no resident table carries the column)."""
+    source = (resident_sources or {}).get(table)
+    if not isinstance(source, pa.Table) or name not in source.schema.names:
+        return None
+    resident = source.schema.field(name).type
+    if resident != _TYPED_DATE_SHIFT_RESIDENT.get(shape):
+        return f"date_shift_typed_type_not_native:{name}:{resident!s}"
+    return None
+
+
 def date_shift_config_rejection(
     name: str,
     table: str,
@@ -151,8 +220,14 @@ def date_shift_config_rejection(
     namespace: str | None,
     provider_config: dict[str, Any],
     resident_sources: Mapping[str, Any] | None = None,
+    shape: ColumnShape | None = None,
 ) -> str | None:
     """The coded reason a `date_shift` column cannot run natively, or None.
+
+    ``shape`` is the plan's native date shape for the column (``native_date_columns``), None for
+    a text column. A typed column needs no format (the oracle ignores one), declines
+    ``preserve_values``, and runs natively only over the resident type its shape names; see
+    `_typed_date_shift_rejection`.
 
     v1 admits ONLY the namespaced, string-source, explicit-`date_format`,
     tz-free, no-`group_by` variant with integer day bounds. A missing format only
@@ -166,6 +241,8 @@ def date_shift_config_rejection(
         return f"date_shift_requires_namespace:{name}"
     if provider_config.get("group_by"):
         return f"date_shift_group_by_not_native:{name}"
+    if shape is not None:
+        return _typed_date_shift_rejection(name, table, shape, provider_config, resident_sources)
     date_format = provider_config.get("date_format")
     if not isinstance(date_format, str) or not date_format:
         return f"date_shift_requires_date_format:{name}"
@@ -179,17 +256,9 @@ def date_shift_config_rejection(
 
     if preserve_config_problem(provider_config) is not None:
         return f"date_shift_preserve_values_invalid:{name}"
-    # Imported lazily: the transform module pulls in pandas, which the planning boundary keeps
-    # off its module-load path.
-    from decoy_engine.transforms.date_shift import WINDOW_BOUND_KEYS, shift_window_problem
-
-    for key in WINDOW_BOUND_KEYS:
-        reason = _date_shift_bound_rejection(name, key, provider_config.get(key, _ABSENT))
-        if reason is not None:
-            return reason
-    problem = shift_window_problem(provider_config)
-    if problem is not None:
-        return f"date_shift_{problem}:{name}"
+    reason = _date_shift_window_rejection(name, provider_config)
+    if reason is not None:
+        return reason
     # With neither a profile nor a resident source, the input type is
     # unknowable and this defers to the unified-slice resident-type gate
     # (matches hash/bucket_perturb); a RESOLVED non-string type rejects here.
@@ -208,7 +277,7 @@ def date_shift_config_rejection(
 # integer, bool, string, large_string, date, timestamp), and the operator itself
 # masks all of them byte-identically -- but the sibling MUST be an unmasked
 # passthrough node, and passthrough's own production resident set is exactly
-# {string, int64, bool} (`_unified_slice_resident_types._ADMITTED_RESIDENT_TYPES`).
+# {string, int64, bool} (`OPERATORS["passthrough"].resident_type_domain`).
 # So a large_string/int32/uint64/date/timestamp sibling could never activate
 # end-to-end anyway; admitting it here would over-advertise. Narrow to the
 # intersection so admission is honest; float/decimal/dictionary stay excluded
@@ -225,8 +294,9 @@ def group_key_sibling_types(
     return frozenset(t for t in (passthrough_types or frozenset()) if group_by_type_is_safe(t))
 
 
+_PASSTHROUGH_DOMAIN = OPERATORS["passthrough"].resident_type_domain
 _NATIVE_GROUP_KEY_SIBLING_TYPES = group_key_sibling_types(
-    OPERATORS["passthrough"].unified_resident_types
+    _PASSTHROUGH_DOMAIN.default.exact if _PASSTHROUGH_DOMAIN is not None else None
 )
 
 
@@ -321,4 +391,5 @@ __all__ = [
     "is_deterministic_categorical",
     "text_mask_config_rejection",
     "text_redact_config_rejection",
+    "typed_date_shift_type_rejection",
 ]

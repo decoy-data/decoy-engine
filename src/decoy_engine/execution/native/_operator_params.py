@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._strategies._faker_positional import faker_selection_namespace
@@ -137,11 +138,14 @@ class GroupKeyParams:
 
 @dataclass(frozen=True)
 class DateShiftParams:
-    date_format: str
+    # None exactly when `shape` is set: a typed column is read as dates, never parsed.
+    date_format: str | None
     min_days: int
     max_days: int
     namespace: str | None
     preserve: PreserveSet | None = None
+    # The plan's native date shape, carried from admission so the run never re-reads the config.
+    shape: ColumnShape | None = None
 
 
 @dataclass(frozen=True)
@@ -202,8 +206,12 @@ def resolve_operator_params(
     provider_config: Mapping[str, Any],
     namespace: str | None,
     prepared_categorical: PreparedCategorical | None = None,
+    date_shape: ColumnShape | None = None,
 ) -> OperatorParams:
     """The resolved parameters of one admitted column.
+
+    `date_shape` is the plan's native date shape for a date_shift column (None for text); a
+    typed column resolves no `date_format` and no `preserve_values` (admission declined one).
 
     `target` is the column the operator writes (group_key's namespace is derived from it).
     `prepared_categorical` is the artifact the caller already holds for a categorical column:
@@ -291,6 +299,8 @@ def resolve_operator_params(
         )
     if strategy == "date_shift":
         min_days, max_days = shift_window(cfg)
+        if date_shape is not None:
+            return DateShiftParams(None, min_days, max_days, namespace, shape=date_shape)
         return DateShiftParams(
             cfg["date_format"],
             min_days,
@@ -330,6 +340,7 @@ def resolve_params_by_column(
     *,
     excluded: frozenset[str],
     table: str | None = None,
+    plan: Any = None,
 ) -> dict[str, OperatorParams]:
     """Parameters for every configured column of one table, resolved once for the whole run
     (defaults, coercions and namespaces never change between chunks).
@@ -338,7 +349,13 @@ def resolve_params_by_column(
     its strategy is not a native operator, or when it is a categorical the chunked entry did
     not prepare. The route then fails closed on the missing entry, as it did when it looked
     these up per chunk. `table` keys the default selection namespace of a position-keyed faker.
+    `plan` is the compiled plan; a typed date_shift column takes the shape it lists there.
     """
+    from decoy_engine.execution.native._real_type_admission import table_date_shapes
+
+    date_shapes = (
+        {} if plan is None or table is None else table_date_shapes(plan, table, col_seed_by_name)
+    )
     params: dict[str, OperatorParams] = {}
     for name, seed in col_seed_by_name.items():
         if name in excluded or seed.strategy not in OPERATORS:
@@ -354,5 +371,6 @@ def resolve_params_by_column(
             provider_config=provider_config_to_dict(seed.provider_config),
             namespace=seed.namespace,
             prepared_categorical=prepared_categoricals.get(name),
+            date_shape=date_shapes.get(name) if seed.strategy == "date_shift" else None,
         )
     return params

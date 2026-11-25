@@ -140,3 +140,104 @@ def test_allowlist_entries_are_real() -> None:
     assert not stale, (
         "Stale PUBLIC_BOUNDARY_ALLOWLIST entries -- remove them:\n  - " + "\n  - ".join(stale)
     )
+
+
+# `generation.pool` exports `canonicalize_typed_array`; execution/ reads it from the package,
+# not the private `_canonicalize` module. The only name execution/ may still take from the
+# private module is `_canonicalize_source`, at the sites below (this set may only shrink).
+_CANONICALIZE_PRIVATE = "decoy_engine.generation.pool._canonicalize"
+_CANONICALIZE_PRIVATE_SITES = frozenset(
+    {
+        "execution/_strategies/_categorical.py",
+        "execution/_strategies/_date_shift.py",
+        "execution/native/_index_ext.py",
+        "execution/out_of_core/_mask_group_b.py",
+    }
+)
+
+
+def _private_canonicalize_imports(rel: str, source: str) -> set[tuple[str, str]]:
+    """Every import of the private module or a name in it, under any spelling: absolute or
+    relative, aliased, or the module itself taken from its package (`from ...pool import
+    _canonicalize as c`). The one import resolver is `_retry_scan.import_bindings`."""
+    import ast
+
+    from tests.sentry._retry_scan import import_bindings, package_of
+
+    tree = ast.parse(source)
+    found: set[tuple[str, str]] = set()
+    for target in import_bindings(tree, package_of(rel)).values():
+        if target == _CANONICALIZE_PRIVATE:
+            found.add((rel, _CANONICALIZE_PRIVATE.rsplit(".", 1)[1]))
+        elif target.startswith(_CANONICALIZE_PRIVATE + "."):
+            found.add((rel, target.removeprefix(_CANONICALIZE_PRIVATE + ".")))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found |= {(rel, a.name) for a in node.names if a.name == _CANONICALIZE_PRIVATE}
+    return found
+
+
+def _canonicalize_offenders(sources: dict[str, str]) -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    for rel, text in sources.items():
+        found |= _private_canonicalize_imports(rel, text)
+    return {
+        (rel, name)
+        for rel, name in found
+        if rel not in _CANONICALIZE_PRIVATE_SITES or name != "_canonicalize_source"
+    }
+
+
+def _execution_sources() -> dict[str, str]:
+    root = ENGINE_ROOT / "execution"
+    return {
+        p.relative_to(ENGINE_ROOT).as_posix(): p.read_text(encoding="utf-8")
+        for p in root.rglob("*.py")
+    }
+
+
+def test_execution_reads_canonicalize_through_the_package() -> None:
+    sources = _execution_sources()
+    assert not _canonicalize_offenders(sources)
+    still = {
+        rel
+        for rel, _ in set().union(
+            *(_private_canonicalize_imports(r, t) for r, t in sources.items())
+        )
+    }
+    assert still == _CANONICALIZE_PRIVATE_SITES, "ratchet the site set down"
+
+
+def test_a_private_canonicalize_import_in_execution_is_red() -> None:
+    """Mutation: `_date_shift_ext.py` takes `canonicalize_typed_array` from the private module."""
+    rel = "execution/native/_date_shift_ext.py"
+    text = (ENGINE_ROOT / rel).read_text(encoding="utf-8")
+    old = "from decoy_engine.generation.pool import GenerationError, canonicalize_typed_array"
+    assert old in text
+    mutated = text.replace(
+        old,
+        "from decoy_engine.generation.pool import GenerationError\n"
+        f"from {_CANONICALIZE_PRIVATE} import canonicalize_typed_array",
+    )
+    assert _canonicalize_offenders({rel: mutated}) == {(rel, "canonicalize_typed_array")}
+    rel2 = "execution/_strategies/_date_shift.py"
+    text2 = (ENGINE_ROOT / rel2).read_text(encoding="utf-8")
+    mutated2 = text2.replace(
+        f"from {_CANONICALIZE_PRIVATE} import _canonicalize_source",
+        f"from {_CANONICALIZE_PRIVATE} import _canonicalize_source, canonicalize_typed_array",
+    )
+    assert mutated2 != text2
+    assert _canonicalize_offenders({rel2: mutated2}) == {(rel2, "canonicalize_typed_array")}
+
+
+def test_every_spelling_of_the_private_import_is_red() -> None:
+    """Mutations: an aliased module import, a relative one, and an aliased name."""
+    spellings = [
+        "from decoy_engine.generation.pool import _canonicalize as c\n",
+        "from decoy_engine.generation.pool._canonicalize import canonicalize_typed_array as c\n",
+        "from ..generation.pool import _canonicalize\n",
+        "from ..generation.pool._canonicalize import _canonicalize_source as c\n",
+    ]
+    for spelling in spellings:
+        sources = {"execution/_chunked_x.py": spelling}
+        assert _canonicalize_offenders(sources), spelling

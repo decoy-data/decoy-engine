@@ -274,7 +274,7 @@ def _bound_params(
                 raise AssertionError("date_shift node reached run_operator with no KeyBinding")
             if (
                 not isinstance(params, DateShiftParams)
-                or params.date_format is None
+                or (params.date_format is None) == (params.shape is None)
                 or params.min_days is None
                 or params.max_days is None
             ):  # pragma: no cover - C0 binds all three together with the KeyBinding

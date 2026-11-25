@@ -267,6 +267,15 @@ SOURCES: tuple[Source, ...] = (
         "defects/test_faker_pool_size_one_resolver.py",
         in_code("defects/test_faker_pool_size_one_resolver.py", "ALLOWED"),
     ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "date-shift-one-arithmetic",
+        "tests/sentry/baselines/date-shift-one-arithmetic.json",
+        lambda: set(
+            json.loads((BASELINES / "date-shift-one-arithmetic.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
     Source(
         "faker-native-allowlist-total",
         "defects/test_faker_native_allowlist_total.py",

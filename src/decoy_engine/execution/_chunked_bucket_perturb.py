@@ -108,14 +108,9 @@ def config_proves_text(config: dict[str, Any], *, table: str, column: str) -> bo
 
 def typed_date_columns(plan: Plan, *, table: str) -> frozenset[str]:
     """The columns of `table` the plan lists as native dates, from the plan field every route reads."""
-    from decoy_engine.contracts.column_shape import native_date_shapes
-    from decoy_engine.declared_casting._boundary import (
-        declared_date_shift_columns,
-        plan_column_shapes,
-    )
+    from decoy_engine.declared_casting import plan_native_date_shapes
 
-    native = native_date_shapes(plan_column_shapes(plan), declared_date_shift_columns(plan))
-    return frozenset(column for (t, column) in native if t == table)
+    return frozenset(column for (t, column) in plan_native_date_shapes(plan) if t == table)
 
 
 def _text_bucket_perturb_columns(
