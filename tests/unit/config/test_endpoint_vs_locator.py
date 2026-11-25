@@ -21,9 +21,7 @@ CASES: list[dict[str, Any]] = json.loads(
     )
 )
 HTTP_CARRIES = [
-    r
-    for r in CASES
-    if r["carries"] and r["input"].lower().startswith(("http://", "https://"))
+    r for r in CASES if r["carries"] and r["input"].lower().startswith(("http://", "https://"))
 ]
 
 
