@@ -36,7 +36,7 @@ _CLEAN = [
     "customer:/tmp/archive:/alice@local/file.parquet",
     "customer:C:\\data\\c.parquet",
     "customer:https:\\\\host.example\\corpora\\c.parquet",
-    "customer://server/share/a@b.parquet",
+    "customer://server/share/f.parquet",
     "shipped",
 ]
 

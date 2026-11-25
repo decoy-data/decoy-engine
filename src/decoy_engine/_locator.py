@@ -30,8 +30,7 @@ _EMBEDDED_URL_RE = re.compile(
     + r"):[/\\])(?P<rest>.*)",
     re.DOTALL,
 )
-# A network path with no scheme: `//user:secret@host/key`. A UNC name has no `@`, so only one
-# whose first segment holds an `@` is read as userinfo.
+# A network path with no scheme: `//user:secret@host/key`, read like the part after a scheme.
 _NETWORK_PATH_RE = re.compile(r"\A(?P<slashes>[/\\]{2})(?P<rest>.*)", re.DOTALL)
 _DELIMS_RE = re.compile(r"[/?#]")
 _MARKS_RE = re.compile(r"[?#]")
@@ -87,10 +86,9 @@ def _scan(text: str) -> tuple[str, bool]:
     hits: list[bool] = []
     network = _NETWORK_PATH_RE.match(text)
     if network is not None:
-        rest = network["rest"].replace("\\", "/")
-        first = _DELIMS_RE.split(rest, maxsplit=1)[0]
-        if "@" in first:
-            return _redact_rest("//", network["rest"], hits), True
+        # One rule with the scheme URLs. A path with no `@`, `?` or `#` is left as written.
+        out = _redact_rest("//", network["rest"], hits)
+        return (out, True) if hits else (text, False)
     return _LOCATOR_URL_RE.sub(lambda m: _redact_url(m, hits), text), bool(hits)
 
 
