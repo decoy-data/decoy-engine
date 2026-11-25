@@ -13,8 +13,8 @@ import pytest
 
 from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan, plan_to_yaml
-from decoy_engine.plan._checks_code_set_locator import check_code_set_corpus_locators
 from decoy_engine.plan._compile import run_config_only_checks
+from decoy_engine.plan.checks._code_set_locator import check_code_set_corpus_locators
 from decoy_engine.profile import Profile
 
 _PW = "ZQX-PASSWORD-7731"
@@ -25,6 +25,9 @@ _BAD = [
     f"customer:https://host.example/c.parquet#{_TOK}",
     f"customer:https://svc:pa/{_PW}@host/c.parquet",
     f"customer:https:\\\\svc:{_PW}@host\\c.parquet",
+    f"customer://svc:{_PW}@host/c.parquet",
+    f"https://host.example/c.parquet?token={_TOK}",
+    f"s3://svc:{_PW}@bucket/key.parquet",
 ]
 _CLEAN = [
     "customer:https://host.example/corpora/c.parquet",
@@ -32,6 +35,8 @@ _CLEAN = [
     "customer:/data/corpora/c.parquet",
     "customer:/tmp/archive:/alice@local/file.parquet",
     "customer:C:\\data\\c.parquet",
+    "customer:https:\\\\host.example\\corpora\\c.parquet",
+    "customer://server/share/a@b.parquet",
     "shipped",
 ]
 
@@ -112,3 +117,39 @@ def test_compile_never_yields_a_plan_holding_the_secret(
         sources=NO_SOURCES,
     )
     assert _PW not in plan_to_yaml(plan)
+
+
+@pytest.mark.parametrize("name", [f"https://svc:{_PW}@host/c", f"icd10?token={_TOK}"])
+def test_a_credential_bearing_corpus_name_is_refused(name: str) -> None:
+    cfg = {
+        "tables": [
+            {
+                "name": "t",
+                "columns": [
+                    {
+                        "name": "dx",
+                        "strategy": "code_set",
+                        "provider_config": {"code_set": name},
+                    }
+                ],
+            }
+        ]
+    }
+    with pytest.raises(PlanCompileError) as info:
+        check_code_set_corpus_locators(cfg)
+    assert info.value.code == "code_set_corpus_source_credentials"
+    assert info.value.path == "provider_config.code_set"
+    assert _PW not in str(info.value) and _TOK not in str(info.value)
+
+
+@pytest.mark.parametrize("source", _BAD)
+def test_no_plan_yaml_is_produced_for_a_bad_source(
+    source: str, simple_config: dict, simple_profile: Profile
+) -> None:
+    with pytest.raises(PlanCompileError):
+        compile_plan(
+            _config(source, simple_config),
+            simple_profile,
+            decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
+        )

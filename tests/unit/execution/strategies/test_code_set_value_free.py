@@ -12,8 +12,6 @@ import pathlib
 from typing import Any
 
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution._adapter import StrategyContext
@@ -24,6 +22,7 @@ from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
 from decoy_engine.transforms.code_set import CodeSetConfig, apply_code_set, resolve_corpus_record
+from tests._code_set_memo import customer_corpus
 
 _CANARY = "ZQX-CANARY-9931"
 
@@ -52,20 +51,6 @@ def _plan(cfg: dict[str, Any]) -> ColumnSeed:
     )
 
 
-def _corpus(tmp_path: pathlib.Path, codes: list[str], chapters: list[str]) -> str:
-    path = tmp_path / "c.parquet"
-    pq.write_table(
-        pa.table(
-            {
-                "code": pa.array(codes, type=pa.string()),
-                "chapter": pa.array(chapters, type=pa.string()),
-            }
-        ),
-        str(path),
-    )
-    return f"customer:{path}"
-
-
 def _assert_value_free(exc: BaseException, caplog: pytest.LogCaptureFixture, code: str) -> None:
     assert getattr(exc, "code", None) == code
     assert _CANARY not in str(exc)
@@ -89,7 +74,7 @@ def test_single_row_corpus_error_is_value_free(
         "code_set": "one",
         "mode": "mask",
         "chapter_preserve": False,
-        "corpus_source": _corpus(tmp_path, [_CANARY], ["A"]),
+        "corpus_source": customer_corpus(tmp_path, [_CANARY], ["A"]),
     }
     exc = _run_expect_raise(cfg, [_CANARY], caplog)
     _assert_value_free(exc, caplog, "code_set_single_row_corpus")
@@ -112,7 +97,7 @@ def test_sole_member_bucket_error_is_value_free(
         "code_set": "ab",
         "mode": "mask",
         "chapter_preserve": True,
-        "corpus_source": _corpus(tmp_path, ["A01", "A02", _CANARY], ["A", "A", "Q"]),
+        "corpus_source": customer_corpus(tmp_path, ["A01", "A02", _CANARY], ["A", "A", "Q"]),
     }
     exc = _scalar_error(cfg, _CANARY)
     _assert_value_free(exc, caplog, "code_set_sole_member_bucket")
@@ -125,7 +110,7 @@ def test_chapter_absent_error_is_value_free(
         "code_set": "ab",
         "mode": "mask",
         "chapter_preserve": True,
-        "corpus_source": _corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
+        "corpus_source": customer_corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
     }
     exc = _scalar_error(cfg, _CANARY)
     _assert_value_free(exc, caplog, "code_set_chapter_absent")
@@ -138,7 +123,7 @@ def test_version_pin_mismatch_is_value_free(
         "code_set": "ab",
         "mode": "mask",
         "corpus_source_version": _CANARY,
-        "corpus_source": _corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
+        "corpus_source": customer_corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
     }
     exc = _run_expect_raise(cfg, ["A01"], caplog)
     _assert_value_free(exc, caplog, "code_set_corpus_version_mismatch")
@@ -151,7 +136,7 @@ def test_list_valued_version_pin_is_value_free(
         "code_set": "ab",
         "mode": "mask",
         "corpus_source_version": [_CANARY],
-        "corpus_source": _corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
+        "corpus_source": customer_corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
     }
     exc = _run_expect_raise(cfg, ["A01"], caplog)
     _assert_value_free(exc, caplog, "code_set_corpus_source_version_invalid")
@@ -163,7 +148,7 @@ def test_unsupported_mode_is_value_free(
     cfg = {
         "code_set": "ab",
         "mode": _CANARY,
-        "corpus_source": _corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
+        "corpus_source": customer_corpus(tmp_path, ["A01", "A02"], ["A", "A"]),
     }
     exc = _run_expect_raise(cfg, ["A01"], caplog)
     assert _CANARY not in str(exc)

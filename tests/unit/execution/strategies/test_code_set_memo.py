@@ -24,7 +24,7 @@ from decoy_engine.execution._strategies._code_set import CodeSetHandler
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
-from tests._code_set_memo import SEED, base_run, make_ctx, make_seed
+from tests._code_set_memo import SEED, base_run, customer_corpus, make_ctx, make_seed
 
 
 def _snapshot(fn: Any, df: pd.DataFrame, plan: ColumnSeed) -> tuple:
@@ -48,18 +48,13 @@ def _snapshot(fn: Any, df: pd.DataFrame, plan: ColumnSeed) -> tuple:
 
 
 def _customer_corpus(tmp_path: pathlib.Path) -> str:
-    path = tmp_path / "ab.parquet"
-    pq.write_table(
-        pa.table(
-            {
-                "code": pa.array(["A01", "A02", "B01", "B02", "C01"], type=pa.string()),
-                # Chapter C holds one code, so C01 hits the sole-member-bucket error.
-                "chapter": pa.array(["A", "A", "B", "B", "C"], type=pa.string()),
-            }
-        ),
-        str(path),
+    # Chapter C holds one code, so C01 hits the sole-member-bucket error.
+    return customer_corpus(
+        tmp_path,
+        ["A01", "A02", "B01", "B02", "C01"],
+        ["A", "A", "B", "B", "C"],
+        filename="ab.parquet",
     )
-    return f"customer:{path}"
 
 
 _OPTION_SETS = [

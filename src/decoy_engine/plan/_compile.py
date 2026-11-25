@@ -69,7 +69,6 @@ from decoy_engine.plan._checks import (
 from decoy_engine.plan._checks_bucket_perturb import check_bucket_perturb_config
 from decoy_engine.plan._checks_bucketize import check_bucketize_config
 from decoy_engine.plan._checks_categorical import check_categorical_categories
-from decoy_engine.plan._checks_code_set_locator import check_code_set_corpus_locators
 from decoy_engine.plan._checks_correctness import (
     check_vault_columns,
     check_when_string_output_on_numeric_unsupported,
@@ -111,6 +110,7 @@ from decoy_engine.plan.checks import (
     check_required_strategy_settings,
     column_shape_warnings,
 )
+from decoy_engine.plan.checks._code_set_locator import check_code_set_corpus_locators
 from decoy_engine.plan.checks._column_shapes import build_column_shapes
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
 from decoy_engine.plan.checks._text_mask_strategy import check_text_mask_strategies

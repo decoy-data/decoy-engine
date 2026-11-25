@@ -11,9 +11,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine._locator import locator_carries_credentials, without_url_credentials
 from decoy_engine.execution._strategies._code_set import CodeSetHandler
 from decoy_engine.transforms.code_set import CodeSetConfig, apply_code_set
-from tests._code_set_memo import make_ctx, make_seed
+from tests._code_set_memo import customer_corpus, make_ctx, make_seed
 
 _PW = "ZQX-PASSWORD-7731"
 _TOK = "ZQX-TOKEN-5519"
@@ -21,17 +22,7 @@ _URL = f"https://svc:{_PW}@host.example/corpus?token={_TOK}"
 
 
 def _corpus(tmp_path: pathlib.Path) -> str:
-    path = tmp_path / "ab.parquet"
-    pq.write_table(
-        pa.table(
-            {
-                "code": pa.array(["A01", "A02", "B01", "B02"], type=pa.string()),
-                "chapter": pa.array(["A", "A", "B", "B"], type=pa.string()),
-            }
-        ),
-        str(path),
-    )
-    return f"customer:{path}"
+    return customer_corpus(tmp_path, filename="ab.parquet")
 
 
 @pytest.mark.parametrize("chapter_preserve", [True, False])
@@ -107,11 +98,13 @@ def test_missing_url_source_hides_credentials() -> None:
         ("https://svc:pa/ss@host/c?t=T", "https://<redacted>"),
         ("https://svc:p?w@host/c", "https://<redacted>"),
         ("https://svc:p#w@host/c", "https://<redacted>"),
+        ("//svc:p@ss@host/c.parquet?t=T", "//host/c.parquet?<redacted>"),
+        ("\\\\svc:pw@host\\c.parquet", "//host/c.parquet"),
+        ("//server/share/a@b.parquet", "//server/share/a@b.parquet"),
+        ("https:\\\\host\\c.parquet", "https://host/c.parquet"),
     ],
 )
 def test_url_redactor_shapes(locator: str, expected: str) -> None:
-    from decoy_engine.fileaccess._read import without_url_credentials
-
     assert without_url_credentials(locator) == expected
 
 
@@ -133,8 +126,6 @@ def test_url_redactor_shapes(locator: str, expected: str) -> None:
     ],
 )
 def test_url_redactor_never_keeps_canaries(locator: str) -> None:
-    from decoy_engine.fileaccess._read import without_url_credentials
-
     out = without_url_credentials(locator.format(pw=_PW, tok=_TOK))
     assert _PW not in out
     assert _TOK not in out
@@ -150,8 +141,6 @@ def test_url_redactor_never_keeps_canaries(locator: str) -> None:
     ],
 )
 def test_url_after_a_path_separator_is_suppressed_whole(locator: str) -> None:
-    from decoy_engine.fileaccess._read import without_url_credentials
-
     out = without_url_credentials(locator.format(pw=_PW, tok=_TOK))
     assert _PW not in out
     assert _TOK not in out
@@ -446,3 +435,67 @@ def test_a_shipped_load_diagnostic_does_not_print_none() -> None:
 
     shown = _codeset_loader._where(None)
     assert shown != "None"
+
+
+@pytest.mark.parametrize(
+    "locator",
+    [
+        "//svc:{pw}@host/c.parquet",
+        "\\\\svc:{pw}@host\\c.parquet",
+        "//svc:pa@{pw}@host/c.parquet?t={tok}",
+    ],
+)
+def test_network_path_userinfo_is_redacted_on_every_surface(locator: str) -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    raw = locator.format(pw=_PW, tok=_TOK)
+    _no_secret(without_url_credentials(raw))
+    report = verify_corpus(raw)
+    assert not report.ok
+    _no_secret(report.path)
+    _no_secret(" ".join(report.problems))
+    cfg = CodeSetConfig.from_dict({"code_set": "ab", "corpus_source": f"customer:{raw}"})
+    with pytest.raises(Exception) as info:
+        describe_loaded_corpus_for(cfg)
+    _no_secret(str(info.value))
+
+
+@pytest.mark.parametrize(
+    ("locator", "carries"),
+    [
+        ("https://svc:pw@host/c", True),
+        ("https://host/c?token=T", True),
+        ("https://host/c#frag", True),
+        ("//svc:pw@host/c", True),
+        ("https:\\\\host\\c.parquet", False),
+        ("s3:/bucket/c.parquet", False),
+        ("//server/share/a@b.parquet", False),
+        ("/tmp/archive:/alice@local/file?rev=1", False),
+        ("C:\\data\\c.parquet", False),
+    ],
+)
+def test_carries_credentials_ignores_separator_normalisation(locator: str, carries: bool) -> None:
+    assert locator_carries_credentials(locator) is carries
+
+
+def test_a_credential_free_license_url_is_published(tmp_path: pathlib.Path) -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    path = tmp_path / "lic.parquet"
+    pq.write_table(
+        pa.table(
+            {"code": pa.array(["Z01", "Z02"], type=pa.string())},
+            metadata={
+                b"decoy_corpus": b"x",
+                b"source": b"https://example.org/source",
+                b"source_version": b"1",
+                b"effective_date": b"2026-01-01",
+                b"license": b"https://creativecommons.org/licenses/by/4.0/",
+            },
+        ),
+        str(path),
+    )
+    prov = verify_corpus(path).provenance
+    assert prov is not None
+    assert prov["license"] == "https://creativecommons.org/licenses/by/4.0/"
+    assert prov["source"] == "https://example.org/source"

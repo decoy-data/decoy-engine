@@ -277,8 +277,8 @@ def _validate_provenance(
 
 def _publishable(text: str) -> str:
     """A provenance text field is published only when it carries no URL or credential marker
-    (`@`, `?`, `#`, `:/`); otherwise it is withheld whole, since the stamp is file-supplied."""
-    return "<redacted>" if any(mark in text for mark in ("@", "?", "#", ":/")) else text
+    (`@`, `?`, `#`); otherwise it is withheld whole, since the stamp is file-supplied."""
+    return "<redacted>" if any(mark in text for mark in ("@", "?", "#")) else text
 
 
 def provenance_summary(prov: CodeSetProvenance | None) -> dict[str, Any] | None:

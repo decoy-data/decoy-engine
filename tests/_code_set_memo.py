@@ -6,9 +6,12 @@ row); the memo tests compare the handler to it, and the perf test times against 
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._strategies import _code_set as csm
@@ -18,6 +21,32 @@ from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
 
 SEED = (0x77).to_bytes(8, "big")
+
+AB_CODES = ["A01", "A02", "B01", "B02"]
+AB_CHAPTERS = ["A", "A", "B", "B"]
+
+
+def customer_corpus(
+    tmp_path: pathlib.Path,
+    codes: list[str] | None = None,
+    chapters: list[str] | None = None,
+    *,
+    filename: str = "c.parquet",
+) -> str:
+    """Write a customer corpus Parquet (`code`, `chapter`) and return its `customer:` source."""
+    path = tmp_path / filename
+    pq.write_table(
+        pa.table(
+            {
+                "code": pa.array(AB_CODES if codes is None else codes, type=pa.string()),
+                "chapter": pa.array(
+                    AB_CHAPTERS if chapters is None else chapters, type=pa.string()
+                ),
+            }
+        ),
+        str(path),
+    )
+    return f"customer:{path}"
 
 
 def make_ctx() -> StrategyContext:

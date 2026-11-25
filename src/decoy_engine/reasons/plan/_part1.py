@@ -325,7 +325,9 @@ CODE_SET_CORPUS_PROVENANCE_MALFORMED_STAMP = _d(
 )
 CODE_SET_CORPUS_READ_ERROR = _d("code_set_corpus_read_error", "Code set corpus read error.")
 CODE_SET_CORPUS_SOURCE_CREDENTIALS = _d(
-    "code_set_corpus_source_credentials", "Code set corpus source carries credentials."
+    "code_set_corpus_source_credentials",
+    "Code set corpus source carries credentials.",
+    since=UNRELEASED,
 )
 CODE_SET_CORPUS_SOURCE_VERSION_INVALID = _d(
     "code_set_corpus_source_version_invalid", "Code set corpus source version invalid."

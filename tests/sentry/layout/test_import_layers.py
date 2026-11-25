@@ -50,7 +50,7 @@ LAYERS: tuple[str, ...] = (
     " : contracts : connectors : expressions : validators : sdk : run_result : signed_evidence",
     "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess",
     "errors : reason_adapter : validation_result : release : reasons : instrumentation"
-    " : checksums : _opaque : _lexeme : _error_base : _progress_events : _reference_date"
+    " : checksums : _opaque : _locator : _lexeme : _error_base : _progress_events : _reference_date"
     " : _capacity : codesets : _execution_error : _field_names : _value_free : _arrow_types"
     " : _canonical : _pandas_meta : _nested_json : _duckdb_read",
 )
