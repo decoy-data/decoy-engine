@@ -162,8 +162,10 @@ Rules the builder applies at run time:
    `detector_id`, and `Member(value)` a file name from a manifest. Both take the raw config
    object, never a converted one (Codex R2 V1-2). A name is shown only when `type(value) is str`
    and `approve_name(value)` accepts it; any other type is shown as `<name>` (or `<file>`), and
-   the site refuses it with `Problem.WRONG_TYPE`. `Member` shows the bare name
-   (`PurePosixPath(value).name`) after the same check. `config_position` joins the segments and
+   the site refuses it with `Problem.WRONG_TYPE`. For an exact string, `Member.shown()` checks
+   the raw member for URL syntax (including `://` and network-path references starting with
+   `//`) first. A URL displays as `<file>`. Only then may an ordinary path yield a basename
+   via `PurePosixPath(value).name`; show that basename only if `approve_name` accepts it. `config_position` joins the segments and
    calls `position_key`, so a refusal inside `at_position` binds the table and column with no
    extra call. `Refusal.key` is that joined key.
 2. **Problem.** A closed enum: `MISSING`, `EMPTY`, `WRONG_TYPE`, `NOT_FOUND`, `UNREADABLE`,
@@ -278,7 +280,11 @@ outside `_config_text` is itself a finding, and mypy checks that only a `Refusal
   allowed, because the construction that bound the name is checked where it is built. The one
   named exemption is `_rebuild_load_error` (`profiling/model_pack/loader.py:78`), the pickle
   rebuild of a `ModelPackLoadError` from the text it already had. Any other function that builds
-  a refusal from a parameter not annotated `Refusal` is a finding.
+  a refusal from a parameter not annotated `Refusal` is a finding. On the full engine walk,
+  S1 requires exactly one construction mapping a refusal's fields to `PlanCompileError`, in
+  `plan/_errors.py::refusal_error`. Resolve constructor aliases and positional and keyword
+  arguments. Check the factory's fields there and flag a second mapping even when it uses the
+  correct fields or receives the refusal from a helper. This check has no baseline exemption.
 - **S2 builder arguments, everywhere S1 accepts builder output.** S2 runs on every
   resolved `config_refusal` call in or out of the zero set, including builder arguments sent
   to a factory whose parameter is annotated `Refusal`. Apply the same checks at the producer.
@@ -364,7 +370,7 @@ Classes from the plan contract catalog (`30_Resources/Decoy-Plan-Contract-and-De
 | 7 | check then use on a path | N/A: no new path checks; reads keep their `fileaccess` handles | | | |
 | 8 | weak tests and overclaimed evidence | yes: the R3 test removed `str(root)` before it checked the text | tests assert on the unmodified `str(exc)`, `repr(exc)`, `args` and `path`; A1–A5 red on `da71c502e`, compatibility cells red on their named mutations | A2, the Acceptance tests section | |
 | 9 | refactor drift | yes: about 98 sites change wording | snapshot tests that pin wording are updated in the same commit; reason codes and `path` keys stay the same except the A5 binding and the one `condition_on` code in row 10 | the existing loader unit tests, green | N6 |
-| 10 | frozen contract drift | yes, narrow: one reason code changes for one input. A non-string `condition_on` whose `str()` names a withheld column got `statistical_snapshot_values_redacted` on `da71c502e` and gets `statistical_joint_missing` now. No error class or public name changes (Frozen contracts touched) | the type check runs before the withheld-values check, and every non-string `condition_on` gets one code | A9 withheld-column cell, the re-pinned redacted-snapshot test | N27, N34 |
+| 10 | frozen contract drift | yes, narrow: one reason code changes for one input. A non-string `condition_on` whose `str()` names a withheld column got `statistical_snapshot_values_redacted` on `da71c502e` and gets `statistical_joint_missing` now. Existing error classes and names stay available (Frozen contracts touched) | the type check runs before the withheld-values check, and every non-string `condition_on` gets one code | A9 withheld-column cell, the re-pinned redacted-snapshot test | N27, N34 |
 
 ## Enumerations
 
@@ -389,7 +395,9 @@ Each loader has four exits: success, read failure, parse failure, validation ref
   `UnknownTimeZoneError` with the zone name (Codex R2 V1-1).
 - Statistical spec: `source_column` is converted with `str()` before lookup
   (`src/decoy_engine/generation/statistical/_spec.py:326`), so a list prints its items
-  (Codex R2 V1-2). In the same module, validate each non-None raw `condition_on` before
+  (Codex R2 V1-2). At the current `_spec.py:268`, use `col_cfg.get("source_column", name)`
+  and check the result with `type(source_column) is str` before lookup. Only an absent key
+  defaults to the output name. In the same module, validate each non-None raw `condition_on` before
   passing it to the withheld-values check or looking up a joint. Remove both string conversions;
   keep None and valid categorical string behavior. Keep `STATISTICAL_CONDITION_KIND_INVALID`
   for a non-categorical conditioning request. On a categorical column, every non-None
@@ -475,7 +483,7 @@ withheld column got `statistical_snapshot_values_redacted` (Enumerations, Behavi
 The same move applies to any non-string the withheld-values check used to refuse first, for
 example under a malformed value-policy marker; YAML and JSON reach it with a list or a mapping.
 A string `condition_on` keeps its old code in every case. Error classes, all
-other reason codes and public names stay the same. `path` keys are now always
+other reason codes and existing public names stay the same. The plan facade also exports `refusal_error`. `path` keys are now always
 `Refusal.key`. Outside `at_position` that is the same string as the old literal; inside
 `at_position` it carries the bound table and column, as the joint-mask missing `reference` now
 does like its two sibling refusals. `raise_bare` moves between private modules; it has no public
@@ -493,7 +501,8 @@ name-hint directory path. The position names the member file instead.
 | missing joint-mask `reference` in `at_position` | `joint_masks.reference` | `<position>.joint_masks.reference` |
 | YAML syntax error | `__cause__` is the parser error | `__cause__` and `__context__` None |
 | corpus Parquet with a timestamp column whose time zone is unknown | `UnknownTimeZoneError` with the zone name from `load_corpus`; `verify_corpus` raises it too | `load_corpus`: `PlanCompileError` `CODE_SET_CORPUS_READ_ERROR`, no zone name; `verify_corpus`: `ok=False` with that code in `problems` |
-| statistical `source_column` given a list | `StatisticalSpecError` printing the list items | `StatisticalSpecError`: `<position>.source_column: wrong type; expected a string, got list` |
+| statistical `source_column` given a nonempty list | `StatisticalSpecError` printing the list items | `StatisticalSpecError`: `<position>.source_column: wrong type; expected a string, got list` |
+| explicit `source_column` of `[]`, `{}`, `false` or `0`, with a valid same-name snapshot column | silently selects that column | `StatisticalSpecError`, code `STATISTICAL_COLUMN_NOT_IN_SNAPSHOT`, with the source position and wrong-type detail |
 | statistical `condition_on` given a non-string object whose `str()` names a withheld column | `StatisticalSpecError` `statistical_snapshot_values_redacted`, text quoting the column | `StatisticalSpecError` `statistical_joint_missing`: `<position>.condition_on: wrong type; expected a string, got other`. The re-pinned test is `test_a_non_string_condition_on_is_refused_as_mistyped_not_converted` (`tests/unit/generation/test_statistical_redacted.py`), an intended change |
 | `MemoryError` while reading under the ambient policy | translated to a read or parse refusal | passes unchanged (Dennis V1-4) |
 | memory failure while reading under a strict policy | translated to a read or parse refusal | replaced by the fresh object from `classified_failure`: same class, text `fileaccess.MEMORY_TEXT`, no chain; a fresh builtin `MemoryError(MEMORY_TEXT)` when the rebuild gives None (A10, N28) |
@@ -562,7 +571,11 @@ Runtime regressions and compatibility cases:
     `STATISTICAL_COLUMN_NOT_IN_SNAPSHOT`, wrong-type text, `got list`, and no `PRIVATE_RELEASE`. A cell asserts
     `approve_name(str(["PRIVATE_RELEASE"]))` accepts the converted string, which proves the
     test depends on the type check and not on approval. A valid string `source_column` is still
-    shown.
+    shown. With a usable snapshot distribution for the output name, first omit `source_column`
+    and assert that `load_spec` selects it. In the same fixture explicitly supply `[]`, `{}`,
+    `false` and `0` in separate cells. Each must raise `StatisticalSpecError` with exactly
+    `STATISTICAL_COLUMN_NOT_IN_SNAPSHOT`, the `source_column` position and wrong-type detail
+    for the raw kind. Restoring only the truthiness default makes these cells succeed incorrectly.
     For `condition_on=["PRIVATE_RELEASE"]`, use a valid categorical source with released values
     and no matching joint. Assert `STATISTICAL_JOINT_MISSING`, the `condition_on` position,
     wrong-type detail with `got list`, and no literal in rendered text or exception fields.
@@ -631,13 +644,19 @@ New guards:
    - Name slots (`Name(...)` and `Member(...)` segments): the canary is shaped so that
      `approve_name` refuses it (a path, a URL, or longer than the name limit). The case asserts
      `approve_name(canary)` refuses it, then asserts the canary is absent from the same surfaces
-     and that `<name>` or the bare file name is shown in its place. An approved name may appear
+     and that `<name>`, `<file>` or the approved bare file name is shown in its place. An approved name may appear
      and is not a canary. A third kind of name canary is a non-string value (a list or a mapping
      holding the canary), which must show as `<name>` with `got list` or `got dict`.
+   - Ambient manifest regression: load a real manifest listing a missing
+     `https://example.invalid/download/BEARER_CANARY` member. Assert its final segment alone
+     passes `approve_name`. Require the missing-member `NameHintLoaderError`, the `<file>`
+     position and not-found file detail. Check that `BEARER_CANARY` itself is absent from
+     unmodified `str(exc)`, `repr(exc)`, every argument and the other B1 refusal surfaces.
 13. B2 `tests/unit/config_text/test_config_refusal.py`. Cells:
     - the kind table, with `bool` before `int` and a `str` subclass shown as `other`;
     - `Name` with a URL, a path and a 200-character value, each shown as `<name>`;
-    - `Member` with `../x` and `/etc/x`, each shown as the bare name;
+    - `Member` with `../x` and `/etc/x`, each shown as the bare name; the B1 URL and its
+      scheme-relative form both show exactly `<file>`;
     - refused choices are dropped;
     - `at_position` binding;
     - `read_config` with a `ValueError`, an `OSError` and a `yaml.YAMLError`, checking the text,
@@ -683,6 +702,8 @@ New guards:
     - `err = ProvenanceError(f"{v}")` followed later by `raise err`;
     - `PlanCompileError("code", "path", f"{v}")` (third positional argument);
     - `PlanCompileError("code", path=v, message=r.text)` (non-literal path);
+    - a second mapping outside the factory, using an aliased `PlanCompileError` with the
+      correct positional fields; also seed the keyword form with a helper-returned refusal;
     - a subclass of `StatisticalSpecError` defined in the snippet, built with an f-string;
     - a subclass with its own `__init__` and no row in the per-class table;
     - a builtin error with an f-string in a zero-set snippet; the same snippet outside the zero
@@ -690,7 +711,7 @@ New guards:
 
     Cells that must pass: `err = ConfigError(r.text)` with `r = config_refusal(...)`, then
     `raise_bare(err)`; the factory form `def _refuse(r: Refusal) -> PlanCompileError: return
-    PlanCompileError(CODE, r.key, r.detail)` passed as `refuse=` to `read_config` (Codex R2
+    refusal_error(CODE, r)` passed as `refuse=` to `read_config` (Codex R2
     DESIGN 1); `except OSError as e: if fileaccess.keeps_class(e): raise` (S4); `.as_py()` inside
     a lambda passed as `read=`; `_rebuild_load_error` in its real module; the same body under any
     other name is flagged; a refusal built inside an `except` outside the zero set (S3 and S4 do
@@ -713,7 +734,9 @@ New guards:
 16. B5: the existing `test_dp_provenance_imports_neither_pandas_nor_pyarrow` stays green, which
     proves `_config_text` pulls no pyarrow.
 17. B6: the existing import-layer snapshot (`tests/sentry/layout/test_import_layers.py`) is
-    updated for `_config_text` and the `raise_bare` move and stays green.
+    updated for `_config_text` and the `raise_bare` move and stays green. In clean interpreters
+    import the plan facade first and each affected transform first, then verify the facade
+    exposes the same factory and error class; a partially initialized import fails the cell.
 
 ## Mutations
 
@@ -756,6 +779,16 @@ each mutation ran on). The builder records the results in the PR body.
 | N32 | remove one of two live occurrences while leaving its baseline max at 2 | B4 (live-count equality) |
 | N33 | substitute an unrelated same-class refusal for the planted branch | B1 (exact code or branch detail) |
 | N34 | move the `type(condition_on) is not str` check in `_spec.py` after `withheld_values_refusal` (Dennis M1) | A9 (withheld-column cell gets the redacted code), `test_mistyped_condition_on_beats_the_withheld_values_refusal` (`test_loader_review_r1.py`) |
+
+On the same final HEAD, run these independent regressions, restoring the clean tree between
+mutations. Record the SHA, the named failing assertion and the clean pass for each.
+
+| Change on the final head | Test that must fail |
+|---|---|
+| Remove only the raw URL check in `Member.shown()` so basename approval sees the token | B1 ambient missing-member case (token exposed), B2 URL case |
+| Restore only `col_cfg.get("source_column") or name` ahead of the existing exact-type check | A9, all four explicit falsey inputs |
+| Inline `PlanCompileError(code, r.key, r.detail)` at a migrated caller while keeping the factory | B4 (S1 reports the second construction site) |
+| At one rewritten raise outside the loaders, restore direct interpolation of the caught exception in its message | `tests/sentry/safe_output/test_exception_text_copy.py::test_no_audit_copy_reaches_a_raise_message` (engine-wide audit mutation; N1 independently exercises loader S1) |
 
 ## Failure modes
 
@@ -807,16 +840,18 @@ line numbers are on `f43ece79e`.
 | `tests/security/test_f31_raise_copies.py` | each rewritten raise site keeps class and code and drops the wrapped exception's text | "Safe output boundary" lists `tests/security/` (269) | `test_config_error_text.py` |
 | `changelog.d/f31-ae5-loader-text.md` | the CHANGELOG fragment in Docs and changelog | changelog fragment convention | other `changelog.d/` fragments |
 
-**Mapping a `Refusal` to an error class.** `plan/_errors.py:55` `refusal_error(code, refusal)`
-is the one shared mapping from builder output to `PlanCompileError` (`path=r.key`,
-`message=r.detail`). `joint_mask.py`, `_codeset_config_checks.py`, `_codeset_loader.py` and
-`corpus/_checks.py` import it. `quality/dp_record/_record.py:34` `refusal_error` is the same
-mapping for `ProvenanceError` (`r.text`). Some `plan/` modules (`_generation.py`, `_checks.py`,
-`_checks_fpe.py`, `_serialize_declared.py`) still build `PlanCompileError(code, path=r.key,
-message=r.detail)` inline. S1's per-class row checks each of those constructions, so the field
-mapping is enforced in every case; folding them into `refusal_error` is V2-LOG for AE5b. Guard
-mutation: make `plan/_errors.refusal_error` pass `r.text` as the message (N26 shape); A5's stock
-render cell and B2 fail.
+**Mapping a `Refusal` to an error class.** In AE5, `plan/_errors.py:55`
+`refusal_error(code, refusal)` owns the mapping to `PlanCompileError` (`path=r.key`,
+`message=r.detail`). Replace all eight inline constructions in `plan/_generation.py:316,494,524,537`,
+`plan/_checks.py:389`, `plan/_checks_fpe.py:114,130` and `plan/_serialize_declared.py:71`
+with calls passing the existing code and refusal. Re-export the factory alongside
+`PlanCompileError` from `decoy_engine.plan`. Bind both before importing `_compile` or other
+modules that load transforms during package initialization. The four transform callers
+(`joint_mask.py`, `_codeset_config_checks.py`, `_codeset_loader.py`, `corpus/_checks.py`)
+import from that facade. Plan and transforms are peers in the layer contract. B6 checks the
+layer snapshot and fresh-process imports in both orders. S1/B4 guards the single mapping and
+B3 exercises the duplicate; N26 checks the factory's rendering. The separate
+`quality/dp_record/_record.py:34` factory maps to `ProvenanceError` with `r.text`.
 
 `raise_bare` adds no file: it moves into the existing leaf `src/decoy_engine/_error_base.py`
 (35 lines, standard library only, bottom tier of `.importlinter`), so `fileaccess`,
@@ -845,8 +880,8 @@ The first estimates were far too low (Dennis M3). Measured on `f43ece79e` agains
 - Changed: about 98 raise sites in the nine modules, plus the size splits in Placement.
 - `transforms/_codeset_loader.py` 568 lines (683 on the merge base), `generation/statistical/_spec.py`
   581 (600), `quality/dp_provenance.py` 501 (550). None may grow past its module-size ceiling.
-- No new public names.
-- Machinery limit (Dennis M3). Six sentry rules and 34 mutations is the most this guard gets.
+- The only added facade export is the existing `plan` refusal factory.
+- Machinery limit (Dennis M3). Keep six sentry rules and N1–N34. The four final-head regressions above exercise existing rules and behavior.
   AE5b may only shrink the baseline and the sentry: it deletes baseline entries as sites move to
   `config_refusal`, and it adds no S-rule, no new exemption and no scanner growth. A new S-rule
   needs a new plan amendment and a plan review. `_config_refusal_scan.py` (796 lines) does not
@@ -885,7 +920,7 @@ Commit order inside AE5 (Dennis D5):
 5. The test move.
 
 The PR body states the seeded baseline entry count and `max` total (Dennis V1-6). Mutations N1
-to N34 run on the final recorded HEAD, and the PR body records that SHA.
+to N34 and the four independent regressions in Mutations run on the final recorded HEAD, and the PR body records that SHA.
 
 ## Test depth
 
@@ -947,5 +982,3 @@ Ways a gate reviewer could break the built change, each now a test or a recorded
 - A dedicated reason code for a non-string `condition_on`, like the sibling
   `STATISTICAL_HIGH_CARDINALITY_INVALID_TYPE`, instead of `statistical_joint_missing` (Dennis
   M1). It is a new registered code, so it waits for its own row.
-- Fold the inline `PlanCompileError(code, path=r.key, message=r.detail)` constructions in
-  `plan/` into `plan/_errors.refusal_error` in AE5b. S1 already holds them to the same fields.
