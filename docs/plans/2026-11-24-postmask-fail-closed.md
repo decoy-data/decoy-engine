@@ -26,6 +26,8 @@ are now deleted and the coded error propagates. The deferred NER block moves int
 `_blocked.py`, the NumPy key fix covers `float64`, and `_post_scan.py` has a checked line
 budget. The resolution of each finding is in "Review round 2".
 
+Revision 4 addresses the Codex review of plan `418f906b6` against `c2ca4f531`.
+
 ## Read this first: most of the fix is already in review
 
 Part of this row is already built in open PR #784, which is slice PM-1a of
@@ -58,7 +60,9 @@ engine error never makes a column look clean, on any route (resident required, r
 deferred, streamed commit). It becomes an `error` row or a `pass_failed_with` entry that names
 the exception class only. A required gate blocks on it. A deferred gate reports it, and blocks
 on it when the run enforces the NER predicate (`ner_findings: fail`). A lossy conversion that
-the check uses to compare cells is a failure of the same kind.
+removes identity evidence or changes the source diversity used to grade a text column fails the
+table. Both resident gates preserve exact Arrow integers on input and output. Under NER
+enforcement, a blocking `check_error` withholds delivery even when NER itself completes cleanly.
 
 Non-goals: new reason codes, a new finding type, a report schema version change, the PM-1b and
 PM-1c slices of the existing PM plan, and making reporting-only checks block (distribution,
@@ -88,20 +92,15 @@ the V2-LOG.
   is required and not deferred, that raises `PostScanBlockedError`, the outputs are withheld,
   and the CLI exits 4 (CLI `src/decoy/cli/exit_codes.py:204,259`). On a deferred (report-only)
   run, the row is in the report and `error_count` counts it.
-- B8 (new, R1-V1a). When the resident runner carries a paired column as text (Arrow refused one
-  side), equal cells stay equal. Two cells that pandas `==` treats as equal (the rule
-  `identity_counts` uses) give equal text keys. If the text keys of a column count fewer
-  identical rows than `identity_counts` counts on the same cells, the comparison is not
-  preserved, and the table is recorded as failed (one `error` row, class name only). The text
-  keys may count more identical rows (for example two `longdouble` values that round to one
-  float). That is the strict direction and is allowed.
-- B9 (new, R1-V1b). The deferred gate converts its tables and runs the suite inside the same
-  class-only handler as the required gate (`_decide`). A conversion failure or a suite failure
-  gives a report with `pass_failed_with` set to the class name, `gate.report` is not `None`, and
-  no exception text leaves the gate. When `enforces_ner` is true, that report blocks with
-  `check_error`, because the NER predicate could not be judged. Otherwise it is report-only,
-  like every other blocking code on a deferred gate. The rule "a report with
-  `pass_failed_with` under NER enforcement blocks" has one place: `_blocked.py`.
+- B8. On aligned paired text columns, preserve the comparable denominator, all existing
+  identity evidence and the original constant-or-varied source classification. Fail the table if the
+  denominator or classification changes, or the keys count fewer identical rows. Extra identity
+  matches are permitted only after both other checks pass.
+- B9. Required and deferred resident suites use the same exact-integer conversion for every
+  source and output column. A deferred suite or conversion exception produces a report with
+  the safe class name in `pass_failed_with`. A completed suite keeps its own findings.
+  Under `ner_findings: fail`, either `ner_blocked` or a blocking `check_error` withholds delivery.
+  Under `warn`, the deferred gate records the verdict and allows delivery.
 - B10 (new, N2/N3). An invalid declared relationship is a configuration error.
   `parse_relationship_config` (`src/decoy_engine/config/_parse.py:34-45`) raises
   `PipelineConfigError`, a coded, value-free `DecoyError` for which `passes_through` is True.
@@ -211,47 +210,57 @@ every case.
 
 Fix, in two parts:
 
-1. `_number_key` reads a NumPy scalar as its Python value first, before the `bool`, `int` and
-   `float` checks: `np.bool_` as `bool`, `np.integer` as `int`, `np.floating` (`float64`
-   included) as `float` (via `float()`, so `longdouble` also gets a Python float),
-   `np.datetime64` as `pd.Timestamp`, `np.timedelta64` as `pd.Timedelta`. Then the existing
-   rules apply to a plain Python value. The order is the fix for `float64`: a NumPy branch
-   placed after the `float` check never sees it (M18). This is the one key rule in
-   `cell_text.py`, which is already the choke point for cell text
-   (`tests/sentry/test_cell_text_choke_point.py`).
-2. Backstop for types the key rule does not know. In `_frame_tables`, for each paired column
-   that is carried as text, compute `identity_counts` on the original pandas cells and on the
-   two key columns. If the keys count fewer identical rows, raise a fixed-text internal
-   exception (proposed name `ComparisonNotPreservedError`, a plain `Exception` subclass, not a
-   `DecoyError`, so it does not pass through). The existing handler in `_frame_tables` records
-   its class name in `failed[name]`, which becomes one residual `error` row and `check_error`.
-   The raise is outside any `except` block. A raise inside `identity_counts` itself takes the
-   same path.
+1. Normalize temporal scalars first in `cell_text._number_key`. Render `np.timedelta64` via
+   `pd.Timedelta` before the `np.integer` branch (`int(np.timedelta64(1, "D"))` raises).
+   Render `np.datetime64` via `pd.Timestamp`. Give Python and NumPy booleans the integer
+   comparison keys `"0"` and `"1"`. Convert other NumPy integers to Python integers and
+   NumPy floats to Python floats before the existing numeric rendering rules. In particular,
+   handle `np.float64` before the Python float branch. This affects fallback comparison keys
+   in `key_text`; ordinary `cell_text` rendering retains its existing contract.
+2. Check the actual arrays selected by the paired fallback once, inside the per-table failure
+   boundary in `_frame_tables`. Use the source and output series with positional indexes and
+   their actual emitted keys, with nulls intact. Skip identity checks on unequal lengths as
+   the frame path does. Compare both results from `identity_counts` on the original and key
+   pairs. A changed comparable count or a smaller identical count fails the table. When
+   comparable rows exist, compare the non-null distinct count of the **entire source column**
+   with that of its emitted keys using the grader's constant-source predicate. Fail the table
+   if the constant/varied classification changes, even when every row matches. Distinct counts
+   of three and two both mean varied and must still pass this check.
+   Share the frame count currently at `residual_pii.py:172` as a function beside
+   `canonical_cells` in `_column_facts.py` (`canonical_cells(series).nunique(dropna=True)`).
+   This keeps container handling and null semantics identical. Give the constant-source
+   predicate one owner beside `ColumnFacts`. Route its property (`_column_facts.py:198-199`),
+   the residual grader (`residual_pii.py:281`), the policy grader (`policy_validation.py:239`)
+   and this backstop through it.
+   Check mismatches outside exception handlers with a fixed-text internal
+   `ComparisonNotPreservedError`. The existing per-table handler records its class name and
+   continues with the other tables. A failed count or comparison uses that same boundary
+   and coded errors still pass through.
 
-The backstop runs only on paired text-fallback columns, which are rare (mixed-type object
-columns). It reuses `identity_counts`, so it adds no new equality rule. The streamed route does
-not go through `_frame_table` (its tables are typed Arrow already) and is not affected.
+### S7: exact resident conversion and deferred enforcement (B9)
 
-### S7: the deferred gate inside the class-only handler (B9)
+The duplicate conversions at `_post_scan.py:281-282` and `:433-434` widen nullable Arrow
+integers to floats. For example, the SSN detector no longer sees nine digits after a decimal
+suffix is added. The staged batch reader at `_column_facts.py:213-216` preserves the dtype.
 
-`_column_suite` and `_report_only` both convert with
-`materialize_source(sources[n]).to_pandas()` and `outputs[n].to_pandas()`. On the required route
-that conversion runs inside `_decide`'s handler. On the deferred route it does not.
+Use a single resident frame builder for both callers and both sides. For each materialized
+source or output table use `table_to_pandas_exact_ints(table, table.column_names)` from
+`decoy_engine.internal.pandas_compat`. This includes unconfigured siblings and reuses the
+batch reader's `exact_int_types_mapper`. Keep the required suite's keys, distribution input
+and writer ownership, and the deferred suite's detectors and writer ownership. Keep the
+existing early returns for no requested suite or no eligible deferred table.
 
-Fix: one gate helper builds the two frame dicts and runs `run_post_mask`, and both callers use
-it. `_report_only` calls it inside a handler that has the same shape as `_decide`: open with
-`passes_through`, then record `safe_error_class(type(exc).__name__)`. After the handler closes,
-`_report_only` sets `self.report` to the suite report, or to
-`{"schema_version": SCHEMA_VERSION, "pass_failed_with": <class>}` on failure. It adds the
-`verdict` as `_decide` does, then calls `raise_if_ner_blocked` as it does today.
-`self.ran` is set only after `self.report` holds a dict.
+In `_report_only`, build the frames and run the suite inside the failure boundary. Re-raise
+coded errors first. On an ordinary exception build a report with `SCHEMA_VERSION` and
+`safe_error_class(type(exc).__name__)` in `pass_failed_with`. Outside the handler, retain the
+completed report or failure report, attach its verdict and set the gate state before ruling.
+In `raise_if_ner_blocked` (`_blocked.py:334`), use the blocking reason refs in
+`post_scan_verdict(report, ner_findings=ner_findings).codes`. Raise through the existing
+`blocked_error` and `raise_bare` path for `_NER_BLOCKED`, or for `_CHECK_ERROR` under
+`fail`. This includes a residual comparison error with `pass_failed_with is None`.
+Other deferred finding codes alone keep their existing ruling. The gate calls this decision
+after reporting, before settlement releases a held publish.
 
-`raise_if_ner_blocked` (`_blocked.py:334-346`) today raises only when the verdict holds
-`ner_blocked`, so a `check_error` from `pass_failed_with` would ride along and not block. G8-S1
-extends that one function: under NER enforcement (`ner_findings == "fail"`) it also raises when
-the report has `pass_failed_with`, with the same `blocked_error` and the same `raise_bare` call
-it already uses, so the chain is empty. The rule lives only in `_blocked.py`. `_post_scan.py`
-does not import `secret_providers._errors` and does not test `pass_failed_with` itself.
 
 ### C7: the policy handler passes coded errors through (B5)
 
@@ -276,7 +285,7 @@ from `_decide`'s `_keys` call. No carrier, no new attribute.
 
 ### Design notes
 
-No new module. New names: the backstop exception class and the sentry label.
+Reuse existing modules, subject to the placement and line budget below. Internal names cover the backstop exception, shared count, conversion helper and sentry label.
 `raise_if_ner_blocked` gets a wider rule, not a new name. Each new fact has one place: the
 equality rule stays in `identity_counts`, the key rule stays in `cell_text`, the deferred NER
 block rule stays in `_blocked.py`. The principle applied is "one rule, one place" (two equality
@@ -293,7 +302,7 @@ The ways a column comparison can end, and what each one must give:
 - Comparison raises a non-coded exception: one residual `error` row (S1 to S3).
 - Comparison raises a coded `DecoyError`: propagates as the same object (B5).
 - No evidence (no source, unequal rows, zero comparable rows): no `error` (B4).
-- Text fallback loses equality: one residual `error` row for the table (B8).
+- Text fallback loses identity evidence or changes the source diversity classification: one residual `error` row for the table (B8).
 - Arrow refuses a column with an exception outside the narrowed set: one residual `error` row
   for the table (N1 fix).
 - Whole table fails before the column loop: one `error` per table (`runner.py:235`, `:420`).
@@ -348,7 +357,7 @@ the run with the coded error from each of the three gate entry points (B10).
 | 5 | Referential integrity | N/A for keys; the relationship parse failure is pinned | none | AT-8 |
 | 6 | Untrusted producer | N/A: the exceptions come from in-process pandas or Arrow code, and only their class name is read. | none | AT-6, AT-14 |
 | 7 | Check then use on a path (TOCTOU) | N/A: no path is checked or opened. | none | none |
-| 8 | Weak tests and overclaimed evidence | Yes: "exists" tests must be green on the slice head, red-before recorded, mutations recorded with the head SHA. | AT-10 red-before; mutation evidence table | M1 to M18 (no M17) on the slice heads |
+| 8 | Weak tests and overclaimed evidence | Yes: "exists" tests must be green on the slice head, red-before recorded, mutations recorded with the head SHA. | AT-10 red-before; mutation evidence table | M1 to M21 (no M17) on the slice heads |
 | 9 | Behavior-preserving refactor drift | Yes, small: the shared conversion helper (S7) moves code, and the N2/N3 handler deletions change the shape of two methods. | The required-gate tests stay green unchanged | AT-11, AT-7, AT-8 |
 | 10 | Frozen contract drift | N/A: no schema, reason code or exit code changes (see Frozen contracts). | none | none |
 
@@ -404,7 +413,7 @@ the run with the coded error from each of the three gate entry points (B10).
 Choke point. The choke point for "a comparison failed" is already in place.
 `ColumnFacts.identity_error` and `distinct_error` (`_column_facts.py`) are the one carrier, and
 `residual_pii_findings` (#784 `_compare_raised`) is the one place they become a finding. The gate
-has `pass_failed_with` as its one carrier.
+uses the verdict from `_blocked.py` for both row-level errors and `pass_failed_with`.
 
 Gap. The existing `post-scan-pass-through` sentry (`tests/sentry/post_scan/_scan.py`
 `pass_through_label`, baseline `tests/sentry/baselines/post-scan-pass-through.json`) checks
@@ -471,21 +480,46 @@ or `__cause__`, and not in any `caplog` record.
 | AT-4 | A raised comparison on a passthrough column that another writer owns is one `error`, with or without a hit. A proven passthrough stays quiet. | exists | #784 | `postscan/test_writer_ownership_findings.py` (three tests, as named in #784) |
 | AT-5 | A coded error raised inside the comparison propagates as the same object: `excinfo.value is raised`, on the frame path and on `run_post_mask`. | exists; extend with the identity assertion and the second path | G8-S2 | `test_residual_pii_source_compare.py::...::test_frame_path_passes_through_exception_propagates` |
 | AT-6 | Value-free on the column paths: the forced exception's text holds a seeded marker. Value-free as defined above, on both paths, for AT-1 and AT-3 inputs. | new | G8-S2 | `test_residual_pii_source_compare.py` |
-| AT-7 | End to end, required gate. Mechanism: the source table has a configured column plus an unconfigured sibling column `contact` that holds synthetic email-shaped values (`user{n}@example.invalid`), so the regex detector hits it and `detector_id == "email"`, and it has no policy entry, so no policy error exists. The test forces the identity comparison of `contact` to raise (the same patch point AT-1 uses). Assert: the residual row for `contact` has `detector_id == "email"` and `severity == "error"`; `PostScanBlockedError`; `verdict.codes[0]` is `check_error`; outputs withheld; `error_count == 1`; the only `error` row in the report is that residual row; `policy_validation` has no `error` row; value-free. | new | G8-S2 | `tests/unit/execution/post_scan/test_gate_rulings.py` |
+| AT-7 | Run the required gate through the real pipeline and a `ParquetTransactionalSink`, as in `test_m1_integrity_withholds_a_run_on_a_failing_column_finding`. Use Arrow-native synthetic emails only in unconfigured `contact`, and a configured sibling whose mask passes. Wrap `_column_facts._add_identity` at its batch-loop binding (:387). Identify the contact batch by its reserved synthetic email fixture, raise an ordinary marker-bearing exception only for it, and delegate every other call. Use one batch. Assert the injection ran, exactly one error across all sections, the residual `contact/email/error` row, no policy error or other blocking reason, `error_count == 1`, and `PostScanBlockedError` with sole code `check_error`. Assert the sink destination and configured target remain absent, and all surfaces are value-free. | new | G8-S2 | `tests/unit/execution/post_scan/test_gate_rulings.py` |
 | AT-8 | Invalid relationship (an entry whose values hold a seeded marker). Patch `parse_relationship_config` to record the object it raises, or capture it on the first call. (a) `tee_reader()` raises `PipelineConfigError`, and `excinfo.value` is that same object. (b) `note_quarantined(...)` with a non-empty `removed` raises the same way. (c) `run_resident` on a required gate raises the same way, and no output is published (outputs withheld). All value-free: the marker is not in `str()` of the error, its `__context__` or its `__cause__`, or any `caplog` record. | new; red-before for (a) and (b) on #784 is not expected (the guard already re-raises), so this is a pin; M8 is its kill | G8-S1 | `tests/unit/execution/post_scan/test_gate_rulings.py` |
 | AT-9 | Sentry fixtures. Flagged: `return None`, bare `return`, `pass` and `continue` after the guard, for bare `except`, for `except Exception`, for `except builtins.Exception`, for `except (Exception,)`, and for a tuple that holds `Exception` with another class. Clean: an assignment, an append, a returned finding, a re-raise, a narrow `except ValueError: return None`. The live scan finds zero sites. A seeded `except Exception: return None` in a scratch copy of `residual_pii.py` raises the count by one. | new | G8-S2 | `tests/sentry/post_scan/test_post_scan_choke_points.py` |
 | AT-10 | Run the new label on main's `residual_pii.py` (flags `_source_identity`) and on `c2ca4f531` (flags N1 to N3). Record both in the PR body. | red-before evidence | G8-S2 | PR body |
 | AT-11 | The closed carriers keep their tests: failed comparison, failed distinct counts, table isolation and the unconvertible table in `postscan/test_column_suite_on_facts.py`, including `test_a_zip_column_of_mixed_int_and_str_is_compared_as_on_the_frame_checks`; `postscan/test_runner_pass_through.py`; `postscan/test_value_free_check_errors.py`. | pin, exists | both | as named |
-| AT-12 | B8 key parity. An object column holds, per case, one of: `np.float16`, `np.float32`, `np.float64`, `np.longdouble`, `np.int8` to `np.int64`, `np.uint8` to `np.uint64`, `np.bool_`, `Decimal`, Python `int`, Python `float`, `np.datetime64` vs `pd.Timestamp`. The output holds equal cells of another numeric type, plus one text cell that forces the fallback. Every float type case includes non-whole values (`1.5`, `0.25`) as well as whole ones, against equal Python `float` cells. For each case, `run_post_mask` and `check_residual_pii` give the same `identical_rows` and the same severity, and the B8 backstop does not fire (no residual `error` row). The round 1 case (61 rows, `faker` strategy, 60 `np.float32` ZIP source cells, equal `int` output cells, one changed text cell) grades `fail` on both paths and `post_scan_verdict` blocks with `finding_blocked`. | new, red-before | G8-S1 | `postscan/test_column_suite_on_facts.py` |
-| AT-13 | B8 backstop. A test-only cell class whose `__eq__` says equal and whose `__str__` differs on each side (Arrow refuses it, so the fallback runs). `run_post_mask` gives one residual `error` row for the table, with the backstop's class name; verdict `check_error`; value-free (the `__str__` text holds a marker). A paired column whose keys count more identical rows than pandas (two `longdouble` values that round together) is not an error. | new, red-before | G8-S1 | `postscan/test_column_suite_on_facts.py` |
-| AT-14 | B9 deferred gate, at `PostScanGate.run_resident` with a deferred gate and the integrity suite on. The output has an Arrow string cell with invalid UTF-8 bytes around a seeded marker, as in round 1. (a) `ner_findings: warn`: no exception leaves `run_resident`; `gate.ran` is True; `gate.report` is a dict with `pass_failed_with` equal to a bare class name (matches `^[A-Za-z_][A-Za-z0-9_]*$`); the verdict codes hold `check_error`; value-free. (b) `ner_findings: fail`: `PostScanBlockedError` with `check_error`, `__context__` and `__cause__` both `None`, value-free. A unit case on `raise_if_ner_blocked` itself pins the rule in `_blocked.py`: a report with `pass_failed_with` raises under `fail` and does not raise under `warn`. (c) The same input on a required, non-deferred gate blocks with `check_error` (pin of C10). | new; red-before for (a) and (b) | G8-S1 | `tests/unit/execution/post_scan/test_gate_rulings.py` |
-| AT-15 | C7 pass-through. A coded error (`FileAccessReadError`) raised inside the policy comparison propagates out of `run_post_mask` as the same object (`is`). The pass-through sentry finds no unguarded site, and its baseline has no entry left in `policy_validation.py`. | new, red-before | G8-S1 | `postscan/test_runner_pass_through.py`; `tests/sentry/post_scan/test_post_scan_choke_points.py` |
+| AT-12 | B8 key parity. An object column holds, per case, one of: `np.float16`, `np.float32`, `np.float64`, `np.longdouble`, `np.int8` to `np.int64`, `np.uint8` to `np.uint64`, `np.bool_`, `Decimal`, Python `int`, Python `float`, `np.datetime64` vs `pd.Timestamp`. The output holds equal cells of another numeric type, plus a text sentinel arranged so Arrow refuses native conversion. Include object-series pairs of `np.timedelta64(1, "D")` and `pd.Timedelta(days=1)`, and `np.bool_(True/False)` and Python `1/0` respectively. Assert the text branch ran for the tested column and that each equal pair has equal keys and counts as identical. Every float type case includes non-whole values (`1.5`, `0.25`) as well as whole ones, against equal Python `float` cells. For each case, `run_post_mask` and `check_residual_pii` give the same reported identity rate and severity for detector hits (check raw counts with `identity_counts` for the scalar pairs), and the B8 backstop does not fire (no residual `error` row). The round 1 case (61 rows, `faker` strategy, 60 `np.float32` ZIP source cells, equal `int` output cells, one changed text cell) grades `fail` on both paths and `post_scan_verdict` blocks with `finding_blocked`. | new, red-before | G8-S1 | `postscan/test_column_suite_on_facts.py` |
+| AT-13 | B8. (a) A test cell compares equal but renders differently on each side. Require one residual table error with the backstop class, value-free report and blocking `check_error`. Extra key matches are allowed in a control whose source diversity and comparable count stay unchanged. (b) Put 64 unchanged synthetic, Luhn-valid PAN cells alternating between the integer and its identical decimal string in an object column. Use an unconfigured sibling in a configured table and a clean masked column. Assert the frame check yields `pan/fail` with full identity. Confirm fallback has 64 comparable and identical rows on both representations, source distinct counts 2 and 1. Require one residual table error and blocking `check_error` from `run_post_mask`. Removing only the classification check must expose `pan/warning` and lose the block. (c) With mixed source cells `[1, "1", 2]` and distinct changed non-PII output, assert source diversity goes from three to two, both varied, with a clean verdict and no table error. | new, red-before | G8-S1 | `postscan/test_column_suite_on_facts.py` |
+| AT-14 | Gate conversion, deferred ruling and publication. Run cases (a) through (d) below. | new, with required/staged controls | G8-S1 | `tests/unit/execution/post_scan/test_gate_rulings.py` |
+| AT-15 | Call `check_policy_validation(source_frames, output_frames, config)` with an existing configured column and equal row counts. Patch `pd.Series.equals` for that pair to raise a preconstructed `FileAccessReadError`. Assert it was called and `excinfo.value is raised`. Removing the C7 guard must make this runtime assertion fail even without the sentry. Separately require the pass-through sentry green and the C7 baseline entry removed. | new, red-before | G8-S1 | `postscan/test_runner_pass_through.py` and the existing pass-through sentry |
+
+**AT-14 gate cases**
+
+- (a) Deferred, integrity on. Convert an Arrow string containing invalid UTF-8 and a synthetic
+  marker. Under `warn`, require a completed gate, a value-free report, a bare class name
+  (`re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)`) and blocking verdict code `check_error`.
+  Under `fail`, require the same report and a chain-free, value-free `PostScanBlockedError`.
+- (b) Repeat under both modes with valid Arrow cells, the selective batch fault from AT-7
+  (define the fixture in G8-S1 for both slices), and an enabled deterministic clean NER
+  pass. Assert the model ran, one residual comparison error, `pass_failed_with is None`,
+  and sole blocking code `check_error`. Bind the gate and register an observable write
+  through `publish_after_gate` before settlement. Under `fail` verify it was held, settlement
+  raises the chain-free block and the destination remains empty. Under `warn` settlement
+  returns with the error in the report and exactly one publication. Also exercise
+  `raise_if_ner_blocked` with both report shapes in both modes and with a standalone
+  `finding_blocked` control that remains report-only when deferred.
+- (c) A required resident gate with the invalid conversion from (a) blocks with `check_error`.
+- (d) Put 75 distinct synthetic nine-digit SSNs and one null in an unconfigured Arrow
+  `int64` sibling, identical on source and output, beside a successfully masked column.
+  Through the required resident gate and the staged gate's `before_commit` with a real `ParquetTransactionalSink`, assert the
+  same `ssn/fail` residual row, full source identity, sole `finding_blocked` code and zero
+  publications. Under deferred `warn`, require the same finding and recorded verdict.
+  Assert both resident frame dtypes at the real suite boundary are nullable `Int64`
+  (delegate to the real suite). This catches source-only widening even when floating-point
+  equality still preserves all 75 matches. No fault injection or text fallback in this case.
 
 ## Mutations the tests must kill
 
-Each mutation is run on its slice head. The PR body records it in this form: mutation id,
+Each mutation is run on the final slice head. The PR body records it in this form: mutation id,
 slice head SHA, the test id that turned red, and the assertion line from the failure. A
-mutation that no test kills blocks the slice. Until that table exists on the head, these are
+mutation that no test kills blocks the slice. Until that table exists on that exact head, these are
 proposed work, not results.
 
 | # | Mutation | Slice | Killed by |
@@ -504,10 +538,13 @@ proposed work, not results.
 | M11 | Remove the NumPy branch from `_number_key`. | G8-S1 | AT-12 |
 | M12 | Remove the B8 backstop in `_frame_tables`. | G8-S1 | AT-13 |
 | M13 | In `_report_only`, convert the tables before the handler (as on #784). | G8-S1 | AT-14 (a) |
-| M14 | In `raise_if_ner_blocked`, drop the `pass_failed_with` rule (back to `ner_blocked` only). | G8-S1 | AT-14 (b) and its `raise_if_ner_blocked` unit case |
+| M14 | Restore the whole-suite-only predicate (`_NER_BLOCKED` or `fail` with `pass_failed_with`). | G8-S1 | AT-14(b), held output escapes despite the residual error |
 | M15 | Drop the `passes_through` guard from the C7 handler. | G8-S1 | AT-15 |
 | M16 | Widen the N1 handler back to `except Exception: return None`. | G8-S2 | AT-9 (live scan finds one site) |
 | M18 | Move the NumPy branch in `_number_key` after the `float` check. | G8-S1 | AT-12 (the non-whole `np.float64` case) |
+| M19 | Remove only the source diversity classification check, leaving the identity checks active. | G8-S1 | AT-13(b) |
+| M20 | Restore plain conversion for the resident source alone, then for the output alone. | G8-S1 | AT-14(d) source dtype and output finding/dtype respectively |
+| M21 | Handle NumPy integers before durations, then separately restore boolean string keys. | G8-S1 | AT-12 mixed duration and boolean pairs respectively |
 
 M17 (revision 2, the relationship carrier) is withdrawn with the carrier.
 
@@ -516,13 +553,15 @@ M17 (revision 2, the relationship carrier) is withdrawn with the carrier.
 #784 carries the main behavior change, and its PR body, its `changelog.d/` entry and the PM-1a
 entry in `docs/compatibility-contract.md` record it.
 
-G8-S1 changes behavior in four narrow ways, each in the fail-closed direction:
+G8-S1 changes these observable behaviors:
 
 - A resident run whose mixed-type column holds NumPy scalars now compares those cells as equal
   numbers. A leaking column that graded `info` now grades `fail` or `warning` as the frame
   check does. A run that passed can now block. That is the fix.
 - A resident run whose text fallback cannot preserve equality, or whose Arrow conversion raises
   an exception outside the narrowed set, now gets one `error` row for the table and blocks.
+- Resident suites preserve nullable integer cells for detector input on both sides, including unconfigured columns.
+- A deferred gate enforcing NER withholds output on a residual comparison error even after a clean model pass.
 - A deferred run whose suite or conversion fails now completes report-only with
   `pass_failed_with`, where it used to crash with a raw exception. Under `ner_findings: fail` it
   blocks with `check_error`.
@@ -537,35 +576,37 @@ G8-S2 adds tests and a sentry only.
 
 | Slice | Repo | Risk | Size | Depends on |
 |---|---|---|---|---|
-| G8-S1 runtime: B8 key rule and backstop, B9 deferred handler and the `_blocked.py` rule, C7 guard, N1 narrowing, N2/N3 handler deletions | engine | R2 (changes grading and gate behavior) | 5 source files, about 110 changed source lines; 3 test files; 1 baseline shrink; 1 new non-public name (the backstop exception) | #784 (stacks on `fix/postmask-fail-closed`, because `cell_text.py` is new in #784) |
+| G8-S1 runtime: B8 key rule and backstop, B9 deferred handler and the `_blocked.py` rule, C7 guard, N1 narrowing, N2/N3 handler deletions | engine | R2 (changes grading and gate behavior) | 7 source files, about 140 changed source lines; 3 test files; 1 baseline shrink; internal helpers and the backstop exception, no new public API | #784 (stacks on `fix/postmask-fail-closed`, because `cell_text.py` is new in #784) |
 | G8-S2 no-signal sentry and end-to-end pins | engine | R1 (tests and sentry only) | 1 new baseline file, 4 changed test and registry files, about 200 test lines; no `src/` change | G8-S1 (the empty baseline needs N1 to N3 gone) |
 
-Placement, G8-S1 (no new source files unless the line-budget fallback below applies):
+Placement, G8-S1 (existing files except for the conditional helper and changelog fragment):
 
 | File | Change |
 |---|---|
+| `src/decoy_engine/verification/postmask/_column_facts.py` and `residual_pii.py` | Share the frame source count and constant-source predicate with B8 |
 | `src/decoy_engine/internal/cell_text.py` | NumPy scalars in `_number_key` |
 | `src/decoy_engine/verification/postmask/runner.py` | narrow `_native`; backstop in `_frame_tables` |
-| `src/decoy_engine/verification/postmask/policy_validation.py` | `passes_through` guard |
+| `src/decoy_engine/verification/postmask/policy_validation.py` | Use the shared source classification and add the C7 guard |
 | `src/decoy_engine/execution/pipeline/_post_scan.py` | shared conversion helper; `_report_only` handler; delete the N2/N3 `try`/`except` blocks |
-| `src/decoy_engine/verification/postmask/_blocked.py` | `raise_if_ner_blocked` also raises on `pass_failed_with` under NER enforcement |
+| `src/decoy_engine/verification/postmask/_blocked.py` | `raise_if_ner_blocked` also raises on blocking `check_error` under NER enforcement |
 | `tests/sentry/baselines/post-scan-pass-through.json` | delete the `policy_validation` entry |
 | `tests/unit/detection_verification/postscan/test_column_suite_on_facts.py` | AT-12, AT-13 |
 | `tests/unit/detection_verification/postscan/test_runner_pass_through.py` | AT-15 |
 | `tests/unit/execution/post_scan/test_gate_rulings.py` | AT-8, AT-14 |
-| `changelog.d/`, `docs/compatibility-contract.md` | the behavior notes above |
+| `changelog.d/`, `docs/compatibility-contract.md` | Put the behavior note beside the PM-1a fragment and contract entry |
+| `src/decoy_engine/execution/pipeline/_post_scan_suite.py` (conditional) | Resident frame builder beside `_post_scan.py` under the pipeline rule, #784 `CODEMAP.md:271` |
 
 Line budget for `_post_scan.py` (checked item). The file is 600 lines on #784, the module-size
 GOAL, with no census entry. G8-S1 must leave it at 600 lines or fewer, net change 0 or less.
 Expected: the N2/N3 deletions remove about 10 lines, the shared conversion helper removes the
 duplicated two-line conversion from `_column_suite` and `_report_only` (about 4 lines), and the
 `_report_only` handler adds about 10. If the build still ends over 600, the conversion helper
-moves to a new `src/decoy_engine/execution/pipeline/_post_scan_suite.py`, beside
+moves to a new `src/decoy_engine/execution/pipeline/_post_scan_suite.py`, under the pipeline placement rule in #784 `CODEMAP.md:271`, beside
 `_post_scan.py`, as `_post_scan_distribution.py` already does for the distribution check. No census entry is
 added. Proof: `tests/sentry/test_module_size.py` green on the head (it fails a module over 600
 with no entry), and the PR body records `wc -l` of the file on the base and the head.
 
-Placement, G8-S2 (one new file, a baseline beside the existing ones):
+Placement, G8-S2 (one new file under the sentry baseline rule in #784 `CODEMAP.md:295`):
 
 | File | Change | Sits beside |
 |---|---|---|
@@ -591,7 +632,7 @@ Steps, G8-S1:
    `tests/sentry/test_cell_text_choke_point.py`, `tests/sentry/test_module_size.py`, the
    ratchet and registry tests, and the `_blocked.py` unit tests. A baseline file shrinks, so
    run the sentry ratchet tests on the exact head.
-5. Run M8, M11 to M15 and M18 and record them as stated above.
+5. Run M8, M11 to M15 and M18 to M21 and record them as stated above.
 
 Steps, G8-S2:
 
@@ -623,7 +664,7 @@ no runtime code. #784 has its own review track under the PM-1a plan.
 - A column that no writer touches and no detector hits does not report a failed comparison
   (B3). Such a column has no masking and no PII signal, so the residual check has nothing to
   say. Policy validation does not see it either, because it is not configured.
-- The B8 backstop fails the whole table, not one column, when a fallback column loses equality.
+- The B8 backstop fails the whole table, not one column, when a fallback column loses identity evidence or changes the source diversity classification.
   This is coarse but closed, and it needs no new per-column carrier in the runner. It is rare
   once the key rule knows NumPy scalars.
 - A deferred gate without `enforces_ner` reports a failed suite and does not block. That is the
@@ -648,10 +689,10 @@ no runtime code. #784 has its own review track under the PM-1a plan.
 | Finding | Tier | Resolution |
 |---|---|---|
 | F1: the N2/N3 premise is false; the parse raises only the coded `PipelineConfigError`, which passes through | V1 | Carrier, its `_decide` read and M17 dropped. The `try`/`except` in `tee_reader` and `note_quarantined` is deleted and the coded error propagates (B10). AT-8 now asserts the same object (`is`) from `tee_reader`, `note_quarantined` and `run_resident`, outputs withheld, value-free. M8 is an unguarded handler around the parse, killed by AT-8. Round 1 row corrected. |
-| F2: `raise_if_ner_blocked` raises only on `ner_blocked`, so `check_error` from `pass_failed_with` does not block | high | The rule goes in one place: `raise_if_ner_blocked` in `_blocked.py` also raises on `pass_failed_with` under NER enforcement. The gate only calls it; no `secret_providers._errors` import in `_post_scan.py`. S7, B9, AT-14 (b) and M14 updated. |
+| F2: `raise_if_ner_blocked` raises only on `ner_blocked`, so `check_error` from `pass_failed_with` does not block | high | The rule goes in one place: `raise_if_ner_blocked` in `_blocked.py` also raises on blocking `check_error` under NER enforcement. The gate only calls it; no `secret_providers._errors` import in `_post_scan.py`. S7, B9, AT-14 (b) and M14 updated. |
 | F3: `np.float64(1.5)` keys as `'np.float64(1.5)'` today | should-fix | The NumPy branch runs before the `float` check; the "except float64" wording is corrected. AT-12 adds non-whole values for every float type with the backstop not firing. M18 moves the branch after the `float` check. |
 | F4: `_post_scan.py` is at 600 lines with no census entry | should-fix | Line budget: net change 0 or less, checked by `test_module_size.py` and `wc -l` in the PR body; named fallback `_post_scan_suite.py` for the helper; no census entry. |
-| F5: AT-7 must name its mechanism | should-fix | AT-7 uses an unconfigured `contact` column with email-shaped synthetic values, expects `detector_id == "email"`, and forces the comparison to raise at the AT-1 patch point. |
+| F5: AT-7 must name its mechanism | should-fix | AT-7 uses an unconfigured `contact` column with email-shaped synthetic values, expects `detector_id == "email"`, and forces only its batch comparison to raise as specified in AT-7. |
 | F6: `1` vs `"1"` key collision | low | V2-LOG item 6. |
 | F7: C7 rationale | low | Corrected: the guard is justified by B5; `passes_through` is False for `UnreadableCellError`. |
 | F8: AT-9 fixtures | low | Added `except builtins.Exception` and `except (Exception,)`. |
@@ -699,7 +740,7 @@ says otherwise.
    SCAN-ML Q1 policy; revisit only if the default mode changes.
 6. Key collision in the text fallback. `cell_text` gives `1` and `"1"` the same key, while
    pandas `==` says they differ, so the text keys can count more identical rows than
-   `identity_counts`. B8 allows that direction because it only makes the grade stricter (a
+   `identity_counts`. With the source classification and the denominator preserved, B8 allows extra identity matches because they only increase identity evidence (a
    possible false `fail` on a constant-like column, never a missed leak). Revisit if it gives
    false blocks in practice.
 7. Show `pass_failed_with` to the user. On a deferred run without NER enforcement, a failed
