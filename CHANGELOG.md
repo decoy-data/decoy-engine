@@ -9,6 +9,12 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+### Removed
+
+- removed the public names `TelemetryClient`, `ExecutionEvent` and `event_to_legacy_dict` from `decoy_engine` and `ExecutionContext.telemetry`; use `event_to_dict` for progress events
+- removed the 21 top-level bindings `BundlePool`, `CompositeAddress`, `PoolCache`, `composite_city_state_zip` and the `Ein`, `Mrn`, `Ndc`, `Npi` and `Ssn` adapter, domain and validator names, `IdentifierError` and `IdentifierFormatError` from `decoy_engine`; import them from `decoy_engine.identifiers`, `decoy_engine.generation.pool` and `decoy_engine.generation.composite`
+- removed `decoy_engine.internal.crypto.deterministic_hash` (use `hmac_hex`) and the `FK_SELF_REFERENCE` alias on `ValidationResult` codes; the reason code `fk.self_reference` stays
+
 ## [0.28.4] - 2026-11-23
 
 ### Breaking for consumers

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from decoy_engine import progress, reasons
+from decoy_engine._progress_events import _LEGACY_FIELDS
 from decoy_engine.progress import (
     CheckpointEvent,
     CheckpointInfo,
@@ -99,7 +100,11 @@ def _events() -> dict[str, dict[str, Any]]:
     return {
         name: {
             "v1": progress.event_to_dict(event),
-            "v0": progress.event_to_legacy_dict(event),
+            "v0": {
+                k: v
+                for k, v in progress.event_to_dict(event).items()
+                if k in _LEGACY_FIELDS[type(event)]
+            },
         }
         for name, event in events.items()
     }
