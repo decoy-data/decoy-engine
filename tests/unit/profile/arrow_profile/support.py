@@ -85,37 +85,6 @@ def bounded_profile(
     )
 
 
-def _base_resident_frame(table: pa.Table) -> pd.DataFrame:
-    """The resident reader's conversion: the whole slice, else text for the failing columns."""
-    try:
-        return table.to_pandas()
-    except (ValueError, OverflowError):
-        columns = []
-        for column in table.columns:
-            try:
-                column.to_pandas()
-            except (ValueError, OverflowError):
-                column = column.cast(pa.string())
-            columns.append(column)
-        return pa.Table.from_arrays(columns, names=table.column_names).to_pandas()
-
-
-def base_sample(kind: str, table: pa.Table, data: bytes, sample_rows: int) -> tuple[Any, ...]:
-    """(frame, shape schema, total rows) as the base reader gave them."""
-    if kind == "resident":
-        return _base_resident_frame(table.slice(0, sample_rows)), table.schema, table.num_rows
-    parquet = pq.ParquetFile(io.BytesIO(data))
-    batches: list[pa.RecordBatch] = []
-    gathered = 0
-    for batch in parquet.iter_batches(sample_rows):
-        batches.append(batch)
-        gathered += batch.num_rows
-        if gathered >= sample_rows:
-            break
-    head = pa.Table.from_batches(batches) if batches else parquet.schema_arrow.empty_table()
-    return head.slice(0, sample_rows).to_pandas(), parquet.schema_arrow, parquet.metadata.num_rows
-
-
 class BaseRaisedError(Exception):
     """The merge base raised on this case (its text is not pinned)."""
 
@@ -168,18 +137,15 @@ def _load_pins() -> dict[str, Any]:
 def _record_case(
     kind: str, table: pa.Table, data: bytes, meta: dict[str, Any], base_src: str
 ) -> dict[str, Any]:
-    """The pin for one case, recorded only when re-recording: a base reader failure is pinned like
-    a walk failure, so it is part of the oracle and not read from the running environment."""
+    """The pin for one case, recorded only when re-recording. The merge base's own reader and walk
+    both run in the child interpreter, so a reader failure is pinned like a walk failure and no
+    code of the current checkout decides an outcome."""
     atexit.register(_flush_pins)  # idempotent: the pins are written once, at exit
-    try:
-        frame, schema, total = base_sample(kind, table, data, meta["sample_rows"])
-    except Exception as exc:  # the base reader itself refused the table
-        return {"raises": type(exc).__name__}
     request = {
         **meta,
-        "frame": frame,
-        "schema": schema,
-        "total": total,
+        "kind": kind,
+        "table": table,
+        "data": data,
         "source_format": FILE_FORMAT[kind],
     }
     return _record(request, base_src)
