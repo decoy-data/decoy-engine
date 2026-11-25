@@ -15,8 +15,10 @@ cycle forms.
 from __future__ import annotations
 
 from decoy_engine import reasons
+from decoy_engine.checksums import EXACT_LENGTHS, MIN_LENGTHS, scheme_length_ok
 from decoy_engine.errors import FpeChecksumError
 from decoy_engine.transforms.fpe import _permute
+
 
 # Valid length(s) per checksum scheme. NPI/ISBN-13/EAN-13/VIN have EXACT lengths;
 # GTIN has four legal lengths (GS1); Luhn is variable (any Luhn-protected digit
@@ -26,17 +28,6 @@ from decoy_engine.transforms.fpe import _permute
 # leak the extra source digit raw (separator-preserve) or truncate it
 # (preserve_separators=false), because the checksum body is a FIXED width and the
 # surplus never round-trips. Fail closed on any invalid length instead.
-_EXACT_LENGTHS: dict[str, frozenset[int]] = {
-    "npi": frozenset({10}),
-    "isbn13": frozenset({13}),
-    "ean13": frozenset({13}),
-    "vin": frozenset({17}),
-    "gtin": frozenset({8, 12, 13, 14}),
-}
-# Luhn is length-agnostic beyond needing a body plus a check digit.
-_MIN_LENGTHS: dict[str, int] = {"luhn": 2}
-
-
 def _validate_scheme_length(scheme: str, s: str) -> None:
     """Fail closed unless ``s`` has a valid length for ``scheme``.
 
@@ -44,8 +35,10 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
     the checksum path and permutes to itself (len 0/1), nor (b) leaks/truncates a
     surplus character against the scheme's fixed-width body (over-length).
     """
-    exact = _EXACT_LENGTHS.get(scheme)
-    if exact is not None and len(s) not in exact:
+    if scheme_length_ok(scheme, len(s)):
+        return
+    exact = EXACT_LENGTHS.get(scheme)
+    if exact is not None:
         expected = " or ".join(str(n) for n in sorted(exact))
         raise FpeChecksumError(
             f"FPE checksum scheme {scheme!r} requires exactly {expected} character(s); "
@@ -55,8 +48,8 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
             "through a different strategy.",
             scheme=scheme,
         )
-    minimum = _MIN_LENGTHS.get(scheme)
-    if minimum is not None and len(s) < minimum:
+    minimum = MIN_LENGTHS.get(scheme)
+    if minimum is not None:
         raise FpeChecksumError(
             f"FPE checksum scheme {scheme!r} requires at least {minimum} characters "
             f"(body + check digit); got {len(s)}. The engine fails closed "
