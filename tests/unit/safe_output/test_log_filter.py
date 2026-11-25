@@ -8,15 +8,18 @@ one cell that writes it as a literal checks that the filter prints no source lin
 from __future__ import annotations
 
 import collections
+import configparser
+import gc
 import io
 import logging
 import sys
+import types
 
 import pytest
 
 from decoy_engine.internal import logging as engine_logging
 from decoy_engine.internal.logging import _configure_logger, _new_engine_handler
-from decoy_engine.safe_output import SafeRecordFilter
+from decoy_engine.safe_output import SafeRecordFilter, _log_filter
 
 _CANARY = "".join(("DECOY_CANARY", "_F31_7Q4Z"))
 _FMT = logging.Formatter("%(levelname)s %(message)s")
@@ -225,9 +228,14 @@ def test_later_handler_rendering_exc_info_sees_no_canary() -> None:
     assert _CANARY not in buf.getvalue()
 
 
-def test_fallback_clears_live_exc_info() -> None:
+def test_fallback_clears_live_exc_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(value: object, depth: int) -> object:
+        raise RuntimeError(_CANARY)
+
+    # The scan runs no caller code, so a hostile argument no longer reaches the fallback.
+    monkeypatch.setattr(_log_filter, "_scan", _boom)
     record = _record("x %(e)s", (), exc=True)
-    record.args = _ExplodingArgs(e=ValueError(_CANARY))
+    record.args = {"e": ValueError(_CANARY)}
     assert record.exc_info is not None
     assert SafeRecordFilter().filter(record) is True
     assert record.exc_info is None
@@ -415,7 +423,7 @@ class _Wrapper:
 
 
 @pytest.mark.xfail(strict=True, reason="named in the module gap list; call sites are guarded")
-@pytest.mark.parametrize("shape", ["exc_args", "wrapper_str", "too_deep"])
+@pytest.mark.parametrize("shape", ["exc_args", "wrapper_str", "too_deep", "mappingproxy"])
 def test_documented_gap_uncatchable_shapes(shape: str) -> None:
     engine, buf = _engine_handler()
     exc = ValueError(_CANARY)
@@ -424,7 +432,107 @@ def test_documented_gap_uncatchable_shapes(shape: str) -> None:
         arg = exc.args
     elif shape == "wrapper_str":
         arg = _Wrapper(exc)
+    elif shape == "mappingproxy":
+        arg = types.MappingProxyType({"e": exc})
     else:
         arg = [[exc]]
     engine.handle(_record("x %s", (arg,), exc=False))
     assert _CANARY not in buf.getvalue()
+
+
+def _reachable(root: object) -> list[object]:
+    """Objects reachable from `root` by reference, not entering types, modules or code."""
+    stop = (type, types.ModuleType, types.FunctionType, types.CodeType, types.BuiltinFunctionType)
+    seen: dict[int, object] = {}
+    todo = [root]
+    while todo:
+        obj = todo.pop()
+        if id(obj) in seen or isinstance(obj, stop):
+            continue
+        seen[id(obj)] = obj
+        todo.extend(gc.get_referents(obj))
+    return list(seen.values())
+
+
+def test_brace_formatter_cannot_reach_the_original_exception() -> None:
+    exc = ValueError(_CANARY)
+    record = _record("x %(err)s", (), exc=False)
+    record.args = {"err": exc}
+    SafeRecordFilter().filter(record)
+    assert record.getMessage() == "x ValueError"
+    assert not any(obj is exc for obj in _reachable(record.args))
+    braced = logging.Formatter("{message} {args}", style="{")
+    assert _CANARY not in braced.format(record)
+    with pytest.raises(AttributeError):
+        logging.Formatter("{args._original[err]}", style="{").format(record)
+
+
+def test_fallback_lookup_result_is_not_enumerated(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = configparser.ConfigParser()
+    parser.read_dict({"sec": {"opt": "%(absent)s " + _CANARY}})
+    section = parser["sec"]
+    engine, buf = _engine_handler()
+    record = _record("%(x)s", (), exc=False)
+    record.args = collections.defaultdict(lambda: section, a=1)
+    engine.handle(record)
+    assert buf.getvalue().strip() == "ERROR <Section: sec>"
+    assert _CANARY not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        collections.Counter(a=3),
+        collections.OrderedDict(a=1, b=2),
+        collections.defaultdict(int, a=1),
+        collections.UserDict(a=1),
+        {"a": 1},
+    ],
+    ids=["counter", "ordereddict", "defaultdict_int", "userdict", "dict"],
+)
+def test_mapping_with_nothing_to_replace_passes_through(mapping: object) -> None:
+    expected = repr(mapping)
+    record = _record("%r", (mapping,), exc=False)
+    SafeRecordFilter().filter(record)
+    assert record.args is mapping
+    assert record.getMessage() == expected
+
+
+def test_lookup_never_mutates_the_caller_mapping() -> None:
+    mapping: collections.defaultdict[str, object] = collections.defaultdict(
+        lambda: 0, e=ValueError(_CANARY)
+    )
+    record = _record("%(e)s %(missing)d", (), exc=False)
+    record.args = mapping
+    SafeRecordFilter().filter(record)
+    assert record.getMessage() == "ValueError 0"
+    assert "missing" not in mapping
+    assert isinstance(mapping["e"], ValueError)
+
+
+def test_nested_defaultdict_lookup_is_scanned() -> None:
+    # Decision: a defaultdict the scan reaches (the args mapping or a container one level
+    # inside it) is copied with a scanned factory, so a nested missing-key lookup prints the
+    # label. Deeper levels stay in the documented depth gap.
+    record = _record("x", (), exc=False)
+    nested: collections.defaultdict[str, object] = collections.defaultdict(
+        lambda: ValueError(_CANARY), a=1
+    )
+    record.args = {"nested": nested}
+    SafeRecordFilter().filter(record)
+    out = logging.Formatter("{args[nested][missing]}", style="{").format(record)
+    assert out == "ValueError"
+
+
+def test_failing_factory_carries_no_exception_text() -> None:
+    def _boom() -> object:
+        raise RuntimeError(_CANARY)
+
+    record = _record("%(x)s", (), exc=False)
+    record.args = collections.defaultdict(_boom, a=1)
+    SafeRecordFilter().filter(record)
+    with pytest.raises(LookupError) as info:
+        record.getMessage()
+    assert _CANARY not in repr(info.value)
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None

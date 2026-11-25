@@ -9,15 +9,22 @@ What the filter rewrites, in place on the record:
 
 - an exception in `msg` or in `args` (a tuple item or a mapping value) becomes its closed type
   label (`safe_error_type`), so `%s` and `%r` print the label. The same holds one level inside
-  a list, tuple, set, frozenset or mapping (keys and values; a mapping that needs no change is
-  left as is, and one that does is replaced by a dict whose missing-key lookup is scanned too; a lone mapping argument is
-  always replaced that way) used as an argument or as `msg`;
+  a list, tuple, set, frozenset, dict or `UserDict` (keys and values) used as an argument or as
+  `msg`. A lone mapping argument is `args` itself and follows the same rule (`_scan_mapping`);
 - live `exc_info` becomes a traceback of labels and `file:line, in function` frames, with no
   exception text, no source lines and no frame locals; `exc_info` is then cleared so the
   formatter cannot render the raw one;
 - a cached `exc_text` with no live traceback is dropped unless this filter wrote it, so text a
   host formatter cached earlier never passes, while a second filtered handler prints the same
   safe traceback as the first.
+
+The scan reads containers through their builtin base type only, so it runs no caller code: no
+overridden `items` or `__iter__`, no `default_factory`, no lazy mapping such as a
+`ConfigParser` section. A container with nothing to replace is returned as is, identity
+included. One that changes is rebuilt as a new builtin of the same kind and keeps no reference
+to the caller's object, so no formatter field (`{args.x[y]}`) can reach an original value, and
+the caller's data is never changed. A mapping whose missing-key lookup the filter cannot
+vouch for is rebuilt even when its items are clean (`_Lookup`).
 
 `stack_info` holds code locations and engine source lines (code, not data) and is kept.
 
@@ -27,16 +34,19 @@ call-site guard `tests/sentry/test_log_interpolation.py` covers them instead:
 - text already formatted into `msg` (an f-string, or `str(exc)` passed as an argument), which
   cannot be told apart from any other text here;
 - `exc.args` (or any part of an exception) passed as an argument, since it is plain data;
-- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`;
+- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`, including a
+  mapping type other than dict and `UserDict`, which the scan does not open;
 - an exception nested deeper than one container level.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections import Counter, OrderedDict, UserDict, defaultdict
+from collections.abc import Callable
+from enum import Enum
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 from decoy_engine.safe_output._exception import safe_error_type
 
@@ -45,6 +55,13 @@ _SAFE_EXC_TEXT = "_decoy_safe_exc_text"
 # Bounds the cause/context walk; links past it are not printed.
 _MAX_CHAIN = 16
 _UNRENDERABLE = "log record could not be made safe"
+# `args` holds the arguments themselves, so it is scanned one container level deeper than `msg`.
+_ARGS_DEPTH = 2
+_SEQUENCES = (list, tuple, set, frozenset)
+# Factories that build an empty builtin: a defaultdict using one keeps its identity.
+_EMPTY_FACTORIES = (int, float, complex, bool, str, bytes, list, tuple, dict, set, frozenset)
+_FACTORY_FAILED = "default factory failed"
+_NO_VALUE = object()
 
 
 class _Label(str):
@@ -60,56 +77,132 @@ def _label(exc: BaseException) -> _Label:
     return _Label(safe_error_type(exc).value)
 
 
+class _Lookup(Enum):
+    """What a missing-key lookup on a mapping does, read from its type alone."""
+
+    BUILTIN = "builtin"  # KeyError, Counter's 0, or a factory from `_EMPTY_FACTORIES`
+    FACTORY = "factory"  # defaultdict: calls a caller's `default_factory`
+    CALLER = "caller"  # a `__getitem__` or `__missing__` the caller wrote
+
+
+def _factory_of(value: dict[object, object]) -> Callable[[], object] | None:
+    # The C slot `defaultdict.__missing__` reads, not an attribute a subclass may override.
+    slot: Any = vars(defaultdict)["default_factory"]
+    return cast("Callable[[], object] | None", slot.__get__(value))
+
+
+def _lookup_of(value: dict[object, object] | UserDict[object, object]) -> _Lookup:
+    kind = type(value)
+    # Identity checks only: `in` or `==` would call a caller's `__eq__`.
+    getitem = kind.__getitem__
+    if getitem is not dict.__getitem__ and getitem is not UserDict.__getitem__:
+        return _Lookup.CALLER
+    missing = getattr(kind, "__missing__", None)
+    if missing is None or missing is Counter.__missing__:
+        return _Lookup.BUILTIN
+    if missing is defaultdict.__missing__:
+        factory = _factory_of(value)  # type: ignore[arg-type]
+        if factory is None or any(factory is f for f in _EMPTY_FACTORIES):
+            return _Lookup.BUILTIN
+        return _Lookup.FACTORY
+    return _Lookup.CALLER
+
+
+class _ScannedFactory:
+    """A copy's `default_factory`: the caller's factory, with its result scanned.
+
+    Holds the factory only. A formatter field cannot call it, so no value it builds is
+    reachable from the record; `repr` is the factory's, so the copy prints like the original.
+    """
+
+    __slots__ = ("_depth", "_factory")
+
+    def __init__(self, factory: Callable[[], object], depth: int) -> None:
+        self._factory = factory
+        self._depth = depth
+
+    def __call__(self) -> object:
+        value = _NO_VALUE
+        try:
+            value = _scan(self._factory(), self._depth)
+        except Exception:
+            # The factory's own error text is not carried over.
+            pass
+        if value is _NO_VALUE:
+            raise LookupError(_FACTORY_FAILED)
+        return value
+
+    def __repr__(self) -> str:
+        return repr(self._factory)
+
+
+def _store_of(value: object) -> dict[object, object] | None:
+    """The builtin dict holding a mapping's items, or None for a type the scan does not open."""
+    # `issubclass(type(...))`, not `isinstance`, which falls back to a caller's `__class__`.
+    if issubclass(type(value), dict):
+        return value  # type: ignore[return-value]
+    if issubclass(type(value), UserDict):
+        data = vars(value).get("data")
+        return data if issubclass(type(data), dict) else None
+    return None
+
+
+def _scan_pairs(store: dict[object, object], depth: int) -> list[tuple[object, object]] | None:
+    """`store`'s items with keys and values scanned, or None when none of them change.
+
+    The one key/value scan: every mapping, the lone mapping argument included, goes through it.
+    """
+    pairs = list(dict.items(store))
+    scanned = [(_scan(k, depth), _scan(v, depth)) for k, v in pairs]
+    if all(nk is k and nv is v for (k, v), (nk, nv) in zip(pairs, scanned, strict=True)):
+        return None
+    return scanned
+
+
+def _scan_mapping(value: object, store: dict[object, object], depth: int) -> object:
+    lookup = _lookup_of(value)  # type: ignore[arg-type]
+    scanned = _scan_pairs(store, depth - 1)
+    if scanned is None and lookup is _Lookup.BUILTIN:
+        return value
+    pairs = scanned if scanned is not None else list(dict.items(store))
+    if lookup is _Lookup.CALLER:
+        # The caller's lookup cannot be reused, so a missing key raises a plain KeyError.
+        return dict(pairs)
+    kind = type(value)
+    if issubclass(kind, defaultdict):
+        factory = _factory_of(value)  # type: ignore[arg-type]
+        if factory is not None and lookup is _Lookup.FACTORY:
+            factory = _ScannedFactory(factory, depth - 1)
+        return defaultdict(factory, pairs)
+    if issubclass(kind, Counter):
+        return Counter(dict(pairs))
+    if issubclass(kind, OrderedDict):
+        return OrderedDict(pairs)
+    return dict(pairs)
+
+
 def _scan(value: object, depth: int) -> object:
     """`value` with exceptions swapped for labels, `depth` container levels down.
 
-    Returns `value` itself when nothing in it changes, so a mapping with its own lookup
-    behavior (a `Counter`, a `defaultdict`) is never swapped for a plain copy needlessly.
+    Dispatches on `type(value)` and reads containers through their builtin base, so no caller
+    code runs. Returns `value` itself when nothing in it changes.
     """
-    if isinstance(value, BaseException):
-        return _label(value)
+    kind = type(value)
+    if issubclass(kind, BaseException):
+        return _label(value)  # type: ignore[arg-type]
     if depth == 0:
         return value
-    if isinstance(value, (list, tuple, set, frozenset)):
-        items = list(value)
-        new = [_scan(v, depth - 1) for v in items]
-        if all(n is o for n, o in zip(new, items, strict=True)):
-            return value
-        if isinstance(value, list):
-            return new
-        if isinstance(value, tuple):
-            return tuple(new)
-        return set(new) if isinstance(value, set) else frozenset(new)
-    if isinstance(value, Mapping):
-        pairs = [(k, v, _scan(k, depth - 1), _scan(v, depth - 1)) for k, v in value.items()]
-        if all(nk is k and nv is v for k, v, nk, nv in pairs):
-            return value
-        return _SafeMapping([(nk, nv) for _, _, nk, nv in pairs], value)
-    return value
-
-
-class _SafeMapping(dict):
-    """The mapping a formatter sees: scanned items, and a scanned fallback lookup.
-
-    The caller's mapping type is never reused, so its own `__missing__` or `__getitem__` cannot
-    hand the formatter an unscanned value. A key absent from the scanned items goes to the
-    original mapping, and the result passes through `_scan` before it is returned.
-    """
-
-    def __init__(self, pairs: list[tuple[object, object]], original: Mapping[Any, object]):
-        super().__init__(pairs)
-        self._original = original
-
-    def __missing__(self, key: object) -> object:
-        try:
-            result = self._original[key]
-            found = True
-        except Exception:
-            # No exception text is carried over: the caller sees a plain KeyError below.
-            found = False
-        if not found:
-            raise KeyError(key)
-        return _scan(result, 1)
+    for base in _SEQUENCES:
+        if issubclass(kind, base):
+            items: list[object] = list(cast("Any", base).__iter__(value))
+            new = [_scan(v, depth - 1) for v in items]
+            if all(n is o for n, o in zip(new, items, strict=True)):
+                return value
+            return base(new)
+    store = _store_of(value)
+    if store is None:
+        return value
+    return _scan_mapping(value, store, depth)
 
 
 def _frames(tb: TracebackType | None) -> list[str]:
@@ -149,13 +242,10 @@ def _safe_traceback(exc: BaseException) -> str:
 
 def _scrub(record: logging.LogRecord) -> None:
     record.msg = _scan(record.msg, 1)
-    args = record.args
-    if isinstance(args, tuple):
-        record.args = tuple(_scan(a, 1) for a in args)
-    elif isinstance(args, Mapping):
-        # Always wrapped, even when nothing changed: the formatter's lookups must be scanned too.
-        pairs = [(_scan(k, 1), _scan(v, 1)) for k, v in args.items()]
-        record.args = _SafeMapping(pairs, args)
+    # `args` is the positional tuple or, when the only argument is a non-empty mapping, that
+    # mapping itself (`LogRecord.__init__`). A lone mapping gets no wrapper of its own: like any
+    # mapping, it is replaced only when `_scan_mapping` must replace it.
+    record.args = _scan(record.args, _ARGS_DEPTH)  # type: ignore[assignment]
 
     exc = record.exc_info[1] if record.exc_info else None
     if exc is not None:
