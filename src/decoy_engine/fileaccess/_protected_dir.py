@@ -40,6 +40,7 @@ from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._entry import require_ambient
 from decoy_engine.fileaccess._fdtree import _owned
+from decoy_engine.fileaccess._types import FileAccessUnavailable
 
 _MODE = 0o700
 _REPARSE_POINT = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: junction, mount point, placeholder
@@ -55,6 +56,13 @@ class ProtectedDirUnsafe(DecoyError, ValueError):  # noqa: N818 - the plan names
 
     def __init__(self) -> None:
         super().__init__("the protected directory is not safe to use.")
+
+
+class ScratchRootUnusable(FileAccessUnavailable):
+    """The directory a temp variable names cannot hold scratch; the run stops, it does not fall
+    back to another temp directory."""
+
+    code = reasons.runtime.SCRATCH_ROOT_UNUSABLE
 
 
 class ProtectedDirAclFailed(DecoyError, OSError):  # noqa: N818 - the plan names
@@ -270,7 +278,7 @@ def open_protected_dir(
 def protected_scratch_dir(
     parent: str | os.PathLike[str] | None = None, prefix: str = "decoy-"
 ) -> Iterator[Path]:
-    """A fresh protected directory under ``parent`` (default: the system temp directory),
+    """A fresh protected directory under ``parent`` (default: ``scratch_root()``),
     removed on every exit. While it is open, it and its children are the engine's own paths."""
     if os.sep in prefix or (os.altsep is not None and os.altsep in prefix):
         raise ProtectedDirUnsafe
@@ -283,19 +291,51 @@ def protected_scratch_dir(
         _remove(root)
 
 
+def scratch_root() -> Path:
+    """The one directory every engine scratch root goes under, and the one the disk cap measures.
+
+    The first non-empty temp variable (stdlib order: TMPDIR, TEMP, TMP) is the choice; lower ones
+    are ignored. It must take a private directory, or the run stops: no silent move to another
+    temp directory. With none set it is ``tempfile.gettempdir()``. Messages name the variable
+    only."""
+    chosen = (
+        ("TMPDIR", os.environ.get("TMPDIR")),
+        ("TEMP", os.environ.get("TEMP")),
+        ("TMP", os.environ.get("TMP")),
+    )
+    for name, value in chosen:
+        if value:
+            path = os.path.abspath(value)
+            if _takes_a_directory(path):
+                return Path(path)
+            raise ScratchRootUnusable(f"the directory named by {name} cannot hold scratch files.")
+    return Path(tempfile.gettempdir())
+
+
+def _takes_a_directory(base: str) -> bool:
+    """Whether a protected directory can be made under ``base``; the probe is removed."""
+    try:
+        probe = _allocate(base, ".decoy-probe-")
+        _remove(probe)  # best effort; the check below is what counts
+    except (OSError, ProtectedDirUnsafe):
+        return False
+    # A parent that allows create but denies delete would gain one directory per call.
+    return _lstat(probe) is None
+
+
 def _parent_base(parent: str | os.PathLike[str] | None) -> str:
-    """The directory a fresh root goes under: the system temp directory, or ``parent`` after the
+    """The directory a fresh root goes under: ``scratch_root()``, or ``parent`` after the
     policy check (a live issued root is accepted under every policy), made if it is missing."""
-    base = tempfile.gettempdir()
-    if parent is not None:
-        base = os.path.abspath(os.fspath(parent))
-        root = _live_root(_key(base))
-        if root is None:
-            require_ambient(_WHAT)
-        else:
-            _vet_live(os.fspath(parent), base, root)
-        if _lstat(base) is None:
-            _make(base, parents=True)
+    if parent is None:
+        return str(scratch_root())
+    base = os.path.abspath(os.fspath(parent))
+    root = _live_root(_key(base))
+    if root is None:
+        require_ambient(_WHAT)
+    else:
+        _vet_live(os.fspath(parent), base, root)
+    if _lstat(base) is None:
+        _make(base, parents=True)
     return base
 
 

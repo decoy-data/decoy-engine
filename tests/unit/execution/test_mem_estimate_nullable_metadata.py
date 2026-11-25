@@ -10,11 +10,12 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
+from decoy_engine._pandas_meta import pandas_nullable_columns
 from decoy_engine.config._transforms import FilterOp
 from decoy_engine.execution import _mem_estimate_arrow as _arrow
 from decoy_engine.execution._fk_keys import to_pandas_fk_safe
 from decoy_engine.execution._mem_estimate import _FIXED_WIDTH_DTYPE_BYTES, _column_bytes
-from decoy_engine.execution._mem_estimate_arrow import classify_column, pandas_nullable_columns
+from decoy_engine.execution._mem_estimate_arrow import classify_column
 from decoy_engine.execution._mem_estimate_schema import (
     table_size_spec_from_profile,
     table_size_spec_from_table,

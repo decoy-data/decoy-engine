@@ -2,6 +2,23 @@
 
 from __future__ import annotations
 
+# The `tempfile` creators. The protected-directory and arena sentries share this one list.
+TEMP_CREATORS: frozenset[str] = frozenset(
+    {
+        "tempfile.mkstemp",
+        "tempfile.mkdtemp",
+        "tempfile.mktemp",
+        "tempfile.NamedTemporaryFile",
+        "tempfile.TemporaryDirectory",
+        "tempfile.TemporaryFile",
+        "tempfile.SpooledTemporaryFile",
+    }
+)
+
+# Reads of the system temp root. Kept out of `EXACT`: a root read touches no file. Only
+# `fileaccess.scratch_root` may select the default temp root (F25 G6, sentry S-G6a).
+TEMP_ROOT_READS: frozenset[str] = frozenset({"tempfile.gettempdir", "tempfile.gettempdirb"})
+
 # Exact canonical names.
 EXACT: frozenset[str] = frozenset(
     {
@@ -36,10 +53,7 @@ EXACT: frozenset[str] = frozenset(
         "os.chmod",
         "os.utime",
         "os.chdir",
-        "tempfile.mkstemp",
-        "tempfile.mkdtemp",
-        "tempfile.NamedTemporaryFile",
-        "tempfile.TemporaryDirectory",
+        *TEMP_CREATORS,
         "zipfile.ZipFile",
         "tarfile.open",
         "gzip.open",

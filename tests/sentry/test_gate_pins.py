@@ -13,6 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "unit" / "scripts"))
 from _gates_harness import read_pins
 
+from tests.sentry.ratchet import is_test_filename
+
 ROOT = Path(__file__).resolve().parents[2]
 PINS = ROOT / "scripts" / "dev" / "gate_pins.txt"
 GATES = ROOT / "scripts" / "dev" / "gates.sh"
@@ -26,14 +28,19 @@ def test_list_is_not_empty() -> None:
     assert _paths(), "gate_pins.txt lists no test; the always-on set would be empty"
 
 
+def _has_a_test(folder: Path) -> bool:
+    """A test file anywhere below ``folder`` (a directory named like a test does not count)."""
+    return any(is_test_filename(p.name) for p in folder.rglob("*") if p.is_file())
+
+
 def test_every_pinned_path_exists_and_is_a_test() -> None:
     bad = []
     for p in _paths():
         target = ROOT / p
         if target.is_file():
-            ok = target.name.startswith("test_") and target.suffix == ".py"
+            ok = is_test_filename(target.name)
         else:
-            ok = target.is_dir() and any(target.rglob("test_*.py"))
+            ok = target.is_dir() and _has_a_test(target)
         if not ok:
             bad.append(p)
     assert not bad, f"gate_pins.txt names missing or non-test paths: {bad}"

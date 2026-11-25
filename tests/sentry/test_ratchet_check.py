@@ -189,6 +189,7 @@ def _set_keys(repo: Path, keys: list[str], sid: str = V_ID) -> None:
     _write(repo, REG, _registry({"a": A, V_ID: V}))
     if sid == "a":
         _write(repo, A, _baseline("a", keys))
+        _write(repo, V, _baseline(V_ID, []))  # the registry lists V, so its file must exist
     else:
         _write(repo, V, _baseline(V_ID, keys))
 
