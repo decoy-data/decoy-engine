@@ -36,25 +36,22 @@ if TYPE_CHECKING:
 __all__ = ["bound_decline", "faker_admit", "load_faker_kernels"]
 
 
-def load_faker_kernels(
-    native_threads: int | None,
-    *,
-    load_index: Callable[[], IndexDerivationKernel],
-    load_hash: Callable[[], KeyedDerivationKernel],
-) -> BoundFakerKernel:
+def load_faker_kernels(native_threads: int | None) -> BoundFakerKernel:
     """Bind the index kernel and the hash kernel, each on its own.
 
-    The caller passes the two loaders so they resolve through its module globals at call time,
-    which is how a test swaps the companion load (`_sequential_native._load_faker`). A kernel
-    that is unavailable binds the byte-identical reference (index) or None (hash), and
+    Both loaders are read off `_sequential_native` at call time, the module every sequential
+    loader lives in, so a test swaps a companion load by patching the name there. A kernel that
+    is unavailable binds the byte-identical reference (index) or None (hash), and
     `BoundFakerKernel.ready` then declines the columns that variant cannot run natively, so a
     missing index kernel does not discard a healthy hash kernel or the reverse."""
+    from decoy_engine.execution import _sequential_native as seam
+
     try:
-        index: IndexDerivationKernel | None = load_index()
+        index: IndexDerivationKernel | None = seam.load_compiled_index_kernel()
     except CryptoExtensionUnavailableError:
         index = None
     try:
-        hash_kernel: KeyedDerivationKernel | None = load_hash()
+        hash_kernel: KeyedDerivationKernel | None = seam.load_compiled_crypto_kernel()
     except CryptoExtensionUnavailableError:
         hash_kernel = None
     return BoundFakerKernel.bind(index, native_threads, hash_kernel)

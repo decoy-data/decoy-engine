@@ -251,7 +251,7 @@ def _hash_kernel_fails() -> Iterator[None]:
     boom = CryptoExtensionUnavailableError("injected self-test failure")
     with (
         mock.patch(
-            "decoy_engine.execution.sequential._faker_admission.load_compiled_crypto_kernel",
+            "decoy_engine.execution._sequential_native.load_compiled_crypto_kernel",
             side_effect=boom,
         ),
         mock.patch(
@@ -331,7 +331,7 @@ def _index_kernel_fails() -> Iterator[None]:
     boom = CryptoExtensionUnavailableError("injected index load failure")
     with (
         mock.patch(
-            "decoy_engine.execution.sequential._faker_admission.load_compiled_index_kernel",
+            "decoy_engine.execution._sequential_native.load_compiled_index_kernel",
             side_effect=boom,
         ),
         mock.patch(
@@ -453,6 +453,7 @@ class TestMissingIndexKernelBinding:
     def test_both_routes_report_the_same_status_without_the_index_kernel(self) -> None:
         from decoy_engine.execution import _sequential_native
         from decoy_engine.execution.out_of_core import _hash_run
+        from decoy_engine.execution.sequential import _faker_admission
 
         def missing(*_a: Any, **_k: Any) -> Any:
             raise CryptoExtensionUnavailableError("index kernel absent")
@@ -463,7 +464,7 @@ class TestMissingIndexKernelBinding:
             mock.patch.object(_hash_run, "load_compiled_crypto_kernel", missing),
             mock.patch.object(_sequential_native, "load_compiled_crypto_kernel", missing),
         ):
-            seq = _sequential_native._load_faker(None)
+            seq = _faker_admission.load_faker_kernels(None)
             ooc = _hash_run.OocHashRun()._faker_kernel()
         assert seq.compiled is False and ooc.compiled is False
         assert seq.hash_kernel is None and ooc.hash_kernel is None
