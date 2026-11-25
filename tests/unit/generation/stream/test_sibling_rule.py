@@ -12,8 +12,10 @@ import pytest
 
 from decoy_engine.generation import stream as gen_stream
 from decoy_engine.generation._admission import classify_plan
+from decoy_engine.generation._column_streams import WindowedDateStream
 from decoy_engine.generation._window_admission import classify_window_table
 from decoy_engine.generation.stream import _batches
+from decoy_engine.generators.derivation import with_table
 from tests.parity import _f0_fixtures as fx
 from tests.parity._fr0_support import prepared_config
 
@@ -45,6 +47,7 @@ def test_the_three_readers_agree_with_the_declared_anchor() -> None:
     assert plan_reason == "eligible"
     assert dict(window_reasons).get("ev") is None
     assert read == frozenset({"dob"})
+    assert WindowedDateStream(with_table(dict(_EV), "t"), 1).anchor == "dob"
 
 
 def test_the_three_readers_follow_a_changed_rule(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,6 +62,22 @@ def test_the_three_readers_follow_a_changed_rule(monkeypatch: pytest.MonkeyPatch
     assert plan_reason == "windowed_date_anchor_not_in_table"
     assert dict(window_reasons).get("ev") == "windowed_date_anchor_not_earlier"
     assert read == frozenset({"absent"})
+    assert WindowedDateStream(with_table(dict(_EV), "t"), 1).anchor == "absent"
+
+
+class _ArrowStream:
+    supports_array = True
+
+
+def test_a_column_read_as_a_sibling_stays_off_the_arrow_path() -> None:
+    """A later column reads the sibling as a Python list, so its batch must be built as one."""
+    cols = [
+        {"name": "p", "type": "faker"},
+        {"name": "q", "type": "faker"},
+        {"name": "ev", "type": "windowed_date", "anchor": "p"},
+    ]
+    streams: list[Any] = [_ArrowStream(), _ArrowStream(), object()]
+    assert _batches.array_columns(cols, streams, {}, {}) == [False, True, False]
 
 
 @pytest.mark.parametrize(
