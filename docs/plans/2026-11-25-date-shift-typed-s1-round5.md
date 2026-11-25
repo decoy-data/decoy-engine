@@ -23,8 +23,9 @@ The DESIGN finding (the arithmetic sentry misses `from datetime import timedelta
 fixed here too, as P8.
 
 Review history. Dennis R1 returned GO-WITH-FIXES. Codex plan reviews R1, R2 and R3 returned NO-GO.
-codex-fix then added the native predicate projection and value-free retries (rules 5 and 6).
-The owner dropped its exact time membership rule. That edge is now a refusal (P5t).
+codex-fix then added the native predicate projection and value-free retries (rules 5 and 7).
+The owner dropped its exact time membership rule. Codex R4 then showed that aligned hinted
+input would silently stop matching, so rule 6 now refuses integer membership on time columns (P5t).
 R1 (V1) added the shifted storage bound, protected exact native work and removed masking bounds.
 R2 (V1) required reconciliation of valid hints and stale zones, plus value-free conversion errors.
 R3 (V1) found that native predicates still exposed the null row's sibling and lost carry attribution.
@@ -80,10 +81,12 @@ select a row, change a conversion refusal or put a rejected value in error or lo
 Native output still takes a passthrough column from Arrow. The predicate supplies only a mask.
 
 Non-goals include nested temporal bounds and exact transition-zone limits.
-Known issue (owner decision, rule 6): a `when:` that reads an Arrow-backed `time64[ns]` column
-holding a sub-microsecond tick now gets the coded refusal on both legs. Today the hint lets
-`t in [0]` succeed. The unhinted source is already refused, so the hint no longer changes the
-outcome. Exact time membership is deferred to a later release.
+Known issue (owner decision 2026-11-25, rule 6): exact time membership is not supported.
+Today a hinted `t in [0]` on an Arrow-backed `time64[ns]` column redacts matching rows, and
+the unhinted source either refuses (unaligned ticks) or silently matches nothing (aligned
+ticks, because `datetime.time(0, 0) != 0`). After this change every integer-list membership
+test on a time column is refused before any chunk is emitted, on both legs and with or
+without the hint. Exact time membership is deferred to a later release.
 The native Faker null mask, group-key kernel, transforms and mixed FK bridge retain their
 existing conversions.
 
@@ -124,12 +127,24 @@ existing conversions.
    Keep `_eval_predicate` and its handling of nullable boolean masks. At its existing
    fallback warning (`_when_gate.py:404`), log only the fixed event, strategy and column.
    Omit the library warning payload.
-6. **No exact time path (owner decision, 2026-11-25).** Integer-list time membership gets no
-   special column access. Rev9's `t != 1` and `t in [0]` both take ordinary ingestion.
-   A hinted Arrow-backed `time64[ns]` column with an unaligned tick that a `when:` reads is
-   refused on both legs, as the unhinted source is refused today. See Non-goals and P5t.
+6. **Refuse integer membership on time columns.** Before a chunk is converted, check the
+   source Arrow schema against the parsed `when:` AST (`parse_when_cached`). If any `InList`
+   leaf (including negation) reads a field whose physical type is `time32` or `time64`, raise
+   `StrategyError(code=reasons.runtime.WHEN_EXPRESSION_ERROR)` with the fixed text
+   `"when expression on column {column!r} tests integer membership on time column {field!r};
+   this is not supported"`. This is the released code that `_when_gate.py:431` already raises
+   for a predicate that cannot be evaluated, so no new code is needed. The text names only
+   the gated column and the time field, never a literal or a cell. The check is one function
+   in `_when_gate.py` and depends only on schema and AST, so the hint, alignment and cell
+   values cannot change its outcome. Call it from `native/_when_mask.py` before the
+   projection, and from the adapter (line 205) and sequential (415) ingestion before
+   `to_pandas_masking_frame`. The adapter call covers full frame, the chunked oracle and
+   unified admission, which declines to full frame. Each leg evaluates masks for a chunk before
+   it writes that chunk, and the schema does not change between chunks, so the refusal comes
+   before chunk 0 is emitted. Comparisons on time columns (rev9's `t != 1`) are not affected
+   and keep the conversion refusal of rule 7.
 
-6. **Preserve the public failure class and replace its text once.** At the shared conversion
+7. **Preserve the public failure class and replace its text once.** At the shared conversion
    boundary, diagnose a failed conversion with single-column conversions in source order.
    Use the same prepared input and protected set. A single-column failure needs no retry.
    Match the original class and text internally before attributing a multi-column failure.
@@ -185,9 +200,10 @@ bound, so its pre-1677 values read as null in a profile. That is safe and is rec
 - The five pandas sites and native predicate projection enter the same conversion boundary.
   The caller sentry pins the six qualified callers and the forwarding helper. The four
   exact-vector consumers in P5e retain their existing calls. M8 and M16 exercise this split.
-- The existing predicate evaluator decides membership on the converted frame. P5t checks
-  the unaligned time refusal. P5r checks the ordinary comparison. Neither the predicate nor
-  a retry adds a reason code.
+- The rule 6 schema check is one function in `_when_gate.py` with three callers (native
+  when-mask, adapter ingestion, sequential ingestion), pinned by the caller sentry (P5e). P5t
+  checks the refusal. P5r checks the ordinary comparison. Neither the check nor a retry adds a
+  new reason code.
 - `native/_chunked_entry.py:330` passes the masks and the original Arrow chunk separately
   into the kernel. `_chunked_carry.py:139-164` matches errors and owns the chunk refusal.
 
@@ -214,8 +230,8 @@ bound, so its pre-1677 values read as null in a profile. That is safe and is rec
 | P5r | Use the C8-i good chunk then its bad chunk, `t != 1`, with and without the `time64[ns][pyarrow]` hint. The public oracle raises exactly `pa.ArrowInvalid` with the fixed column-only text. Its cause and context are empty. Native and forced oracle each emit the same first chunk only. Both then raise `chunked_passthrough_value_unrepresentable` naming the table, `'t'` and `chunk 1`. Both causes equal the public error in exact class and text. Assert that the safe cause has no raw cause or context. Check outer text, cause, formatted chain and captured logs for the rejected tick. Seed the fallback warning with a distinctive literal and check the captured log too. Run unchanged rev9 and C8-i pins too. | same |
 | P5c | Unified admission flag on and off, P5's `date32` fixture with Arrow-backed metadata: both give `full_frame_value_unrepresentable` (admission declines) | same |
 | P5d | Native compatibility guard: the chunked positional Faker job on Arrow-backed `date32` year 10000 succeeds; the zoned rev9 shapes (`tests/native/_rev9_support.py:64`) stay `"exact"`; `tests/native/test_c8_i_when_mask.py` and `test_chunked_entry_rev9_shapes.py` retain their assertions. Update the shapes spy binding as described in Slices. | same, and existing files |
-| P5t | Known-issue refusal (owner decision, rule 6): `t in [0]` on Arrow-backed `time64[ns]` ticks `[1, null, 0]` with `time64[ns][pyarrow]` metadata. Native and forced oracle both raise `chunked_passthrough_value_unrepresentable` naming the table, `'t'` and `'chunk '`, with `__cause__` set; full frame raises `full_frame_value_unrepresentable`. The same run without metadata gives the same codes. No `str(exc)`, rendered chain or captured log holds the tick text `00:00:00.000000001`. Aligned ticks (`[1000, null, 0]`) on both legs succeed and redact only the last sibling. | `tests/unit/execution/test_full_frame_value_unrepresentable.py` |
-| P5e | Pin the five pandas sites and `native.when_mask` to the masking helper. Pin its FK-safe delegate and the four direct users (Faker null mask, group-key, transforms, mixed FK). Extend the exact caller-set and alias tests for the helper. | `tests/sentry/defects/test_lossless_int_columns.py` |
+| P5t | Time membership refusal (rule 6). Fixtures: Arrow-backed `time64[ns]` column `t` beside a masked sibling, ticks `[123456789, null, 0]` (unaligned) and `[123456000, null, 0]` (aligned); also one `time32[s]` fixture. Predicates `t in [0]` and `t not in [0]`. Run each on native and forced oracle, with `time64[ns][pyarrow]` metadata and with metadata removed, plus full frame and sequential once each. Every run raises `StrategyError` with code `when_expression_error` and the exact text `"when expression on column 'x' tests integer membership on time column 't'; this is not supported"`, `__cause__` and `__context__` are None, and the output sink holds no chunk (no sibling emitted, not even chunk 0). No `str(exc)`, rendered chain or captured log contains `123456789`, `123456000` or `00:00:00.123456`. A control `t != 1` on the aligned fixture still takes rule 7. | `tests/unit/execution/test_full_frame_value_unrepresentable.py`, `tests/native/test_c8_i_when_mask.py` |
+| P5e | Pin the five pandas sites and `native.when_mask` to the masking helper. Pin its FK-safe delegate and the four direct users (Faker null mask, group-key, transforms, mixed FK). Extend the exact caller-set and alias tests for the helper. Pin the three callers of the rule 6 check. | `tests/sentry/defects/test_lossless_int_columns.py` |
 | P6 | No-regression, new surface (guard): for tables from `pa.Table.from_pandas` with numpy dtypes (dates, naive and zoned in-range timestamps, timedelta, DatetimeIndex, zoned DatetimeIndex, a MultiIndex with a datetime level), `profile_frame(t)` equals `t.to_pandas()` (`assert_frame_equal`, dtypes included) | `tests/unit/profile/test_profile_frame_unrepresentable.py` |
 | P6b | Disclosed change, new surface: correct Arrow-backed metadata (`timestamp[us][pyarrow]`, `date32[day][pyarrow]`) now profiles as the physical default (`datetime64[us]`, `object`), before profile label canonicalization. `reconcile_temporal_metadata` returns the table unchanged for unparseable `pandas` metadata, skips entries with no matching field (after `select`) and duplicate field names, and never raises | same |
 | P7 | Bounds edges for every table row and unit, `coerce_ns` both ways, including `timestamp[ns, -05:00]`, `timestamp[ns, +05:30]` and `timestamp[s, +05:30]` (the fixed-offset edges use the three-term formula): the expected edges are computed in the test from independent constants (`datetime(1, 1, 1)`, `datetime(9999, 12, 31, 23, 59, 59, 999999)`, the offset, `pd.Timestamp.min.value`, `pd.Timestamp.max.value`), never from `temporal_bounds`; assert the returned low bound itself excludes `INT64_MIN` for every timestamp and duration unit. Check both inclusive edges and their representable neighbours. For `time64[ns]`, accept 86,399,999,999,000 (the last aligned tick), reject its adjacent ticks and the next midnight; no bound lies outside int64 | `tests/unit/test_arrow_types.py` |
@@ -248,9 +264,10 @@ a reproduction. P4 verifies observed nulls after NumPy conversion. Only P7 inspe
 | M15 | re-raise raw Arrow conversion text | P5x, P5r |
 | M16 | native predicate projection bypasses the masking helper | P5w, P5e, P5r |
 | M17 | normalize only the retry, or collapse the first failure to plain ValueError | P5r, existing rev9 class and C8-i parity pins |
-| M18 | give hinted `time64[ns]` columns `pd.ArrowDtype` in the masking helper | P5t, P5r |
+| M18 | run the rule 6 check on one leg only, only when hinted, or after the first chunk is written | P5t |
+| M19 | give hinted `time64[ns]` columns `pd.ArrowDtype` in the masking helper | P5r |
 
-Rerun M1 through M18 on the final implementation head. Record the head and failing assertion.
+Rerun M1 through M19 on the final implementation head. Record the head and failing assertion.
 
 ## Defect classes (plan contract catalog)
 
@@ -259,13 +276,13 @@ Rerun M1 through M18 on the final implementation head. Record the head and faili
 | 1 | Value-bearing output | metadata reconciled and the cell nulled on Arrow before conversion; both initial conversions and retries raise fresh value-free errors after leaving the handler | P1, P1b, P2f, P5x, P5r | M1, M15, M17 |
 | 2 | Cleanup missing on an exit path | N/A: no resource is opened; every new function is pure over an Arrow table | none needed | N/A |
 | 3 | State machine and concurrency | N/A: no shared state; `coerce_ns` is read per call | none needed | N/A |
-| 4 | Route parity and silent fallback | every profile route calls `profile_frame`; every pandas masking site calls `to_pandas_masking_frame` (sentry-pinned); native predicate input and unified admission use it too | P5c, P5d, P5e, P5t, P5w | M8, M16, M18 |
+| 4 | Route parity and silent fallback | every profile route calls `profile_frame`; every pandas masking site calls `to_pandas_masking_frame` (sentry-pinned); native predicate input and unified admission use it too | P5c, P5d, P5e, P5t, P5w | M8, M16, M18, M19 |
 | 5 | Referential integrity | N/A: no key path changes | none needed | N/A |
 | 6 | Untrusted producer | pandas metadata from a source file never decides a profile bound or a masking outcome | P1, P1b, P4, P5 | M1, no reconcile |
 | 7 | Check then use on a path (TOCTOU) | N/A: no path is opened | none needed | N/A |
-| 8 | Weak tests and overclaimed evidence | record baseline results separately for regressions and guards. Compare emitted siblings, public errors and direct bounds | builder report | M1 to M18 |
+| 8 | Weak tests and overclaimed evidence | record baseline results separately for regressions and guards. Compare emitted siblings, public errors and direct bounds | builder report | M1 to M19 |
 | 9 | Behaviour-preserving refactor drift | P6 pins that correct metadata converts exactly as before | P6 equality test | M2, metadata dropped |
-| 10 | Frozen contract drift | public class and coded causes match on both legs. Exact native outputs and Faker remain covered | P5d, P5r, P5t, P5w | M14 to M18 |
+| 10 | Frozen contract drift | public class and coded causes match on both legs. Exact native outputs and Faker remain covered | P5d, P5r, P5t, P5w | M14 to M19 |
 
 The recurring-defect checks apply to the final implementation. Use a full match for offset
 tokens and test a trailing newline. Treat malformed metadata members as untrusted input.
@@ -331,8 +348,8 @@ profile-only TypeError at its caller. Extend the FK-safe caller sentry. For P8, 
 ## Design notes
 
 Keep the bounds in `_arrow_types.py` and dtype reconciliation in `internal/pandas_compat.py`.
-Reuse `_pandas_meta` through its package exports. Extend the access declarations rather than
-adding a second parser or consumer list. Keep one frame conversion and one safe error builder.
+Reuse `_pandas_meta` through its package exports. Rule 6 reads the existing parsed AST and adds
+no second parser. Keep one frame conversion and one safe error builder.
 Both attributions already compare exact class and text (`_pipeline_full_frame.py:83`,
 `_chunked_carry.py:164`). Preserve that contract. Native kernels still receive Arrow arrays.
 
@@ -351,11 +368,13 @@ Existing instrumentation also follows the ingestion rename (see Slices).
 
 Keep both released reason codes and every exception-class and cause pin. No pin change.
 The public oracle still raises `ArrowInvalid` on rev9's unaligned time comparison.
-Both coded causes carry the same safe text. A hinted unaligned time read by any `when:` now gives the same refusal as the unhinted
-source. This keeps the released C8-i refusal and adds the P5t known issue.
+Both coded causes carry the same safe text. This keeps the released C8-i refusal. Integer
+membership on a time column now raises the released `when_expression_error` (rule 6), for
+aligned and unaligned input and with or without the hint.
 
 Document normalized temporal frame dtypes, metadata-independent predicate selection,
-value-free failures and the P5t known issue in one CHANGELOG entry. The profile report
+value-free failures and the rule 6 refusal in one CHANGELOG entry. The entry says that
+`t in [...]` on a time column is now refused even for aligned ticks that matched before. The profile report
 continues to use its canonical dtype labels. Untouched output fields come from the source.
 
 ## Slices
@@ -371,8 +390,8 @@ pandas sites plus the native predicate projection. Finish with sentries and acce
 | `src/decoy_engine/profile/arrow/_frame.py` | 59 | about +20 |
 | `src/decoy_engine/execution/_fk_keys.py` | 511 | about +65 (conversion and safe failure) |
 | `_pandas_adapter.py`, `_sequential.py` | 674, 680 | adapter at most +6. Sequential 0 net under its 680-line sentry pin. Keep conversion logic in the helper |
-| `_when_gate.py` | 565 | remove the warning payload |
-| `native/_when_mask.py` | 101 | about +8 for projection inputs |
+| `_when_gate.py` | 565 | remove the warning payload, about +25 for the rule 6 check |
+| `native/_when_mask.py` | 101 | about +10 for projection inputs and the rule 6 call |
 | `_unified_slice_admission.py`, `_pipeline_full_frame.py`, `_chunked_carry.py` | 551, 337, 311 | about +8 each |
 | `tests/sentry/defects/test_date_shift_one_arithmetic.py`, `test_lossless_int_columns.py` | | about +15, +25 |
 | extended test files | 165, 98, 94 | each stays under 450 |
@@ -403,8 +422,8 @@ under pandas 1.5.3. Include the touched spies, caller-inventory tests, import co
   catches it.
 - The predicate sees an Arrow timestamp on one leg. P5w checks admission and the actual
   siblings, including the null row. P5z observes the physical wall hour before output assembly.
-- A user relied on hinted sub-microsecond time membership. P5t pins the coded, value-free
-  refusal on both legs; the CHANGELOG names it. P5r checks that an ordinary comparison still
+- A user relied on hinted time membership, aligned or not. P5t pins the coded, value-free
+  refusal on both legs before any chunk; the CHANGELOG names it. P5r checks that an ordinary comparison still
   fails after one yielded chunk.
 - One route changes the exception class or quotes a tick. P5r compares both causes with the
   public exception. P5x checks a masked column with no carry attribution.
