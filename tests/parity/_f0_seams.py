@@ -122,16 +122,17 @@ def observe_pool_seam(mp: pytest.MonkeyPatch) -> Iterator[PoolSeamLog]:
             sampled=[],
         )
         log.calls.append(call)
-        real_select = selector.select
+        real_take = selector.take
 
-        def select_spy(size: int) -> Any:
-            picked = real_select(size)
+        def take_spy(size: int) -> Any:
+            # `take` is the one pick: `select` (the list form) goes through it too.
+            picked = real_take(size)
             call.n += size
             assert call.sampled is not None
-            call.sampled.extend(picked)
+            call.sampled.extend(picked.to_pylist())
             return picked
 
-        selector.select = select_spy  # type: ignore[method-assign]
+        selector.take = take_spy  # type: ignore[method-assign]
         return selector
 
     mp.setattr(_faker_pool, "build_pool_values", build_spy)

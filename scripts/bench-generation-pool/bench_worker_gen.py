@@ -144,15 +144,15 @@ def install_vacuity_guards() -> tuple[dict[str, bool], Any]:
     # The unified generation core builds and samples through the persistent selector, not
     # `build_and_sample`; the legacy whole-table path still uses the pair above.
     original_open = _faker_pool.open_pooled_selector
-    original_select = _faker_pool.PooledSelector.select
+    original_take = _faker_pool.PooledSelector.take
 
     def _wrapped_open(*args: Any, **kwargs: Any) -> Any:
         fired["build_and_sample"] = True
         return original_open(*args, **kwargs)
 
-    def _wrapped_select(self: Any, *args: Any, **kwargs: Any) -> Any:
+    def _wrapped_take(self: Any, *args: Any, **kwargs: Any) -> Any:
         fired["pool_sample"] = True
-        return original_select(self, *args, **kwargs)
+        return original_take(self, *args, **kwargs)
 
     def _wrapped_build_and_sample(*args: Any, **kwargs: Any) -> Any:
         fired["build_and_sample"] = True
@@ -165,13 +165,13 @@ def install_vacuity_guards() -> tuple[dict[str, bool], Any]:
     _faker_pool.build_and_sample = _wrapped_build_and_sample
     _pool_sampler.PoolSampler.sample = _wrapped_pool_sample  # type: ignore[method-assign]
     _faker_pool.open_pooled_selector = _wrapped_open
-    _faker_pool.PooledSelector.select = _wrapped_select  # type: ignore[method-assign]
+    _faker_pool.PooledSelector.take = _wrapped_take  # type: ignore[method-assign]
 
     def _restore() -> None:
         _faker_pool.build_and_sample = original_build_and_sample
         _pool_sampler.PoolSampler.sample = original_pool_sample  # type: ignore[method-assign]
         _faker_pool.open_pooled_selector = original_open
-        _faker_pool.PooledSelector.select = original_select  # type: ignore[method-assign]
+        _faker_pool.PooledSelector.take = original_take  # type: ignore[method-assign]
 
     return fired, _restore
 

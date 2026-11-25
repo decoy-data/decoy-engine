@@ -639,11 +639,11 @@ def test_restarted_selection_stream_is_caught_through_the_seam(
 ) -> None:
     """Mutate the persistent pooled selector so each batch re-creates `default_rng(seed)` (the
     batch-local stream restart), with the 50_000-row fixture forced into two batches."""
-    real_select = _faker_pool.PooledSelector.select
+    real_take = _faker_pool.PooledSelector.take
 
     def restarting(self: _faker_pool.PooledSelector, size: int) -> Any:
         self._rng = np.random.default_rng(self._seed_int)
-        return real_select(self, size)
+        return real_take(self, size)
 
     real_init = _faker_pool.PooledSelector.__init__
 
@@ -652,7 +652,7 @@ def test_restarted_selection_stream_is_caught_through_the_seam(
         self._seed_int = int.from_bytes(selection_seed, "big")
 
     monkeypatch.setattr(_faker_pool.PooledSelector, "__init__", init)
-    monkeypatch.setattr(_faker_pool.PooledSelector, "select", restarting)
+    monkeypatch.setattr(_faker_pool.PooledSelector, "take", restarting)
     monkeypatch.setattr(_streamed, "DEFAULT_BATCH_ROWS", 20_000)
     _trips(
         lambda: assert_matches_oracle("pooled_faker", fx.FIXTURES_BY_ID["pooled_faker"].run()),

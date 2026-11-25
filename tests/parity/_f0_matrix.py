@@ -252,7 +252,7 @@ HOW_F3_ASSERTS_WITNESS = (
     "(`docs/plans/2026-10-18-phase-f-rebaseline-f1-f3.md`), so generation has NO compiled path by "
     "design and the original obligation (no admitted cell silently falls back from a CLAIMED Rust "
     "generation backend) is INAPPLICABLE. What stays true is guarded as a forbidden path: both "
-    "generation pool entry points are non-deterministic, `_faker_pool.PooledSelector.select` "
+    "generation pool entry points are non-deterministic, `_faker_pool.PooledSelector.take` "
     "(core, `np.random.default_rng(...).integers`) and "
     "`_faker_pool._build_and_sample_returning_pool` (legacy whole-table, "
     "`PoolSampler.sample(..., deterministic=False)`), so no generate_tables column enters "

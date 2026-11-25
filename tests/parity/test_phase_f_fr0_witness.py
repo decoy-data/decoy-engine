@@ -169,14 +169,14 @@ def _trips(
 
 def test_core_numpy_discarded_result_trips(monkeypatch: pytest.MonkeyPatch) -> None:
     def discard(inner: Any) -> Any:
-        def select(self: Any, size: int) -> list[Any]:
-            return [w.strip_mark(v) for v in inner(self, size)]
+        def take(self: Any, size: int) -> Any:
+            return pa.array([w.strip_mark(v) for v in inner(self, size).to_pylist()])
 
-        return select
+        return take
 
     _trips(
         monkeypatch,
-        lambda mp: _outer(mp, _faker_pool.PooledSelector, "select", discard),
+        lambda mp: _outer(mp, _faker_pool.PooledSelector, "take", discard),
         match="numpy-selected",
         marking=True,
     )
@@ -184,15 +184,15 @@ def test_core_numpy_discarded_result_trips(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_core_numpy_recompute_trips(monkeypatch: pytest.MonkeyPatch) -> None:
     def recompute(inner: Any) -> Any:
-        def select(self: Any, size: int) -> list[Any]:
+        def take(self: Any, size: int) -> Any:
             picked = inner(self, size)
-            return [self._values[(i * 7) % len(self._values)] for i in range(len(picked))]
+            return pa.array([self._values[(i * 7) % len(self._values)] for i in range(len(picked))])
 
-        return select
+        return take
 
     _trips(
         monkeypatch,
-        lambda mp: _outer(mp, _faker_pool.PooledSelector, "select", recompute),
+        lambda mp: _outer(mp, _faker_pool.PooledSelector, "take", recompute),
         match="numpy-selected",
         marking=True,
     )

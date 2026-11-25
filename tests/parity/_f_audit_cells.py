@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 import pytest
 
 from decoy_engine.generation import _column_streams, _faker_pool, synthesize
@@ -371,11 +372,11 @@ def _sub_categorical(inner: Any) -> Any:
 
 
 def _sub_pooled(inner: Any) -> Any:
-    def select(self: Any, size: int) -> list[Any]:
+    def take(self: Any, size: int) -> Any:
         inner(self, size)
-        return [self._values[(i * 7 + 1) % len(self._values)] for i in range(size)]
+        return pa.array([self._values[(i * 7 + 1) % len(self._values)] for i in range(size)])
 
-    return select
+    return take
 
 
 def _sub_live(inner: Any) -> Any:
@@ -489,7 +490,7 @@ def mutants_for(row_id: str, unmarked_windowed: Callable[..., list[Any]]) -> tup
             fid: (
                 Mutant(
                     "recomputed-pool-index",
-                    _outer(_faker_pool.PooledSelector, "select", _sub_pooled),
+                    _outer(_faker_pool.PooledSelector, "take", _sub_pooled),
                     "numpy-selected|sampler result",
                 ),
             )

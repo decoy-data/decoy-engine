@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
@@ -79,13 +80,13 @@ class _Reached:
         self.calls = 0
 
     def install_core(self, mp: pytest.MonkeyPatch) -> None:
-        real, outer = _faker_pool.PooledSelector.select, self
+        real, outer = _faker_pool.PooledSelector.take, self
 
-        def select(selector: Any, size: int) -> Any:
+        def take(selector: Any, size: int) -> Any:
             outer.calls += 1
             return real(selector, size)
 
-        mp.setattr(_faker_pool.PooledSelector, "select", select)
+        mp.setattr(_faker_pool.PooledSelector, "take", take)
 
     def install_legacy(self, mp: pytest.MonkeyPatch) -> None:
         real, outer = _faker_pool._build_and_sample_returning_pool, self
@@ -159,10 +160,10 @@ def _deterministic_sample(values: Any, n: int) -> list[Any]:
 
 
 def mutate_core(mp: pytest.MonkeyPatch) -> None:
-    def select(self: _faker_pool.PooledSelector, size: int) -> list[Any]:
-        return _deterministic_sample(self._values, size)
+    def take(self: _faker_pool.PooledSelector, size: int) -> Any:
+        return pa.array(_deterministic_sample(self._values, size))
 
-    mp.setattr(_faker_pool.PooledSelector, "select", select)
+    mp.setattr(_faker_pool.PooledSelector, "take", take)
 
 
 def mutate_legacy(mp: pytest.MonkeyPatch) -> None:

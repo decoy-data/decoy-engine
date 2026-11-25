@@ -148,15 +148,17 @@ import sys
 sys.argv = ["bench_worker_gen.py", "{n_rows}", "city"]
 sys.path.insert(0, {bench_dir!r})
 
+import pyarrow as pa
+
 from decoy_engine.generation import _faker_pool
 
 
 class _StubSelector:
     # Simulates a pool build that hands back SOMETHING without ever reaching
-    # PooledSelector.select -- the exact mismatch the worker's vacuity guard
+    # PooledSelector.take -- the exact mismatch the worker's vacuity guard
     # (both wrappers must fire on the on arm) exists to catch.
-    def select(self, size):
-        return ["stub"] * size
+    def take(self, size):
+        return pa.array(["stub"] * size)
 
 
 def _stub_open_pooled_selector(**kwargs):

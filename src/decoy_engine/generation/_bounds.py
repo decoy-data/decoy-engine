@@ -262,8 +262,24 @@ def accumulator_bytes(rows: int, payloads: list[int]) -> int:
     return rows * sum(p + 12 for p in payloads)
 
 
-def faker_pool_bytes(pool_size: int, payload: int) -> int:
-    return int(pool_size * (STR_OBJECT_OVERHEAD_BYTES + payload) * _POOL_SLACK) + _POOL_FIXED_BYTES
+_ARROW_OFFSET_BYTES = 4  # Arrow string offsets are int32
+_POINTER_BYTES = 8
+
+
+def faker_pool_resident_bytes(pool_size: int, payload: int) -> int:
+    """Conservative resident bytes of one pooled Faker pool: the one choke point.
+
+    The preflight and the live ledger reservation both call it, with `pool_size` the number of
+    values the pool builds. The pool is held in two forms (the frozen numpy object array and the
+    Arrow array `pool_take` gathers from), and building the Arrow form briefly holds the Python
+    list beside them. The three are summed, with slack, never taken as a maximum:
+    object form (a str object plus its 8-byte slot per value), Arrow form (value bytes, int32
+    offsets, validity bitmap) and conversion peak (the list's pointer per value).
+    """
+    object_form = pool_size * (STR_OBJECT_OVERHEAD_BYTES + payload)
+    arrow_form = pool_size * (payload + _ARROW_OFFSET_BYTES) + pool_size // 8 + 1
+    conversion_peak = pool_size * _POINTER_BYTES
+    return int((object_form + arrow_form + conversion_peak) * _POOL_SLACK) + _POOL_FIXED_BYTES
 
 
 # A set slot (hash + pointer, at CPython's load factor) beyond the str object it holds.
@@ -567,7 +583,7 @@ __all__ = [
     "compute_payload_bounds",
     "detected_memory_bytes",
     "faker_payload_bound",
-    "faker_pool_bytes",
+    "faker_pool_resident_bytes",
     "generated_lifecycle_terms",
     "generation_floor_bytes",
     "generation_floor_shortfall",

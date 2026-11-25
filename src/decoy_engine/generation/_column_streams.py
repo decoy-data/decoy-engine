@@ -10,7 +10,9 @@ RNG families), consumed incrementally:
 - sequence: no RNG, `start + step * global_i`;
 - categorical: one `random.Random(base_int("py"))`, `choices(k=batch)` per call;
 - per-row faker: `seed_instance(row_int("faker", global_i))` then the provider;
-- pooled faker: pool built once, then one persistent `default_rng(selection_seed)`;
+- pooled faker: pool built once, then one persistent `default_rng(selection_seed)`; its picks can
+  also leave as an Arrow array (`next_array`), which `stream/_batches.py` uses when no consumer
+  needs Python values;
 - reference (no repair): parent key set materialized once, one persistent `random.Random`;
 - constant: no draw, the one configured value;
 - distribution: one persistent `default_rng(base_int("dist"))`, `size` draws per call;
@@ -30,11 +32,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
 
 from decoy_engine.generation import _faker_pool
-from decoy_engine.generation._bounds import faker_pool_bytes
+from decoy_engine.generation._bounds import faker_pool_resident_bytes
 from decoy_engine.generation._numeric_typing import sequence_affixes
 from decoy_engine.generation.kinds import ConstantStream, ParametricStream
+from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.relational import check_reference_pool
 from decoy_engine.generators.derivation import (
     TABLE_KEY,
@@ -194,11 +199,16 @@ class PerRowFakerStream:
 
 
 class PooledFakerStream:
+    supports_array = True
+
     def __init__(self, selector: _faker_pool.PooledSelector) -> None:
         self._selector = selector
 
     def next_batch(self, offset: int, size: int) -> list[Any]:
         return self._selector.select(size)
+
+    def next_array(self, offset: int, size: int) -> pa.Array:
+        return self._selector.take(size)
 
 
 class ReferenceStream:
@@ -246,6 +256,16 @@ class NullMaskedStream:
         self._p = probability
         self._rng = np.random.default_rng(ctx.base_int("np"))
 
+    @property
+    def supports_array(self) -> bool:
+        return supports_array(self._inner)
+
+    def next_array(self, offset: int, size: int) -> pa.Array:
+        """The inner array with the same mask positions nulled (`if_else` keeps the type)."""
+        arr: pa.Array = self._inner.next_array(offset, size)  # type: ignore[attr-defined]
+        masked = pa.array(self._rng.random(size) < self._p)
+        return pc.if_else(masked, pa.scalar(None, type=arr.type), arr)  # type: ignore[attr-defined, unused-ignore]
+
     def next_batch(self, offset: int, size: int) -> list[Any]:
         return self.next_batch_from(offset, size, {})
 
@@ -256,6 +276,11 @@ class NullMaskedStream:
         for idx in np.flatnonzero(self._rng.random(size) < self._p):
             values[int(idx)] = None
         return values
+
+
+def supports_array(stream: object) -> bool:
+    """True when the stream can hand a batch over as an Arrow array (`next_array`)."""
+    return getattr(stream, "supports_array", False) is True
 
 
 def draw_batch(
@@ -347,10 +372,12 @@ def _faker_stream(
         faker_type, requested_locale, rows, opted_out=_faker_pool.pool_opted_out(col)
     ):
         raw_kwargs = col.get("faker_kwargs") or {}
-        # Reserve before the 10_000 provider calls that build the pool allocate anything.
+        # Reserve before the provider calls that build the pool allocate anything.
         reservation = ledger.reserve(
             f"faker_pool_build:{label}",
-            faker_pool_bytes(10_000, faker_payload if faker_payload is not None else 0),
+            faker_pool_resident_bytes(
+                DEFAULT_POOL_SIZE, faker_payload if faker_payload is not None else 0
+            ),
         )
         selector = _faker_pool.open_pooled_selector(
             faker_type=faker_type,
@@ -378,4 +405,5 @@ __all__ = [
     "WindowedDateStream",
     "draw_batch",
     "make_column_stream",
+    "supports_array",
 ]

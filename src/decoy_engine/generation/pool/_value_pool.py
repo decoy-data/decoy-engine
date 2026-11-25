@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,10 @@ class ValuePool:
     backend_type: str
     backend_version: str
     distinct_count: int
+    # The same values as one Arrow array, for the vectorized take (`pool_take`). Set only by
+    # generation's faker pool, which holds both forms on purpose: the frozen object array stays
+    # for the keyed and bundle paths that gather one value at a time.
+    arrow: pa.Array[Any] | None = field(default=None, repr=False, compare=False)
 
     @property
     def identity(self) -> tuple[str, str, str, bytes, int]:
@@ -106,6 +112,29 @@ def construction_floor(size: int, *, strings: bool) -> int:
     return size * (BUILD_HELD_BYTES_PER_VALUE if strings else BUILD_HELD_BYTES_PER_VALUE_ANY)
 
 
+def pool_take(pool: pa.Array[Any], indices: np.ndarray[Any, Any]) -> pa.Array[Any]:
+    """Gather `pool[indices]` as an Arrow array: the one pooled pick.
+
+    Arrow's `take` is the documented gather for an index array over a value array (the dictionary
+    decode pattern). A null in the pool stays null in the output. `PooledSelector.take` and the
+    REUSE sampler both pick through this, so a later change to the pick is one edit.
+    """
+    return pc.take(pool, indices)  # type: ignore[no-untyped-call, unused-ignore]
+
+
+def pool_pick(pool: ValuePool, indices: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """The REUSE gather of a built pool as a numpy object array.
+
+    A pool that carries its Arrow form picks through `pool_take`; one without it (every pool
+    built by `PoolBuilder`) gathers from the frozen object array. Both give the same values.
+    """
+    if pool.arrow is not None:
+        picked: np.ndarray[Any, Any] = pool_take(pool.arrow, indices).to_numpy(zero_copy_only=False)
+        return picked
+    gathered: np.ndarray[Any, Any] = pool.values[indices]
+    return gathered
+
+
 __all__ = [
     "BUILD_HELD_BYTES_PER_VALUE",
     "BUILD_HELD_BYTES_PER_VALUE_ANY",
@@ -114,6 +143,8 @@ __all__ = [
     "_freeze_array",
     "construction_floor",
     "measured_pool_bytes",
+    "pool_pick",
+    "pool_take",
 ]
 
 

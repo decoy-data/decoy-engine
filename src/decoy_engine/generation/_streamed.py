@@ -32,7 +32,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
-import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine.generation._admission import PlanAdmission, classify_plan
@@ -41,7 +40,7 @@ from decoy_engine.generation._bounds import (
     batch_buffer_bytes,
     compute_payload_bounds,
     detected_memory_bytes,
-    faker_pool_bytes,
+    faker_pool_resident_bytes,
     generation_floor_shortfall,
     key_pool_bytes,
     legacy_table_bytes,
@@ -54,20 +53,17 @@ from decoy_engine.generation._budget_ledger import (
     GenerationUnboundedError,
 )
 from decoy_engine.generation._column_streams import (
-    ColumnStream,
     KeyPool,
-    draw_batch,
     make_column_stream,
 )
 from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
-from decoy_engine.generation._numeric_typing import restore_declared
-from decoy_engine.generation.kinds import cast_output_values, output_types
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.relational import reference_policies
+from decoy_engine.generation.stream._batches import check_width, table_batches
 from decoy_engine.progress import get_active_channel
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from faker import Faker
 
@@ -237,7 +233,7 @@ def _preflight(
                 key_total += key_pool_bytes(rows, bounds.get((t["name"], c["name"])) or 0)
         accumulators += accumulator_bytes(rows, payloads)
         pools = sum(
-            faker_pool_bytes(DEFAULT_POOL_SIZE, bounds.get((t["name"], c["name"])) or 0)
+            faker_pool_resident_bytes(DEFAULT_POOL_SIZE, bounds.get((t["name"], c["name"])) or 0)
             for c in _pooled_columns(t, instance_default_locale)
         )
         stage_peak = max(stage_peak, batch_buffer_bytes(payloads, batch) + pools)
@@ -268,55 +264,6 @@ def _fits(ledger: GenerationBudgetLedger, need: int) -> bool:
     if ledger.remaining_bytes is None:
         return True
     return need * (1 + _fit_band()) < ledger.remaining_bytes
-
-
-def _check_width(arr: pa.Array, bound: int, column: str) -> None:
-    if not (pa.types.is_string(arr.type) or pa.types.is_large_string(arr.type)):
-        return
-    longest = pc.max(pc.binary_length(arr)).as_py()  # type: ignore[attr-defined, unused-ignore]
-    if longest is not None and longest > bound:
-        raise GenerationBudgetExceeded(
-            code=reasons.runtime.VALUE_EXCEEDS_DECLARED_BOUND,
-            message=f"column {column!r} produced a value wider than its declared {bound}-byte bound.",
-        )
-
-
-def _table_batches(
-    table: dict[str, Any],
-    schema: pa.Schema,
-    sizes: Iterable[int],
-    streams: Sequence[ColumnStream],
-    widths: Mapping[str, int],
-    collectors: Mapping[str, KeyPool],
-    generated: Sequence[pa.DataType | None],
-) -> Iterator[pa.RecordBatch]:
-    offset = 0
-    cols = table["generate_columns"]
-    names = [c["name"] for c in cols]
-    declared = output_types(cols)
-    for size in sizes:
-        arrays = []
-        # Columns emitted so far in THIS batch, post-null-mask (legacy `generated`): date anchors.
-        emitted: dict[str, list[Any]] = {}
-        for col, name, stream, field_, gen_type in zip(
-            cols, names, streams, schema, generated, strict=True
-        ):
-            # Parse text cells to the GENERATED type; the output_type cast comes after, so the
-            # provider's text never reaches `int()` just because the column is emitted as int.
-            values = restore_declared(col, draw_batch(stream, offset, size, emitted), gen_type)
-            emitted[name] = values  # siblings read the generator's values, not the typed ones
-            if name in declared:
-                values = cast_output_values(
-                    values, declared[name], table=str(table["name"]), column=name
-                )
-            arr = pa.array(values, type=field_.type)
-            if name in widths:
-                _check_width(arr, widths[name], name)
-            if name in collectors:
-                collectors[name].add(values)
-            arrays.append(arr)
-        yield pa.RecordBatch.from_arrays(arrays, schema=schema)
-        offset += size
 
 
 def _refuse_if_over_memory(config: dict[str, Any], admission: PlanAdmission) -> None:
@@ -470,7 +417,7 @@ def run_generation(
         consume(
             name,
             schema,
-            _table_batches(t, schema, lay.sizes(), streams, widths, collectors, generated),
+            table_batches(t, schema, lay.sizes(), streams, widths, collectors, generated),
         )
 
     _pg = get_active_channel()
@@ -590,9 +537,7 @@ def _run_legacy(
             for c in t["generate_columns"]:
                 bound = bounds.get((t["name"], c["name"]))
                 if c.get("type") == "faker" and bound is not None:
-                    _check_width(
-                        out[t["name"]].column(c["name"]).combine_chunks(), bound, c["name"]
-                    )
+                    check_width(out[t["name"]].column(c["name"]).combine_chunks(), bound, c["name"])
     counts = {name: tbl.num_rows for name, tbl in out.items()}
     declines = tuple(f"{c.table}.{c.column}:{c.reason}" for c in admission.declines)
     return GenerationResult(

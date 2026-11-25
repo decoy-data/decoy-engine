@@ -362,15 +362,15 @@ class EndToEndWitness:
         mp.setattr(
             _faker_pool, "np", _NpProxy(lambda label, payload: outer._record(label, payload))
         )
-        real_select = _faker_pool.PooledSelector.select
+        real_take = _faker_pool.PooledSelector.take
 
-        def select(selector: _faker_pool.PooledSelector, size: int) -> Any:
-            out = real_select(selector, size)
+        def take(selector: _faker_pool.PooledSelector, size: int) -> Any:
+            out = real_take(selector, size)
             outer._record(
                 NUMPY_SELECTION,
                 {
                     "stage": "sample",
-                    "result": list(out),
+                    "result": out.to_pylist(),
                     "pool_size": len(selector._values),
                     "n": size,
                     "deterministic": False,
@@ -378,7 +378,7 @@ class EndToEndWitness:
             )
             return out
 
-        mp.setattr(_faker_pool.PooledSelector, "select", select)
+        mp.setattr(_faker_pool.PooledSelector, "take", take)
 
         # Pool construction (kept apart from selection) and optional marking.
         real_build = _faker_pool.build_pool_values

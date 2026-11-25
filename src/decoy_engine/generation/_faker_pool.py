@@ -36,6 +36,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
+import pyarrow as pa
 from faker import VERSION as _FAKER_VERSION
 from faker import Faker
 
@@ -43,7 +44,7 @@ from decoy_engine.determinism import seed_bytes_to_int
 from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import PoolSampler
-from decoy_engine.generation.pool._value_pool import ValuePool, _freeze_array
+from decoy_engine.generation.pool._value_pool import ValuePool, _freeze_array, pool_take
 from decoy_engine.generators.derivation import (  # noqa: F401  (the families are re-exported)
     POOL_BUILD_FAMILY,
     POOL_SELECTION_FAMILY,
@@ -375,6 +376,17 @@ def build_pool_values(
         raise
 
 
+def _arrow_form(raw_values: list[Any]) -> pa.Array[Any] | None:
+    """The pool's Arrow form, or `None` for values Arrow cannot hold as one array.
+
+    Without it the sampler gathers from the object array, which gives the same values.
+    """
+    try:
+        return pa.array(raw_values)
+    except pa.ArrowException:
+        return None
+
+
 def _build_and_sample_returning_pool(
     *,
     faker_type: str,
@@ -423,6 +435,7 @@ def _build_and_sample_returning_pool(
             backend_type="faker",
             backend_version=_FAKER_VERSION,
             distinct_count=len(set(values.tolist())),
+            arrow=_arrow_form(raw_values),
         )
         sampled = PoolSampler().sample(
             pool, n, mode=CardinalityMode.REUSE, seed=selection_seed, deterministic=False
@@ -446,14 +459,20 @@ class PooledSelector:
     def __init__(self, values: Any, selection_seed: bytes) -> None:
         try:
             self._values = values
+            self._arrow = pa.array(values.tolist())
             self._rng = np.random.default_rng(seed_bytes_to_int(selection_seed))
         except BaseException:
             del selection_seed
             raise
 
-    def select(self, size: int) -> list[Any]:
+    def take(self, size: int) -> pa.Array[Any]:
+        """The next `size` picks as one Arrow array, with no Python list in between."""
         indices = self._rng.integers(0, len(self._values), size=size)
-        return list(self._values[indices].tolist())
+        return pool_take(self._arrow, indices)
+
+    def select(self, size: int) -> list[Any]:
+        """The same picks as Python values, for a batch that needs them as a list."""
+        return list(self.take(size).to_pylist())
 
 
 def open_pooled_selector(
