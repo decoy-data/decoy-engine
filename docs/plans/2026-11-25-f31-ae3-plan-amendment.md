@@ -31,6 +31,25 @@ and mapping rows come before the depth check (V1-3), the guarantee is narrowed (
 call form is fixed (D2), three mutations are added (D3), and lone `ChainMap`, `mappingproxy` and
 `UserDict` rows are added to the behavior table.
 
+Codex plan review R2 (NO-GO) is folded in as rules, not cases. Each claim was checked on
+`cade66080` with the interpreter:
+
+- V1-1: a lone dict's `%s` display scanned one level too shallow. The display now comes from the
+  same scanned pairs as named lookup.
+- V1-2: a `namedtuple` would pass through and print the canary. Subclasses of the four sequence
+  types keep the current safe rule.
+- V1-3: a second filter turned a clean display into `<mapping>`. Re-filtering is now a no-op.
+- V1-4: an unused field (`10**5000`) made an eager `repr` fail the whole record. Display is now
+  lazy.
+- V1-5: a `PurePath` msg and a host `{args[a]}` formatter lost fields. The field parser is
+  removed: `_NamedArgs` holds every safe exact-`str` key.
+- D6: `dict.get` still ran a `str` subclass key's `__eq__`. Named values now come from the
+  shared pair traversal.
+- D7: the brace repro now uses `{args[0].default_factory._factory.args[0]}`, M5 mutates the
+  subclass dispatch, and M10 bypasses the factory at one route.
+- D8: test 13's identity assertion is replaced in the implementation commit.
+- V2-LOG: test 18's `==` check is narrowed to caller values.
+
 ## Defect class
 
 **Open-ended reconstruction of caller objects.** The filter tries to keep each caller mapping
@@ -49,11 +68,14 @@ Guarantee, inside the scan depth only:
 - At every position the scan reaches, a caller exception becomes its label and a non-plain
   mapping becomes the placeholder. No reference to either stays in what the filter writes back.
 - For each value it inspects, the filter makes exact type checks and calls only the builtin
-  methods named under Choke point (`dict.items`, `dict.get`, iteration of an exact `list`,
-  `tuple`, `set` or `frozenset`). It calls no `__getitem__`, `__missing__`, `__iter__`, `items`,
-  `__eq__`, `__hash__` or factory of a caller type.
+  methods named under Choke point (`dict.items` and the unbound `__iter__` of `list`, `tuple`,
+  `set` or `frozenset`). It calls no `__getitem__`, `__missing__`, `__iter__`, `items`, `__eq__`,
+  `__hash__`, `__repr__` or factory of a caller type, and no key lookup on a caller store.
 - Named `%(name)` lookups on a lone mapping whose items are in a plain `dict` (the mapping
-  itself, or a `UserDict`'s `data`) keep their stored values.
+  itself, or a `UserDict`'s `data`) keep their stored values when the key is an exact `str`,
+  whatever the `msg` type and whatever reads them (`%`, or a host `{args[a]}` formatter).
+- Each output surface of one record prints the same, on every handler, after any number of
+  filter passes.
 
 Values past the scan depth, objects that are not exceptions or mappings, and caller metaclasses
 that change `issubclass` are outside the guarantee (the documented gaps and V2).
@@ -76,11 +98,11 @@ stdlib logging cookbook already cited in `_log_filter.py`.
   denylist of mapping behaviors. The table below is an allowlist of exact builtin types.
 - ASVS 7.4.1 and CWE-209: when a value cannot be shown safely, show a generic message. The
   placeholder is that message for a mapping.
-- Named-field parsing follows CPython's `%`-format key rule (`Objects/unicodeobject.c`,
-  `unicode_format_arg_parse`): a key is the text inside balanced parentheses after `%(`, and `%%`
-  is a literal.
+- No named-field parsing (Codex R2 V1-5). `LogRecord.getMessage` does `str(msg) % args`, and
+  the stdlib `%` operator does the key lookup itself on the dict it is given. Handing it a plain
+  dict of every safe `str` key reuses CPython's own key rule instead of a copy of it.
 
-The remaining custom code is the type table and the named-field read, about 80 lines. No library
+The remaining custom code is the type table and the shared pair traversal, about 80 lines. No library
 filters `logging` args by type.
 
 ## Class table
@@ -92,12 +114,12 @@ Classes from the plan contract catalog (`30_Resources/Decoy-Plan-Contract-and-De
 | 1 | value-bearing output | yes | the closed exact-type table in `_safe_value`; the placeholder for every non-plain mapping | tests 1 to 4, 16 (seeded canary through stream and file handlers) | M1, M2, M7 |
 | 2 | cleanup on an exit path | N/A: the filter owns no file or resource | | | |
 | 3 | state and concurrency | yes, narrow: the filter must not change caller state | no write to any caller object; `_NamedArgs` is a new dict | tests 5, 8 | M4 |
-| 4 | route parity and fallback | yes, narrow: stream, file and host handlers | one filter class on every engine handler; the existing `_UNRENDERABLE` fallback | `test_every_engine_handler_carries_the_filter`, test 4 on both handlers | M10 |
+| 4 | route parity and fallback | yes, narrow: stream, file and host handlers | one filter class on every engine handler; the existing `_UNRENDERABLE` fallback; a second filter pass keeps `_NamedArgs` unchanged | `test_every_engine_handler_carries_the_filter` (extended to console, file and fallback), test 4 on both handlers, test 22 | M10, M19 |
 | 5 | referential integrity | N/A: no table data or FK shapes | | | |
 | 6 | untrusted producer | yes: caller mapping types and factories | exact types only; no caller code runs | tests 15, 16 | M2, M4, M5 |
 | 7 | check then use on a path | N/A: no paths | | | |
 | 8 | weak tests and overclaimed evidence | yes | each Codex repro red on `cade66080`, recorded; mutations recorded with their head | the Acceptance tests and Mutations sections | |
-| 9 | refactor drift | yes: the plain-dict, tuple and exc_info paths must print as before | tests 10, 12 and the dict case of 13 run unchanged | those tests, green on `cade66080` and on the final head | M9 |
+| 9 | refactor drift | yes: the plain-dict, tuple, sequence-subclass and exc_info paths must print as before | tests 10 and 12 run unchanged; the dict case of 13 keeps its output assertion and changes only its identity assertion (Codex R2 D8); tests 20 and 21 pin the `cade66080` output | those tests, green on the final head; 20 and 21 also green on `cade66080` | M9, M17, M18 |
 | 10 | frozen contract drift | N/A: `SafeRecordFilter` keeps its name and signature; log text is not a frozen contract | | | |
 
 ## Enumerations
@@ -161,8 +183,8 @@ changes table), which is log output, not a frozen contract.
 
 ## Slices
 
-One slice: the rest of AE3 on PR #809, in decoy-engine, branch `feat/f31-ae3`. Size about -60
-source lines and +60 net test lines in two files. No other slice depends on this change.
+One slice: the rest of AE3 on PR #809, in decoy-engine, branch `feat/f31-ae3`. Size about -50
+source lines and +130 net test lines in two files. No other slice depends on this change.
 
 ## Pre-mortem
 
@@ -171,13 +193,18 @@ gap:
 
 1. A mapping type not in the test list leaks: test 16 covers caller `Mapping` classes, and the
    table has no per-type row to forget.
-2. A named-field read calls `__missing__`: tests 5 and 15, mutation M4.
-3. `_NamedArgs` carries extra keys or a caller reference that a brace field reaches: tests 1, 17,
-   mutations M6 and M8.
-4. The field parser misreads `%(a(b))s` or `%%(a)s`: test 17 parser cells.
-5. A `dict` subclass passes the plain-dict row through `isinstance`: test 3, mutation M5.
+2. A named-field read calls `__missing__` or a stored key's `__eq__`: tests 5 and 15, mutation
+   M4.
+3. `_NamedArgs` carries an unscanned value, a non-`str` key or a caller reference that a brace
+   field reaches: tests 1, 17, mutations M6 and M8.
+4. The display and the named values drift apart in depth: test 20, mutation M17.
+5. A `dict` subclass passes the plain-dict row: test 3, mutation M5. A sequence subclass prints
+   its own `repr`: test 21, mutation M18.
 6. A wrapper object formats an exception: recorded gap, guarded at call sites.
-7. A new engine handler skips the filter: `test_every_engine_handler_carries_the_filter`, M10.
+7. A route builds a handler outside `_new_engine_handler`: the extended
+   `test_every_engine_handler_carries_the_filter`, M10.
+8. Two handlers print one record differently: test 22, mutation M19.
+9. An unused value fails the whole record: test 23, mutation M20.
 
 ## Choke point
 
@@ -196,23 +223,39 @@ included.
 | 2 | any mapping that is not an exact `dict`: `issubclass(type(value), collections.abc.Mapping)` or a `UserDict` subclass. This covers dict subclasses, `OrderedDict`, `Counter`, `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap`, `ConfigParser` sections and caller mapping classes | the placeholder |
 | 3 | any value at `depth == 0` | the value itself (the documented depth gap) |
 | 4 | `str`, `bytes`, `int`, `float`, `complex`, `bool`, `None` | the value itself |
-| 5 | `list`, `tuple`, `set`, `frozenset` | a new builtin of the same type with each item through `_safe_value(item, depth - 1)`; the value itself when no item changes |
-| 6 | `dict` whose keys all have an exact type of `str`, `int`, `float`, `bool` or `None` | a new `dict` with each value through `_safe_value(value, depth - 1)` and the keys unchanged; the value itself when no value changes |
+| 5 | `list`, `tuple`, `set`, `frozenset`, and any subclass of one of them (`namedtuple` included; Codex R2 V1-2) | items read with the unbound base iterator (`list.__iter__(value)` and so on, as `cade66080` does), each through `_safe_value(item, depth - 1)`. When any item changes, the result is a new plain base type (`list`, `tuple`, `set` or `frozenset`), never the subclass, so no subclass `repr` runs on a changed value: `Result(issue=ValueError(c))` prints `(ValueError,)`. When no item changes, the value itself |
+| 6 | `dict` whose keys all have an exact type of `str`, `int`, `float`, `bool` or `None` | a new `dict` built from the scanned pairs (`_safe_pairs`, below); the value itself when no value changes |
 | 7 | `dict` with any other key type (an exception key or a `str` subclass included) | the placeholder |
 | 8 | anything else | the value itself (the documented wrapper gap, unchanged) |
 
 Builtin call form (D2). The filter reads containers only in these forms, and test 18 accepts no
 other:
 
-- row 6 reads pairs with `dict.items(value)`, an unbound call on an exact `dict`;
-- named lookups read with `dict.get(store, name, _ABSENT)`;
-- row 5 iterates with `for item in value`, which is safe only because the type check is exact;
+- one function, `_safe_pairs(store, depth)`, reads pairs with `dict.items(store)` (an unbound
+  call) and is the only reader of mapping items. Row 6, the lone-mapping named values and the
+  lone-mapping display all use its result. Nothing calls `dict.get`, `dict.__getitem__` or `in`
+  on a caller store, because each of these compares the stored key with `__eq__` (Codex R2 D6:
+  `dict.get({K("a"): 7}, "a")` runs `K.__eq__`). `dict.items` does not compare keys;
+- row 5 iterates with the unbound base iterator (`list.__iter__(value)`), so a subclass
+  `__iter__` never runs;
 - key checks use `type(key) in _PLAIN_KEY_TYPES` on the type object, never `isinstance` and never
   a comparison of the key itself;
 - "no item changes" is decided with `is`, never `==`, so no caller `__eq__` runs.
 
-Test 18 allows an attribute read of `items`, `keys`, `values` or `get` only when the receiver is
-the name `dict` (`dict.<method>(...)`).
+Test 18 allows an attribute read of `items` or `__iter__` only when the receiver is one of the
+names `dict`, `list`, `tuple`, `set` or `frozenset`, and finds no read of `get`, `keys` or
+`values` at all.
+
+`_safe_pairs(store, depth)` returns two things from one pass:
+
+- `pairs`: a list of `(key, _safe_value(value, depth - 1))` for every key whose exact type is in
+  `_PLAIN_KEY_TYPES`;
+- `plain`: True when every key had a plain type.
+
+One `depth` argument feeds both the named values and the display, so the two cannot drift
+(Codex R2 V1-1). For the lone mapping the call is `_safe_pairs(store, _ARGS_DEPTH)`: each stored
+value is scanned at depth 1 and the items of a plain container value at depth 0, the same depth
+a positional argument gets.
 
 The placeholder is one module constant, `_MAPPING_PLACEHOLDER = _Label("<mapping>")`. It holds no
 reference to the caller object, its type, its factory or its items. The filter never reads the
@@ -237,36 +280,60 @@ Decisions the table makes:
 mapping. Named lookups must keep working for that case. One function, `_named_args(msg, mapping)`,
 handles it, and `_scrub` calls it only for that case:
 
+0. Re-filtering is a no-op (Codex R2 V1-3). When `type(record.args) is _NamedArgs`, `_scrub`
+   keeps it unchanged. Its keys and values already came from one filter pass, and an exact type
+   check runs no caller code. The engine attaches one filter per handler, so with console and
+   file both on, the second handler sees the record the first one rewrote. Without this rule
+   `_NamedArgs`, a `dict` subclass, would fall to row 2 and the file would print `<mapping>`
+   where the console printed `{'k': 1}`. Positional args need no such rule: rows 1 to 8 return a
+   rewritten value unchanged on a second pass, because `_Label` and the placeholder fall to row 8.
+   `_NamedArgs` is private; a caller who builds one on purpose is a hostile caller (V2).
 1. `_named_args` always returns a `_NamedArgs`, also when `msg` has no `%(name)` field. It never
    turns the lone mapping into a tuple: `"done" % ("<mapping>",)` raises "not all arguments
    converted", while `"done" % {"a": 1}` prints `done`. Stock `%` with a mapping argument ignores
    unused keys, and `_NamedArgs` keeps that.
-2. Read the field names from `msg` with the CPython key rule above. A `msg` that is not a `str`
-   has no fields.
+2. No field inventory (Codex R2 V1-5). The plan no longer reads field names from `msg`. Stock
+   logging converts `msg` with `str(msg)` before `%`, so a `PurePath("%(a)d")` msg reads `a`
+   (verified: it prints 7 on `cade66080`). A host formatter with `{args[a]}` reads any stored key,
+   also one the message does not name. A key set chosen from `msg` would break both. `_NamedArgs`
+   holds every safe exact-`str` key instead (step 4), so the msg type does not matter and the
+   field parser and its `%%` and nested-parenthesis rules are removed.
 3. Find the store without running caller code: the mapping itself when
    `issubclass(type(m), dict)`; `vars(m)["data"]` when `m` is a `UserDict` and that attribute is
    an exact `dict`; otherwise no store.
-4. For each name, read `dict.get(store, name, _ABSENT)`. This calls no `__getitem__`,
-   `__missing__` or factory. A present value goes through `_safe_value(value, _ARGS_DEPTH - 1)`.
-5. An absent name, or any name when there is no store, takes a value-free default from one closed
-   table: `0` for a `Counter`; `factory()` for a `defaultdict` whose factory `is` one of the
-   builtins in `_EMPTY_FACTORIES`; `_MAPPING_PLACEHOLDER` for all others.
-6. `record.args` becomes a `_NamedArgs`: a `dict` subclass holding only the names from step 2,
-   plus one fixed display string. It holds no reference to the caller mapping.
-   - `__missing__` returns `_MAPPING_PLACEHOLDER`.
+4. Named values come from the shared traversal (Codex R2 D6): `pairs, plain =
+   _safe_pairs(store, _ARGS_DEPTH)`. The `_NamedArgs` keys are the pairs whose key has the exact
+   type `str`, with their scanned values. No key is looked up by name, so no stored key's
+   `__eq__` or `__hash__` runs. With no store, there are no pairs.
+5. A name not in the pairs (absent, stored under a non-plain key, or no store) takes a value-free
+   default from one closed table, through `__missing__`: `0` for a `Counter`; `factory()` for a
+   `defaultdict` whose factory `is` one of the builtins in `_EMPTY_FACTORIES`;
+   `_MAPPING_PLACEHOLDER` for all others. The default is chosen once, from the exact type of the
+   caller mapping, and stored on `_NamedArgs` as a constant.
+6. `record.args` becomes a `_NamedArgs`: a `dict` subclass holding the safe `str` pairs from
+   step 4, the default from step 5, and the display source. It holds no reference to the caller
+   mapping.
+   - `__missing__` returns the stored default.
    - `__bool__` returns True, also with no keys. `LogRecord.getMessage` formats only when
      `self.args` is truthy, so an empty `_NamedArgs` would leave `%%` unformatted.
-   - `__str__` and `__repr__` both return the display string. This is what `%s` and `%r` print
-     for the lone mapping (`"x %s" % m` formats the whole mapping). The display string is
-     `repr(_safe_value(mapping, _ARGS_DEPTH - 1))` when the mapping is an exact `dict` that row 6
-     keeps, which prints the same as stock logging for a clean dict, and `<mapping>` for every
-     other mapping (rows 2 and 7).
+   - `__str__` and `__repr__` give the display. This is what `%s`, `%r` and a brace `{args}`
+     print for the lone mapping (`"x %s" % m` formats the whole mapping). The display source is
+     `dict(pairs)` when the mapping is an exact `dict` and `plain` is True, else `None`. Both
+     come from the same `_safe_pairs` call as the named values, at the same depth (Codex R2
+     V1-1).
+   - The display is lazy (Codex R2 V1-4). `__str__` and `__repr__` compute
+     `repr(display_source)` when called, never in `_scrub`. A failure there (for example the
+     int-to-text limit on `10**5000`) returns `<mapping>` for that one use and does not reach
+     `_scrub`, so the `_UNRENDERABLE` fallback never runs for it. A named-only message that does
+     not print the whole mapping never calls them, so an unused value cannot drop the line: with
+     `"%(a)d"` and `{"a": 7, "unused": 10**5000}` the output is `7`, the same as stock. With
+     `None` as the display source, both return `<mapping>`.
 
-Only names from the format string become keys, and values come from exact-key reads of the store.
-The exception key in `{"ValueError": 7, ValueError(): 11}` is never read, so `%(ValueError)d`
-prints 7. A `%(x)d` field whose value is the placeholder raises `TypeError` in `getMessage()`.
-Logging then reports its standard logging error with the filtered args, which is the same
-outcome as a missing key in stock logging.
+Values come from exact-type key checks during one pass over the store. The exception key in
+`{"ValueError": 7, ValueError(): 11}` is not a plain key, so it gives no pair, and
+`%(ValueError)d` prints 7 from the real `str` key. A `%(x)d` field whose value is the
+placeholder raises `TypeError` in `getMessage()`. Logging then reports its standard logging
+error with the filtered args, which is the same outcome as a missing key in stock logging.
 
 ### Removed
 
@@ -285,7 +352,9 @@ outcome as a missing key in stock logging.
 | dict holding a `defaultdict`, `{args[nested][missing]}` | label | the nested value is the `<mapping>` string, so the brace field fails and prints nothing from the caller |
 | lone `ChainMap`, `%(a)s` | passed through; the ChainMap's own lookup prints the value | `<mapping>` (no plain store) |
 | lone `mappingproxy`, `%(a)s` | passed through; prints the value, or exception text for an exception value | `<mapping>` (no plain store) |
-| lone `UserDict`, `%(a)s` with `a` stored | the value, rebuilt as a dict when it changed | the value read from `data` with `dict.get`, through `_safe_value` |
+| lone `UserDict`, `%(a)s` with `a` stored | the value, rebuilt as a dict when it changed | the value from the `_safe_pairs` pass over `data` |
+| lone plain dict with a `str` subclass key, `%(a)s` naming it | the stored value, found through the key's `__eq__` | `<mapping>` (not a plain key, so no pair; no `__eq__` runs) |
+| lone mapping read by a host `{args[a]}` formatter | the stored value | the scanned stored value when `a` is an exact `str` key, else the default |
 | lone `UserDict`, `%(missing)s` | `KeyError`, a stock logging error | `<mapping>` |
 | lone mapping, `"x %s"` or `"x %r"` | the mapping's own `str` or `repr` | an exact clean `dict` prints as before; any other mapping prints `<mapping>` |
 | lone dict with an exception or tuple key, `"failed: %s"` | the key relabelled | `failed: <mapping>` |
@@ -303,9 +372,16 @@ Codex R4 repros, red on `cade66080`:
 
 1. `test_partial_factory_exception_is_unreachable`: `defaultdict(functools.partial(f,
    ValueError(_CANARY)))` as a positional arg and as the lone mapping, through an engine handler
-   with `%s`, `%r` and `%(missing)s`: no canary. A `{`-style formatter with
-   `{args[0].default_factory.args[0]}` (positional case) raises or prints no canary. `_reachable`
-   from `record.args` and `record.msg` finds neither the exception nor the partial.
+   with `%s`, `%r` and `%(missing)s`: no canary. `_reachable` from `record.args` and
+   `record.msg` finds neither the exception nor the partial. Two rules for the cells (Codex R2
+   D7):
+   - The brace cell uses the field `{args[0].default_factory._factory.args[0]}`, which prints the
+     canary on `cade66080` (`.default_factory.args[0]` already raises there, so it proves
+     nothing). The mapping is truly positional: `args` is `(dd, 1)` with msg `"%s %s"`, so
+     `LogRecord` keeps the tuple. After the fix the field raises or prints no canary.
+   - The lone-mapping cell uses a nonempty `defaultdict` (`{"a": 1}` plus the factory).
+     `LogRecord` keeps an empty mapping as a one-item tuple, so an empty one would test the
+     positional path twice.
 2. `test_exception_key_does_not_overwrite_a_named_key`: the lone mapping
    `{"ValueError": 7, ValueError(_CANARY): 11}` with `%(ValueError)d` prints `7`, no canary.
 3. `test_ordereddict_arg_is_the_placeholder`: an `OrderedDict` with an exception value after
@@ -336,7 +412,12 @@ Earlier-round repros, kept or rewritten to the new rule (each was red on its rou
     level down, nested tuples): unchanged.
 13. `test_mapping_with_nothing_to_replace_passes_through` keeps only the `dict` case. The
     `counter`, `ordereddict`, `defaultdict_int` and `userdict` cases move to a new parametrized
-    `test_clean_non_plain_mapping_is_the_placeholder`.
+    `test_clean_non_plain_mapping_is_the_placeholder`. The `dict` case (Codex R2 D8) keeps
+    `record.getMessage() == repr(mapping)` and replaces `record.args is mapping` (`:497` on
+    `cade66080`; a lone mapping now always becomes a new `_NamedArgs`) with two assertions: the
+    caller mapping equals a copy taken before the filter, and a second `filter` call leaves
+    `record.args` the same object with the same `getMessage()`. This is a changed expectation, so
+    it goes in the 13a table and in the implementation commit.
 13a. Existing tests the new rule turns red on purpose (Dennis V1-2). Each is rewritten in the
     same commit as the code change, with the new expected output below. No assertion is dropped
     without a replacement.
@@ -348,6 +429,7 @@ Earlier-round repros, kept or rewritten to the new rule (each was red on its rou
     | `test_tuple_key_in_lone_mapping_arg_becomes_label` (:292) | `ValueError` in the output | `failed: <mapping>`, no canary (row 7: tuple key; `_NamedArgs` display string); renamed `test_tuple_key_in_lone_mapping_arg_is_the_placeholder` |
     | `test_mapping_needing_replacement_keeps_missing_lookup` (:321, `defaultdict(lambda: 0, ...)`) | `WARNING ValueError 0` | the field changes to `%(missing)s` and the output is `WARNING ValueError <mapping>` (caller factory, not called). A second cell keeps `%(missing)d` and asserts the stock logging error on stderr, with no canary on stderr and nothing in the handler output |
     | `test_fallback_clears_live_exc_info` (:236, monkeypatches `_scan`) | fallback runs | monkeypatches `_safe_value` instead (`_scan` is removed, and `monkeypatch.setattr` fails on a missing name); assertions unchanged |
+    | `test_mapping_with_nothing_to_replace_passes_through[dict]` (:497) | `record.args is mapping` | caller mapping unchanged, and a second filter keeps `record.args` and the message (test 13) |
 
 14. Removed with the code they tested: `test_missing_lookup_returning_exception_becomes_label`,
     `test_missing_lookup_returning_container_is_scanned`,
@@ -368,6 +450,11 @@ New guards:
       output is `<mapping>` (row 7) and neither method ran;
     - a plain `list` and a plain `dict` holding an exception next to a caller object whose
       `__eq__` records a call: the exception is relabelled and `__eq__` did not run.
+    - (Codex R2 D6) a lone plain `dict` `{K("a"): 7, "b": 1}`, where `K` is a `str` subclass that
+      keeps `str.__hash__` and has a recording `__eq__`, with msg `"%(a)s %(b)s"`. The named
+      lookup matches the subclass key by hash. The output has `<mapping>` for `a` and `1` for
+      `b`, and `K.__eq__` did not run. The recorder is reset after the fixture is built, because
+      building the dict can call `__eq__` itself.
 16. `test_any_mapping_type_is_value_free` (Hypothesis): nests one and two levels deep built from
     `dict`, `OrderedDict`, `Counter`, `defaultdict` (empty-builtin and caller factories),
     `UserDict`, `mappingproxy`, `ChainMap`, a `ConfigParser` section and a caller `Mapping`, with
@@ -385,10 +472,15 @@ New guards:
       the strategy plants nothing inside one. That is the `too_deep` strict xfail cell.
     - One fixed example runs on every run: a `UserDict` holding the canary exception inside a
       positional `list` prints `x [<mapping>]`.
-17. `test_named_args_holds_only_format_fields`: after filtering a lone mapping with fields `a` and
-    `b`, `record.args` is a `_NamedArgs` with exactly the keys `{"a", "b"}`. Parser cells: a key
-    with nested parentheses and a `%%` before a field, compared with CPython's own `%` result on
-    a plain dict. A `%%(a)s %(b)s` cell gives exactly the keys `{"b"}` (D3).
+17. `test_named_args_match_stock_output` (reworked for Codex R2 V1-5; the field parser is gone,
+    so its parser cells go too). Each cell compares the real formatted output with stock logging
+    on a clean plain dict, never a key set alone:
+    - a `PurePath("%(a)d")` msg with `{"a": 7}` prints `7`;
+    - a host `logging.Formatter("{message} {args[a]}", style="{")` with msg `"done"` and
+      `{"a": 7}` prints `done 7`;
+    - a key with nested parentheses (`%(a(b))s`) and a `%%(a)s %(b)s` msg print the same as stock;
+    - `record.args` has exactly the exact-`str` keys of the store, and none of its non-`str` keys
+      (an `int` key cell and a `str` subclass key cell).
 19. `test_lone_mapping_keeps_mapping_semantics` (V1-1). The lone mapping goes through an engine
     handler. Each cell compares the output with stock logging on a clean plain dict, and asserts
     `record.args` is a truthy `_NamedArgs`:
@@ -400,11 +492,39 @@ New guards:
     - `"x %s"` and `"x %r"` of a `Counter`: prints `x <mapping>`;
     - `"x %s"` of a plain dict holding an exception value: prints `x {'k': ValueError}` (the
       label prints bare under `repr`), no canary.
+20. `test_lone_mapping_display_scans_to_the_named_depth` (Codex R2 V1-1). The lone mapping
+    `{"k": [ValueError(_CANARY)]}` through the engine file handler prints exactly
+    `x {'k': [ValueError]}` with `"x %s"` and `"x %r"`, the same as `cade66080`, and a host
+    `{`-style formatter over `{args}` prints `{'k': [ValueError]}`. `%(k)s` prints `[ValueError]`.
+    No canary in any cell.
+21. `test_sequence_subclass_keeps_the_safe_rule` (Codex R2 V1-2). A
+    `namedtuple("Result", "issue")(ValueError(_CANARY))` as a positional `%s` argument through
+    the engine file handler prints exactly `(ValueError,)`, the same as `cade66080`. Cells for a
+    `list` subclass and a `set` subclass with an exception item print `[ValueError]` and
+    `{ValueError}`. A clean `namedtuple` prints its own `repr`, unchanged from stock.
+22. `test_two_handlers_print_the_same_record` (Codex R2 V1-3). Two engine handlers built by
+    `_new_engine_handler`, one stream and one file, handle the same record in turn. Cells: lone
+    clean `{"k": 1}` with `"x %s"`, `"x %r"` and `"%(k)d"`; lone `{"k": ValueError(_CANARY)}` with
+    the same three. The two outputs are equal and exact (`x {'k': 1}`, `1`, and so on), and no
+    canary. The existing parity test only uses empty arguments.
+23. `test_unused_value_cannot_drop_a_named_record` (Codex R2 V1-4). The lone mapping
+    `{"a": 7, "unused": 10**5000}` with `"%(a)d"` prints `7`, the same as stock logging, and not
+    `_UNRENDERABLE`. The same mapping with `"x %s"` prints `x <mapping>` and the line is not
+    dropped.
 18. `test_filter_builds_only_closed_types` (sentry, same file, because it guards one module): an
     AST walk of `_log_filter.py` finds no call to `OrderedDict`, `Counter`, `defaultdict`,
     `UserDict`, `copy` or `type(...)(...)`, no attribute read of `default_factory`, and no
-    attribute read of `items`, `keys`, `values` or `get` unless the receiver is the name `dict`
-    (D2). It also finds no `isinstance` call and no `==` or `!=` comparison in `_safe_value`. A seeded `defaultdict(...)` call in a scratch copy turns it red.
+    attribute read of `items` or `__iter__` unless the receiver is one of the names `dict`,
+    `list`, `tuple`, `set` or `frozenset`, and no attribute read of `get`, `keys` or `values` at
+    all (D2, Codex R2 D6). It also finds no `isinstance` call in `_safe_value`.
+    - Comparisons (Codex R2 V2-LOG): the check is narrowed to caller values. An `==` or `!=` is
+      allowed only when one side is an `int` constant (`depth == 0`); any other `==` or `!=` in
+      `_safe_value`, `_safe_pairs` or `_named_args` fails it.
+    - Import aliases (recurring defect 5): constructor names are resolved through the module's
+      imports, so `collections.OrderedDict(...)`, `from collections import OrderedDict as OD`
+      then `OD(...)`, and `import collections as c` then `c.defaultdict(...)` all count.
+    - Seeds, each in a scratch copy and each red: a bare `defaultdict(...)` call, each alias
+      spelling above, a `store.get(...)` read, and a `value == other` comparison.
 
 The other documented gaps stay strict xfails: `exc_args`, `wrapper_str`, `too_deep`, and the
 pre-formatted text cells.
@@ -419,19 +539,23 @@ each mutation ran on). The builder records the results in the PR body.
 | M1 | return a clean non-plain mapping as is | 13, 4 |
 | M2 | read a non-plain mapping through `.items()` instead of the placeholder | 15, 16, 7 |
 | M3 | relabel exception keys into a rebuilt dict instead of the placeholder | 2, 16 |
-| M4 | read a named field with `mapping[name]` instead of `dict.get(store, ...)` | 1, 5, 8, 15 |
-| M5 | use `isinstance(value, dict)` for the plain-dict row | 3, 13, 16 |
+| M4 | read a named field with `dict.get(store, name)` (or `mapping[name]`) instead of taking it from the `_safe_pairs` result | 1, 5, 8, 15 (`str` subclass named-lookup cell) |
+| M5 | change the dispatch decision that admits a subclass (Codex R2 D7): row 2 no longer catches a `dict` subclass, and row 6 accepts it (`isinstance(value, dict)` in both places). Changing row 6 alone is inert, because row 2 runs first | 3, 13, 16 |
 | M6 | keep a reference to the caller mapping on `_NamedArgs` | 1, 16 |
 | M7 | make the placeholder's `repr` call the caller object's `repr` | 1, 4, 16 |
-| M8 | copy every stored key into `_NamedArgs`, not only the format fields | 2, 17 |
+| M8 | copy a non-exact-`str` key (an `int` key or a `str` subclass key) and its value into `_NamedArgs` | 15, 17 (non-`str` key cells) |
 | M9 | drop the `Counter` row of the default table | 10 |
-| M10 | remove the `addFilter` call in `_new_engine_handler` (existing guard) | `test_every_engine_handler_carries_the_filter`, 4 |
+| M10 | one route bypasses the factory (Codex R2 D7): the file handler at `internal/logging.py:145`, or the fallback console at `:165`, is built directly as a `logging` handler without the filter. The guard is extended to configure console, file (under `tmp_path`) and the fallback console, and to walk every handler on the engine logger | `test_every_engine_handler_carries_the_filter` (extended), 4 |
 | M11 | key check with `isinstance(key, (str, int, float, bool, type(None)))` instead of the exact type | 15 (`str` subclass key cell) |
 | M12 | decide "no item changes" with `==` instead of `is` | 15 (recording `__eq__` cell) |
-| M13 | the field parser reads `%%(a)s` as a field | 17 (`%%(a)s %(b)s` cell) |
+| M13 | (replaces the retired parser mutation) `_NamedArgs` keeps only the fields named in a `str` msg | 17 (`PurePath` and host `{args[a]}` cells) |
 | M14 | lone mapping with no fields becomes a one-item tuple | 19 (`"done"`, `"x"` cells) |
 | M15 | `_NamedArgs.__bool__` removed, so an empty one is falsy | 19 (`100%%` cell) |
 | M16 | rows 1 and 2 moved after the depth check | 16 (fixed cell: a `UserDict` holding the canary exception inside a positional `list`, at depth 0) |
+| M17 | reduce the display depth alone: the display uses `_safe_pairs(store, _ARGS_DEPTH - 1)` while the named values keep `_ARGS_DEPTH` (Codex R2 V1-1) | 20 |
+| M18 | row 5 returns a changed subclass as the subclass (`type(value)(new)`), or passes sequence subclasses through to row 8 (Codex R2 V1-2) | 21 |
+| M19 | remove the `type(record.args) is _NamedArgs` keep rule in `_scrub` (Codex R2 V1-3) | 13, 22 |
+| M20 | compute `repr(display_source)` in `_scrub` instead of in `__str__` and `__repr__` (Codex R2 V1-4) | 23 |
 
 ## Failure modes
 
@@ -440,19 +564,22 @@ each mutation ran on). The builder records the results in the PR body.
 | a new mapping type appears | it is not an exact plain type, so it gets the placeholder | none needed |
 | a log line that printed a clean `Counter` now prints `<mapping>` | the builder's walk of logger calls; the PR body list | pass `dict(counter)` at the call site |
 | a named field's value is the placeholder under `%d` | stock logging error with filtered args | the call site passes a plain dict |
-| the field parser disagrees with CPython on an odd key | test 17 parser cells | follow the CPython rule |
+| the display `repr` fails on a stored value (for example the int-to-text limit) | test 23 | that one `%s` or `%r` prints `<mapping>`; named fields still print |
+| a second filter on the same record | test 22 | the exact-type keep rule returns the `_NamedArgs` unchanged |
 
 ## Design notes
 
 No new structure. The change removes the lookup machinery and replaces many type cases with one
 table (open/closed: a new mapping type needs no new code). Each fact has one place: the type
-table in `_safe_value`, the default table in `_named_args`, the placeholder constant.
+table in `_safe_value`, the one pair reader `_safe_pairs` (row 6, named values and display all
+take its result, so their depth cannot differ), the default table in `_named_args`, the
+placeholder constant.
 
 ## Placement and size
 
 No new files. `_log_filter.py` loses `_Lookup`, `_ScannedFactory` and the rebuild code, and gains
-`_safe_value`, `_named_args`, `_NamedArgs` and the placeholder. Expected: about -60 net source
-lines, about +150 and -90 test lines. No new public names. Tests stay in
+`_safe_value`, `_safe_pairs`, `_named_args`, `_NamedArgs` and the placeholder. Expected: about
+-50 net source lines, about +220 and -90 test lines. No new public names. Tests stay in
 `tests/unit/safe_output/test_log_filter.py`.
 
 ## Test depth
@@ -462,10 +589,21 @@ T0 on `test_log_filter.py` per edit. T1 per commit: `tests/unit/safe_output/`,
 `_new_engine_handler`, ruff check, ruff format and mypy on changed files. No full-suite trigger
 applies (no shared fixture, schema, lock or frozen contract change).
 
+Commit order (Codex R2 D8):
+
+1. Write the new and rewritten tests first. Run them on `cade66080` and record each red run (test
+   id and failing assertion) in the PR body. Tests 20 and 21 pin current output, so they are
+   green there; record that too.
+2. Commit the implementation together with every changed expectation in the 13a table, so each
+   commit is green and no assertion is weakened or dropped on its own. No pin, cap or baseline
+   moves.
+3. On the final recorded head, run T1 and every mutation M1 to M20, and record the head next to
+   each result (recurring defect 9). A code change after that run voids it.
+
 ## Docs and changelog
 
-The `_log_filter.py` module docstring gets the type table and the named-lookup rule in place of
-the current mapping text. The gap list drops "a mapping type other than dict and `UserDict`". The
+The `_log_filter.py` module docstring gets the type table, the one pair reader, the re-filter
+keep rule, the lazy display and the named-lookup rule in place of the current mapping text. The gap list drops "a mapping type other than dict and `UserDict`". The
 CHANGELOG line says a non-plain mapping argument prints `<mapping>` in engine logs.
 
 ## V2-LOG
