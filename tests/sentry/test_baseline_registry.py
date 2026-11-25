@@ -213,43 +213,18 @@ def test_the_scan_reaches_sentry_subfolders() -> None:
 # file, the three names and the statement form. A new constant in the same file is still found.
 FIXTURE_FILE = "ci_scan/test_identity.py"
 FIXTURE_NAMES = ("REPO", "COMMIT", "PATH")
+FIXTURE_SOURCE = 'REPO, COMMIT, PATH = "o/r", "a" * 40, "tests/x.py"'
 UPPER = re.compile(r"_*[A-Z][A-Z0-9_]*")
 
 
-def _is_text(node: ast.expr) -> bool:
-    """A string literal, or a string literal repeated by an int literal (``"a" * 40``)."""
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
-        return _is_text(node.left) and isinstance(node.right, ast.Constant)
-    return isinstance(node, ast.Constant) and isinstance(node.value, str)
-
-
 def _is_fixture_statement(tree: ast.Module) -> bool:
-    """True when the module has exactly one ``REPO, COMMIT, PATH = <str>, <str>, <str>`` line."""
-    hits = [
-        stmt
-        for stmt in tree.body
-        if isinstance(stmt, ast.Assign)
-        and len(stmt.targets) == 1
-        and isinstance(stmt.targets[0], ast.Tuple)
-        and tuple(getattr(e, "id", None) for e in stmt.targets[0].elts) == FIXTURE_NAMES
-        and isinstance(stmt.value, ast.Tuple)
-        and len(stmt.value.elts) == len(FIXTURE_NAMES)
-        and all(_is_text(e) for e in stmt.value.elts)
-    ]
-    return len(hits) == 1 and _binding_count(tree, FIXTURE_NAMES) == len(FIXTURE_NAMES)
-
-
-def _binding_count(tree: ast.Module, names: tuple[str, ...]) -> int:
-    """How many places bind any of ``names``: a stored name, import, ``def`` or ``class``."""
-    count = 0
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            count += node.id in names
-        elif isinstance(node, ast.alias):
-            count += (node.asname or node.name) in names
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            count += node.name in names
-    return count
+    """True when the module binds the fixture names once, in exactly ``FIXTURE_SOURCE``. The
+    count comes from the ratchet reader's own binding list, so every form it sees (assign, loop,
+    ``with``, walrus, import, ``match`` capture, ``def``, ``global``) withdraws the excuse."""
+    expected = ast.dump(ast.parse(FIXTURE_SOURCE).body[0])
+    hits = [stmt for stmt in tree.body if ast.dump(stmt) == expected]
+    bound = [name for name, _ in bs._limits()._bindings(tree) if name in FIXTURE_NAMES]
+    return len(hits) == 1 and len(bound) == len(FIXTURE_NAMES)
 
 
 def _upper_candidates(sources: dict[str, str]) -> dict[tuple[str, str], int | None]:
@@ -334,6 +309,28 @@ def test_the_fixture_file_is_scanned_and_only_its_fixture_is_excused() -> None:
     assert refused_constants({FIXTURE_FILE: text + "\ndef PATH() -> None: ...\n"})
     assert refused_constants({FIXTURE_FILE: text + "\nfrom os import PATH\n"})
     assert module_int_constants({FIXTURE_FILE: "REPO, COMMIT, PATH = 1, 2, 3\n"})
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "match 7:\n    case REPO:\n        pass\n",
+        "for COMMIT in (1,):\n    pass\n",
+        "with open('f') as PATH:\n    pass\n",
+        "(REPO := 3)\n",
+        "PATH += 1\n",
+        "global REPO\n",
+    ],
+)
+def test_any_other_binding_of_a_fixture_name_withdraws_the_excuse(extra: str) -> None:
+    text = (bs.SENTRY / FIXTURE_FILE).read_text(encoding="utf-8")
+    assert module_int_constants({FIXTURE_FILE: text + "\n" + extra})
+
+
+def test_only_the_exact_fixture_statement_is_excused() -> None:
+    text = (bs.SENTRY / FIXTURE_FILE).read_text(encoding="utf-8")
+    assert FIXTURE_SOURCE in text
+    assert module_int_constants({FIXTURE_FILE: text.replace('"a" * 40', '"a" * 40 * 1.5')})
 
 
 def limit_problems(
