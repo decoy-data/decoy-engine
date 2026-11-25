@@ -78,8 +78,9 @@ from decoy_engine.generation.pool._resident import (
     PoolResidentParts,
     faker_pool_resident_bytes,
     faker_pool_resident_parts,
-    pool_locales,
+    provider_init_bound,
     provider_init_bytes,
+    run_faker_footprint,
 )
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import (
@@ -124,10 +125,11 @@ __all__ = [
     "get_default_pool_cache",
     "int_from_index",
     "parse_computed_draw",
-    "pool_locales",
     "pool_take",
+    "provider_init_bound",
     "provider_init_bytes",
     "raise_uniqueness_impossible",
+    "run_faker_footprint",
     "unique_capacity_ok",
     "uuid_from_bits",
     "uuid_from_hex",

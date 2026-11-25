@@ -95,13 +95,32 @@ def measured_pool_bytes(pool: ValuePool) -> int:
     The one pool-byte function: `PoolCache` budgets with it and the out-of-core run reserves
     with it, so a pool that fits one ledger fits the other. A character-count estimate measured
     from 0.5x to 2.6x off the real size depending on string length, which let the two ledgers
-    disagree. A pool that retains its Arrow form counts the buffers it holds, not the logical size of a slice:
-    a slice keeps its whole backing buffer alive."""
+    disagree. A pool that retains its Arrow form counts the root buffers it keeps alive."""
     values = pool.values
-    arrow_bytes = 0 if pool.arrow is None else int(pool.arrow.get_total_buffer_size())
+    arrow_bytes = 0 if pool.arrow is None else _arrow_retained_bytes(pool.arrow)
     if values.dtype != object:
         return int(values.nbytes) + arrow_bytes
     return sum(sys.getsizeof(v) for v in values) + 8 * len(values) + arrow_bytes
+
+
+def _arrow_retained_bytes(array: pa.Array[Any]) -> int:
+    """Bytes of every distinct root buffer ``array`` keeps alive.
+
+    A sliced or IPC-read buffer is a zero-copy view that holds its parent (Arrow's memory model,
+    `pyarrow.Buffer.parent`), so a one-value view of a large message body keeps the whole body.
+    """
+    arrays = [array]
+    if pa.types.is_dictionary(array.type):
+        arrays.append(array.dictionary)
+    roots: dict[tuple[int, int], int] = {}
+    for arr in arrays:
+        for buf in arr.buffers():
+            if buf is None:
+                continue
+            while buf.parent is not None:
+                buf = buf.parent
+            roots[(buf.address, buf.size)] = buf.size
+    return sum(roots.values())
 
 
 def construction_floor(size: int, *, strings: bool) -> int:

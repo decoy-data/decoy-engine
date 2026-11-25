@@ -1,4 +1,4 @@
-"""Worst-case resident bytes of one pooled Faker pool, the one choke point for its reservation.
+"""Worst-case resident bytes of one pooled Faker pool and of a run's Faker providers.
 
 The preflight (`_streamed`) and the live ledger reservation (`_column_streams`) both call
 `faker_pool_resident_bytes`. The model follows CPython's compact str layout (PEP 393: 1, 2 or 4
@@ -8,8 +8,17 @@ Arrow's growable binary builder (buffers at most double while they grow).
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
+
+from decoy_engine.config import generate_columns_of
+from decoy_engine.internal.faker_setup import (
+    DEFAULT_GENERATE_LOCALE,
+    effective_locale,
+    locale_entries,
+)
 
 # CPython str object header + list pointer (execution._mem_estimate_dtypes). The one definition;
 # `_bounds` imports it from `pool`.
@@ -19,15 +28,18 @@ _POINTER_BYTES = 8
 # Interpreter and Arrow builder minimums that do not scale with the pool (a 1-value Arrow string
 # array still allocates whole 64-byte blocks).
 _POOL_FIXED_BYTES = 80 * 1024
-# Faker builds its locale providers (name, address and other word lists) when a worker first opens
-# a locale, before the first value, and keeps them for the run. A fresh process measured 10.7 MB of
-# Python allocations for `it_IT`, the heaviest of Faker's locales (the next is 1.5 MB), and under
-# 1 MB for most. A run is charged once per distinct locale: 16 MiB for the first (the heaviest,
-# rounded up) and 2 MiB for each further one (the second heaviest, rounded up), so any set of
-# locales is covered whichever order they open in.
-_PROVIDER_INIT_FIRST_BYTES = 16 * 1024 * 1024
-_PROVIDER_INIT_NEXT_BYTES = 2 * 1024 * 1024
-_DEFAULT_LOCALE = "en_US"
+_MIB = 1024 * 1024
+# Faker builds a locale's providers (name, address and other word lists) when anything first opens
+# it, and keeps them for the run. Each locale has a retained bound (bytes kept once open) and a
+# transient bound (its peak above that while its modules compile). Measured cold, with no cached
+# bytecode, under tracemalloc for every locale Faker ships; each bound is the measure plus at least
+# 25%, rounded up to a MiB. `test_provider_init_bound` re-measures every locale against this table.
+_PROVIDER_INIT_BOUNDS: Mapping[str, tuple[int, int]] = MappingProxyType(
+    {"it_IT": (12 * _MIB, 64 * _MIB), "de_AT": (2 * _MIB, 16 * _MIB)}
+)
+_PROVIDER_INIT_OTHER_BOUND = (2 * _MIB, 8 * _MIB)
+# One more Faker instance of a locale already open (measured under 0.35 MB at peak).
+_PROVIDER_INSTANCE_BYTES = 512 * 1024
 # A str holding any non-ASCII char: the larger compact header and terminator, plus the
 # terminator and allocator header of its cached UTF-8 copy, beyond STR_OBJECT_OVERHEAD_BYTES.
 _STR_WIDE_EXTRA_BYTES = 48
@@ -83,22 +95,63 @@ def faker_pool_resident_bytes(pool_size: int, payload: int) -> int:
     return parts.object_form + parts.arrow_peak + parts.lists + parts.fixed
 
 
-def pool_locales(requested_locale: Any) -> frozenset[str]:
-    """The distinct locales a pooled column opens: one for a string, each entry of a list.
+def provider_init_bound(locale: str) -> tuple[int, int]:
+    """The (retained, transient) bytes bound of opening ``locale`` cold."""
+    return _PROVIDER_INIT_BOUNDS.get(locale, _PROVIDER_INIT_OTHER_BOUND)
 
-    An absent locale is Faker's default. `en-US` and `en_US` are one locale, as Faker reads them.
+
+def provider_init_bytes(locales: Collection[str], instances: int) -> int:
+    """Worst-case Python bytes to open ``locales`` in any order, as ``instances`` Faker instances.
+
+    Opening a locale after others peaks at most at their retained bytes plus its own solo peak,
+    so the bound is every retained bound plus the largest transient one.
     """
-    entries = requested_locale if isinstance(requested_locale, list) else [requested_locale]
-    return frozenset(
-        str(entry).replace("-", "_") if entry else _DEFAULT_LOCALE for entry in entries
-    ) or frozenset({_DEFAULT_LOCALE})
-
-
-def provider_init_bytes(locale_count: int) -> int:
-    """Worst-case Python bytes to build the providers of `locale_count` distinct locales."""
-    if locale_count <= 0:
+    if not locales:
         return 0
-    return _PROVIDER_INIT_FIRST_BYTES + (locale_count - 1) * _PROVIDER_INIT_NEXT_BYTES
+    bounds = [provider_init_bound(locale) for locale in locales]
+    retained = sum(r for r, _ in bounds)
+    return retained + max(t for _, t in bounds) + max(instances, 0) * _PROVIDER_INSTANCE_BYTES
+
+
+def _opens_faker(col: Mapping[str, Any]) -> bool:
+    if col.get("type") == "faker":
+        return True
+    if col.get("type") != "provider":
+        return False
+    from decoy_engine.providers_v2 import get_default_registry
+
+    try:
+        caps = get_default_registry().get_capabilities(str(col.get("provider")))
+    except Exception:
+        return False  # an unknown provider is refused by the plan check that runs next
+    return caps.backend_type == "faker"
+
+
+def run_faker_footprint(
+    config: Mapping[str, Any], instance_default_locale: str | None
+) -> tuple[frozenset[str], int]:
+    """Every locale any step of a run opens, and how many Faker instances, before any opens.
+
+    Faker columns (pooled or per-row), Faker-backed provider columns and in-run validation open
+    each column's locale; admission, bounds and the per-row path also open the default Faker.
+    A malformed config yields nothing here: the plan check that follows refuses it by its code.
+    """
+    found: set[str] = set()
+    instances = 0
+    try:
+        for table in config.get("tables") or []:
+            for col in generate_columns_of(table):
+                if _opens_faker(col):
+                    entries = locale_entries(
+                        effective_locale(col.get("locale"), instance_default_locale)
+                    )
+                    found |= set(entries)
+                    instances += len(entries)
+    except (AttributeError, TypeError, ValueError):
+        return frozenset(), 0
+    if not found:
+        return frozenset(), 0
+    return frozenset({*found, DEFAULT_GENERATE_LOCALE}), instances + 1
 
 
 __all__ = [
@@ -106,6 +159,7 @@ __all__ = [
     "PoolResidentParts",
     "faker_pool_resident_bytes",
     "faker_pool_resident_parts",
-    "pool_locales",
+    "provider_init_bound",
     "provider_init_bytes",
+    "run_faker_footprint",
 ]

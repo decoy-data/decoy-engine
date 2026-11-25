@@ -25,11 +25,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import reasons
 from decoy_engine.generators.derivation import (
-    DEFAULT_GENERATE_LOCALE,
     TABLE_KEY,
     GenDeriveContext,
     pool_seeds,
 )
+from decoy_engine.internal.faker_setup import effective_locale
 
 if TYPE_CHECKING:
     from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry
@@ -61,7 +61,7 @@ def provider_column_values(
     instance_default_locale: str | None,
 ) -> list[Any]:
     """``n`` values for a ``provider`` generate column, in its locale or the instance default."""
-    locale = str(col.get("locale") or instance_default_locale or DEFAULT_GENERATE_LOCALE)
+    locale = str(effective_locale(col.get("locale"), instance_default_locale))
     return provider_generate(col, n, gen_ctx, registry, locale)
 
 

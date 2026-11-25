@@ -636,6 +636,22 @@ def list_generate_faker_providers(locale: str | list[str] | None = None) -> tupl
     return tuple(sorted(get_faker_providers(fake)))
 
 
+# The locale a generate column uses when neither the column nor the run names one.
+DEFAULT_GENERATE_LOCALE = "en_US"
+
+
+def effective_locale(column_locale: Any, default_locale: Any = None) -> Any:
+    """The locale a generate column runs in: its own, else the run default, else en_US."""
+    return column_locale or default_locale or DEFAULT_GENERATE_LOCALE
+
+
+def locale_entries(locale: Any) -> tuple[str, ...]:
+    """The distinct locales Faker opens for ``locale``, in order. Faker reads `-` as `_`."""
+    entries = locale if isinstance(locale, list) else [locale]
+    names = (str(e).replace("-", "_") if e else DEFAULT_GENERATE_LOCALE for e in entries)
+    return tuple(dict.fromkeys(names)) or (DEFAULT_GENERATE_LOCALE,)
+
+
 def make_faker(locale: str | list[str] | None = None) -> Faker:
     """Construct a `Faker` instance with optional locale override. Locale
     can be a single string (`'en_GB'`) or a list of strings -- Faker mixes

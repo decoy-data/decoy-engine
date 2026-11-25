@@ -28,9 +28,10 @@ from decoy_engine.generation._budget_ledger import (
 from decoy_engine.generation.pool import (
     faker_pool_resident_bytes,
     faker_pool_resident_parts,
-    pool_locales,
     provider_init_bytes,
+    run_faker_footprint,
 )
+from decoy_engine.internal.faker_setup import locale_entries
 from tests.parity._fr0_support import prepared_config
 from tests.unit.generation.stream._support import faker_config
 
@@ -120,13 +121,18 @@ def test_the_charge_sums_every_part(payload: int) -> None:
 
 
 def test_the_provider_charge_is_once_per_distinct_locale() -> None:
-    first = provider_init_bytes(1)
-    assert provider_init_bytes(0) == 0
+    first = provider_init_bytes({"it_IT"}, 1)
+    assert provider_init_bytes(set(), 0) == 0
     assert first >= 10_721_072  # the measured it_IT build, the heaviest locale
-    assert provider_init_bytes(2) > first
-    assert provider_init_bytes(30) >= 25_322_859  # the measured 30-locale build
-    assert pool_locales("en-US") == pool_locales(["en_US", None]) == frozenset({"en_US"})
-    assert pool_locales(["it_IT", "de_AT", "it_IT"]) == frozenset({"it_IT", "de_AT"})
+    # A cold de_AT then it_IT import peaked at 66 MB (Codex V1-2).
+    assert provider_init_bytes({"de_AT", "it_IT"}, 2) > max(first, 66_000_000)
+    assert provider_init_bytes(set(_locales_30()), 30) >= 25_322_859  # the measured 30-locale build
+    # More instances of one locale add only the per-instance part, never a second locale build.
+    per_instance = provider_init_bytes({"it_IT"}, 2) - first
+    assert 0 < per_instance < 1024 * 1024
+    assert provider_init_bytes({"it_IT"}, 3) - first == 2 * per_instance
+    assert locale_entries("en-US") == locale_entries(["en_US", None]) == ("en_US",)
+    assert locale_entries(["it_IT", "de_AT", "it_IT"]) == ("it_IT", "de_AT")
 
 
 def test_the_helper_grows_with_pool_size_and_payload() -> None:
@@ -264,7 +270,7 @@ def _fresh_worker_peak(locale: str, faker_type: str, n: int) -> int:
 def test_the_reservation_covers_a_fresh_worker_build_with_the_real_provider(locale: str) -> None:
     peak = _fresh_worker_peak(locale, "prefix", _POOL)
     payload = _bounds.FAKER_VALUE_CAPS["prefix"]
-    assert faker_pool_resident_bytes(_POOL, payload) + provider_init_bytes(1) >= peak
+    assert faker_pool_resident_bytes(_POOL, payload) + provider_init_bytes({locale}, 1) >= peak
 
 
 class _DrainSink:
@@ -364,7 +370,10 @@ def test_a_locale_list_is_charged_for_every_locale_it_opens() -> None:
 def test_the_charge_covers_a_fresh_worker_that_opens_thirty_locales() -> None:
     peak = _fresh_worker_peak(",".join(_locales_30()), "prefix", _POOL)
     payload = _bounds.FAKER_VALUE_CAPS["prefix"]
-    assert faker_pool_resident_bytes(_POOL, payload) + provider_init_bytes(30) >= peak
+    assert (
+        faker_pool_resident_bytes(_POOL, payload) + provider_init_bytes(set(_locales_30()), 1)
+        >= peak
+    )
 
 
 @pytest.mark.serial
@@ -377,5 +386,7 @@ def test_three_columns_of_one_locale_are_charged_one_provider_build() -> None:
     result = _streamed.run_generation(config, sink=_DrainSink(), ledger=ledger, batch_rows=4096)
     assert result.mode == "streamed"
     inits = [n for stage, n in ledger.events if stage == "faker_provider_init"]
-    assert inits == [provider_init_bytes(1)]
+    # One en_US build, three column instances and the default-locale check's instance.
+    assert inits == [provider_init_bytes({"en_US"}, 4)]
+    assert run_faker_footprint(config, None) == (frozenset({"en_US"}), 4)
     assert ledger.peak_bytes < 64 * _MIB

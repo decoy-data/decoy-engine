@@ -8,6 +8,7 @@ the bytes under null slots) and the Parquet file the bounded sink commits.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+import decoy_engine
 from decoy_engine.generation import _faker_pool, _streamed
 from tests.parity import _f0_fixtures as fx
 from tests.parity._fr0_support import run_resident, run_streamed
@@ -155,26 +157,61 @@ def test_the_declared_width_bound_is_enforced_on_the_arrow_path(
     assert selects == []
 
 
-@pytest.mark.serial
-@pytest.mark.parametrize(
-    "first",
-    [
-        "decoy_engine.generation.stream",
-        "decoy_engine.generation._column_streams",
-        "decoy_engine.generation.stream._batches",
-    ],
-)
-def test_the_stream_package_has_no_import_cycle_in_any_entry_order(first: str) -> None:
-    import subprocess
-    import sys
+def _module_path(src: Path, module: str) -> Path | None:
+    base = src.joinpath(*module.split("."))
+    for candidate in (base / "__init__.py", base.with_suffix(".py")):
+        if candidate.is_file():
+            return candidate
+    return None
 
-    code = (
-        f"import {first}\n"
-        "from decoy_engine.generation.stream import check_width, table_batches, sibling_input\n"
-        "from decoy_engine.generation.pool import pool_take\n"
-        "import decoy_engine.generation._column_streams, decoy_engine.generation._streamed\n"
-    )
-    out = subprocess.run(  # noqa: S603 -- fixed argv, test-only
-        [sys.executable, "-c", code], check=False, capture_output=True, text=True
-    )
-    assert out.returncode == 0, out.stderr[-1500:]
+
+def _module_level_imports(src: Path, module: str) -> set[str]:
+    """Engine modules `module` imports when it loads: not under TYPE_CHECKING, not in a function."""
+    path = _module_path(src, module)
+    if path is None:
+        return set()
+    package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+    found: set[str] = set()
+
+    def visit(body: list[ast.stmt]) -> None:
+        for node in body:
+            if isinstance(node, ast.If):
+                if "TYPE_CHECKING" not in ast.unparse(node.test):
+                    visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.Try):
+                for block in (node.body, node.orelse, node.finalbody):
+                    visit(block)
+                for handler in node.handlers:
+                    visit(handler.body)
+            elif isinstance(node, ast.Import):
+                found.update(a.name for a in node.names if a.name.startswith("decoy_engine"))
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:
+                    parts = package.split(".")[: len(package.split(".")) - node.level + 1]
+                    base = ".".join([*parts, base] if base else parts)
+                if base.startswith("decoy_engine"):
+                    for alias in node.names:
+                        sub = f"{base}.{alias.name}"
+                        found.add(sub if _module_path(src, sub) else base)
+
+    visit(ast.parse(path.read_text(encoding="utf-8")).body)
+    return found
+
+
+def test_the_stream_package_has_no_import_cycle() -> None:
+    """`stream` loads `_batches` lazily: `_batches` imports `_column_streams`, which imports
+    `stream`. A runtime import passes even with the eager import, since Python hands back the
+    partly built module, so this reads the module-level imports instead."""
+    src = Path(decoy_engine.__file__).parents[1]
+    start = "decoy_engine.generation.stream"
+    seen: set[str] = set()
+    pending = [(name, [start, name]) for name in _module_level_imports(src, start)]
+    while pending:
+        module, chain = pending.pop()
+        assert module != start, " -> ".join(chain)
+        if module not in seen:
+            seen.add(module)
+            pending += [(n, [*chain, n]) for n in _module_level_imports(src, module)]
+    assert "decoy_engine.generation.stream._siblings" in seen

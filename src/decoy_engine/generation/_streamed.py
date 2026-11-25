@@ -59,8 +59,8 @@ from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
 from decoy_engine.generation.pool import (
     DEFAULT_POOL_SIZE,
     faker_pool_resident_bytes,
-    pool_locales,
     provider_init_bytes,
+    run_faker_footprint,
 )
 from decoy_engine.generation.relational import reference_policies
 from decoy_engine.generation.stream import check_width, table_batches
@@ -286,25 +286,6 @@ def _refuse_if_over_memory(config: dict[str, Any], admission: PlanAdmission) -> 
         )
 
 
-def _pooled_locales(config: dict[str, Any], instance_default_locale: str | None) -> frozenset[str]:
-    """Every locale a pooled Faker column of the config will open, before any of them does.
-
-    A malformed config yields nothing here: the plan check that follows refuses it by its own code.
-    """
-    found: set[str] = set()
-    try:
-        for t in config.get("tables") or []:
-            rows = int(t.get("row_count") or 0)
-            for c in _pooled_columns(
-                {"generate_columns": t.get("generate_columns") or [], "row_count": rows},
-                instance_default_locale,
-            ):
-                found |= pool_locales(c.get("locale") or instance_default_locale)
-    except (AttributeError, TypeError, ValueError):
-        return frozenset()
-    return frozenset(found)
-
-
 def run_generation(
     config: dict[str, Any],
     *,
@@ -340,12 +321,14 @@ def run_generation(
             resolved_batch = resolved_batch or resolved.batch_rows
     with ExitStack() as run_scope:
         # Faker builds a locale's providers the first time anything opens it, and the default-locale
-        # check below does that for a column with no `locale`. So the one charge per distinct
-        # locale of the run is taken first and held to the end; the pools charge only their values.
-        locales = _pooled_locales(config, instance_default_locale)
+        # check below is the first to do so. So every locale of the run is charged first and held
+        # to the end; the pools charge only their values.
+        locales, instances = run_faker_footprint(config, instance_default_locale)
         if locales:
             run_scope.callback(
-                ledger.reserve("faker_provider_init", provider_init_bytes(len(locales))).release
+                ledger.reserve(
+                    "faker_provider_init", provider_init_bytes(locales, instances)
+                ).release
             )
         # Before any pool or provider: a column without `locale` runs in the platform default.
         check_faker_default_locale(

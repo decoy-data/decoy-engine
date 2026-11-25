@@ -22,7 +22,7 @@ from decoy_engine.generation._budget_ledger import (
     GenerationUnboundedError,
 )
 from decoy_engine.generation._streamed import run_generation
-from decoy_engine.generation.pool import provider_init_bytes
+from decoy_engine.generation.pool import provider_init_bytes, run_faker_footprint
 from tests.parity import _f0_fixtures as fx
 from tests.parity._fr0_support import fingerprints, prepared_config
 
@@ -386,8 +386,15 @@ def test_runtime_ledger_is_the_line_of_defense_when_the_admission_estimate_is_to
     monkeypatch.setattr(_streamed, "_fits", lambda ledger, need: True)
     spies = AllocationSpies(monkeypatch, None)
     config = _relational()
+    # Faker's provider charge comes first; with room for exactly that, the key pool is the
+    # first stage that does not fit.
+    init = provider_init_bytes(*run_faker_footprint(config, None))
     with pytest.raises(GenerationBudgetExceeded) as err:
         run_generation(config, ledger=GenerationBudgetLedger(1))
+    assert "faker_provider_init" in str(err.value)
+    assert spies.snapshot() == {"pool_build": 0, "batch": 0, "key_pool": 0, "sink_calls": 0}
+    with pytest.raises(GenerationBudgetExceeded) as err:
+        run_generation(config, ledger=GenerationBudgetLedger(init + 1))
     assert "parent_key_pool" in str(err.value)
     assert spies.snapshot() == {"pool_build": 0, "batch": 0, "key_pool": 0, "sink_calls": 0}
     # And a ceiling that fits every stage completes.
@@ -404,11 +411,12 @@ def test_ceiling_sweep_never_allocates_past_a_reservation(monkeypatch: pytest.Mo
     peak = GenerationBudgetLedger(None)
     run_generation(config, ledger=peak)
     refused_stages: set[str] = set()
-    # The run charges Faker's provider init first, a fixed 16 MiB that dwarfs the key pool and batch
+    # The run charges Faker's provider init first, megabytes that dwarf the key pool and batch
     # buffers, so those stages' refusals sit just past it: sweep the low range and the range just
     # above the init charge in fine steps as well.
     top = peak.peak_bytes
-    init = provider_init_bytes(1)
+    init = provider_init_bytes(*run_faker_footprint(config, None))
+    assert init > 0
     fine = list(range(0, 64 * 1024, 1024))
     ceilings = [top * step // 40 for step in range(0, 41)] + fine + [init + d for d in fine]
     for ceiling in ceilings:

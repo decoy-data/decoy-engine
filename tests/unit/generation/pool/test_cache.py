@@ -196,3 +196,41 @@ def test_a_one_value_slice_of_a_large_buffer_counts_the_buffer_it_keeps() -> Non
     cache = PoolCache(max_bytes=64 * 1024)
     with pytest.raises(PoolCapacityError):
         cache.put(pool)
+
+
+def test_an_ipc_read_pool_counts_the_message_body_it_keeps_alive() -> None:
+    """Codex V1-3: an IPC-read one-value column holds the whole record batch body, ~1 MB, while
+    its own buffers report a few bytes."""
+    import pyarrow as pa
+
+    batch = pa.record_batch(
+        {"v": pa.array(["a"]), "wide": pa.array([b"x" * (1 << 20)], type=pa.binary())}
+    )
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, batch.schema) as writer:
+        writer.write_batch(batch)
+    message = sink.getvalue()
+    arrow = pa.ipc.open_stream(message).read_next_batch().column("v")
+    assert arrow.get_total_buffer_size() < 1024
+    objects = np.array(["a"], dtype=object)
+
+    def pool(retained: bool) -> ValuePool:
+        return ValuePool(
+            values=objects,
+            provider="p",
+            locale="en_US",
+            config_hash="",
+            seed=b"\x01" * 8,
+            size=1,
+            build_time_ms=0.0,
+            backend_type="faker",
+            backend_version="x",
+            distinct_count=1,
+            arrow=arrow if retained else None,
+        )
+
+    object_only = measured_pool_bytes(pool(retained=False))
+    assert measured_pool_bytes(pool(retained=True)) >= object_only + (1 << 20)
+    # Room for the object form and the column's own buffers, not for the body behind them.
+    with pytest.raises(PoolCapacityError):
+        PoolCache(max_bytes=object_only + 64 * 1024).put(pool(retained=True))
