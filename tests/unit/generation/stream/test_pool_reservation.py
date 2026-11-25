@@ -253,6 +253,26 @@ def test_the_reservation_covers_a_fresh_worker_build_with_the_real_provider(loca
     assert faker_pool_resident_bytes(_POOL, payload) >= peak
 
 
+class _DrainSink:
+    """A bounded sink that reads every batch and keeps nothing, so the run streams."""
+
+    bounded_write_batches = True
+
+    def write(self, table: str, data: pa.Table) -> None:
+        del table, data
+
+    def write_batches(self, table: str, batches: Any, *, schema: pa.Schema) -> None:
+        del table, schema
+        for _ in batches:
+            pass
+
+    def commit(self) -> None:
+        return None
+
+    def abort(self) -> None:
+        return None
+
+
 @pytest.mark.serial
 def test_a_six_mib_ceiling_refuses_the_it_it_prefix_job_before_it_builds(
     monkeypatch: pytest.MonkeyPatch,
@@ -269,6 +289,9 @@ def test_a_six_mib_ceiling_refuses_the_it_it_prefix_job_before_it_builds(
     config = prepared_config(faker_config("prefix", _ROWS, locale="it_IT"))
     with pytest.raises(GenerationBudgetExceeded):
         _streamed.run_generation(
-            config, ledger=GenerationBudgetLedger(6 * 1024 * 1024), batch_rows=128
+            config,
+            sink=_DrainSink(),
+            ledger=GenerationBudgetLedger(6 * 1024 * 1024),
+            batch_rows=128,
         )
     assert builds == []
