@@ -178,7 +178,7 @@ the plan check then refuses; that is the safe direction.
 Userinfo is replaced whole, user included (pip), with two exceptions where a userinfo without `:` is
 an identifier, not a secret, and is kept:
 - `abfs`, `abfss`, `wasb`, `wasbs`: the container name (`abfss://container@acct.dfs.core.windows.net/p`);
-- `sftp`: the account name (`sftp://etl@files.example/in/a.csv`); the key lives in connection config.
+- `sftp`: the account name (`sftp://etl@files.example/in/a.csv`); the key is held in connection config.
 A userinfo with `:` is redacted for every scheme. Every other scheme masks a user-only userinfo,
 because tokens are sent as the username (`https://TOKEN@github.example`).
 
