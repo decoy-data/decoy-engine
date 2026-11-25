@@ -187,12 +187,14 @@ N/A: the filter handles log records, not table data.
 
 - `LogRecord` fields the filter reads or writes: `msg`, `args`, `exc_info`, `exc_text`, the
   private `_decoy_safe_exc_text` (`src/decoy_engine/safe_output/_log_filter.py:54`), and
-  `stack_info` (kept).
+  `stack_info` (kept). Discard the formatter cache with `record.__dict__.pop("message", None)`
+  before the common return from `filter`, after either success or fallback.
 - Every other record attribute (HIGH-2). `_STANDARD_FIELDS` is computed once from
   `vars(logging.makeLogRecord({}))` plus `message` and `asctime` (`_log_filter.py:171@9e63c151`),
   so it follows the running Python's own field list (`taskName` on 3.12). Any attribute outside
   it and outside `_decoy_safe_exc_text` came from `extra=` or a host filter, and goes through
-  `_safe_value(value, 1)`, the `msg` depth (`_log_filter.py:405-408@9e63c151`).
+  `_safe_value(value, 1)`, the `msg` depth (`_log_filter.py:405-408@9e63c151`). Both extra-field
+  loops must write `record.__dict__[key]` directly because logging accepts non-string keys.
 - Argument shapes: a positional tuple; a lone non-empty mapping (`LogRecord.__init__` sets `args`
   to the mapping); a mapping or container as `msg`.
 - Mapping kinds checked by test 16: `dict`, `dict` subclasses, `OrderedDict`, `Counter`,
@@ -208,6 +210,8 @@ N/A: the filter handles log records, not table data.
   `src/decoy_engine/safe_output/_log_filter.py:250` to `:257`.
 - At `9e63c151` all of these are written in `_scrub` (`_log_filter.py:395-417@9e63c151`): `msg`
   at `:396`, `args` at `:399-404`, `extra=` attributes at `:405-408`, the traceback at `:410-417`.
+- A prior formatter can cache exception text in `record.message`. A JSON formatter can dump
+  that cache without recomputing it from the scrubbed fields (test 26).
 - Brace-style formatter fields over the record (`{args[0].x}`): reach only what `args` holds.
 - `extra=` attributes (HIGH-2): a `%(err)s` field in a host format string, or a JSON-style
   formatter that dumps `record.__dict__`, prints them. `logger.info("x", extra={"err": exc})`
@@ -295,6 +299,9 @@ included.
 | 11 | exact `_SCALAR_LIKE` type: `PurePosixPath`, `PureWindowsPath`, `PosixPath`, `WindowsPath`, `Decimal`, `date`, `datetime`, `time`, `timedelta`, `UUID`, `type`, `ABCMeta`, `FunctionType`, `BuiltinFunctionType`, `None`, `Ellipsis`, `NotImplemented` | the value itself. C1 removes `MethodType` from this list (below) |
 | 12 | a subclass of `int`, `float` or `complex`; an `enum.Enum` member | a number subclass is copied to its base with the unbound `__pos__` (`int.__pos__(value)`). C2 puts this check before the enum check, so an `IntEnum` or `IntFlag` member prints as its number, as stock `%s` and `%d` do. Any other enum member becomes the label `Class.NAME`, built from `type(value).__name__` and `vars(value)["_name_"]`; a member with no `_name_` is `<object>` |
 | 13 | anything else | `<nested>` when `issubclass(type(value), collections.abc.Iterable)` (a generator, a caller class with `__iter__`, an array library's object; it is never iterated, so nothing is drained and no caller `__iter__` runs), else `<object>` (a `SimpleNamespace`, `argparse.Namespace`, `functools.partial`, a wrapper object, a caller class). This is the deny-by-default row that replaces the old "anything else passes" row |
+
+Row 4 preserves exact strings. The call-site sentry owns data provenance for plain strings,
+including values supplied through `extra=`. The runtime table continues to classify by type.
 
 Required code changes, each pinned by a test and a mutation:
 
@@ -529,7 +536,12 @@ the deny-by-default table, so the builder replaces it with a walk on the final h
   argument used under `%d`, `%i` or `%x` whose type is not an exact `int`, `float` or `bool`.
 - Prove the walk before trusting it: in a scratch copy, add one call that passes a
   `SimpleNamespace` and one that passes `numpy.int64(1)` under `%d`, and show both are flagged.
-- Each flagged call is fixed at the call site in #809 (`int(n)`, `dict(c)`, `str(path)`), or
+- Trace the source of each nonliteral extra value. Remove row-derived data from the log call.
+  In the existing `tests/sentry/test_log_interpolation.py` sentry, seed
+  `logger.info("done", extra={"customer": row["customer_id"]})` for a string-valued customer
+  ID. Require the scanner to report the seeded call for `row`. Skipping the `extra` keyword
+  must fail this cell. M30 continues to cover exception objects in the runtime filter.
+- Each flagged type-compatibility call is fixed at the call site in #809 (`int(n)`, `dict(c)`, `str(path)`), or
   listed in the PR body as an accepted output change with the line it prints after the filter.
   The full list goes in the PR body.
 
@@ -665,7 +677,9 @@ New guards:
     `UserDict`, `copy`, `copy.copy`, `copy.deepcopy` or `type(...)(...)`, no attribute read of
     `default_factory`, `get`, `keys` or `values`, and no `items` read except the single direct
     `dict.items(store)` call whose enclosing function is `_safe_pairs`. It requires exactly one
-    site in the module. It allows `__iter__` only on the eight base names of rows 7 and 8
+    site in the module. Match the AST Call itself: its function is the `items` attribute of
+    the name `dict`, its only argument is the name `store`, and it has no keywords. Reject
+    every other `items` read, including one inside `_safe_pairs`. It allows `__iter__` only on the eight base names of rows 7 and 8
     (`list`, `tuple`, `set`, `frozenset`, `deque`, `_KEYS_VIEW`, `_VALUES_VIEW`, `_ITEMS_VIEW`).
     In every `_CHECKED` function (C3) it rejects `isinstance`, membership tests and `==`.
     - Comparisons (Codex R2 V2-LOG): the check is narrowed to caller values. An `==` or `!=` is
@@ -679,7 +693,9 @@ New guards:
     - Seeds, each a parametrized cell of `test_filter_sentry_flags_each_seed` and each red: a bare
       `defaultdict(...)` call, each alias spelling above, a `store.get(...)` read, a
       `value == depth` comparison, and a second `dict.items(value)` site outside `_safe_pairs`
-      while the original stays (flagged by function and line). C3 adds
+      while the original stays (flagged by function and line). Separately, replace
+      `dict.items(store)` in place with `store.items()` inside `_safe_pairs` and require a
+      finding at the replacement line. C3 adds
       `isinstance(value, enum.Enum)` in `_other_value` and `kind == dict` in `_is_container`; the
       seed cell takes the target function's `def` line as a parameter instead of the fixed
       `_HEAD`.
@@ -747,13 +763,22 @@ builder adds.
     `test_failed_scrub_blanks_every_extra_attribute` (a forced failure in `_safe_value` gives
     `_UNRENDERABLE` in every field and no canary), and
     `test_standard_record_fields_are_not_rewritten` (`_STANDARD_FIELDS` attributes are left as
-    they were).
+    they were for a fresh record). Add two cells calling `logger.info("x", extra={7: ValueError(_CANARY)})`
+    through a filtered capturing handler. Require normal return and exactly one captured record
+    in each cell. On success require message `x` and the label `ValueError` at dictionary key 7.
+    Force `_safe_value` to raise in the other cell and require `_UNRENDERABLE` as both the
+    message and the value at key 7. Require no canary in the whole dumped record in either cell.
 26. New: `test_json_formatter_prints_no_extra_exception_text`, in `test_log_filter.py`. A
     formatter that returns `json.dumps(record.__dict__, default=str)`, the shape of common JSON
     log formatters, on an engine handler and on a host handler with `SafeRecordFilter` attached.
     Cells: `extra={"err": ValueError(_CANARY)}`, `extra={"ctx": _Holder(ValueError(_CANARY))}`
     and `extra={"rows": [ValueError(_CANARY)]}`. Assert no canary, and that the parsed JSON has
-    `err == "ValueError"`, `ctx == "<object>"` and `rows == ["ValueError"]`.
+    `err == "ValueError"`, `ctx == "<object>"` and `rows == ["ValueError"]`. Add success and
+    forced-fallback cells with `"failed: %s"` and `ValueError(_CANARY)`. Format the record first
+    with a stock Formatter and assert the canary is in `record.message`. Pass that same record
+    to the filtered JSON handler. Require one complete JSON record, no canary anywhere in its
+    output and no cached `message` key. Restoring the prior cache on either path must turn
+    that path's cell red.
 27. `test_scalars_and_plain_objects_still_print_as_before` and
     `test_clean_exact_scalars_and_containers_keep_their_identity`, in
     `test_log_filter_objects.py`: exact `_SCALAR_LIKE` and plain values print as stock, at the
@@ -838,6 +863,11 @@ each mutation ran on). The builder records the results in the PR body.
 | M33 | move row 5 after the depth check, or return a `str` subclass as itself | 31 (`in_list` cell for the move; every cell for the pass-through) |
 | M34 | put `types.MethodType` back in `_SCALAR_LIKE` (reverts C1) | 24 (`bound_method`) |
 
+For test 25, restore `setattr(record, key, ...)` separately in each extra-field loop. The
+normal numeric-key cell detects an unexpected fallback and the forced-fallback cell detects
+an escaping exception. Run both mutations and both cache restorations from test 26 on the
+final head alongside M1 to M34.
+
 Test 18 has its own seeds (listed at test 18), including the two C3 seeds. They are run with the
 mutations and recorded the same way.
 
@@ -852,7 +882,7 @@ mutations and recorded the same way.
 | a second filter on the same record | test 22 | the exact-type keep rule returns the `_NamedArgs` unchanged |
 | a `%d` field gets `<object>` (a `numpy.int64`, a `Fraction`), B9 | the logger-call walk; stock logging error on stderr | the call site passes `int(n)`; the walk lists every such call in the PR body |
 | an `IntEnum` under `%d` | test 28 `int_enum` | C2 copies it to `int`, so the line prints |
-| an `extra=` value cannot be scanned | test 25 | the fallback writes `_UNRENDERABLE` to `msg` and to every `extra=` attribute |
+| an `extra=` value cannot be scanned, including under key 7 | test 25 captures the record on success and forced fallback | both loops write directly to the record dictionary. Fallback sets `msg` and every extra value to `_UNRENDERABLE` |
 | a generator or stream is passed as an argument | test 24 `generator` | `<nested>`; it is never iterated, so the caller can still read it |
 | a retired strict xfail would XPASS | the strict run fails | `wrapper_str` and `too_deep` are retired, not kept (Decision 5); the two remaining xfails are rechecked on the final head |
 
@@ -875,11 +905,12 @@ the F31 safe-output sentries (`CODEMAP.md:168`).
 | File | Status | Holds | Lines at `9e63c151` | Expected after |
 |---|---|---|---|---|
 | `src/decoy_engine/safe_output/_log_filter.py` | existing | the type table, pair reader, `_NamedArgs`, `_scrub`, the filter | 438 | about 438 (C1 -1, C2 reorders 3 lines; docstring edits) |
-| `tests/unit/safe_output/test_log_filter.py` | existing | record, traceback, `exc_info`, container, handler-route and `extra=` tests (10 to 12, the 13a rows, 25, 26), the strict xfails | 421 | about 460 (test 26) |
+| `tests/unit/safe_output/test_log_filter.py` | existing | record, traceback, `exc_info`, container, handler-route and `extra=` tests (10 to 12, the 13a rows, 25, 26), the strict xfails | 421 | about 495 (tests 25 and 26) |
 | `tests/unit/safe_output/test_log_filter_mappings.py` | new, split in `a6f97b5c5` | the mapping and named-lookup tests (1 to 9, 13 to 17, 19 to 23), 30, 31 | 623 | 623: no tests added here, because it is past the 600 aim |
 | `tests/unit/safe_output/test_log_filter_objects.py` | new, split in `9e63c151` | tests 24, 27, 28, 29, 32, 33 | 268 | about 350 |
 | `tests/unit/safe_output/log_filter_support.py` | new, split in `a6f97b5c5` | shared helpers: `_CANARY`, handlers, `_record`, `_lone`, `_both`, `_reachable` | 127 | about 127 |
-| `tests/sentry/safe_output/test_log_filter_closed_types.py` | new | test 18 and its seeds | 103 | about 115 (C3) |
+| `tests/sentry/safe_output/test_log_filter_closed_types.py` | new | test 18 and its seeds | 103 | about 125 (C3 and exact call check) |
+| `tests/sentry/test_log_interpolation.py` | existing | row-derived scalar seed for the logger-call walk | 423 | about 430 |
 
 `tests/sentry/test_module_size.py` budgets `src/` and `scripts/` only, so no census entry or pin
 moves. `_log_filter.py` lost `_Lookup`, `_ScannedFactory` and the rebuild code and gained
@@ -911,10 +942,10 @@ Commit order (Codex R2 D8):
    moves.
 3. From `9e63c151`, the rest goes in one commit per change, each with its tests: C1 with the
    `bound_method` cell; C2 with the `int_enum` and `int_flag` cells; C3 with its two seeds; then
-   tests 26, 32 and 33 and the `fraction`, `numpy_int` and `str_enum` cells. Show the C1 and C2
+   the numeric-key and cache fixes with tests 25 and 26, tests 32 and 33 and the `fraction`, `numpy_int` and `str_enum` cells. Show the C1 and C2
    cells red on `9e63c151` in a scratch run first, and record it.
 4. Run the logger-call walk on the final head and put its list in the PR body.
-5. On the final recorded head, run T1 and every mutation M1 to M34 and the test 18 seeds, and
+5. On the final recorded head, run T1 and M1 to M34, the test 18 seeds, the logger-call sentry seed and the test 25 and 26 mutations above, and
    record the head next to each result (recurring defect 9). Record that the two remaining
    strict xfails still fail strictly. A code change after that run voids it.
 
