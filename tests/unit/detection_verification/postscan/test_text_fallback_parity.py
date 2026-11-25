@@ -15,8 +15,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
-from decoy_engine.internal.cell_text import key_text
+from decoy_engine.internal.cell_text import detector_text, key_text
 from decoy_engine.verification.postmask import post_scan_verdict, run_post_mask
 from decoy_engine.verification.postmask import runner as runner_module
 from decoy_engine.verification.postmask._column_facts import canonical_cells, identity_counts
@@ -258,21 +260,13 @@ def test_an_unchanged_wide_float_column_that_keys_alike_in_a_double_still_fails(
     cells = pd.Series(WIDE, dtype=object if kind == "object" else np.longdouble)
     src = pd.DataFrame({"email": EMAILS, "n": cells})
     out = pd.DataFrame({"email": FAKE, "n": cells.copy()})
-    # Two distinct cells in the source, kept distinct by the cell count and by the keys.
+    # Two distinct cells in the source; both round to one double, so they share a key.
     assert canonical_cells(src["n"]).nunique(dropna=True) == 2
-    assert _keys(src["n"]).nunique(dropna=True) == 2
+    assert _keys(src["n"]).nunique(dropna=True) == 1
     report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker"), ("n", "hash")))
     (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
     assert finding["severity"] == "fail"
     assert post_scan_verdict(report).blocking
-
-
-@needs_wide_longdouble
-def test_a_fractional_wide_float_keeps_its_precision_in_the_key() -> None:
-    wide = np.longdouble(1) + np.longdouble(2) ** -60
-    assert wide != float(wide)
-    keys = key_text(pd.Series([wide, np.longdouble(1)], dtype=object))
-    assert keys[0] != keys[1]
 
 
 def test_a_source_that_cannot_be_counted_is_not_counted_when_no_row_is_comparable() -> None:
@@ -320,7 +314,7 @@ def test_huge_finite_longdouble_keys_do_not_hit_the_int_string_limit() -> None:
         "import sys\n"
         "sys.set_int_max_str_digits(4300)\n"
         "import numpy as np, pandas as pd\n"
-        "from decoy_engine.internal.cell_text import key_text\n"
+        "from decoy_engine.internal.cell_text import detector_text, key_text\n"
         "values = [np.longdouble('1e4500'), np.longdouble('2e4500')]\n"
         "keys = key_text(pd.Series(values, dtype=object))\n"
         "assert keys[0] != keys[1] and len(keys[0]) > 4300\n"
@@ -339,7 +333,7 @@ def test_wide_fractional_keys_do_not_depend_on_the_decimal_context() -> None:
         ctx.prec = 15
         keys = key_text(pd.Series([low, high], dtype=object))
         report = _masked_wide_run([low, high], [1, 2])
-    assert keys[0] != keys[1]
+    assert keys[0] == keys[1]
     assert not _table_errors(report)
     assert not post_scan_verdict(report).blocking
 
@@ -347,7 +341,7 @@ def test_wide_fractional_keys_do_not_depend_on_the_decimal_context() -> None:
 @needs_wide_longdouble
 def test_a_whole_wide_float_keys_as_the_equal_int() -> None:
     whole = np.longdouble(2**53 + 1)
-    assert key_text(pd.Series([whole, 2**53 + 1], dtype=object)) == [str(2**53 + 1)] * 2
+    assert key_text(pd.Series([whole, 2**53 + 1], dtype=object)) == [str(2**53)] * 2
 
 
 @needs_wide_longdouble
@@ -414,22 +408,13 @@ def test_huge_integral_decimals_key_under_the_default_digit_limit() -> None:
     assert keys[0] != keys[2]
 
 
-@pytest.mark.parametrize(
-    "near", [np.float64(0.1), 0.1, np.longdouble("0.1")], ids=["float64", "float", "longdouble"]
-)
-def test_a_binary_float_and_the_decimal_it_rounds_from_key_apart(near: Any) -> None:
-    pair = pd.Series([near, Decimal("0.1")], dtype=object)
-    assert not bool(pair[0] == pair[1])
-    first, second = key_text(pair)
-    assert first != second
-
-
 def test_the_exact_text_of_a_float_keys_as_the_float_and_blocks() -> None:
     # The Decimal holds the float 0.2 exactly, and makes Arrow refuse the column.
     tenth, fifth = 0.1, 0.2
     cells = [tenth, Decimal(fifth)]
     exact = [str(Decimal(tenth)), str(Decimal(fifth))]
-    assert key_text(pd.Series(cells, dtype=object)) == exact
+    assert key_text(pd.Series(cells, dtype=object)) == ["0.1", "0.2"]
+    assert key_text(pd.Series(exact, dtype=object)) == ["0.1", "0.2"]
     report = _masked_wide_run(cells, exact)
     (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
     assert finding["severity"] == "fail"
@@ -458,6 +443,10 @@ def test_infinities_key_alike_across_float_decimal_and_text() -> None:
         1e300,
         np.float32(1.1),
         Decimal("1E-999999999999999999"),
+        "Overflow",
+        Decimal("1E4500"),
+        0.1,
+        9007199254740992,
         "02134",
         "+15551234567",
         "nan",
@@ -473,3 +462,175 @@ def test_the_key_of_a_key_is_the_key(cell: Any) -> None:
 def test_signed_zero_keys_as_zero_and_leading_zero_text_keeps_its_characters() -> None:
     keys = key_text(pd.Series([-0.0, Decimal("-0.00"), "-0", 0, "02134", "+1"], dtype=object))
     assert keys == ["0", "0", "0", "0", "02134", "+1"]
+
+
+# ----- round 5: binary64 keys, a bounded exponent and detector text -----------------------------
+
+WIDE_LONGDOUBLE = np.finfo(np.longdouble).nmant > 52
+
+
+def _one_key(*cells: Any) -> str | None:
+    keys = set(key_text(pd.Series(list(cells), dtype=object)))
+    assert len(keys) == 1, keys
+    return next(iter(keys))
+
+
+def test_a1b_detector_text_keeps_the_characters_as_written() -> None:
+    cells = ["212555.0100", "02134", "+1 212 555 0100", Decimal("212555.0100")]
+    assert detector_text(pd.Series(cells, dtype=object)) == [
+        "212555.0100",
+        "02134",
+        "+1 212 555 0100",
+        "212555.0100",
+    ]
+    assert key_text(pd.Series(cells[:1], dtype=object)) == ["212555.01"]
+    stamp = np.timedelta64(5, "s")
+    assert detector_text(pd.Series([stamp], dtype=object)) == [str(pd.Timedelta(stamp))]
+
+
+@needs_wide_longdouble
+def test_a1b_wide_float_detector_text_reads_as_its_own_export() -> None:
+    assert detector_text(pd.Series([np.longdouble("35.001417")], dtype=object)) == ["35.001417"]
+
+
+def test_a1c_a_whole_float_reads_as_plain_digits() -> None:
+    cells = pd.Series([2125550100.0, "x", None, 0.5, True], dtype=object)
+    assert detector_text(cells) == ["2125550100", "x", None, "0.5", "True"]
+
+
+def test_a1e_integers_keep_every_digit_for_the_detectors() -> None:
+    cells = [411111111111111936, np.int64(411111111111111936), -12, 0]
+    assert detector_text(pd.Series(cells, dtype=object)) == [
+        "411111111111111936",
+        "411111111111111936",
+        "-12",
+        "0",
+    ]
+
+
+def test_a1h_integral_decimals_and_big_values_read_as_digits() -> None:
+    cells = [Decimal("4111111111111111.00"), 10**33, Decimal("1E+3"), Decimal("0.00")]
+    assert detector_text(pd.Series(cells, dtype=object)) == [
+        "4111111111111111",
+        "1" + "0" * 33,
+        "1000",
+        "0",
+    ]
+
+
+def test_a2b_one_key_for_every_spelling_of_a_number() -> None:
+    assert (
+        _one_key(
+            0.1,
+            np.float64(0.1),
+            "0.1",
+            "1.00000000000000006e-01",
+            Decimal("0.1"),
+            str(Decimal.from_float(0.1)),
+        )
+        == "0.1"
+    )
+    assert _one_key(1e-07, "1e-07", "1E-7", "0.0000001") == "0.0000001"
+    assert _one_key(2125550100.0, "2125550100", "2125550100.0", "2.1255501E9", "2.1255501e+09") == (
+        "2125550100"
+    )
+    assert _one_key(1e23, "1e+23", "99999999999999991611392") == "1" + "0" * 23
+    assert _one_key(2**53 + 1, np.int64(2**53 + 1), float(2**53)) == str(2**53)
+
+
+@needs_wide_longdouble
+def test_a2b_wide_floats_key_as_their_own_export() -> None:
+    assert _one_key(np.longdouble("0.1"), "0.1") == "0.1"
+    assert _one_key(np.longdouble("35.001417"), "35.001417") == "35.001417"
+
+
+finite_floats = st.floats(allow_nan=False, allow_infinity=False)
+
+
+@settings(derandomize=True, max_examples=300, deadline=None)
+@given(f=finite_floats)
+def test_a2c_every_spelling_of_a_binary64_has_one_key(f: float) -> None:
+    spellings = [f, repr(f), str(f), str(Decimal(f)), Decimal(f), f"{f:.17e}", f"{f:.17g}"]
+    key = _one_key(*spellings)
+    assert key is not None
+    assert key_text(pd.Series([key], dtype=object)) == [key]
+    if f.is_integer():
+        assert _one_key(f, int(f)) == key
+
+
+@settings(derandomize=True, max_examples=300, deadline=None)
+@given(n=st.integers(min_value=-(2**1000), max_value=2**1000))
+def test_a2c_every_spelling_of_an_int_has_one_key(n: int) -> None:
+    assert _one_key(n, str(n), Decimal(n), float(n), np.float64(n)) is not None
+
+
+def test_a2d_range_edges() -> None:
+    assert key_text(pd.Series([Decimal("1e-326")], dtype=object)) == ["1E-326"]
+    assert _one_key("1e-325", "2e-324") == "0"
+    assert _one_key("3e-324", 5e-324) == "5E-324"
+    assert _one_key("1" + "0" * 308 + ".1", 1e308) == "1E308"
+    huge = "2" + "0" * 308 + ".1"
+    assert _one_key(huge, Decimal(huge)) == huge
+
+
+def _limit(digits: int) -> Any:
+    import contextlib
+    import sys
+
+    @contextlib.contextmanager
+    def swap() -> Any:
+        old = sys.get_int_max_str_digits()
+        sys.set_int_max_str_digits(digits)
+        try:
+            yield
+        finally:
+            sys.set_int_max_str_digits(old)
+
+    return swap()
+
+
+def test_a3a_the_exponent_does_not_depend_on_the_int_digit_limit() -> None:
+    padded = "1e" + "0" * 640 + "1"
+    seen = []
+    for limit in (640, 4300, 0):
+        with _limit(limit):
+            seen.append(key_text(pd.Series([10, padded], dtype=object)))
+    assert seen[0] == seen[1] == seen[2] == ["10", "10"]
+
+
+def test_a3b_a_huge_exponent_text_is_a_band_and_raises_nothing() -> None:
+    with _limit(640):
+        keys = key_text(
+            pd.Series(
+                [
+                    "10e" + "9" * 640,
+                    "1e" + "9" * 100_000,
+                    "1e-" + "9" * 100_000,
+                    "-1e" + "9" * 30,
+                    "0e" + "9" * 100_000,
+                ],
+                dtype=object,
+            )
+        )
+        big = pd.Series([10**700], dtype=object)
+        assert key_text(big) == ["1E700"]
+        assert detector_text(big) == ["1E700"]
+    assert keys == ["Overflow", "Overflow", "Underflow", "-Overflow", "0"]
+
+
+def test_a3c_a_band_follows_the_value_not_the_spelling() -> None:
+    assert _one_key("1e100000000000000000000", "10e99999999999999999999") == "Overflow"
+    assert _one_key("10e10000000000000000000", "1e10000000000000000001") == "Overflow"
+    assert _one_key("1e10000000000000000000") == "1E10000000000000000000"
+
+
+def test_a3d_keys_do_not_depend_on_the_decimal_context() -> None:
+    from decimal import FloatOperation, Inexact, Rounded, localcontext
+
+    cells = ["1.5", Decimal("1.5"), 0.1, "1e-07", Decimal("1E4500")]
+    plain = key_text(pd.Series(cells, dtype=object))
+    with localcontext() as ctx:
+        ctx.prec, ctx.Emax, ctx.Emin = 1, 9, -9
+        ctx.traps[FloatOperation] = ctx.traps[Inexact] = ctx.traps[Rounded] = True
+        trapped = key_text(pd.Series(cells, dtype=object))
+    assert trapped == plain
