@@ -35,9 +35,8 @@ the named site:
   sentry rule S6 bans materializers outside the `read=` callable (A8, N22).
 - V1-2, list-valued name: `Name` and `Member` need `type(value) is str` before `approve_name`,
   and S2 flags `str()`, f-strings, `format` and `repr` inside them (A9, N17).
-- V1-3, pass-through policy: `read_config` reuses `fileaccess.keeps_class` and takes the
-  route's own `passes`, so the strict `FileAccessReadError` and `ENOSPC` contracts hold (A10,
-  N18).
+- V1-3, pass-through policy: A10 distinguishes route-specific pass-through from strict
+  resource classification. Strict resource failures use the fileaccess classifier's replacement.
 - V1-4, real route outcomes: B1 uses a per-route table (raise, `None`, `PinnedRead`, report),
   so a canary check cannot pass on a different refusal (N19, N20).
 - Design 1, one checked factory form: builder output is a `Refusal`; `PlanCompileError` takes
@@ -143,7 +142,7 @@ def read_config(
 ```
 
 Imports (Dennis D1): `_config_text` uses the package facades, `from decoy_engine.reasons import
-approve_name` and `from decoy_engine.fileaccess import position_key, keeps_class`, not the
+approve_name` and `from decoy_engine.fileaccess import position_key, classified_failure`, not the
 private modules. B5 checks that neither facade pulls pyarrow on the final head.
 
 Rules the builder applies at run time:
@@ -209,16 +208,20 @@ Python values.
   `yaml.safe_load`, `serial.*_load`, `CodeSetProvenance.from_parquet_metadata`) runs inside it.
   A failure while materializing (for example `UnknownTimeZoneError` from `.as_py()` on a
   timestamp column whose time zone is a file-authored string) is then a refusal, not a raw
-  exception. In `_codeset_loader._read_corpus_record` the row loop at `:476` moves into the read
-  callable; the schema check stays after it because it raises its own refusals.
-- It catches `Exception` and lets an exception pass unchanged when any of these holds:
-  `fileaccess.keeps_class(exc)` (the policy predicate, `fileaccess/_read.py:77`, which covers a
-  policy decision, `FileAccessReadError`, `FileAccessUnavailable` and the memory and disk-full
-  classes under a strict policy); `isinstance(exc, passes)`, the route's own explicit list, kept
-  exactly as each route passes today (`load_table` passes `FileAccessDenied` and
-  `FileAccessReadError`, `reference_tables/_loader.py:108`; the code-set loader passes
-  `FileAccessDenied`); or `exc` is a builtin `MemoryError` (Dennis V1-4). There is no second
-  hand-written list: the policy rule stays in `keeps_class`.
+  exception. In `_read_corpus_record` keep the source order inside the protected operation:
+  read the table, run `_check_corpus_schema` (including both `.to_pylist()` calls), then build
+  rows with `.as_py()`, sort and index them, and decode and validate provenance. Keep existing
+  handle ownership and cleanup. A checker's value-free `PlanCompileError` passes unchanged.
+- Catch `Exception`. Explicit route types pass unchanged under either policy. Preserve
+  `load_table`'s `(FileAccessDenied, FileAccessReadError)` and the corpus route's
+  `FileAccessDenied`, adding `PlanCompileError` for its protected validation.
+- Under strict policy use public `fileaccess.classified_failure(exc)`
+  (`fileaccess/_errors.py:233`). Save its `fresh` object for `raise_bare` after the handler.
+  If rebuilding a recognized memory failure yields None, use a fresh builtin
+  `MemoryError(fileaccess.MEMORY_TEXT)` to preserve worker classification. Only after excluding
+  classified failures use `keeps_class` for a strict policy's own typed errors. Never use the
+  predicate alone to forward a materialization error. Ambient builtin `MemoryError` keeps
+  its existing pass-through contract. Translate other failures with the route's refusal factory.
 - From a caught exception it keeps only a position made of ints: the YAML mark's line and column
   (the `yaml_error_text` rule) or `json.JSONDecodeError.lineno` and `.colno`. An error with no
   position, such as the `!!int` `ValueError`, gives the text with no line or column (Dennis D2).
@@ -267,25 +270,36 @@ outside `_config_text` is itself a finding, and mypy checks that only a `Refusal
   rebuild of a `ModelPackLoadError` from the text it already had. Any other function that builds
   a refusal from a parameter not annotated `Refusal` is a finding.
 - **S2 builder arguments, everywhere S1 accepts builder output.** S2 runs on every
-  `config_refusal` call that S1 accepts as a source, in or out of the zero set, so
-  `config_refusal(..., hint=runtime_text).text` in a new module fails (Codex R2 DESIGN 2).
+  resolved `config_refusal` call in or out of the zero set, including builder arguments sent
+  to a factory whose parameter is annotated `Refusal`. Apply the same checks at the producer.
   `problem=` and `expected=` are `Problem.X` and `Expected.X` attributes; `got_kind=` is a
   `Kind.X` attribute or a call to the Arrow classifier. `choices=` is a module-level UPPER_CASE
   name. `hint=` is a `str` constant. Each `config_position` segment is a constant, an int, or a
   `Name(...)` or `Member(...)` call whose argument is a plain name, attribute or subscript: a
   `str()`, f-string, `format` or `repr` call inside `Name(...)` or `Member(...)` is a finding
-  (Codex R2 V1-2), and so is an argument the tagger marks as risky.
+  (Codex R2 V1-2), and so is an argument the tagger marks as risky. Follow local assignments feeding
+  those wrappers in source order (reuse the shared tagger's scope and assignment helpers).
+  Mark formatting origins independently of the input variable's spelling, including
+  `condition_on = str(condition_on)`, and propagate through plain local copies. An untouched
+  raw-field binding remains eligible for the exact-type and approval checks at runtime.
 - **S3 chaining, zero set only.** No `raise <call>` or `raise <name>` sits inside an `except`
   body, no `raise ... from` exists, and every refusal raise goes through `raise_bare`. A bare
   `raise` is allowed.
-- **S4 except names, zero set only.** A name bound by `except ... as e` may appear only as the
-  argument of `isinstance`, `type(e) is`, `safe_error_type` or `fileaccess.keeps_class`
-  (Codex R2 V1-3; `plan/_generation.py:181` uses it today).
+- **S4 except names, zero set only.** Keep type checks, `safe_error_type` and fileaccess
+  classification calls. For an exact typed handler, check the resolved exception class,
+  enclosing module and function, field and destination. In `verify_corpus` allow `PlanCompileError.code`
+  and `.message` in the report's problems tuple. In `read_and_pin_snapshots` allow storing the
+  caught `StatisticalSpecError` intact in `failures[path]`. In the fitted-column check allow
+  forwarding its `.code` as the new refusal's code and build the message and path using S1.
+  S1 still checks the original refusal constructors. No other field, general handler or
+  stringification inherits these permissions.
 - **S1 for builtin errors, zero set only.** In the nine modules, the message of a builtin error
   (`ValueError`, `TypeError`, `KeyError` and the others) follows the S1 message rule.
 - **S6 materialization, zero set only (Codex R2 V1-1).** A materializer call from the list under
   `read_config` may appear only inside a function or lambda passed as `read=` to `read_config`.
-  The list is a constant in the sentry, and B3 seeds one case per entry.
+  Include a named helper only if every resolved call site is inside that protected operation
+  (including the schema checker). B3 checks the helper and its callers by module and name,
+  including a second call outside the protected operation. The materializer list is a sentry constant.
 - **S5 ratchet (Dennis V1-1).** Outside the zero set, the sentry applies S1 and S2 to the refusal
   classes only. Builtin errors, S3, S4 and S6 are not checked there. Chaining outside the zero
   set stays with the existing sentries `tests/sentry/defects/test_exception_context.py` and
@@ -295,14 +309,14 @@ outside `_config_text` is itself a finding, and mypy checks that only a `Refusal
   every refusal construction in the tree, so a new module has no entry and fails. The earlier
   "config reader list" rule is dropped: it added nothing S1 does not already catch.
 - **Occurrence counts (Codex R2 DESIGN 2).** Two identical constructions in one function share a
-  key, so each entry carries `{"max": n}`, the number of constructions under that key on the
-  merge base. The sentry compares the head count with `max`. The existing ratchet check
-  `max_raised` (`tests/sentry/_ratchet.py:237`) refuses a raised or dropped `max`, and a lower
-  head count lowers `max` in the same diff, so counts only shrink.
+  key. For each live key require `max == head count > 0`; remove the entry at zero. The set of
+  keys must equal the live findings. Each count must also fit its merge-base count and pass the
+  existing `max_raised` comparison against the previous baseline. Lowering a count therefore
+  consumes the removed occurrence's allowance in the same edit.
 - **Baseline seed (Dennis V1-6).** The baseline is seeded only from the merge base: the builder
-  runs the S1 and S2 scan on the merge-base sources (`git show <merge-base>:<path>`) and writes
-  those findings with their counts. A site that this PR adds or changes cannot enter the
-  baseline. The sentry id is not added to `REKEY_PER_SITE` (`tests/sentry/_ratchet.py:36`), so a
+  runs the S1 and S2 scan on the merge-base sources (`git show <merge-base>:<path>`) and seeds
+  only those keys and counts, then prunes to exact surviving occurrences on the head. A site
+  that this PR adds or changes cannot enter the baseline. The sentry id is not added to `REKEY_PER_SITE` (`tests/sentry/_ratchet.py:36`), so a
   changed message is new growth, not a re-key. The PR body states the seeded entry count and
   the total of all `max` values.
 
@@ -334,11 +348,11 @@ Classes from the plan contract catalog (`30_Resources/Decoy-Plan-Contract-and-De
 | 1 | value-bearing output | yes | `config_refusal`: closed problem, expected, kind and `Kind` tables; names only when `type is str` and approved; builder output is a `Refusal` built in one place | A1 to A5, A9, B1 (seeded canaries), B4 (sentry) | N1, N4, N5, N10, N17, N21 |
 | 2 | cleanup on an exit path | yes, narrow: a read handle must close on a refusal | `read_config` runs inside the existing `try/finally` that closes the member | B2 cell: the handle is closed after a parse refusal | N2 |
 | 3 | state and concurrency | yes, narrow: the ambient `at_position` context | `config_position` reads `position_key` once, when it is built | A5, B1 (property test runs each route inside `at_position`), B4 (S1 path rule) | N6 |
-| 4 | route parity and fallback | yes: every loader entry, every policy (ambient, strict); fallback and report routes keep their outcome | one builder for all policies; the ambient display is removed; `read_config` passes what `keeps_class` and the route's `passes` keep | A2, A10, B1 per-route outcome table under both policies, B2 pass-through cells | N4, N16, N18, N19, N20 |
+| 4 | route parity and fallback | yes: every loader entry, every policy (ambient, strict); fallback and report routes keep their outcome | one builder for all policies; the ambient display is removed; `read_config` preserves explicit route errors and resurfaces strict resource failures with safe text | A2, A10, B1 per-route outcome table under both policies, B2 pass-through cells | N4, N16, N18, N19, N20 |
 | 5 | referential integrity | N/A: no table data or FK shapes | | | |
 | 6 | untrusted producer | yes: PyYAML constructors, `pyarrow` reads and `.as_py()` materialization, `json` exception text | `read_config` wraps read and materialization, catches `Exception` and keeps only an int line and column | A1, A6, A8, B3 (S6 cells) | N2, N3, N22 |
 | 7 | check then use on a path | N/A: no new path checks; reads keep their `fileaccess` handles | | | |
-| 8 | weak tests and overclaimed evidence | yes: the R3 test removed `str(root)` before it checked the text | tests assert on the unmodified `str(exc)`, `repr(exc)`, `args` and `path`; each repro red on `da71c502e` | A2, the Acceptance tests section | |
+| 8 | weak tests and overclaimed evidence | yes: the R3 test removed `str(root)` before it checked the text | tests assert on the unmodified `str(exc)`, `repr(exc)`, `args` and `path`; A1–A5 red on `da71c502e`, compatibility cells red on their named mutations | A2, the Acceptance tests section | |
 | 9 | refactor drift | yes: about 98 sites change wording | snapshot tests that pin wording are updated in the same commit; reason codes and `path` keys stay the same except the A5 binding | the existing loader unit tests, green | N6 |
 | 10 | frozen contract drift | N/A: no error class, reason code or public name changes (Frozen contracts touched) | | | |
 
@@ -365,7 +379,11 @@ Each loader has four exits: success, read failure, parse failure, validation ref
   `UnknownTimeZoneError` with the zone name (Codex R2 V1-1).
 - Statistical spec: `source_column` is converted with `str()` before lookup
   (`src/decoy_engine/generation/statistical/_spec.py:326`), so a list prints its items
-  (Codex R2 V1-2).
+  (Codex R2 V1-2). In the same module, validate each non-None raw `condition_on` before
+  passing it to the withheld-values check or looking up a joint. Remove both string conversions;
+  keep None and valid categorical string behavior. For the categorical missing-joint fixture,
+  preserve `STATISTICAL_JOINT_MISSING` and identify a non-string by kind. Keep
+  `STATISTICAL_CONDITION_KIND_INVALID` for a non-categorical conditioning request.
 - Non-raising exits that must keep their outcome: `load_with_fallback` returns `None`
   (`src/decoy_engine/profiling/model_pack/loader.py:220`), `read_pinned_artifact` returns a
   `PinnedRead` (`src/decoy_engine/plan/_generation.py:161`), `verify_corpus` returns a report
@@ -425,8 +443,8 @@ N/A: the loaders read config files and reference tables. They do not handle FK r
   existing `_TYPE_KINDS` classifier itself, retargeted to `Kind` members.
 - `raise_bare` (`src/decoy_engine/secret_providers/_errors.py:44`), moved to `_error_base.py`
   and used by every copy.
-- `fileaccess.keeps_class` (`src/decoy_engine/fileaccess/_read.py:77`) as the one pass-through
-  policy in `read_config`.
+- The fileaccess facade's `classified_failure` and `keeps_class` for strict resource
+  classification and policy errors respectively.
 - The ratchet's per-entry `max` and `max_raised` (`tests/sentry/_ratchet.py:237`) for occurrence
   counts.
 - F31 tagger `tests/sentry/safe_output` and `tests/sentry/_ratchet.py` for the sentry.
@@ -459,12 +477,11 @@ name-hint directory path. The position names the member file instead.
 
 ## Acceptance tests
 
-Written first. Each Codex R3 repro is a red test on `da71c502e`, shown red there before the fix,
-and asserts on the unmodified `str(exc)`, `repr(exc)`, `exc.args` and `path`. Tests live in
+Written first. A1–A5 reproduce the original defects on `da71c502e` and assert on the unmodified `str(exc)`, `repr(exc)`, `exc.args` and `path`. Tests live in
 `tests/unit/safe_output/test_loader_refusal_text.py` (moved from
 `tests/unit/test_f31_ae5_loader_text.py`) unless stated.
 
-Codex R3 repros, red on `da71c502e`:
+A1–A5 must demonstrate the original failures on `da71c502e`:
 
 1. A1 `test_yaml_scalar_conversion_error_is_value_free`: a name-hint member holding
    `!!int PRIVATEMARKER` raises `NameHintLoaderError`, with no `PRIVATEMARKER` anywhere and
@@ -506,23 +523,37 @@ Codex R3 repros, red on `da71c502e`:
    package wherever the test file lives. A cell asserts the scanned directory holds
    `_config_text/__init__.py`, so a wrong root fails instead of scanning nothing.
 
-Codex R2 repros, red on `da71c502e`:
+Runtime regressions and compatibility cases:
 
 9. A8 `test_corpus_materialization_is_value_free`: a corpus Parquet with a valid `code` column
    and a timestamp column whose time zone is `PRIVATE_ZONE_CANARY`. `load_corpus` raises
    `PlanCompileError` with code `CODE_SET_CORPUS_READ_ERROR` and no canary in any surface;
    `verify_corpus` returns `ok=False` with that code in `problems` and no canary. Both are
-   public calls.
+   public calls. Add a corpus missing `code` whose unrelated timestamp would fail conversion.
+   Under both policies assert `load_corpus` raises `PlanCompileError` with the exact code
+   `CODE_SET_CORPUS_MISSING_CODE_COLUMN` and `verify_corpus` returns `ok=False` with that
+   exact code and the safe missing-column detail in its problem.
 10. A9 `test_list_valued_name_is_not_shown`: `load_spec` with
     `source_column=["PRIVATE_RELEASE"]` raises `StatisticalSpecError` with
-    `STATISTICAL_...` wrong-type text, `got list`, and no `PRIVATE_RELEASE`. A cell asserts
+    `STATISTICAL_COLUMN_NOT_IN_SNAPSHOT`, wrong-type text, `got list`, and no `PRIVATE_RELEASE`. A cell asserts
     `approve_name(str(["PRIVATE_RELEASE"]))` accepts the converted string, which proves the
     test depends on the type check and not on approval. A valid string `source_column` is still
     shown.
-11. A10 `test_read_failures_keep_their_route`: under a strict policy, through real loaders:
-    `load_table` with a `FileAccessReadError` from the read passes it unchanged; `load_table` and
-    `read_pinned_artifact` with an `OSError(ENOSPC)` pass it unchanged (`keeps_class`); the same
-    `ENOSPC` under the ambient policy gives the route's refusal or `PinnedRead`, as today.
+    For `condition_on=["PRIVATE_RELEASE"]`, use a valid categorical source with released values
+    and no matching joint. Assert `STATISTICAL_JOINT_MISSING`, the `condition_on` position,
+    wrong-type detail with `got list`, and no literal in rendered text or exception fields.
+    An approved string still resolves a matching joint; None still selects the unconditional path.
+
+11. A10 exercises `load_table` with an injected `FileAccessReadError` under ambient and strict
+    policies; assert identity. Removing only the explicit route argument must fail the ambient
+    cell. Through `load_table` and `read_pinned_artifact`, strict ENOSPC preserves errno;
+    ambient ENOSPC gives the route's refusal or failed `PinnedRead` respectively.
+    In a separate strict `load_corpus` test, let the adapter succeed and have a scalar's
+    `.as_py()` raise an Arrow exception with `Unknown error: Wrapping PRIVATE_CELL failed`.
+    Assert the replacement has the original class, satisfies `fileaccess.is_memory_failure`,
+    renders exactly `fileaccess.MEMORY_TEXT`, has no canary in args or repr and has no chain.
+    Exercise strict ENOSPC from materialization with a canary filename and require errno only
+    plus canonical strerror and no filename.
 
 Earlier-round canaries, moved unchanged and kept green: the R1 snapshot cells (AT-6, e1_2, e1_5),
 the fitted-reference and fingerprint canaries, and the R2 set:
@@ -551,12 +582,15 @@ New guards:
 
    | Route | Expected outcome | Surface checked |
    |---|---|---|
-   | raising loaders | the named refusal class and the exact reason code for the planted slot | `str`, `repr`, `args`, `str` attributes, `path`, chain |
+   | raising loaders | the named refusal class and the exact existing reason code for that slot, or the branch-specific position and detail for a code-less refusal | `str`, `repr`, `args`, `str` attributes, `path`, chain |
    | `load_with_fallback` | returns `None` | the captured warning record (message and args) |
    | `read_pinned_artifact` | returns `PinnedRead` with `cause_type` or `oversize` set | every `PinnedRead` field |
    | `verify_corpus` | returns `ok=False` | every `problems` string |
 
-   Non-vacuity check: each case first asserts the expected outcome, class and code, so an
+   Non-vacuity check: each case first asserts the expected outcome and discriminator. For example, a malformed name-hint member must give
+   `NameHintLoaderError` with its member position and parse detail; a wrong reference ID type
+   must give `ValueError` naming the ID, expected int64 and actual closed kind. A generic read
+   failure fails both cells. Pin the report problem code and detail for each fixture so an
    earlier unrelated refusal cannot satisfy the canary check. The slots split in two
    (Dennis V1-5):
    - Value slots (field values, pins, URLs, file contents): the canary is never shown. Assert it
@@ -576,11 +610,11 @@ New guards:
     - `at_position` binding;
     - `read_config` with a `ValueError`, an `OSError` and a `yaml.YAMLError`, checking the text,
       that the chain is None and that the handle is closed;
-    - `read_config` pass-through, each asserting the same object comes out (`is`): under a
-      strict policy, every class `keeps_class` keeps (`FileAccessDenied`,
-      `FileAccessReadError`, `FileAccessUnavailable`, `OSError(ENOSPC)`); under both policies,
-      a class in the route's `passes` and a builtin `MemoryError` (Dennis V1-4); under the
-      ambient policy, `OSError(ENOSPC)` becomes a refusal, as today;
+    - assert identity for explicit route errors under both policies and strict fileaccess policy
+      errors. Strict classified memory failures retain worker classification and safe text;
+      strict ENOSPC retains errno with no filename. Ambient builtin MemoryError passes unchanged;
+      ambient ENOSPC becomes a refusal. For a recognized text-memory exception whose constructor
+      rejects the fixed text, assert the fallback is a fresh, classified, canary-free MemoryError;
     - `read_config` with a `json.JSONDecodeError` keeps only `lineno` and `colno`;
     - `read_config` with a `read` that fails while materializing (an `.as_py()` error) gives a
       refusal with no exception text;
@@ -601,8 +635,12 @@ New guards:
     - a non-constant `choices=`;
     - a risky segment;
     - `Name(str(v))`, `Name(f"{v}")` and `Member(repr(v))` (Codex R2 V1-2);
-    - `config_refusal(..., hint=runtime_text).text` in a module outside the zero set
-      (Codex R2 DESIGN 2);
+    - outside the zero set bind `r = config_refusal(..., hint=runtime_text)`, then construct
+      `ConfigError(r.text)`. Repeat with the same producer passed to an annotated factory
+      `def make(r: Refusal): return ConfigError(r.text)`. Require S2 on the hint and zero S1
+      findings in each case; replacing only the hint with a literal passes both;
+    - `condition_on = str(condition_on)` followed by `Name(condition_on)`, and a local copy
+      passed to `Member`, each flagged by S2; a plain binding to the raw field passes;
     - `Refusal("x", "x", "x")` outside `_config_text`;
     - a function outside `_error_base.py` that sets `__context__ = None` and re-raises;
     - in a zero-set snippet, one case per materializer in the S6 list called outside a
@@ -625,14 +663,21 @@ New guards:
     a lambda passed as `read=`; `_rebuild_load_error` in its real module; the same body under any
     other name is flagged; a refusal built inside an `except` outside the zero set (S3 and S4 do
     not apply there).
+    S4 positive cells scan the actual `verify_corpus` typed report path, snapshot failure-map
+    storage and fitted-code forwarding. For each, widen the handler to `Exception` and require
+    S4; replacing a projected field with `str(exc)` or `exc.args` must also fail. For S6,
+    the protected checker passes and an additional unprotected checker call must fail specifically on S6.
 15. B4 `test_config_refusal_text` on the real tree: zero findings in the zero set, and the
     baseline holds under `_ratchet.check`. Merge-base cell (Dennis V1-6):
     `test_config_refusal_baseline_is_from_the_merge_base` runs the S1 and S2 scan on the
     merge-base sources and asserts every baseline entry's `<file>::<qualname>::<digest>` is in
-    that set and its `max` equals the merge-base occurrence count or less. It also asserts the
+    that set and its `max` is at most the merge-base count. Independently compare the entire head
+    baseline count map for equality with the scanner's live positive counts. It also asserts the
     sentry id is not in `REKEY_PER_SITE`. When no merge base is reachable (a shallow clone), the
     cell fails, not skips. Count cell (Codex R2 DESIGN 2): a seeded tree that duplicates one
-    baselined construction in the same function fails with the head count above `max`.
+    baselined construction in the same function fails with the head count above `max`. Start
+    with two occurrences, delete one but retain max 2: fail. Lower max to 1: pass. Delete the
+    last occurrence: only removing the key passes (including a negative with max 0).
 16. B5: the existing `test_dp_provenance_imports_neither_pandas_nor_pyarrow` stays green, which
     proves `_config_text` pulls no pyarrow.
 17. B6: the existing import-layer snapshot (`tests/sentry/layout/test_import_layers.py`) is
@@ -662,15 +707,22 @@ each mutation ran on). The builder records the results in the PR body.
 | N15 | seed one baseline entry from the head instead of the merge base (Dennis D4) | B4 (merge-base cell) |
 | N16 | `read_config` catches `FileAccessDenied` and turns it into a refusal (Dennis V1-4) | B2 (pass-through cell) |
 | N17 | restore `str(col_cfg.get("source_column") or name)` before the lookup in `_spec.py` (Codex R2 V1-2) | A9, B1 (non-string name slot), B3 (`Name(str(v))` cell) |
-| N18 | drop `keeps_class` from `read_config`'s pass-through test (Codex R2 V1-3) | A10 (`ENOSPC` and `FileAccessReadError` cells), B2 |
+| N18 | translate strict resource errors into read refusals | A10 (strict ENOSPC), B2 |
 | N19 | `load_with_fallback` re-raises instead of returning `None` (Codex R2 V1-4) | B1 (fallback row) |
 | N20 | `verify_corpus` lets the refusal propagate instead of returning a report (Codex R2 V1-4) | A8, B1 (report row) |
-| N21 | S2 runs only inside the zero set (Codex R2 DESIGN 2) | B3 (runtime `hint=` outside the zero set) |
+| N21 | S2 runs only inside the zero set (Codex R2 DESIGN 2) | B3 (S2 on runtime hint, both S1-valid outside-module forms) |
 | N22 | move the `.as_py()` row loop out of the `read=` callable in `_codeset_loader.py` (Codex R2 V1-1) | A8, B4 (S6) |
 | N23 | the sentry compares keys only, not counts (Codex R2 DESIGN 2) | B4 (count cell) |
 | N24 | `_TYPE_KINDS` returns plain strings again and the reference loader passes `got=` (Codex R2 DESIGN 4) | A7 (second cell) |
 | N25 | restore the local `_unavailable` copy in `fileaccess/_entry.py` (Codex R2 DESIGN 5) | B3 (raise-bare copy cell) |
 | N26 | `PlanCompileError` takes `r.text` instead of `r.detail` | A5 (stock render cell), B2 |
+| N27 | restore `condition_on = str(condition_on)` before raw validation | A9 (categorical list), B4 (S2) |
+| N28 | use `if keeps_class(exc): raise` before selecting the strict replacement | A10 (materialization class, text and errno cases) |
+| N29 | omit `FileAccessReadError` from the reference route's explicit passes | A10 (ambient identity) |
+| N30 | move row conversion before the schema check, or translate the checker's typed refusal | A8 (mixed failure, both public routes) |
+| N31 | reject all S4 typed uses, or accept the same uses from a broad handler | B3 (typed positive and negative cells) |
+| N32 | remove one of two live occurrences while leaving its baseline max at 2 | B4 (live-count equality) |
+| N33 | substitute an unrelated same-class refusal for the planted branch | B1 (exact code or branch detail) |
 
 ## Failure modes
 
@@ -748,11 +800,14 @@ Commit order inside AE5 (Dennis D5):
 3. C2-snapshot and C2-checks: the head-minus-base sites in Size.
 4. One commit per zero-set module, each turning that module green in the sentry. Each
    regression test (A1 to A10) and each snapshot update lands in the same commit as its fix.
-   The builder first runs it on `da71c502e` and records the red result in the PR body.
+   Write each regression and guard cell first. Record the failing assertion on the buggy head
+   or the named single-fault mutant for an already-correct route. Then record green on the
+   corrected head. For A10 ambient pass-through record compatibility green on the old head
+   and red on N29. For A8 mixed failure use N30 to reproduce the proposed order regression.
 5. The test move.
 
 The PR body states the seeded baseline entry count and `max` total (Dennis V1-6). Mutations N1
-to N26 run on the final recorded HEAD, and the PR body records that SHA.
+to N33 run on the final recorded HEAD, and the PR body records that SHA.
 
 ## Test depth
 
@@ -802,6 +857,6 @@ Ways a gate reviewer could break the built change, each now a test or a recorded
 - Hostile objects passed through the Python API whose `__eq__` or `__hash__` run during
   validation (V2 threat model).
 - About 160 non-loader refusal sites until AE5b lands, held by the shrink-only baseline.
-- No red runs on `da71c502e` and no mutation results are recorded in this plan yet (Codex R2
-  V2-LOG). The builder records them in the PR body, with the HEAD each ran on. The JSON
-  position item from Dennis R1 is closed: `read_config` keeps `lineno` and `colno` (B2).
+- Implementation evidence is deferred: record the A1–A5 red runs, A10 compatibility result
+  and all final-head mutation results with their SHAs in the PR body.
+- Plan length falls in the 800–900 line V2 cleanup band.
