@@ -23,8 +23,9 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA
+from decoy_engine.transforms._codeset._checks import _unknown_shipped_corpus
 from decoy_engine.transforms._codeset_provenance import RESERVED_LICENSED_NAMES
+from decoy_engine.transforms._codeset_provenance import SHIPPED_CORPUS_NAMES as _SHIPPED_CORPORA
 
 
 def validate_code_set_config(cfg: dict[str, Any]) -> None:
@@ -76,8 +77,8 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
             code=reasons.plan.CODE_SET_CORPUS_SOURCE_VERSION_INVALID,
             path="provider_config.corpus_source_version",
             message=(
-                f"corpus_source_version must be a string or numeric release id "
-                f"(got {version!r} of type {type(version).__name__}). Quote the "
+                "corpus_source_version must be a string or numeric release id "
+                f"(got type {type(version).__name__}). Quote the "
                 "release, e.g. corpus_source_version: '2024'."
             ),
         )
@@ -90,24 +91,27 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
     # apply time (Codex/Dennis MEDIUM). Kept in sync deliberately.
     is_shipped_source = not source.startswith("customer:")
 
-    if str(name).strip().lower() in RESERVED_LICENSED_NAMES and is_shipped_source:
+    reserved = str(name).strip().lower()  # a registry member, never the raw text
+    if reserved in RESERVED_LICENSED_NAMES and is_shipped_source:
         raise PlanCompileError(
             code=reasons.plan.CODE_SET_RESERVED_LICENSED_NAME,
             path="provider_config.code_set",
             message=(
-                f"{name!r} is a licensed code set the engine never ships "
+                f"{reserved!r} is a licensed code set the engine never ships "
                 "(AMA CPT license / proprietary grouper). It is upload-only: "
                 "set corpus_source: customer:<path> to your own licensed copy."
             ),
         )
 
     if is_shipped_source and name not in _SHIPPED_CORPORA:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
-            path="provider_config.code_set",
-            message=(
-                f"corpus {name!r} not found in shipped corpora. "
-                f"Available: {sorted(_SHIPPED_CORPORA)}. "
-                f"To use a custom corpus, set corpus_source: customer:<path>."
-            ),
-        )
+        raise _unknown_shipped_corpus()
+
+
+def check_mode(mode: object) -> None:
+    """Refuse a mode other than ``mask`` or ``gen``. Value-free: the text never repeats it.
+
+    The strategy handler calls this when it consumes the config, so a column with no
+    non-null row (or no row a gate matches) is refused as well as one that dispatches.
+    """
+    if mode not in ("mask", "gen"):
+        raise ValueError("code_set: unsupported mode. Use 'mask' or 'gen'.")

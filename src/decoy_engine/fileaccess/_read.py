@@ -6,6 +6,7 @@ import os
 import stat
 from collections.abc import Callable
 
+from decoy_engine._locator import without_url_credentials
 from decoy_engine.fileaccess._entry import current, is_ambient
 from decoy_engine.fileaccess._errors import encode_field_key, passes_by_type, resurface_scrubbed
 from decoy_engine.fileaccess._types import FileRequest, FileRole
@@ -70,8 +71,9 @@ def read_checked(
 
 def shown(locator: str, field_key: str) -> str:
     """What an engine message may call a file: the locator under the ambient CLI policy (so
-    CLI text is unchanged), the encoded config position under any other."""
-    return locator if is_ambient() else encode_field_key(field_key)
+    CLI text is unchanged, minus any URL credentials), the encoded config position under any
+    other."""
+    return without_url_credentials(locator) if is_ambient() else encode_field_key(field_key)
 
 
 def keeps_class(exc: BaseException) -> bool:

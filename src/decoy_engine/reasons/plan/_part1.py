@@ -62,6 +62,7 @@ __all__ = [
     "CODE_SET_CORPUS_PROVENANCE_IDENTITY_MISMATCH",
     "CODE_SET_CORPUS_PROVENANCE_MALFORMED_STAMP",
     "CODE_SET_CORPUS_READ_ERROR",
+    "CODE_SET_CORPUS_SOURCE_CREDENTIALS",
     "CODE_SET_CORPUS_SOURCE_VERSION_INVALID",
     "CODE_SET_CORPUS_VERSION_MISMATCH",
     "CODE_SET_GEN_REQUIRES_NAMESPACE",
@@ -323,6 +324,11 @@ CODE_SET_CORPUS_PROVENANCE_MALFORMED_STAMP = _d(
     "code_set_corpus_provenance_malformed_stamp", "Code set corpus provenance malformed stamp."
 )
 CODE_SET_CORPUS_READ_ERROR = _d("code_set_corpus_read_error", "Code set corpus read error.")
+CODE_SET_CORPUS_SOURCE_CREDENTIALS = _d(
+    "code_set_corpus_source_credentials",
+    "Code set corpus source carries credentials.",
+    since=UNRELEASED,
+)
 CODE_SET_CORPUS_SOURCE_VERSION_INVALID = _d(
     "code_set_corpus_source_version_invalid", "Code set corpus source version invalid."
 )

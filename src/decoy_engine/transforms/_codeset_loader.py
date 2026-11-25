@@ -14,52 +14,39 @@ its ``ModelPackManifest``-imitating shape).
 
 from __future__ import annotations
 
-import logging
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import pyarrow as pa
-
 from decoy_engine import fileaccess, reasons
 from decoy_engine.fileaccess import FileAccess, FileAccessDenied, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.transforms._codeset._checks import (
+    _check_corpus_schema,
+    _check_source_version_pin,
+    _unknown_shipped_corpus,
+    _validate_provenance,
+    _where,
+    corpus_stat_error,
+    provenance_summary,
+)
 from decoy_engine.transforms._codeset_index import SelectionIndexes, build_selection_indexes
-from decoy_engine.transforms._codeset_provenance import CODESET_REGISTRY, CodeSetProvenance
-
-_LOG = logging.getLogger(__name__)
+from decoy_engine.transforms._codeset_provenance import (
+    SHIPPED_CORPUS_NAMES as _SHIPPED_CORPORA,
+)
+from decoy_engine.transforms._codeset_provenance import CodeSetProvenance
 
 # Shipped corpora live in this directory.
 _CODESETS_DIR = Path(__file__).parent.parent / "codesets"
 
 # Recognised shipped corpus names, derived from the single-source-of-truth
 # registry (HC-1 slice 1 item 5; transforms/_codeset_provenance.py).
-_SHIPPED_CORPORA = frozenset(CODESET_REGISTRY)
 
 # A shipped name resolves ONLY through this table, to a constant path: membership is checked
 # before any file-system call, so a name like "../x" or an absolute stem never reaches one.
 _SHIPPED_PATHS: dict[str, Path] = {n: _CODESETS_DIR / f"{n}.parquet" for n in _SHIPPED_CORPORA}
-
-
-def _where(path: Path | str | None) -> str:
-    """How a diagnostic names a corpus file: the path under the ambient CLI policy, the config
-    position under any other (a locator never crosses)."""
-    return fileaccess.shown(str(path), "code_set.corpus_source")
-
-
-def _unknown_shipped_corpus() -> PlanCompileError:
-    """The one message for a name that is not a registry key; it echoes neither the name nor a
-    path."""
-    return PlanCompileError(
-        code=reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
-        path="provider_config.code_set",
-        message=(
-            "shipped corpus name is not one of the registered corpora. "
-            f"Available: {sorted(_SHIPPED_CORPORA)}."
-        ),
-    )
 
 
 @dataclass(frozen=True)
@@ -217,18 +204,24 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
             )
         return shipped
 
+    return path
+
+
+def _check_exists(path: Path, shown: str) -> None:
+    """The existence check for a customer corpus, before any cache lookup. Its stat failure goes
+    through the same classifier as the cache-key stat, raised after the handle closes."""
     handle = _open_customer(path)
+    err: PlanCompileError | None = None
     try:
         handle.stat()
-    except (FileNotFoundError, NotADirectoryError):
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
-            path="provider_config.corpus_source",
-            message=f"customer corpus not found at path {handle.display}.",
-        ) from None
+    except OSError as exc:
+        if fileaccess.keeps_class(exc):
+            raise
+        err = corpus_stat_error(exc, shown)
     finally:
         handle.close()
-    return path
+    if err is not None:
+        raise err
 
 
 def _get_corpus_record(
@@ -237,6 +230,7 @@ def _get_corpus_record(
     *,
     is_shipped: bool,
     expected_source_version: str | None = None,
+    locator: str | None = None,
 ) -> _CorpusRecord:
     """Return the cached (or freshly-read) ``_CorpusRecord`` for this corpus.
 
@@ -256,7 +250,12 @@ def _get_corpus_record(
     different expectations (or none) must each be checked independently
     rather than only at the point the record is first read from disk.
     """
+    # The outward label is built once, from the locator exactly as configured: a `Path` has
+    # already collapsed a doubled separator and would hide a prefixed URL from the redactor.
     resolved = _resolve_read_path(name, path)
+    shown = _where(locator if locator is not None else resolved)  # a shipped load has no `path`
+    if path is not None:
+        _check_exists(resolved, shown)
     if is_shipped:
         # A registry-resolved corpus keys on its name (no file-system call); an explicit path
         # (an internal caller's override) keeps the resolved-path key.
@@ -265,36 +264,26 @@ def _get_corpus_record(
         if cached is not None:
             record = cached
         else:
-            record = _read_corpus_record(name, resolved, is_shipped=True)
+            record = _read_corpus_record(name, resolved, is_shipped=True, shown=shown)
             _shipped_cache[resolved_str] = record
-        _check_source_version_pin(name, resolved, record, expected_source_version)
+        _check_source_version_pin(name, shown, record, expected_source_version)
         return record
 
-    # A customer corpus can disappear or become unreadable between
-    # `_resolve_read_path`'s existence check and this stat (TOCTOU). Translate
-    # the bare OSError to the loader's typed error contract (load_corpus
-    # documents PlanCompileError for missing/unreadable corpora) instead of
-    # leaking FileNotFoundError/PermissionError. The handle is opened first so the
-    # policy decides before any cache lookup: a cached record is never served to a
-    # request the policy refuses.
+    # A customer corpus can be missing or unreadable: translate the stat's OSError to the typed
+    # PlanCompileError (one classifier, `corpus_stat_error`). The handle is opened first so the
+    # policy decides before any cache lookup (a cached record is never served to a refused
+    # request).
     handle = _open_customer(resolved)
     try:
+        err: PlanCompileError | None = None
         try:
             stat = handle.stat()
-        except FileNotFoundError as exc:
-            raise PlanCompileError(
-                code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
-                path="provider_config.corpus_source",
-                message=f"customer corpus at {handle.display} became unavailable after the existence check.",
-            ) from exc
         except OSError as exc:
             if fileaccess.keeps_class(exc):
                 raise
-            raise PlanCompileError(
-                code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
-                path="provider_config.corpus_source",
-                message=f"failed to stat customer corpus at {handle.display}: {exc}",
-            ) from exc
+            err = corpus_stat_error(exc, shown)
+        if err is not None:  # raised after the handler closes: no `__context__`
+            raise err
         # Best-effort file identity, not a content hash (see the module-level
         # comment on `_customer_cache` for why ctime is included and a hash is
         # not).
@@ -304,140 +293,25 @@ def _get_corpus_record(
             _customer_cache.move_to_end(cache_key)  # LRU: mark as most recently used.
             record = cached
         else:
-            record = _read_corpus_record(name, resolved, is_shipped=False, handle=handle)
+            record = _read_corpus_record(
+                name, resolved, is_shipped=False, handle=handle, shown=shown
+            )
             _customer_cache[cache_key] = record
             if len(_customer_cache) > _CUSTOMER_CACHE_MAX_ENTRIES:
                 _customer_cache.popitem(last=False)  # evict the least-recently-used entry.
     finally:
         handle.close()
-    _check_source_version_pin(name, resolved, record, expected_source_version)
+    _check_source_version_pin(name, shown, record, expected_source_version)
     return record
 
 
-def _check_source_version_pin(
-    name: str,
-    path: Path | None,
-    record: _CorpusRecord,
-    expected_source_version: str | None,
-) -> None:
-    """Fail closed when a config-pinned corpus release does not match (HC-2 D2a).
-
-    ``corpus_source_version`` (``CodeSetConfig``) is the plan author's
-    declared expectation of the corpus's SOURCE release id (e.g. "FY2024"),
-    independently verified here against the release actually embedded in the
-    loaded file's provenance (``CodeSetProvenance.source_version``). This is
-    distinct from ``corpus_version`` / ``CORPUS_METADATA_VERSION``, which is
-    the metadata FORMAT, not the source's release. Runs for BOTH shipped and
-    customer corpora: a shipped corpus update and a customer swapping in a
-    different release must fail exactly the same way. Unset (None) is a
-    no-op -- today's unpinned behavior is unchanged.
-    """
-    if expected_source_version is None:
-        return
-    actual = record.provenance.source_version if record.provenance else ""
-    if actual != expected_source_version:
-        at = f" at {_where(path)}" if path is not None else ""
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_VERSION_MISMATCH,
-            path="provider_config.corpus_source_version",
-            message=(
-                f"corpus {name!r}{at}: corpus_source_version pins "
-                f"{expected_source_version!r}, but the loaded corpus's embedded "
-                f"source_version is {actual!r}. The corpus at this name/path has "
-                "changed since the plan was authored (or never carried the pinned "
-                "release). Update corpus_source_version to match the corpus you "
-                "intend to use, or remove the pin to accept whatever is loaded."
-            ),
-        )
-
-
-def _check_corpus_schema(tbl: pa.Table, path: Path) -> None:
-    """Generic, corpus-agnostic schema invariants (HC-2 D2c).
-
-    Shared by the load path (:func:`_read_corpus_record`) and the standalone
-    :func:`verify_corpus` primitive, so a corpus can never pass one and fail
-    the other -- ONE checker, two callers. Deliberately corpus-agnostic: a
-    ``code`` column that is present, non-null, non-empty, and unique, plus
-    (only when the column exists) a ``chapter`` column that is populated for
-    every row. Code-system-specific regexes and a mandatory ``description``
-    column are deferred to HC-1 slice 2, when the real full corpora (each
-    with its own per-system format conventions) land.
-    """
-    where = _where(path)
-    if "code" not in tbl.schema.names:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_MISSING_CODE_COLUMN,
-            path="provider_config.corpus_source",
-            message=(
-                f"corpus at {where} is missing required 'code' column. "
-                f"Customer corpora must have a 'code' (string) column. "
-                f"Available columns: {tbl.schema.names}"
-            ),
-        )
-
-    if tbl.num_rows == 0:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_EMPTY,
-            path="provider_config.corpus_source",
-            message=f"corpus at {where} has 0 rows. Corpus must be non-empty.",
-        )
-
-    code_col = tbl.column("code")
-    if code_col.null_count > 0:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_NULL_CODE,
-            path="provider_config.corpus_source",
-            message=(
-                f"corpus at {where} has {code_col.null_count} null value(s) in the "
-                "'code' column. Every row must carry a code."
-            ),
-        )
-
-    # str() every value up front: codes are treated as strings everywhere
-    # downstream (sorting, HMAC keying), so duplicate/empty detection must
-    # compare on the same representation, not the raw Arrow-decoded type.
-    codes = [str(c) for c in code_col.to_pylist()]
-
-    empty = sum(1 for c in codes if c.strip() == "")
-    if empty:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_EMPTY_CODE,
-            path="provider_config.corpus_source",
-            message=(
-                f"corpus at {where} has {empty} empty-string value(s) in the 'code' "
-                "column. Every code must be a non-empty string."
-            ),
-        )
-
-    duplicates = len(codes) - len(set(codes))
-    if duplicates:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_DUPLICATE_CODES,
-            path="provider_config.corpus_source",
-            message=(
-                f"corpus at {where} has {duplicates} duplicate code value(s). code_set "
-                "requires unique codes: HMAC-keyed candidate selection assumes a 1:1 "
-                "code -> row mapping, and a duplicate makes selection ambiguous."
-            ),
-        )
-
-    if "chapter" in tbl.schema.names:
-        chapters = tbl.column("chapter").to_pylist()
-        incoherent = sum(1 for c in chapters if c is None or str(c).strip() == "")
-        if incoherent:
-            raise PlanCompileError(
-                code=reasons.plan.CODE_SET_CORPUS_INCOHERENT_CHAPTER,
-                path="provider_config.corpus_source",
-                message=(
-                    f"corpus at {where} has {incoherent} row(s) with a null/empty "
-                    "'chapter' value. A corpus that has a 'chapter' column must "
-                    "populate it for every row (chapter_preserve assumes full coverage)."
-                ),
-            )
-
-
 def _read_corpus_record(
-    name: str, path: Path, *, is_shipped: bool, handle: FileHandle | None = None
+    name: str,
+    path: Path,
+    *,
+    is_shipped: bool,
+    handle: FileHandle | None = None,
+    shown: str | None = None,
 ) -> _CorpusRecord:
     """Internal: read, validate, and index a corpus from disk (uncached).
 
@@ -446,12 +320,15 @@ def _read_corpus_record(
     corpus is package data the engine owns; any other path is read through the
     handle the caller's policy issued.
     """
+    if shown is None:
+        shown = _where(path)
     if handle is None:
         handle = fileaccess.engine_handle(path) if is_shipped else _open_customer(path)
         owned = True
     else:
         owned = False
     try:
+        read_failure = ""
         try:
             tbl = arrow_adapter.read_table(handle)
         except FileAccessDenied:
@@ -459,16 +336,18 @@ def _read_corpus_record(
         except Exception as exc:
             if fileaccess.keeps_class(exc):
                 raise
+            read_failure = type(exc).__name__
+        if read_failure:
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
                 path="provider_config.corpus_source",
-                message=f"failed to read corpus Parquet at {handle.display}: {exc}",
-            ) from exc
+                message=f"failed to read corpus Parquet at {shown} ({read_failure}).",
+            )
     finally:
         if owned:
             handle.close()
 
-    _check_corpus_schema(tbl, path)
+    _check_corpus_schema(tbl, shown)
 
     # Build row dicts and sort by code for stable HMAC-keyed access.
     columns = tbl.schema.names
@@ -484,110 +363,9 @@ def _read_corpus_record(
     selection = build_selection_indexes(rows)
 
     provenance = CodeSetProvenance.from_parquet_metadata(tbl)
-    _validate_provenance(name, path, provenance, is_shipped=is_shipped)
+    _validate_provenance(name, shown, provenance, is_shipped=is_shipped)
 
     return _CorpusRecord(rows=rows, provenance=provenance, selection=selection)
-
-
-def _validate_provenance(
-    name: str, path: Path, provenance: CodeSetProvenance | None, *, is_shipped: bool
-) -> None:
-    """Fail-closed for shipped corpora; warn for customer corpora (HC-1 slice 1).
-
-    A shipped corpus without a complete provenance stamp (source,
-    source_version, effective_date, license) is a packaging defect: the
-    engine ships it, so it must be able to say where the codes came from.
-    A customer corpus may legitimately have no provenance metadata at all
-    (it is not required for the strategy to function); if the operator did
-    stamp it, the stamp must be complete -- a half-filled provenance block
-    is worse than none, since it looks authoritative but is not.
-    """
-    where = _where(path)
-    if provenance is None:
-        if is_shipped:
-            raise PlanCompileError(
-                code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
-                path="provider_config.code_set",
-                message=(
-                    f"shipped corpus {name!r} at {where} has no provenance metadata "
-                    "(source, source_version, effective_date, license). This is a "
-                    "packaging defect, not a customer-corpus configuration issue."
-                ),
-            )
-        _LOG.warning(
-            "customer code_set corpus %r at %s has no provenance metadata "
-            "(source, source_version, effective_date, license). Provenance is "
-            "optional for customer corpora but recommended for audit evidence.",
-            name,
-            where,
-        )
-        return
-
-    missing = provenance.missing_required_fields()
-    if not missing:
-        # Codex round-5 P2 SHIPPED PROVENANCE IDENTITY UNVERIFIED
-        # remediation: a complete provenance stamp is not proof the stamp
-        # belongs to THIS corpus. A packaging/metadata mistake (or a
-        # deliberate swap) can ship `icd10.parquet` carrying `mcc`'s
-        # embedded `decoy_corpus` metadata; the completeness check above
-        # passes either way, so `describe_loaded_corpus` would report
-        # `code_set: icd10` with MCC's attribution as if it were genuine.
-        # Shipped-only: a customer corpus's provenance is optional and may
-        # legitimately name a different embedded id (e.g. a customer's own
-        # code_set built from a shipped seed), so this identity check does
-        # not apply to the customer path.
-        if is_shipped and provenance.corpus != name:
-            raise PlanCompileError(
-                code=reasons.plan.CODE_SET_CORPUS_PROVENANCE_IDENTITY_MISMATCH,
-                path="provider_config.code_set",
-                message=(
-                    f"shipped corpus {name!r} at {where} carries provenance "
-                    f"for a different corpus ({provenance.corpus!r}). This "
-                    "looks like a packaging or metadata swap; the embedded "
-                    "provenance.corpus must match the requested corpus name."
-                ),
-            )
-        # Codex round-7 P2 remediation: the required-field check above does
-        # not cover is_seed or the metadata format version, so a shipped
-        # corpus with all four required fields but an absent/garbled is_seed
-        # (silently coerced to False -> evidence reports a seed as a full
-        # corpus) or a stale corpus_version slipped through. Shipped corpora
-        # are our own build artifacts; those are packaging defects, fail
-        # closed. Customer corpora are exempt (they may omit is_seed and never
-        # carry our corpus_version).
-        if is_shipped:
-            stamp_defects = provenance.shipped_stamp_defects()
-            if stamp_defects:
-                raise PlanCompileError(
-                    code=reasons.plan.CODE_SET_CORPUS_PROVENANCE_MALFORMED_STAMP,
-                    path="provider_config.code_set",
-                    message=(
-                        f"shipped corpus {name!r} at {where} has a malformed "
-                        f"provenance stamp ({'; '.join(stamp_defects)}). A "
-                        "shipped corpus is a build artifact: is_seed and the "
-                        "metadata format version must be explicit and current "
-                        "so evidence cannot misreport a seed as a full corpus."
-                    ),
-                )
-        return
-    if is_shipped:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
-            path="provider_config.code_set",
-            message=(
-                f"shipped corpus {name!r} at {where} has incomplete provenance "
-                f"metadata (missing: {', '.join(missing)})."
-            ),
-        )
-    raise PlanCompileError(
-        code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
-        path="provider_config.corpus_source",
-        message=(
-            f"customer corpus {name!r} at {where} has partial provenance metadata "
-            f"(missing: {', '.join(missing)}). Either remove the partial stamp or "
-            "complete it; a half-filled provenance block is not surfaced as evidence."
-        ),
-    )
 
 
 # ── Standalone verification primitive (HC-2 item 1) ──────────────────────────
@@ -620,64 +398,38 @@ class CorpusVerifyReport:
 
 
 @fileaccess.entry_point
-def verify_corpus(path: Path, *, file_access: FileAccess | None = None) -> CorpusVerifyReport:
+def verify_corpus(path: Path | str, *, file_access: FileAccess | None = None) -> CorpusVerifyReport:
     """Validate a corpus Parquet file without running a masking job.
 
-    Runs the EXACT same schema check (:func:`_check_corpus_schema`) and
-    provenance validation (:func:`_validate_provenance`) the load path runs
-    in :func:`_read_corpus_record` -- the single validation source of truth
-    the CLI ``codesets verify``/``add`` and the platform upload check call
-    (both live in sibling repos; this is the primitive they call into).
-    Treats the file as a CUSTOMER corpus (``is_shipped=False``): a file under
-    review for upload has no registered shipped name to identity-check
-    against, and the shipped-only strictness (identity match, ``is_seed``,
-    metadata format version) does not apply to it.
-
-    Unlike :func:`_read_corpus_record`, this NEVER raises
-    :class:`PlanCompileError` -- that is the point of a standalone,
-    non-job-fatal check: every coded failure is caught and translated into
-    ``problems`` instead of propagating. Does not use the module cache (a
-    corpus under review is not yet a job's corpus).
+    Runs the same schema check and provenance validation as the load path (the single
+    validation source for the CLI ``codesets verify``/``add`` and the platform upload check),
+    treating the file as a CUSTOMER corpus (``is_shipped=False``). Unlike
+    :func:`_read_corpus_record` this NEVER raises :class:`PlanCompileError`: every coded
+    failure becomes a ``problems`` entry. It does not use the module cache.
 
     Args:
-        path: Path to the corpus Parquet file to verify. A ``str`` is accepted
-            and coerced (the "never raises" contract must hold for a path-like
-            string too, not only a ``Path``).
+        path: Path to the corpus Parquet file. A ``str`` is coerced.
 
     Returns:
-        A :class:`CorpusVerifyReport`. ``ok=False`` on any failure (unreadable
-        file, missing/empty/duplicate/null code column, incomplete
-        provenance, ...); ``problems`` names exactly what failed.
+        A :class:`CorpusVerifyReport`; ``ok=False`` on any failure, with ``problems`` naming
+        what failed.
     """
-    path = Path(path)
-    name = path.stem
+    shown = _where(path)  # built from the locator as given, before any `Path` conversion
+    name = "corpus"  # never the file stem: it is user text and would reach `problems`
     try:
-        record = _read_corpus_record(name, path, is_shipped=False)
-    except PlanCompileError as exc:
+        record = _read_corpus_record(name, Path(path), is_shipped=False, shown=shown)
+    except PlanCompileError as failed:
         return CorpusVerifyReport(
             ok=False,
-            path=str(path),
+            path=shown,
             row_count=0,
             provenance=None,
-            problems=(f"{exc.code}: {exc.message}",),
+            problems=(f"{failed.code}: {failed.message}",),
         )
-
-    prov = record.provenance
-    summary = (
-        {
-            "source": prov.source,
-            "source_version": prov.source_version,
-            "effective_date": prov.effective_date,
-            "license": prov.license,
-            "is_seed": prov.is_seed,
-        }
-        if prov is not None
-        else None
-    )
     return CorpusVerifyReport(
         ok=True,
-        path=str(path),
+        path=shown,
         row_count=len(record.rows),
-        provenance=summary,
+        provenance=provenance_summary(record.provenance),
         problems=(),
     )

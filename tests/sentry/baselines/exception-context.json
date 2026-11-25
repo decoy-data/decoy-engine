@@ -125,9 +125,6 @@
   "decoy_engine/secret_providers/vault.py::_parse_rfc3339::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
-  "decoy_engine/transforms/_codeset_loader.py::_resolve_read_path::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
   "decoy_engine/validation/_config.py::_load_config::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   }

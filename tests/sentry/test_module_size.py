@@ -106,7 +106,7 @@ ALLOWLIST: dict[str, int] = {
     # compile-check ownership table; split into per-strategy check modules once the check set stabilises.
     "src/decoy_engine/plan/_checks.py": 700,
     # statistical-column check threading; same per-strategy-check decomposition target as _checks.py.
-    "src/decoy_engine/plan/_compile.py": 673,
+    "src/decoy_engine/plan/_compile.py": 676,
     # dispatch entry plus the table-keyed params, the job-seed hand-off and the eager string-pool
     # check for the position-keyed faker; dense exception, the pool check itself lives in _chunk_masking.
     # OBS-2: threads the decline records and branch-call snapshot onto each chunk's evidence.
@@ -132,7 +132,6 @@ ALLOWLIST: dict[str, int] = {
     # transactional publish hardening and row mask; split the publish cluster.
     "src/decoy_engine/quarantine.py": 658,
     # corpus schema checks and verify_corpus; split into _codeset_verify.py when next touched.
-    "src/decoy_engine/transforms/_codeset_loader.py": 700,
     # one StreamFkJoiner lifecycle class (stage, orphan count, ordered and bounded-reorder joins, resolve); explain/optimizer helpers live in _stream_join_plan.py.
     "src/decoy_engine/execution/out_of_core/_stream_join.py": 665,
     # custom-provider registry snapshot for the shadow-parity gate; one cohesive module, no split identified.

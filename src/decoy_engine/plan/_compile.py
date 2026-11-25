@@ -110,6 +110,7 @@ from decoy_engine.plan.checks import (
     check_required_strategy_settings,
     column_shape_warnings,
 )
+from decoy_engine.plan.checks._code_set_locator import check_code_set_corpus_locators
 from decoy_engine.plan.checks._column_shapes import build_column_shapes
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
 from decoy_engine.plan.checks._text_mask_strategy import check_text_mask_strategies
@@ -242,6 +243,7 @@ def compile_plan(
     # bound (silent-passthrough leak). Config-only; both branches +
     # run_config_only_checks.
     check_top_code_config(config)
+    check_code_set_corpus_locators(config)
     check_bucket_perturb_config(config, column_shapes)
     # Rows 24-26 (silent-passthrough leaks), then the required strategy settings.
     check_categorical_categories(config)
@@ -556,6 +558,7 @@ def run_config_only_checks(
     # Row 28 (HC-3b, 2026-07-17): reject top_code columns with no resolvable
     # bound (silent-passthrough leak). Config-only.
     check_top_code_config(config)
+    check_code_set_corpus_locators(config)
     check_bucket_perturb_config(config, config_shapes)
     # Rows 24-26 (categorical shape, fpe charset, faker provider) and the required strategy
     # settings: config-only, so safe for decoy validate.

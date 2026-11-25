@@ -63,6 +63,8 @@ diverge -- there is only ever one record in play for the whole column.
 
 from __future__ import annotations
 
+import sys
+
 import pandas as pd
 
 from decoy_engine import fileaccess, reasons
@@ -81,6 +83,7 @@ from decoy_engine.transforms.code_set import (
     SHIPPED_CODE_SETS,
     CodeSetConfig,
     apply_code_set,
+    check_mode,
     describe_loaded_corpus,
     resolve_corpus_record,
 )
@@ -93,6 +96,13 @@ from decoy_engine.transforms.code_set import (
 _PER_VALUE_CODE_SET_ERRORS: frozenset[str] = frozenset(
     {reasons.plan.CODE_SET_CHAPTER_ABSENT, reasons.plan.CODE_SET_SOLE_MEMBER_BUCKET}
 )
+
+
+# Caps on the per-call memo in ``CodeSetHandler.run`` (bound the extra memory
+# on high-cardinality or long-string columns; past a cap the loop falls back
+# to one scalar call per value).
+_MEMO_MAX_ENTRIES = 65_536
+_MEMO_MAX_KEY_BYTES = 8 * 1024 * 1024
 
 
 class CodeSetHandler:
@@ -136,6 +146,7 @@ class CodeSetHandler:
         bad, not to record evidence.
         """
         cfg = provider_config_to_dict(plan.provider_config)
+        check_mode(str(cfg.get("mode", "mask")))
         code_cfg = CodeSetConfig.from_dict(cfg)
         describe_loaded_corpus(code_cfg)
 
@@ -148,6 +159,7 @@ class CodeSetHandler:
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
         mode = str(cfg.get("mode", "mask"))
+        check_mode(mode)
         code_cfg = CodeSetConfig.from_dict(cfg)
 
         if mode == "gen" and plan.namespace is None:
@@ -203,23 +215,61 @@ class CodeSetHandler:
         na_mask = source.isna().to_numpy()
         out: list[object] = []
         masked_any = False
+        # Mask mode is a pure function of str(value), so repeats reuse the first
+        # answer. Gen mode depends on row_index and keeps one call per row.
+        use_memo = mode == "mask"
+        done: dict[str, str] = {}
+        failed: dict[str, str] = {}
+        memo_bytes = 0
+        memo_open = use_memo
         for i, value in enumerate(source):
             if na_mask[i]:
                 out.append(None)
                 continue
-            try:
-                result = apply_code_set(
-                    str(value),
-                    code_cfg,
-                    mode=mode,
-                    job_seed=ctx.mask_key,
-                    row_index=i,
-                    namespace=plan.namespace,
-                    corpus_record=corpus_record,
-                )
-            except PlanCompileError as exc:
-                if exc.code not in _PER_VALUE_CODE_SET_ERRORS:
-                    raise  # corpus/config-level defect: still job-fatal
+            key = str(value)
+            if use_memo and key in done:
+                out.append(done[key])
+                masked_any = True
+                continue
+            reason = failed.get(key) if use_memo else None
+            if reason is None:
+                try:
+                    result = apply_code_set(
+                        key,
+                        code_cfg,
+                        mode=mode,
+                        job_seed=ctx.mask_key,
+                        row_index=i,
+                        namespace=plan.namespace,
+                        corpus_record=corpus_record,
+                    )
+                except PlanCompileError as exc:
+                    if exc.code not in _PER_VALUE_CODE_SET_ERRORS:
+                        raise  # corpus/config-level defect: still job-fatal
+                    reason = f"code_set could not mask this value ({exc.code})"
+                    result = None
+                # Check and insert share one `size`; once a cap is hit the memo
+                # stays closed so a later short key cannot sneak in.
+                if memo_open:
+                    size = sys.getsizeof(key)
+                    if (
+                        len(done) + len(failed) < _MEMO_MAX_ENTRIES
+                        and memo_bytes + size <= _MEMO_MAX_KEY_BYTES
+                    ):
+                        if reason is None:
+                            done[key] = result  # type: ignore[assignment]
+                        else:
+                            failed[key] = reason
+                        memo_bytes += size
+                    else:
+                        memo_open = False
+                # Drop the local name before the next str(value) is built. On a
+                # miss that frees the string unless the memo stored it. On a hit
+                # for a failed value the name is not deleted here; that string
+                # equals one `failed` already holds (and counted against the byte
+                # cap), so the transient copy adds at most one stored-size key.
+                del key
+            if reason is not None:
                 # Sprint 2 honesty pack (D7): a per-value defect. Record it
                 # and keep the ORIGINAL value in the frame (trap T4); the
                 # pipeline-level rule (D8) guarantees this row never reaches
@@ -230,7 +280,7 @@ class CodeSetHandler:
                         column=column,
                         row_index=i,
                         trigger="mask_error",
-                        reason=f"code_set could not mask this value ({exc.code})",
+                        reason=reason,
                     )
                 )
                 out.append(value)
