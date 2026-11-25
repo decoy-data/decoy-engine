@@ -1,5 +1,7 @@
 //! Validators ported from `pre-scan/_validators.py` (ASCII-input behavior).
 
+use crate::checksum;
+
 // ── validators (ports of pre-scan/_validators.py; ASCII-input behavior) ────────────────────────
 
 /// The whitespace set Python's `\s` strips on an eligible cell: `[ \t\n\x0b\x0c\r]`. 0x1c-0x1f
@@ -18,18 +20,7 @@ pub(super) fn luhn_valid(value: &str) -> bool {
     if digits.len() < 13 || !digits.iter().all(u8::is_ascii_digit) {
         return false;
     }
-    let mut total: u32 = 0;
-    for (i, b) in digits.iter().rev().enumerate() {
-        let mut d = (b - b'0') as u32;
-        if i % 2 == 1 {
-            d *= 2;
-            if d > 9 {
-                d -= 9;
-            }
-        }
-        total += d;
-    }
-    total.is_multiple_of(10)
+    checksum::luhn_valid_digits(digits.iter().map(|b| u32::from(b - b'0')))
 }
 
 /// CMS NPI check digit (`_npi_valid`): strip `[\s-]`, require exactly 10 digits, prepend "80840"
@@ -42,21 +33,8 @@ pub(super) fn npi_valid(value: &str) -> bool {
     if digits.len() != 10 || !digits.iter().all(u8::is_ascii_digit) {
         return false;
     }
-    let mut seq: Vec<u8> = Vec::with_capacity(14);
-    seq.extend_from_slice(b"80840");
-    seq.extend_from_slice(&digits[..9]);
-    let mut total: u32 = 0;
-    for (i, b) in seq.iter().rev().enumerate() {
-        let mut d = (b - b'0') as u32;
-        if i % 2 == 0 {
-            d *= 2;
-            if d > 9 {
-                d -= 9;
-            }
-        }
-        total += d;
-    }
-    (10 - total % 10) % 10 == (digits[9] - b'0') as u32
+    checksum::npi_check_value(digits[..9].iter().map(|b| u32::from(b - b'0')))
+        == u32::from(digits[9] - b'0')
 }
 
 /// IPv4 dotted-quad (`_ipv4_valid`): exactly four `.`-separated parts, each 1-3 digits in 0-255.
