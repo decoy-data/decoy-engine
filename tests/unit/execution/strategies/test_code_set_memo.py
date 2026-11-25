@@ -1,7 +1,7 @@
 """CODE-SET-NATIVE S1: bounded per-distinct memo in ``CodeSetHandler.run``.
 
 Plan: ``docs/plans/2026-11-22-code-set-native.md`` (rev 7). AT-1 (parity),
-AT-2 (call counts), AT-5 (memory bound) and AT-6 (caps). ``_base_run`` is an
+AT-2 (call counts), AT-5 (memory bound) and AT-6 (caps). ``base_run`` is an
 in-test copy of the pre-memo handler loop; the handler must match it value for
 value, row error for row error, under and over the caps.
 """
@@ -19,111 +19,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._strategies import _code_set as csm
 from decoy_engine.execution._strategies._code_set import CodeSetHandler
-from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
-
-_SEED = (0x77).to_bytes(8, "big")
-
-
-def _ctx() -> StrategyContext:
-    return StrategyContext(
-        registry=None,  # type: ignore[arg-type]
-        pool_cache=PoolCache(),
-        relationship_graph=RelationshipGraph(edges=(), ordering=()),
-        namespace_registry=NamespaceRegistry(bindings=()),
-        job_seed=_SEED,
-    )
-
-
-def _seed(cfg: dict[str, Any], namespace: str | None = "cs") -> ColumnSeed:
-    return ColumnSeed(
-        namespace=namespace,
-        strategy="code_set",
-        provider="code_set",
-        backend_type="faker",
-        backend_version="v",
-        cardinality_mode="reuse",
-        deterministic=False,
-        provider_config=tuple(cfg.items()),
-        coherent_with=(),
-    )
-
-
-def _base_run(df: pd.DataFrame, column: str, plan: ColumnSeed, ctx: StrategyContext) -> Any:
-    """The handler loop as it was before the memo (one scalar call per row)."""
-    cfg = csm.provider_config_to_dict(plan.provider_config)
-    mode = str(cfg.get("mode", "mask"))
-    code_cfg = csm.CodeSetConfig.from_dict(cfg)
-    if mode == "gen" and plan.namespace is None:
-        raise csm.StrategyError(
-            code=csm.reasons.runtime.CODE_SET_GEN_REQUIRES_NAMESPACE,
-            strategy="code_set",
-            message=(
-                f"column {column!r} uses code_set gen mode but has no namespace. "
-                "Set namespace on the ColumnSeed so gen-mode columns are "
-                "decorrelated across namespaces via derive_index."
-            ),
-        )
-    record_key = (ctx.current_table, ctx.nested_outer_column or column)
-    record = ctx.code_set_records.get(record_key)
-    if record is None:
-        record = csm.resolve_corpus_record(code_cfg)
-        ctx.code_set_records[record_key] = record
-    evidence = csm.describe_loaded_corpus(code_cfg, record=record)
-    source = df[column]
-    na_mask = source.isna().to_numpy()
-    out: list[object] = []
-    masked_any = False
-    for i, value in enumerate(source):
-        if na_mask[i]:
-            out.append(None)
-            continue
-        try:
-            result = csm.apply_code_set(
-                str(value),
-                code_cfg,
-                mode=mode,
-                job_seed=ctx.mask_key,
-                row_index=i,
-                namespace=plan.namespace,
-                corpus_record=record,
-            )
-        except csm.PlanCompileError as exc:
-            if exc.code not in csm._PER_VALUE_CODE_SET_ERRORS:
-                raise
-            ctx.row_errors.append(
-                csm.RowError(
-                    column=column,
-                    row_index=i,
-                    trigger="mask_error",
-                    reason=f"code_set could not mask this value ({exc.code})",
-                )
-            )
-            out.append(value)
-            continue
-        out.append(result)
-        masked_any = True
-    if masked_any:
-        ec = ctx.nested_outer_column or column
-        ctx.code_set_corpora[(ctx.current_table, ec)] = {
-            **evidence,
-            "table": ctx.current_table,
-            "column": ec,
-        }
-    if out:
-        df[column] = out
-    else:
-        df[column] = pd.array([], dtype="string")
-    return df, []
+from tests._code_set_memo import SEED, base_run, make_ctx, make_seed
 
 
 def _snapshot(fn: Any, df: pd.DataFrame, plan: ColumnSeed) -> tuple:
-    ctx = _ctx()
+    ctx = make_ctx()
     work = df.copy(deep=True)
 
     def errs() -> list[tuple]:
@@ -199,10 +104,10 @@ class TestAt1Parity:
     def test_handler_equals_base_loop(
         self, opts: dict, name: str, corpus: str, namespace: str | None, mode: str
     ) -> None:
-        plan = _seed({"code_set": corpus, "mode": mode}, namespace)
+        plan = make_seed({"code_set": corpus, "mode": mode}, namespace)
         df = pd.DataFrame({"c": _COLUMNS[name]})
         with _option_context(opts):
-            base = _snapshot(_base_run, df, plan)
+            base = _snapshot(base_run, df, plan)
             new = _snapshot(CodeSetHandler().run, df, plan)
         assert new == base
 
@@ -210,7 +115,7 @@ class TestAt1Parity:
     def test_chapter_preserve_failures_interleaved(
         self, tmp_path: pathlib.Path, opts: dict
     ) -> None:
-        plan = _seed(
+        plan = make_seed(
             {
                 "code_set": "ab",
                 "mode": "mask",
@@ -223,7 +128,7 @@ class TestAt1Parity:
         vals = ["A01", "U07", 1, "1", "B01", "U07", "A01", 1, None, "1", "B02", "A02"]
         df = pd.DataFrame({"c": pd.Series(vals, dtype=object)})
         with _option_context(opts):
-            base = _snapshot(_base_run, df, plan)
+            base = _snapshot(base_run, df, plan)
             new = _snapshot(CodeSetHandler().run, df, plan)
         assert new == base
 
@@ -231,7 +136,7 @@ class TestAt1Parity:
     def test_sole_member_bucket_interleaved_and_repeated(
         self, tmp_path: pathlib.Path, opts: dict
     ) -> None:
-        plan = _seed(
+        plan = make_seed(
             {
                 "code_set": "ab",
                 "mode": "mask",
@@ -244,7 +149,7 @@ class TestAt1Parity:
         vals = ["C01", "A01", "C01", "U07", None, "C01", "B02", "U07", "A02"]
         df = pd.DataFrame({"c": pd.Series(vals, dtype=object)})
         with _option_context(opts):
-            base = _snapshot(_base_run, df, plan)
+            base = _snapshot(base_run, df, plan)
             new = _snapshot(CodeSetHandler().run, df, plan)
         assert new == base
         reasons = [e[3] for e in base[-1]]
@@ -253,24 +158,24 @@ class TestAt1Parity:
     def test_two_calls_two_namespaces_two_corpora(self, tmp_path: pathlib.Path) -> None:
         # M3: a module-level memo would leak the first call's codes.
         df = pd.DataFrame({"c": pd.Series(["A01", "B01", "A01"], dtype=object)})
-        p1 = _seed({"code_set": "icd10", "mode": "mask"}, "ns1")
-        p2 = _seed(
+        p1 = make_seed({"code_set": "icd10", "mode": "mask"}, "ns1")
+        p2 = make_seed(
             {"code_set": "ab", "mode": "mask", "corpus_source": _customer_corpus(tmp_path)},
             "ns2",
         )
         for plan in (p1, p2, p1, p2):
-            assert _snapshot(CodeSetHandler().run, df, plan) == _snapshot(_base_run, df, plan)
+            assert _snapshot(CodeSetHandler().run, df, plan) == _snapshot(base_run, df, plan)
 
     def test_chunks_that_split_repeats_equal_one_call(self) -> None:
-        plan = _seed({"code_set": "icd10", "mode": "mask"})
+        plan = make_seed({"code_set": "icd10", "mode": "mask"})
         vals = ["I10", "E11.9", "I10", None, "J45", "E11.9", "I10", "J45"]
         whole, _ = CodeSetHandler().run(
-            pd.DataFrame({"c": pd.Series(vals, dtype=object)}), "c", plan, _ctx()
+            pd.DataFrame({"c": pd.Series(vals, dtype=object)}), "c", plan, make_ctx()
         )
         parts = []
         for chunk in (vals[:3], vals[3:]):
             out, _ = CodeSetHandler().run(
-                pd.DataFrame({"c": pd.Series(chunk, dtype=object)}), "c", plan, _ctx()
+                pd.DataFrame({"c": pd.Series(chunk, dtype=object)}), "c", plan, make_ctx()
             )
             parts.append(out["c"])
         assert list(pd.concat(parts, ignore_index=True)) == list(whole["c"])
@@ -291,33 +196,35 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 class TestAt2CallCounts:
     def test_one_call_per_distinct_in_first_occurrence_order(self, calls: list[str]) -> None:
-        plan = _seed({"code_set": "icd10", "mode": "mask"})
+        plan = make_seed({"code_set": "icd10", "mode": "mask"})
         vals = ["I10", "E11.9", "I10", None, 1, "1", "E11.9", 1.0, "I10"]
-        CodeSetHandler().run(pd.DataFrame({"c": pd.Series(vals, dtype=object)}), "c", plan, _ctx())
+        CodeSetHandler().run(
+            pd.DataFrame({"c": pd.Series(vals, dtype=object)}), "c", plan, make_ctx()
+        )
         assert calls == ["I10", "E11.9", "1", "1.0"]
 
     def test_zero_rows_and_all_missing_make_no_calls(self, calls: list[str]) -> None:
-        plan = _seed({"code_set": "icd10", "mode": "mask"})
+        plan = make_seed({"code_set": "icd10", "mode": "mask"})
         for vals in ([], [None, None]):
             CodeSetHandler().run(
-                pd.DataFrame({"c": pd.Series(vals, dtype=object)}), "c", plan, _ctx()
+                pd.DataFrame({"c": pd.Series(vals, dtype=object)}), "c", plan, make_ctx()
             )
         assert calls == []
 
     def test_gen_mode_keeps_one_call_per_row(self, calls: list[str]) -> None:
-        plan = _seed({"code_set": "icd10", "mode": "gen"})
+        plan = make_seed({"code_set": "icd10", "mode": "gen"})
         CodeSetHandler().run(
             pd.DataFrame({"c": pd.Series(["I10", "I10", None, "I10"], dtype=object)}),
             "c",
             plan,
-            _ctx(),
+            make_ctx(),
         )
         assert len(calls) == 3
 
     def test_lone_surrogate_namespace_all_missing_succeeds(self, calls: list[str]) -> None:
-        plan = _seed({"code_set": "icd10", "mode": "mask"}, "\ud800")
+        plan = make_seed({"code_set": "icd10", "mode": "mask"}, "\ud800")
         CodeSetHandler().run(
-            pd.DataFrame({"c": pd.Series([None, None], dtype=object)}), "c", plan, _ctx()
+            pd.DataFrame({"c": pd.Series([None, None], dtype=object)}), "c", plan, make_ctx()
         )
         assert calls == []
 
@@ -329,7 +236,7 @@ class TestAt2CallCounts:
         # first non-null value must fail the job with base's class, code and text.
         path = tmp_path / "one.parquet"
         pq.write_table(pa.table({"code": ["A01"], "chapter": ["A"]}), str(path))
-        plan = _seed(
+        plan = make_seed(
             {
                 "code_set": "one",
                 "mode": "mask",
@@ -338,7 +245,7 @@ class TestAt2CallCounts:
             }
         )
         df = pd.DataFrame({"c": pd.Series([None, "A01", "A01", "X"], dtype=object)})
-        base = _snapshot(_base_run, df, plan)
+        base = _snapshot(base_run, df, plan)
         calls.clear()
         new = _snapshot(CodeSetHandler().run, df, plan)
         assert new == base
@@ -347,7 +254,7 @@ class TestAt2CallCounts:
         assert calls == ["A01"] or base[0] != "raise"
 
     def test_fatal_precedence_same_row_errors_before_raise(self, tmp_path: pathlib.Path) -> None:
-        plan = _seed(
+        plan = make_seed(
             {
                 "code_set": "ab",
                 "mode": "mask",
@@ -357,7 +264,7 @@ class TestAt2CallCounts:
             "\ud800",
         )
         df = pd.DataFrame({"c": pd.Series(["U07", "A01", "U07"], dtype=object)})
-        assert _snapshot(CodeSetHandler().run, df, plan) == _snapshot(_base_run, df, plan)
+        assert _snapshot(CodeSetHandler().run, df, plan) == _snapshot(base_run, df, plan)
 
 
 def _peak(fn: Any, make_df: Any, plan: ColumnSeed) -> tuple[int, list]:
@@ -365,7 +272,7 @@ def _peak(fn: Any, make_df: Any, plan: ColumnSeed) -> tuple[int, list]:
     tracemalloc.start()
     try:
         tracemalloc.reset_peak()
-        out_df, _ = fn(df, "c", plan, _ctx())
+        out_df, _ = fn(df, "c", plan, make_ctx())
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
@@ -375,25 +282,26 @@ def _peak(fn: Any, make_df: Any, plan: ColumnSeed) -> tuple[int, list]:
 @pytest.mark.serial
 class TestAt5MemoryBound:
     def test_many_large_distinct_keys_stay_under_cap(self) -> None:
-        plan = _seed({"code_set": "icd10", "mode": "mask", "chapter_preserve": False})
+        plan = make_seed({"code_set": "icd10", "mode": "mask", "chapter_preserve": False})
 
         def make() -> pd.DataFrame:
             cells = [f"{i:08d}".encode() + b"x" * 4088 for i in range(24_000)]
             return pd.DataFrame({"c": pd.Series(cells, dtype=object)})
 
-        base_peak, base_out = _peak(_base_run, make, plan)
+        base_peak, base_out = _peak(base_run, make, plan)
         new_peak, new_out = _peak(CodeSetHandler().run, make, plan)
         assert new_out == base_out
-        assert new_peak - base_peak <= csm._MEMO_MAX_KEY_BYTES + 2 * 1024 * 1024
+        # 8 MiB is the specified byte cap, written out so a changed constant fails here.
+        assert new_peak - base_peak <= 8 * 1024 * 1024 + 2 * 1024 * 1024
 
     def test_zero_entry_memo_does_not_hold_two_keys(self) -> None:
-        plan = _seed({"code_set": "icd10", "mode": "mask", "chapter_preserve": False})
+        plan = make_seed({"code_set": "icd10", "mode": "mask", "chapter_preserve": False})
         mib16 = 16 * 1024 * 1024
 
         def make() -> pd.DataFrame:
             return pd.DataFrame({"c": pd.Series([["A" * mib16], ["B" * mib16]], dtype=object)})
 
-        base_peak, base_out = _peak(_base_run, make, plan)
+        base_peak, base_out = _peak(base_run, make, plan)
         new_peak, new_out = _peak(CodeSetHandler().run, make, plan)
         assert new_out == base_out
         assert new_peak - base_peak <= 1024 * 1024
@@ -405,7 +313,7 @@ class TestAt6Caps:
 
     @pytest.fixture
     def plan(self, tmp_path: pathlib.Path) -> ColumnSeed:
-        return _seed(
+        return make_seed(
             {
                 "code_set": "ab",
                 "mode": "mask",
@@ -420,7 +328,7 @@ class TestAt6Caps:
         new = _snapshot(CodeSetHandler().run, df, plan)
         got = list(calls)
         calls.clear()
-        base = _snapshot(_base_run, df, plan)
+        base = _snapshot(base_run, df, plan)
         calls.clear()
         assert new == base
         assert got == expected
@@ -428,6 +336,16 @@ class TestAt6Caps:
     def test_default_caps(self, plan: ColumnSeed, calls: list[str]) -> None:
         a, b, c, d = self.A, self.B, self.C, self.D
         self._check(plan, [a, b, c, a, b, c, d, d], [a, b, c, d], calls)
+
+    def test_default_entry_cap_is_65536(self, calls: list[str]) -> None:
+        # Specified cap, written out so a changed constant fails here. Cheap short keys keep the
+        # byte cap out of the way; the last distinct key is the first one the memo refuses.
+        plan = make_seed({"code_set": "icd10", "mode": "mask", "chapter_preserve": False})
+        keys = [f"K{i:05d}" for i in range(65_537)]
+        df = pd.DataFrame({"c": pd.Series([*keys, keys[0], keys[-1]], dtype=object)})
+        CodeSetHandler().run(df, "c", plan, make_ctx())
+        assert len(calls) == 65_537 + 1
+        assert calls[-1] == keys[-1]
 
     def test_entry_cap_two(
         self, plan: ColumnSeed, calls: list[str], monkeypatch: pytest.MonkeyPatch
@@ -472,7 +390,7 @@ def _route_plan(column: str, seed: ColumnSeed) -> Any:
 
     return SimpleNamespace(
         seed_envelope=SeedEnvelope(
-            job_seed=_SEED,
+            job_seed=SEED,
             per_table=(("t", TableSeed(per_column=((column, seed),), per_group=())),),
         )
     )
@@ -550,7 +468,7 @@ class TestAt1RouteEntries:
         new_calls = list(calls)
         calls.clear()
         monkeypatch.setattr(
-            CodeSetHandler, "run", lambda self, df, col, plan, ctx: _base_run(df, col, plan, ctx)
+            CodeSetHandler, "run", lambda self, df, col, plan, ctx: base_run(df, col, plan, ctx)
         )
         base_out, base_res = _run_route(route)
         assert new_out == base_out
@@ -632,7 +550,7 @@ class TestAt1ChunkedRoute:
         new_calls = list(calls)
         calls.clear()
         monkeypatch.setattr(
-            CodeSetHandler, "run", lambda self, df, col, plan, ctx: _base_run(df, col, plan, ctx)
+            CodeSetHandler, "run", lambda self, df, col, plan, ctx: base_run(df, col, plan, ctx)
         )
         base_rows, base_ev = _run_chunked()
         assert new_rows == base_rows

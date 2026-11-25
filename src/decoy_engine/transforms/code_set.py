@@ -309,6 +309,8 @@ def apply_code_set(
             config.corpus_source_version when the latter is set (HC-2 D2a).
         ValueError: Unsupported mode.
     """
+    if mode not in ("mask", "gen"):
+        raise ValueError("code_set: unsupported mode. Use 'mask' or 'gen'.")
     try:
         if corpus_record is None:
             corpus_name, override_path = _resolve_corpus_path(config)

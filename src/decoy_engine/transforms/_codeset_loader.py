@@ -224,7 +224,7 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
         raise PlanCompileError(
             code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
             path="provider_config.corpus_source",
-            message=f"customer corpus not found at path {handle.display}.",
+            message=f"customer corpus not found at path {_where(path)}.",
         ) from None
     finally:
         handle.close()
@@ -341,7 +341,8 @@ def _check_source_version_pin(
             code=reasons.plan.CODE_SET_CORPUS_VERSION_MISMATCH,
             path="provider_config.corpus_source_version",
             message=(
-                f"corpus {name!r}{at}: corpus_source_version does not match the "
+                f"corpus {fileaccess.shown(name, 'code_set.code_set')!r}{at}: "
+                "corpus_source_version does not match the "
                 "loaded corpus's embedded source_version. The corpus at this name/path has "
                 "changed since the plan was authored (or never carried the pinned "
                 "release). Update corpus_source_version to match the corpus you "

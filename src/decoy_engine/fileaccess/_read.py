@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from collections.abc import Callable
 
@@ -68,10 +69,26 @@ def read_checked(
             raise
 
 
+# A locator may be a URL (`s3://user:secret@host/key?token=...`), or one a `Path` has squeezed to a
+# single slash (`s3:/user:secret@host/...`). Its userinfo and query string are credentials.
+_URL_USERINFO_RE = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*:/{1,2})[^/@\s]*@")
+_URL_SCHEME_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]+:/")  # 2+ chars, so not a drive letter
+_URL_QUERY_RE = re.compile(r"\?[^\s#]*")
+
+
+def without_url_credentials(text: str) -> str:
+    """`text` with the userinfo and query string of any URL-shaped locator removed."""
+    if not _URL_SCHEME_RE.search(text):
+        return text
+    out = _URL_USERINFO_RE.sub(r"\g<scheme>", text)
+    return _URL_QUERY_RE.sub("?<redacted>", out)
+
+
 def shown(locator: str, field_key: str) -> str:
     """What an engine message may call a file: the locator under the ambient CLI policy (so
-    CLI text is unchanged), the encoded config position under any other."""
-    return locator if is_ambient() else encode_field_key(field_key)
+    CLI text is unchanged, minus any URL credentials), the encoded config position under any
+    other."""
+    return without_url_credentials(locator) if is_ambient() else encode_field_key(field_key)
 
 
 def keeps_class(exc: BaseException) -> bool:
