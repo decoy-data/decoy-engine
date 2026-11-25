@@ -7,6 +7,7 @@ own types, and the opened source is closed before any of them escapes.
 from __future__ import annotations
 
 import errno
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -43,10 +44,17 @@ def _raising(exc: BaseException) -> Any:
     return boom
 
 
-@pytest.mark.parametrize("exc", [PermissionError(errno.EACCES, "x"), OSError(errno.EIO, "x")])
+# Factories, not instances: pytest keeps parameter objects for the whole session, and a raised
+# exception keeps its traceback frames (and the results they hold) alive with it.
+@pytest.mark.parametrize(
+    "make_exc",
+    [lambda: PermissionError(errno.EACCES, "x"), lambda: OSError(errno.EIO, "x")],
+    ids=["exc0", "exc1"],
+)
 def test_a_source_read_error_is_not_a_capacity_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc: OSError
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_exc: Callable[[], OSError]
 ) -> None:
+    exc = make_exc()
     monkeypatch.setattr(LazySource, "open_batches", _raising(exc))
     with pytest.raises(OSError) as info:
         _run(tmp_path)
