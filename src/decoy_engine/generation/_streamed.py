@@ -56,7 +56,12 @@ from decoy_engine.generation._column_streams import (
     make_column_stream,
 )
 from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
-from decoy_engine.generation.pool import DEFAULT_POOL_SIZE, faker_pool_resident_bytes
+from decoy_engine.generation.pool import (
+    DEFAULT_POOL_SIZE,
+    faker_pool_resident_bytes,
+    pool_locales,
+    provider_init_bytes,
+)
 from decoy_engine.generation.relational import reference_policies
 from decoy_engine.generation.stream import check_width, table_batches
 from decoy_engine.progress import get_active_channel
@@ -281,6 +286,25 @@ def _refuse_if_over_memory(config: dict[str, Any], admission: PlanAdmission) -> 
         )
 
 
+def _pooled_locales(config: dict[str, Any], instance_default_locale: str | None) -> frozenset[str]:
+    """Every locale a pooled Faker column of the config will open, before any of them does.
+
+    A malformed config yields nothing here: the plan check that follows refuses it by its own code.
+    """
+    found: set[str] = set()
+    try:
+        for t in config.get("tables") or []:
+            rows = int(t.get("row_count") or 0)
+            for c in _pooled_columns(
+                {"generate_columns": t.get("generate_columns") or [], "row_count": rows},
+                instance_default_locale,
+            ):
+                found |= pool_locales(c.get("locale") or instance_default_locale)
+    except (AttributeError, TypeError, ValueError):
+        return frozenset()
+    return frozenset(found)
+
+
 def run_generation(
     config: dict[str, Any],
     *,
@@ -302,11 +326,8 @@ def run_generation(
     batch layout (used to prove route-independence over irregular partitions). ``on_warning``
     receives each ``QualityWarning`` a route raises; it never changes the generated tables.
     """
-    from decoy_engine.plan._seed import _normalize_job_seed_int
     from decoy_engine.plan.checks import check_faker_default_locale
 
-    # Before any pool or provider: a column without `locale` runs in the platform default.
-    check_faker_default_locale(config, instance_default_locale, provider_snapshot=provider_snapshot)
     resolved_batch = batch_rows
     if ledger is None:
         if budget_bytes is None:
@@ -317,7 +338,50 @@ def run_generation(
             resolved = resolve_budget(budget_bytes)
             ledger = GenerationBudgetLedger(resolved.budget_bytes)
             resolved_batch = resolved_batch or resolved.batch_rows
-    resolved_batch = resolved_batch or DEFAULT_BATCH_ROWS
+    with ExitStack() as run_scope:
+        # Faker builds a locale's providers the first time anything opens it, and the default-locale
+        # check below does that for a column with no `locale`. So the one charge per distinct
+        # locale of the run is taken first and held to the end; the pools charge only their values.
+        locales = _pooled_locales(config, instance_default_locale)
+        if locales:
+            run_scope.callback(
+                ledger.reserve("faker_provider_init", provider_init_bytes(len(locales))).release
+            )
+        # Before any pool or provider: a column without `locale` runs in the platform default.
+        check_faker_default_locale(
+            config, instance_default_locale, provider_snapshot=provider_snapshot
+        )
+        return _run_admitted(
+            config,
+            derive_key=derive_key,
+            instance_default_locale=instance_default_locale,
+            sink=sink,
+            batch_rows=resolved_batch,
+            partition=partition,
+            ledger=ledger,
+            provider_snapshot=provider_snapshot,
+            legacy_kwargs=legacy_kwargs,
+            on_warning=on_warning,
+        )
+
+
+def _run_admitted(
+    config: dict[str, Any],
+    *,
+    derive_key: Any,
+    instance_default_locale: str | None,
+    sink: Any,
+    batch_rows: int | None,
+    partition: Callable[[str, int], Sequence[int]] | None,
+    ledger: GenerationBudgetLedger,
+    provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None,
+    legacy_kwargs: dict[str, Any] | None,
+    on_warning: Callable[[QualityWarning], None] | None,
+) -> GenerationResult:
+    """The run after the locale charge and the default-locale check."""
+    from decoy_engine.plan._seed import _normalize_job_seed_int
+
+    resolved_batch = batch_rows or DEFAULT_BATCH_ROWS
     admission = classify_plan(config, provider_snapshot=provider_snapshot)
     if not ledger.bounded and not (admission.eligible and is_bounded_sink(sink)):
         _refuse_if_over_memory(config, admission)

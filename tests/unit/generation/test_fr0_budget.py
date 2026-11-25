@@ -22,6 +22,7 @@ from decoy_engine.generation._budget_ledger import (
     GenerationUnboundedError,
 )
 from decoy_engine.generation._streamed import run_generation
+from decoy_engine.generation.pool import provider_init_bytes
 from tests.parity import _f0_fixtures as fx
 from tests.parity._fr0_support import fingerprints, prepared_config
 
@@ -403,11 +404,13 @@ def test_ceiling_sweep_never_allocates_past_a_reservation(monkeypatch: pytest.Mo
     peak = GenerationBudgetLedger(None)
     run_generation(config, ledger=peak)
     refused_stages: set[str] = set()
-    # The pool reservation includes Faker's provider init, a fixed 16 MiB that dwarfs the key
-    # pool and batch buffers, so the early stages' refusals sit in the first 1/40 step of the
-    # peak: sweep the low range in fine steps as well.
+    # The run charges Faker's provider init first, a fixed 16 MiB that dwarfs the key pool and batch
+    # buffers, so those stages' refusals sit just past it: sweep the low range and the range just
+    # above the init charge in fine steps as well.
     top = peak.peak_bytes
-    ceilings = [top * step // 40 for step in range(0, 41)] + list(range(0, 64 * 1024, 1024))
+    init = provider_init_bytes(1)
+    fine = list(range(0, 64 * 1024, 1024))
+    ceilings = [top * step // 40 for step in range(0, 41)] + fine + [init + d for d in fine]
     for ceiling in ceilings:
         ledger = GenerationBudgetLedger(ceiling)
         held_at_batch: list[int] = []

@@ -25,9 +25,11 @@ from decoy_engine.generation._budget_ledger import (
     GenerationBudgetExceeded,
     GenerationBudgetLedger,
 )
-from decoy_engine.generation.pool._resident import (
+from decoy_engine.generation.pool import (
     faker_pool_resident_bytes,
     faker_pool_resident_parts,
+    pool_locales,
+    provider_init_bytes,
 )
 from tests.parity._fr0_support import prepared_config
 from tests.unit.generation.stream._support import faker_config
@@ -109,12 +111,22 @@ def test_each_part_covers_its_measured_peak(
 @pytest.mark.serial
 @pytest.mark.parametrize("payload", [0, 1, 8, 32, 128, _PAYLOAD])
 def test_the_charge_sums_every_part(payload: int) -> None:
-    """Leaving any part out of the sum is red at every payload size."""
+    """The charge is the four per-pool parts exactly; a run adds the provider part once."""
     parts = faker_pool_resident_parts(_POOL, payload)
-    assert parts.arrow_peak > 0 and parts.object_form > 0 and parts.lists > 0
-    assert faker_pool_resident_bytes(_POOL, payload) >= (
-        parts.object_form + parts.arrow_peak + parts.lists
+    assert min(parts.arrow_peak, parts.object_form, parts.lists, parts.fixed) > 0
+    assert faker_pool_resident_bytes(_POOL, payload) == (
+        parts.object_form + parts.arrow_peak + parts.lists + parts.fixed
     )
+
+
+def test_the_provider_charge_is_once_per_distinct_locale() -> None:
+    first = provider_init_bytes(1)
+    assert provider_init_bytes(0) == 0
+    assert first >= 10_721_072  # the measured it_IT build, the heaviest locale
+    assert provider_init_bytes(2) > first
+    assert provider_init_bytes(30) >= 25_322_859  # the measured 30-locale build
+    assert pool_locales("en-US") == pool_locales(["en_US", None]) == frozenset({"en_US"})
+    assert pool_locales(["it_IT", "de_AT", "it_IT"]) == frozenset({"it_IT", "de_AT"})
 
 
 def test_the_helper_grows_with_pool_size_and_payload() -> None:
@@ -209,6 +221,8 @@ import os, sys, tracemalloc
 import pyarrow as pa
 from decoy_engine.generation import _faker_pool
 locale, faker_type, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+if "," in locale:
+    locale = locale.split(",")
 proxy = pa.proxy_memory_pool(pa.default_memory_pool())
 pa.set_memory_pool(proxy)
 tracemalloc.start()
@@ -250,7 +264,7 @@ def _fresh_worker_peak(locale: str, faker_type: str, n: int) -> int:
 def test_the_reservation_covers_a_fresh_worker_build_with_the_real_provider(locale: str) -> None:
     peak = _fresh_worker_peak(locale, "prefix", _POOL)
     payload = _bounds.FAKER_VALUE_CAPS["prefix"]
-    assert faker_pool_resident_bytes(_POOL, payload) >= peak
+    assert faker_pool_resident_bytes(_POOL, payload) + provider_init_bytes(1) >= peak
 
 
 class _DrainSink:
@@ -295,3 +309,73 @@ def test_a_six_mib_ceiling_refuses_the_it_it_prefix_job_before_it_builds(
             batch_rows=128,
         )
     assert builds == []
+
+
+# Review R2: the provider tables are charged once per distinct locale of the run, before anything
+# opens a locale, and the charge counts every locale a column lists.
+_MIB = 1024 * 1024
+
+
+def _locales_30() -> list[str]:
+    from faker.config import AVAILABLE_LOCALES
+
+    others = [name for name in sorted(AVAILABLE_LOCALES) if name != "it_IT"]
+    return ["it_IT", *others[:: len(others) // 29][:29]]
+
+
+@pytest.mark.serial
+def test_a_runtime_default_locale_is_charged_before_the_default_check_builds_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The column has no `locale`: the check that validates the default builds `it_IT` first."""
+    import decoy_engine.plan.checks as checks
+
+    def must_not_run(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("the default-locale check ran before the reservation")
+
+    monkeypatch.setattr(checks, "check_faker_default_locale", must_not_run)
+    ledger = GenerationBudgetLedger(6 * _MIB)
+    config = prepared_config(faker_config("prefix", _ROWS))
+    with pytest.raises(GenerationBudgetExceeded):
+        _streamed.run_generation(
+            config,
+            sink=_DrainSink(),
+            ledger=ledger,
+            batch_rows=128,
+            instance_default_locale="it_IT",
+        )
+    assert ledger.events == []
+
+
+@pytest.mark.serial
+def test_a_locale_list_is_charged_for_every_locale_it_opens() -> None:
+    locales = _locales_30()
+    assert len(set(locales)) == 30
+    config = prepared_config(faker_config("prefix", _ROWS))
+    config["tables"][0]["generate_columns"][0]["locale"] = locales
+    # Room for the pool and one locale, far below thirty locales.
+    ledger = GenerationBudgetLedger(45 * _MIB)
+    with pytest.raises(GenerationBudgetExceeded):
+        _streamed.run_generation(config, sink=_DrainSink(), ledger=ledger, batch_rows=128)
+    assert not any(stage.startswith("faker_pool_build") for stage, _ in ledger.events)
+
+
+@pytest.mark.serial
+def test_the_charge_covers_a_fresh_worker_that_opens_thirty_locales() -> None:
+    peak = _fresh_worker_peak(",".join(_locales_30()), "prefix", _POOL)
+    payload = _bounds.FAKER_VALUE_CAPS["prefix"]
+    assert faker_pool_resident_bytes(_POOL, payload) + provider_init_bytes(30) >= peak
+
+
+@pytest.mark.serial
+def test_three_columns_of_one_locale_are_charged_one_provider_build() -> None:
+    """The reviewer's repro: three `en_US` prefix columns at the 64 MiB auto budget."""
+    config = prepared_config(faker_config("prefix", _ROWS))
+    column = config["tables"][0]["generate_columns"][0]
+    config["tables"][0]["generate_columns"] = [{**column, "name": f"p{i}"} for i in range(3)]
+    ledger = GenerationBudgetLedger(64 * _MIB)
+    result = _streamed.run_generation(config, sink=_DrainSink(), ledger=ledger, batch_rows=4096)
+    assert result.mode == "streamed"
+    inits = [n for stage, n in ledger.events if stage == "faker_provider_init"]
+    assert inits == [provider_init_bytes(1)]
+    assert ledger.peak_bytes < 64 * _MIB

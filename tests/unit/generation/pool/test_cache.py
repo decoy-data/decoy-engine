@@ -163,10 +163,36 @@ def test_the_cache_limit_counts_the_retained_arrow_buffers() -> None:
 
     one = measured_pool_bytes(pool("a"))
     object_only = measured_pool_bytes(pool("a", retained=False))
-    assert one == object_only + arrow.nbytes
+    assert one == object_only + arrow.get_total_buffer_size()
     # Room for two pools if the Arrow form were free, but not once it is counted.
-    cache = PoolCache(max_bytes=2 * object_only + arrow.nbytes)
+    cache = PoolCache(max_bytes=2 * object_only + arrow.get_total_buffer_size())
     cache.put(pool("a"))
     cache.put(pool("b"))
     assert cache.get(pool("a").identity) is None
     assert cache.stats().bytes_used == one
+
+
+@pytest.mark.serial
+def test_a_one_value_slice_of_a_large_buffer_counts_the_buffer_it_keeps() -> None:
+    import pyarrow as pa
+
+    big = pa.array([f"{i:08d}" + "x" * 120 for i in range(10_000)])
+    sliced = big.slice(5, 1)
+    assert sliced.nbytes < 200  # the logical size the old measure used
+    pool = ValuePool(
+        values=np.array([sliced[0].as_py()], dtype=object),
+        provider="p",
+        locale="en_US",
+        config_hash="",
+        seed=b"\x01" * 8,
+        size=1,
+        build_time_ms=0.0,
+        backend_type="faker",
+        backend_version="x",
+        distinct_count=1,
+        arrow=sliced,
+    )
+    assert measured_pool_bytes(pool) > 1_000_000
+    cache = PoolCache(max_bytes=64 * 1024)
+    with pytest.raises(PoolCapacityError):
+        cache.put(pool)

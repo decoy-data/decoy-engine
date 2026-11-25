@@ -153,3 +153,28 @@ def test_the_declared_width_bound_is_enforced_on_the_arrow_path(
     assert err.value.code == "value_exceeds_declared_bound"
     assert "wwww" not in str(err.value)
     assert selects == []
+
+
+@pytest.mark.serial
+@pytest.mark.parametrize(
+    "first",
+    [
+        "decoy_engine.generation.stream",
+        "decoy_engine.generation._column_streams",
+        "decoy_engine.generation.stream._batches",
+    ],
+)
+def test_the_stream_package_has_no_import_cycle_in_any_entry_order(first: str) -> None:
+    import subprocess
+    import sys
+
+    code = (
+        f"import {first}\n"
+        "from decoy_engine.generation.stream import check_width, table_batches, sibling_input\n"
+        "from decoy_engine.generation.pool import pool_take\n"
+        "import decoy_engine.generation._column_streams, decoy_engine.generation._streamed\n"
+    )
+    out = subprocess.run(  # noqa: S603 -- fixed argv, test-only
+        [sys.executable, "-c", code], check=False, capture_output=True, text=True
+    )
+    assert out.returncode == 0, out.stderr[-1500:]

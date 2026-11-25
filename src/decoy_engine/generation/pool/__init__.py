@@ -78,6 +78,8 @@ from decoy_engine.generation.pool._resident import (
     PoolResidentParts,
     faker_pool_resident_bytes,
     faker_pool_resident_parts,
+    pool_locales,
+    provider_init_bytes,
 )
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import (
@@ -86,7 +88,7 @@ from decoy_engine.generation.pool._sampler import (
     derive_validated_indices,
 )
 from decoy_engine.generation.pool._validate import check_pool_capacity_pre_flight
-from decoy_engine.generation.pool._value_pool import ValuePool
+from decoy_engine.generation.pool._value_pool import ValuePool, pool_take
 
 __all__ = [
     "COMPUTED_NAMESPACE_MARKER",
@@ -122,6 +124,9 @@ __all__ = [
     "get_default_pool_cache",
     "int_from_index",
     "parse_computed_draw",
+    "pool_locales",
+    "pool_take",
+    "provider_init_bytes",
     "raise_uniqueness_impossible",
     "unique_capacity_ok",
     "uuid_from_bits",

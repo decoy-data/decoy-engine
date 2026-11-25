@@ -95,9 +95,10 @@ def measured_pool_bytes(pool: ValuePool) -> int:
     The one pool-byte function: `PoolCache` budgets with it and the out-of-core run reserves
     with it, so a pool that fits one ledger fits the other. A character-count estimate measured
     from 0.5x to 2.6x off the real size depending on string length, which let the two ledgers
-    disagree. A pool that retains its Arrow form counts those buffers too."""
+    disagree. A pool that retains its Arrow form counts the buffers it holds, not the logical size of a slice:
+    a slice keeps its whole backing buffer alive."""
     values = pool.values
-    arrow_bytes = 0 if pool.arrow is None else int(pool.arrow.nbytes)
+    arrow_bytes = 0 if pool.arrow is None else int(pool.arrow.get_total_buffer_size())
     if values.dtype != object:
         return int(values.nbytes) + arrow_bytes
     return sum(sys.getsizeof(v) for v in values) + 8 * len(values) + arrow_bytes

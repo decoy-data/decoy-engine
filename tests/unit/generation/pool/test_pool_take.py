@@ -286,5 +286,5 @@ def test_measured_pool_bytes_counts_the_retained_arrow_buffers() -> None:
     without = _typed_pool(words, None)
     assert with_arrow.arrow is not None
     assert _value_pool.measured_pool_bytes(with_arrow) == (
-        _value_pool.measured_pool_bytes(without) + with_arrow.arrow.nbytes
+        _value_pool.measured_pool_bytes(without) + with_arrow.arrow.get_total_buffer_size()
     )
