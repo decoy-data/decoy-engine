@@ -5,6 +5,7 @@ logic. It does not define FK equality semantics; those live in
 ``decoy_engine.execution._fk_keys``.
 """
 
+from decoy_engine.kernel._bucket import integer_width_exit_mask
 from decoy_engine.kernel._canonicalize import canonicalize_derive_source, encode_int
 from decoy_engine.kernel._scalar import (
     hash_array,
@@ -17,6 +18,7 @@ __all__ = [
     "canonicalize_derive_source",
     "encode_int",
     "hash_array",
+    "integer_width_exit_mask",
     "passthrough_array",
     "redact_array",
     "truncate_array",

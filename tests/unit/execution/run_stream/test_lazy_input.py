@@ -14,7 +14,7 @@ import contextlib
 import copy
 import inspect
 import stat
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -983,12 +983,21 @@ def test_the_no_sink_collector_spills_beneath_its_own_run_root(
     assert not root.exists()
 
 
-@pytest.mark.parametrize("fail", [RuntimeError("injected spill failure"), KeyboardInterrupt()])
+# Factories, not instances: pytest keeps parameter objects for the whole session, and a raised
+# exception keeps its traceback frames (and the results they hold) alive with it.
+@pytest.mark.parametrize(
+    "make_fail",
+    [lambda: RuntimeError("injected spill failure"), lambda: KeyboardInterrupt()],
+    ids=["fail0", "fail1"],
+)
 def test_a_failure_after_the_first_spill_write_removes_the_hold_and_the_run_root(
-    fail: BaseException, spill_job: tuple[dict[str, Any], Path], monkeypatch: pytest.MonkeyPatch
+    make_fail: Callable[[], BaseException],
+    spill_job: tuple[dict[str, Any], Path],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # AT-E5s; M-E5s2 closes the scratch scope only on success and leaves the root behind.
     cfg, path = spill_job
+    fail = make_fail()
     spy = _ScratchSpy(monkeypatch, fail=fail)
     with pytest.raises(type(fail)):
         _spill_run(cfg, LazySource(path))

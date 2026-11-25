@@ -32,10 +32,13 @@ written). Source-null cells are unaffected (null passthrough is not a leak).
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
+import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.contracts.bucketize_width import resolve_bucketize_width
+from decoy_engine.contracts.format_error_reasons import format_error_reason
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
@@ -46,9 +49,54 @@ from decoy_engine.execution._adapter import (
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool._events import QualityWarning
+from decoy_engine.kernel import integer_width_exit_mask
 from decoy_engine.plan._types import ColumnSeed
 
 _FORMATS = frozenset({"lower", "range", "midpoint"})
+_NOT_NUMERIC = "value is not numeric under bucketize"
+
+
+def _out_of_range_mask(nums: pd.Series) -> npt.NDArray[np.bool_]:
+    """B2/B3 positions of ``nums`` for an integer width, through the one kernel rule.
+
+    The comparison view is float64 with every missing value as NaN, which the rule never selects.
+    """
+    view = nums.to_numpy(dtype="float64", na_value=np.nan)
+    return np.asarray(integer_width_exit_mask(pa.array(view)).to_numpy(zero_copy_only=False))
+
+
+def _render_labels(
+    nums: pd.Series, width: int | float, fmt: str, *, declared_integer_output: bool
+) -> pd.Series:
+    """The bucket label of every number in ``nums``, keeping its dtype's missing values.
+
+    Integer width: ``lower`` is an Int64 column (the declared-integer output renders it once
+    later). Float width: float labels. Missing positions come back as the dtype's missing marker
+    or its string form; the caller restores the source cell there.
+    """
+    lower_f = np.floor(nums / width) * width
+    is_int_width = isinstance(width, int) and not isinstance(width, bool)
+    if is_int_width:
+        lower = lower_f.astype("Int64")
+        upper_excl = lower + int(width)
+    else:
+        lower = lower_f
+        upper_excl = lower + width
+
+    if fmt == "lower":
+        formatted = lower.astype(str)
+    elif fmt == "range":
+        upper = upper_excl - 1 if is_int_width else upper_excl
+        formatted = lower.astype(str) + "-" + upper.astype(str)
+    else:  # midpoint
+        mid = lower_f + width / 2
+        if is_int_width and int(width) % 2 == 0:
+            mid = mid.astype("Int64")
+        formatted = mid.astype(str)
+
+    if declared_integer_output and fmt == "lower" and is_int_width:
+        return lower  # F06: stays an integer; the declared formatter renders it once
+    return formatted
 
 
 class BucketizeStrategyHandler:
@@ -90,45 +138,44 @@ class BucketizeStrategyHandler:
 
         col = df[column]
         nums = pd.to_numeric(col, errors="coerce")
-        lower_f = np.floor(nums / width) * width
         is_int_width = isinstance(width, int) and not isinstance(width, bool)
+        uncoercible = (col.notna() & nums.isna()).to_numpy()  # D7, before any masking
+        out_of_range = _out_of_range_mask(nums) if is_int_width else np.zeros(len(nums), dtype=bool)
 
-        if is_int_width:
-            lower = lower_f.astype("Int64")
-            upper_excl = lower + int(width)
+        if out_of_range.any():
+            # B2/B3: mask on a separate series so the label arithmetic and the Int64 cast
+            # never see a value they cannot represent; `nums` itself stays untouched.
+            labelled = nums.where(~out_of_range)
+        elif not is_int_width and pd.api.types.is_integer_dtype(nums.dtype):
+            # B4: every integer dtype divides as float64, round-to-nearest (int64[pyarrow]
+            # would otherwise divide in Arrow, raise on a large value and quote it).
+            labelled = pd.Series(nums.to_numpy(dtype="float64", na_value=np.nan), index=nums.index)
         else:
-            lower = lower_f
-            upper_excl = lower + width
+            labelled = nums
+        formatted = _render_labels(
+            labelled,
+            width,
+            fmt,
+            declared_integer_output=bool(cfg.get("declared_integer_output")),
+        )
 
-        if fmt == "lower":
-            formatted = lower.astype(str)
-        elif fmt == "range":
-            upper = upper_excl - 1 if is_int_width else upper_excl
-            formatted = lower.astype(str) + "-" + upper.astype(str)
-        else:  # midpoint
-            mid = lower_f + width / 2
-            if is_int_width and int(width) % 2 == 0:
-                mid = mid.astype("Int64")
-            formatted = mid.astype(str)
-
-        if cfg.get("declared_integer_output") and fmt == "lower" and is_int_width:
-            formatted = lower  # F06: stays an integer; the declared formatter renders it once
-
-        # Sprint 2 honesty pack (D7): a non-null cell that fails numeric
-        # coercion is a per-row format error, NOT a silent keep-original.
-        # `col.notna()` isolates non-null source cells; among those, `nums`
-        # NaN means coercion failed. Null source cells stay null (unchanged,
-        # no error) via `formatted.where(nums.notna(), col)` below, which is
-        # unchanged from before -- only the bookkeeping is new.
-        non_null_and_uncoercible = col.notna() & nums.isna()
-        for i in np.flatnonzero(non_null_and_uncoercible.to_numpy()):
+        # Sprint 2 honesty pack (D7): a non-null cell that fails numeric coercion is a per-row
+        # format error, NOT a silent keep-original; null source cells are not errors. D7 and the
+        # B2/B3 range exits are disjoint (an uncoercible cell has no number to be out of range).
+        # One record per bad cell, in row order.
+        range_reason = format_error_reason("bucketize")
+        for i in np.flatnonzero(uncoercible | out_of_range):
             ctx.row_errors.append(
                 RowError(
                     column=column,
                     row_index=int(i),
                     trigger="format_error",
-                    reason="value is not numeric under bucketize",
+                    reason=range_reason if out_of_range[i] else _NOT_NUMERIC,
                 )
             )
-        df[column] = formatted.where(nums.notna(), col)
+        # Missing and uncoercible cells keep the source value; a range exit is null (the
+        # pipeline drops or quarantines the row, and the bad number is never retained).
+        keep_label = nums.notna().to_numpy() | out_of_range
+        result = formatted.where(keep_label, col)
+        df[column] = result.mask(out_of_range) if out_of_range.any() else result
         return df, []
