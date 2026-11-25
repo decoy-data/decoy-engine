@@ -2,7 +2,7 @@ Status: plan
 
 # GEN-NONFAKER-DRAWS S3: computed draws on the generate side (uuid, integer range, element choice)
 
-Owner: Cam. Author: Opus. Date: 2026-11-25. Revision 3 (Dennis R1 and Codex R1 folded). Row: GEN-NONFAKER-DRAWS. Parent plan: revision 4 on branch `plan/gen-nonfaker-draws` ("rev 4" below), sections 5.3, 8, 10 and 12. S1a is merged (#775). S2 is PR #797, open at `2b98183ba`, in gate. S1b (mask-side admission on the remaining native routes, if the closing set keeps it) is not built and is not a dependency of S3.
+Owner: Cam. Author: Opus. Date: 2026-11-25. Revision 4 (Dennis R1, Codex R1 to R4 folded; RNG-model wording corrected against the GVS plan review). Row: GEN-NONFAKER-DRAWS. Parent plan: revision 4 on branch `plan/gen-nonfaker-draws` ("rev 4" below), sections 5.3, 8, 10 and 12. S1a is merged (#775). S2 is PR #797, open at `2b98183ba`, in gate. S1b (mask-side admission on the remaining native routes, if the closing set keeps it) is not built and is not a dependency of S3.
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md`, `profiles/local-operations.md`, `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `api-and-compatibility.md` (named byte change), `performance.md`, `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md` and `CODEMAP.md` "Where Things Go".
 
@@ -52,17 +52,19 @@ Size:
 
 Search run on 2026-11-25:
 
-- Online: NumPy random docs for `PCG64`, `PCG64.advance` and `BitGenerator.random_raw`; the PCG paper (O'Neill 2014) on jump-ahead; RFC 9562 section 5.4 (UUID version 4 layout); Lemire, "Fast random integer generation in an interval" (2019); the JAX and NumPy guidance on counter-based and seekable streams.
-- Codebase: `generation/pool/_computed_draw.py` (S1a formatters), `generators/derivation.py:219-222` and `:335-354` (seeding families), the GVS plan (`next_array`), the GSA plan (`pool_take`, group A), `generation/window.py` (the window contract), `execution/native/_draw_sites_gen.py` (draw site registry).
+- Online: NumPy random docs for `PCG64`, `PCG64.advance` and `BitGenerator.random_raw`; the PCG paper (O'Neill 2014) on jump-ahead; RFC 9562 section 5.4 (UUID version 4 layout); Lemire, "Fast random integer generation in an interval" (2019); the NumPy guidance on seekable bit generators (`advance`, `jumped`).
+- Codebase: `generation/pool/_computed_draw.py` (S1a formatters), `generators/derivation.py:219-222` and `:335-354` (seeding families), the GVS plan (its CPython MT19937 replay, for contrast), the GSA plan (`pool_take`, group A), `generation/window.py` (the window contract), `execution/native/_draw_sites_gen.py` (draw site registry).
 
 Findings and the source each part follows:
 
-- Seekable stream: `PCG64.advance(delta)` jumps the state forward in O(log delta). With a fixed number of raw words per value, value i is a pure function of (seed, i). This is the counter-based pattern the GVS plan already picked for `next_array`. S3a follows it.
+- Seekable stream: `PCG64.advance(delta)` jumps the state forward in O(log delta). With a fixed number of raw words per value, value i is a pure function of (seed, i). PCG64 is a sequential generator with jump-ahead, not a counter-based generator such as Philox; the fixed word count per value is what makes it seekable. This is S3a's own choice. No other plan supplies it:
+  - GVS does not use this model. Its `next_array` replays CPython's `random` (MT19937) on numpy and carries one `random.Random` state from batch to batch, because its streams must keep today's bytes. S3a changes bytes on purpose (a named byte change), so it does not need the CPython replay. It needs a value at row i that does not depend on how earlier rows were batched, and that is what the jump-ahead gives.
+  - The mask side (S2, #797) has no generator state at all. `execution/native/draw/_computed_batch.py::deterministic_computed_array` derives each value from the keyed hash of its source value under `computed_selection_namespace(column, provider)`. The generate side has no source value, so S3a draws from (column seed, row number). The two sides share only the S1a formatters (`uuid_from_bits` or `uuid_from_hex`, `int_from_index`, `choice_from_index`) and the argument contract. Generate and mask outputs are not expected to be equal.
 - Words to uuid: RFC 9562 section 5.4. `uuid_from_bits` (S1a) sets the version and variant bits. S3a feeds it 16 bytes per value: two raw uint64 words, little-endian, `words.astype("<u8").view(np.uint8).reshape(n, 16)`. The byte order is stated so a big-endian host gives the same strings.
 - Words to an index: `word % count`. Bias is at most `count / 2**64`; with the S1a cap `_COUNT_MAX = 2**56` it is at most 1/256 for the largest range, and below 1e-15 for ranges up to 10,000. Lemire's method removes the bias but needs rejection, which breaks the fixed words-per-value rule and so breaks seekability. The bias is recorded as a known issue, not fixed.
 - Family separation: `GenDeriveContext.family_bytes(label)` already gives independent keys per label (`POOL_BUILD_FAMILY`, `POOL_SELECTION_FAMILY`). S3a adds one label beside them.
 
-The only custom code is the wiring of a stream into the three sites. Everything else reuses S1a names, NumPy and GVS's stream method.
+The only custom code is the wiring of a stream into the three sites. Everything else reuses S1a names and NumPy. The stream protocol (`next_batch`, optional `next_array`) is #813's.
 
 ## 4. Reuse inventory
 
@@ -146,7 +148,7 @@ The module and its consumer land in the same slice (S3a), so no consumer gap exi
 ### 5.5 Design notes
 
 - One place per fact: the argument contract stays in `providers_v2`, the formatting in `generation.pool`, the stream and the admission in one module. No site restates admission.
-- Established pattern: a seekable counter-style stream (PCG64 advance), RFC 9562 layout (section 3).
+- Established pattern: a seekable sequential generator (PCG64 with `advance` jump-ahead and a fixed word count per value), RFC 9562 layout (section 3).
 - Dependency direction: `generation.stream` imports `generation.pool` and `providers_v2` through their public names. It imports nothing from `execution`.
 - House style: `open_computed_stream` takes the column, the context and a keyword caller kind; no flag argument switches its behavior.
 
