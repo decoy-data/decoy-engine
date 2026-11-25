@@ -141,17 +141,17 @@ def _pandas_options() -> dict[str, Any]:
     return found
 
 
-def _case_key(kind: str, table: pa.Table, data: bytes, meta: dict[str, Any]) -> str:
-    """Names the case from its inputs alone: the format, the bytes the base reader saw and the
-    walk arguments."""
+def _case_key(kind: str, table: pa.Table, meta: dict[str, Any]) -> str:
+    """Names the case from its inputs alone: the format, the table and the walk arguments.
+
+    The table, not the Parquet bytes it was written to: a Parquet writer may order the
+    dictionary of a repeated-value column differently from run to run, so the bytes would name
+    one case by several keys (`data` is always `parquet_bytes(table)` here)."""
     digest = hashlib.sha256(kind.encode())
-    if kind == "resident":
-        sink = pa.BufferOutputStream()
-        with pa.ipc.new_stream(sink, table.schema) as writer:
-            writer.write_table(table)
-        digest.update(sink.getvalue().to_pybytes())
-    else:
-        digest.update(data)
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    digest.update(sink.getvalue().to_pybytes())
     digest.update(
         repr(sorted((k, sorted(v) if k == "declared_pk" else v) for k, v in meta.items())).encode()
     )
@@ -255,7 +255,7 @@ def base_profile(
     }
     # The key names the case from its inputs alone, so a case whose base reader refused the table
     # is looked up in the pins like any other and never answered by the current environment.
-    key = _case_key(kind, table, data, meta)
+    key = _case_key(kind, table, meta)
     pins = _load_pins()
     base_src = os.environ.get(_RECORD_ENV)
     if base_src and key not in pins:
