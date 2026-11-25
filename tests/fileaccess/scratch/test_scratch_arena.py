@@ -235,6 +235,103 @@ def test_a_child_keeps_its_opener_alive(temp_root: Path) -> None:
     assert [p for p in temp_root.iterdir() if p.name.startswith("decoy-arena-")] == []
 
 
+def _open_fds() -> int:
+    return (
+        len(os.listdir("/proc/self/fd"))
+        if os.path.isdir("/proc/self/fd")
+        else len(os.listdir("/dev/fd"))
+    )
+
+
+def _plant_tree(arena: ScratchArena, name: str) -> ScratchArena:
+    child = arena.create_dir(name)
+    os.close(child.create_file("top"))
+    sub = child.create_dir("sub")
+    os.close(sub.create_file("leaf"))
+    sub.create_dir("empty")
+    return child
+
+
+@pytest.fixture
+def unremovable(temp_root: Path) -> Iterator[Callable[[ScratchArena], None]]:
+    """Make a planted child impossible to clear: a read-only subdirectory holding a file."""
+    locked: list[str] = []
+
+    def lock(arena: ScratchArena) -> None:
+        path = os.path.join(arena.local_path(), "t", "sub")
+        os.chmod(path, 0o500)
+        locked.append(path)
+
+    yield lock
+    for path in locked:
+        if os.path.isdir(path):
+            os.chmod(path, 0o700)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "nested",
+        "symlinked_child",
+        "file_child",
+        "marker_refused",
+        "bad_component",
+        "unremovable",
+        "fd_closed",
+    ],
+)
+def test_remove_tree(
+    case: str, tmp_path: Path, unremovable: Callable[[ScratchArena], None]
+) -> None:
+    with ScratchArena.fresh() as arena:
+        root = Path(arena.local_path())
+        if case == "nested":
+            _plant_tree(arena, "t")
+            report = arena.remove_tree("t")
+            assert report.disposition is Disposition.REMOVED
+            assert not (root / "t").exists()
+        elif case == "symlinked_child":
+            target = tmp_path / "target"
+            target.mkdir()
+            (target / "keep").write_text("x")
+            os.symlink(target, root / "t")
+            report = arena.remove_tree("t")
+            assert report.disposition is Disposition.REMOVED
+            assert not os.path.lexists(root / "t")
+            assert (target / "keep").read_text() == "x"
+        elif case == "file_child":
+            os.close(arena.create_file("t"))
+            assert arena.remove_tree("t").disposition is Disposition.REMOVED
+            assert not os.path.lexists(root / "t")
+        elif case == "marker_refused":
+            _plant_tree(arena, "t")
+            with pytest.raises(FileAccessDenied):
+                arena.remove_tree(".decoy-arena")
+            assert (root / ".decoy-arena").is_file() and (root / "t" / "top").is_file()
+        elif case == "bad_component":
+            _plant_tree(arena, "t")
+            for bad in ("t/sub", "..", ""):
+                with pytest.raises(FileAccessDenied):
+                    arena.remove_tree(bad)
+            assert (root / "t" / "sub" / "leaf").is_file()
+        elif case == "unremovable":
+            _plant_tree(arena, "t")
+            unremovable(arena)
+            report = arena.remove_tree("t")
+            assert report.disposition is Disposition.RETAINED
+            assert report.retained_bytes is None and report.retained_inodes is None
+        else:
+            kept = [_plant_tree(arena, "ok"), _plant_tree(arena, "t")]
+            gc.collect()
+            held = _open_fds()  # `kept` pins the arena's descriptors, so only a leak can move it
+            assert arena.remove_tree("ok").disposition is Disposition.REMOVED
+            assert _open_fds() == held
+            unremovable(arena)
+            assert arena.remove_tree("t").disposition is Disposition.RETAINED
+            assert _open_fds() == held
+            assert len(kept) == 2
+
+
 def test_remove_takes_a_file_or_an_empty_directory() -> None:
     with ScratchArena.fresh() as arena:
         os.close(arena.create_file("f"))
