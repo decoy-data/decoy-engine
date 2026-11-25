@@ -371,7 +371,8 @@ def finish_validation(
     """Stamp `quality_metrics["validation"]`, then fail closed on any finding.
 
     Runs before the sink publish so a failed validation commits nothing. The run's bound
-    session records `tables` as complete, so a resident return is not checked a second time.
+    session records this collector's verdict on `tables`, so a resident return is not checked a
+    second time and the session's `close` does not refuse them as unseen.
     """
     if collector is None:
         return
@@ -383,5 +384,4 @@ def finish_validation(
         raise ValidatorFailedError(report)
     session = active_validation_session()
     if session is not None:
-        for table in tables:
-            session.table_complete(table)
+        session.record_external_verdict(tables, owner="out_of_core_collector")

@@ -414,20 +414,25 @@ def finalize_validators_and_quarantine(
     the first return value; post-validation uses the second to align the
     sources it scans to the filtered output.
     """
-    from decoy_engine.validators import run_resident_validation
+    from decoy_engine.validators import active_validation_session, run_resident_validation
 
     # Only resident tables pair with an output; `caller_sources` must be aligned to these outputs.
     resident = {name: src for name, src in caller_sources.items() if isinstance(src, pa.Table)}
     v_report = run_resident_validation(outputs, config, resident)
     if v_report is not None:
         stamp_validation(quality_metrics, config, v_report)
-    return finalize_quarantine(
+    settled = finalize_quarantine(
         outputs,
         v_report,
         config=config,
         mask_row_errors=mask_row_errors,
         quality_metrics=quality_metrics,
     )
+    # finalize_quarantine returned, so it judged the report: nothing failed, or quarantine covered.
+    session = active_validation_session()
+    if session is not None and v_report is not None:
+        session.record_verdict(v_report)
+    return settled
 
 
 def finalize_quarantine(

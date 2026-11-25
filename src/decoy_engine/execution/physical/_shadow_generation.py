@@ -245,13 +245,14 @@ def enforce_validators(
     outputs: Mapping[str, pa.Table],
     sources: Mapping[str, pa.Table],
 ) -> None:
-    """Fail a standalone shadow result that its configured validators reject.
+    """Judge a standalone shadow result, feed the run's session with it, or defer it by name.
 
-    The config is the one the caller handed the context (`ctx.validation_config`), else the
-    generation payload the plan embeds. A context with neither has an enclosing caller that
-    validates the result itself (the unified slice does, on the rendered bytes), so nothing runs
-    here. With a session bound to the run the outputs feed that session, which fails at its own
-    finish; they are never skipped.
+    A context whose `validation_owner` is set belongs to a caller that validates the result
+    itself (the unified slice, on the rendered bytes): it defers the tables to that owner, and
+    the session's `close` refuses them if the owner never feeds them. Otherwise a bound session
+    is fed and judges at `close`, whatever the context carries. With no session the config the
+    caller handed the context (`ctx.validation_config`), else the generation payload the plan
+    embeds, judges here.
 
     Raises:
         ValidatorFailedError: A configured validator found a failing row in `outputs`.
@@ -259,14 +260,18 @@ def enforce_validators(
     from decoy_engine.errors import ValidatorFailedError
     from decoy_engine.validators import active_validation_session, run_resident_validation
 
+    session = active_validation_session()
+    if ctx.validation_owner is not None:
+        if session is not None:
+            session.defer(outputs, owner=ctx.validation_owner)
+        return
+    if session is not None:
+        session.observe_unobserved(outputs, sources)
+        return
     config = ctx.validation_config
     if config is None and ctx.plan is not None and ctx.plan.generation is not None:
         config = _decode_generation_config_shallow(ctx.plan.generation.config_json)
     if config is None:
-        return
-    session = active_validation_session()
-    if session is not None:
-        session.observe_unobserved(outputs, sources)
         return
     report = run_resident_validation(outputs, dict(config), sources)
     if report is not None and not report.passed:

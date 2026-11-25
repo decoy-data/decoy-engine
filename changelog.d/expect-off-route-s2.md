@@ -26,3 +26,12 @@ A validator parameter error or finding never carries the parameter text: a bad r
 parser (`validators/_params.py`), and a failing `regex_match` finding no longer quotes its pattern.
 A standalone shadow run with a validation session bound feeds that session instead of skipping it, and a
 standalone full-frame run judges its result when the context carries `validation_config`.
+
+Every table a run delivers is judged exactly once. Marking a table complete no longer counts as
+judging it: `ValidationSession.close()` finishes the session, then raises `ValidatorFailedError` for a
+finding on any table no caller judged, whichever step fed it. Full frame's quarantine pass records
+its verdict, so a covered failure is not raised twice. The out-of-core collector records its own
+verdict under an owner token. A step may leave a table to another caller only with an explicit owner
+token (`ShadowContext.validation_owner`; the unified slice sets it), and `close()` refuses a table
+that was deferred or marked complete but never fed, with the new reason code
+`validator_table_not_observed`.

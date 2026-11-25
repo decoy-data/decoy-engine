@@ -154,6 +154,9 @@ class ShadowContext:
     # validates the result itself (the unified slice checks the rendered bytes).
     validation_config: Mapping[str, Any] | None = field(default=None, repr=False)
     provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None = None
+    # The caller that commits to feeding this result to the run's validation session itself.
+    # Set, the coordinator defers its tables to that owner instead of judging them.
+    validation_owner: str | None = None
 
     def _validate(self) -> None:
         if self.batch_size_rows < 1:
@@ -182,6 +185,7 @@ class ShadowContext:
         quarantine_config: Any = None,
         validation_config: Mapping[str, Any] | None = None,
         provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None = None,
+        validation_owner: str | None = None,
     ) -> ShadowContext:
         """Resolve `mask_key` the same way `run_pipeline` does
         (`keyprovider.resolve_mask_key`), so the shadow side and the oracle,
@@ -242,4 +246,5 @@ class ShadowContext:
             quarantine_requested=quarantine_config is not None,
             validation_config=validation_config,
             provider_snapshot=provider_snapshot,
+            validation_owner=validation_owner,
         )

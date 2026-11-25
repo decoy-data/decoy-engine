@@ -98,6 +98,7 @@ __all__ = [
     "VALIDATOR_KEY_STATE_OVER_BUDGET",
     "VALIDATOR_SOURCE_PAIRING_MISMATCH",
     "VALIDATOR_SPAN_REPEATED",
+    "VALIDATOR_TABLE_NOT_OBSERVED",
     "VAULT_COMMIT_FAILED",
     "VAULT_CRYPTO_NOT_INSTALLED",
     "VAULT_ENTRY_TOO_LARGE",
@@ -539,6 +540,11 @@ VALIDATOR_KEY_STATE_OVER_BUDGET = _d(
 VALIDATOR_SOURCE_PAIRING_MISMATCH = _d(
     "validator_source_pairing_mismatch",
     "The source rows read for a leak check do not line up with the published rows.",
+    since=UNRELEASED,
+)
+VALIDATOR_TABLE_NOT_OBSERVED = _d(
+    "validator_table_not_observed",
+    "A table was marked complete or left to an owner, but no validator ever saw its rows.",
     since=UNRELEASED,
 )
 VALIDATOR_COLUMN_MISSING = _d(

@@ -3,12 +3,14 @@ validators reject (EXPECT-OFF-ROUTE S2, round 1)."""
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from decoy_engine.errors import ValidatorFailedError
+from decoy_engine import reasons
+from decoy_engine.errors import ValidatorFailedError, ValidatorStateError
 from decoy_engine.execution.physical._compiler import compile_physical_plan
 from decoy_engine.execution.physical._shadow_context import ShadowContext
 from decoy_engine.execution.physical._shadow_coordinator import ShadowCoordinator
@@ -127,3 +129,63 @@ def test_full_frame_branch_returns_output_a_validator_accepts(tmp_path: Path) ->
     ctx = _build_ctx(inputs, config, validation_config=config)
     result = _coordinator(inputs, ctx).run(plan, capture_shadow_snapshot(sources))
     assert _TABLE in result.outputs
+
+
+# --- Plan section 3a: under a bound session, `close` judges what the coordinator fed -------------
+
+
+def _full_frame_reject_all(tmp_path: Path) -> tuple[Any, Any, Any, Any, Any]:
+    config, source = _admitted_table_config(tmp_path)
+    config["validators"] = [
+        {"name": "regex_match", "columns": {_TABLE: ["shuffled"]}, "params": _REJECT_ALL}
+    ]
+    sources = {_TABLE: source}
+    inputs, plan = _capture(config, sources)
+    return config, inputs, plan, _build_ctx(inputs, config), capture_shadow_snapshot(sources)
+
+
+def test_v15b_default_context_full_frame_is_judged_at_close(tmp_path: Path) -> None:
+    config, inputs, plan, ctx, snapshot = _full_frame_reject_all(tmp_path)
+    with bind_validation_session(config, key_state_budget=lambda: None) as session:
+        assert session is not None
+        _coordinator(inputs, ctx).run(plan, snapshot)
+        with pytest.raises(ValidatorFailedError):
+            session.close()
+        assert session.unjudged_tables() == []
+
+
+def test_v15d_generation_fed_under_a_session_is_judged_at_close() -> None:
+    config = _generate_config()
+    config["validators"] = [
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+    ]
+    plan, ctx, snapshot = _admitted_dispatch(config)
+    with bind_validation_session(config, key_state_budget=lambda: None) as session:
+        assert session is not None
+        ShadowCoordinator(ctx=ctx).run(plan, snapshot)
+        with pytest.raises(ValidatorFailedError):
+            session.close()
+        assert session.unjudged_tables() == []
+
+
+def test_v15e_mixed_driver_under_a_session_is_judged_at_close(tmp_path: Path) -> None:
+    config, inputs, plan, ctx, snapshot = _mixed_reject_all(tmp_path)
+    with bind_validation_session(config, key_state_budget=lambda: None) as session:
+        assert session is not None
+        ShadowCoordinator(ctx=ctx, registry=inputs.registry).run(plan, snapshot)
+        with pytest.raises(ValidatorFailedError):
+            session.close()
+
+
+def test_v15g_an_owned_context_defers_and_close_refuses_when_the_owner_never_feeds(
+    tmp_path: Path,
+) -> None:
+    config, inputs, plan, ctx, snapshot = _full_frame_reject_all(tmp_path)
+    owned = dataclasses.replace(ctx, validation_owner="unified_slice")
+    with bind_validation_session(config, key_state_budget=lambda: None) as session:
+        assert session is not None
+        _coordinator(inputs, owned).run(plan, snapshot)
+        assert session.unobserved_tables([_TABLE]) == [_TABLE]
+        with pytest.raises(ValidatorStateError) as caught:
+            session.close()
+    assert caught.value.code == reasons.runtime.VALIDATOR_TABLE_NOT_OBSERVED

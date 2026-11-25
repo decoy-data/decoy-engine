@@ -986,7 +986,8 @@ def test_duplicate_entries_with_different_parameters_stay_separate(tmp_path: Pat
     assert [f.validator for f in report.findings] == ["regex_match"] * 3
     assert report.validators_run == ("regex_match",)  # names dedup, findings do not
     assert report.findings[0].failing_row_indices == report.findings[2].failing_row_indices
-    assert "'^ab.$'" in report.findings[1].detail and "'^ab.$'" not in report.findings[0].detail
+    # A finding never quotes its pattern (value-free), so the entries differ only in their slot.
+    assert all("^ab.$" not in f.detail and "[a-z]" not in f.detail for f in report.findings)
 
 
 def test_a_repeated_column_in_one_entry_is_two_findings(tmp_path: Path) -> None:

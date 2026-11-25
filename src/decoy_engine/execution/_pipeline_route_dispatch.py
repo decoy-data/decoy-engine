@@ -79,10 +79,10 @@ def complete_resident_validation(
     """Finish the run's validation over the outputs a resident route returned.
 
     Tables no earlier observer completed are fed here; a table finalize already folded is not
-    fed again. A failure on tables fed here fails the run. A failure on tables finalize folded
-    was already judged there (raised, or covered by quarantine). The report is stored once.
+    fed again. `close` then fails the run on every table no judge acted on, whoever fed it; a
+    table finalize judged (raised, or covered by quarantine) is not raised twice. The report is
+    stored once.
     """
-    from decoy_engine.errors import ValidatorFailedError
     from decoy_engine.execution._pipeline_finalize import stamp_validation
 
     pending = session.unobserved_tables(result.outputs)
@@ -97,10 +97,7 @@ def complete_resident_validation(
         elif isinstance(source, pa.Table):
             resident[name] = source
     session.observe_unobserved(result.outputs, resident)
-    fed = bool(pending)
-    report = session.finish()
-    if fed and not report.passed:
-        raise ValidatorFailedError(report)
+    report = session.close()
     if "validation" not in result.quality_metrics:
         stamp_validation(result.quality_metrics, ctx.config, report)
     return result

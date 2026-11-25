@@ -242,8 +242,12 @@ def _execute_admitted(
             unified_slice_enabled=True,
         )
 
+        # The slice feeds its rendered bytes to the run's session (`_render_and_seal`).
         ctx = ShadowContext.from_key_provider(
-            plan=plan, key_provider=key_provider, native_threads=native_threads
+            plan=plan,
+            key_provider=key_provider,
+            native_threads=native_threads,
+            validation_owner="unified_slice",
         )
         snapshot = capture_shadow_snapshot({candidate.table: candidate.source})
 

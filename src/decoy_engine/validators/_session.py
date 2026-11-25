@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.errors import ValidatorStateError
+from decoy_engine.errors import ValidatorFailedError, ValidatorStateError
 from decoy_engine.validators._fold import KeyStateBudget, assemble_report, finding_index_cap
 from decoy_engine.validators._registry import build_fold
 from decoy_engine.validators._types import (
@@ -127,6 +127,12 @@ class ValidationSession:
             self._folds.append(fold)
         self._rows: dict[str, int] = {}
         self._complete: set[str] = set()
+        # Plan section 3a: completion is not judgement. A fed table is judged by a caller that
+        # records this session's verdict, or else by `close`; an external verdict and a deferral
+        # each name the owner that answers for the table.
+        self._judged: set[str] = set()
+        self._external: set[str] = set()
+        self._deferred: set[str] = set()
         self._explicit_source_rows: dict[str, int] = {}
         self._elapsed = 0.0
         self._report: ValidationReport | None = None
@@ -214,8 +220,57 @@ class ValidationSession:
         return any(getattr(fold, "reads_sources", False) for fold in self._folds)
 
     def table_complete(self, table: str) -> None:
-        """The table has delivered every row; keyed folds may resolve what waited on it."""
+        """The table has delivered every row; keyed folds may resolve what waited on it.
+
+        Completion is not a judgement: ``close`` refuses a completed table nobody fed or judged.
+        """
         self._complete_table(table)
+
+    def defer(self, tables: Iterable[str], *, owner: str) -> None:
+        """Leave ``tables`` to ``owner``, which commits to feeding them before ``close``."""
+        _require_owner(owner)
+        self._deferred.update(tables)
+
+    def record_external_verdict(self, tables: Iterable[str], *, owner: str) -> None:
+        """``owner`` judged ``tables`` itself and fails the run on any finding; they are complete."""
+        _require_owner(owner)
+        for table in tables:
+            self._external.add(table)
+            self._complete_table(table)
+
+    def record_verdict(self, report: ValidationReport) -> None:
+        """A judge acted on ``report``: it raised, or quarantine covered the failure.
+
+        Only this session's own report settles its tables, so a stale or foreign report leaves
+        them for ``close``.
+        """
+        if report is self._report:
+            self._judged.update(self._rows)
+
+    def unjudged_tables(self) -> list[str]:
+        """Fed tables no judge has acted on yet."""
+        return sorted(t for t in self._rows if t not in self._judged and t not in self._external)
+
+    def close(self) -> ValidationReport:
+        """Finish, then judge every fed table no caller judged, whoever fed it.
+
+        Raises:
+            ValidatorStateError: A table was completed or deferred but never fed or judged
+                (``validator_table_not_observed``).
+            ValidatorFailedError: A finding falls on a table no caller judged or vouched for.
+        """
+        report = self.finish()
+        unseen = sorted((self._complete | self._deferred) - self._rows.keys() - self._external)
+        if unseen:
+            raise ValidatorStateError(
+                code=reasons.runtime.VALIDATOR_TABLE_NOT_OBSERVED,
+                message=f"no validator saw the rows of table {unseen[0]!r}.",
+            )
+        settled = self._judged | self._external
+        self._judged.update(self._rows)
+        if not report.passed and any(f.table not in settled for f in report.findings):
+            raise ValidatorFailedError(report)
+        return report
 
     def _source_rows(
         self,
@@ -290,3 +345,8 @@ class ValidationSession:
                                 "published rows."
                             ),
                         )
+
+
+def _require_owner(owner: str) -> None:
+    if not owner:
+        raise ValueError("an owner token is required to defer or judge a table outside the session")
