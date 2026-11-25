@@ -340,10 +340,9 @@ def fpe_checksum_config_rejection(
     column: str, provider_config: Mapping[str, Any], *, context: FpeChecksumContext
 ) -> str | None:
     """`fpe_checksum_rejection` for a provider-config mapping: reads the scheme, resolves the
-    charset without raising (config validation stays at its own gate) and forwards both."""
+    charset without raising (config validation stays at its own gate) and forwards both. An
+    absent scheme is forwarded too: the shared decision alone says an absent scheme passes."""
     scheme = provider_config.get("checksum") or None
-    if scheme is None:
-        return None
     spec = provider_config.get("charset", "digits")
     charset = resolve_fpe_charset(spec) if isinstance(spec, str) else ""
     return fpe_checksum_rejection(column, scheme, charset, context=context)

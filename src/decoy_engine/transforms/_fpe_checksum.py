@@ -37,6 +37,28 @@ _EXACT_LENGTHS: dict[str, frozenset[int]] = {
 _MIN_LENGTHS: dict[str, int] = {"luhn": 2}
 
 
+def max_fixed_length(scheme: str | None) -> int | None:
+    """The longest legal value for a fixed-width scheme, or None when there is no ceiling.
+
+    The caller stops collecting in-charset positions once it passes this, so a oversized cell
+    is refused without a copy proportional to its length."""
+    exact = _EXACT_LENGTHS.get(scheme) if scheme else None
+    return max(exact) if exact else None
+
+
+def _require_ascii_digits(scheme: str, part: str) -> None:
+    """Fail closed, value-free, when a digit-only part carries any other character.
+
+    An accepted ALPHANUM charset lets a nondigit reach the digit arithmetic, whose own error
+    would quote the part."""
+    if not (part.isascii() and part.isdigit()):
+        raise FpeChecksumError(
+            "FPE checksum mode: a position that must be a digit holds another character, "
+            "so the check digit cannot be computed. The engine fails closed.",
+            scheme=scheme,
+        )
+
+
 def _validate_scheme_length(scheme: str, s: str) -> None:
     """Fail closed unless ``s`` has a valid length for ``scheme``.
 
@@ -188,6 +210,13 @@ def _fpe_checksum_permute(
             )
 
         _DIGITS_ONLY = "0123456789"
+
+        # The pinned NPI leading digit and ISBN-13 bookland prefix skip `_permute`, so no
+        # charset gate checks them before the check-digit arithmetic. Validate them here.
+        if scheme == "npi":
+            _require_ascii_digits(scheme, s[0])
+        elif scheme == "isbn13":
+            _require_ascii_digits(scheme, s[:3])
 
         # luhn / ean13 / gtin: digit-only, check digit at end.
         if scheme in ("luhn", "ean13", "gtin"):

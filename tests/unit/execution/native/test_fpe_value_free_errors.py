@@ -20,7 +20,7 @@ from decoy_engine.transforms.fpe import fpe_encrypt_value
 from tests.native._chunked_entry_support import ENGINE_VERSION, TABLE, key_provider, make_config
 
 DUP = "CQZ9CQZ9"  # a duplicate-symbol charset that is plain printable ASCII
-ONE = "QQQQ"  # one distinct symbol
+ONE = "Q"  # one distinct symbol: degenerate, no duplicate
 SCHEME = "CANARYSCHEME"
 NS = "people.ssn"
 

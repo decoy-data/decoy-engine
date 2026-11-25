@@ -192,3 +192,19 @@ def test_a_malformed_non_string_scheme_declines_coded_not_raises(
     """An unhashable or non-string scheme is malformed config. The decision keeps the coded
     decline it gave before the registry check existed, instead of raising `TypeError`."""
     assert fpe_checksum_config_rejection("c", {"checksum": scheme}, context="payload") == DECLINE
+
+
+@pytest.mark.parametrize("config", [{}, {"checksum": ""}, {"checksum": None}])
+def test_the_mapping_adapter_delegates_an_absent_scheme_to_the_shared_decision(
+    monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]
+) -> None:
+    """The adapter has no pass-through of its own: the one decision says an absent scheme passes."""
+    seen: list[Any] = []
+
+    def spy(column: str, scheme: Any, charset: str, *, context: str) -> str | None:
+        seen.append((column, scheme, context))
+        return None
+
+    monkeypatch.setattr(rej, "fpe_checksum_rejection", spy)
+    assert rej.fpe_checksum_config_rejection("c", config, context="payload") is None
+    assert seen == [("c", None, "payload")]

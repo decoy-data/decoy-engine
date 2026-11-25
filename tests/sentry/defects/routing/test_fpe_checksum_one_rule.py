@@ -45,11 +45,14 @@ SCHEME_READS: dict[Edge, tuple[int, str]] = {
     ("execution/_strategies/_fpe.py", "FpeStrategyHandler.run"): (1, "oracle carrier"),
     ("execution/out_of_core/_mask_group_b.py", "fpe_array"): (1, "oracle carrier"),
     ("execution/native/_crypto_ext.py", "FpeConfig.from_mapping"): (1, "config carrier"),
-    ("execution/native/_crypto_ext.py", "FpeConfig._resolve"): (1, "config carrier"),
+    ("execution/native/_crypto_ext.py", "FpeConfig._resolve"): (
+        3,
+        "config carrier: one read, then the bound name is used twice (the luhn guard, the return)",
+    ),
     ("execution/native/_crypto_reference.py", "_ReferenceFpe._run"): (1, "oracle carrier"),
     ("execution/native/_operator_params.py", "resolve_operator_params"): (1, "params carrier"),
     ("execution/native/_fpe_route.py", "fpe_config_from_params"): (1, "params to config"),
-    (REJ, ADAPTER): (1, "adapter reads the scheme once and forwards it"),
+    (REJ, ADAPTER): (2, "adapter reads the scheme once and forwards the bound name"),
     ("execution/native/_fpe_ext.py", "_CompiledFpeKernel.run"): (1, "wrapper backstop"),
     ("execution/native/_fpe_ext.py", "load_compiled_fpe_kernel"): (
         1,
@@ -161,7 +164,8 @@ def field_readers(source: str, rel: str) -> Counter[Edge]:
 
 def scheme_reads(source: str, rel: str) -> Counter[Edge]:
     """Reads of the configured scheme: a mapping key read, a `.checksum` attribute, and any use
-    of a name bound to the scheme slot of `_resolve()` (the fourth item)."""
+    of a name bound to the scheme slot of `_resolve()` (the fourth item) or assigned from an
+    expression that reads the scheme."""
     tree = ast.parse(source)
     out: Counter[Edge] = Counter()
     bound: dict[str, set[str]] = {}
@@ -177,6 +181,24 @@ def scheme_reads(source: str, rel: str) -> Counter[Edge]:
             and isinstance(node.targets[0].elts[3], ast.Name)
         ):
             bound.setdefault(scope, set()).add(node.targets[0].elts[3].id)
+    # A name assigned from an expression that reads the scheme (`checksum = self.checksum or None`)
+    # carries the scheme too, so a later branch on it is a use of the scheme.
+    for scope, node in scoped:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and any(
+                _key_read(n, SCHEME)
+                or (
+                    isinstance(n, ast.Attribute)
+                    and n.attr == SCHEME
+                    and isinstance(n.ctx, ast.Load)
+                )
+                for n in ast.walk(node.value)
+            )
+        ):
+            bound.setdefault(scope, set()).add(node.targets[0].id)
     for scope, node in scoped:
         if _key_read(node, SCHEME):
             out[(rel, scope)] += 1
@@ -856,4 +878,18 @@ def test_the_text_mask_restriction_check_reads_the_boolean_relation(
 
 def test_a_second_read_inside_a_listed_function_changes_the_count() -> None:
     src = "def f(cfg):\n    a = cfg.get('checksum')\n    return cfg.get('checksum') or a\n"
-    assert scheme_reads(src, "x.py")[("x.py", "f")] == 2
+    assert scheme_reads(src, "x.py")[("x.py", "f")] == 3  # two reads and a use of the bound `a`
+
+
+def test_a_refusal_branching_on_a_name_bound_to_the_scheme_changes_the_count() -> None:
+    """The mutation Codex inserted in `FpeConfig._resolve`: a second checksum refusal on the
+    bound name, right after `checksum = self.checksum or None`."""
+    rel = "execution/native/_crypto_ext.py"
+    src = dict(_sources())[rel]
+    anchor = "        checksum = self.checksum or None\n"
+    assert anchor in src
+    mutated = src.replace(
+        anchor, anchor + "        if checksum == 'vin':\n            raise FpeConfigError('vin')\n"
+    )
+    edge = (rel, "FpeConfig._resolve")
+    assert scheme_reads(mutated, rel)[edge] == scheme_reads(src, rel)[edge] + 1
