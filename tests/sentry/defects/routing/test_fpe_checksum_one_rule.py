@@ -42,8 +42,14 @@ FIELD_READERS: dict[Edge, str] = {
 # Every read of the configured scheme, with the number of reads in that function. A carrier
 # forwards the scheme to its destination; none of them decides a route.
 SCHEME_READS: dict[Edge, tuple[int, str]] = {
-    ("execution/_strategies/_fpe.py", "FpeStrategyHandler.run"): (1, "oracle carrier"),
-    ("execution/out_of_core/_mask_group_b.py", "fpe_array"): (1, "oracle carrier"),
+    ("execution/_strategies/_fpe.py", "FpeStrategyHandler.run"): (
+        2,
+        "oracle carrier: one read, then the annotated bound name feeds the luhn guard",
+    ),
+    ("execution/out_of_core/_mask_group_b.py", "fpe_array"): (
+        3,
+        "oracle carrier: one read, then the annotated bound name feeds the luhn guard and the call",
+    ),
     ("execution/native/_crypto_ext.py", "FpeConfig.from_mapping"): (1, "config carrier"),
     ("execution/native/_crypto_ext.py", "FpeConfig._resolve"): (
         3,
