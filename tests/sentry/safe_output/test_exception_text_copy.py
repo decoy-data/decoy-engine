@@ -36,7 +36,7 @@ SENTRY_ID = "engine-exception-text-copies"
 BASELINE = _baseline_sources.baseline_path(SENTRY_ID)
 # The F31 audit figure. The audit bucket must still match it until AE5 lowers it, in the same
 # change that lowers the baseline entries.
-AUDIT_PARITY = 100
+AUDIT_PARITY = 98
 
 
 def _total(counts: dict[str, int], bucket: str) -> int:

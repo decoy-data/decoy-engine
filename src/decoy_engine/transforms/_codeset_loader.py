@@ -44,14 +44,12 @@ _SHIPPED_PATHS: dict[str, Path] = {n: _CODESETS_DIR / f"{n}.parquet" for n in _S
 
 
 def _where(path: Path | str | None) -> str:
-    """How a diagnostic names a corpus file: the path under the ambient CLI policy, the config
-    position under any other (a locator never crosses)."""
+    """How a diagnostic names a corpus file: the redacted path (CLI) or the config position."""
     return fileaccess.shown(str(path), "code_set.corpus_source")
 
 
 def _shown_name(name: str) -> str:
-    """How a diagnostic names a corpus: a shipped name as is, any other label (a customer
-    corpus label is configured text, and may be a credential-bearing URL) under the policy."""
+    """A shipped name as is; any other label (configured text, maybe a URL) under the policy."""
     return name if name in _SHIPPED_CORPORA else fileaccess.shown(name, "code_set.code_set")
 
 
@@ -223,6 +221,7 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
             )
         return shipped
 
+    path_display = _where(path)
     handle = _open_customer(path)
     try:
         handle.stat()
@@ -230,7 +229,7 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
         raise PlanCompileError(
             code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
             path="provider_config.corpus_source",
-            message=f"customer corpus not found at path {_where(path)}.",
+            message=f"customer corpus not found at path {path_display}.",
         ) from None
     finally:
         handle.close()
@@ -276,36 +275,35 @@ def _get_corpus_record(
         _check_source_version_pin(name, resolved, record, expected_source_version)
         return record
 
-    # A customer corpus can disappear or become unreadable between
-    # `_resolve_read_path`'s existence check and this stat (TOCTOU). Translate
-    # the bare OSError to the loader's typed error contract (load_corpus
-    # documents PlanCompileError for missing/unreadable corpora) instead of
-    # leaking FileNotFoundError/PermissionError. The handle is opened first so the
-    # policy decides before any cache lookup: a cached record is never served to a
-    # request the policy refuses.
+    # A customer corpus can vanish between `_resolve_read_path`'s check and this stat (TOCTOU):
+    # translate the OSError to the typed PlanCompileError. The handle is opened first so the
+    # policy decides before any cache lookup (a cached record is never served to a refused
+    # request).
     handle = _open_customer(resolved)
     try:
-        # The error is raised after the `except` blocks close, so it carries no
-        # `__context__` (an OS error's text names the file).
-        stat_code = ""
-        stat_message = ""
+        # Raised after the `except` blocks close: no `__context__` (OS text names the file).
+        resolved_display = _where(resolved)
+        stat_missing = False
+        stat_failure = ""
         try:
             stat = handle.stat()
         except FileNotFoundError:
-            stat_code = reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND
-            stat_message = f"customer corpus at {_where(resolved)} became unavailable after the existence check."
+            stat_missing = True
         except OSError as exc:
             if fileaccess.keeps_class(exc):
                 raise
-            stat_code = reasons.plan.CODE_SET_CORPUS_READ_ERROR
-            stat_message = (
-                f"failed to stat customer corpus at {_where(resolved)} ({type(exc).__name__})."
-            )
-        if stat_code:
+            stat_failure = type(exc).__name__
+        if stat_missing:
             raise PlanCompileError(
-                code=stat_code,
+                code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
                 path="provider_config.corpus_source",
-                message=stat_message,
+                message=f"customer corpus at {resolved_display} became unavailable.",
+            )
+        if stat_failure:
+            raise PlanCompileError(
+                code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
+                path="provider_config.corpus_source",
+                message=f"failed to stat customer corpus at {resolved_display} ({stat_failure}).",
             )
         # Best-effort file identity, not a content hash (see the module-level
         # comment on `_customer_cache` for why ctime is included and a hash is
@@ -474,10 +472,11 @@ def _read_corpus_record(
                 raise
             read_failure = type(exc).__name__
         if read_failure:
+            path_display = _where(path)
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
                 path="provider_config.corpus_source",
-                message=f"failed to read corpus Parquet at {_where(path)} ({read_failure}).",
+                message=f"failed to read corpus Parquet at {path_display} ({read_failure}).",
             )
     finally:
         if owned:

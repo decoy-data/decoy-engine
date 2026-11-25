@@ -71,19 +71,26 @@ def read_checked(
 
 # A locator may be a URL (`s3://user:secret@host/key?token=...`), or one a `Path` has squeezed to a
 # single slash (`s3:/user:secret@host/...`) or turned to backslashes on Windows. Its userinfo,
-# query and fragment are credentials. A URL is found anywhere in the text (it may follow
-# whitespace or sit inside a sentence), but its scheme must not continue a path or a word, so a
-# local path such as `/tmp/a:/b@c/f?x=1` is not one. Two or more scheme characters, so not a
-# drive letter. The URL runs to the next whitespace.
-_URL_RE = re.compile(
-    r"(?<![\w+.\-/\\])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]+):(?P<slashes>[/\\]{1,2})(?P<rest>\S*)"
-)
+# query and fragment are credentials. The scheme may follow whitespace or sit inside a sentence,
+# but must not continue a path or a word, so a local path such as `/tmp/a:/b@c/f?x=1` is not a
+# URL. Two or more scheme characters, so not a drive letter.
+_HEAD = r"(?<![\w+.\-/\\])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]+):(?P<slashes>[/\\]{1,2})"
+_TOKEN_URL_RE = re.compile(_HEAD + r"(?P<rest>\S*)")  # free text: a URL ends at whitespace
+_LOCATOR_URL_RE = re.compile(_HEAD + r"(?P<rest>.*)", re.DOTALL)  # a locator: nothing ends it
 _DELIMS_RE = re.compile(r"[/?#]")
+_MARKS_RE = re.compile(r"[?#]")
+_SENSITIVE_RE = re.compile(r"[@?#]")
 
 
 def _redact_url(match: re.Match[str]) -> str:
     head = f"{match['scheme']}:{match['slashes'].replace(chr(92), '/')}"
-    rest = match["rest"].replace("\\", "/")
+    rest = match["rest"]
+    if not _SENSITIVE_RE.search(rest):
+        return head + rest.replace("\\", "/")
+    # Whitespace inside a URL is a password or query holding a space: nothing is kept.
+    if re.search(r"\s", rest):
+        return head + "<redacted>"
+    rest = rest.replace("\\", "/")
     delim = _DELIMS_RE.search(rest)
     cut = delim.start() if delim else len(rest)
     authority, tail = rest[:cut], rest[cut:]
@@ -94,7 +101,7 @@ def _redact_url(match: re.Match[str]) -> str:
     authority = authority.rpartition("@")[2]
     if "@" in authority or "?" in authority:
         return head + "<redacted>"
-    tail_delim = re.search(r"[?#]", tail)
+    tail_delim = _MARKS_RE.search(tail)
     path = tail[: tail_delim.start()] if tail_delim else tail
     marks = tail[tail_delim.start() :] if tail_delim else ""
     out = head + authority + path
@@ -105,9 +112,31 @@ def _redact_url(match: re.Match[str]) -> str:
     return out
 
 
-def without_url_credentials(text: str) -> str:
-    """`text` with the userinfo, query and fragment of every URL-shaped locator removed."""
-    return _URL_RE.sub(_redact_url, text)
+def without_url_credentials(text: str, *, free_text: bool = False) -> str:
+    """`text` with the userinfo, query and fragment of any URL-shaped locator removed.
+
+    A single locator (the default) is read whole: whitespace does not end a URL, so a password
+    or query holding a space is removed with the rest. Free-form message text (`free_text`)
+    ends each URL at whitespace, then removes every later token that holds `@`, `?` or `#`,
+    since the text may have split a credential at a space."""
+    if not free_text:
+        return _LOCATOR_URL_RE.sub(_redact_url, text)
+    out: list[str] = []
+    pos = 0
+    seen = False
+    for match in _TOKEN_URL_RE.finditer(text):
+        out.append(_scrub_tokens(text[pos : match.start()]) if seen else text[pos : match.start()])
+        out.append(_redact_url(match))
+        pos = match.end()
+        seen = True
+    out.append(_scrub_tokens(text[pos:]) if seen else text[pos:])
+    return "".join(out)
+
+
+def _scrub_tokens(text: str) -> str:
+    return "".join(
+        "<redacted>" if _SENSITIVE_RE.search(part) else part for part in re.split(r"(\s+)", text)
+    )
 
 
 def shown(locator: str, field_key: str) -> str:

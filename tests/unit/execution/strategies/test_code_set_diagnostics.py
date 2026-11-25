@@ -102,7 +102,7 @@ def test_missing_url_source_hides_credentials() -> None:
         ("C:\\data\\a@b.parquet", "C:\\data\\a@b.parquet"),
         ("\\\\server\\share\\a@b", "\\\\server\\share\\a@b"),
         ("  https://svc:pw@host/c?t=T", "  https://host/c?<redacted>"),
-        ("failed at https://svc:pw@host/c?t=T now", "failed at https://host/c?<redacted> now"),
+        ("failed at https://svc:pw@host/c?t=T now", "failed at https://<redacted>"),
         ("https://svc:pa/ss@host/c?t=T", "https://<redacted>"),
         ("https://svc:p?w@host/c", "https://<redacted>"),
         ("https://svc:p#w@host/c", "https://<redacted>"),
@@ -126,6 +126,9 @@ def test_url_redactor_shapes(locator: str, expected: str) -> None:
         "cannot read https://svc:{pw}@host/c?token={tok} (denied)",
         "https:\\\\svc:{pw}@host\\c?token={tok}",
         "s3:/svc:{pw}@host/c?token={tok}",
+        "s3://svc:pa {pw}@host/c?token={tok}",
+        "https://host/c ?token={tok}",
+        "https://svc:pa {pw}@host/c ?token={tok}",
     ],
 )
 def test_url_redactor_never_keeps_canaries(locator: str) -> None:
@@ -134,6 +137,22 @@ def test_url_redactor_never_keeps_canaries(locator: str) -> None:
     out = without_url_credentials(locator.format(pw=_PW, tok=_TOK))
     assert _PW not in out
     assert _TOK not in out
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("failed at https://svc:pw@host/c?t=T now", "failed at https://host/c?<redacted> now"),
+        ("url https://h/c ?token=T x", "url https://h/c <redacted> x"),
+        ("read https://h/c then a@b.com ok", "read https://h/c then <redacted> ok"),
+        ("bad s3://user:pa ss@host/k end", "bad s3://user:pa <redacted> end"),
+        ("no url here a@b", "no url here a@b"),
+    ],
+)
+def test_url_redactor_free_text(text: str, expected: str) -> None:
+    from decoy_engine.fileaccess._read import without_url_credentials
+
+    assert without_url_credentials(text, free_text=True) == expected
 
 
 def _no_secret(text: str) -> None:

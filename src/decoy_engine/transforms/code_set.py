@@ -313,8 +313,8 @@ def apply_code_set(
             config.corpus_source_version when the latter is set (HC-2 D2a).
         ValueError: Unsupported mode.
     """
-    check_mode(mode)
     try:
+        check_mode(mode)
         if corpus_record is None:
             corpus_name, override_path = _resolve_corpus_path(config)
             record = _get_corpus_record(
