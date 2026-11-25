@@ -1,0 +1,479 @@
+[
+ {
+  "id": "url-plain",
+  "input": "s3://bucket/key.parquet",
+  "kind": "url",
+  "shown": "s3://bucket/key.parquet",
+  "carries": false,
+  "origin_shown": "s3://bucket/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "url-userinfo",
+  "input": "s3://AKIA:CANARY@bucket/key",
+  "kind": "url",
+  "shown": "s3://<redacted>@bucket/key",
+  "carries": true,
+  "origin_shown": "s3://bucket/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "url-user-only",
+  "input": "https://CANARY@github.example/r.git",
+  "kind": "url",
+  "shown": "https://<redacted>@github.example/r.git",
+  "carries": true,
+  "origin_shown": "https://github.example/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "url-at-in-pass",
+  "input": "https://u:p@CANARY@h/a",
+  "kind": "url",
+  "shown": "https://<redacted>@h/a",
+  "carries": true,
+  "origin_shown": "https://h/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "url-quote-in-pass",
+  "input": "https://u:foo'CANARY@h/a",
+  "kind": "url",
+  "shown": "https://<redacted>@h/a",
+  "carries": true,
+  "origin_shown": "https://h/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "embedded-dsn",
+  "input": "dsn=https://u:foo'CANARY@h/a",
+  "kind": "local",
+  "shown": "dsn=https://<redacted>@h/a",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "embedded-space",
+  "input": "see https://u:CANARY@h/a",
+  "kind": "local",
+  "shown": "see https://<redacted>@h/a",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "two-urls",
+  "input": "https://u:CANARY@h/a s3://k:CANARY@b/c",
+  "kind": "url",
+  "shown": "https://<redacted>@h/a s3://<redacted>@b/c",
+  "carries": true,
+  "origin_shown": "https://h/<redacted> s3://b/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "space-in-path-query",
+  "input": "https://h/My Report.csv?sig=CANARY",
+  "kind": "url",
+  "shown": "https://h/My Report.csv?<redacted>",
+  "carries": true,
+  "origin_shown": "https://h/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "embedded-trailing-query",
+  "input": "see https://h/My Report.csv?sig=CANARY",
+  "kind": "local",
+  "shown": "see https://h/My Report.csv?<redacted>",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "backslash-url",
+  "input": "https:\\\\u:CANARY@host\\file",
+  "kind": "url",
+  "shown": "https:\\\\<redacted>@host\\file",
+  "carries": true,
+  "origin_shown": "https://host/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "backslash-dual",
+  "input": "https://h\\u:CANARY@x/a",
+  "kind": "url",
+  "shown": "https://<redacted>@x/a",
+  "carries": true,
+  "origin_shown": "https://x/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "backslash-url-at-path",
+  "input": "https:\\\\host\\dir\\a@b.csv",
+  "kind": "url",
+  "shown": "https:\\\\host\\dir\\a@b.csv",
+  "carries": false,
+  "origin_shown": "https://host/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "folded-url",
+  "input": "https:/u:CANARY@host/file",
+  "kind": "url",
+  "shown": "https:/<redacted>@host/file",
+  "carries": true,
+  "origin_shown": "https://host/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "folded-any-scheme",
+  "input": "myfs:/u:CANARY@host/file",
+  "kind": "url",
+  "shown": "myfs:/<redacted>@host/file",
+  "carries": true,
+  "origin_shown": "myfs://host/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "folded-under-cwd",
+  "input": "/home/x/https:/u:CANARY@h/a",
+  "kind": "local",
+  "shown": "/home/x/https:/<redacted>@h/a",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "leading-space-net",
+  "input": "  //svc:CANARY@host/key",
+  "kind": "network",
+  "shown": "  //<redacted>@host/key",
+  "carries": true,
+  "origin_shown": "//host/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "leading-tab-url",
+  "input": "\tx3://u:CANARY@h/k",
+  "kind": "url",
+  "shown": "\tx3://<redacted>@h/k",
+  "carries": true,
+  "origin_shown": "x3://h/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "pass-hash",
+  "input": "https://u:pa#CANARY@h/a",
+  "kind": "url",
+  "shown": "https://<redacted>",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "pass-query",
+  "input": "https://u:pa?CANARY@h/a",
+  "kind": "url",
+  "shown": "https://<redacted>",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "slash-in-pass",
+  "input": "https://u:pa/CANARY@h/a",
+  "kind": "url",
+  "shown": "https://<redacted>",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "invalid-port-no-at",
+  "input": "https://u:CANARY",
+  "kind": "url",
+  "shown": "https://<redacted>",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "net-invalid-port",
+  "input": "//svc:CANARY/key",
+  "kind": "network",
+  "shown": "//<redacted>",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "one-letter-creds",
+  "input": "x://svc:CANARY@host/key",
+  "kind": "drive",
+  "shown": "x://<redacted>@host/key",
+  "carries": true,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "drive-at-dir",
+  "input": "C://foo@bar/data.csv",
+  "kind": "drive",
+  "shown": "C://foo@bar/data.csv",
+  "carries": false,
+  "origin_shown": "C://foo@bar/data.csv",
+  "note": ""
+ },
+ {
+  "id": "drive-backslash-at",
+  "input": "C:\\foo@bar\\data.csv",
+  "kind": "drive",
+  "shown": "C:\\foo@bar\\data.csv",
+  "carries": false,
+  "origin_shown": "C:\\foo@bar\\data.csv",
+  "note": ""
+ },
+ {
+  "id": "drive-later-colon-at",
+  "input": "C:\\data\\a:CANARY@b.csv",
+  "kind": "drive",
+  "shown": "C:\\data\\a:CANARY@b.csv",
+  "carries": false,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "drive-plain",
+  "input": "C:/data/x.csv",
+  "kind": "drive",
+  "shown": "C:/data/x.csv",
+  "carries": false,
+  "origin_shown": "C:/data/x.csv",
+  "note": ""
+ },
+ {
+  "id": "posix-colon-at",
+  "input": "/tmp/a:b@c/f?x=1",
+  "kind": "local",
+  "shown": "/tmp/a:b@c/f?x=1",
+  "carries": false,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "net-empty-query",
+  "input": "//host/key?",
+  "kind": "network",
+  "shown": "//host/key?",
+  "carries": false,
+  "origin_shown": "//host/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "net-empty-fragment",
+  "input": "//host/key#",
+  "kind": "network",
+  "shown": "//host/key#",
+  "carries": false,
+  "origin_shown": "//host/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "unc",
+  "input": "\\\\server\\share\\x.parquet",
+  "kind": "network",
+  "shown": "\\\\server\\share\\x.parquet",
+  "carries": false,
+  "origin_shown": "//server/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "unc-at-dir",
+  "input": "\\\\fs01\\users\\jane.doe@corp.com\\data.csv",
+  "kind": "network",
+  "shown": "\\\\fs01\\users\\jane.doe@corp.com\\data.csv",
+  "carries": false,
+  "origin_shown": "//fs01/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "ext-unc",
+  "input": "\\\\?\\UNC\\server\\share\\corpus.parquet",
+  "kind": "device",
+  "shown": "\\\\?\\UNC\\server\\share\\corpus.parquet",
+  "carries": false,
+  "origin_shown": "\\\\?\\UNC\\server\\share\\corpus.parquet",
+  "note": ""
+ },
+ {
+  "id": "ext-drive",
+  "input": "\\\\?\\C:\\data\\x.csv",
+  "kind": "device",
+  "shown": "\\\\?\\C:\\data\\x.csv",
+  "carries": false,
+  "origin_shown": "\\\\?\\C:\\data\\x.csv",
+  "note": ""
+ },
+ {
+  "id": "query-token",
+  "input": "https://h/a?token=CANARY",
+  "kind": "url",
+  "shown": "https://h/a?<redacted>",
+  "carries": true,
+  "origin_shown": "https://h/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "version-query",
+  "input": "s3://b/k.parquet?versionId=3",
+  "kind": "url",
+  "shown": "s3://b/k.parquet?<redacted>",
+  "carries": true,
+  "origin_shown": "s3://b/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "fragment-token",
+  "input": "https://h/a#access_token=CANARY",
+  "kind": "url",
+  "shown": "https://h/a#<redacted>",
+  "carries": true,
+  "origin_shown": "https://h/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "at-in-query",
+  "input": "https://h/a?x=u@CANARY",
+  "kind": "url",
+  "shown": "https://h/a?<redacted>",
+  "carries": true,
+  "origin_shown": "https://h/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "at-in-path",
+  "input": "s3://bucket/user@example.com/f.csv",
+  "kind": "url",
+  "shown": "s3://bucket/user@example.com/f.csv",
+  "carries": false,
+  "origin_shown": "s3://bucket/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "bearer-path",
+  "input": "https://files.example/s/CANARY",
+  "kind": "url",
+  "shown": "https://files.example/s/CANARY",
+  "carries": false,
+  "origin_shown": "https://files.example/<redacted>",
+  "note": "D6 residual"
+ },
+ {
+  "id": "ipv6",
+  "input": "https://u:CANARY@[::1]:8080/a",
+  "kind": "url",
+  "shown": "https://<redacted>@[::1]:8080/a",
+  "carries": true,
+  "origin_shown": "https://[::1]:8080/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "empty-port",
+  "input": "https://h:/a",
+  "kind": "url",
+  "shown": "https://h:/a",
+  "carries": false,
+  "origin_shown": "https://h:/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "dsn-driver",
+  "input": "postgresql+psycopg://u:CANARY@db:5432/x",
+  "kind": "url",
+  "shown": "postgresql+psycopg://<redacted>@db:5432/x",
+  "carries": true,
+  "origin_shown": "postgresql+psycopg://db:5432/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "abfs-container",
+  "input": "abfss://container@acct.dfs.core.windows.net/p",
+  "kind": "url",
+  "shown": "abfss://container@acct.dfs.core.windows.net/p",
+  "carries": false,
+  "origin_shown": "abfss://acct.dfs.core.windows.net/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "abfs-key",
+  "input": "abfss://container:CANARY@acct.dfs.core.windows.net/p",
+  "kind": "url",
+  "shown": "abfss://<redacted>@acct.dfs.core.windows.net/p",
+  "carries": true,
+  "origin_shown": "abfss://acct.dfs.core.windows.net/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "sftp-user",
+  "input": "sftp://etl@files.example/in/a.csv",
+  "kind": "url",
+  "shown": "sftp://etl@files.example/in/a.csv",
+  "carries": false,
+  "origin_shown": "sftp://files.example/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "sftp-user-pass",
+  "input": "sftp://etl:CANARY@files.example/in/a.csv",
+  "kind": "url",
+  "shown": "sftp://<redacted>@files.example/in/a.csv",
+  "carries": true,
+  "origin_shown": "sftp://files.example/<redacted>",
+  "note": ""
+ },
+ {
+  "id": "file-url-at",
+  "input": "file:///tmp/a@b.csv",
+  "kind": "url",
+  "shown": "file:///tmp/a@b.csv",
+  "carries": false,
+  "origin_shown": "file:///<redacted>",
+  "note": ""
+ },
+ {
+  "id": "pct-encoded",
+  "input": "//svc%3ACANARY%40host/key",
+  "kind": "network",
+  "shown": "//svc%3ACANARY%40host/key",
+  "carries": false,
+  "origin_shown": null,
+  "note": "D13 characterization"
+ },
+ {
+  "id": "prov-embedded-bearer",
+  "input": "see https://files.example/s/CANARY",
+  "kind": "local",
+  "shown": "see https://files.example/s/CANARY",
+  "carries": false,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "prov-scp-userinfo",
+  "input": "svc:CANARY@host:/data",
+  "kind": "local",
+  "shown": "svc:CANARY@host:/data",
+  "carries": false,
+  "origin_shown": null,
+  "note": ""
+ },
+ {
+  "id": "empty",
+  "input": "",
+  "kind": "local",
+  "shown": "",
+  "carries": false,
+  "origin_shown": "",
+  "note": ""
+ }
+]

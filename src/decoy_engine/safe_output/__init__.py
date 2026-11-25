@@ -10,6 +10,7 @@ published Parquet file (see ``_file_metadata``).
 
 from __future__ import annotations
 
+from decoy_engine._locator import LocatorKind, LocatorScan, scan_locator
 from decoy_engine.safe_output._event import EventKind, Flag, SafeEvent, StepRef
 from decoy_engine.safe_output._exception import SafeErrorType, safe_error_type
 from decoy_engine.safe_output._file_metadata import (
@@ -24,6 +25,8 @@ __all__ = [
     "ConfigProblem",
     "EventKind",
     "Flag",
+    "LocatorKind",
+    "LocatorScan",
     "SafeErrorType",
     "SafeEvent",
     "StepRef",
@@ -31,6 +34,7 @@ __all__ = [
     "output_schema",
     "output_table",
     "safe_error_type",
+    "scan_locator",
     "sanitized_schema_metadata",
     "validation_problems",
     "yaml_error_text",
