@@ -1,4 +1,4 @@
-Status: plan
+Status: plan (revision 7 build-ready: Codex review-low GO at 88b2e0126, low anchor notes folded at de3421c08)
 
 # PROP batch: quiet fallbacks, unused public names, shims and guard facts (roadmap rows 24zi, 24zj, 24zk, 24zl)
 
