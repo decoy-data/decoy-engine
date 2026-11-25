@@ -15,6 +15,11 @@ Verbs, all on one file so the driver and its workers stay in step:
   prepare  write one workload's Parquet source with a bounded writer loop
   run      one `run_pipeline` call in this process; prints evidence JSON to --out
   estimate read the source whole and print the static estimate (kept out of any measured run)
+  e2e      one `decoy run` of a workload from a Parquet `path:` source under a cgroup cap, with the
+           exit code, the registered code in stderr, and the target and staging checks (S5)
+
+A refused run (`ExecutionError`) is recorded as an outcome, not a crash: the code, whether the error
+chains cleanly, and every entry that appeared under the work directory or the temp root.
 
 Run on a Linux node under the box-wide lock, from a worktree with the companion built:
 
@@ -43,6 +48,37 @@ GROUP_ROWS = 1_048_576
 WORKLOADS = ("W-P", "W-S", "W-U", "W-D")
 ADMISSION_FRACTION = 0.85  # the plan's A = 0.85 H, recorded so the table shows the planned ceilings
 SELF = Path(__file__).resolve()
+REFUSAL_CODE = "nonfk_full_frame_capacity_exceeded"
+EXIT_CAPACITY = 5  # `decoy run` exit for a capacity refusal (CLI exit_codes.EXIT_CAPACITY)
+
+
+def refusal_evidence(exc: BaseException) -> dict[str, Any]:
+    """The code and chaining of a refused run: never the message, which carries byte counts only."""
+    return {
+        "code": getattr(exc, "code", None),
+        "clean_chaining": exc.__cause__ is None and exc.__context__ is None,
+    }
+
+
+def snapshot_entries(roots: list[Path]) -> set[str]:
+    out: set[str] = set()
+    for root in roots:
+        if root.is_dir():
+            out.update(str(child) for child in root.iterdir())
+    return out
+
+
+def new_entries(before: set[str], after: set[str]) -> list[str]:
+    return sorted(after - before)
+
+
+def e2e_refused_cleanly(
+    exit_code: int, stderr: str, target_exists: bool, staging: list[str]
+) -> bool:
+    """The S5 expectation: exit 5, the registered code on stderr, no target file, no staging."""
+    return (
+        exit_code == EXIT_CAPACITY and REFUSAL_CODE in stderr and not target_exists and not staging
+    )
 
 
 def _status(key: str) -> int:
@@ -147,7 +183,7 @@ def prepare(args: argparse.Namespace) -> int:
 def run(args: argparse.Namespace) -> int:
     import pyarrow.parquet as pq
 
-    from decoy_engine.execution import run_pipeline
+    from decoy_engine.execution import ExecutionError, run_pipeline
     from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
     from decoy_engine.execution.out_of_core._budget import detect_effective_memory_bytes
     from decoy_engine.execution.pipeline import lazy_spec, lower_bound_bytes, resident_spec
@@ -167,15 +203,23 @@ def run(args: argparse.Namespace) -> int:
         meta = pq.ParquetFile(args.source)
         spec = lazy_spec(meta.metadata.num_rows, meta.schema_arrow)
     lower_bound = lower_bound_bytes([spec])
-    result = run_pipeline(
-        config,
-        sources={TABLE: source},
-        sink=ParquetTransactionalSink(workdir / "out"),
-        engine_version=ENGINE_VERSION,
-        native_threads=1,
-    )
+    watched = [workdir, workdir / "out", Path(tempfile.gettempdir())]
+    before = snapshot_entries(watched)
+    refusal: dict[str, Any] | None = None
+    result: Any = None
+    try:
+        result = run_pipeline(
+            config,
+            sources={TABLE: source},
+            sink=ParquetTransactionalSink(workdir / "out"),
+            engine_version=ENGINE_VERSION,
+            native_threads=1,
+        )
+    except ExecutionError as exc:
+        refusal = refusal_evidence(exc)
     wall_s = time.perf_counter() - started
     hwm = _status("VmHWM")
+    leftover = [e for e in new_entries(before, snapshot_entries(watched)) if "evidence" not in e]
     kill = detect_effective_memory_bytes()
     evidence = {
         "workload": args.workload,
@@ -188,8 +232,11 @@ def run(args: argparse.Namespace) -> int:
         "lower_bound_bytes": lower_bound,
         "admission_ceiling_bytes": int(kill * ADMISSION_FRACTION),
         "kill_ceiling_bytes": kill,
-        "auto_chunk": result.quality_metrics.get("auto_chunk"),
-        "execution": result.quality_metrics.get("execution"),
+        "refusal": refusal,
+        "new_entries": leftover,
+        "auto_chunk": result.quality_metrics.get("auto_chunk") if result else None,
+        "execution": result.quality_metrics.get("execution") if result else None,
+        "resident_fit": result.quality_metrics.get("resident_fit") if result else None,
     }
     Path(args.out).write_text(json.dumps(evidence, allow_nan=False, indent=1))
     return 0
@@ -203,6 +250,53 @@ def estimate(args: argparse.Namespace) -> int:
 
     spec = table_size_spec_from_table(TABLE, pq.read_table(args.source))
     print(json.dumps({"estimate_bytes": estimate_peak_bytes([spec], "full_frame").estimated_bytes}))
+    return 0
+
+
+def e2e_config(workload: str, source: Path, target: Path) -> dict[str, Any]:
+    config = build_config(workload, str(source))
+    config["targets"] = {TABLE: {"type": "file", "format": "parquet", "path": str(target)}}
+    return config
+
+
+def e2e(args: argparse.Namespace) -> int:
+    """One `decoy run` under a cgroup cap; the verdict is `e2e_refused_cleanly` on what it left."""
+    import yaml
+
+    work = Path(args.workdir)
+    work.mkdir(parents=True, exist_ok=True)
+    source = Path(args.source)
+    target = work / "out.parquet"
+    target.unlink(missing_ok=True)
+    cfg = work / "job.yaml"
+    cfg.write_text(yaml.safe_dump(e2e_config(args.workload, source, target)))
+    watched = [work, Path(tempfile.gettempdir())]
+    before = snapshot_entries(watched)
+    cmd = [args.decoy, "run", str(cfg), "--quiet"]
+    if args.cgroup_bytes:
+        cmd = [
+            "systemd-run", "--user", "--scope", "-q",
+            "-p", f"MemoryMax={args.cgroup_bytes}", "-p", "MemorySwapMax=0", *cmd,
+        ]  # fmt: skip
+    started = time.perf_counter()
+    done = subprocess.run(cmd, env=_env(), check=False, capture_output=True, text=True)  # noqa: S603
+    wall_s = time.perf_counter() - started
+    staging = [e for e in new_entries(before, snapshot_entries(watched)) if e != str(cfg)]
+    staging = [e for e in staging if Path(e) != target]
+    evidence = {
+        "workload": args.workload,
+        "rows": args.rows,
+        "cgroup_bytes": args.cgroup_bytes,
+        "exit_code": done.returncode,
+        "wall_s": wall_s,
+        "code_in_stderr": REFUSAL_CODE in done.stderr,
+        "target_exists": target.exists(),
+        "new_entries": staging,
+        "refused_cleanly": e2e_refused_cleanly(
+            done.returncode, done.stderr, target.exists(), staging
+        ),
+    }
+    Path(args.out).write_text(json.dumps(evidence, allow_nan=False, indent=1))
     return 0
 
 
@@ -260,18 +354,25 @@ def drive(args: argparse.Namespace) -> int:
                 _worker(
                     "prepare", "--workload", workload, "--rows", str(rows), "--path", str(source)
                 )
-                est = subprocess.run(  # noqa: S603
-                    [sys.executable, str(SELF), "estimate", "--source", str(source)],
-                    check=True, capture_output=True, text=True, env=_env(),
-                )  # fmt: skip
                 cell = {"workload": workload, "rows": rows, "input": args.input}
-                cell["static_estimate_bytes"] = json.loads(est.stdout)["estimate_bytes"]
+                if not args.no_estimate:
+                    est = subprocess.run(  # noqa: S603
+                        [sys.executable, str(SELF), "estimate", "--source", str(source)],
+                        check=True, capture_output=True, text=True, env=_env(),
+                    )  # fmt: skip
+                    cell["static_estimate_bytes"] = json.loads(est.stdout)["estimate_bytes"]
                 trials = [
                     _trial(cell, source, base, args.cgroup_bytes)
                     for _ in range(args.warmup + args.rounds)
                 ][args.warmup :]
-                ok = [t for t in trials if t["exit_status"] == 0]
+                refused = [t for t in trials if t["exit_status"] == 0 and t.get("refusal")]
+                ok = [t for t in trials if t["exit_status"] == 0 and not t.get("refusal")]
                 cell["trials"] = trials
+                cell["refused"] = len(refused)
+                if refused:
+                    cell["refusal_codes"] = sorted({t["refusal"]["code"] for t in refused})
+                    cell["refusal_wall_s_median"] = statistics.median(t["wall_s"] for t in refused)
+                    cell["refusal_new_entries"] = [e for t in refused for e in t["new_entries"]]
                 if ok:
                     cell["lower_bound_bytes"] = ok[0]["lower_bound_bytes"]
                     cell["peak_bytes"] = [t["peak_bytes"] for t in ok]
@@ -309,6 +410,7 @@ def main(argv: list[str]) -> int:
     d.add_argument("--rounds", type=int, default=3)
     d.add_argument("--warmup", type=int, default=1)
     d.add_argument("--cgroup-bytes", type=int, default=None)
+    d.add_argument("--no-estimate", action="store_true")
     d.add_argument("--workdir", default=tempfile.gettempdir())
     d.set_defaults(func=drive)
     p = sub.add_parser("prepare")
@@ -327,6 +429,15 @@ def main(argv: list[str]) -> int:
     e = sub.add_parser("estimate")
     e.add_argument("--source", required=True)
     e.set_defaults(func=estimate)
+    e2 = sub.add_parser("e2e")
+    e2.add_argument("--workload", choices=WORKLOADS, required=True)
+    e2.add_argument("--rows", type=int, required=True)
+    e2.add_argument("--source", required=True)
+    e2.add_argument("--workdir", required=True)
+    e2.add_argument("--out", required=True)
+    e2.add_argument("--decoy", default="decoy")
+    e2.add_argument("--cgroup-bytes", type=int, default=None)
+    e2.set_defaults(func=e2e)
     args = parser.parse_args(argv)
     return int(args.func(args))
 
