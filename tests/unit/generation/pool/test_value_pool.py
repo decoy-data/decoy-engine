@@ -205,6 +205,8 @@ def test_the_byte_walk_is_linear_on_deeply_nested_maps(monkeypatch: pytest.Monke
         return slots[0]
 
     s16, s32, s64 = slots_at(16), slots_at(32), slots_at(64)
+    # a walker that reads buffers outside the seam counts 0 here and must not pass
+    assert s16 > 0
     # linear: doubling the depth about doubles the slots (quadratic walks gave 898/3330/12802)
     assert s32 <= 2.2 * s16
     assert s64 <= 2.2 * s32
