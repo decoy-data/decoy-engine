@@ -25,7 +25,7 @@ from decoy_engine.quality.dp_provenance import ProvenanceError, validate_recorde
 from decoy_engine.quality.snapshot import compute_distribution_snapshot
 from decoy_engine.reference_tables._loader import load_table
 from decoy_engine.transforms._codeset_loader import _check_source_version_pin
-from decoy_engine.transforms.joint_mask import validate_joint_mask_config
+from decoy_engine.transforms.joint_mask import apply_joint_mask, validate_joint_mask_config
 
 _SECRET = "DEMO_PRIVATE_ZONE"
 
@@ -201,7 +201,8 @@ def test_text_mask_fail_closed_text_is_written_once() -> None:
     [
         ([1, 2, 3], {"high_cardinality": "PRIVATE_FLAG"}),
         ([1, 2, 3], {"allow_real_categories": "PRIVATE_FLAG"}),
-        (["x", "y", "z"], {"other_mode": "PRIVATE_MODE"}),
+        # Real categories opted in, so the load reaches the other_mode check.
+        (["x", "y", "z"], {"other_mode": "PRIVATE_MODE", "allow_real_categories": True}),
     ],
 )
 def test_statistical_config_values_are_not_echoed(
@@ -211,4 +212,30 @@ def test_statistical_config_values_are_not_echoed(
     col = {"name": "a", "type": "statistical", "snapshot_file": "s.json", **field}
     with pytest.raises(StatisticalSpecError) as exc:
         load_spec(col, snapshot=json.loads(json.dumps(snap)))
+    assert "real_categories_not_allowed" not in exc.value.code
+    assert "PRIVATE" not in str(exc.value)
+
+
+def test_joint_mask_unsupported_mode_is_not_echoed() -> None:
+    with pytest.raises(ValueError) as exc:
+        apply_joint_mask(
+            pd.DataFrame({"k": [1]}),
+            None,  # type: ignore[arg-type]
+            mode="PRIVATE_MODE",
+            job_seed=b"\x00" * 32,
+            table="t",
+        )
+    assert "unsupported mode" in str(exc.value)
+    assert "PRIVATE_MODE" not in str(exc.value)
+
+
+def test_dp_duplicate_install_omits_both_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    dists = [
+        SimpleNamespace(metadata={"Name": "foo"}, version=v)
+        for v in ("1.0.PRIVATE_A", "2.0.PRIVATE_B")
+    ]
+    monkeypatch.setattr(prov.importlib.metadata, "distributions", lambda: dists)
+    with pytest.raises(ProvenanceError) as exc:
+        prov.installed_distribution_set()
+    assert exc.value.code == "dp_provenance_duplicate_distribution"
     assert "PRIVATE" not in str(exc.value)
