@@ -246,13 +246,13 @@ def enforce_validators(
     outputs: Mapping[str, pa.Table],
     sources: Mapping[str, pa.Table],
     *,
-    plan_validators: Sequence[Any] = (),
+    plan_entries: Sequence[Any] = (),
 ) -> None:
     """Judge a standalone shadow result, feed the run's session with it, or defer it by name.
 
-    The run's configured checks are the physical plan's own `validators` (`plan_validators`),
-    else the config the caller handed the context, else the generation payload the plan embeds.
-    A bound session must hold exactly those checks; one that holds others would judge the rows
+    The run's configured checks are the physical plan's own entries (`plan_entries`), else the
+    config the caller handed the context, else the generation payload the plan embeds. A bound
+    session must hold exactly those checks; one that holds others would judge the rows
     against a different configuration, so the run is refused.
 
     A context whose `validation_owner` is set belongs to a caller that validates the result
@@ -266,16 +266,18 @@ def enforce_validators(
             (`validator_config_not_owned`).
     """
     from decoy_engine.errors import ValidatorFailedError, ValidatorStateError
-    from decoy_engine.validators import active_validation_session, run_resident_validation
+    from decoy_engine.validators import (
+        active_validation_session,
+        judging_config,
+        run_resident_validation,
+    )
 
     config: dict[str, Any] | None = dict(ctx.validation_config) if ctx.validation_config else None
     if config is None and ctx.plan is not None and ctx.plan.generation is not None:
         config = _decode_generation_config_shallow(ctx.plan.generation.config_json)
-    if plan_validators:
-        config = {**(config or {}), "validators": list(plan_validators)}
+    config = judging_config(config, plan_entries)
     session = active_validation_session()
-    configured = config.get("validators") if config else None
-    if session is not None and configured and not session.owns(configured):
+    if session is not None and config is not None and not session.owns(config):
         raise ValidatorStateError(
             code=reasons.runtime.VALIDATOR_CONFIG_NOT_OWNED,
             message="the bound validation session does not hold this run's validators.",

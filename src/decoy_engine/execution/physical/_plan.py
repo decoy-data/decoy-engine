@@ -237,6 +237,6 @@ class PhysicalPlan:
     plan_hash: str
     synthesis: SynthesisStage | None
     tables: tuple[PhysicalTable, ...]
-    # The job's ``validators:`` entries, so a run that executes this plan alone (no caller-held
-    # config) still knows which checks judge its result.
-    validators: tuple[Any, ...] = field(default=(), repr=False)
+    # The checks that judge this plan's result, so a run that executes the plan alone (no
+    # caller-held config) still knows them. Judgement only: no route reads it.
+    validation_entries: tuple[Any, ...] = field(default=(), repr=False)

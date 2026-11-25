@@ -73,6 +73,8 @@ from decoy_engine.validators._session import (
     ValidationSession,
     active_validation_session,
     bind_validation_session,
+    carried_entries,
+    judging_config,
     run_resident_validation,
 )
 from decoy_engine.validators._types import (
@@ -97,7 +99,9 @@ __all__ = [
     "active_validation_session",
     "assemble_report",
     "bind_validation_session",
+    "carried_entries",
     "finding_index_cap",
+    "judging_config",
     "plan_scope",
     "run_resident_validation",
     "unchecked_named_columns",

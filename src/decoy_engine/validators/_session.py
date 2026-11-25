@@ -150,9 +150,13 @@ class ValidationSession:
         """True once ``close`` has run, whether it returned or raised."""
         return self._close_attempted
 
-    def owns(self, validators: Iterable[Any]) -> bool:
-        """True when this session was opened with exactly these ``validators:`` entries."""
-        return _plain_entries(validators) == self._configured
+    def owns(self, config: Mapping[str, Any]) -> bool:
+        """True when this session was opened with exactly the checks ``config`` configures.
+
+        A config that configures none is owned by any session: there is nothing to judge twice.
+        """
+        entries = _plain_entries(config.get("validators"))
+        return not entries or entries == self._configured
 
     def observe(self, table: str, output: pa.Table, source: pa.Table | None = None) -> None:
         """Feed one complete resident table, then mark it complete.
@@ -367,6 +371,24 @@ class ValidationSession:
                                 "published rows."
                             ),
                         )
+
+
+def carried_entries(carrier: Any) -> tuple[Any, ...]:
+    """The ``validators:`` entries a captured-inputs object carries, for a plan to judge by."""
+    return tuple(getattr(carrier, "validators", ()) or ())
+
+
+def judging_config(
+    config: Mapping[str, Any] | None, entries: Iterable[Any] = ()
+) -> dict[str, Any] | None:
+    """The config that judges a run: ``entries`` (a plan's own checks) over ``config``, else it.
+
+    None when neither configures a check.
+    """
+    chosen = list(entries)
+    if chosen:
+        return {**(config or {}), "validators": chosen}
+    return dict(config) if config and config.get("validators") else None
 
 
 def _plain_entries(entries: Iterable[Any] | None) -> list[Any]:
