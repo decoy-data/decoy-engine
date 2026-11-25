@@ -118,6 +118,26 @@ def test_at2_companions_and_order_hold_wherever_the_bad_field_sits(
 
 
 @pytest.mark.parametrize("kind", PARQUET_KINDS)
+def test_at2_key_fields_follow_the_recovered_and_the_companion_columns(
+    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keys = {"declared_pk": frozenset({"t"}), "fk_specs": {"email": ("parent", "mail")}}
+    table = pa.table({"t": _times(), "email": EMAILS})
+    reader = make_reader(kind, table, parquet_bytes(table), tmp_path, monkeypatch)
+    ours = bounded_profile(reader, kind, **keys)
+    twin = pa.table({"t": _times(3000), "email": EMAILS})
+    control = base_profile(kind, twin, parquet_bytes(twin), **keys)
+    t, email = _column(ours, "t"), _column(ours, "email")
+    assert (t.declared_pk, t.is_fk, t.is_candidate_key_sampled) == (True, False, True)
+    assert (email.is_fk, email.fk_target) == (True, ("parent", "mail"))
+    assert email == _column(control, "email")
+    assert (t.declared_pk, t.is_candidate_key_sampled) == (
+        _column(control, "t").declared_pk,
+        _column(control, "t").is_candidate_key_sampled,
+    )
+
+
+@pytest.mark.parametrize("kind", PARQUET_KINDS)
 def test_at2_two_bad_temporals_and_a_good_one(
     kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -297,24 +297,27 @@ def _profile(table: pa.Table, kind: str, tmp_path: Path, mp: pytest.MonkeyPatch)
 def test_at3c_pandas_metadata_never_enters_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    good = pa.Table.from_pandas(
-        pd.DataFrame(
-            {"t": pd.array([0, 1000, 2000, 3000], dtype="int64"), "e": ["a", "b", "c", "d"]}
-        ),
-        preserve_index=False,
-    )
-    bad = pa.table(
-        {
-            "t": pa.array([0, 1000, 2000, 3_600_987_654_321], pa.time64("ns")),
-            "e": pa.array(["a", "b", "c", "d"]),
-        }
-    ).replace_schema_metadata(good.schema.metadata)
-    data = parquet_bytes(bad)
+    import datetime
     import io
 
     import pyarrow.parquet as pq
 
-    assert b"pandas" in (pq.ParquetFile(io.BytesIO(data)).schema_arrow.metadata or {})
+    twin = pa.Table.from_pandas(
+        pd.DataFrame(
+            {
+                "t": [datetime.time(0, 0, i) for i in range(4)],
+                "e": ["a@x.test", "b@x.test", "c@x.test", "d@x.test"],
+            }
+        ),
+        preserve_index=False,
+    )
+    twin = twin.set_column(0, "t", twin.column("t").cast(pa.time64("ns")))
+    bad = twin.set_column(
+        0, "t", pa.array([0, 1000, 2000, 3_600_987_654_321], pa.time64("ns"))
+    ).replace_schema_metadata(twin.schema.metadata)
+    assert _profile(twin, "local", tmp_path, monkeypatch).columns  # the twin converts whole
+    read_back = pq.ParquetFile(io.BytesIO(parquet_bytes(bad))).schema_arrow
+    assert b"pandas" in (read_back.metadata or {})
     with pytest.raises(ValueError, match=SAFE_FAILURE):
         _profile(bad, "local", tmp_path, monkeypatch)
 
