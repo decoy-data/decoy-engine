@@ -20,11 +20,11 @@ cmd=$(printf '%s' "$input" \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" \
   2>/dev/null || echo "")
 
-# Owner 2026-11-25: every agent may push a feature branch, since a push only
-# backs up work. Opening a PR still waits for the gate, and so do pushes that
-# can lose work or skip review by accident: main or master, tags, force, delete,
-# mirror or all.
-risky_push='git[[:space:]]+push.*([[:space:]:/](main|master)([[:space:]]|$)|--tags|refs/tags|--force|[[:space:]]-f([[:space:]]|$)|[[:space:]]\+|--mirror|--all|--delete|[[:space:]]-d([[:space:]]|$))'
+# Owner 2026-11-25: every agent may push, since a push only backs up work; only
+# the orchestrator may push main or merge (the user-level branch-only guard
+# enforces that). Opening a PR still waits for this gate, and so do pushes that
+# can lose work by accident: tags, force, delete, mirror or all.
+risky_push='git[[:space:]]+push.*(--tags|refs/tags|--force|[[:space:]]-f([[:space:]]|$)|[[:space:]]\+|--mirror|--all|--delete|[[:space:]]-d([[:space:]]|$))'
 if ! printf '%s' "$cmd" | grep -Eq "gh[[:space:]]+pr[[:space:]]+create|$risky_push"; then
   exit 0
 fi
