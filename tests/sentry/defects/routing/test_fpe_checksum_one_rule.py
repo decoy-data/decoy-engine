@@ -162,6 +162,12 @@ def field_readers(source: str, rel: str) -> Counter[Edge]:
     return out
 
 
+def _reads_scheme(n: ast.AST) -> bool:
+    return _key_read(n, SCHEME) or (
+        isinstance(n, ast.Attribute) and n.attr == SCHEME and isinstance(n.ctx, ast.Load)
+    )
+
+
 def scheme_reads(source: str, rel: str) -> Counter[Edge]:
     """Reads of the configured scheme: a mapping key read, a `.checksum` attribute, and any use
     of a name bound to the scheme slot of `_resolve()` (the fourth item) or assigned from an
@@ -181,24 +187,18 @@ def scheme_reads(source: str, rel: str) -> Counter[Edge]:
             and isinstance(node.targets[0].elts[3], ast.Name)
         ):
             bound.setdefault(scope, set()).add(node.targets[0].elts[3].id)
-    # A name assigned from an expression that reads the scheme (`checksum = self.checksum or None`)
-    # carries the scheme too, so a later branch on it is a use of the scheme.
+    # A name bound from an expression that reads the scheme (`checksum = self.checksum or None`,
+    # or the annotated `checksum: str | None = ...`) carries the scheme too.
     for scope, node in scoped:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+            continue
+        tgts = node.targets if isinstance(node, ast.Assign) else [node.target]
         if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and any(
-                _key_read(n, SCHEME)
-                or (
-                    isinstance(n, ast.Attribute)
-                    and n.attr == SCHEME
-                    and isinstance(n.ctx, ast.Load)
-                )
-                for n in ast.walk(node.value)
-            )
+            len(tgts) == 1
+            and isinstance(tgts[0], ast.Name)
+            and any(_reads_scheme(n) for n in ast.walk(node.value))
         ):
-            bound.setdefault(scope, set()).add(node.targets[0].id)
+            bound.setdefault(scope, set()).add(tgts[0].id)
     for scope, node in scoped:
         if _key_read(node, SCHEME):
             out[(rel, scope)] += 1
@@ -629,6 +629,21 @@ def test_sequential_admission_callers_pin_payload_and_key_context(index: ModuleI
 
 
 # Seeded spellings: each must be seen by the scanner it targets.
+
+
+@pytest.mark.parametrize(
+    "rel", ["execution/_strategies/_fpe.py", "execution/out_of_core/_mask_group_b.py"]
+)
+def test_a_refusal_after_an_annotated_binding_changes_the_count(rel: str) -> None:
+    """A refusal after the handlers' `checksum: str | None = ...` binding moves the count."""
+    src = dict(_sources())[rel]
+    anchor = '        checksum: str | None = cfg.get("checksum") or None\n'
+    assert src.count(anchor) == 1
+    mutated = src.replace(
+        anchor, anchor + "        if checksum == 'vin':\n            raise ValueError\n"
+    )
+    before, after = scheme_reads(src, rel), scheme_reads(mutated, rel)
+    assert sum(after.values()) == sum(before.values()) + 1
 
 
 def test_scanner_sees_every_registry_field_spelling() -> None:

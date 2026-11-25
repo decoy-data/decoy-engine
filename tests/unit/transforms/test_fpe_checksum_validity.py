@@ -16,6 +16,8 @@ Findings:
 
 from __future__ import annotations
 
+import tracemalloc
+
 import pytest
 
 import decoy_engine.checksums as checksums
@@ -676,3 +678,40 @@ class TestFpeChecksumLengthBoundary:
         assert all(c in "0123" for c in non_check), (
             f"permuted VIN body {non_check!r} left the caller's 4-symbol charset."
         )
+
+
+# ---------------------------------------------------------------------------
+# Hostile ciphertext and oversized cells: value-free refusal, ceiling-bound memory
+# ---------------------------------------------------------------------------
+
+_ALNUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _text(exc: BaseException) -> str:
+    return f"{exc} {exc!r} {exc.args}"
+
+
+@pytest.mark.parametrize(
+    ("scheme", "ciphertext"),
+    [("npi", "Z234567893"), ("isbn13", "ZZZ4567890123"), ("isbn13", "97Z1234567890")],
+)
+def test_nondigit_prefix_raises_a_value_free_checksum_error(scheme: str, ciphertext: str) -> None:
+    with pytest.raises(FpeChecksumError) as info:
+        fpe_decrypt_value(ciphertext, _KEY, _ALNUM, _TWEAK, True, False, scheme)
+    assert "Z" not in _text(info.value)
+
+
+@pytest.mark.parametrize("scheme", ["npi", "isbn13", "ean13", "gtin", "vin"])
+def test_an_oversized_cell_is_refused_without_a_length_sized_copy(scheme: str) -> None:
+    cell = "1" * 300_000
+    # Warm the refusal path so cold imports are not charged to the measurement.
+    with pytest.raises(FpeChecksumError):
+        fpe_encrypt_value("1" * 40, _KEY, _ALNUM, _TWEAK, True, False, scheme)
+    tracemalloc.start()
+    try:
+        with pytest.raises(FpeChecksumError):
+            fpe_encrypt_value(cell, _KEY, _ALNUM, _TWEAK, True, False, scheme)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 200_000, peak
