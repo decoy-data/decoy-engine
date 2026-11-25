@@ -22,6 +22,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine.contracts.bucketize_width import BUCKETIZE_FORMATS, EXACT_INT_BOUND
+from decoy_engine.kernel._scalar import passthrough_array
 
 _BOUND = float(EXACT_INT_BOUND)  # 2**53 is exact in float64
 
@@ -79,12 +80,6 @@ class TopCodeResult:
     labels: pa.Array
     over_count: int
     under_count: int
-
-
-def _combine(values: pa.Array | pa.ChunkedArray) -> pa.Array:
-    if isinstance(values, pa.ChunkedArray):
-        return values.combine_chunks()
-    return values
 
 
 def _numeric_domain(values: pa.Array) -> bool:
@@ -150,7 +145,7 @@ def python_float_str(values: pa.Array | pa.ChunkedArray) -> pa.Array:
     This is the notation ``Series.astype(str)`` prints (``1e+16``, ``1e-05``, ``-0.0``, ``inf``,
     ``nan``). Arrow's own float-to-string cast prints differently, so it is not used.
     """
-    array = _combine(values)
+    array = passthrough_array(values)
     valid = array.is_valid().to_numpy(zero_copy_only=False)
     floats = np.asarray(array.fill_null(0.0).to_numpy(zero_copy_only=False), dtype=np.float64)
     strings = [
@@ -162,7 +157,7 @@ def python_float_str(values: pa.Array | pa.ChunkedArray) -> pa.Array:
 def floor_multiple(values: pa.Array | pa.ChunkedArray, width: int | float) -> pa.Array:
     """``floor(x / width) * width`` in float64: the bucket start, bit-equal to NumPy's."""
     w = pa.scalar(float(width), pa.float64())
-    quotient = pc.divide(_as_float64(_combine(values)), w)  # type: ignore[attr-defined, unused-ignore]
+    quotient = pc.divide(_as_float64(passthrough_array(values)), w)  # type: ignore[attr-defined, unused-ignore]
     return pc.multiply(pc.floor(quotient), w)  # type: ignore[attr-defined, unused-ignore, no-any-return]
 
 
@@ -212,7 +207,7 @@ def bucketize_array(
     2**53 in magnitude cannot take a label; its label is null and its row is in ``exit_positions``.
     A float width never exits. Null and NaN rows are null unless ``exceptional`` supplies a label.
     """
-    array = _combine(values)
+    array = passthrough_array(values)
     _require_numeric(array, "bucketize")
     if fmt not in BUCKETIZE_FORMATS:
         raise ValueError("bucketize format is not one of lower, range, midpoint")
@@ -287,7 +282,7 @@ def top_code_array(
     it: an integral value without ``.0``. Null and NaN rows are null unless ``exceptional``
     supplies a label. The counts are the over and under rows, for the warning.
     """
-    array = _combine(values)
+    array = passthrough_array(values)
     _require_numeric(array, "top_code")
     do_under = floor is not None and under_label is not None
     view = _compare_view(array, cap, floor if do_under else None)

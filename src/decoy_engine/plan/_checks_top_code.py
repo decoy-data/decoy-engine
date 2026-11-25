@@ -55,7 +55,7 @@ def _reject_unusable_bound(
             code=code,
             path=path,
             message=(
-                f"top_code column {where} has invalid {kind} {value!r} "
+                f"top_code column {where} has invalid {kind} "
                 f"({type(value).__name__}). Set a numeric {kind} (a numeric-looking "
                 "string does not count; the emitter must coerce it to a real number)."
             ),
@@ -65,7 +65,7 @@ def _reject_unusable_bound(
             code=code,
             path=path,
             message=(
-                f"top_code column {where} has non-finite {kind} {value!r}. A NaN/inf "
+                f"top_code column {where} has non-finite {kind}. A NaN/inf "
                 f"{kind} never fires its tail comparison, so nothing is generalized "
                 "and the column passes through unmasked; set a finite numeric bound."
             ),
@@ -75,7 +75,7 @@ def _reject_unusable_bound(
             code=code,
             path=path,
             message=(
-                f"top_code column {where} has {kind} {value!r} whose magnitude is at "
+                f"top_code column {where} has a {kind} whose magnitude is at "
                 f"or beyond 2**53 ({EXACT_INT_BOUND}). Past that, float64 cannot compare "
                 "it exactly against a null-bearing column (Arrow int64+null widens to "
                 "float64), so a true tail value can round to the bound and escape "
@@ -208,7 +208,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                         code=reasons.plan.TOP_CODE_BOUNDS_UNRESOLVABLE,
                         path=f"tables.{table_name}.columns.{col_name}.provider_config.preset",
                         message=(
-                            f"top_code column {where} has preset {preset!r}, which is "
+                            f"top_code column {where} has a preset that is "
                             f"not a known preset (known: {sorted(_PRESETS)!r}). An "
                             "unresolved preset leaves the column unmasked at run; set "
                             "a known preset or drop 'preset' and set a numeric 'cap' "
@@ -232,7 +232,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                         message=(
                             f"top_code column {col_name!r} in table "
                             f"{table_name!r} sets a numeric cap but has no "
-                            f"non-empty 'over_label' (got {over_label!r}). Set "
+                            "non-empty 'over_label'. Set "
                             "'over_label' to the aggregate label for values "
                             'above cap (e.g. "90+").'
                         ),
@@ -276,8 +276,8 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                     path=(f"tables.{table_name}.columns.{col_name}.provider_config.under_label"),
                     message=(
                         f"top_code column {col_name!r} in table {table_name!r} "
-                        f"sets 'floor' but has no non-empty 'under_label' "
-                        f"(got {under_label!r}). Set 'under_label' to the "
+                        "sets 'floor' but has no non-empty 'under_label'. "
+                        "Set 'under_label' to the "
                         "aggregate label for values below floor."
                     ),
                 )
@@ -287,7 +287,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.floor",
                     message=(
                         f"top_code column {col_name!r} in table {table_name!r} "
-                        f"has floor {floor!r} >= cap {cap!r}. floor must be "
+                        "has a floor at or above its cap. floor must be "
                         "strictly less than cap, or every value falls into "
                         "one tail or the other with nothing left in range."
                     ),
