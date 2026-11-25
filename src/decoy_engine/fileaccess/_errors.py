@@ -185,21 +185,22 @@ def passes_by_type(exc: Exception) -> bool:
 
 def resurface_scrubbed(exc: Exception) -> Exception | None:
     """A failure the engine recognises only by its TEXT (Arrow's `Wrapping <cell> failed`,
-    OpenSSL's context copy), rebuilt as the same type around FIXED text; None when `exc` is not
-    such a failure or cannot be rebuilt so that the predicate still matches.
+    OpenSSL's context copy), rebuilt as the same type around the fixed `MEMORY_TEXT`; None when
+    `exc`'s own message is not such a failure or it cannot be rebuilt so that the predicate
+    still matches.
 
     The library text is never reused: it can carry a cell value next to the marker (an Arrow
     conversion error that names the cell and also the OpenSSL marker), and no redaction of the
-    original text can be proven to catch every shape."""
-    from decoy_engine.execution._isolated_common import is_memory_failure, memory_failure_text
-
-    if not is_memory_failure(exc):
+    original text can be proven to catch every shape. A typed memory error elsewhere in the
+    chain does not make the outer message one."""
+    message = str(exc)
+    if not (
+        any(marker in message for marker in MEMORY_ERROR_MARKERS)
+        or any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
+    ):
         return None
-    try:
-        rebuilt = type(exc)(memory_failure_text(str(exc)))
-    except Exception:
-        return None
-    return rebuilt if is_memory_failure(rebuilt) else None
+    rebuilt = _fixed_text_rebuild(exc)
+    return rebuilt if isinstance(rebuilt, Exception) else None
 
 
 def _errno_rebuild(exc: OSError) -> OSError:

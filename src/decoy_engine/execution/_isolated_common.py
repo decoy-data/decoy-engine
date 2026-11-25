@@ -75,7 +75,6 @@ __all__ = [
     "exception_error_text",
     "inside_isolated_worker",
     "is_memory_failure",
-    "memory_failure_text",
     "peak_rss_mb",
     "scrub_error_text",
 ]
@@ -237,18 +236,6 @@ def scrub_error_text(message: str) -> str:
     if value_end < value_start:
         return message
     return f"{message[:value_start]}<value>{message[value_end:]}"
-
-
-def memory_failure_text(message: str) -> str:
-    """Fixed text for a recognised memory failure: the marker that matched, never the message.
-
-    The message can carry a cell value beside the marker, so none of it is kept. Text that
-    matches no text marker (a typed memory error in the cause chain) comes back as the Arrow
-    wording, which still classifies."""
-    for marker in _MEMORY_ERROR_MARKERS:
-        if marker in message:
-            return marker
-    return f"Unknown error: {_WRAPPING_OPEN}<value>{_WRAPPING_CLOSE}"
 
 
 # Registered, data-free ExecutionError codes raised by the knob, substrate and memory-detection
