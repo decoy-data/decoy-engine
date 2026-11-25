@@ -177,3 +177,22 @@ def test_every_nested_layout_counts_its_dictionary_and_the_cache_refuses_it(layo
     assert measured_pool_bytes(pool) >= 1_000_000
     with pytest.raises(PoolCapacityError):
         PoolCache(max_bytes=1024).put(pool)
+
+
+def test_the_byte_walk_is_linear_on_deeply_nested_maps() -> None:
+    import time
+
+    import pyarrow as pa
+
+    from decoy_engine.generation.pool import _value_pool
+
+    arr: Any = pa.MapArray.from_arrays(pa.array([0, 1], pa.int32()), pa.array(["k"]), pa.array([1]))
+    depth = 16
+    for _ in range(depth - 1):
+        arr = pa.MapArray.from_arrays(pa.array([0, 1], pa.int32()), pa.array(["k"]), arr)
+    _value_pool._VISITS[0] = 0
+    start = time.perf_counter()
+    _value_pool._arrow_retained_bytes(arr)
+    elapsed = time.perf_counter() - start
+    assert _value_pool._VISITS[0] <= 4 * depth
+    assert elapsed < 0.25

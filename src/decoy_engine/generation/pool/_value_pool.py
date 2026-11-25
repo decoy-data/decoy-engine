@@ -119,11 +119,15 @@ def _arrow_retained_bytes(array: pa.Array[Any]) -> int:
 # every child's buffers, so the walk exists only to reach what it skips: a dictionary, wherever it
 # sits. A layout pyarrow adds later is covered by its accessor name or by `field(i)`, and the
 # type-parametrized test in test_value_pool.py fails when one is not.
+_VISITS = [0]  # child-visit counter read by the linearity test
 _CHILD_ACCESSORS = ("dictionary", "storage", "values", "run_ends", "keys", "items")
 
 
 def _child_arrays(array: pa.Array[Any]) -> Iterator[pa.Array[Any]]:
+    is_map = pa.types.is_map(array.type)
     for name in _CHILD_ACCESSORS:
+        if is_map and name == "values":
+            continue  # a map's entries struct repeats its keys and items: walking it doubles each level
         try:
             child = getattr(array, name)
         except (AttributeError, NotImplementedError, pa.ArrowException):
@@ -142,7 +146,9 @@ def _child_arrays(array: pa.Array[Any]) -> Iterator[pa.Array[Any]]:
 def _collect_arrow_roots(array: pa.Array[Any], roots: dict[tuple[int, int], int]) -> None:
     """Add every root buffer of ``array`` and of everything nested under it to ``roots``.
 
-    A shared root counts once, whichever path reaches it."""
+    A shared root counts once, whichever path reaches it. Each child is visited once per path,
+    so the walk is linear in the number of arrays."""
+    _VISITS[0] += 1
     for buf in array.buffers():
         if buf is None:
             continue

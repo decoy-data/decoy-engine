@@ -226,6 +226,16 @@ def test_locale_entries_read_a_faker_alias_as_the_locale_faker_opens() -> None:
     assert locale_entries(["de-AT", "it"]) == ("de_AT", "it_IT")
 
 
+_IT_ONLY = {"Sig.", "Sig.ra", "Dott."}
+_AT_ONLY = {"Dipl.-Ing.", "Dr.", "Ing.", "Mag.", "Prof.", "Univ.Prof."}
+
+
+def _both_locales_contribute(values: list[Any]) -> None:
+    """A pick pinned to one locale would replay exactly, so replay alone proves nothing."""
+    assert set(values) & _IT_ONLY, "no value only it_IT produces"
+    assert set(values) & _AT_ONLY, "no value only de_AT produces"
+
+
 def _list_rows(ambient: int) -> list[Any]:
     Faker.seed(ambient)  # the shared RNG an unseeded factory choice would read
     config = prepared_config(faker_config("prefix", 60, locale=["de_AT", "it_IT"]))
@@ -236,7 +246,8 @@ def _list_rows(ambient: int) -> list[Any]:
 def test_a_validated_locale_list_replays_exactly_whatever_the_ambient_state() -> None:
     first = _list_rows(1)
     assert all(_list_rows(ambient) == first for ambient in range(2, 8))
-    assert len(set(first)) > 3, "both locales should contribute, or the replay proves nothing"
+    assert len(first) == 60 and all(isinstance(v, str) and v for v in first)
+    _both_locales_contribute(first)
 
 
 @pytest.mark.serial
@@ -249,4 +260,14 @@ def test_a_locale_list_pool_build_replays_exactly_whatever_the_ambient_state() -
 
     first = build(1)
     assert all(build(ambient) == first for ambient in range(2, 8))
-    assert len(set(first)) > 3
+    assert len(first) == 40
+    _both_locales_contribute(first)
+
+
+@pytest.mark.serial
+def test_a_selection_pinned_to_the_first_locale_fails_the_contribution_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Faker, "_select_factory", lambda self, name: self.factories[0])
+    with pytest.raises(AssertionError, match="no value only it_IT"):
+        _both_locales_contribute(_list_rows(1))
