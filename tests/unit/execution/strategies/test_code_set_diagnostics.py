@@ -269,15 +269,15 @@ def test_invalid_mode_refused_with_no_live_row(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "exc_type",
-    [PermissionError, OSError],
+    ("exc_type", "err"),
+    [(PermissionError, 13), (OSError, 5)],  # 5 is EIO: a generic OSError, not a subclass
 )
 def test_first_stat_translates_every_oserror_value_free(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, exc_type: type[OSError]
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, exc_type: type[OSError], err: int
 ) -> None:
 
     def _boom(self: Any, *a: Any, **k: Any) -> Any:
-        raise exc_type(13, f"denied {_PW}", f"/x/{_TOK}")
+        raise exc_type(err, f"denied {_PW}", f"/x/{_TOK}")
 
     monkeypatch.setattr(pathlib.Path, "stat", _boom)
     cfg = CodeSetConfig.from_dict(
@@ -306,3 +306,93 @@ def test_verify_corpus_problems_never_carry_the_file_stem(tmp_path: pathlib.Path
     assert "missing" in " ".join(report.problems)
     # The policy-rendered location is the only place the file name may appear.
     assert _TOK not in " ".join(report.problems).replace(report.path, "")
+
+
+_PREFIXED = f"a/https://svc:{_PW}@host.example/c.parquet?token={_TOK}"
+
+
+def test_load_path_keeps_the_configured_locator_for_display() -> None:
+    # `Path` collapses the doubled separator, which hid the URL from the redactor.
+    cfg = CodeSetConfig.from_dict({"code_set": "ab", "corpus_source": f"customer:{_PREFIXED}"})
+    with pytest.raises(Exception) as info:
+        describe_loaded_corpus_for(cfg)
+    assert getattr(info.value, "code", None) == "code_set_corpus_path_not_found"
+    _no_secret(str(info.value))
+
+
+def test_verify_corpus_keeps_the_given_locator_for_display() -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    report = verify_corpus(_PREFIXED)
+    assert not report.ok
+    _no_secret(report.path)
+    _no_secret(" ".join(report.problems))
+
+
+def test_no_provenance_warning_hides_a_credential_label(
+    tmp_path: pathlib.Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = CodeSetConfig.from_dict({"code_set": _URL, "corpus_source": _corpus(tmp_path)})
+    with caplog.at_level("DEBUG"):
+        describe_loaded_corpus_for(cfg)
+    assert any("no provenance" in r.getMessage() for r in caplog.records)
+    for rec in caplog.records:
+        _no_secret(rec.getMessage())
+
+
+def test_file_supplied_provenance_never_enters_error_text() -> None:
+    from decoy_engine.transforms._codeset_checks import _validate_provenance
+    from decoy_engine.transforms._codeset_provenance import CodeSetProvenance
+
+    def stamp(corpus: str, version: str, is_seed: str) -> CodeSetProvenance:
+        return CodeSetProvenance(
+            corpus=corpus,
+            corpus_version=version,
+            source="s",
+            source_url="",
+            license="l",
+            citation="",
+            source_version="1",
+            effective_date="2026-01-01",
+            is_seed=False,
+            raw_is_seed=is_seed,
+        )
+
+    for bad in (stamp(_PW, "2.0", "true"), stamp("icd10", _TOK, _PW)):
+        with pytest.raises(Exception) as info:
+            _validate_provenance("icd10", "where", bad, is_shipped=True)
+        _no_secret(str(info.value))
+    assert "corpus_version" in str(info.value)
+
+
+def test_success_path_provenance_is_stripped_of_url_credentials(tmp_path: pathlib.Path) -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+    from decoy_engine.transforms.code_set import describe_loaded_corpus
+
+    path = tmp_path / "p.parquet"
+    pq.write_table(
+        pa.table(
+            {"code": pa.array(["Z01", "Z02"], type=pa.string())},
+            metadata={
+                b"decoy_corpus": b"x",
+                b"source": f"https://svc:{_PW}@host/a?token={_TOK}".encode(),
+                b"source_version": b"1",
+                b"effective_date": b"2026-01-01",
+                b"license": b"l",
+            },
+        ),
+        str(path),
+    )
+    _no_secret(repr(verify_corpus(path).provenance))
+    cfg = CodeSetConfig.from_dict({"code_set": "x", "corpus_source": f"customer:{path}"})
+    _no_secret(repr(describe_loaded_corpus(cfg)))
+
+
+def test_both_stat_sites_classify_not_a_directory_the_same_way() -> None:
+    from decoy_engine.transforms._codeset_checks import corpus_stat_error
+
+    for exc in (NotADirectoryError(20, "x"), FileNotFoundError(2, "x")):
+        first = corpus_stat_error(exc, "p")
+        second = corpus_stat_error(exc, "p")
+        assert first.code == second.code == "code_set_corpus_path_not_found"
+    assert corpus_stat_error(OSError(5, _PW), "p").code == ("code_set_corpus_read_error")

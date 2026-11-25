@@ -23,7 +23,7 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA, _unknown_shipped_corpus
+from decoy_engine.transforms._codeset_checks import _SHIPPED_CORPORA, _unknown_shipped_corpus
 from decoy_engine.transforms._codeset_provenance import RESERVED_LICENSED_NAMES
 
 

@@ -67,7 +67,14 @@ from decoy_engine.fileaccess._protected_dir import (
     protected_scratch_dir,
     scratch_root,
 )
-from decoy_engine.fileaccess._read import keeps_class, read_all, read_checked, read_text, shown
+from decoy_engine.fileaccess._read import (
+    keeps_class,
+    read_all,
+    read_checked,
+    read_text,
+    shown,
+    without_url_credentials,
+)
 from decoy_engine.fileaccess._reclaim import reclaim_stages
 from decoy_engine.fileaccess._rooted import Root, RootedFileAccess
 from decoy_engine.fileaccess._scratch import ScratchArena, scratch_native, scratch_native_iter
@@ -238,5 +245,6 @@ __all__ = [
     "shown",
     "stage_entries",
     "typed_memory_member",
+    "without_url_credentials",
     "write_private",
 ]

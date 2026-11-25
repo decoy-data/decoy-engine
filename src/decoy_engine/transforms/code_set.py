@@ -111,6 +111,12 @@ from decoy_engine import reasons
 from decoy_engine.determinism import derive, derive_index
 from decoy_engine.internal.crypto import hmac_hex
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.transforms._codeset_checks import (
+    _check_source_version_pin,
+    _corpus_label,
+    _where,
+    provenance_summary,
+)
 from decoy_engine.transforms._codeset_config import CodeSetConfig as CodeSetConfig
 from decoy_engine.transforms._codeset_config_checks import (
     check_mode as check_mode,
@@ -122,8 +128,6 @@ from decoy_engine.transforms._codeset_index import hole_candidate_count, hole_re
 from decoy_engine.transforms._codeset_loader import (
     _SHIPPED_CORPORA,
     CorpusVerifyReport,  # noqa: F401 -- re-exported public API (see below)
-    _check_source_version_pin,
-    _corpus_label,
     _CorpusRecord,
     _get_corpus_record,
     load_corpus_provenance,  # noqa: F401 -- re-exported public API (see below)
@@ -183,12 +187,13 @@ def resolve_corpus_record(config: CodeSetConfig) -> _CorpusRecord:
     and every subsequent masked value (via the pinned record) share the
     already-verified corpus.
     """
-    corpus_name, override_path = _resolve_corpus_path(config)
+    corpus_name, override_path, locator = _resolve_corpus_path(config)
     return _get_corpus_record(
         corpus_name,
         override_path,
         is_shipped=override_path is None,
         expected_source_version=config.corpus_source_version,
+        locator=locator,
     )
 
 
@@ -213,28 +218,27 @@ def describe_loaded_corpus(
     """
     if record is None:
         record = resolve_corpus_record(config)
-    prov = record.provenance
-    return {
-        "code_set": _corpus_label(config.code_set),
-        "source": prov.source if prov else "",
-        "source_version": prov.source_version if prov else "",
-        "effective_date": prov.effective_date if prov else "",
-        "license": prov.license if prov else "",
-        "is_seed": prov.is_seed if prov else False,
-        "row_count": len(record.rows),
+    empty = {
+        "source": "",
+        "source_version": "",
+        "effective_date": "",
+        "license": "",
+        "is_seed": False,
     }
+    summary = provenance_summary(record.provenance) or empty
+    return {"code_set": _corpus_label(config.code_set), **summary, "row_count": len(record.rows)}
 
 
-def _resolve_corpus_path(config: CodeSetConfig) -> tuple[str, Path | None]:
-    """Return (corpus_name, optional_override_path) from config."""
+def _resolve_corpus_path(config: CodeSetConfig) -> tuple[str, Path | None, str | None]:
+    """Return (corpus_name, optional_override_path, locator exactly as configured)."""
     source = config.corpus_source
     if source == "shipped" or not source:
-        return config.code_set, None
+        return config.code_set, None, None
     if source.startswith("customer:"):
         raw = source[len("customer:") :]
-        return config.code_set, Path(raw)
+        return config.code_set, Path(raw), raw
     # Unknown source prefix -- treat as shipped (validated at config time).
-    return config.code_set, None
+    return config.code_set, None, None
 
 
 # ── Chapter derivation ────────────────────────────────────────────────────────
@@ -316,13 +320,7 @@ def apply_code_set(
     try:
         check_mode(mode)
         if corpus_record is None:
-            corpus_name, override_path = _resolve_corpus_path(config)
-            record = _get_corpus_record(
-                corpus_name,
-                override_path,
-                is_shipped=override_path is None,
-                expected_source_version=config.corpus_source_version,
-            )
+            record = resolve_corpus_record(config)
         else:
             record = corpus_record
             # Defense-in-depth (Codex HIGH): a caller that resolved this record
@@ -331,10 +329,9 @@ def apply_code_set(
             # check ran against the OTHER config). Re-verify the pin against the
             # record we are about to mask with, so the pin is enforced wherever a
             # pinned config is used, not only on the self-resolving path.
-            corpus_name, override_path = _resolve_corpus_path(config)
-            _check_source_version_pin(
-                corpus_name, override_path, record, config.corpus_source_version
-            )
+            corpus_name, override_path, locator = _resolve_corpus_path(config)
+            shown = None if override_path is None else _where(locator)
+            _check_source_version_pin(corpus_name, shown, record, config.corpus_source_version)
         rows = record.rows
 
         if config.chapter_preserve:
