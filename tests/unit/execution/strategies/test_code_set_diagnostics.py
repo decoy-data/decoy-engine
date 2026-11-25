@@ -304,4 +304,5 @@ def test_verify_corpus_problems_never_carry_the_file_stem(tmp_path: pathlib.Path
     report = verify_corpus(partial)
     assert not report.ok
     assert "missing" in " ".join(report.problems)
-    assert _TOK not in " ".join(report.problems)
+    # The policy-rendered location is the only place the file name may appear.
+    assert _TOK not in " ".join(report.problems).replace(report.path, "")
