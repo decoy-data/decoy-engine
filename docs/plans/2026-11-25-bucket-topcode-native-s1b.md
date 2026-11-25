@@ -94,9 +94,9 @@ Non-goals: raw physical snapshots skipping the wrapper (S1p); sequential native 
 
 | Route | Before S1b | After S1b |
 |---|---|---|
-| chunked (`native/_chunked_entry.py`) | oracle for both strategies | Arrow per chunk where admitted; declined chunks on the oracle (S1r) |
+| chunked (`execution/native/_chunked_entry.py:287`, the per-chunk gate S1r extends) | oracle for both strategies | Arrow per chunk where admitted; declined chunks on the oracle (S1r) |
 | unified slice, bucketize | oracle (no kernel) | per-node Arrow step |
-| unified slice, top_code | wrapper (`ADMITTED_GLOBAL_STRATEGIES`) | per-node Arrow step when the snapshot is marked post-cast and the three candidate checks hold (10a); wrapper otherwise |
+| unified slice, top_code | wrapper (`execution/physical/_shadow_full_frame.py:119`, called from `execution/_unified_slice.py:254`) | per-node Arrow step when the snapshot is marked post-cast and the three candidate checks hold (10a); wrapper otherwise |
 | physical raw snapshot | wrapper for top_code | unchanged (S1p) |
 | sequential FK, out-of-core | handler; out-of-core refuses bucketize (`execution/out_of_core/_compat.py:78`) and has no top_code entry | unchanged (P8 controls) |
 | full frame | handler (reference) | unchanged |
