@@ -363,24 +363,14 @@ def test_documented_gap_preformatted_text(shape: str) -> None:
     assert _CANARY not in buf.getvalue()
 
 
-class _Wrapper:
-    def __init__(self, exc: BaseException) -> None:
-        self._exc = exc
-
-    def __str__(self) -> str:
-        return str(self._exc)
-
-
 @pytest.mark.xfail(strict=True, reason="named in the module gap list; call sites are guarded")
-@pytest.mark.parametrize("shape", ["exc_args", "wrapper_str"])
+@pytest.mark.parametrize("shape", ["exc_args"])
 def test_documented_gap_uncatchable_shapes(shape: str) -> None:
     engine, buf = _engine_handler()
     exc = ValueError(_CANARY)
     arg: object
     if shape == "exc_args":
         arg = exc.args
-    elif shape == "wrapper_str":
-        arg = _Wrapper(exc)
     engine.handle(_record("x %s", (arg,), exc=False))
     assert _CANARY not in buf.getvalue()
 
@@ -408,3 +398,24 @@ def test_standard_record_fields_are_not_rewritten() -> None:
     SafeRecordFilter().filter(record)
     after = {k: v for k, v in vars(record).items() if k not in ("msg", "args", "exc_info")}
     assert after == before | {k: v for k, v in after.items() if k.startswith("_decoy")}
+
+
+def test_failed_scrub_blanks_every_extra_attribute(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_logger,  # type: ignore[no-untyped-def]
+) -> None:
+    real = _log_filter._safe_value
+
+    def flaky(value: object, depth: int) -> object:
+        if isinstance(value, ValueError):
+            raise RuntimeError(_CANARY)
+        return real(value, depth)
+
+    monkeypatch.setattr(_log_filter, "_safe_value", flaky)
+    buf = io.StringIO()
+    handler = _new_engine_handler(lambda: logging.StreamHandler(buf), _ExtraFormatter())
+    logger = isolated_logger("f31_ae3_t_extra_fail", handler, logging.INFO)
+    logger.info("x", extra={"err": ValueError(_CANARY), "rows": ["ok"]})
+    assert _CANARY not in buf.getvalue()
+    unrenderable = _log_filter._UNRENDERABLE
+    assert buf.getvalue().strip() == f"{unrenderable} | {unrenderable} | {unrenderable}"

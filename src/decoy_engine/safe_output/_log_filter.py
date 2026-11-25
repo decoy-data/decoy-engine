@@ -26,7 +26,10 @@ type (an unbound builtin iterator at most), in this order:
   container at the depth limit becomes `<nested>`;
 - any other iterable (a generator, a custom class with `__iter__`, an array library's object)
   becomes `<nested>`: iterating it would run caller code and could drain it;
-- any other object (a `Path`, `Decimal`, enum member, `datetime`) passes and prints as usual.
+- a scalar-like object (`_SCALAR_LIKE`: `Path`, `Decimal`, enum member, `date`, `datetime`,
+  `time`, `timedelta`, `UUID`, a class or function, a number subclass) passes and prints as
+  usual. Every other object (`SimpleNamespace`, `argparse.Namespace`, `functools.partial`, a
+  caller class) becomes `<object>`: its repr is caller code.
 
 Also:
 
@@ -55,14 +58,19 @@ call-site guard `tests/sentry/test_log_interpolation.py` covers them instead (pl
 - text already formatted into `msg` (an f-string, or `str(exc)` passed as an argument), which
   cannot be told apart from any other text here;
 - `exc.args` (or any part of an exception) passed as an argument, since it is plain data;
-- an arbitrary non-iterable wrapper object whose `__str__` or `__repr__` calls `str(exc)`;
 - a caller metaclass that changes `issubclass` or class attribute reads.
 """
 
 from __future__ import annotations
 
 import array
+import datetime
+import decimal
+import enum
 import logging
+import pathlib
+import types
+import uuid
 from collections import Counter, UserDict, defaultdict, deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from types import TracebackType
@@ -106,6 +114,27 @@ _ITERABLES: tuple[tuple[type, Callable[[Any], Iterator[Any]]], ...] = (
     (_KEYS_VIEW, _KEYS_VIEW.__iter__),  # type: ignore[attr-defined]
     (_VALUES_VIEW, _VALUES_VIEW.__iter__),  # type: ignore[attr-defined]
     (_ITEMS_VIEW, _ITEMS_VIEW.__iter__),  # type: ignore[attr-defined]
+)
+# Anything else that may print through its own repr. Every other object is `<object>`: a
+# `SimpleNamespace`, an `argparse.Namespace` or a `functools.partial` prints what it holds.
+_SCALAR_LIKE = (
+    int,
+    float,
+    complex,
+    pathlib.PurePath,
+    decimal.Decimal,
+    enum.Enum,
+    datetime.date,
+    datetime.time,
+    datetime.timedelta,
+    uuid.UUID,
+    type,
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodType,
+    type(None),
+    type(Ellipsis),
+    type(NotImplemented),
 )
 _PLAIN_KEY_TYPES = (str, int, float, bool, type(None))
 # Factories that build an empty builtin: a missing name on such a defaultdict has a safe default.
@@ -201,7 +230,7 @@ def _safe_value(value: object, depth: int) -> object:
         # A plain copy, so the subclass's own `__str__` and `__repr__` never run.
         return str.__str__(value)
     if depth == 0:
-        return _NESTED_PLACEHOLDER if _is_container(kind) else _scalar_or_iterable(value)
+        return _NESTED_PLACEHOLDER if _is_container(kind) else _other_value(value)
     for base, iterate in _SEQUENCES:
         if issubclass(kind, base):
             items: list[object] = list(iterate(value))
@@ -223,13 +252,19 @@ def _safe_value(value: object, depth: int) -> object:
         if not plain:
             return _MAPPING_PLACEHOLDER
         return dict(pairs) if changed else value
-    return _scalar_or_iterable(value)
+    return _other_value(value)
 
 
-def _scalar_or_iterable(value: object) -> object:
-    """Any other object: an iterable is the placeholder, the rest (a `Path`, `Decimal`, enum
-    member, `datetime`) prints as it does today."""
-    return _NESTED_PLACEHOLDER if issubclass(type(value), Iterable) else value
+def _other_value(value: object) -> object:
+    """Any object the table has no row for: deny by default.
+
+    A scalar-like type (`_SCALAR_LIKE`) prints as it does today, an iterable is `<nested>`
+    (it is never iterated), and every other object is `<object>`.
+    """
+    kind = type(value)
+    if any(issubclass(kind, t) for t in _SCALAR_LIKE):
+        return value
+    return _NESTED_PLACEHOLDER if issubclass(kind, Iterable) else _OBJECT_PLACEHOLDER
 
 
 class _NamedArgs(dict[object, object]):
@@ -374,4 +409,8 @@ class SafeRecordFilter(logging.Filter):
             # A failure here must not raise inside logging or let the raw record through.
             record.msg, record.args = _UNRENDERABLE, ()
             record.exc_info = record.exc_text = None
+            # `extra=` attributes may hold the very value that failed, so none is kept.
+            for key in list(vars(record)):
+                if key not in _STANDARD_FIELDS and key != _SAFE_EXC_TEXT:
+                    setattr(record, key, _UNRENDERABLE)
         return True

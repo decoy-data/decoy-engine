@@ -9,6 +9,7 @@ one cell that writes it as a literal checks that the filter prints no source lin
 
 from __future__ import annotations
 
+import argparse
 import collections
 import collections.abc
 import configparser
@@ -301,7 +302,7 @@ def test_item_equality_is_never_called_on_a_caller_value() -> None:
     )
     _CALLS.clear()
     SafeRecordFilter().filter(record)
-    assert record.getMessage() == "[ValueError, item] {'k': ValueError, 'i': item}"
+    assert record.getMessage() == "[ValueError, <object>] {'k': ValueError, 'i': <object>}"
     assert _CALLS == []
 
 
@@ -648,6 +649,18 @@ class _AttrsLike:
         return f"AttrsLike(error={self.error!r})"
 
 
+class _NamespaceSub(types.SimpleNamespace):
+    pass
+
+
+class _Wrapper:
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def __str__(self) -> str:
+        return str(self._exc)
+
+
 class _CustomIterable:
     def __init__(self, error: object) -> None:
         self.error = error
@@ -671,6 +684,11 @@ def _protocol_cell(name: str, exc: BaseException) -> tuple[object, str]:
         "dataclass": (_Holder(exc), "<object>"),
         "attrs_like": (_AttrsLike(exc), "<object>"),
         "slice": (slice(exc, None), "slice(ValueError, None, None)"),
+        "simple_namespace": (types.SimpleNamespace(error=exc), "<object>"),
+        "namespace_subclass": (_NamespaceSub(error=exc), "<object>"),
+        "argparse_namespace": (argparse.Namespace(error=exc), "<object>"),
+        "partial": (functools.partial(_ret, exc), "<object>"),
+        "wrapper": (_Wrapper(exc), "<object>"),
     }[name]
 
 
@@ -684,6 +702,11 @@ _PROTOCOL_CELLS = [
     "dataclass",
     "attrs_like",
     "slice",
+    "simple_namespace",
+    "namespace_subclass",
+    "argparse_namespace",
+    "partial",
+    "wrapper",
 ]
 
 
