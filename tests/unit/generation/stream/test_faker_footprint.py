@@ -226,9 +226,27 @@ def test_locale_entries_read_a_faker_alias_as_the_locale_faker_opens() -> None:
     assert locale_entries(["de-AT", "it"]) == ("de_AT", "it_IT")
 
 
+def _list_rows(ambient: int) -> list[Any]:
+    Faker.seed(ambient)  # the shared RNG an unseeded factory choice would read
+    config = prepared_config(faker_config("prefix", 60, locale=["de_AT", "it_IT"]))
+    return synthesize._generate_tables_from_config(config)["t"].column("v").to_pylist()
+
+
 @pytest.mark.serial
-def test_a_validated_locale_list_generates_rows() -> None:
-    config = prepared_config(faker_config("prefix", 3, locale=["de_AT", "it_IT"]))
-    out = synthesize._generate_tables_from_config(config)
-    assert out["t"].num_rows == 3
-    assert all(isinstance(v, str) and v for v in out["t"].column("v").to_pylist())
+def test_a_validated_locale_list_replays_exactly_whatever_the_ambient_state() -> None:
+    first = _list_rows(1)
+    assert all(_list_rows(ambient) == first for ambient in range(2, 8))
+    assert len(set(first)) > 3, "both locales should contribute, or the replay proves nothing"
+
+
+@pytest.mark.serial
+def test_a_locale_list_pool_build_replays_exactly_whatever_the_ambient_state() -> None:
+    from decoy_engine.generation._faker_pool import build_pool_values
+
+    def build(ambient: int) -> list[Any]:
+        Faker.seed(ambient)
+        return build_pool_values("prefix", ["de_AT", "it_IT"], b"\x01" * 8, 40, {})[0]
+
+    first = build(1)
+    assert all(build(ambient) == first for ambient in range(2, 8))
+    assert len(set(first)) > 3

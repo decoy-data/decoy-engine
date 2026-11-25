@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
 from decoy_engine._canonical import canonical_json_bytes
+from decoy_engine.internal.faker_setup import requested_locale
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -189,7 +190,9 @@ def build_envelope(
     for table in config.get("tables") or []:
         for col in table.get("generate_columns") or []:
             if col.get("type") == "faker":
-                effective = col.get("locale") or instance_default_locale or "default"
+                effective = (
+                    requested_locale(col.get("locale"), instance_default_locale) or "default"
+                )
                 locales.append((table["name"], col["name"], str(effective)))
     return PinnedEnvelope(
         job_seed=_normalize_job_seed_int(config),

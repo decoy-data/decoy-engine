@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import numpy as np
 import pytest
@@ -129,3 +130,50 @@ class TestNestedArrowRetention:
         nested = pa.StructArray.from_arrays([shared, shared], names=["a", "b"])
         pool = _make_pool(np.array([1], dtype=np.int64), arrow=nested)
         assert measured_pool_bytes(pool) < 2 * 1000 + 100
+
+
+def _nested_dictionary_layouts() -> dict[str, Any]:
+    import pyarrow as pa
+
+    class Wrapped(pa.ExtensionType):
+        def __init__(self, storage_type: pa.DataType) -> None:
+            super().__init__(storage_type, "test.wrapped")
+
+        def __arrow_ext_serialize__(self) -> bytes:
+            return b""
+
+        @classmethod
+        def __arrow_ext_deserialize__(cls, storage_type: Any, serialized: bytes) -> Any:
+            return cls(storage_type)
+
+    big = pa.array(["x" * 1_000_000, "y"])
+    d = pa.DictionaryArray.from_arrays(pa.array([0, 1], pa.int8()), big)
+    off = pa.array([0], pa.int32())
+    size = pa.array([2], pa.int32())
+    return {
+        "struct": pa.StructArray.from_arrays([d], names=["d"]),
+        "list": pa.ListArray.from_arrays(pa.array([0, 2], pa.int32()), d),
+        "large_list": pa.LargeListArray.from_arrays(pa.array([0, 2], pa.int64()), d),
+        "fixed_size_list": pa.FixedSizeListArray.from_arrays(d, 2),
+        "list_view": pa.ListViewArray.from_arrays(off, size, d),
+        "large_list_view": pa.LargeListViewArray.from_arrays(
+            off.cast(pa.int64()), size.cast(pa.int64()), d
+        ),
+        "run_end_encoded": pa.RunEndEncodedArray.from_arrays(pa.array([2], pa.int32()), d),
+        "extension": pa.ExtensionArray.from_storage(Wrapped(d.type), d),
+        "struct_of_list_view": pa.StructArray.from_arrays(
+            [pa.ListViewArray.from_arrays(off, size, d)], names=["v"]
+        ),
+        "map": pa.MapArray.from_arrays(pa.array([0, 2], pa.int32()), d.cast(d.type), d),
+    }
+
+
+@pytest.mark.parametrize("layout", sorted(_nested_dictionary_layouts()))
+def test_every_nested_layout_counts_its_dictionary_and_the_cache_refuses_it(layout: str) -> None:
+    from decoy_engine.generation.pool import PoolCache, PoolCapacityError
+
+    arrow = _nested_dictionary_layouts()[layout]
+    pool = _make_pool(np.array([1], dtype=np.int64), arrow=arrow)
+    assert measured_pool_bytes(pool) >= 1_000_000
+    with pytest.raises(PoolCapacityError):
+        PoolCache(max_bytes=1024).put(pool)

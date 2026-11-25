@@ -186,7 +186,7 @@ def test_provider_missing_from_the_effective_locale_is_refused_even_if_another_h
     assert (info.value.code, info.value.path) == DEPT_REFUSAL
     # A plan compiled without it is refused when generation starts, before any provider runs.
     monkeypatch.setattr(
-        "decoy_engine.generation._streamed.table_batches",
+        "decoy_engine.generation._streamed._run_admitted",
         lambda *a, **k: pytest.fail("generation started"),
     )
     with pytest.raises(PlanCompileError) as info:

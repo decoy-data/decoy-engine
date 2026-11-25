@@ -460,6 +460,9 @@ def _reflect(fake: Faker, name: str, attr: Callable[..., Any]) -> Callable[..., 
         from decoy_engine.generation._dob_anchor import anchored_date_of_birth
 
         return _make_reflected_provider(partial(anchored_date_of_birth, fake))
+    if len(fake.factories) > 1:
+        # The proxy picks a factory per lookup from its RNG: look up after the seed, not before.
+        return lambda **kwargs: _make_reflected_provider(getattr(fake, name))(**kwargs)
     return _make_reflected_provider(attr)
 
 
@@ -666,11 +669,9 @@ def open_column_faker(
     column_locale: Any, default_locale: Any, seed: int, default_faker: Callable[[], Faker]
 ) -> tuple[Faker, int | None]:
     """The per-row Faker and its pre-seed: a column locale gives no pre-seed, else ``seed``."""
-    if column_locale:
-        return make_faker(column_locale), None
-    if default_locale:
-        return make_faker(default_locale), seed
-    return default_faker(), seed
+    requested = requested_locale(column_locale, default_locale)
+    pre_seed = None if column_locale else seed
+    return (make_faker(requested), pre_seed) if requested else (default_faker(), seed)
 
 
 def make_faker(locale: str | list[str] | None = None) -> Faker:

@@ -31,6 +31,7 @@ from decoy_engine.contracts.distribution_snapshot import (
 )
 from decoy_engine.errors import DecoyError
 from decoy_engine.generation import stream as gen_stream
+from decoy_engine.internal.faker_setup import requested_locale
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -379,7 +380,7 @@ def classify_window_table(
             else:
                 _check_statistical(table, col, spec, max_cell_chars)
         elif kind == "faker":
-            locale = col.get("locale") or instance_default_locale
+            locale = requested_locale(col.get("locale"), instance_default_locale)
             pooled = pool_eligible(
                 col.get("faker_type", "word"), locale, rows, opted_out=pool_opted_out(col)
             )
@@ -433,7 +434,7 @@ def _class_b_reason(
     if kind == "sequence":
         return None
     if kind == "faker":
-        locale = col.get("locale") or instance_default_locale
+        locale = requested_locale(col.get("locale"), instance_default_locale)
         if pool_eligible(
             col.get("faker_type", "word"), locale, rows, opted_out=pool_opted_out(col)
         ):
