@@ -29,8 +29,8 @@ import pyarrow as pa
 
 from decoy_engine.determinism import DeterminismError, derive_index
 from decoy_engine.determinism._derive import DeriveContext
+from decoy_engine.generation.pool import native_type_not_admitted_error
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
-from decoy_engine.generation.pool._errors import native_type_not_admitted_error
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 
 from ._crypto_ext import (

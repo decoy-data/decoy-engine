@@ -56,7 +56,7 @@ from decoy_engine.errors import (
     DecoyError,
     MaskKeyRequiredError,
 )
-from decoy_engine.generation.pool._errors import native_type_not_admitted_error
+from decoy_engine.generation.pool import native_type_not_admitted_error
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.transforms.fpe import _CHARSETS
 

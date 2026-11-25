@@ -64,6 +64,7 @@ from decoy_engine.generation.pool._computed_draw import (
 from decoy_engine.generation.pool._errors import (
     GenerationError,
     PoolCapacityError,
+    native_type_not_admitted_error,
     raise_uniqueness_impossible,
 )
 from decoy_engine.generation.pool._events import (
@@ -111,6 +112,7 @@ __all__ = [
     "emit_generation_warning",
     "get_default_pool_cache",
     "int_from_index",
+    "native_type_not_admitted_error",
     "parse_computed_draw",
     "raise_uniqueness_impossible",
     "unique_capacity_ok",
