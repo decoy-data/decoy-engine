@@ -364,6 +364,22 @@ def test_every_loader_outcome_is_value_free(
         assert canary not in surface, (name, strict, surface)
 
 
+def test_manifest_url_member_does_not_expose_its_final_segment() -> None:
+    """Ambient regression: the URL's last segment passes `approve_name`, the URL as a whole must
+    still show as `<file>`."""
+    token = "BEARER_CANARY"
+    assert approve_name(token) is not None
+    with _world(False) as root:
+        folder = _hints(
+            root, "detectors: []\n", f"files:\n  - https://example.invalid/download/{token}\n"
+        )
+        outcome = _caught(lambda: load_name_hint_terms(folder))
+    assert isinstance(outcome, NameHintLoaderError), outcome
+    assert str(outcome).startswith("pre_scan.name_hints/<file>: not found"), str(outcome)
+    for surface in _surfaces(outcome):
+        assert token not in surface, surface
+
+
 @settings(max_examples=10, deadline=None)
 @given(canary=_CANARIES)
 def test_name_slot_canaries_are_shapes_that_approve_name_refuses(canary: str) -> None:

@@ -152,6 +152,11 @@ class QuotedName(Name):
         return text if text == _NAME_SHOWN else f"'{text}'"
 
 
+def _is_url(value: str) -> bool:
+    """URL syntax: a scheme separator anywhere, or a network-path reference (`//host/x`)."""
+    return "://" in value or value.startswith("//")
+
+
 @dataclass(frozen=True, slots=True)
 class Member:
     """A file name a manifest lists. Shown as the bare name when it passes the same checks as
@@ -160,7 +165,9 @@ class Member:
     value: object
 
     def shown(self) -> str:
-        if type(self.value) is str:
+        # A URL's last segment can be a bearer token that passes `approve_name`, so the raw
+        # value is checked for URL syntax before any basename is taken.
+        if type(self.value) is str and not _is_url(self.value):
             bare = PurePosixPath(self.value).name
             approved = approve_name(bare)
             if approved is not None:

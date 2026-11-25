@@ -93,6 +93,20 @@ def test_member_shows_the_bare_name(value: str, shown: str) -> None:
     assert _pos("pre_scan", Member(value)) == f"pre_scan/{shown}"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://example.invalid/download/BEARER_CANARY",
+        "//example.invalid/download/BEARER_CANARY",
+        "s3://bucket/BEARER_CANARY",
+    ],
+)
+def test_member_that_is_a_url_shows_as_a_placeholder(value: str) -> None:
+    # The basename alone would pass `approve_name`, so the raw value is checked first.
+    assert approve_name("BEARER_CANARY") is not None
+    assert _pos("pre_scan", Member(value)) == "pre_scan/<file>"
+
+
 def test_member_with_a_non_string_is_a_placeholder() -> None:
     assert _pos("pre_scan", Member(["x"])) == "pre_scan/<file>"
 
