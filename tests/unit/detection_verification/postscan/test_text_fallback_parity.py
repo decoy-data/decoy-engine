@@ -364,3 +364,112 @@ def test_an_unchanged_wide_fraction_is_not_counted_as_masked(form: str) -> None:
     (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
     assert finding["severity"] == "fail"
     assert post_scan_verdict(report).blocking
+
+
+# ----- round 4: one exact-value key for every numeric cell --------------------------------------
+
+HALVES = [Decimal("9007199254740992.5"), Decimal("9007199254740994.5")]
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        ["9007199254740992.50", "9007199254740994.50"],
+        ["9.0071992547409925E15", "9.0071992547409945e+15"],
+    ],
+    ids=["trailing_zero", "scientific"],
+)
+def test_another_spelling_of_an_unchanged_decimal_keys_and_blocks_as_the_decimal(
+    spelling: list[str],
+) -> None:
+    assert key_text(pd.Series(HALVES, dtype=object)) == key_text(pd.Series(spelling, dtype=object))
+    report = _masked_wide_run(HALVES, spelling)
+    (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
+    assert finding["severity"] == "fail"
+    assert post_scan_verdict(report).blocking
+
+
+def test_a_tiny_decimal_exponent_keys_in_bounded_space() -> None:
+    tiny = Decimal("1e-999999999999999999")
+    keys = key_text(pd.Series([tiny, "mixed"], dtype=object))
+    assert keys == ["1E-999999999999999999", "mixed"]
+    report = _masked_wide_run([tiny, "mixed"], [1, 2])
+    assert not _table_errors(report)
+
+
+def test_huge_integral_decimals_key_under_the_default_digit_limit() -> None:
+    import sys
+
+    limit = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(4300)
+    try:
+        keys = key_text(
+            pd.Series(
+                [Decimal("1E+4500"), Decimal("10E+4499"), Decimal(10**5000 + 1), "x"],
+                dtype=object,
+            )
+        )
+    finally:
+        sys.set_int_max_str_digits(limit)
+    assert keys[0] == keys[1] == "1E4500"
+    assert keys[2] is not None and len(keys[2]) == 5001
+    assert keys[0] != keys[2]
+
+
+@pytest.mark.parametrize(
+    "near", [np.float64(0.1), 0.1, np.longdouble("0.1")], ids=["float64", "float", "longdouble"]
+)
+def test_a_binary_float_and_the_decimal_it_rounds_from_key_apart(near: Any) -> None:
+    pair = pd.Series([near, Decimal("0.1")], dtype=object)
+    assert not bool(pair[0] == pair[1])
+    first, second = key_text(pair)
+    assert first != second
+
+
+def test_the_exact_text_of_a_float_keys_as_the_float_and_blocks() -> None:
+    floats = [0.1, 0.2]
+    exact = [str(Decimal(v)) for v in floats]
+    assert key_text(pd.Series([*floats, "x"], dtype=object))[:2] == exact
+    report = _masked_wide_run([*floats, "x"], [*exact, "y"])
+    (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
+    assert finding["severity"] == "fail"
+    assert post_scan_verdict(report).blocking
+
+
+def test_infinities_key_alike_across_float_decimal_and_text() -> None:
+    cells = [np.inf, -np.inf, Decimal("Infinity"), Decimal("-Infinity"), "inf", "-INFINITY"]
+    keys = key_text(pd.Series(cells, dtype=object))
+    assert keys == ["Infinity", "-Infinity"] * 3
+    report = _masked_wide_run([np.inf, -np.inf, "x"], [Decimal("Infinity"), Decimal("-Infinity"), "y"])
+    (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
+    assert finding["severity"] == "fail"
+    assert post_scan_verdict(report).blocking
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        0,
+        -0.0,
+        Decimal("-0E+7"),
+        True,
+        12300,
+        Decimal("123.4500"),
+        1e300,
+        np.float32(1.1),
+        Decimal("1E-999999999999999999"),
+        "02134",
+        "+15551234567",
+        "nan",
+        "1/2",
+        "plain text",
+    ],
+)
+def test_the_key_of_a_key_is_the_key(cell: Any) -> None:
+    (key,) = key_text(pd.Series([cell], dtype=object))
+    assert key_text(pd.Series([key], dtype=object)) == [key]
+
+
+def test_signed_zero_keys_as_zero_and_leading_zero_text_keeps_its_characters() -> None:
+    keys = key_text(pd.Series([-0.0, Decimal("-0.00"), "-0", 0, "02134", "+1"], dtype=object))
+    assert keys == ["0", "0", "0", "0", "02134", "+1"]
