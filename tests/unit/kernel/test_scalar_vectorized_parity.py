@@ -28,6 +28,7 @@ import pyarrow.compute as pc
 import pytest
 
 from decoy_engine._arrow_types import narrow_text
+from decoy_engine._execution_error import ExecutionError
 from decoy_engine.kernel import _scalar
 from decoy_engine.kernel._scalar import (
     _redact_array_reference,
@@ -205,12 +206,24 @@ def test_truncate_unhashable_keep_does_not_raise_on_membership_check() -> None:
     _check_truncate(pa.array(["abc", None]), length=2, keep=[], mask_char=None)
 
 
-def test_truncate_non_str_mask_char_with_unpaired_surrogate() -> None:
-    # A `str` mask_char carrying an unpaired surrogate is admitted by the type-exact
-    # guard (`type(x) is str`); whatever the fast path or the reference does with it
-    # (succeed, or raise the same encode error) must match exactly.
-    _check_truncate(pa.array(["abcdef", None, "xy"]), length=1, keep="head", mask_char="\ud800")
-    _check_truncate(pa.array(["abcdef", None, "xy"]), length=1, keep="tail", mask_char="\ud800")
+@pytest.mark.parametrize("keep", ["head", "tail"])
+@pytest.mark.parametrize(
+    "values",
+    [
+        pa.array(["SAMPLE", None, "xy"]),
+        pa.array(["ab", None]),
+        pa.array([], type=pa.string()),
+        ["SAMPLE", "ab"],
+    ],
+    ids=["long_rows", "short_rows", "empty_batch", "python_list"],
+)
+def test_truncate_unencodable_mask_char_refused_for_every_batch(values: Any, keep: str) -> None:
+    # An unpaired surrogate has no UTF-8 form. Short rows, long rows and an empty batch all
+    # get the same coded, value-free refusal (never a raw UnicodeEncodeError with a prefix).
+    with pytest.raises(ExecutionError) as exc:
+        truncate_array(values, length=2, keep=keep, mask_char="\ud800")
+    assert exc.value.code == "truncate_mask_char_invalid"
+    assert "SA" not in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

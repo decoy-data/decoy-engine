@@ -178,3 +178,23 @@ def test_truncate_invalid_config_fails_closed_not_raw_passthrough(provider_confi
         mask_column(values, seed, _SEED)
     assert exc.value.code == code
     assert exc.value.strategy == "truncate"
+
+
+@pytest.mark.parametrize("bad", ["CANARY", "\ud800", 42])
+def test_ooc_truncate_params_rejects_mask_char_value_free(bad: Any) -> None:
+    from decoy_engine.execution.out_of_core._mask import truncate_params
+
+    with pytest.raises(StrategyError) as exc:
+        truncate_params({"length": 3, "mask_char": bad})
+    assert exc.value.code == "truncate_mask_char_invalid"
+    assert "CANARY" not in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", ["CANARY", "\ud800", 42])
+def test_native_truncate_rejects_mask_char_value_free(bad: Any) -> None:
+    from decoy_engine.execution.native._kernels_scalar import native_truncate
+
+    with pytest.raises(StrategyError) as exc:
+        native_truncate(pa.array(["abcdef"]), length=3, keep="head", mask_char=bad)
+    assert exc.value.code == "truncate_mask_char_invalid"
+    assert "CANARY" not in str(exc.value)

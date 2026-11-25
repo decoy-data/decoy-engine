@@ -20,3 +20,8 @@ def is_utf8_text(value: Any) -> bool:
     except UnicodeEncodeError:
         return False
     return True
+
+
+def is_mask_char(value: Any) -> bool:
+    """True for one character that encodes as strict UTF-8 (a usable truncate mask)."""
+    return isinstance(value, str) and len(value) == 1 and is_utf8_text(value)

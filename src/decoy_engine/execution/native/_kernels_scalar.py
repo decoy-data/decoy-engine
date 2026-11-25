@@ -49,6 +49,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.label_text import is_mask_char
 from decoy_engine.detection.detectors import Span, iter_spans
 from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
@@ -129,14 +130,11 @@ def native_truncate(
             strategy="truncate",
             message=f"truncate requires keep in ('head', 'tail'), got {keep!r}.",
         )
-    if mask_char is not None and (not isinstance(mask_char, str) or len(mask_char) != 1):
+    if mask_char is not None and not is_mask_char(mask_char):
         raise StrategyError(
             code=reasons.runtime.TRUNCATE_MASK_CHAR_INVALID,
             strategy="truncate",
-            message=(
-                f"truncate requires mask_char to be a single character, got "
-                f"{mask_char!r} ({type(mask_char).__name__})."
-            ),
+            message=("truncate requires mask_char to be a single character that encodes as UTF-8."),
         )
     return truncate_array(array, length=length, keep=keep, mask_char=mask_char)
 

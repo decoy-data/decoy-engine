@@ -25,6 +25,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, narrow_passthrough
+from decoy_engine.contracts.label_text import is_mask_char
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution.out_of_core._categorical_native import native_categorical_array
@@ -97,13 +98,13 @@ def truncate_params(cfg: dict[str, Any]) -> tuple[int, str, str | None]:
             message=f"truncate has invalid keep {keep!r}.",
         )
     mask_char = cfg.get("mask_char")
-    if mask_char is not None and (not isinstance(mask_char, str) or len(mask_char) != 1):
+    if mask_char is not None and not is_mask_char(mask_char):
         raise StrategyError(
             code=reasons.runtime.TRUNCATE_MASK_CHAR_INVALID,
             strategy="truncate",
             message=(
-                f"truncate has invalid mask_char {mask_char!r} ({type(mask_char).__name__}); "
-                "mask_char must be a single character."
+                "truncate has an invalid mask_char; "
+                "mask_char must be a single character that encodes as UTF-8."
             ),
         )
     return length, keep, mask_char

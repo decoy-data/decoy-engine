@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.contracts.label_text import is_mask_char
 from decoy_engine.plan._errors import PlanCompileError
 
 
@@ -98,13 +99,13 @@ def check_truncate_config(config: dict[str, Any]) -> None:
                 )
 
             mask_char = pc.get("mask_char")
-            if mask_char is not None and (not isinstance(mask_char, str) or len(mask_char) != 1):
+            if mask_char is not None and not is_mask_char(mask_char):
                 raise PlanCompileError(
                     code=reasons.plan.TRUNCATE_MASK_CHAR_INVALID,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.mask_char",
                     message=(
                         f"truncate column {col_name!r} in table {table_name!r} has "
-                        f"invalid mask_char {mask_char!r} ({type(mask_char).__name__}). "
-                        "mask_char must be a single character when set."
+                        "an invalid mask_char. mask_char must be a single character "
+                        "that encodes as UTF-8 when set."
                     ),
                 )
