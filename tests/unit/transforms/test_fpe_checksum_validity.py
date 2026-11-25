@@ -701,6 +701,7 @@ def test_nondigit_prefix_raises_a_value_free_checksum_error(scheme: str, ciphert
     assert "Z" not in _text(info.value)
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("scheme", ["npi", "isbn13", "ean13", "gtin", "vin"])
 def test_an_oversized_cell_is_refused_without_a_length_sized_copy(scheme: str) -> None:
     cell = "1" * 300_000
