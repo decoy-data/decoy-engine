@@ -167,6 +167,38 @@ class ValidationSession:
                 fed = True
         return fed
 
+    def observe_source_batches(
+        self,
+        table: str,
+        output: pa.Table,
+        source_batches: Iterable[pa.RecordBatch],
+        source_schema: pa.Schema,
+    ) -> None:
+        """Feed one complete resident table against its source read batch by batch.
+
+        The source is never held whole: each batch is paired with the output rows at the same
+        positions, then the table is marked complete.
+        """
+        if table in self._complete:
+            return
+        offset = 0
+        for batch in source_batches:
+            if offset + batch.num_rows > output.num_rows:
+                break
+            self._feed(table, output.slice(offset, batch.num_rows), batch)
+            offset += batch.num_rows
+        else:
+            if offset == output.num_rows:
+                if offset == 0:
+                    self._feed(table, output, source_schema.empty_table())
+                self._explicit_source_rows[table] = offset
+                self._complete_table(table)
+                return
+        raise ValidatorStateError(
+            code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
+            message=f"the source rows for table {table!r} do not match the published rows.",
+        )
+
     def unobserved_tables(self, tables: Iterable[str]) -> list[str]:
         """The names in ``tables`` no observer has completed."""
         return [table for table in tables if table not in self._complete]

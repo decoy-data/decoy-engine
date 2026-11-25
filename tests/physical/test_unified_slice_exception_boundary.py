@@ -70,7 +70,7 @@ def _raise_on_nth_call(monkeypatch: pytest.MonkeyPatch, module: Any, attr: str, 
     """Patch `module.attr` so its Nth call (1-indexed) raises a plain
     `RuntimeError`; every other call delegates to the real implementation.
 
-    Several wrapped stages (`stamp_execution_metrics`, `finalize_validators_and_quarantine`, `execution_telemetry`)
+    Several wrapped stages (`stamp_execution_metrics`, `finalize_quarantine`, `execution_telemetry`)
     are ALSO called by the legacy route this test expects the reroute to
     complete through -- a permanent patch would poison that very legacy
     run, failing the "reroute completes" assertion for the wrong reason.
@@ -168,10 +168,10 @@ def _stage_stamp_execution_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     _raise_on_nth_call(monkeypatch, _pipeline_finalize, "stamp_execution_metrics", n=1)
 
 
-def _stage_finalize_validators_and_quarantine(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stage_finalize_quarantine(monkeypatch: pytest.MonkeyPatch) -> None:
     from decoy_engine.execution import _pipeline_finalize
 
-    _raise_on_nth_call(monkeypatch, _pipeline_finalize, "finalize_validators_and_quarantine", n=1)
+    _raise_on_nth_call(monkeypatch, _pipeline_finalize, "finalize_quarantine", n=1)
 
 
 def _stage_execution_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,7 +202,7 @@ _STAGES: list[tuple[str, Any]] = [
     ("shadow_coordinator_run", _stage_shadow_coordinator_run),
     ("source_shaped_assembly", _stage_source_shaped_assembly),
     ("stamp_execution_metrics", _stage_stamp_execution_metrics),
-    ("finalize_validators_and_quarantine", _stage_finalize_validators_and_quarantine),
+    ("finalize_quarantine", _stage_finalize_quarantine),
     ("execution_telemetry", _stage_execution_telemetry),
     ("typed_warnings", _stage_typed_warnings),
     ("execution_result_construction", _stage_execution_result_construction),

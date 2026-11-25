@@ -2386,8 +2386,9 @@ On the resident routes a `validators:` block does not change the route. The unif
 physical drivers run a validator-bearing job as they run it without validators, and the run's one
 validation session judges the output they produce. The streamed and bounded routes (auto-chunk
 streamed to a sink, sequential foreign-key, out-of-core and the multi-table split) still keep such a
-job resident. When a plain callable `sink` is passed with validators, the run stays resident and
-the callable receives each output table once, after every check passed.
+job resident. Validators do not change what a plain callable `sink` receives. The out-of-core route
+writes each batch to its sink before the run's validation finishes, so use a `TransactionalSink` when
+a validator failure must leave nothing published.
 
 Fail-closed by default: any validator failure raises `ValidatorFailedError`
 (exported from `decoy_engine.errors`), which carries the `ValidationReport` for

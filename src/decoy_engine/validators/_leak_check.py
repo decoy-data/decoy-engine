@@ -108,11 +108,14 @@ class LeakCheckFold:
             self._by_table.setdefault(col.table, []).append(position)
         self._state = [_ColumnState(cap) for _ in self._plan.columns]
         self._observed: set[str] = set()
-        self._compared_tables: set[str] = set()
 
     def paired_tables(self) -> frozenset[str]:
-        """Tables with at least one column that was read against its source."""
-        return frozenset(self._compared_tables)
+        """Tables with a column in scope that is read against its source.
+
+        Known from the scope at construction, so a caller can load exactly these sources
+        before it feeds any table.
+        """
+        return frozenset(col.table for col in self._plan.columns if col.skip is None)
 
     def table_complete(self, table: str) -> None:
         return None
@@ -154,8 +157,6 @@ class LeakCheckFold:
                 code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
                 message=f"the source rows for table {table!r} do not line up with its output rows.",
             )
-        if reading:
-            self._compared_tables.add(table)
         if source is None:
             return
         for position in reading:

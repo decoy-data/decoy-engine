@@ -27,7 +27,7 @@ from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
 from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run, current_duckdb_run
 from decoy_engine.execution.pipeline._post_scan import attach_cast_run, tee_reader
-from decoy_engine.profile._readers import LazySource
+from decoy_engine.profile import LazySource
 from decoy_engine.validators import ValidationSession, bind_validation_session
 
 if TYPE_CHECKING:
@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "complete_resident_validation",
-    "deliver_resident_outputs",
     "emit_route",
     "execute_mixed_route",
     "execute_out_of_core_route",
@@ -60,6 +59,10 @@ def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> Pipelin
     return replace(ctx, post_scan_detectors=detectors)
 
 
+# Rows per batch when a lazy source is paired with its output; bounds what validation holds.
+_SOURCE_BATCH_ROWS = 65_536
+
+
 def _key_state_budget(ctx: PipelineRunContext) -> int:
     """The validators' own memory ceiling, resolved once. It is not charged to the generation
     ledger or the faker-pool carve."""
@@ -80,34 +83,24 @@ def complete_resident_validation(
     from decoy_engine.errors import ValidatorFailedError
     from decoy_engine.execution._pipeline_finalize import stamp_validation
 
+    pending = session.unobserved_tables(result.outputs)
     wanted = session.paired_tables()
-    sources: dict[str, Any] = {
-        name: _psrc.materialize_source(src) if isinstance(src, LazySource) else src
-        for name, src in ctx.caller_sources.items()
-        if name in wanted and name in session.unobserved_tables(result.outputs)
-    }
-    fed = session.observe_unobserved(result.outputs, sources)
+    resident: dict[str, Any] = {}
+    for name in pending:
+        source = ctx.caller_sources.get(name) if name in wanted else None
+        if isinstance(source, LazySource):
+            batches = source.iter_batches(_SOURCE_BATCH_ROWS)
+            session.observe_source_batches(name, result.outputs[name], batches, source.schema)
+        elif source is not None:
+            resident[name] = source
+    session.observe_unobserved(result.outputs, resident)
+    fed = bool(pending)
     report = session.finish()
     if fed and not report.passed:
         raise ValidatorFailedError(report)
     if "validation" not in result.quality_metrics:
         stamp_validation(result.quality_metrics, ctx.config, report)
     return result
-
-
-def deliver_resident_outputs(ctx: PipelineRunContext, result: ExecutionResult) -> None:
-    """Hand each resident output to a plain callable sink once, after validation and settle.
-
-    A callable cannot take a written table back, so nothing reaches it before every gate passed.
-    A sink with a transactional contract is never written here: its owner commits it.
-    """
-    from decoy_engine.execution._sequential import _has_transactional_write_contract
-
-    sink = ctx.sink
-    if sink is None or _has_transactional_write_contract(sink) or not callable(sink):
-        return
-    for name, table in result.outputs.items():
-        sink(name, table)
 
 
 def execute_route(
@@ -152,8 +145,6 @@ def execute_route(
         if session is not None:
             result = complete_resident_validation(session, ctx, result)
         result = settle(gate, ctx, result)
-        if session is not None and decision.route not in ("sequential", "out_of_core"):
-            deliver_resident_outputs(ctx, result)
         execution_block = result.quality_metrics.setdefault("execution", {})
         execution_block["native_threads"] = {
             "count": ctx.native_threads,

@@ -2,8 +2,8 @@
 
 A job with a `validators:` block takes the route the same job takes without it (unified slice,
 mixed route). `execute_route` binds one validation session beside the post-scan gate, feeds it every
-resident output no route fed yet, finishes it before `settle`, stores the report, and hands each
-passing resident output to a plain callable sink once, after `settle`.
+resident output no route fed yet, finishes it before `settle` and stores the report. Validators do
+not change what a plain callable sink receives.
 
 Mutations these tests kill (plan section 10): M6 (the unified admission decline comes back), M12
 (`execute_route` skips resident completion), M15 (a table's second observer adds to its folds).
@@ -11,6 +11,7 @@ Mutations these tests kill (plan section 10): M6 (the unified admission decline 
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,6 @@ from decoy_engine.execution import _pipeline_route_dispatch as dispatch
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._unified_slice import QUALITY_METRICS_KEY
 from decoy_engine.execution.native._companion_status import native_companion_status
-from decoy_engine.execution.pipeline import _post_scan
 from decoy_engine.keyprovider import SecretKeyProvider
 from decoy_engine.validators import ValidationSession
 from tests.parity import _f2_mixed_support as mixed
@@ -200,29 +200,14 @@ def test_mixed_route_failure_is_raised_by_the_resident_choke(tmp_path: Path) -> 
 
 
 @mixed.NEEDS_COMPANION
-def test_callable_gets_each_passing_resident_table_once_after_validation_and_settle(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    events: list[str] = []
-    real_finish = ValidationSession.finish
-    real_settle = _post_scan.settle
-
-    def finish(self: ValidationSession) -> Any:
-        events.append("finish")
-        return real_finish(self)
-
-    def settle(*args: Any, **kwargs: Any) -> Any:
-        events.append("settle")
-        return real_settle(*args, **kwargs)
-
-    monkeypatch.setattr(ValidationSession, "finish", finish)
-    monkeypatch.setattr(_post_scan, "settle", settle)
-    config, child = _mixed_job(tmp_path, _MIXED_PASSING)
-    _, result = _routes(config, child, sink=lambda name, table: events.append(f"write:{name}"))
-    writes = [e.removeprefix("write:") for e in events if e.startswith("write:")]
-    assert sorted(writes) == sorted(result.outputs), "each table exactly once"
-    first_write = events.index(f"write:{writes[0]}")
-    assert events.index("finish") < events.index("settle") < first_write
+def test_validators_do_not_change_what_a_callable_sink_receives(tmp_path: Path) -> None:
+    config, child = _mixed_job(tmp_path, None)
+    plain: list[str] = []
+    _routes(config, child, sink=lambda name, table: plain.append(name))
+    config_v, _ = _mixed_job(tmp_path, _MIXED_PASSING)
+    checked: list[str] = []
+    _routes(config_v, child, sink=lambda name, table: checked.append(name))
+    assert checked == plain, "a passing validator changed what the callable received"
 
 
 @mixed.NEEDS_COMPANION
@@ -289,3 +274,76 @@ def test_observe_unobserved_reports_when_there_was_nothing_to_feed() -> None:
     session = ValidationSession(_TWO_TABLE)
     session.observe("a", bad)
     assert session.observe_unobserved({"a": bad}, {}) is False
+
+
+# --- a lazy paired source is read in batches, never whole ---------------------------------------
+
+
+def _leak_case(tmp_path: Path) -> tuple[dict[str, Any], pa.Table, pa.Table, Any]:
+    from decoy_engine.profile import LazySource
+
+    src = [f"v{i}" for i in range(10)]
+    source = pa.table({"col": src})
+    # Rows 0 and 7 leak; the rest are masked.
+    output = pa.table({"col": [v if i in (0, 7) else v + "_m" for i, v in enumerate(src)]})
+    path = tmp_path / "t.parquet"
+    pq.write_table(source, path)
+    config = {
+        "validators": [{"name": "leak_check"}],
+        "tables": [{"name": "t", "columns": [{"name": "col", "strategy": "hash"}]}],
+        "relationships": [],
+    }
+    return config, source, output, LazySource(path=path)
+
+
+def _report_or_error(call: Any) -> Any:
+    try:
+        call()
+    except ValidatorFailedError as exc:
+        return dataclasses.replace(exc.report, elapsed_ms=0.0)
+    except Exception as exc:  # the verdict under test is which error, if any
+        return f"raised {type(exc).__name__}"
+    return "passed"
+
+
+def test_a_lazy_paired_source_is_read_in_batches_with_the_resident_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from decoy_engine.profile import LazySource
+    from decoy_engine.validators import validate
+
+    config, source, output, lazy = _leak_case(tmp_path)
+    whole: list[str] = []
+    real_to_table = LazySource.to_table
+
+    def to_table(self: LazySource, *args: Any, **kwargs: Any) -> pa.Table:
+        whole.append(str(self.path))
+        return real_to_table(self, *args, **kwargs)
+
+    monkeypatch.setattr(LazySource, "to_table", to_table)
+    monkeypatch.setattr(dispatch, "_SOURCE_BATCH_ROWS", 3, raising=False)
+    oracle = validate({"t": output}, config, sources={"t": source})
+    assert oracle.passed is False
+    ctx = SimpleNamespace(caller_sources={"t": lazy}, config=config)
+    result = SimpleNamespace(outputs={"t": output}, quality_metrics={})
+    verdict = _report_or_error(
+        lambda: dispatch.complete_resident_validation(ValidationSession(config), ctx, result)
+    )
+    assert whole == [], "the lazy source was read whole"
+    assert verdict == dataclasses.replace(oracle, elapsed_ms=0.0)
+
+
+def test_a_lazy_source_shorter_than_its_output_is_a_pairing_failure(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from decoy_engine.errors import ValidatorStateError
+
+    config, _, output, lazy = _leak_case(tmp_path)
+    longer = pa.concat_tables([output, output.slice(0, 2)])
+    ctx = SimpleNamespace(caller_sources={"t": lazy}, config=config)
+    result = SimpleNamespace(outputs={"t": longer}, quality_metrics={})
+    with pytest.raises(ValidatorStateError) as caught:
+        dispatch.complete_resident_validation(ValidationSession(config), ctx, result)
+    assert caught.value.code == "validator_source_pairing_mismatch"

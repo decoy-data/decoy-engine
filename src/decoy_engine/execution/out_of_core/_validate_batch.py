@@ -51,13 +51,14 @@ from decoy_engine.validators import (
     SkippedColumn,
     ValidationReport,
     ValidatorFinding,
+    active_validation_session,
     assemble_report,
     finding_index_cap,
     validator_function,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
     from decoy_engine.plan._types import Plan
     from decoy_engine.profile._readers import LazySource
@@ -349,11 +350,14 @@ def collect_batch_validation(
 
 
 def finish_validation(
-    collector: ValidatorCollector | None, quality_metrics: dict[str, Any]
+    collector: ValidatorCollector | None,
+    quality_metrics: dict[str, Any],
+    tables: Iterable[str] = (),
 ) -> None:
     """Stamp `quality_metrics["validation"]`, then fail closed on any finding.
 
-    Runs before the sink publish so a failed validation commits nothing.
+    Runs before the sink publish so a failed validation commits nothing. The run's bound
+    session records `tables` as complete, so a resident return is not checked a second time.
     """
     if collector is None:
         return
@@ -363,3 +367,7 @@ def finish_validation(
         from decoy_engine.errors import ValidatorFailedError
 
         raise ValidatorFailedError(report)
+    session = active_validation_session()
+    if session is not None:
+        for table in tables:
+            session.table_complete(table)

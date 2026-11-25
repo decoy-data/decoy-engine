@@ -37,7 +37,7 @@ from decoy_engine.execution.out_of_core._validate_batch import (
 )
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
-from decoy_engine.validators import _registry
+from decoy_engine.validators import ValidationSession, _registry
 from tests._keyed_secret import THROWAWAY_KEY_PROVIDER
 from tests.parity import _strict_compare as sc
 
@@ -1262,6 +1262,27 @@ def test_a_passing_validated_run_still_commits_exactly_once(
     assert mode(result) == _OOC
     assert sink.commits == 1 and sink.aborts == 0
     assert sorted(p.stem for p in (tmp_path / "sink_out").glob("*.parquet")) == ["child", "parent"]
+
+
+def test_a_no_sink_run_gives_the_bound_session_nothing_to_feed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The batches were checked out-of-core; the resident completion must not check them twice.
+    fed: list[bool] = []
+    real = ValidationSession.observe_unobserved
+
+    def spy(self: ValidationSession, outputs: Any, sources: Any) -> bool:
+        fed.append(real(self, outputs, sources))
+        return fed[-1]
+
+    monkeypatch.setattr(ValidationSession, "observe_unobserved", spy)
+    vs = [_v("column_in_set", {"child": ["memo"]}, allowed_values=[f"m{i}" for i in range(6)])]
+    cfg, tables = standard(tmp_path, vs)
+    result = run(cfg, tables)
+    assert mode(result) == _OOC
+    assert sorted(result.outputs) == ["child", "parent"]
+    assert fed == [False], "the resident completion fed out-of-core tables a second time"
+    assert result.quality_metrics["validation"]["validators"]["passed"] is True
 
 
 def test_a_direct_caller_with_an_unadmitted_validator_fails_closed(tmp_path: Path) -> None:

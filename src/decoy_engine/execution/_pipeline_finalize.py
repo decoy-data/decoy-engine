@@ -44,9 +44,11 @@ if TYPE_CHECKING:
 __all__ = [
     "compute_fidelity_reports",
     "compute_post_validation",
+    "finalize_quarantine",
     "finalize_validators_and_quarantine",
     "stamp_execution_metrics",
     "stamp_validation",
+    "validate_rendered",
 ]
 
 # `run_pipeline`'s execution-knob defaults. Owned here (not `_pipeline.py`,
@@ -413,13 +415,56 @@ def finalize_validators_and_quarantine(
     the first return value; post-validation uses the second to align the
     sources it scans to the filtered output.
     """
-    quarantine_removed: dict[str, set[int]] = {}
     from decoy_engine.validators import run_resident_validation
 
     v_report = run_resident_validation(outputs, config, caller_sources)
     if v_report is not None:
         stamp_validation(quality_metrics, config, v_report)
+    return finalize_quarantine(
+        outputs,
+        v_report,
+        config=config,
+        mask_row_errors=mask_row_errors,
+        quality_metrics=quality_metrics,
+    )
 
+
+def validate_rendered(
+    outputs: dict[str, pa.Table],
+    *,
+    config: dict[str, Any],
+    sources: Mapping[str, Any],
+    quality_metrics: dict[str, Any],
+) -> dict[str, pa.Table]:
+    """Validators for a lane that returns finished outputs, judged on the rendered bytes.
+
+    `sources` must already be aligned to the rendered rows (declared casting may have dropped
+    some). The verdict then goes through the same quarantine tail full-frame uses.
+    """
+    from decoy_engine.validators import run_resident_validation
+
+    resident = {name: src for name, src in sources.items() if isinstance(src, pa.Table)}
+    v_report = run_resident_validation(outputs, config, resident)
+    if v_report is None:
+        return outputs
+    stamp_validation(quality_metrics, config, v_report)
+    outputs, _ = finalize_quarantine(
+        outputs, v_report, config=config, mask_row_errors=(), quality_metrics=quality_metrics
+    )
+    return outputs
+
+
+def finalize_quarantine(
+    outputs: dict[str, pa.Table],
+    v_report: Any,
+    *,
+    config: dict[str, Any],
+    mask_row_errors: tuple[Any, ...],
+    quality_metrics: dict[str, Any],
+) -> tuple[dict[str, pa.Table], dict[str, set[int]]]:
+    """The D8 tail of `finalize_validators_and_quarantine`: one combined quarantine pass over a
+    validator verdict (None when none ran) and the row errors, then the fail-closed remainder."""
+    quarantine_removed: dict[str, set[int]] = {}
     if mask_row_errors:
         # Additive manifest key, counts only (no cell values -- trap T3).
         row_error_counts: dict[str, int] = {}
