@@ -2,10 +2,7 @@
  "sentry_id": "cell-text-names",
  "created_in": "PR 784",
  "entries": {
-  "verification/postmask/runner.py::_frame_table::str(c) for (n, c) in reversed(list(enumerate(other.columns)))": {
-   "reason": "a column name of the other frame, matched to the frame's, not a cell"
-  },
-  "verification/postmask/runner.py::_frame_table::str(c) for c in frame.columns": {
+  "verification/postmask/runner.py::_column_names::str(c) for c in frame.columns": {
    "reason": "a column name of the frame, not a cell"
   },
   "verification/postmask/runner.py::run_post_mask::str(name) for name in output_frames": {

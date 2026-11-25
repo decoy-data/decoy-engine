@@ -430,3 +430,33 @@ def test_at7_a_column_comparison_error_withholds_the_run(
     assert not out.exists()
     assert not Path(cfg["targets"]["t"]["path"]).exists()
     _value_free(report, str(block), caplog.text)
+
+
+def test_at7_a_residual_comparison_error_alone_withholds_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The policy check is silenced, so the residual error is the only one in the report and
+    the block cannot come from the policy error."""
+    from decoy_engine.verification.postmask import runner as runner_module
+
+    monkeypatch.setattr(runner_module, "check_policy_validation", lambda *a, **k: [])
+    fired = _contact_fault(monkeypatch)
+    cfg, sources = _pipeline(tmp_path)
+    out = tmp_path / "sink"
+    outcome = _outcome(
+        lambda: run_pipeline(
+            cfg, sources=sources, engine_version="g8-at7b", sink=ParquetTransactionalSink(out)
+        )
+    )
+    assert fired == ["contact"]
+    report = _assert_bare_block(outcome).report
+    errors = [
+        (section, f["column"])
+        for section in ("residual_pii", "policy_validation", "fk_preservation")
+        for f in report.get(section) or []
+        if f.get("severity") == "error"
+    ]
+    assert errors == [("residual_pii", "contact")]
+    assert report["error_count"] == 1
+    assert _codes(report) == ["check_error"]
+    assert not out.exists()

@@ -138,5 +138,9 @@ def _python_scalar(value: object) -> object:
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.floating):
-        return float(value)
+        as_float = float(value)
+        if np.isfinite(value) and value != as_float:
+            # Wider than a double (longdouble): keep every digit, or two cells read as one.
+            return int(value) if value == np.trunc(value) else Decimal(str(value))
+        return as_float
     return value

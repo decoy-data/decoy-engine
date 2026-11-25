@@ -210,47 +210,60 @@ def _first_positions(frame: pd.DataFrame) -> dict[str, int]:
 
 def _frame_table(
     name: str, frame: pd.DataFrame, other: pd.DataFrame | None
-) -> tuple[TableBatches, list[int]]:
-    """`frame` as Arrow, column by column, and the positions of the columns carried as text. A
-    column Arrow will not take (mixed int and str, Decimal with float, a set) is carried as the
-    text of each value, which is all the detectors read. The choice is made for the column on both
-    sides at once: if either side needs the text, both get it, so a source int and an output "1"
-    still compare equal as they do in pandas."""
+) -> tuple[TableBatches, dict[int, pa.Array]]:
+    """`frame` as Arrow, column by column, and the text keys emitted for the columns carried as
+    text, by position. A column Arrow will not take (mixed int and str, Decimal with float, a
+    set) is carried as the text of each value, which is all the detectors read. The choice is
+    made for the column on both sides at once: if either side needs the text, both get it, so a
+    source int and an output "1" still compare equal as they do in pandas."""
     names = _column_names(frame)
     other_at = {} if other is None else _first_positions(other)
     arrays = []
-    texted = []
+    texted: dict[int, pa.Array] = {}
     for n, series in enumerate(frame.iloc[:, i] for i in range(len(names))):
         paired = names[n] in other_at and other is not None
         native = _native(series)
         if paired and other is not None:
             native = native if _native(other.iloc[:, other_at[names[n]]]) is not None else None
         if native is None:
-            texted.append(n)
-        arrays.append(native if native is not None else _text(series))
+            texted[n] = _text(series)
+        arrays.append(native if native is not None else texted[n])
     return from_table(name, pa.Table.from_arrays(arrays, names)), texted
 
 
-def _require_preserved(src: pd.DataFrame, out: pd.DataFrame, texted: list[int]) -> None:
+def _require_preserved(
+    src: pd.DataFrame,
+    out: pd.DataFrame,
+    src_keys: Mapping[int, pa.Array],
+    out_keys: Mapping[int, pa.Array],
+) -> None:
     """Raise when a text-keyed column compares differently than its cells do: fewer identical or
     other comparable rows, or a source that turns constant or varied. Extra key matches with
-    the same counts are allowed. Equal lengths only, as the column check compares no others."""
+    the same counts are allowed. The keys are the arrays `_frame_table` emitted, the ones the
+    graders read. Equal lengths only, as the column check compares no others."""
     if len(src) != len(out):
         return
     src_at, out_names = _first_positions(src), _column_names(out)
-    for n in texted:
+    for n, out_array in out_keys.items():
         name = out_names[n]
-        if name not in src_at:
+        if name not in src_at or src_at[name] not in src_keys:
             continue
         cells = (
             src.iloc[:, src_at[name]].reset_index(drop=True),
             out.iloc[:, n].reset_index(drop=True),
         )
-        keys = tuple(pd.Series(key_text(c), dtype=object) for c in cells)
+        keys = (
+            pd.Series(src_keys[src_at[name]].to_pylist(), dtype=object),
+            pd.Series(out_array.to_pylist(), dtype=object),
+        )
         by_cells, by_keys = identity_counts(*cells), identity_counts(*keys)
         lost = by_keys[0] != by_cells[0] or by_keys[1] < by_cells[1]
-        constant = ColumnFacts.constant(source_distinct(cells[0]))
-        if lost or (by_cells[0] and constant != ColumnFacts.constant(source_distinct(keys[0]))):
+        # Diversity only matters where a row is comparable; an uncountable source is not counted.
+        changed = bool(by_cells[0]) and (
+            ColumnFacts.constant(source_distinct(cells[0]))
+            != ColumnFacts.constant(source_distinct(keys[0]))
+        )
+        if lost or changed:
             raise ComparisonNotPreservedError
 
 
@@ -265,10 +278,10 @@ def _frame_tables(
     for name, out_frame in output_frames.items():
         try:
             src_frame = source_frames.get(name)
-            out_table, texted = _frame_table(name, out_frame, src_frame)
+            out_table, out_keys = _frame_table(name, out_frame, src_frame)
             if src_frame is not None:
-                src[name] = _frame_table(name, src_frame, out_frame)[0]
-                _require_preserved(src_frame, out_frame, texted)
+                src[name], src_keys = _frame_table(name, src_frame, out_frame)
+                _require_preserved(src_frame, out_frame, src_keys, out_keys)
             out[name] = out_table
         except Exception as exc:
             if passes_through(exc):

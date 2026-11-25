@@ -240,3 +240,53 @@ def test_a_source_diversity_that_drops_but_stays_varied_passes() -> None:
     report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
     assert not _table_errors(report)
     assert not post_scan_verdict(report).blocking
+
+
+# ----- precision and the zero-comparable guard --------------------------------------------------
+
+WIDE = [np.longdouble(2**53 + (i % 2)) for i in range(64)]
+
+
+@pytest.mark.parametrize("kind", ["object", "longdouble"])
+def test_an_unchanged_wide_float_column_that_keys_alike_in_a_double_still_fails(kind: str) -> None:
+    cells = pd.Series(WIDE, dtype=object if kind == "object" else np.longdouble)
+    src = pd.DataFrame({"email": EMAILS, "n": cells})
+    out = pd.DataFrame({"email": FAKE, "n": cells.copy()})
+    # Two distinct cells in the source, kept distinct by the cell count and by the keys.
+    assert canonical_cells(src["n"]).nunique(dropna=True) == 2
+    assert _keys(src["n"]).nunique(dropna=True) == 2
+    report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker"), ("n", "hash")))
+    (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
+    assert finding["severity"] == "fail"
+    assert post_scan_verdict(report).blocking
+
+
+def test_a_fractional_wide_float_keeps_its_precision_in_the_key() -> None:
+    wide = np.longdouble(1) + np.longdouble(2) ** -60
+    assert wide != float(wide)
+    keys = key_text(pd.Series([wide, np.longdouble(1)], dtype=object))
+    assert keys[0] != keys[1]
+
+
+def test_a_source_that_cannot_be_counted_is_not_counted_when_no_row_is_comparable() -> None:
+    src = pd.DataFrame(
+        {"email": EMAILS[:3], "mixed": pd.Series([bytearray(b"ab"), 7, 8], dtype=object)}
+    )
+    out = pd.DataFrame({"email": FAKE[:3], "mixed": pd.Series([None, None, None], dtype=object)})
+    report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
+    assert not _table_errors(report)
+    assert not post_scan_verdict(report).blocking
+
+
+def test_the_backstop_checks_the_keys_the_emitter_produced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An emitter that gives one key to a varied column is caught: the backstop reads the emitted
+    arrays, not keys it computes again from the frames."""
+    import pyarrow as pa
+
+    src = pd.DataFrame({"email": EMAILS, "code": pd.Series([1, "a"] * 32, dtype=object)})
+    out = pd.DataFrame({"email": FAKE, "code": pd.Series([2, "b"] * 32, dtype=object)})
+    monkeypatch.setattr(
+        runner_module, "_text", lambda series: pa.array(["k"] * len(series), type=pa.string())
+    )
+    report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
+    _assert_backstop_blocks(report)

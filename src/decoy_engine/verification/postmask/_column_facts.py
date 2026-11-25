@@ -264,7 +264,10 @@ def canonical_cells(series: pd.Series) -> pd.Series:
     path, never its one element, and is hashable for a distinct count."""
     cells = series.astype(object)
     # Only an object column can hold a container; a typed one is passed as it is.
-    return cells.map(_frozen) if series.dtype == object else cells
+    if series.dtype != object:
+        return cells
+    # Not `Series.map`: it re-infers the result and rounds a wide float cell to a double.
+    return pd.Series([_frozen(c) for c in cells], index=cells.index, dtype=object)
 
 
 def source_distinct(series: pd.Series) -> int:

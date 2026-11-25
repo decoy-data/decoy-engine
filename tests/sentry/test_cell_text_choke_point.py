@@ -213,19 +213,17 @@ def test_sites_are_keyed_by_function() -> None:
     assert conversions("m.py", SEEDED["str(cell)"]) == ["m.py::f::str(v)"]
 
 
-# The allowlisted spelling `str(c)` in `_frame_table`, but over cells, not column names.
+# The allowlisted spelling `str(c)` in `_column_names`, but over cells, not column names.
 _CELL_LOOPS = {
     "for loop over cells": (
-        "def _frame_table(name, frame, other):\n"
-        "    for c in frame.iloc[:, 0]:\n"
-        "        yield str(c)\n"
+        "def _column_names(frame):\n    for c in frame.iloc[:, 0]:\n        yield str(c)\n"
     ),
     "comprehension over cells": (
-        "def _frame_table(name, frame, other):\n    return [str(c) for c in frame.iloc[:, 0]]\n"
+        "def _column_names(frame):\n    return [str(c) for c in frame.iloc[:, 0]]\n"
     ),
-    "no loop": "def _frame_table(name, frame, other):\n    c = frame.iloc[0, 0]\n    return str(c)\n",
+    "no loop": "def _column_names(frame):\n    c = frame.iloc[0, 0]\n    return str(c)\n",
     "inner loop over cells": (
-        "def _frame_table(name, frame, other):\n"
+        "def _column_names(frame):\n"
         "    for c in frame.columns:\n"
         "        for c in frame[c]:\n"
         "            yield str(c)\n"
