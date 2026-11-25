@@ -108,7 +108,20 @@ def _is_arrow_binary(dtype: object) -> bool:
     return binary_dtype is not None and isinstance(dtype, binary_dtype)
 
 
+def _wide_float_key(value: np.floating) -> str:
+    """The key of a finite float that a double cannot hold (longdouble). It comes from the exact
+    integer ratio, so two distinct values never share a key. It reads no process setting: not the
+    decimal context precision, and not the int-to-str digit limit, which `Decimal(int)` and hex
+    formatting both skip. A whole value gets its decimal digits, so it matches an int cell."""
+    numerator, denominator = value.as_integer_ratio()
+    if denominator == 1:
+        return str(Decimal(numerator))
+    return f"{numerator:x}/{denominator:x}"
+
+
 def _number_key(value: object) -> str:
+    if isinstance(value, np.floating) and np.isfinite(value) and value != float(value):
+        return _wide_float_key(value)
     value = _python_scalar(value)
     if isinstance(value, bool):
         # pandas `==` holds True equal to 1 and 1.0, so a bool keys as the number it equals.
@@ -138,9 +151,5 @@ def _python_scalar(value: object) -> object:
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.floating):
-        as_float = float(value)
-        if np.isfinite(value) and value != as_float:
-            # Wider than a double (longdouble): keep every digit, or two cells read as one.
-            return int(value) if value == np.trunc(value) else Decimal(str(value))
-        return as_float
+        return float(value)
     return value

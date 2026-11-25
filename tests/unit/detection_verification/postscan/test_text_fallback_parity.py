@@ -244,9 +244,15 @@ def test_a_source_diversity_that_drops_but_stays_varied_passes() -> None:
 
 # ----- precision and the zero-comparable guard --------------------------------------------------
 
+# longdouble is binary64 on some platforms (arm64): the wide-float cases need a wider mantissa.
+needs_wide_longdouble = pytest.mark.skipif(
+    np.finfo(np.longdouble).nmant <= 52, reason="longdouble is no wider than a double here"
+)
+
 WIDE = [np.longdouble(2**53 + (i % 2)) for i in range(64)]
 
 
+@needs_wide_longdouble
 @pytest.mark.parametrize("kind", ["object", "longdouble"])
 def test_an_unchanged_wide_float_column_that_keys_alike_in_a_double_still_fails(kind: str) -> None:
     cells = pd.Series(WIDE, dtype=object if kind == "object" else np.longdouble)
@@ -261,6 +267,7 @@ def test_an_unchanged_wide_float_column_that_keys_alike_in_a_double_still_fails(
     assert post_scan_verdict(report).blocking
 
 
+@needs_wide_longdouble
 def test_a_fractional_wide_float_keeps_its_precision_in_the_key() -> None:
     wide = np.longdouble(1) + np.longdouble(2) ** -60
     assert wide != float(wide)
@@ -290,3 +297,41 @@ def test_the_backstop_checks_the_keys_the_emitter_produced(monkeypatch: pytest.M
     )
     report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
     _assert_backstop_blocks(report)
+
+
+def _masked_wide_run(values: list[Any], replacement: list[Any]) -> dict[str, Any]:
+    src = pd.DataFrame({"email": EMAILS, "n": pd.Series(values * 32, dtype=object)})
+    out = pd.DataFrame({"email": FAKE, "n": replacement * 32})
+    return run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker"), ("n", "hash")))
+
+
+@needs_wide_longdouble
+def test_huge_finite_longdouble_keys_do_not_hit_the_int_string_limit() -> None:
+    import sys
+
+    assert sys.get_int_max_str_digits() in (0, 4300)  # the default limit, not a raised one
+    values = [np.longdouble("1e4500"), np.longdouble("2e4500")]
+    report = _masked_wide_run(values, [1, 2])
+    assert not _table_errors(report)
+    assert not post_scan_verdict(report).blocking
+
+
+@needs_wide_longdouble
+def test_wide_fractional_keys_do_not_depend_on_the_decimal_context() -> None:
+    from decimal import localcontext
+
+    low = np.longdouble(1) + np.longdouble(2) ** -62
+    high = np.longdouble(1) + np.longdouble(2) ** -61
+    with localcontext() as ctx:
+        ctx.prec = 15
+        keys = key_text(pd.Series([low, high], dtype=object))
+        report = _masked_wide_run([low, high], [1, 2])
+    assert keys[0] != keys[1]
+    assert not _table_errors(report)
+    assert not post_scan_verdict(report).blocking
+
+
+@needs_wide_longdouble
+def test_a_whole_wide_float_keys_as_the_equal_int() -> None:
+    whole = np.longdouble(2**53 + 1)
+    assert key_text(pd.Series([whole, 2**53 + 1], dtype=object)) == [str(2**53 + 1)] * 2
