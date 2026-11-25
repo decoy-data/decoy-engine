@@ -94,19 +94,46 @@ def test_missing_url_source_hides_credentials() -> None:
     ("locator", "expected"),
     [
         ("https://svc:p@ss@host.example/c?token=T", "https://host.example/c?<redacted>"),
-        ("https://host?email=x@y&token=T", "https://host?<redacted>"),
+        ("https://host?email=x@y&token=T", "https://<redacted>"),
         ("https:\\\\svc:pw@host\\c\\f?token=T", "https://host/c/f?<redacted>"),
         ("s3:/u:p@h/k", "s3:/h/k"),
         ("https://h/p#access_token=T", "https://h/p#<redacted>"),
         ("/tmp/archive:/alice@local/file?rev=1", "/tmp/archive:/alice@local/file?rev=1"),
         ("C:\\data\\a@b.parquet", "C:\\data\\a@b.parquet"),
         ("\\\\server\\share\\a@b", "\\\\server\\share\\a@b"),
+        ("  https://svc:pw@host/c?t=T", "  https://host/c?<redacted>"),
+        ("failed at https://svc:pw@host/c?t=T now", "failed at https://host/c?<redacted> now"),
+        ("https://svc:pa/ss@host/c?t=T", "https://<redacted>"),
+        ("https://svc:p?w@host/c", "https://<redacted>"),
+        ("https://svc:p#w@host/c", "https://<redacted>"),
     ],
 )
 def test_url_redactor_shapes(locator: str, expected: str) -> None:
     from decoy_engine.fileaccess._read import without_url_credentials
 
     assert without_url_credentials(locator) == expected
+
+
+@pytest.mark.parametrize(
+    "locator",
+    [
+        "https://svc:{pw}@host/c?token={tok}",
+        "https://svc:pa/{pw}@host/c?token={tok}",
+        "https://svc:pa?{pw}@host/c?token={tok}",
+        "https://svc:pa#{pw}@host/c",
+        "https://svc:pa@{pw}@host/c#{tok}",
+        "  https://svc:{pw}@host/c?token={tok}",
+        "cannot read https://svc:{pw}@host/c?token={tok} (denied)",
+        "https:\\\\svc:{pw}@host\\c?token={tok}",
+        "s3:/svc:{pw}@host/c?token={tok}",
+    ],
+)
+def test_url_redactor_never_keeps_canaries(locator: str) -> None:
+    from decoy_engine.fileaccess._read import without_url_credentials
+
+    out = without_url_credentials(locator.format(pw=_PW, tok=_TOK))
+    assert _PW not in out
+    assert _TOK not in out
 
 
 def _no_secret(text: str) -> None:

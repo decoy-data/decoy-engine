@@ -6,7 +6,6 @@ import os
 import re
 import stat
 from collections.abc import Callable
-from urllib.parse import urlsplit
 
 from decoy_engine.fileaccess._entry import current, is_ambient
 from decoy_engine.fileaccess._errors import encode_field_key, passes_by_type, resurface_scrubbed
@@ -72,28 +71,43 @@ def read_checked(
 
 # A locator may be a URL (`s3://user:secret@host/key?token=...`), or one a `Path` has squeezed to a
 # single slash (`s3:/user:secret@host/...`) or turned to backslashes on Windows. Its userinfo,
-# query and fragment are credentials. The scheme must open the text: a local path such as
-# `/tmp/a:/b@c/f?x=1` is not a URL and is left alone. Two or more characters, so not a drive letter.
-_URL_HEAD_RE = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]+):(?P<slashes>[/\\]{1,2})")
+# query and fragment are credentials. A URL is found anywhere in the text (it may follow
+# whitespace or sit inside a sentence), but its scheme must not continue a path or a word, so a
+# local path such as `/tmp/a:/b@c/f?x=1` is not one. Two or more scheme characters, so not a
+# drive letter. The URL runs to the next whitespace.
+_URL_RE = re.compile(
+    r"(?<![\w+.\-/\\])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]+):(?P<slashes>[/\\]{1,2})(?P<rest>\S*)"
+)
+_DELIMS_RE = re.compile(r"[/?#]")
+
+
+def _redact_url(match: re.Match[str]) -> str:
+    head = f"{match['scheme']}:{match['slashes'].replace(chr(92), '/')}"
+    rest = match["rest"].replace("\\", "/")
+    delim = _DELIMS_RE.search(rest)
+    cut = delim.start() if delim else len(rest)
+    authority, tail = rest[:cut], rest[cut:]
+    # A literal `@` after the authority is a password holding a `/`, `?` or `#`, or an `@` in a
+    # query: the parsers disagree on where userinfo ends, so nothing of the URL is kept.
+    if "@" in tail:
+        return head + "<redacted>"
+    authority = authority.rpartition("@")[2]
+    if "@" in authority or "?" in authority:
+        return head + "<redacted>"
+    tail_delim = re.search(r"[?#]", tail)
+    path = tail[: tail_delim.start()] if tail_delim else tail
+    marks = tail[tail_delim.start() :] if tail_delim else ""
+    out = head + authority + path
+    if "?" in marks.split("#", 1)[0]:
+        out += "?<redacted>"
+    if "#" in marks:
+        out += "#<redacted>"
+    return out
 
 
 def without_url_credentials(text: str) -> str:
-    """`text` with the userinfo, query and fragment of a URL-shaped locator removed."""
-    head = _URL_HEAD_RE.match(text)
-    if head is None:
-        return text
-    rest = text[head.end() :].replace("\\", "/")
-    try:
-        parts = urlsplit("//" + rest)
-        host = parts.netloc.rpartition("@")[2]
-    except ValueError:
-        return text[: head.end()] + "<redacted>"
-    out = f"{head['scheme']}:{head['slashes'].replace(chr(92), '/')}{host}{parts.path}"
-    if "?" in rest.split("#", 1)[0]:
-        out += "?<redacted>"
-    if parts.fragment:
-        out += "#<redacted>"
-    return out
+    """`text` with the userinfo, query and fragment of every URL-shaped locator removed."""
+    return _URL_RE.sub(_redact_url, text)
 
 
 def shown(locator: str, field_key: str) -> str:
