@@ -4,6 +4,8 @@ Memory monitoring utilities for the decoy_engine package.
 
 from typing import Any
 
+from decoy_engine.safe_output import safe_error_type
+
 
 class MemoryMonitor:
     """
@@ -51,7 +53,7 @@ class MemoryMonitor:
             logger.debug("Install with: pip install psutil")
             return None
         except Exception as e:
-            logger.warning(f"Could not monitor memory ({type(e).__name__})")
+            logger.warning(f"Could not monitor memory ({safe_error_type(e).value})")
             return None
 
     @staticmethod

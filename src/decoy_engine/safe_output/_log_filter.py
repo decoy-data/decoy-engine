@@ -9,7 +9,8 @@ What the filter rewrites, in place on the record:
 
 - an exception in `msg` or in `args` (a tuple item or a mapping value) becomes its closed type
   label (`safe_error_type`), so `%s` and `%r` print the label. The same holds one level inside
-  a list, tuple, set, frozenset or dict (keys and values) used as an argument or as `msg`;
+  a list, tuple, set, frozenset or mapping (keys and values; a mapping that needs no change is
+  left as is, and one that does keeps its type and `__missing__`) used as an argument or as `msg`;
 - live `exc_info` becomes a traceback of labels and `file:line, in function` frames, with no
   exception text, no source lines and no frame locals; `exc_info` is then cleared so the
   formatter cannot render the raw one;
@@ -31,6 +32,7 @@ call-site guard `tests/sentry/test_log_interpolation.py` covers them instead:
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Mapping
 from types import TracebackType
@@ -57,25 +59,45 @@ def _label(exc: BaseException) -> _Label:
     return _Label(safe_error_type(exc).value)
 
 
-def _replace(value: object) -> object:
-    return _label(value) if isinstance(value, BaseException) else value
+def _scan(value: object, depth: int) -> object:
+    """`value` with exceptions swapped for labels, `depth` container levels down.
 
-
-def _safe(value: object) -> object:
-    """`value` with exceptions swapped for labels, at the top and one container level down."""
+    Returns `value` itself when nothing in it changes, so a mapping with its own lookup
+    behavior (a `Counter`, a `defaultdict`) is never swapped for a plain copy needlessly.
+    """
     if isinstance(value, BaseException):
         return _label(value)
-    if isinstance(value, list):
-        return [_replace(v) for v in value]
-    if isinstance(value, tuple):
-        return tuple(_replace(v) for v in value)
-    if isinstance(value, set):
-        return {_replace(v) for v in value}
-    if isinstance(value, frozenset):
-        return frozenset(_replace(v) for v in value)
-    if isinstance(value, dict):
-        return {_replace(k): _replace(v) for k, v in value.items()}
+    if depth == 0:
+        return value
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+        new = [_scan(v, depth - 1) for v in items]
+        if all(n is o for n, o in zip(new, items, strict=True)):
+            return value
+        if isinstance(value, list):
+            return new
+        if isinstance(value, tuple):
+            return tuple(new)
+        return set(new) if isinstance(value, set) else frozenset(new)
+    if isinstance(value, Mapping):
+        pairs = [(k, v, _scan(k, depth - 1), _scan(v, depth - 1)) for k, v in value.items()]
+        if all(nk is k and nv is v for k, v, nk, nv in pairs):
+            return value
+        return _rebuild_mapping(value, [(nk, nv) for _, _, nk, nv in pairs])
     return value
+
+
+def _rebuild_mapping(
+    original: Mapping[object, object], pairs: list[tuple[object, object]]
+) -> object:
+    """A mapping of the same type as `original` (keeping `__missing__`) holding `pairs`."""
+    try:
+        clone = copy.copy(original)
+        clone.clear()  # type: ignore[attr-defined]
+        clone.update(pairs)  # type: ignore[attr-defined]
+        return clone
+    except Exception:
+        return dict(pairs)
 
 
 def _frames(tb: TracebackType | None) -> list[str]:
@@ -114,12 +136,14 @@ def _safe_traceback(exc: BaseException) -> str:
 
 
 def _scrub(record: logging.LogRecord) -> None:
-    record.msg = _safe(record.msg)
+    record.msg = _scan(record.msg, 1)
     args = record.args
     if isinstance(args, tuple):
-        record.args = tuple(_safe(a) for a in args)
+        record.args = tuple(_scan(a, 1) for a in args)
     elif isinstance(args, Mapping):
-        record.args = {_replace(k): _safe(v) for k, v in args.items()}  # type: ignore[misc]
+        record.args = _scan(
+            args, 2
+        )  # the mapping itself is the argument list  # type: ignore[assignment]
 
     exc = record.exc_info[1] if record.exc_info else None
     if exc is not None:

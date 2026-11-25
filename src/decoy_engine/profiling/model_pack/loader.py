@@ -51,6 +51,7 @@ from decoy_engine.profiling.model_pack.types import (
     PACK_FORMAT,
     ModelPackManifest,
 )
+from decoy_engine.safe_output import safe_error_type
 
 _log = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ class ModelPackLoader:
             cause = exc.cause  # closed engine-set value, never message text
             _log.warning(
                 "Model pack unavailable (%s, cause %s); falling back to regex baseline",
-                type(exc).__name__,
+                safe_error_type(exc).value,
                 cause,
             )
             return None
@@ -242,7 +243,7 @@ class ModelPackLoader:
                 raise
             _log.warning(
                 "Unexpected error loading model pack (%s); falling back to regex baseline",
-                type(exc).__name__,
+                safe_error_type(exc).value,
             )
             return None
 

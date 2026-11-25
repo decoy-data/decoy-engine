@@ -7,6 +7,7 @@ one cell that writes it as a literal checks that the filter prints no source lin
 
 from __future__ import annotations
 
+import collections
 import io
 import logging
 import sys
@@ -174,6 +175,7 @@ def test_unlisted_exception_class_is_labelled_exception() -> None:
 def test_stack_info_is_kept() -> None:
     engine, buf = _engine_handler()
     record = _record(exc=False)
+    # stack_info shows engine source lines: code text, not runtime data, so it is kept.
     record.stack_info = 'Stack (most recent call last):\n  File "m.py", line 3, in f'
     engine.handle(record)
     assert 'File "m.py", line 3, in f' in buf.getvalue()
@@ -277,6 +279,55 @@ def test_dict_msg_with_exception_becomes_label() -> None:
     engine.handle(_record({"err": ValueError(_CANARY)}, (), exc=False))
     assert "ValueError" in buf.getvalue()
     assert _CANARY not in buf.getvalue()
+
+
+def test_tuple_key_in_lone_mapping_arg_becomes_label() -> None:
+    engine, buf = _engine_handler()
+    logger = logging.getLogger("decoy_engine.t_key")
+    logger.propagate = False
+    logger.handlers = [engine]
+    logger.error("failed: %s", {(ValueError(_CANARY),): 1})
+    assert "ValueError" in buf.getvalue()
+    assert _CANARY not in buf.getvalue()
+
+
+def test_non_dict_mapping_msg_and_arg_are_scanned() -> None:
+    engine, buf = _engine_handler()
+    engine.handle(_record(collections.UserDict({"e": ValueError(_CANARY)}), (), exc=False))
+    engine.handle(_record("x %s", (collections.UserDict({"e": ValueError(_CANARY)}),), exc=False))
+    assert buf.getvalue().count("ValueError") == 2
+    assert _CANARY not in buf.getvalue()
+
+
+def test_valid_record_is_not_dropped_by_the_filter() -> None:
+    engine, buf = _engine_handler()
+    logger = logging.getLogger("decoy_engine.t_counter")
+    logger.propagate = False
+    logger.handlers = [engine]
+    logger.setLevel(logging.INFO)
+    counter = collections.Counter(existing=2)
+    logger.info("found %(missing)d", counter)
+    assert buf.getvalue().strip() == "INFO found 0"
+
+
+def test_mapping_needing_replacement_keeps_missing_lookup() -> None:
+    engine, buf = _engine_handler()
+    mapping: collections.defaultdict[str, object] = collections.defaultdict(
+        lambda: 0, e=ValueError(_CANARY)
+    )
+    logger = logging.getLogger("decoy_engine.t_missing")
+    logger.propagate = False
+    logger.handlers = [engine]
+    logger.warning("%(e)s %(missing)d", mapping)
+    assert buf.getvalue().strip() == "WARNING ValueError 0"
+
+
+def test_args_object_untouched_when_nothing_to_replace() -> None:
+    counter = collections.Counter(existing=2)
+    record = _record("x", (), exc=False)
+    record.args = counter
+    SafeRecordFilter().filter(record)
+    assert record.args is counter
 
 
 def test_every_engine_handler_carries_the_filter() -> None:
