@@ -696,7 +696,7 @@ other form" a failure, not a fallback, because a ratchet must not skip a bound.
 
 The grammar. A constant is valid ("plain") only when all of these are true:
 
-1. It has exactly one binding in the counted scopes (step 1 below).
+1. It has exactly one binding in the counted scopes (step 1 below), and its module contains no wildcard import.
 2. That binding is a statement that is a direct element of `Module.body`. A statement inside
    `if`, `try`, `with`, `for` or a function body is not plain.
 3. The statement is `NAME = <lit>` (an `ast.Assign` with exactly one target, and that target is
@@ -710,23 +710,34 @@ The parser, `int_constants(tree: ast.Module) -> dict[str, int | None]`, makes on
 1. Bindings. Collect every binding of every name in the counted scopes, with its binding
    construct. A binding is a node for which `_bindings.bound_names(node)` names the name
    (Store or Del `ast.Name`, `def`, `class`, import alias, `except ... as`, match capture,
-   `global`/`nonlocal`). An `ast.Subscript` or `ast.Attribute` target binds no name, and the
-   `ast.Name` nodes inside it are in Load context, so they never count. The counted scopes do
+   `global`/`nonlocal`). Descend into subscript and attribute targets. The target itself binds no name.
+   Inspect each descendant in its own context. A base or key read is a Load, while the
+   target of a nested `NamedExpr` is a Store. Associate that Store with its own walrus value.
+   If an `ImportFrom` alias reports `*` through `bound_names`, flag the entire module.
+   The counted scopes do
    not change from PR #801 `_count_bindings`: module scope, plus a function or class body for
    the names it declares `global`. A comprehension target is local and does not count. A walrus
    inside a comprehension binds the enclosing scope and counts. A bare `NAME: int` with no value
    counts as a binding.
-2. Candidates. A name is a candidate when at least one of its Store bindings is one of these:
-   - (a) the single `ast.Name` target of an `Assign` or `AnnAssign` whose value, after zero or
-     more unary operators, is an `ast.Constant` with `type(value) is int`;
-   - (b) an `ast.Name` anywhere else in a binding construct (a tuple, list or starred element,
-     one of several chained targets, an `AugAssign` target, a walrus target, a `for` target, a
-     `with ... as` target) when that construct's value expression contains any `ast.Constant`
-     with `type(value) is int`. The value expression is `.value` for `Assign`, `AnnAssign`,
-     `AugAssign` and `NamedExpr`, `.iter` for `for`, and `.context_expr` for a `with` item.
-3. Verdict. For each candidate, the value is the literal when the name is plain. Otherwise the
-   value is `None`, which means "refused". The parser does not try to work out what a refused
-   form binds. Names that are not candidates are not in the result.
+2. Candidates. Accumulate names across all counted bindings, regardless of statement order.
+   Apply these tests to the construct that owns the binding.
+   - (a) For a single Name target of `Assign` or `AnnAssign`, strip zero or more unary
+     operators from its value. Only a remaining `Constant` with `type(value) is int` makes
+     that target a candidate. A first assignment `MIN_ROWS = 59 - 1` leaves a new floor
+     undiscovered. A registered floor still fails its live read. A later computed assignment
+     still counts as a second binding of an existing candidate.
+   - (b) For unpacking, chained targets, augmented assignments, walruses, loops and
+     `with` items, take the Store names bound by the construct's targets when its value
+     expression contains any exact-int literal. Use `.value` for assignments and walruses,
+     `.iter` for loops and the item's `.context_expr` for `with`.
+   - (c) For a match whose `.subject` contains any exact-int literal, visit the pattern
+     nodes in each case and collect their captures with `_bindings.bound_names(node)`.
+     Counted captures qualify on their first binding. Case bodies and guards follow the
+     ordinary scope and binding rules.
+3. Verdict. Return the literal only for a plain candidate. For every other candidate return
+   `None` (refused). A flagged wildcard import refuses every candidate, independent of its
+   position or exported names. Keep the candidate keys for discovery. Never import the
+   source or resolve exports. Omit names that have no candidate binding.
 
 `read_int(source, constant)` returns `int_constants(ast.parse(source))[constant]` when that is
 an int. A refused or absent name raises
@@ -785,50 +796,55 @@ sentry discovers int literals in the binding statement only. Value flow across s
 different defect class.
 
 Constant grammar seed table. Add it to `tests/sentry/ratchet/test_bounds.py` as
-`CONSTANT_FORMS: dict[str, tuple[str, str, int | None]]`, id to `(source, name, expected)`.
-`expected` is the value, or `None` for refused. One parametrized test,
-`test_constant_grammar_seed_table` (red-before), checks each row through both paths. For an int,
-`read_int` returns it and `int_constants` maps the name to it. For `None`, `read_int` raises the
-fixed message, and `refused_constants({"test_x.py": source})` is
-`["test_x.py::<name> must be one module-level NAME = <int> statement"]` when the name is
-UPPER_CASE.
+`CONSTANT_FORMS`, keyed by row id. Each row supplies source and an expected map of **all**
+UPPER_CASE candidates to their integer or `None`. In `test_constant_grammar_seed_table`,
+compare the uppercase projection of `int_constants` and the discovered names from
+`module_int_constants({"test_x.py": source})` against that map and its keys, respectively
+(use the existing `UPPER.fullmatch` filter and qualify discovered keys with the filename).
+For each expected entry, assert that `read_int` returns the exact int or raises `ValueError`
+with the exact fixed message for that name. Compare the entire list from
+`refused_constants({"test_x.py": source})` to the sorted file-qualified messages for
+all expected `None` entries, including the empty list when all entries are plain.
 
-| Id | Source | Name | Expected |
-|---|---|---|---|
-| codex-r3-starred | `TAIL = (58, 0)\n*prefix, MIN_ROWS, end = 0, 59, *TAIL\n` | `MIN_ROWS` | refused |
-| codex-r3-later-rebind | `MIN_ROWS = 59\nMIN_ROWS = max(1, MIN_ROWS)\n` | `MIN_ROWS` | refused |
-| codex-r3-subscript-rebind | `MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], MIN_ROWS = 1, 2\n` | `MIN_ROWS` | refused |
-| codex-r3-subscript-key | `MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], total = range(2)\n` | `MIN_ROWS` | 59 |
-| attribute target | `MIN_ROWS = 59\nns = f()\nns.MIN_ROWS, total = 1, 2\n` | `MIN_ROWS` | 59 |
-| tuple literal | `MIN_A, MIN_B = 59, 1186\n` | `MIN_A` | refused |
-| nested tuple | `(A, (MIN_B, C)) = 1, (2, 3)\n` | `MIN_B` | refused |
-| tuple rebind | `GOAL = 600\nGOAL, OTHER = 900, 1\n` | `GOAL` | refused |
-| starred | `*GOAL, B = 1, 2, 3\n` | `GOAL` | refused |
-| chained | `OTHER = GOAL = 7\n` | `GOAL` | refused |
-| augmented | `GOAL = 600\nGOAL += 300\n` | `GOAL` | refused |
-| augmented only | `GOAL += 1\n` | `GOAL` | refused |
-| walrus | `GOAL = 600\n(GOAL := 900)\n` | `GOAL` | refused |
-| walrus in comprehension | `GOAL = 600\n[(GOAL := 9) for _ in [1]]\n` | `GOAL` | refused |
-| for target | `GOAL = 600\nfor GOAL in [900]:\n    pass\n` | `GOAL` | refused |
-| for over a literal | `for GOAL in range(3):\n    pass\n` | `GOAL` | refused |
-| with target | `GOAL = 600\nwith open('x') as GOAL:\n    pass\n` | `GOAL` | refused |
-| import rebind | `GOAL = 600\nfrom os import sep as GOAL\n` | `GOAL` | refused |
-| def rebind | `GOAL = 600\n\ndef GOAL():\n    pass\n` | `GOAL` | refused |
-| except alias | `GOAL = 600\ntry:\n    pass\nexcept Exception as GOAL:\n    pass\n` | `GOAL` | refused |
-| del | `GOAL = 600\ndel GOAL\n` | `GOAL` | refused |
-| global rebind | `GOAL = 600\n\ndef f():\n    global GOAL\n    GOAL = 900\n` | `GOAL` | refused |
-| inside if | `if True:\n    GOAL = 600\n` | `GOAL` | refused |
-| second plain | `GOAL = 600\nGOAL = 900\n` | `GOAL` | refused |
-| bare annotation after | `GOAL = 600\nGOAL: int\n` | `GOAL` | refused |
-| wrong annotation | `GOAL: float = 600\n` | `GOAL` | refused |
-| unary plus | `F = +5\n` | `F` | refused |
-| double minus | `F = --5\n` | `F` | refused |
-| plain | `GOAL = 600\n` | `GOAL` | 600 |
-| annotated | `GOAL: int = 601\n` | `GOAL` | 601 |
-| negative | `_F = -5\n` | `_F` | -5 |
-| local of the same name | `GOAL = 600\n\ndef f():\n    GOAL = 1\n    return [GOAL for GOAL in range(2)]\n` | `GOAL` | 600 |
-| module comprehension target | `GOAL = 600\nXS = [GOAL for GOAL in range(2)]\n` | `GOAL` | 600 |
-| class attribute | `GOAL = 600\n\nclass C:\n    GOAL = 1\n` | `GOAL` | 600 |
+| Id | Source | Expected uppercase map |
+|---|---|---|
+| codex-r3-starred | `TAIL = (58, 0)\n*prefix, MIN_ROWS, end = 0, 59, *TAIL\n` | `{"MIN_ROWS": None}` |
+| codex-r3-later-rebind | `MIN_ROWS = 59\nMIN_ROWS = max(1, MIN_ROWS)\n` | `{"MIN_ROWS": None}` |
+| codex-r3-subscript-rebind | `MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], MIN_ROWS = 1, 2\n` | `{"MIN_ROWS": None}` |
+| codex-r3-subscript-key | `MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], total = range(2)\n` | `{"MIN_ROWS": 59}` |
+| attribute target | `MIN_ROWS = 59\nns = f()\nns.MIN_ROWS, total = 1, 2\n` | `{"MIN_ROWS": 59}` |
+| tuple literal | `MIN_A, MIN_B = 59, 1186\n` | `{"MIN_A": None, "MIN_B": None}` |
+| nested tuple | `(A, (MIN_B, C)) = 1, (2, 3)\n` | `{"A": None, "C": None, "MIN_B": None}` |
+| tuple rebind | `GOAL = 600\nGOAL, OTHER = 900, 1\n` | `{"GOAL": None, "OTHER": None}` |
+| starred | `*GOAL, B = 1, 2, 3\n` | `{"B": None, "GOAL": None}` |
+| chained | `OTHER = GOAL = 7\n` | `{"GOAL": None, "OTHER": None}` |
+| augmented | `GOAL = 600\nGOAL += 300\n` | `{"GOAL": None}` |
+| augmented only | `GOAL += 1\n` | `{"GOAL": None}` |
+| walrus | `GOAL = 600\n(GOAL := 900)\n` | `{"GOAL": None}` |
+| walrus in comprehension | `GOAL = 600\n[(GOAL := 9) for _ in [1]]\n` | `{"GOAL": None}` |
+| for target | `GOAL = 600\nfor GOAL in [900]:\n    pass\n` | `{"GOAL": None}` |
+| for over a literal | `for GOAL in range(3):\n    pass\n` | `{"GOAL": None}` |
+| with target | `GOAL = 600\nwith open('x') as GOAL:\n    pass\n` | `{"GOAL": None}` |
+| first match capture | `match 58:\n    case MIN_ROWS: pass\nassert len(rows) >= MIN_ROWS\n` | `{"MIN_ROWS": None}` |
+| wildcard overwrite | `GOAL = 59\nfrom sentry_fixture import *\n` | `{"GOAL": None}` |
+| subscript walrus | `GOAL = 59\ncounts = {}\ncounts[(GOAL := 58)] = 0\n` | `{"GOAL": None}` |
+| import rebind | `GOAL = 600\nfrom os import sep as GOAL\n` | `{"GOAL": None}` |
+| def rebind | `GOAL = 600\n\ndef GOAL():\n    pass\n` | `{"GOAL": None}` |
+| except alias | `GOAL = 600\ntry:\n    pass\nexcept Exception as GOAL:\n    pass\n` | `{"GOAL": None}` |
+| del | `GOAL = 600\ndel GOAL\n` | `{"GOAL": None}` |
+| global rebind | `GOAL = 600\n\ndef f():\n    global GOAL\n    GOAL = 900\n` | `{"GOAL": None}` |
+| inside if | `if True:\n    GOAL = 600\n` | `{"GOAL": None}` |
+| second plain | `GOAL = 600\nGOAL = 900\n` | `{"GOAL": None}` |
+| bare annotation after | `GOAL = 600\nGOAL: int\n` | `{"GOAL": None}` |
+| wrong annotation | `GOAL: float = 600\n` | `{"GOAL": None}` |
+| unary plus | `F = +5\n` | `{"F": None}` |
+| double minus | `F = --5\n` | `{"F": None}` |
+| plain | `GOAL = 600\n` | `{"GOAL": 600}` |
+| annotated | `GOAL: int = 601\n` | `{"GOAL": 601}` |
+| negative | `_F = -5\n` | `{"_F": -5}` |
+| local of the same name | `GOAL = 600\n\ndef f():\n    GOAL = 1\n    return [GOAL for GOAL in range(2)]\n` | `{"GOAL": 600}` |
+| module comprehension target | `GOAL = 600\nXS = [GOAL for GOAL in range(2)]\n` | `{"GOAL": 600}` |
+| class attribute | `GOAL = 600\n\nclass C:\n    GOAL = 1\n` | `{"GOAL": 600}` |
 
 The `codex-r3-subscript-key` row reads 59 on purpose. In that source `MIN_ROWS` is bound once,
 in plain form, and Python also binds it to 59. The defect was that the scan erased the name, so
@@ -836,21 +852,27 @@ the acceptance is that the name stays discovered and reads its true value. The
 `codex-r3-subscript-rebind` row is the fail-closed form of the same reproduction.
 
 Rows that are not candidates stay in `test_read_int_handles_annassign_and_refuses_bool`:
-`FLAG = True`, `TEXT = '5'`, `CALL = int('5')`, `GOAL = (600, 1)`, `GOAL = 300 * 2`,
+`FLAG = True`, `TEXT = '5'`, `CALL = int('5')`, `GOAL = (600, 1)`, `GOAL = 300 * 2`, `MIN_ROWS = 59 - 1`,
 `GOAL, OTHER = f()`, `F = -True` and a missing name. Each raises the fixed message, and none is
 discovered.
 
-Mutation check (gate, recorded in the PR). Apply each mutant by hand to `_limit_constants.py`,
-run `test_constant_grammar_seed_table`, and record that it fails:
+Mutation check (gate, recorded in the PR). First run the full seed table on the unmutated implementation and require green.
+Then apply each mutant independently to `_limit_constants.py`, run the table and record the failing row ids.
+Restore the implementation between mutants and rerun the unmutated table on the final head.
 
 - M1, remove the fail-closed branch. In the verdict step, return the literal of the last
   plain-shaped binding, and ignore the binding count and the direct-statement rule. Rows
   `codex-r3-later-rebind`, `second plain` and `augmented` must fail.
-- M2, drop candidate rule (b), so only plain-shaped bindings make candidates. Rows
+- M2, drop candidate rule (b), keeping rules (a) and (c). Rows
   `codex-r3-starred`, `tuple literal` and `for over a literal` must fail, because
   `refused_constants` returns `[]`.
 - M3, count Load names inside a subscript target as bindings. Row `codex-r3-subscript-key`
   must fail.
+- M4, skip candidate rule (c) while still counting captures as rebindings.
+  `first match capture` must fail because discovery loses `MIN_ROWS`.
+- M5, ignore the module wildcard flag at verdict time. `wildcard overwrite` must fail
+  because the reader returns 59 and discovery reports no refusal.
+
 - `tests/sentry/_baseline_sources.py` (562 lines, about +15, stays under 600):
   - Add an optional `mins` callable to `Source`, read by the mirror test the way `maxes` is.
   - A `sentry-limits` source over `LIMITS`, keys `<file>::<CONSTANT>`, with `maxes` and `mins`.
@@ -910,7 +932,7 @@ Failure modes:
 | GOAL rewritten as `GOAL = True` | Fail, `read_int` refuses a bool |
 | A floor bound by starred or tuple unpacking of literals | Fail closed, fixed message naming file and constant; no value read |
 | A plain floor followed by `MIN = max(1, MIN)` or any second binding | Fail closed (discovery and `read_int`) |
-| A floor used as a key in a subscript target | Pass, read at its true value; the subscript binds no name |
+| A floor read as a key in a subscript target | Pass, read at its true value; the key name has Load context |
 | The census floors left as `MIN_PACKAGES, MIN_NAMES = 59, 1186` | Fail closed until rewritten as two plain lines |
 
 Acceptance tests in `tests/sentry/ratchet/test_bounds.py` unless noted, tagged as in RG-E1:
@@ -933,7 +955,7 @@ Acceptance tests in `tests/sentry/ratchet/test_bounds.py` unless noted, tagged a
 - `test_guard_sentry_renamed_with_a_dropped_key_fails` (red-before)
 - `test_read_int_handles_annassign_and_refuses_bool` (red-before)
 - `test_constant_grammar_seed_table` (red-before), one case per `CONSTANT_FORMS` row in
-  "RG-E2 constant grammar", plus mutants M1 to M3 recorded at the gate
+  "RG-E2 constant grammar", plus mutants M1 to M5 recorded at the gate
 - `test_every_module_int_is_a_bound_or_named` (in `test_baseline_registry.py`, pin), now also
   asserting `refused_constants(_sentry_sources()) == []`
 - `test_the_census_floors_are_discovered_and_registered` (in `test_baseline_registry.py`, pin),
