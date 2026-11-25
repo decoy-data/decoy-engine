@@ -50,12 +50,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, NoReturn
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine._error_base import raise_bare
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.determinism import derive, seed_bytes_to_int
 from decoy_engine.fileaccess import FileAccess, entry_point, position_key
@@ -137,20 +138,6 @@ class JointMaskConfig:
         return self._table
 
 
-def _raise_without_chain(err: PlanCompileError) -> NoReturn:
-    """Raise `err` with no cause or context. The rejected `load_table` error is still being
-    handled here, so a plain raise would attach it as `__context__` and its traceback would
-    carry the raw reference (X2). Caught, cleared and re-raised bare, mirroring the keyprovider's
-    `raise_clean`."""
-    try:
-        raise err
-    except PlanCompileError as fresh:
-        fresh.__cause__ = None
-        fresh.__context__ = None
-        fresh.__suppress_context__ = True
-        raise
-
-
 @entry_point
 def validate_joint_mask_config(
     cfg: dict[str, Any], *, file_access: FileAccess | None = None
@@ -215,7 +202,7 @@ def validate_joint_mask_config(
         # strict policy, but its traceback would otherwise surface the raw reference as the
         # PlanCompileError's `__context__` (X2). `from None` only suppresses display, so the
         # context is nulled outright.
-        _raise_without_chain(
+        raise_bare(
             PlanCompileError(
                 code=reasons.plan.JOINT_MASK_REFERENCE_NOT_FOUND,
                 path=ref_path,
@@ -229,7 +216,7 @@ def validate_joint_mask_config(
         )
     except ValueError:
         # The loader's text describes the file, so the code's registered summary stands in.
-        _raise_without_chain(
+        raise_bare(
             PlanCompileError(
                 code=reasons.plan.JOINT_MASK_REFERENCE_INVALID,
                 path=ref_path,
