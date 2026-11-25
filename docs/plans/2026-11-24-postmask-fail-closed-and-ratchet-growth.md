@@ -673,11 +673,184 @@ Changes:
       For a guard rename, count a key as retained only in a registered guard successor.
       Match it once by the same transfer and bound rules.
       These matches never excuse the id retirement and never excuse another missing key.
-- New `tests/sentry/ratchet/_limit_constants.py` (about 50 lines):
+- New `tests/sentry/ratchet/_limit_constants.py` (about 150 lines):
   - `LIMITS`: a dict from `(test file, constant)` to `"max"` or `"min"`.
-  - `read_int(file, constant)`: parses the file with `ast` and returns the module-level `NAME =
-    <int>` or `NAME: int = <int>` value (`Assign` and `AnnAssign`). A `bool` or a non-int value
-    is an error, because `isinstance(True, int)` is true.
+  - `int_constants(tree)` and `read_int(source, constant)`: the one constant parser, with a
+    fail-closed narrow grammar. See "RG-E2 constant grammar" below. Discovery and live reads
+    both call `int_constants`, so they cannot disagree.
+
+### RG-E2 constant grammar (fail closed)
+
+Rounds 1 to 3 of PR #801 tried to evaluate general Python assignment forms (tuple pairing,
+chained targets, starred targets) from the AST. Each Codex round found a new form that gave a
+wrong value or hid a floor from discovery (round 3 at `719ad54bc`: starred unpacking read 59
+where Python binds 58; a later `MIN_ROWS = max(1, MIN_ROWS)` erased a floor from discovery; a
+subscript target `counts[MIN_ROWS], total = ...` erased a name). The root cause is the attempt
+to evaluate. The fix is to accept one form and refuse every other form without evaluating it.
+
+Established pattern: static readers that must not import the module accept only a literal in a
+module-level single-name assignment and give up on any other form. setuptools does this for
+`attr:` metadata (`setuptools/config/expand.py`, `StaticModule`: `Assign`/`AnnAssign` with a
+`Name` target, value through `ast.literal_eval`). This plan adopts that rule and makes "any
+other form" a failure, not a fallback, because a ratchet must not skip a bound.
+
+The grammar. A constant is valid ("plain") only when all of these are true:
+
+1. It has exactly one binding in the counted scopes (step 1 below).
+2. That binding is a statement that is a direct element of `Module.body`. A statement inside
+   `if`, `try`, `with`, `for` or a function body is not plain.
+3. The statement is `NAME = <lit>` (an `ast.Assign` with exactly one target, and that target is
+   `ast.Name`) or `NAME: int = <lit>` (an `ast.AnnAssign` whose target is `ast.Name` and whose
+   annotation is `ast.Name(id="int")`).
+4. `<lit>` is `ast.Constant` with `type(value) is int`, or `ast.UnaryOp(USub, that Constant)`.
+   A bool, `+5`, `--5` and `~5` are not plain.
+
+The parser, `int_constants(tree: ast.Module) -> dict[str, int | None]`, makes one walk:
+
+1. Bindings. Collect every binding of every name in the counted scopes, with its binding
+   construct. A binding is a node for which `_bindings.bound_names(node)` names the name
+   (Store or Del `ast.Name`, `def`, `class`, import alias, `except ... as`, match capture,
+   `global`/`nonlocal`). An `ast.Subscript` or `ast.Attribute` target binds no name, and the
+   `ast.Name` nodes inside it are in Load context, so they never count. The counted scopes do
+   not change from PR #801 `_count_bindings`: module scope, plus a function or class body for
+   the names it declares `global`. A comprehension target is local and does not count. A walrus
+   inside a comprehension binds the enclosing scope and counts. A bare `NAME: int` with no value
+   counts as a binding.
+2. Candidates. A name is a candidate when at least one of its Store bindings is one of these:
+   - (a) the single `ast.Name` target of an `Assign` or `AnnAssign` whose value, after zero or
+     more unary operators, is an `ast.Constant` with `type(value) is int`;
+   - (b) an `ast.Name` anywhere else in a binding construct (a tuple, list or starred element,
+     one of several chained targets, an `AugAssign` target, a walrus target, a `for` target, a
+     `with ... as` target) when that construct's value expression contains any `ast.Constant`
+     with `type(value) is int`. The value expression is `.value` for `Assign`, `AnnAssign`,
+     `AugAssign` and `NamedExpr`, `.iter` for `for`, and `.context_expr` for a `with` item.
+3. Verdict. For each candidate, the value is the literal when the name is plain. Otherwise the
+   value is `None`, which means "refused". The parser does not try to work out what a refused
+   form binds. Names that are not candidates are not in the result.
+
+`read_int(source, constant)` returns `int_constants(ast.parse(source))[constant]` when that is
+an int. A refused or absent name raises
+`ValueError(f"{constant} must be one module-level NAME = <int> statement")`. `live_bounds` in
+`_baseline_sources.py` adds the file: `"<file>::<constant> must be one module-level NAME = <int>
+statement"`. The text is fixed and value-free. It never includes the source line or a value.
+
+Discovery (`test_baseline_registry.py`). `module_int_constants(sources)` returns the
+`(file, NAME)` pairs of every UPPER_CASE key of `int_constants`, plain or refused. A new helper
+`refused_constants(sources) -> list[str]` returns
+`"<file>::<NAME> must be one module-level NAME = <int> statement"` for every UPPER_CASE key whose
+value is `None`, sorted. `test_every_module_int_is_a_bound_or_named` asserts
+`refused_constants(_sentry_sources()) == []` before its other asserts. A refused candidate fails
+whether or not it is registered. A `NOT_A_BOUND` constant must also be plain.
+
+What the PR deletes from `719ad54bc`:
+
+- `_paired` (the hand-rolled tuple and list pairing, `_limit_constants.py:109-121`).
+- `module_int_assignments` (`:124-135`). Its "last binding wins" map is the cause of the round 3
+  discovery erasure. `int_constants` replaces it.
+- `int_literal` (`:96-106`), with its `UAdd` branch and nested-unary check. A private
+  `_plain_literal(value)` that accepts only rule 4 replaces it.
+- `_count_bindings` (`:78-93`) becomes the binding collector of step 1. It keeps its scope rules
+  and `_global_names`, and it returns per-name binding lists, not a count for one name.
+- The two-step body of `read_int` (count, then look up).
+- In tests: the paired and `+5` rows of `test_read_int_reads_signed_and_paired_literals`, the
+  chained-target assertion of `test_read_int_ignores_locals_and_accepts_chained_targets`,
+  `test_read_int_refuses_a_signed_or_paired_non_literal` (moved into the seed table below),
+  `test_a_signed_and_a_paired_bound_are_read_live` (becomes signed only), and the `+5`, chained
+  and tuple rows of `test_the_discovery_scan_sees_each_spelling` (they move to the refusal rows
+  of the seed table).
+
+`_bindings.py` (`bound_names`) stays unchanged. `_reason_when_rows.py` and `consumer_problems`
+keep using it.
+
+Same-site rewrites. A scan of `origin/main` at `9f7bb1f4a` (every `tests/sentry/**/*.py`) found
+that 13 module-level int constants are already plain, including every registered `LIMITS` and
+`NOT_A_BOUND` row except the census pair. The grammar refuses two sites. The builder rewrites
+both at their own line, and changes no value. This same-site re-home is pre-approved:
+
+| Site | Now | Rewrite |
+|---|---|---|
+| `release/test_public_census.py:25` (registered `min` rows `MIN_PACKAGES`, `MIN_NAMES`) | `MIN_PACKAGES, MIN_NAMES = 59, 1186` | `MIN_PACKAGES = 59` and `MIN_NAMES = 1186` on two lines |
+| `ci_scan/test_identity.py:20` (not a bound; the tuple holds the int `40` in `"a" * 40`, so rule (b) makes all three candidates) | `REPO, COMMIT, PATH = "o/r", "a" * 40, "tests/x.py"` | `REPO = "o/r"`, `COMMIT = "a" * 40` and `PATH = "tests/x.py"` on three lines. These are then not candidates. |
+
+The other UPPER_CASE unpacks on main (`fa/scan.py:590,592`, `release/_signatures.py:25`,
+`release/test_public_signatures.py:28`, `test_ratchet_check.py:179,184,314,509`,
+`test_reason_policy_single_source.py:34`, `test_win32_import_surface.py:148`) hold no int
+literal. They are not candidates and stay as they are. PR #801 adds no new candidate site, and
+`tests/sentry` on main has no `global` statement.
+
+Out of scope (a non-goal, so a review finding here is a follow-up, not a blocker). A bound whose
+literal sits in a different statement (`MIN = OTHER`, or `MIN, X = TAIL` with
+`TAIL = (58, 0)`) is not a candidate. This is the same as on main and in rounds 1 to 3: the
+sentry discovers int literals in the binding statement only. Value flow across statements is a
+different defect class.
+
+Constant grammar seed table. Add it to `tests/sentry/ratchet/test_bounds.py` as
+`CONSTANT_FORMS: dict[str, tuple[str, str, int | None]]`, id to `(source, name, expected)`.
+`expected` is the value, or `None` for refused. One parametrized test,
+`test_constant_grammar_seed_table` (red-before), checks each row through both paths. For an int,
+`read_int` returns it and `int_constants` maps the name to it. For `None`, `read_int` raises the
+fixed message, and `refused_constants({"test_x.py": source})` is
+`["test_x.py::<name> must be one module-level NAME = <int> statement"]` when the name is
+UPPER_CASE.
+
+| Id | Source | Name | Expected |
+|---|---|---|---|
+| codex-r3-starred | `TAIL = (58, 0)\n*prefix, MIN_ROWS, end = 0, 59, *TAIL\n` | `MIN_ROWS` | refused |
+| codex-r3-later-rebind | `MIN_ROWS = 59\nMIN_ROWS = max(1, MIN_ROWS)\n` | `MIN_ROWS` | refused |
+| codex-r3-subscript-rebind | `MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], MIN_ROWS = 1, 2\n` | `MIN_ROWS` | refused |
+| codex-r3-subscript-key | `MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], total = range(2)\n` | `MIN_ROWS` | 59 |
+| attribute target | `MIN_ROWS = 59\nns = f()\nns.MIN_ROWS, total = 1, 2\n` | `MIN_ROWS` | 59 |
+| tuple literal | `MIN_A, MIN_B = 59, 1186\n` | `MIN_A` | refused |
+| nested tuple | `(A, (MIN_B, C)) = 1, (2, 3)\n` | `MIN_B` | refused |
+| tuple rebind | `GOAL = 600\nGOAL, OTHER = 900, 1\n` | `GOAL` | refused |
+| starred | `*GOAL, B = 1, 2, 3\n` | `GOAL` | refused |
+| chained | `OTHER = GOAL = 7\n` | `GOAL` | refused |
+| augmented | `GOAL = 600\nGOAL += 300\n` | `GOAL` | refused |
+| augmented only | `GOAL += 1\n` | `GOAL` | refused |
+| walrus | `GOAL = 600\n(GOAL := 900)\n` | `GOAL` | refused |
+| walrus in comprehension | `GOAL = 600\n[(GOAL := 9) for _ in [1]]\n` | `GOAL` | refused |
+| for target | `GOAL = 600\nfor GOAL in [900]:\n    pass\n` | `GOAL` | refused |
+| for over a literal | `for GOAL in range(3):\n    pass\n` | `GOAL` | refused |
+| with target | `GOAL = 600\nwith open('x') as GOAL:\n    pass\n` | `GOAL` | refused |
+| import rebind | `GOAL = 600\nfrom os import sep as GOAL\n` | `GOAL` | refused |
+| def rebind | `GOAL = 600\n\ndef GOAL():\n    pass\n` | `GOAL` | refused |
+| except alias | `GOAL = 600\ntry:\n    pass\nexcept Exception as GOAL:\n    pass\n` | `GOAL` | refused |
+| del | `GOAL = 600\ndel GOAL\n` | `GOAL` | refused |
+| global rebind | `GOAL = 600\n\ndef f():\n    global GOAL\n    GOAL = 900\n` | `GOAL` | refused |
+| inside if | `if True:\n    GOAL = 600\n` | `GOAL` | refused |
+| second plain | `GOAL = 600\nGOAL = 900\n` | `GOAL` | refused |
+| bare annotation after | `GOAL = 600\nGOAL: int\n` | `GOAL` | refused |
+| wrong annotation | `GOAL: float = 600\n` | `GOAL` | refused |
+| unary plus | `F = +5\n` | `F` | refused |
+| double minus | `F = --5\n` | `F` | refused |
+| plain | `GOAL = 600\n` | `GOAL` | 600 |
+| annotated | `GOAL: int = 601\n` | `GOAL` | 601 |
+| negative | `_F = -5\n` | `_F` | -5 |
+| local of the same name | `GOAL = 600\n\ndef f():\n    GOAL = 1\n    return [GOAL for GOAL in range(2)]\n` | `GOAL` | 600 |
+| module comprehension target | `GOAL = 600\nXS = [GOAL for GOAL in range(2)]\n` | `GOAL` | 600 |
+| class attribute | `GOAL = 600\n\nclass C:\n    GOAL = 1\n` | `GOAL` | 600 |
+
+The `codex-r3-subscript-key` row reads 59 on purpose. In that source `MIN_ROWS` is bound once,
+in plain form, and Python also binds it to 59. The defect was that the scan erased the name, so
+the acceptance is that the name stays discovered and reads its true value. The
+`codex-r3-subscript-rebind` row is the fail-closed form of the same reproduction.
+
+Rows that are not candidates stay in `test_read_int_handles_annassign_and_refuses_bool`:
+`FLAG = True`, `TEXT = '5'`, `CALL = int('5')`, `GOAL = (600, 1)`, `GOAL = 300 * 2`,
+`GOAL, OTHER = f()`, `F = -True` and a missing name. Each raises the fixed message, and none is
+discovered.
+
+Mutation check (gate, recorded in the PR). Apply each mutant by hand to `_limit_constants.py`,
+run `test_constant_grammar_seed_table`, and record that it fails:
+
+- M1, remove the fail-closed branch. In the verdict step, return the literal of the last
+  plain-shaped binding, and ignore the binding count and the direct-statement rule. Rows
+  `codex-r3-later-rebind`, `second plain` and `augmented` must fail.
+- M2, drop candidate rule (b), so only plain-shaped bindings make candidates. Rows
+  `codex-r3-starred`, `tuple literal` and `for over a literal` must fail, because
+  `refused_constants` returns `[]`.
+- M3, count Load names inside a subscript target as bindings. Row `codex-r3-subscript-key`
+  must fail.
 - `tests/sentry/_baseline_sources.py` (562 lines, about +15, stays under 600):
   - Add an optional `mins` callable to `Source`, read by the mirror test the way `maxes` is.
   - A `sentry-limits` source over `LIMITS`, keys `<file>::<CONSTANT>`, with `maxes` and `mins`.
@@ -735,6 +908,10 @@ Failure modes:
 | An approval already on base reworded, and the max raised again | Fail |
 | GOAL rewritten as `GOAL: int = 600` | Pass, read via `AnnAssign` |
 | GOAL rewritten as `GOAL = True` | Fail, `read_int` refuses a bool |
+| A floor bound by starred or tuple unpacking of literals | Fail closed, fixed message naming file and constant; no value read |
+| A plain floor followed by `MIN = max(1, MIN)` or any second binding | Fail closed (discovery and `read_int`) |
+| A floor used as a key in a subscript target | Pass, read at its true value; the subscript binds no name |
+| The census floors left as `MIN_PACKAGES, MIN_NAMES = 59, 1186` | Fail closed until rewritten as two plain lines |
 
 Acceptance tests in `tests/sentry/ratchet/test_bounds.py` unless noted, tagged as in RG-E1:
 
@@ -755,6 +932,12 @@ Acceptance tests in `tests/sentry/ratchet/test_bounds.py` unless noted, tagged a
 - `test_added_limit_key_is_not_growth` (red-before)
 - `test_guard_sentry_renamed_with_a_dropped_key_fails` (red-before)
 - `test_read_int_handles_annassign_and_refuses_bool` (red-before)
+- `test_constant_grammar_seed_table` (red-before), one case per `CONSTANT_FORMS` row in
+  "RG-E2 constant grammar", plus mutants M1 to M3 recorded at the gate
+- `test_every_module_int_is_a_bound_or_named` (in `test_baseline_registry.py`, pin), now also
+  asserting `refused_constants(_sentry_sources()) == []`
+- `test_the_census_floors_are_discovered_and_registered` (in `test_baseline_registry.py`, pin),
+  after the same-site rewrite to two plain lines
 - `test_every_numeric_in_code_source_declares_max` (in `test_baseline_registry.py`, red-before)
 - `test_limits_list_is_seen_by_the_reader_scan` (in `test_baseline_registry.py`, red-before)
 - `test_live_limit_constants_match_recorded_bounds` (red-before). Use a standalone test
@@ -763,8 +946,10 @@ Acceptance tests in `tests/sentry/ratchet/test_bounds.py` unless noted, tagged a
   That node is post-change coverage only. Main collects from `bs.SOURCES`
   (`test_baseline_registry.py:38-49`). A missing node is no red-before result.
 
-Size: about +20 `_ratchet.py`, +50 helper, +15 `_baseline_sources.py`, +8 TOML, three regenerated
-baselines and one new one, +200 tests. No ceiling is raised.
+Size: about +20 `_ratchet.py`, +150 helper (the round 3 helper is 195 lines; the rewrite deletes
+`_paired`, `module_int_assignments` and `int_literal`), +15 `_baseline_sources.py`, +8 TOML, two
+same-site rewrites (`release/test_public_census.py:25`, `ci_scan/test_identity.py:20`), three
+regenerated baselines and one new one, +250 tests. No ceiling is raised.
 
 Test depth: T0 the ratchet, baseline-registry and module-size tests; T1 impact selection. Same
 test-tooling trigger as RG-E1; it can ride the same merge train.
