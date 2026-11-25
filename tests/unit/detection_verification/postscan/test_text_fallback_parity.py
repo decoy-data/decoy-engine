@@ -368,15 +368,13 @@ def test_an_unchanged_wide_fraction_is_not_counted_as_masked(form: str) -> None:
 
 # ----- round 4: one exact-value key for every numeric cell --------------------------------------
 
-HALVES = [Decimal("9007199254740992.5"), Decimal("9007199254740994.5")]
+# A Decimal and a float in one column: Arrow refuses it, so the column is keyed as text.
+HALVES = [Decimal("9007199254740992.5"), 2.5]
 
 
 @pytest.mark.parametrize(
     "spelling",
-    [
-        ["9007199254740992.50", "9007199254740994.50"],
-        ["9.0071992547409925E15", "9.0071992547409945e+15"],
-    ],
+    [["9007199254740992.50", "2.50"], ["9.0071992547409925E15", "25e-1"]],
     ids=["trailing_zero", "scientific"],
 )
 def test_another_spelling_of_an_unchanged_decimal_keys_and_blocks_as_the_decimal(
@@ -427,10 +425,12 @@ def test_a_binary_float_and_the_decimal_it_rounds_from_key_apart(near: Any) -> N
 
 
 def test_the_exact_text_of_a_float_keys_as_the_float_and_blocks() -> None:
-    floats = [0.1, 0.2]
-    exact = [str(Decimal(v)) for v in floats]
-    assert key_text(pd.Series([*floats, "x"], dtype=object))[:2] == exact
-    report = _masked_wide_run([*floats, "x"], [*exact, "y"])
+    # The Decimal holds the float 0.2 exactly, and makes Arrow refuse the column.
+    tenth, fifth = 0.1, 0.2
+    cells = [tenth, Decimal(fifth)]
+    exact = [str(Decimal(tenth)), str(Decimal(fifth))]
+    assert key_text(pd.Series(cells, dtype=object)) == exact
+    report = _masked_wide_run(cells, exact)
     (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
     assert finding["severity"] == "fail"
     assert post_scan_verdict(report).blocking
@@ -440,7 +440,7 @@ def test_infinities_key_alike_across_float_decimal_and_text() -> None:
     cells = [np.inf, -np.inf, Decimal("Infinity"), Decimal("-Infinity"), "inf", "-INFINITY"]
     keys = key_text(pd.Series(cells, dtype=object))
     assert keys == ["Infinity", "-Infinity"] * 3
-    report = _masked_wide_run([np.inf, -np.inf, "x"], [Decimal("Infinity"), Decimal("-Infinity"), "y"])
+    report = _masked_wide_run([np.inf, -np.inf], [Decimal("Infinity"), Decimal("-Infinity")])
     (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
     assert finding["severity"] == "fail"
     assert post_scan_verdict(report).blocking

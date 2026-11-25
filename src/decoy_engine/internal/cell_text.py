@@ -11,6 +11,7 @@ This module is the only place the detectors and the runner turn a cell or a colu
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 
 import numpy as np
@@ -108,69 +109,103 @@ def _is_arrow_binary(dtype: object) -> bool:
     return binary_dtype is not None and isinstance(dtype, binary_dtype)
 
 
-def _decimal_text(sign: int, digits: tuple[int, ...], exponent: int) -> str:
-    """A finite Decimal with a negative exponent as plain decimal text, built from its digits so
-    no context precision rounds it and no int-to-str digit limit applies. Trailing zeros are
-    dropped, so equal values read alike."""
-    text = "".join(map(str, digits))
-    stripped = text.rstrip("0") or "0"
-    exponent += len(text) - len(stripped)
-    text = stripped
-    if exponent >= 0:
-        text += "0" * exponent
-    elif len(text) > -exponent:
-        text = f"{text[:exponent]}.{text[exponent:]}"
+# Numbers key as their exact value, the General Decimal Arithmetic "reduce" form built from
+# `Decimal.as_tuple` and `float.as_integer_ratio` with no context, so no precision rounds it and
+# no int-to-str digit limit applies. Text that is a plain decimal numeral reads as that number;
+# a leading zero or `+` keeps the text, since a ZIP or phone code must reach the detectors as
+# written.
+_PLAIN_ZEROS = 32  # beyond this many padding zeros a key uses the E form, so its size is bounded
+_NUMERAL = re.compile(
+    r"(?P<sign>-?)(?:(?P<whole>0|[1-9][0-9]*)(?:\.(?P<part>[0-9]*))?|\.(?P<bare>[0-9]+))"
+    r"(?:[eE](?P<exp>[+-]?[0-9]+))?",
+    re.ASCII,
+)
+_INFINITY = re.compile(r"(?P<sign>-?)inf(?:inity)?", re.ASCII | re.IGNORECASE)
+
+
+def _number_text(negative: bool, digits: str, exponent: int) -> str:
+    """The key of the finite number (-1)**negative * int(digits) * 10**exponent: plain decimal
+    text when it needs at most `_PLAIN_ZEROS` padding zeros, else `<coefficient>E<exponent>`.
+    The form depends only on the value, so equal values share one key and unequal ones never
+    do, and a key read back as text is the same key."""
+    coefficient = digits.lstrip("0").rstrip("0")
+    if not coefficient:
+        return "0"
+    exponent += len(digits) - len(digits.rstrip("0"))
+    point = len(coefficient) + exponent
+    if 0 <= exponent <= _PLAIN_ZEROS:
+        text = coefficient + "0" * exponent
+    elif exponent < 0 < point:
+        text = f"{coefficient[:point]}.{coefficient[point:]}"
+    elif exponent < 0 and -point <= _PLAIN_ZEROS:
+        text = f"0.{'0' * -point}{coefficient}"
     else:
-        text = f"0.{'0' * (-exponent - len(text))}{text}"
-    return f"-{text}" if sign else text
+        text = f"{coefficient}E{exponent}"
+    return f"-{text}" if negative else text
 
 
-def _wide_float_key(value: np.floating) -> str:
-    """The key of a finite float that a double cannot hold (longdouble): its exact decimal text,
-    the text an equal Decimal cell or a decimal string of the value keys as. A fraction n/2**k is
-    n * 5**k / 10**k, so the text is finite and exact. It reads no process setting: not the decimal
-    context precision, and not the int-to-str digit limit, which `Decimal(int)` skips."""
+def _int_digits(value: int) -> str:
+    # Through Decimal: `str(int)` raises past the int-to-str digit limit.
+    return "".join(map(str, Decimal(abs(value)).as_tuple().digits))
+
+
+def _special(negative: bool, nan: bool) -> str:
+    if nan:
+        return "NaN"
+    return "-Infinity" if negative else "Infinity"
+
+
+def _float_key(value: float | np.floating) -> str:
+    """A binary float of any width at its exact value: n / 2**k is n * 5**k / 10**k."""
+    if not np.isfinite(value):
+        return _special(bool(value < 0), bool(np.isnan(value)))
     numerator, denominator = value.as_integer_ratio()
-    if denominator == 1:
-        return str(Decimal(numerator))
     scale = denominator.bit_length() - 1
-    exact = Decimal(numerator * 5**scale)
-    sign, digits, _ = exact.as_tuple()
-    return _decimal_text(sign, digits, -scale)
+    return _number_text(numerator < 0, _int_digits(abs(numerator) * 5**scale), -scale)
+
+
+def _decimal_key(value: Decimal) -> str:
+    if not value.is_finite():
+        return _special(value.is_signed(), value.is_nan())
+    sign, digits, exponent = value.as_tuple()
+    return _number_text(bool(sign), "".join(map(str, digits)), int(exponent))
+
+
+def _text_key(text: str) -> str:
+    """`text` read as a number when it is a plain decimal numeral or an infinity, else itself."""
+    numeral = _NUMERAL.fullmatch(text)
+    if numeral is None:
+        infinity = _INFINITY.fullmatch(text)
+        return text if infinity is None else _special(bool(infinity["sign"]), nan=False)
+    fraction = numeral["part"] or numeral["bare"] or ""
+    try:
+        shift = int(numeral["exp"] or 0)
+    except ValueError:
+        # An exponent past the int-from-text digit limit: the text keys as itself.
+        return text
+    whole = numeral["whole"] or ""
+    return _number_text(bool(numeral["sign"]), whole + fraction, shift - len(fraction))
 
 
 def _number_key(value: object) -> str:
-    if isinstance(value, np.floating) and np.isfinite(value) and value != float(value):
-        return _wide_float_key(value)
+    # First: `np.timedelta64` subclasses `np.integer` and must key as the duration it equals.
     value = _python_scalar(value)
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         # pandas `==` holds True equal to 1 and 1.0, so a bool keys as the number it equals.
         return "1" if value else "0"
-    if isinstance(value, int):
-        return str(int(value))
-    if isinstance(value, float):
-        return str(int(value)) if value.is_integer() else repr(value)
+    if isinstance(value, (float, np.floating)):
+        return _float_key(value)
+    if isinstance(value, (int, np.integer)):
+        return _number_text(int(value) < 0, _int_digits(int(value)), 0)
     if isinstance(value, Decimal):
-        if not value.is_finite():
-            return str(value)
-        if value == value.to_integral_value():
-            return str(int(value))
-        sign, digits, exponent = value.as_tuple()
-        return _decimal_text(sign, digits, int(exponent))
-    return cell_text(value)
+        return _decimal_key(value)
+    return _text_key(cell_text(value))
 
 
 def _python_scalar(value: object) -> object:
-    """A NumPy scalar as the Python or pandas value it equals, so both share one key. Checked
-    before the Python types: `np.float64` is a `float`, but its `repr` names NumPy."""
+    """A NumPy date or duration as the pandas value it equals, so both share one key."""
     if isinstance(value, np.timedelta64):
         return pd.Timedelta(value)
     if isinstance(value, np.datetime64):
         return pd.Timestamp(value)
-    if isinstance(value, np.bool_):
-        return bool(value)
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
     return value
