@@ -28,6 +28,7 @@ use aes::Aes256;
 use arrow_array::{Array, StringArray};
 use fpe::ff1::{FlexibleNumeralString, FF1};
 
+use crate::checksum::luhn_check_digit;
 use crate::derive::{derive, DeriveError};
 use crate::threads::shared_native_pool;
 
@@ -130,24 +131,6 @@ fn min_domain_length(radix: u32) -> usize {
         value *= radix;
     }
     length
-}
-
-/// Luhn check digit for a digit string, reproducing `transforms.fpe._luhn_check_digit`. `body`
-/// is composed entirely of ASCII decimal digits (luhn mode is gated to an all-digit charset).
-fn luhn_check_digit(body: &str) -> char {
-    let mut total: u32 = 0;
-    for (i, ch) in body.chars().rev().enumerate() {
-        let mut n = ch.to_digit(10).expect("luhn body is all decimal digits");
-        if i % 2 == 0 {
-            n *= 2;
-            if n > 9 {
-                n -= 9;
-            }
-        }
-        total += n;
-    }
-    let digit = (10 - total % 10) % 10;
-    char::from_digit(digit, 10).expect("0..=9 is a valid decimal digit")
 }
 
 /// The resolved, per-batch FPE configuration shared by every row.
