@@ -264,8 +264,9 @@ def load_spec(
     name = col_cfg.get("name", "<unnamed>")
     snap = snapshot
     # The raw config object, never `str(...)` of it: converting a list or a mapping would turn
-    # its items into text that then looks like an approvable name.
-    source_column = col_cfg.get("source_column") or name
+    # its items into text that then looks like an approvable name. Only an absent key takes the
+    # output name: `or` would let an explicit `[]`, `{}`, `false` or `0` select it silently.
+    source_column = col_cfg.get("source_column", name)
     column_text = column_label(name)
     at_source = config_position("statistical", Name(name), "source_column")
     if type(source_column) is not str:

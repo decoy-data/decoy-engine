@@ -460,6 +460,25 @@ def test_list_valued_name_is_not_shown() -> None:
     assert "ghost_col" in str(named.value)
 
 
+def test_absent_source_column_defaults_and_falsey_explicit_values_are_refused() -> None:
+    snap = _stat_snapshot(["x", "y", "z"])
+    col = {
+        "name": "a",
+        "type": "statistical",
+        "snapshot_file": "s.json",
+        "allow_real_categories": True,
+    }
+    # Only an absent key takes the output name as the source column.
+    assert load_spec(col, snapshot=snap).column == "a"
+    for raw, kind in (([], "list"), ({}, "dict"), (False, "boolean"), (0, "integer")):
+        with pytest.raises(StatisticalSpecError) as exc:
+            load_spec({**col, "source_column": raw}, snapshot=snap)
+        assert exc.value.code == "statistical_column_not_in_snapshot", raw
+        assert "statistical.a.source_column: wrong type" in str(exc.value), raw
+        assert f"got {kind}" in str(exc.value), raw
+        _assert_value_free(exc.value)
+
+
 def test_list_valued_condition_on_is_not_shown() -> None:
     snap = _stat_snapshot(["x", "y", "z"])
     col = {
