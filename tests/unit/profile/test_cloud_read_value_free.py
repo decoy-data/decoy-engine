@@ -84,10 +84,12 @@ def test_resurface_text_is_fixed(text: str) -> None:
 
 
 def _wide_mixed_csv() -> bytes:
+    """Numbers down column 0 for 512 rows, then text: past one parser chunk, so an unpinned
+    inference leaves a column of mixed int and str, which Arrow refuses and names the cell."""
     cols = 1050
     head = ",".join(f"c{i}" for i in range(cols))
-    rows = [",".join(["1"] * cols) for _ in range(512)]
-    rows.append(",".join(["1"] * (cols - 1) + [CANARY]))
+    rows = [",".join([str(i)] + [""] * (cols - 1)) for i in range(512)]
+    rows.append(CANARY + "," * (cols - 1))
     return ("\n".join([head, *rows]) + "\n").encode()
 
 
