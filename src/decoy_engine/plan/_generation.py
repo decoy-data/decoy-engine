@@ -44,7 +44,7 @@ from decoy_engine._error_base import raise_bare
 from decoy_engine.contracts.distribution_snapshot import ACCEPTED_SCHEMA_VERSIONS
 from decoy_engine.fileaccess import FileRole
 from decoy_engine.plan._checks_dp import verify_dp_snapshots
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import refusal_error
 from decoy_engine.plan._types import (
     DpVerification,
     GenerationPlan,
@@ -313,11 +313,7 @@ def read_and_pin_snapshots(
                 ),
             )
             raise_bare(
-                PlanCompileError(
-                    code=reasons.plan.DP_SNAPSHOT_EMBEDDED_ARTIFACT_TOO_LARGE,
-                    path=too_large.key,
-                    message=too_large.detail,
-                )
+                refusal_error(reasons.plan.DP_SNAPSHOT_EMBEDDED_ARTIFACT_TOO_LARGE, too_large)
             )
         if read.raw is None:
             unreadable = config_refusal(
@@ -490,13 +486,7 @@ def check_fitted_references(
                         "`decoy fit <source> --fanout <column>`, or use distribution: random"
                     ),
                 )
-                raise_bare(
-                    PlanCompileError(
-                        code=reasons.plan.REFERENCE_FANOUT_MISSING,
-                        path=missing.key,
-                        message=missing.detail,
-                    )
-                )
+                raise_bare(refusal_error(reasons.plan.REFERENCE_FANOUT_MISSING, missing))
             snapshot_file = str(snapshot_file)
             spec_code: str | None = None
             try:
@@ -520,13 +510,7 @@ def check_fitted_references(
                             "the per-parent counts. Remove it, or use another distribution"
                         ),
                     )
-                    raise_bare(
-                        PlanCompileError(
-                            code=reasons.plan.REFERENCE_FANOUT_CONFLICT,
-                            path=clash.key,
-                            message=clash.detail,
-                        )
-                    )
+                    raise_bare(refusal_error(reasons.plan.REFERENCE_FANOUT_CONFLICT, clash))
                 source = str(col.get("source_column") or name)
                 fanout_spec_from_snapshot(snap, source, digest=pinned[snapshot_file].sha256)
             except StatisticalSpecError as exc:
@@ -534,7 +518,7 @@ def check_fitted_references(
             if spec_code is not None:
                 # The statistical column's refusal rule: an unreadable snapshot keeps its own text.
                 failed = statistical_refusal(spec_code, snapshot_file, table_name, name)
-                raise_bare(PlanCompileError(code=spec_code, path=failed.key, message=failed.detail))
+                raise_bare(refusal_error(spec_code, failed))
 
 
 def check_generate_snapshot_columns(

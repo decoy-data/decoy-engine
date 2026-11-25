@@ -21,7 +21,7 @@ from decoy_engine._config_text import (
     config_refusal,
 )
 from decoy_engine._error_base import raise_bare
-from decoy_engine.plan._errors import refusal_error
+from decoy_engine.plan import refusal_error
 from decoy_engine.transforms._codeset_provenance import CodeSetProvenance
 
 _LOG = logging.getLogger(__name__)

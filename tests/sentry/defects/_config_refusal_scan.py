@@ -28,6 +28,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tests.sentry.defects._config_refusal_scope import Scope, _build_scope, _name_of, _own_walk
+
 # The AE5 loader modules, plus the files split out of them (the corpus checks, the withheld-values
 # refusal and the provenance record types).
 ZERO_SET = frozenset(
@@ -49,6 +51,9 @@ ZERO_SET = frozenset(
 )
 # The one function allowed to rebuild a refusal from the text it already held (a pickle round trip).
 S1_EXEMPT = frozenset({("profiling/model_pack/loader.py", "_rebuild_load_error")})
+# The one place a `Refusal` becomes a `PlanCompileError`: any other construction of that class
+# from a refusal's `.detail` or `.key` is a second copy of the mapping, with no baseline entry.
+MAPPING_SITE = ("plan/_errors.py", "refusal_error")
 CONFIG_TEXT_DIR = "_config_text/"
 ERROR_BASE = "_error_base.py"
 # The one engine-owned fixed text a zero-set builtin error may take besides a literal.
@@ -140,96 +145,6 @@ class Finding:
 def _digest(*nodes: ast.AST | None) -> str:
     text = "|".join(ast.unparse(n) for n in nodes if n is not None)
     return hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()[:10]
-
-
-def _name_of(node: ast.AST | None) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return None
-
-
-# ---- scope model -----------------------------------------------------------------------------
-
-
-@dataclass
-class Scope:
-    qualname: str
-    parent: Scope | None
-    assigns: dict[str, list[ast.expr]] = field(default_factory=dict)
-    refusal_params: set[str] = field(default_factory=set)
-    position_params: set[str] = field(default_factory=set)
-    index_names: set[str] = field(default_factory=set)
-
-    def chain(self) -> Iterable[Scope]:
-        scope: Scope | None = self
-        while scope is not None:
-            yield scope
-            scope = scope.parent
-
-    def lookup(self, name: str) -> tuple[Scope, list[ast.expr]] | None:
-        for scope in self.chain():
-            if name in scope.assigns:
-                return scope, scope.assigns[name]
-        return None
-
-    def is_refusal_param(self, name: str) -> bool:
-        for scope in self.chain():
-            if name in scope.refusal_params:
-                return True
-            if name in scope.assigns:
-                return False
-        return False
-
-    def is_index(self, name: str) -> bool:
-        return any(name in scope.index_names for scope in self.chain())
-
-
-def _own_walk(scope_node: ast.AST) -> Iterable[ast.AST]:
-    """Nodes of one scope: nested functions, lambdas and classes appear but are not entered."""
-    pending = list(ast.iter_child_nodes(scope_node))
-    while pending:
-        node = pending.pop()
-        yield node
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-            pending.extend(ast.iter_child_nodes(node))
-
-
-def _build_scope(node: ast.AST, qualname: str, parent: Scope | None) -> Scope:
-    scope = Scope(qualname, parent)
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-        args = node.args
-        for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
-            scope.assigns.setdefault(arg.arg, [])
-            if _name_of(arg.annotation) == "Refusal":
-                scope.refusal_params.add(arg.arg)
-            if _name_of(arg.annotation) == "ConfigPosition":
-                scope.position_params.add(arg.arg)
-    for sub in _own_walk(node):
-        if isinstance(sub, ast.Assign):
-            for target in sub.targets:
-                if isinstance(target, ast.Name):
-                    scope.assigns.setdefault(target.id, []).append(sub.value)
-        elif isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Name):
-            if sub.value is not None:
-                scope.assigns.setdefault(sub.target.id, []).append(sub.value)
-        elif isinstance(sub, ast.AugAssign) and isinstance(sub.target, ast.Name):
-            # An augmented assignment rebuilds the value: record it as formatted.
-            scope.assigns.setdefault(sub.target.id, []).append(
-                ast.BinOp(left=sub.target, op=ast.Mod(), right=sub.value)
-            )
-        elif isinstance(sub, ast.For):
-            it = sub.iter
-            target = sub.target
-            if isinstance(it, ast.Call) and _name_of(it.func) in {"enumerate", "range"}:
-                first = target.elts[0] if isinstance(target, ast.Tuple) else target
-                if isinstance(first, ast.Name):
-                    scope.index_names.add(first.id)
-            for t in ast.walk(target):
-                if isinstance(t, ast.Name):
-                    scope.assigns.setdefault(t.id, []).append(ast.Constant(value=None))
-    return scope
 
 
 # ---- the expression predicates ---------------------------------------------------------------
@@ -455,6 +370,18 @@ class _Scanner:
         for parent in ast.walk(tree):
             for child in ast.iter_child_nodes(parent):
                 self.parents[id(child)] = parent
+        # `from x import PlanCompileError as PCE` still builds a `PlanCompileError`.
+        self.aliases = {
+            a.asname: a.name
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ImportFrom)
+            for a in n.names
+            if a.asname
+        }
+
+    def _class_of(self, call: ast.Call) -> str | None:
+        name = _name_of(call.func)
+        return self.aliases.get(name, name) if name else name
 
     def add(self, rule: str, scope: Scope, node: ast.AST, *digest_nodes: ast.AST | None) -> None:
         self.findings.append(
@@ -565,7 +492,7 @@ class _Scanner:
             self.add("S3", scope, node, node.exc)
 
     def _call(self, call: ast.Call, scope: Scope, protected: bool) -> None:
-        name = _name_of(call.func)
+        name = self._class_of(call)
         if name == "config_refusal" and not self.rel.startswith(CONFIG_TEXT_DIR):
             for label in s2_findings(call, scope):
                 self.add("S2", scope, call, call, ast.Constant(value=label))
@@ -586,12 +513,25 @@ class _Scanner:
         message = _arg(call, sig.message)
         bad = not (_is_str_const(message) or _builder_field(message, scope, sig.message_field))
         path = _arg(call, sig.path) if sig.path else None
+        if self._class_of(call) == "PlanCompileError" and self._second_mapping(call, scope):
+            self.add("S1", scope, call, message, path, ast.Constant(value="second mapping"))
+            return
         if sig.path is not None:
             bad = bad or not _builder_field(path, scope, "key")
         elif any(k.arg == "path" for k in call.keywords):
             bad = True
         if bad:
             self.add("S1", scope, call, message, path)
+
+    def _second_mapping(self, call: ast.Call, scope: Scope) -> bool:
+        """A `PlanCompileError` built from a refusal's `.detail` or `.key` outside the factory.
+
+        Judged by the attribute alone, not by proving the origin is a `Refusal`, so a
+        helper-returned refusal and an aliased class cannot hide a second copy."""
+        if (self.rel, scope.qualname.split(".")[-1]) == MAPPING_SITE:
+            return False
+        fields = (_arg(call, (2, "message")), _arg(call, (1, "path")))
+        return any(isinstance(f, ast.Attribute) and f.attr in {"detail", "key"} for f in fields)
 
     def _s1_builtin(self, call: ast.Call, scope: Scope) -> None:
         if not call.args:

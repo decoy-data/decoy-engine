@@ -41,7 +41,7 @@ from decoy_engine import reasons
 from decoy_engine._config_text import Name, Problem, config_position, config_refusal
 from decoy_engine._error_base import raise_bare
 from decoy_engine.errors import FpeUnencryptableError
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.transforms.fpe import (
     _CHARSETS,
     FPE_CHARSET_DUPLICATE_TEXT,
@@ -111,11 +111,7 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
                     at_charset, Problem.NOT_ALLOWED, hint=FPE_CHARSET_DUPLICATE_TEXT
                 )
                 raise_bare(
-                    PlanCompileError(
-                        code=reasons.plan.FPE_CHARSET_DUPLICATE_SYMBOLS,
-                        path=duplicate_refusal.key,
-                        message=duplicate_refusal.detail,
-                    )
+                    refusal_error(reasons.plan.FPE_CHARSET_DUPLICATE_SYMBOLS, duplicate_refusal)
                 )
             non_ascii = False
             try:
@@ -126,13 +122,7 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
                 ascii_refusal = config_refusal(
                     at_charset, Problem.NOT_ALLOWED, hint=FPE_CHARSET_NON_ASCII_TEXT
                 )
-                raise_bare(
-                    PlanCompileError(
-                        code=reasons.plan.FPE_CHARSET_NON_ASCII,
-                        path=ascii_refusal.key,
-                        message=ascii_refusal.detail,
-                    )
-                )
+                raise_bare(refusal_error(reasons.plan.FPE_CHARSET_NON_ASCII, ascii_refusal))
             if len(resolved) < 2:
                 raise PlanCompileError(
                     code=reasons.plan.FPE_CHARSET_DEGENERATE,

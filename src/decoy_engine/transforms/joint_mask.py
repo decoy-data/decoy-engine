@@ -67,7 +67,7 @@ from decoy_engine._error_base import raise_bare
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.determinism import derive, seed_bytes_to_int
 from decoy_engine.fileaccess import FileAccess, entry_point
-from decoy_engine.plan._errors import refusal_error
+from decoy_engine.plan import refusal_error
 from decoy_engine.reference_tables import ReferenceTable, load_table
 from decoy_engine.reference_tables._registry import JOINT_MASK_TABLES
 

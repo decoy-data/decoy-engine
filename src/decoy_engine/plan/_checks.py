@@ -27,7 +27,7 @@ from decoy_engine import reasons
 from decoy_engine._error_base import raise_bare
 from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.plan._pool_size import resolve_pool_size
 from decoy_engine.profile._types import Profile
 
@@ -386,9 +386,7 @@ def check_statistical_columns(
                     check_degenerate(spec)
                 except StatisticalSpecError as exc:
                     refusal = statistical_refusal(exc.code, snapshot_file, table_name, col_name)
-                    failure = PlanCompileError(
-                        code=exc.code, path=refusal.key, message=refusal.detail
-                    )
+                    failure = refusal_error(exc.code, refusal)
                 if failure is not None:
                     raise_bare(failure)
                 # condition_on ordering is checked by plan/checks/_generate_columns.py.

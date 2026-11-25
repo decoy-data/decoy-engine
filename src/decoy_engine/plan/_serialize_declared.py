@@ -13,7 +13,7 @@ from decoy_engine import reasons
 from decoy_engine._config_text import Name, Problem, config_position, config_refusal
 from decoy_engine._error_base import raise_bare
 from decoy_engine.contracts.column_shape import ColumnShape
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.plan._types import (
     PLAN_VERSION,
     DeclaredCastingPlan,
@@ -68,7 +68,7 @@ def declared_casting_from_dict(data: dict[str, Any]) -> DeclaredCastingPlan:
             rejected = exc.code
         if rejected is not None:
             refusal = config_refusal(at_column, Problem.NOT_ALLOWED, code=rejected)
-            raise_bare(PlanCompileError(code=rejected, path=refusal.key, message=refusal.detail))
+            raise_bare(refusal_error(rejected, refusal))
         columns.append(
             PlanDeclaredColumn(
                 table=raw["table"],

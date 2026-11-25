@@ -33,7 +33,7 @@ from decoy_engine._config_text import (
 from decoy_engine._error_base import raise_bare
 from decoy_engine.fileaccess import FileAccess, FileAccessDenied, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
-from decoy_engine.plan._errors import PlanCompileError, refusal_error
+from decoy_engine.plan import PlanCompileError, refusal_error
 from decoy_engine.transforms._codeset_index import SelectionIndexes, build_selection_indexes
 from decoy_engine.transforms._codeset_provenance import CODESET_REGISTRY, CodeSetProvenance
 from decoy_engine.transforms.corpus._checks import _check_corpus_schema, _validate_provenance

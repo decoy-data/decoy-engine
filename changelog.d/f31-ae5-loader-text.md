@@ -11,3 +11,6 @@ Config loader errors now name the field and the expected type, not the supplied 
 - New sentry `tests/sentry/defects/test_config_refusal_text.py` fails on a runtime value in a loader refusal. The remaining sites outside the nine modules sit in a shrink-only baseline, migrated in AE5b.
 - A file-system failure on a loader's first probe or read (an unreadable parent directory) is a value-free refusal too, for corpora, name hints and model packs.
 - `verify_corpus` shows a report path with any credential removed (the config position under a strict policy).
+- A name-hint manifest member given as a URL (`https://host/path/token`, or `//host/path`) shows as `<file>`. Its last path segment is no longer shown.
+- A statistical column's `source_column` defaults to the column name only when the key is absent. An explicit `[]`, `{}`, `false` or `0` is refused as a wrong type with `statistical_column_not_in_snapshot`; before, it silently selected the column of the same name.
+- One function, `decoy_engine.plan.refusal_error`, turns a built refusal into a `PlanCompileError`. The plan checks and the transforms use it. The sentry fails on a second construction that maps a refusal's `detail` and `key`.

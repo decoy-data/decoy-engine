@@ -176,7 +176,7 @@ IMPORTS = (
     " config_position, config_refusal, read_config)\n"
     "from decoy_engine._error_base import raise_bare\n"
     "from decoy_engine.errors import ConfigError\n"
-    "from decoy_engine.plan._errors import PlanCompileError\n"
+    "from decoy_engine.plan import PlanCompileError, refusal_error\n"
     "from decoy_engine.generation.statistical._spec import StatisticalSpecError\n"
     "from decoy_engine.quality.dp_provenance import ProvenanceError\n"
 )
@@ -255,6 +255,26 @@ FIRES: dict[str, tuple[str, str]] = {
         "def f(v):\n    err = ProvenanceError(code='c', message=f'{v}')\n    raise err\n",
     ),
     "third positional": ("S1", "def f(v):\n    raise_bare(PlanCompileError('c', None, f'{v}'))\n"),
+    "second mapping, inline": (
+        "S1",
+        "def f():\n" + OK_REFUSAL + "    raise_bare(PlanCompileError('c', r.key, r.detail))\n",
+    ),
+    "second mapping, keywords": (
+        "S1",
+        "def f():\n"
+        + OK_REFUSAL
+        + "    raise_bare(PlanCompileError(code='c', path=r.key, message=r.detail))\n",
+    ),
+    "second mapping, helper-returned refusal": (
+        "S1",
+        "def f(table):\n    r = make_refusal(table)\n"
+        "    raise_bare(PlanCompileError(code='c', path=r.key, message=r.detail))\n",
+    ),
+    "second mapping, aliased class": (
+        "S1",
+        "from decoy_engine.plan import PlanCompileError as PCE\n"
+        "def f():\n" + OK_REFUSAL + "    raise_bare(PCE('c', r.key, r.detail))\n",
+    ),
     "message in the path slot": (
         "S1",
         "def f():\n" + OK_REFUSAL + "    raise_bare(PlanCompileError('c', r.key, r.text))\n",
@@ -378,11 +398,10 @@ CLEAN: dict[str, str] = {
         "def f():\n" + OK_REFUSAL + "    err = ConfigError(r.text)\n    raise_bare(err)\n"
     ),
     "plan error from detail and key": (
-        "def f():\n" + OK_REFUSAL + "    raise_bare(PlanCompileError('c', r.key, r.detail))\n"
+        "def f():\n" + OK_REFUSAL + "    raise_bare(refusal_error('c', r))\n"
     ),
     "factory passed to read_config": (
-        "def _refuse(r: Refusal) -> PlanCompileError:\n"
-        "    return PlanCompileError('c', r.key, r.detail)\n"
+        "def _refuse(r: Refusal) -> PlanCompileError:\n    return refusal_error('c', r)\n"
         "def f(read):\n    return read_config(read, config_position('a'), _refuse)\n"
     ),
     "keeps_class check": (
@@ -439,7 +458,7 @@ def test_a_refusal_built_in_an_except_outside_the_zero_set_is_not_s3_or_s4() -> 
     body = (
         "def f():\n    r = config_refusal(config_position('a'), Problem.MISSING)\n"
         "    try:\n        pass\n    except ValueError as exc:\n"
-        "        raise PlanCompileError('c', r.key, r.detail) from exc\n"
+        "        raise ConfigError(r.text) from exc\n"
     )
     assert _rules(body, zero=False, rel="x/other.py") == set()
 
@@ -516,3 +535,31 @@ def test_s6_protected_checker_passes_and_an_extra_unprotected_call_fails() -> No
     assert "S6" not in _rules(protected)
     extra = protected + "def other(tbl):\n    return _check(tbl)\n"
     assert "S6" in _rules(extra)
+
+
+FACTORY = (
+    "def refusal_error(code, refusal: Refusal):\n"
+    "    return PlanCompileError(code=code, path=refusal.key, message=refusal.detail)\n"
+)
+
+
+def test_the_one_factory_is_the_only_place_the_mapping_may_live() -> None:
+    real = scan.scan_source("plan/_errors.py", IMPORTS + FACTORY, zero=False)
+    assert [f for f in real if f.rule == "S1"] == []
+    moved = FACTORY.replace("refusal_error", "other_error")
+    assert any(f.rule == "S1" for f in scan.scan_source("plan/_errors.py", IMPORTS + moved))
+    elsewhere = scan.scan_source("plan/_checks.py", IMPORTS + FACTORY, zero=False)
+    assert any(f.rule == "S1" for f in elsewhere)
+
+
+def test_the_real_tree_maps_a_refusal_to_a_plan_error_once() -> None:
+    import ast
+
+    sites = []
+    for path in sorted(SRC.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "PlanCompileError":
+                fields = [*node.args, *(k.value for k in node.keywords)]
+                if any(isinstance(f, ast.Attribute) and f.attr == "detail" for f in fields):
+                    sites.append(path.relative_to(SRC).as_posix())
+    assert sites == ["plan/_errors.py"]
