@@ -361,9 +361,12 @@ def renumber_claim(m: dict, h: dict) -> list[str]:
 
 
 def _waivable(first: bool, new: dict, marked: bool) -> set[str]:
-    """Fields PENDING_EDITS let ``new`` change; ``first``: both deprecation fields were null."""
+    """Fields PENDING_EDITS let ``new`` change; ``first``: both deprecation fields were null.
+
+    A retirement may name no successor (``replaced_by`` stays null); a link it does name is still
+    checked by ``manifest_violations`` against the live identities."""
     out = set(PENDING_EDITS["summary"]) if marked else set()
-    if first and is_pending(new["deprecated_in"]) and new["replaced_by"] is not None:
+    if first and is_pending(new["deprecated_in"]):
         out |= set(PENDING_EDITS["deprecation"])
     return out
 
