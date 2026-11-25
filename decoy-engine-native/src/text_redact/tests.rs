@@ -18,6 +18,20 @@ fn eligibility_marks_the_boundary() {
     assert!(is_eligible("a b"));
 }
 
+#[cfg(not(feature = "test-detector-offset-limit"))]
+#[test]
+fn the_production_offset_limit_is_u32_max() {
+    assert_eq!(DETECTOR_OFFSET_LIMIT, u32::MAX as usize);
+}
+
+#[cfg(feature = "test-detector-offset-limit")]
+#[test]
+fn an_oversized_cell_is_ineligible_under_the_test_limit() {
+    let at_limit = "a".repeat(DETECTOR_OFFSET_LIMIT);
+    assert!(is_eligible(&at_limit));
+    assert!(!is_eligible(&format!("{at_limit}a")));
+}
+
 #[test]
 fn validators_match_the_reference_vectors() {
     assert!(luhn_valid("0000000000000"));
