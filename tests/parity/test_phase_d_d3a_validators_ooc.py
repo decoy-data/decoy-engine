@@ -26,9 +26,9 @@ import pytest
 
 from decoy_engine.errors import ConfigError, ValidatorFailedError
 from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
-from decoy_engine.execution import _pipeline_route_exec as route_exec
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline_routing import decide_execution_route
+from decoy_engine.execution.out_of_core import _budget as route_exec
 from decoy_engine.execution.out_of_core import _runner, _validate_batch
 from decoy_engine.execution.out_of_core._stream_join import StreamFkJoiner
 from decoy_engine.execution.out_of_core._validate_batch import (

@@ -31,7 +31,7 @@ ALLOWED_CALLERS: dict[str, dict[str, str]] = {
     # The profile layer's wrapper over `classify_column`: a caller of it reaches the classifier.
     "observed_shape": {
         "profile/_walk.py": "the walk records each column's shape",
-        "execution/_chunked_profile.py": "the Arrow twin of the walk records the same shape",
+        "profile/arrow/_walk_arrow.py": "the Arrow twin of the walk records the same shape",
     },
 }
 
@@ -110,14 +110,14 @@ def test_no_other_module_decides_a_shape_from_an_arrow_predicate() -> None:
 
 
 def test_the_sentry_catches_a_planted_caller(tmp_path: Path) -> None:
-    probe = tmp_path / "execution" / "_chunked_profile.py"
-    probe.parent.mkdir()
+    probe = tmp_path / "profile" / "arrow" / "_walk_arrow.py"
+    probe.parent.mkdir(parents=True)
     probe.write_text(
         "from decoy_engine.contracts.column_shape import classify_column\n"
         "def f(t):\n    return classify_column(source_format=None, arrow_type=t)\n",
         encoding="utf-8",
     )
-    assert _call_sites(tmp_path, "classify_column") == {"execution/_chunked_profile.py"}
+    assert _call_sites(tmp_path, "classify_column") == {"profile/arrow/_walk_arrow.py"}
 
 
 def test_the_sentry_catches_a_planted_wrapper_caller(tmp_path: Path) -> None:

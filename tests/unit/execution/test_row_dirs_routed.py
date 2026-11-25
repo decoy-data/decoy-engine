@@ -252,6 +252,7 @@ def _ooc_dirs(base: Path) -> list[str]:
     return [p.name for p in base.iterdir() if p.name.startswith("decoy-arena-")]
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 @pytest.mark.parametrize("fail", [False, True])
 def test_runner_removes_its_engine_made_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fail: bool

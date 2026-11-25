@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from decoy_engine._pandas_meta import pandas_nullable_columns
 from decoy_engine.config import categorical_categories
 from decoy_engine.execution._mem_estimate import (
     ColumnSizeSpec,
@@ -35,7 +36,6 @@ from decoy_engine.execution._mem_estimate_arrow import (
     Sampled,
     classify_column,
     normalize_for_sampling,
-    pandas_nullable_columns,
     resident_has_nulls,
     widen_label_without_arrow_type,
 )

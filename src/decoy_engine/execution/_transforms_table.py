@@ -33,6 +33,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.config import SOURCE_ORIGIN, TableConfig, TransformOp, final_bindings
 from decoy_engine.execution import _transforms
 from decoy_engine.execution._fk_keys import to_pandas_fk_safe
@@ -56,7 +57,7 @@ def null_bearing_int_columns(table: pa.Table) -> list[str]:
     The one conversion decision: `to_transform_frame` applies it and the resident-fit bound
     prices it, so the two cannot drift. A stored index field is left alone.
     """
-    stored_index = _transforms.stored_index_fields(table.schema)
+    stored_index = stored_index_fields(table.schema)
     return [
         field.name
         for field in table.schema
