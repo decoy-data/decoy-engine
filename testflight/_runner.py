@@ -93,6 +93,30 @@ class JobResult:
     fingerprint: str = ""
 
 
+# Fixed text for a failed invariant; the detail can quote a cell value.
+INVARIANT_FAILED_CATEGORY = "invariant_failed"
+_UNCLASSIFIED = "unclassified"
+
+
+def failure_text(result: JobResult) -> str:
+    """Value-free text for a failed job, safe for the CI log and report.md.
+
+    Names the exception type for a job error (fixed fallback "unclassified") and
+    the family plus a fixed category for each failed invariant. Never the raw
+    error or detail text, which can quote a cell value. One choke point for the
+    pytest assertion and the evidence report.
+    """
+    lines: list[str] = []
+    if result.error is not None:
+        lines.append(f"job error type: {result.error_type or _UNCLASSIFIED}")
+    lines.extend(
+        f"[{r.family}] {INVARIANT_FAILED_CATEGORY}"
+        for r in result.invariant_results
+        if not r.passed
+    )
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Step 1: manifest loading
 # ---------------------------------------------------------------------------
