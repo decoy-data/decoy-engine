@@ -15,8 +15,9 @@ import pytest
 
 from decoy_engine import fileaccess
 from decoy_engine.fileaccess import FileRequest, FileRole, ScratchArena
-from decoy_engine.fileaccess._fdtree import ARENA_MARKER, STAGE_MARKER, prove_stage
+from decoy_engine.fileaccess._fdtree import STAGE_MARKER, prove_stage
 from decoy_engine.fileaccess._local import LocalFileAccess
+from decoy_engine.fileaccess._scratch import _MARKER as ARENA_MARKER
 from decoy_engine.fileaccess._scratch_reports import Disposition
 from tests.fileaccess.publication._reclaim_support import make_stage
 
@@ -214,7 +215,7 @@ def test_a_stopped_stage_removal_keeps_its_marker(
     try:
         _marker_popped_first(monkeypatch, busy="a.parquet")
         with pytest.raises(OSError, match="busy"):
-            _fdtree._rmtree_fd(stage_fd, parent_fd)
+            _fdtree._rmtree_fd(stage_fd, parent_fd, STAGE_MARKER)
         monkeypatch.undo()
         assert prove_stage(stage_fd) == "0123456789ab"  # a later reclaim still proves the stage
     finally:

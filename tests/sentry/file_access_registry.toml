@@ -1832,13 +1832,13 @@ reason = "F26 G1(d): the one bounded reader of a stage or arena interior proof (
 
 [[entry]]
 module = "decoy_engine/fileaccess/_fdtree.py"
-function = "_rmtree_fd"
+function = "_listing"
 sink = "os.scandir"
 ordinal = 0
 disposition = "read"
 rule = "a held stage or arena directory descriptor"
 owner = "cam"
-reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf; lists the directory it removes"
+reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf; lists the directory it removes (in `_listing`, which orders the root's proof marker last since F25 S2a-1c-ii-a0)"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_fdtree.py"

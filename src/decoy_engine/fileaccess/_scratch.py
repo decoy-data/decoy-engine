@@ -29,13 +29,7 @@ from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._entry import is_ambient, require_ambient
 from decoy_engine.fileaccess._errors import deny, guarded, guarded_iter
-from decoy_engine.fileaccess._fdtree import (
-    ARENA_MARKER,
-    _close,
-    _exact_stat,
-    _rmtree_fd,
-    _write_marker,
-)
+from decoy_engine.fileaccess._fdtree import _close, _exact_stat, _rmtree_fd, _write_marker
 from decoy_engine.fileaccess._output import _call, create_private_at, make_stage_dir_at
 from decoy_engine.fileaccess._protected_dir import (
     ProtectedDirUnsafe,
@@ -58,7 +52,7 @@ if sys.platform != "win32":
 
 ARENA_PREFIX = "decoy-arena-v1-"
 _PENDING_PREFIX = "decoy-arena-pending-"
-_MARKER = ARENA_MARKER
+_MARKER = ".decoy-arena"
 _MAGIC = b"decoy-arena-v1:"
 _DISPLAY = "engine.scratch"
 _ISSUER = object()
@@ -110,7 +104,7 @@ def _remove_tree_at(name: str, dir_fd: int) -> None:
     # V2-LOG: a same-user rename of the held child after open moves the directory, and the final
     # `rmdir` acts on whatever now has the name (the L6 same-user interference limit).
     try:
-        _rmtree_fd(child, dir_fd)  # the same mount-aware walk as every descendant
+        _rmtree_fd(child, dir_fd, None)  # the same mount-aware walk as every descendant
     finally:
         _close(child)
     _rmdir(name, dir_fd)
@@ -154,7 +148,7 @@ def _reclaim(root: _Root) -> CleanupReport:
         _unregister(root.path)
         failed = False
         try:
-            _rmtree_fd(root.fd.fd, root.base_fd.fd)
+            _rmtree_fd(root.fd.fd, root.base_fd.fd, _MARKER)
             _release(root, keep_base=True)  # closing the root fd releases the shared lock
             _rmdir(root.name, root.base_fd.fd)
         except OSError:
@@ -253,7 +247,7 @@ class ScratchArena(StageWalk, StageClaim):
             final = _mark_and_publish(fd, base_fd, pending)
         except BaseException:
             if ours:
-                _quietly(_rmtree_fd, fd, base_fd)
+                _quietly(_rmtree_fd, fd, base_fd, _MARKER)
                 _quietly(_rmdir, pending, base_fd)
             if fd >= 0:
                 _close(fd)

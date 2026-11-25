@@ -102,24 +102,22 @@ def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> s
     Valid means: opened without following a link, a regular file owned by the effective user with
     mode exactly 0600, and content exactly `magic`, a token matching `token_pattern`, and one
     newline. Any `OSError` is None; nothing is raised and nothing is changed. Always None on
-    win32, where no stage is marked."""
-    if not _osflags.WINDOWS:
-        try:
-            fd = _open_leaf(name, dir_fd)
-        except OSError:
+    win32, where no stage is marked and `_open_leaf` refuses."""
+    try:
+        fd = _open_leaf(name, dir_fd)
+    except OSError:
+        return None
+    try:
+        if not _exact_stat(os.fstat(fd), stat.S_IFREG, 0o600):
             return None
-        try:
-            if not _exact_stat(os.fstat(fd), stat.S_IFREG, 0o600):
-                return None
-            data = os.pread(fd, _MARKER_MAX, 0)
-        except OSError:
-            return None
-        finally:
-            _close(fd)
-        pattern = re.escape(magic) + b"(" + token_pattern.encode("ascii") + b")\n"
-        found = re.fullmatch(pattern, data)
-        return found.group(1).decode("ascii") if found else None
-    return None
+        data = os.pread(fd, _MARKER_MAX, 0)
+    except OSError:
+        return None
+    finally:
+        _close(fd)
+    pattern = re.escape(magic) + b"(" + token_pattern.encode("ascii") + b")\n"
+    found = re.fullmatch(pattern, data)
+    return found.group(1).decode("ascii") if found else None
 
 
 # Mount detection. Patterns: coreutils `rm --one-file-system` and gnulib `fts` (`FTS_XDEV`) skip any
@@ -135,8 +133,9 @@ def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> s
 # there. Any other POSIX host has no known table and fails closed. A mount made after the table
 # is read is not seen; that needs privilege and is outside the V1 threat model of accidental
 # leaks.
-_LINUX = sys.platform.startswith("linux")
-_DEVICE_ONLY = sys.platform == "darwin"
+_HOST = sys.platform
+_LINUX = _HOST.startswith("linux")
+_DEVICE_ONLY = _HOST == "darwin"
 _MOUNTINFO = "/proc/self/mountinfo"
 _PROC_FD = "/proc/self/fd/"
 _MOUNTINFO_MAX = 4 * 1024 * 1024  # a mount table is a few KiB; this bounds a hostile one
@@ -148,12 +147,15 @@ def _undiscoverable() -> OSError:
 
 def _open_leaf(name: str, dir_fd: int | None = None) -> int:
     """Open a regular file read-only without following a final link: a marker under a held
-    directory, or the fixed kernel path of the mount table. The one such opener of this leaf."""
-    return os.open(
-        name,
-        _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC,
-        dir_fd=dir_fd,
-    )
+    directory, or the fixed kernel path of the mount table. The one such opener of this leaf.
+    `ENOSYS` on win32, which has neither."""
+    if not _osflags.WINDOWS:
+        return os.open(
+            name,
+            _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC,
+            dir_fd=dir_fd,
+        )
+    raise OSError(errno.ENOSYS, os.strerror(errno.ENOSYS))
 
 
 def _read_mount_table() -> str:
@@ -206,10 +208,6 @@ def _mount_roots(dir_fd: int) -> frozenset[tuple[int, int]]:
 
 
 _MAX_TREE_DEPTH = 128  # open descriptors one removal may hold at once: a deeper tree is retained
-# The interior markers that prove who made a stage or an arena. At the root of a removal they go
-# last, so a removal stopped part way leaves the proof a later reclaim needs.
-ARENA_MARKER = ".decoy-arena"
-_ROOT_PROOFS = frozenset({STAGE_MARKER, ARENA_MARKER})
 
 
 def _mount_guard(fd: int, parent_dev: int, mounts: frozenset[tuple[int, int]]) -> os.stat_result:
@@ -223,24 +221,26 @@ def _mount_guard(fd: int, parent_dev: int, mounts: frozenset[tuple[int, int]]) -
     return found
 
 
-def _listing(fd: int, *, root: bool) -> list[tuple[str, bool]]:
+def _listing(fd: int, proof: str | None) -> list[tuple[str, bool]]:
     """`(name, is a real directory)` of each entry, in the order the walk pops them (from the
-    end). At the root a proof marker is put first, so it is removed after everything else."""
+    end). The entry named `proof` is put first, so it is removed after everything else."""
     with os.scandir(fd) as listing:
         found = [(e.name, e.is_dir(follow_symlinks=False)) for e in listing]
-    if root:
-        found.sort(key=lambda entry: entry[0] not in _ROOT_PROOFS)
+    if proof is not None:
+        found.sort(key=lambda entry: entry[0] != proof)
     return found
 
 
-def _rmtree_fd(dir_fd: int, parent_fd: int) -> None:
+def _rmtree_fd(dir_fd: int, parent_fd: int, proof: str | None) -> None:
     """Remove everything beneath `dir_fd` without following any link or crossing a mount.
 
     One iterative walk holds an explicit stack of descriptors, at most `_MAX_TREE_DEPTH`, so no
     tree depth reaches the interpreter's recursion limit. Every directory, `dir_fd` itself
     included, is tested by `_mount_guard` after it is opened and before anything under it is
     listed, so no entry beneath a mount is removed. `parent_fd` is the held parent of `dir_fd`,
-    whose device the root is compared with. A limit, a mount or mounts that cannot be
+    whose device the root is compared with. `proof` names the marker at the root that proves who
+    made the tree (a stage or an arena marker; None for a plain subtree); it goes last, so a removal stopped part way
+    leaves the proof a later reclaim needs. A limit, a mount or mounts that cannot be
     discovered raise `OSError` (`EMFILE`, `EBUSY`) for the caller to report as retained. A
     no-op on win32."""
     if not _osflags.WINDOWS:
@@ -253,7 +253,7 @@ def _rmtree_fd(dir_fd: int, parent_fd: int) -> None:
             while frames:
                 top = frames[-1]
                 if top[3] is None:
-                    top[3] = _listing(top[0], root=len(frames) == 1)
+                    top[3] = _listing(top[0], proof if len(frames) == 1 else None)
                 if not top[3]:
                     frames.pop()
                     if frames:  # a descended directory: its contents are gone, so remove it
