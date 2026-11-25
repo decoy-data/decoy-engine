@@ -59,10 +59,13 @@ NOT_A_BOUND: dict[tuple[str, str], str] = {
 }
 
 
+REFUSED = "must be one module-level NAME = <int> statement"
+
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+_TARGET_OWNERS = (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor, ast.NamedExpr)
 
 
-def _global_names(scope: ast.AST) -> set[str]:
+def _global_names(scope: ast.AST) -> frozenset[str]:
     """Names a function or class body declares ``global``, not counting nested scopes."""
     out: set[str] = set()
     stack = list(ast.iter_child_nodes(scope))
@@ -72,86 +75,148 @@ def _global_names(scope: ast.AST) -> set[str]:
             out.update(node.names)
         elif not isinstance(node, _SCOPES):
             stack.extend(ast.iter_child_nodes(node))
+    return frozenset(out)
+
+
+def _bindings(tree: ast.Module) -> list[tuple[str, ast.AST | None]]:
+    """Every binding of every name in the counted scopes, as ``(name, owner)``. The counted scopes
+    are the module and any function or class body, for the names it declares ``global``; a
+    comprehension target is local and does not count. ``owner`` is the construct whose target or
+    pattern holds the name (an assignment, loop, ``with`` item, walrus or ``match``), ``None`` for
+    a ``def``, import, ``except``, ``global`` or ``del``. A subscript or attribute target binds no
+    name: its base and key are Loads, and a walrus inside it is its own owner."""
+    out: list[tuple[str, ast.AST | None]] = []
+
+    def visit(node: ast.AST, live: frozenset[str] | None, owner: ast.AST | None) -> None:
+        if not isinstance(node, ast.arg):
+            out.extend((name, owner) for name in bound_names(node) if live is None or name in live)
+        keeps_owner = isinstance(node, (ast.expr, ast.pattern))
+        for field, value in ast.iter_fields(node):
+            for kid in value if isinstance(value, list) else [value]:
+                if not isinstance(kid, ast.AST):
+                    continue
+                inner = live
+                if field == "body" and isinstance(node, _SCOPES):
+                    inner = _global_names(node)
+                elif field == "target" and isinstance(node, ast.comprehension):
+                    inner = frozenset()
+                kid_owner = owner if keeps_owner else None
+                if (
+                    (field == "targets" and isinstance(node, ast.Assign))
+                    or (field == "target" and isinstance(node, _TARGET_OWNERS))
+                    or (field == "optional_vars" and isinstance(node, ast.withitem))
+                    or (field == "cases" and isinstance(node, ast.Match))
+                ):
+                    kid_owner = node
+                elif field == "pattern" and isinstance(node, ast.match_case):
+                    kid_owner = owner
+                visit(kid, inner, kid_owner)
+
+    visit(tree, None, None)
     return out
 
 
-def _count_bindings(node: ast.AST, name: str, live: bool) -> int:
-    """Bindings of module-level ``name`` under ``node``: module scope, and any function or class
-    scope that declares it ``global``. A local of the same name does not count. ``live`` is true
-    when ``node`` sits in such a scope."""
-    total = int(live and name in bound_names(node) and not isinstance(node, ast.arg))
-    for field, value in ast.iter_fields(node):
-        for kid in value if isinstance(value, list) else [value]:
-            if not isinstance(kid, ast.AST):
-                continue
-            inner = live
-            if field == "body" and isinstance(node, _SCOPES):
-                inner = name in _global_names(node)
-            elif field == "target" and isinstance(node, ast.comprehension):
-                inner = False  # a comprehension target is local to it
-            total += _count_bindings(kid, name, inner)
-    return total
+def _has_int(node: ast.AST | None) -> bool:
+    return node is not None and any(
+        isinstance(n, ast.Constant) and type(n.value) is int for n in ast.walk(node)
+    )
 
 
-def int_literal(value: ast.AST | None) -> int | None:
-    """The value of a plain integer literal, signed or not (``5``, ``-5``, ``+5``); ``None`` for a
-    bool, a float, an expression or anything else. The one parser for discovery and live reads."""
-    if isinstance(value, ast.UnaryOp) and isinstance(value.op, (ast.USub, ast.UAdd)):
-        inner = int_literal(value.operand)
-        if inner is None or isinstance(value.operand, ast.UnaryOp):
-            return None
-        return -inner if isinstance(value.op, ast.USub) else inner
+def _stripped_int(value: ast.AST | None) -> bool:
+    while isinstance(value, ast.UnaryOp):
+        value = value.operand
+    return isinstance(value, ast.Constant) and type(value.value) is int
+
+
+def _makes_candidate(owner: ast.AST | None) -> bool:
+    """Whether a binding owned by ``owner`` makes its name a bound candidate. A single-name
+    assignment qualifies only when its value, with unary signs removed, is an exact int; that is
+    the one exception to "any int literal in the statement", so ``MIN = 59 - 1`` is not found.
+    Every other binding form qualifies when its value expression holds an exact int anywhere."""
+    if isinstance(owner, ast.Assign):
+        one_name = len(owner.targets) == 1 and isinstance(owner.targets[0], ast.Name)
+        return _stripped_int(owner.value) if one_name else _has_int(owner.value)
+    if isinstance(owner, ast.AnnAssign):
+        return _stripped_int(owner.value)
+    if isinstance(owner, (ast.AugAssign, ast.NamedExpr)):
+        return _has_int(owner.value)
+    if isinstance(owner, (ast.For, ast.AsyncFor)):
+        return _has_int(owner.iter)
+    if isinstance(owner, ast.withitem):
+        return _has_int(owner.context_expr)
+    if isinstance(owner, ast.Match):
+        return _has_int(owner.subject)
+    return False
+
+
+def _plain_literal(value: ast.AST) -> int | None:
+    """The int of ``<int>`` or ``-<int>``; ``None`` for a bool, ``+5``, ``--5``, ``~5`` or any
+    other expression."""
+    if isinstance(value, ast.UnaryOp) and isinstance(value.op, ast.USub):
+        value, sign = value.operand, -1
+    else:
+        sign = 1
     if isinstance(value, ast.Constant) and type(value.value) is int:
-        return value.value
+        return sign * value.value
     return None
 
 
-def _paired(target: ast.AST, value: ast.AST | None, out: dict[str, int | None]) -> None:
-    """Match ``target`` to ``value``: a name takes the literal (or ``None`` when it is not one); a
-    tuple or list target takes a tuple or list value of the same length element by element."""
-    if isinstance(target, ast.Name):
-        out[target.id] = int_literal(value)
-    elif isinstance(target, (ast.Tuple, ast.List)):
-        if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
-            for t, v in zip(target.elts, value.elts, strict=True):
-                _paired(t, v, out)
-        else:
-            for node in ast.walk(target):
-                if isinstance(node, ast.Name):
-                    out[node.id] = None
+def _plain_value(owner: ast.AST | None, name: str) -> int | None:
+    """The literal when ``owner`` is ``NAME = <lit>`` or ``NAME: int = <lit>`` for ``name``."""
+    if isinstance(owner, ast.Assign):
+        if len(owner.targets) == 1 and _is_name(owner.targets[0], name):
+            return _plain_literal(owner.value)
+    elif isinstance(owner, ast.AnnAssign):
+        ann = owner.annotation
+        if (
+            owner.value is not None
+            and _is_name(owner.target, name)
+            and isinstance(ann, ast.Name)
+            and ann.id == "int"
+        ):
+            return _plain_literal(owner.value)
+    return None
 
 
-def module_int_assignments(tree: ast.Module) -> dict[str, int | None]:
-    """Each name a module-level ``=`` or annotated assignment binds, with its integer literal or
-    ``None`` when the right side is not one. Chained targets (``A = B = 7``) and paired
-    tuple targets (``A, B = 1, 2``) count. A name bound twice keeps the last binding."""
+def _is_name(node: ast.AST, name: str) -> bool:
+    return isinstance(node, ast.Name) and node.id == name
+
+
+def int_constants(tree: ast.Module) -> dict[str, int | None]:
+    """Each name that might be a module-level integer bound, with its value or ``None`` (refused).
+
+    A name is a candidate when any counted binding qualifies (``_makes_candidate``). It reads as an
+    int only when it has exactly one binding, that binding is a direct statement of the module
+    body in the form ``NAME = <int>`` or ``NAME: int = <int>``, and the module has no wildcard
+    import. Every other candidate is ``None``: the source is never evaluated, so a form this parser
+    does not model fails closed instead of reading a wrong value. A bound whose literal sits in
+    another statement (``MIN = OTHER``) is not a candidate. Discovery and live reads both call this.
+    """
+    bindings = _bindings(tree)
+    wildcard = any(name == "*" for name, _ in bindings)
+    direct = {id(stmt) for stmt in tree.body}
+    candidates = {name for name, owner in bindings if _makes_candidate(owner)}
     out: dict[str, int | None] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                _paired(target, node.value, out)
-        elif isinstance(node, ast.AnnAssign):
-            _paired(node.target, node.value, out)
+    for name in sorted(candidates):
+        owners = [owner for n, owner in bindings if n == name]
+        value = _plain_value(owners[0], name) if len(owners) == 1 else None
+        plain = not wildcard and owners[0] is not None and id(owners[0]) in direct
+        out[name] = value if plain else None
     return out
 
 
 def read_int(source: str, constant: str) -> int:
     """The value of module-level ``NAME = <int>`` or ``NAME: int = <int>`` in ``source``, by ``ast``.
 
-    The literal may be signed and the name may sit in a chained or paired tuple assignment
-    (``A, B = 1, 2``). Python uses the last binding, so the name must have exactly one: any other
-    binding (a second assignment, ``+=``, unpacking of a non-literal, a loop or ``with`` target,
-    ``:=``, ``del``, an import, a ``def``, or a rebind in a function that declares it ``global``)
-    raises, as does a bool, a non-literal or a missing name. The module is never imported. The
-    caller reads the file: this package holds checker code, whose reads all go through
-    ``_integrity``.
+    Any other form raises ``ValueError`` with a fixed, value-free message: a second binding, a
+    tuple or chained target, ``+=``, a loop, ``with`` or ``:=`` target, ``del``, an import, a
+    ``def``, a rebind through ``global``, a ``match`` capture, a wildcard import, a bool, a
+    non-literal or a missing name. The module is never imported. The caller reads the file: this
+    package holds checker code, whose reads all go through ``_integrity``.
     """
-    tree = ast.parse(source)
-    if _count_bindings(tree, constant, True) != 1:
-        raise ValueError(f"{constant} must be bound exactly once at module level")
-    value = module_int_assignments(tree).get(constant)
+    value = int_constants(ast.parse(source)).get(constant)
     if value is None:
-        raise ValueError(f"{constant} is not a plain integer literal at module level")
+        raise ValueError(f"{constant} {REFUSED}")
     return value
 
 
@@ -185,8 +250,9 @@ def consumer_problems(source: str, name: str, home: str) -> list[str]:
     for node, alias in imports:
         if alias.asname or (node.module or "").split(".")[-1] != home:
             out.append(f"{name} must be imported by its own name from {home}")
-    binds = sum(name in bound_names(n) for n in ast.walk(tree))
-    if binds > len(imports):
+    imported = {id(alias) for _, alias in imports}
+    rebound = [n for n in ast.walk(tree) if name in bound_names(n) and id(n) not in imported]
+    if rebound:
         out.append(f"{name} is bound again in the importing module")
     for use in ast.walk(tree):
         if isinstance(use, ast.Name) and use.id == name and isinstance(use.ctx, ast.Load):

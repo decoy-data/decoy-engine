@@ -8,6 +8,7 @@ tests fail on the pre-slice checker; ``# pin`` tests guard against over-blocking
 
 from __future__ import annotations
 
+import ast
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -17,6 +18,7 @@ import pytest
 from tests.sentry import _ratchet
 from tests.sentry.ratchet import _limit_constants as lc
 from tests.sentry.ratchet.test_integrity import _commit, _red_from, _run_from
+from tests.sentry.test_baseline_registry import UPPER, module_int_constants, refused_constants
 from tests.sentry.test_ratchet_check import REG, ROOT, A, _assert_red, _run, _write
 
 D1 = "owner 2026-11-24 the cap rises because a reviewed module grew"
@@ -268,46 +270,131 @@ def test_a_second_pr_cannot_move_a_base_approval_into_retired_growth(
 # --- reading the live constants ----------------------------------------------------------------
 
 
+REFUSAL = "{} must be one module-level NAME = <int> statement"
+
+
 def test_read_int_handles_annassign_and_refuses_bool() -> None:  # red-before
-    src = "PLAIN = 600\nTYPED: int = 601\nFLAG = True\nTEXT = '5'\nCALL = int('5')\n"
+    src = "PLAIN = 600\nTYPED: int = 601\n"
     assert lc.read_int(src, "PLAIN") == 600
     assert lc.read_int(src, "TYPED") == 601
-    for name in ("FLAG", "TEXT", "CALL", "MISSING"):
-        with pytest.raises(ValueError):
-            lc.read_int(src, name)
+    for line, name in [
+        ("FLAG = True", "FLAG"),
+        ("TEXT = '5'", "TEXT"),
+        ("CALL = int('5')", "CALL"),
+        ("GOAL = (600, 1)", "GOAL"),
+        ("GOAL = 300 * 2", "GOAL"),
+        ("MIN_ROWS = 59 - 1", "MIN_ROWS"),
+        ("GOAL, OTHER = f()", "GOAL"),
+        ("F = -True", "F"),
+        ("X = 'a'", "MISSING"),
+    ]:
+        with pytest.raises(ValueError) as caught:
+            lc.read_int(line + "\n", name)
+        assert str(caught.value) == REFUSAL.format(name)
+        assert module_int_constants({"test_x.py": line + "\n"}) == set()
 
 
-REBINDS = {
-    "second assignment": "GOAL = 600\nGOAL = 900\n",
-    "augmented": "GOAL = 600\nGOAL += 300\n",
-    "inside if": "GOAL = 600\nif True:\n    GOAL = 900\n",
-    "for target": "GOAL = 600\nfor GOAL in [900]:\n    pass\n",
-    "with target": "GOAL = 600\nwith open('x') as GOAL:\n    pass\n",
-    "walrus": "GOAL = 600\n(GOAL := 900)\n",
-    "walrus in comprehension": "GOAL = 600\n[(GOAL := 9) for _ in [1]]\n",
-    "del": "GOAL = 600\ndel GOAL\n",
-    "tuple unpack": "GOAL = 600\nGOAL, OTHER = 900, 1\n",
-    "a tuple unpack of a call": "GOAL, OTHER = f()\n",
-    "global rebind in a function": "GOAL = 600\n\ndef f():\n    global GOAL\n    GOAL = 900\n",
-    "import": "GOAL = 600\nfrom os import sep as GOAL\n",
-    "def": "GOAL = 600\n\ndef GOAL():\n    pass\n",
-    "except alias": "GOAL = 600\ntry:\n    pass\nexcept Exception as GOAL:\n    pass\n",
-    "chained with a tuple": "GOAL = (600, 1)\n",
-    "computed": "GOAL = 300 * 2\n",
+def test_read_int_ignores_locals() -> None:  # pin
+    local = "GOAL = 600\n\ndef f():\n    GOAL = 1\n    return [GOAL for GOAL in range(2)]\n"
+    assert lc.read_int(local, "GOAL") == 600
+    assert lc.read_int("GOAL = 600\nXS = [GOAL for GOAL in range(2)]\n", "GOAL") == 600
+
+
+# One row per Python form that binds or hides a bound. ``map`` is the expected UPPER_CASE
+# candidates: the int a plain name reads, or None for a refused one (fail closed, no value read).
+CONSTANT_FORMS: dict[str, tuple[str, dict[str, int | None]]] = {
+    "codex-r3-starred": (
+        "TAIL = (58, 0)\n*prefix, MIN_ROWS, end = 0, 59, *TAIL\n",
+        {"MIN_ROWS": None},
+    ),
+    "codex-r3-later-rebind": ("MIN_ROWS = 59\nMIN_ROWS = max(1, MIN_ROWS)\n", {"MIN_ROWS": None}),
+    "codex-r3-subscript-rebind": (
+        "MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], MIN_ROWS = 1, 2\n",
+        {"MIN_ROWS": None},
+    ),
+    "codex-r3-subscript-key": (
+        "MIN_ROWS = 59\ncounts = {}\ncounts[MIN_ROWS], total = range(2)\n",
+        {"MIN_ROWS": 59},
+    ),
+    "attribute target": (
+        "MIN_ROWS = 59\nns = f()\nns.MIN_ROWS, total = 1, 2\n",
+        {"MIN_ROWS": 59},
+    ),
+    "tuple literal": ("MIN_A, MIN_B = 59, 1186\n", {"MIN_A": None, "MIN_B": None}),
+    "nested tuple": (
+        "(A, (MIN_B, C)) = 1, (2, 3)\n",
+        {"A": None, "C": None, "MIN_B": None},
+    ),
+    "tuple rebind": ("GOAL = 600\nGOAL, OTHER = 900, 1\n", {"GOAL": None, "OTHER": None}),
+    "starred": ("*GOAL, B = 1, 2, 3\n", {"B": None, "GOAL": None}),
+    "chained": ("OTHER = GOAL = 7\n", {"GOAL": None, "OTHER": None}),
+    "augmented": ("GOAL = 600\nGOAL += 300\n", {"GOAL": None}),
+    "augmented only": ("GOAL += 1\n", {"GOAL": None}),
+    "walrus": ("GOAL = 600\n(GOAL := 900)\n", {"GOAL": None}),
+    "walrus in comprehension": ("GOAL = 600\n[(GOAL := 9) for _ in [1]]\n", {"GOAL": None}),
+    "for target": ("GOAL = 600\nfor GOAL in [900]:\n    pass\n", {"GOAL": None}),
+    "for over a literal": ("for GOAL in range(3):\n    pass\n", {"GOAL": None}),
+    "with target": ("GOAL = 600\nwith open('x') as GOAL:\n    pass\n", {"GOAL": None}),
+    "first match capture": (
+        "match 58:\n    case MIN_ROWS: pass\nassert len(rows) >= MIN_ROWS\n",
+        {"MIN_ROWS": None},
+    ),
+    "wildcard overwrite": ("GOAL = 59\nfrom sentry_fixture import *\n", {"GOAL": None}),
+    "subscript walrus": (
+        "GOAL = 59\ncounts = {}\ncounts[(GOAL := 58)] = 0\n",
+        {"GOAL": None},
+    ),
+    "import rebind": ("GOAL = 600\nfrom os import sep as GOAL\n", {"GOAL": None}),
+    "def rebind": ("GOAL = 600\n\ndef GOAL():\n    pass\n", {"GOAL": None}),
+    "except alias": (
+        "GOAL = 600\ntry:\n    pass\nexcept Exception as GOAL:\n    pass\n",
+        {"GOAL": None},
+    ),
+    "del": ("GOAL = 600\ndel GOAL\n", {"GOAL": None}),
+    "global rebind": (
+        "GOAL = 600\n\ndef f():\n    global GOAL\n    GOAL = 900\n",
+        {"GOAL": None},
+    ),
+    "inside if": ("if True:\n    GOAL = 600\n", {"GOAL": None}),
+    "second plain": ("GOAL = 600\nGOAL = 900\n", {"GOAL": None}),
+    "bare annotation after": ("GOAL = 600\nGOAL: int\n", {"GOAL": None}),
+    "wrong annotation": ("GOAL: float = 600\n", {"GOAL": None}),
+    "unary plus": ("F = +5\n", {"F": None}),
+    "double minus": ("F = --5\n", {"F": None}),
+    "plain": ("GOAL = 600\n", {"GOAL": 600}),
+    "annotated": ("GOAL: int = 601\n", {"GOAL": 601}),
+    "negative": ("_F = -5\n", {"_F": -5}),
+    "local of the same name": (
+        "GOAL = 600\n\ndef f():\n    GOAL = 1\n    return [GOAL for GOAL in range(2)]\n",
+        {"GOAL": 600},
+    ),
+    "module comprehension target": (
+        "GOAL = 600\nXS = [GOAL for GOAL in range(2)]\n",
+        {"GOAL": 600},
+    ),
+    "class attribute": ("GOAL = 600\n\nclass C:\n    GOAL = 1\n", {"GOAL": 600}),
 }
 
 
-@pytest.mark.parametrize("source", REBINDS.values(), ids=REBINDS.keys())
-def test_read_int_refuses_a_name_bound_twice_or_not_plainly(source: str) -> None:  # red-before
-    with pytest.raises(ValueError):
-        lc.read_int(source, "GOAL")
-
-
-def test_read_int_ignores_locals_and_accepts_chained_targets() -> None:  # pin
-    local = "GOAL = 600\n\ndef f():\n    GOAL = 1\n    return [GOAL for GOAL in range(2)]\n"
-    assert lc.read_int(local, "GOAL") == 600
-    assert lc.read_int("OTHER = GOAL = 7\n", "GOAL") == 7
-    assert lc.read_int("GOAL = 600\nXS = [GOAL for GOAL in range(2)]\n", "GOAL") == 600
+@pytest.mark.parametrize("row", CONSTANT_FORMS, ids=list(CONSTANT_FORMS))
+def test_constant_grammar_seed_table(row: str) -> None:  # red-before
+    source, expected = CONSTANT_FORMS[row]
+    upper = {n: v for n, v in lc.int_constants(ast.parse(source)).items() if UPPER.fullmatch(n)}
+    assert upper == expected
+    found = module_int_constants({"test_x.py": source})
+    assert found == {("test_x.py", n) for n in expected}
+    for name, value in expected.items():
+        if value is None:
+            with pytest.raises(ValueError) as caught:
+                lc.read_int(source, name)
+            assert str(caught.value) == REFUSAL.format(name)
+        else:
+            assert lc.read_int(source, name) == value
+    assert refused_constants({"test_x.py": source}) == sorted(
+        f"test_x.py::{n} must be one module-level NAME = <int> statement"
+        for n, v in expected.items()
+        if v is None
+    )
 
 
 def test_bound_loosened_reads_both_directions() -> None:  # red-before
@@ -421,15 +508,5 @@ def _degrade_to(locales: dict, field: str, fields: tuple[str, ...], count: int) 
     assert done == count
 
 
-@pytest.mark.parametrize(
-    "source, value",
-    [("_F = -5\n", -5), ("F = +5\n", 5), ("A, F = 1, -2\n", -2), ("F, A = 59, 1186\n", 59)],
-)
-def test_read_int_reads_signed_and_paired_literals(source: str, value: int) -> None:  # red-before
-    assert lc.read_int(source, "_F" if source.startswith("_F") else "F") == value
-
-
-@pytest.mark.parametrize("source", ["F = --5\n", "F, A = g()\n", "F, A = 1, 2, 3\n", "F = -True\n"])
-def test_read_int_refuses_a_signed_or_paired_non_literal(source: str) -> None:  # red-before
-    with pytest.raises(ValueError):
-        lc.read_int(source, "F")
+def test_read_int_reads_signed_literals() -> None:  # red-before
+    assert lc.read_int("_F = -5\n", "_F") == -5

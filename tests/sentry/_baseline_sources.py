@@ -97,11 +97,15 @@ def live_bounds(kind: str) -> dict[str, int]:
     mod = _limits()
     if problems := mod.direction_problems(mod.LIMITS):
         raise ValueError("; ".join(problems))
-    return {
-        mod.key_of(f, c): mod.read_int((SENTRY / f).read_text(encoding="utf-8"), c)
-        for (f, c), k in sorted(mod.LIMITS.items())
-        if k == kind
-    }
+    out: dict[str, int] = {}
+    for (f, c), k in sorted(mod.LIMITS.items()):
+        if k != kind:
+            continue
+        try:
+            out[mod.key_of(f, c)] = mod.read_int((SENTRY / f).read_text(encoding="utf-8"), c)
+        except ValueError:
+            raise ValueError(f"{mod.key_of(f, c)} {mod.REFUSED}") from None
+    return out
 
 
 @dataclass(frozen=True)

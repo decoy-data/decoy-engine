@@ -208,24 +208,43 @@ def test_the_scan_reaches_sentry_subfolders() -> None:
     assert "layout/test_package_fanout.py" in names
 
 
-# Sentry files the discovery scan skips, each with the reason. None today: the seeded sources
-# in this file are strings, so they hold no module-level integer.
-UNSCANNED: dict[str, str] = {}
+# Sentry files the discovery scan skips, each with the reason. A skipped file must be pinned by
+# another check, so its constants cannot change unseen.
+UNSCANNED: dict[str, str] = {
+    "ci_scan/test_identity.py": (
+        "byte-identical copy shared with the CLI repo and pinned by the ci-lock ledger; its "
+        "REPO, COMMIT, PATH tuple is a fixture, not a bound"
+    ),
+}
 UPPER = re.compile(r"_*[A-Z][A-Z0-9_]*")
 
 
+REFUSED = "must be one module-level NAME = <int> statement"
+
+
+def _upper_candidates(sources: dict[str, str]) -> dict[tuple[str, str], int | None]:
+    parse = bs._limits().int_constants
+    return {
+        (rel, name): value
+        for rel, text in sources.items()
+        for name, value in parse(ast.parse(text)).items()
+        if UPPER.fullmatch(name)
+    }
+
+
 def module_int_constants(sources: dict[str, str]) -> set[tuple[str, str]]:
-    """``(file, NAME)`` of every module-level UPPER_CASE (private or not) integer literal, signed
-    or not, in ``sources`` (``{path under tests/sentry: text}``)."""
-    parse = bs._limits().module_int_assignments
-    found = set()
-    for rel, text in sources.items():
-        found |= {
-            (rel, name)
-            for name, value in parse(ast.parse(text)).items()
-            if value is not None and UPPER.fullmatch(name)
-        }
-    return found
+    """``(file, NAME)`` of every module-level UPPER_CASE (private or not) candidate bound in
+    ``sources`` (``{path under tests/sentry: text}``), plain or refused."""
+    return set(_upper_candidates(sources))
+
+
+def refused_constants(sources: dict[str, str]) -> list[str]:
+    """One fixed, value-free message per UPPER_CASE candidate the reader refuses, sorted."""
+    return sorted(
+        f"{rel}::{name} {REFUSED}"
+        for (rel, name), value in _upper_candidates(sources).items()
+        if value is None
+    )
 
 
 def _sentry_sources() -> dict[str, str]:
@@ -241,6 +260,7 @@ def test_every_module_int_is_a_bound_or_named() -> None:
     carries a reason it is not one, so a new limit cannot sit outside the ratchet."""
     lc = bs._limits()
     known = set(lc.LIMITS) | set(lc.NOT_A_BOUND)
+    assert refused_constants(_sentry_sources()) == [], "a constant the reader refuses"
     found = module_int_constants(_sentry_sources())
     assert sorted(found - known) == [], "an integer constant is neither a bound nor named"
     assert sorted(known - found) == [], "a LIMITS or NOT_A_BOUND row names no constant"
@@ -255,10 +275,6 @@ def test_every_module_int_is_a_bound_or_named() -> None:
         ("test_baseline_registry.py", "NEW_CAP = 99\n"),
         ("test_x.py", "_NEW_CAP = 99\n"),
         ("test_x.py", "NEW_FLOOR = -5\n"),
-        ("test_x.py", "NEW_FLOOR: int = +5\n"),
-        ("test_baseline_registry_sibling.py", "A = B = 7\n"),
-        ("test_x.py", "MIN_A, MIN_B = 59, -1186\n"),
-        ("test_x.py", "(MIN_A, (MIN_B, MIN_C)) = 1, (2, 3)\n"),
     ],
 )
 def test_the_discovery_scan_sees_each_spelling(path: str, text: str) -> None:
@@ -268,7 +284,9 @@ def test_the_discovery_scan_sees_each_spelling(path: str, text: str) -> None:
 
 def test_the_discovery_scan_reads_every_sentry_file() -> None:
     assert "test_baseline_registry.py" in _sentry_sources()
-    assert UNSCANNED == {}
+    assert set(UNSCANNED) == {"ci_scan/test_identity.py"}
+    assert all((bs.SENTRY / rel).is_file() for rel in UNSCANNED)
+    assert not set(UNSCANNED) & set(_sentry_sources())
 
 
 def limit_problems(
@@ -339,13 +357,11 @@ def test_a_misspelled_direction_fails_the_live_maps(monkeypatch: pytest.MonkeyPa
             bs.live_bounds(kind)
 
 
-def test_a_signed_and_a_paired_bound_are_read_live(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Discovery and the live read share one parser: a signed literal and a tuple-assigned pair
-    that discovery finds must also read, or a registered bound would raise instead of ratchet."""
+def test_a_signed_bound_is_read_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Discovery and the live read share one parser: a signed literal that discovery finds must
+    also read, or a registered bound would raise instead of ratchet."""
     (tmp_path / "test_new.py").write_text(
-        "_NEW_FLOOR = -5\nMIN_A, MIN_B = 59, 1186\n", encoding="utf-8"
+        "_NEW_FLOOR = -5\nMIN_A = 59\nMIN_B = 1186\n", encoding="utf-8"
     )
     mod = bs._limits()
     mod.LIMITS = {
@@ -365,9 +381,12 @@ def test_a_signed_and_a_paired_bound_are_read_live(
 
 
 def test_the_census_floors_are_discovered_and_registered() -> None:
-    """The tuple-assigned census floors are found by discovery and carry a recorded floor."""
+    """The census floors are two plain lines: discovery finds them, the reader accepts them and
+    each carries a recorded floor."""
     found = module_int_constants(_sentry_sources())
     lc = bs._limits()
+    census = {"release/test_public_census.py": _sentry_sources()["release/test_public_census.py"]}
+    assert refused_constants(census) == []
     for name in ("MIN_PACKAGES", "MIN_NAMES"):
         assert ("release/test_public_census.py", name) in found
         assert lc.LIMITS[("release/test_public_census.py", name)] == "min"
