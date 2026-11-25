@@ -75,8 +75,10 @@ def read_checked(
 # but must not continue a path or a word, so a local path such as `/tmp/a:/b@c/f?x=1` is not a
 # URL. Two or more scheme characters, so not a drive letter.
 _HEAD = r"(?<![\w+.\-/\\])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]+):(?P<slashes>[/\\]{1,2})"
-_TOKEN_URL_RE = re.compile(_HEAD + r"(?P<rest>\S*)")  # free text: a URL ends at whitespace
 _LOCATOR_URL_RE = re.compile(_HEAD + r"(?P<rest>.*)", re.DOTALL)  # a locator: nothing ends it
+# `scheme://` after a path separator (`a/https://u:p@h`): a URL the lookbehind above skips so a
+# local path like `/tmp/a:/b@c` stays readable. Two slashes make it a URL, not a path.
+_EMBEDDED_URL_RE = re.compile(r"[/\\][A-Za-z][A-Za-z0-9+.-]+:(?:/{2}|\\{2})(?P<rest>.*)", re.DOTALL)
 _DELIMS_RE = re.compile(r"[/?#]")
 _MARKS_RE = re.compile(r"[?#]")
 _SENSITIVE_RE = re.compile(r"[@?#]")
@@ -112,31 +114,16 @@ def _redact_url(match: re.Match[str]) -> str:
     return out
 
 
-def without_url_credentials(text: str, *, free_text: bool = False) -> str:
-    """`text` with the userinfo, query and fragment of any URL-shaped locator removed.
+def without_url_credentials(text: str) -> str:
+    """`text`, one locator, with the userinfo, query and fragment of a URL in it removed.
 
-    A single locator (the default) is read whole: whitespace does not end a URL, so a password
-    or query holding a space is removed with the rest. Free-form message text (`free_text`)
-    ends each URL at whitespace, then removes every later token that holds `@`, `?` or `#`,
-    since the text may have split a credential at a space."""
-    if not free_text:
-        return _LOCATOR_URL_RE.sub(_redact_url, text)
-    out: list[str] = []
-    pos = 0
-    seen = False
-    for match in _TOKEN_URL_RE.finditer(text):
-        out.append(_scrub_tokens(text[pos : match.start()]) if seen else text[pos : match.start()])
-        out.append(_redact_url(match))
-        pos = match.end()
-        seen = True
-    out.append(_scrub_tokens(text[pos:]) if seen else text[pos:])
-    return "".join(out)
-
-
-def _scrub_tokens(text: str) -> str:
-    return "".join(
-        "<redacted>" if _SENSITIVE_RE.search(part) else part for part in re.split(r"(\s+)", text)
-    )
+    The locator is read whole: whitespace does not end a URL. A URL that follows a path
+    separator is ambiguous (a path, or a URL under a prefix), so a value holding one with a
+    sensitive character after it is suppressed whole."""
+    embedded = _EMBEDDED_URL_RE.search(text)
+    if embedded is not None and _SENSITIVE_RE.search(embedded["rest"]):
+        return "<redacted>"
+    return _LOCATOR_URL_RE.sub(_redact_url, text)
 
 
 def shown(locator: str, field_key: str) -> str:

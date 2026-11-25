@@ -21,9 +21,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA
+from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA, _unknown_shipped_corpus
 from decoy_engine.transforms._codeset_provenance import RESERVED_LICENSED_NAMES
 
 
@@ -90,27 +90,20 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
     # apply time (Codex/Dennis MEDIUM). Kept in sync deliberately.
     is_shipped_source = not source.startswith("customer:")
 
-    if str(name).strip().lower() in RESERVED_LICENSED_NAMES and is_shipped_source:
+    reserved = str(name).strip().lower()  # a registry member, never the raw text
+    if reserved in RESERVED_LICENSED_NAMES and is_shipped_source:
         raise PlanCompileError(
             code=reasons.plan.CODE_SET_RESERVED_LICENSED_NAME,
             path="provider_config.code_set",
             message=(
-                f"{name!r} is a licensed code set the engine never ships "
+                f"{reserved!r} is a licensed code set the engine never ships "
                 "(AMA CPT license / proprietary grouper). It is upload-only: "
                 "set corpus_source: customer:<path> to your own licensed copy."
             ),
         )
 
     if is_shipped_source and name not in _SHIPPED_CORPORA:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
-            path="provider_config.code_set",
-            message=(
-                f"corpus {fileaccess.shown(name, 'code_set.code_set')!r} not found in shipped corpora. "
-                f"Available: {sorted(_SHIPPED_CORPORA)}. "
-                f"To use a custom corpus, set corpus_source: customer:<path>."
-            ),
-        )
+        raise _unknown_shipped_corpus()
 
 
 def check_mode(mode: object) -> None:

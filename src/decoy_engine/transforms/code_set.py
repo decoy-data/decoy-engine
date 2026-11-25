@@ -123,9 +123,9 @@ from decoy_engine.transforms._codeset_loader import (
     _SHIPPED_CORPORA,
     CorpusVerifyReport,  # noqa: F401 -- re-exported public API (see below)
     _check_source_version_pin,
+    _corpus_label,
     _CorpusRecord,
     _get_corpus_record,
-    _shown_name,
     load_corpus_provenance,  # noqa: F401 -- re-exported public API (see below)
     verify_corpus,  # noqa: F401 -- re-exported public API (see below)
 )
@@ -215,7 +215,7 @@ def describe_loaded_corpus(
         record = resolve_corpus_record(config)
     prov = record.provenance
     return {
-        "code_set": _shown_name(config.code_set),
+        "code_set": _corpus_label(config.code_set),
         "source": prov.source if prov else "",
         "source_version": prov.source_version if prov else "",
         "effective_date": prov.effective_date if prov else "",

@@ -48,8 +48,9 @@ def _where(path: Path | str | None) -> str:
     return fileaccess.shown(str(path), "code_set.corpus_source")
 
 
-def _shown_name(name: str) -> str:
-    """A shipped name as is; any other label (configured text, maybe a URL) under the policy."""
+def _corpus_label(name: str) -> str:
+    """The one formatter for a corpus label in a message, report or evidence field: a registered
+    shipped name as is, any other label (configured text, maybe a URL) under the policy."""
     return name if name in _SHIPPED_CORPORA else fileaccess.shown(name, "code_set.code_set")
 
 
@@ -223,16 +224,31 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
 
     path_display = _where(path)
     handle = _open_customer(path)
+    missing = False
+    failure = ""
     try:
         handle.stat()
     except (FileNotFoundError, NotADirectoryError):
+        missing = True
+    except OSError as exc:
+        if fileaccess.keeps_class(exc):
+            raise
+        failure = type(exc).__name__
+    finally:
+        handle.close()
+    # Raised after the handler closes: no `__context__`, and no OS text (it names the file).
+    if missing:
         raise PlanCompileError(
             code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
             path="provider_config.corpus_source",
             message=f"customer corpus not found at path {path_display}.",
-        ) from None
-    finally:
-        handle.close()
+        )
+    if failure:
+        raise PlanCompileError(
+            code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
+            path="provider_config.corpus_source",
+            message=f"failed to stat customer corpus at {path_display} ({failure}).",
+        )
     return path
 
 
@@ -351,7 +367,7 @@ def _check_source_version_pin(
             code=reasons.plan.CODE_SET_CORPUS_VERSION_MISMATCH,
             path="provider_config.corpus_source_version",
             message=(
-                f"corpus {fileaccess.shown(name, 'code_set.code_set')!r}{at}: "
+                f"corpus {_corpus_label(name)!r}{at}: "
                 "corpus_source_version does not match the "
                 "loaded corpus's embedded source_version. The corpus at this name/path has "
                 "changed since the plan was authored (or never carried the pinned "
@@ -523,7 +539,7 @@ def _validate_provenance(
                 code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
                 path="provider_config.code_set",
                 message=(
-                    f"shipped corpus {_shown_name(name)!r} at {where} has no provenance metadata "
+                    f"shipped corpus {_corpus_label(name)!r} at {where} has no provenance metadata "
                     "(source, source_version, effective_date, license). This is a "
                     "packaging defect, not a customer-corpus configuration issue."
                 ),
@@ -555,7 +571,7 @@ def _validate_provenance(
                 code=reasons.plan.CODE_SET_CORPUS_PROVENANCE_IDENTITY_MISMATCH,
                 path="provider_config.code_set",
                 message=(
-                    f"shipped corpus {_shown_name(name)!r} at {where} carries provenance "
+                    f"shipped corpus {_corpus_label(name)!r} at {where} carries provenance "
                     f"for a different corpus ({provenance.corpus!r}). This "
                     "looks like a packaging or metadata swap; the embedded "
                     "provenance.corpus must match the requested corpus name."
@@ -576,7 +592,7 @@ def _validate_provenance(
                     code=reasons.plan.CODE_SET_CORPUS_PROVENANCE_MALFORMED_STAMP,
                     path="provider_config.code_set",
                     message=(
-                        f"shipped corpus {_shown_name(name)!r} at {where} has a malformed "
+                        f"shipped corpus {_corpus_label(name)!r} at {where} has a malformed "
                         f"provenance stamp ({'; '.join(stamp_defects)}). A "
                         "shipped corpus is a build artifact: is_seed and the "
                         "metadata format version must be explicit and current "
@@ -589,7 +605,7 @@ def _validate_provenance(
             code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
             path="provider_config.code_set",
             message=(
-                f"shipped corpus {_shown_name(name)!r} at {where} has incomplete provenance "
+                f"shipped corpus {_corpus_label(name)!r} at {where} has incomplete provenance "
                 f"metadata (missing: {', '.join(missing)})."
             ),
         )
@@ -597,7 +613,7 @@ def _validate_provenance(
         code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
         path="provider_config.corpus_source",
         message=(
-            f"customer corpus {_shown_name(name)!r} at {where} has partial provenance metadata "
+            f"customer corpus {_corpus_label(name)!r} at {where} has partial provenance metadata "
             f"(missing: {', '.join(missing)}). Either remove the partial stamp or "
             "complete it; a half-filled provenance block is not surfaced as evidence."
         ),
@@ -637,34 +653,21 @@ class CorpusVerifyReport:
 def verify_corpus(path: Path, *, file_access: FileAccess | None = None) -> CorpusVerifyReport:
     """Validate a corpus Parquet file without running a masking job.
 
-    Runs the EXACT same schema check (:func:`_check_corpus_schema`) and
-    provenance validation (:func:`_validate_provenance`) the load path runs
-    in :func:`_read_corpus_record` -- the single validation source of truth
-    the CLI ``codesets verify``/``add`` and the platform upload check call
-    (both live in sibling repos; this is the primitive they call into).
-    Treats the file as a CUSTOMER corpus (``is_shipped=False``): a file under
-    review for upload has no registered shipped name to identity-check
-    against, and the shipped-only strictness (identity match, ``is_seed``,
-    metadata format version) does not apply to it.
-
-    Unlike :func:`_read_corpus_record`, this NEVER raises
-    :class:`PlanCompileError` -- that is the point of a standalone,
-    non-job-fatal check: every coded failure is caught and translated into
-    ``problems`` instead of propagating. Does not use the module cache (a
-    corpus under review is not yet a job's corpus).
+    Runs the same schema check and provenance validation as the load path (the single
+    validation source for the CLI ``codesets verify``/``add`` and the platform upload check),
+    treating the file as a CUSTOMER corpus (``is_shipped=False``). Unlike
+    :func:`_read_corpus_record` this NEVER raises :class:`PlanCompileError`: every coded
+    failure becomes a ``problems`` entry. It does not use the module cache.
 
     Args:
-        path: Path to the corpus Parquet file to verify. A ``str`` is accepted
-            and coerced (the "never raises" contract must hold for a path-like
-            string too, not only a ``Path``).
+        path: Path to the corpus Parquet file. A ``str`` is coerced.
 
     Returns:
-        A :class:`CorpusVerifyReport`. ``ok=False`` on any failure (unreadable
-        file, missing/empty/duplicate/null code column, incomplete
-        provenance, ...); ``problems`` names exactly what failed.
+        A :class:`CorpusVerifyReport`; ``ok=False`` on any failure, with ``problems`` naming
+        what failed.
     """
     path = Path(path)
-    name = path.stem
+    name = "corpus"  # never the file stem: it is user text and would reach `problems`
     try:
         record = _read_corpus_record(name, path, is_shipped=False)
     except PlanCompileError as exc:

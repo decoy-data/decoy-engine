@@ -103,6 +103,7 @@ def test_missing_url_source_hides_credentials() -> None:
         ("\\\\server\\share\\a@b", "\\\\server\\share\\a@b"),
         ("  https://svc:pw@host/c?t=T", "  https://host/c?<redacted>"),
         ("failed at https://svc:pw@host/c?t=T now", "failed at https://<redacted>"),
+        ("a/https://user:pw@host", "<redacted>"),
         ("https://svc:pa/ss@host/c?t=T", "https://<redacted>"),
         ("https://svc:p?w@host/c", "https://<redacted>"),
         ("https://svc:p#w@host/c", "https://<redacted>"),
@@ -140,19 +141,20 @@ def test_url_redactor_never_keeps_canaries(locator: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("text", "expected"),
+    "locator",
     [
-        ("failed at https://svc:pw@host/c?t=T now", "failed at https://host/c?<redacted> now"),
-        ("url https://h/c ?token=T x", "url https://h/c <redacted> x"),
-        ("read https://h/c then a@b.com ok", "read https://h/c then <redacted> ok"),
-        ("bad s3://user:pa ss@host/k end", "bad s3://user:pa <redacted> end"),
-        ("no url here a@b", "no url here a@b"),
+        "a/https://user:{pw}@host/c?token={tok}",
+        "/srv/x-s3://user:{pw}@host/c",
+        "a\\\\https:\\\\user:{pw}@host\\c",
+        "prefix/https://host/c?token={tok}",
     ],
 )
-def test_url_redactor_free_text(text: str, expected: str) -> None:
+def test_url_after_a_path_separator_is_suppressed_whole(locator: str) -> None:
     from decoy_engine.fileaccess._read import without_url_credentials
 
-    assert without_url_credentials(text, free_text=True) == expected
+    out = without_url_credentials(locator.format(pw=_PW, tok=_TOK))
+    assert _PW not in out
+    assert _TOK not in out
 
 
 def _no_secret(text: str) -> None:
@@ -264,3 +266,42 @@ def test_invalid_mode_refused_with_no_live_row(tmp_path: pathlib.Path) -> None:
             CodeSetHandler().run(df, "c", make_seed(cfg), make_ctx())
     with pytest.raises(ValueError, match="unsupported mode"):
         CodeSetHandler().preflight(make_seed(cfg), make_ctx())
+
+
+@pytest.mark.parametrize(
+    "exc_type",
+    [PermissionError, OSError],
+)
+def test_first_stat_translates_every_oserror_value_free(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, exc_type: type[OSError]
+) -> None:
+
+    def _boom(self: Any, *a: Any, **k: Any) -> Any:
+        raise exc_type(13, f"denied {_PW}", f"/x/{_TOK}")
+
+    monkeypatch.setattr(pathlib.Path, "stat", _boom)
+    cfg = CodeSetConfig.from_dict(
+        {"code_set": "ab", "corpus_source": f"customer:{tmp_path}/{_TOK}.parquet"}
+    )
+    with pytest.raises(Exception) as info:
+        describe_loaded_corpus_for(cfg)
+    assert getattr(info.value, "code", None) == "code_set_corpus_read_error"
+    assert _PW not in str(info.value)
+    assert info.value.__context__ is None and info.value.__cause__ is None
+
+
+def test_verify_corpus_problems_never_carry_the_file_stem(tmp_path: pathlib.Path) -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    partial = tmp_path / f"x?token={_TOK}.parquet"
+    pq.write_table(
+        pa.table(
+            {"code": pa.array(["Z01", "Z02"], type=pa.string())},
+            metadata={b"decoy_corpus": b"x", b"source": b"Some Source"},
+        ),
+        str(partial),
+    )
+    report = verify_corpus(partial)
+    assert not report.ok
+    assert "missing" in " ".join(report.problems)
+    assert _TOK not in " ".join(report.problems)
