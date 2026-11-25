@@ -101,8 +101,10 @@ def _remove_tree_at(name: str, dir_fd: int) -> None:
             raise
         _unlink(name, dir_fd)  # a link or a file: the target of a link is never touched
         return
+    # V2-LOG: a same-user rename of the held child after open moves the directory, and the final
+    # `rmdir` acts on whatever now has the name (the L6 same-user interference limit).
     try:
-        _rmtree_fd(child)
+        _rmtree_fd(child, dir_fd)  # the same mount-aware walk as every descendant
     finally:
         _close(child)
     _rmdir(name, dir_fd)

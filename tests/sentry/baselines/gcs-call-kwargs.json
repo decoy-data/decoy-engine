@@ -219,6 +219,9 @@
     "decoy_engine/fileaccess/_fdtree.py::_prove_marker::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
     },
+    "decoy_engine/fileaccess/_fdtree.py::_read_mount_table::open::0": {
+      "reason": "os.open on a local path, not a GCS Blob"
+    },
     "decoy_engine/fileaccess/_fdtree.py::_rmtree_fd::open::0": {
       "reason": "os.open on a local path, not a GCS Blob",
       "moved_from": "decoy_engine/fileaccess/_output.py::_rmtree_fd::open::0"
