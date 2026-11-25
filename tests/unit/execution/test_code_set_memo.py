@@ -372,6 +372,7 @@ def _peak(fn: Any, make_df: Any, plan: ColumnSeed) -> tuple[int, list]:
     return peak, list(out_df["c"])
 
 
+@pytest.mark.serial
 class TestAt5MemoryBound:
     def test_many_large_distinct_keys_stay_under_cap(self) -> None:
         plan = _seed({"code_set": "icd10", "mode": "mask", "chapter_preserve": False})
