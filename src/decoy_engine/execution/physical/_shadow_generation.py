@@ -76,6 +76,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SHADOW_ADMISSIBLE_FAKER_TYPES",
     "dispatch_synthesis",
+    "enforce_validators",
     "require_generation_shape",
     "require_pure_generation_shadowable",
     "run_synthesis_adapter",
@@ -237,6 +238,32 @@ def require_pure_generation_shadowable(
     _require_pure_job_scope(config, generate_table_names)
     _require_admitted_runtime_carriers(ctx)
     return plan_obj
+
+
+def enforce_validators(
+    ctx: ShadowContext,
+    outputs: Mapping[str, pa.Table],
+    sources: Mapping[str, pa.Table],
+) -> None:
+    """Fail a standalone generation or mixed result that its configured validators reject.
+
+    The dispatch has admitted the plan's generation payload, so its config decodes. Under a
+    `run_pipeline` the route boundary owns validation and one session feeds every table once,
+    so this stands down when that session is bound.
+
+    Raises:
+        ValidatorFailedError: A configured validator found a failing row in `outputs`.
+    """
+    from decoy_engine.errors import ValidatorFailedError
+    from decoy_engine.validators import active_validation_session, run_resident_validation
+
+    generation = ctx.plan.generation if ctx.plan is not None else None
+    if generation is None or active_validation_session() is not None:
+        return
+    config = _decode_generation_config_shallow(generation.config_json)
+    report = run_resident_validation(outputs, config, sources)
+    if report is not None and not report.passed:
+        raise ValidatorFailedError(report)
 
 
 def _decode_generation_config_shallow(config_json: str) -> dict[str, Any]:

@@ -18,6 +18,8 @@ from contextlib import nullcontext
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any
 
+import pyarrow as pa
+
 from decoy_engine import reasons
 from decoy_engine.config import post_scan_sink_kind, post_scan_sink_refusal
 from decoy_engine.declared_casting._boundary import open_cast_run
@@ -66,7 +68,7 @@ _SOURCE_BATCH_ROWS = 65_536
 def _key_state_budget(ctx: PipelineRunContext) -> int:
     """The validators' own memory ceiling, resolved once. It is not charged to the generation
     ledger or the faker-pool carve."""
-    from decoy_engine.execution.out_of_core._budget import resolve_budget
+    from decoy_engine.execution.out_of_core import resolve_budget
 
     return resolve_budget(ctx.out_of_core_budget_bytes).budget_bytes
 
@@ -85,13 +87,14 @@ def complete_resident_validation(
 
     pending = session.unobserved_tables(result.outputs)
     wanted = session.paired_tables()
+    every = session.reads_every_source()
     resident: dict[str, Any] = {}
     for name in pending:
-        source = ctx.caller_sources.get(name) if name in wanted else None
-        if isinstance(source, LazySource):
+        source = ctx.caller_sources.get(name) if name in wanted or every else None
+        if isinstance(source, LazySource) and name in wanted:
             batches = source.iter_batches(_SOURCE_BATCH_ROWS)
             session.observe_source_batches(name, result.outputs[name], batches, source.schema)
-        elif source is not None:
+        elif isinstance(source, pa.Table):
             resident[name] = source
     session.observe_unobserved(result.outputs, resident)
     fed = bool(pending)

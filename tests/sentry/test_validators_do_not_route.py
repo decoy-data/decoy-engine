@@ -75,10 +75,10 @@ S3_PENDING: dict[tuple[str, str, str], int] = {
     ("capacity.py", "get", "estimate_job_capacity"): 2,
     # The out-of-core route's own batch validation: S3.
     ("out_of_core/_rewrite_pass.py", "parameter validators", "_stream_table"): 1,
-    ("out_of_core/_rewrite_pass.py", "name validators", "rewritten"): 1,
+    ("out_of_core/_rewrite_pass.py", "name validators", "_delivered"): 1,
     ("out_of_core/_runner.py", "name validators", "run_fk_out_of_core"): 3,
     ("out_of_core/_stream_driver.py", "parameter validators", "stream_table"): 1,
-    ("out_of_core/_stream_driver.py", "name validators", "stream_table"): 1,
+    ("out_of_core/_stream_driver.py", "name validators", "_delivered"): 1,
     ("out_of_core/_validate_batch.py", "get", "admitted_validators"): 1,
     ("out_of_core/_validate_batch.py", "get", "validators_ooc_safe"): 1,
     ("out_of_core/_validate_batch.py", "get", "build_validator_collector"): 1,
@@ -121,7 +121,9 @@ def violations(source: str) -> list[str]:
             found.append(f"{line}: subscript")
         elif isinstance(node, ast.Call) and _call_reads_key(node):
             found.append(f"{line}: get")
-        elif isinstance(node, ast.ImportFrom) and _private_validators_import(node):
+        elif (
+            isinstance(node, ast.ImportFrom | ast.Import) and _private_validators_import(node)
+        ) or (isinstance(node, ast.Constant) and _names_private_module(node.value)):
             found.append(f"{line}: private import")
     return found
 
@@ -140,9 +142,28 @@ def _call_reads_key(node: ast.Call) -> bool:
     return False
 
 
-def _private_validators_import(node: ast.ImportFrom) -> bool:
+def _names_private_module(text: object) -> bool:
+    """A dotted path into a private `decoy_engine.validators` module, however it is spelled."""
+    return isinstance(text, str) and (text + ".").startswith(_PRIVATE_PREFIX)
+
+
+def _private_validators_import(node: ast.ImportFrom | ast.Import) -> bool:
+    """An import that binds a private validators module, in any of its spellings.
+
+    `from decoy_engine.validators._registry import x`, `from decoy_engine.validators import
+    _registry` (aliased or not), `import decoy_engine.validators._registry as r`, and the
+    relative forms, which resolve to the same module.
+    """
+    if isinstance(node, ast.Import):
+        return any(_names_private_module(alias.name) for alias in node.names)
     module = node.module or ""
-    return module.startswith(_PRIVATE_PREFIX)
+    if node.level and module.split(".")[0] == "validators":
+        module = "decoy_engine." + module  # relative spelling of the same package
+    if _names_private_module(module):
+        return True
+    if module == "decoy_engine.validators":
+        return any(alias.name.startswith("_") for alias in node.names)
+    return False
 
 
 def sites(source: str) -> Counter[tuple[str, str]]:
@@ -205,6 +226,13 @@ def test_a_new_site_in_a_listed_function_fails() -> None:
         "x = ctx.validators_requested",
         "f(validators_ooc_safe=True)",
         "from decoy_engine." + "validators._registry import validate",
+        "from decoy_engine.validators import _registry",
+        "from decoy_engine.validators import _registry as registry",
+        "import decoy_engine." + "validators._registry as registry",
+        "import decoy_engine." + "validators._registry",
+        "from .validators import _registry",
+        "from ..validators import _registry",
+        'importlib.import_module("decoy_engine.' + 'validators._registry")',
     ],
 )
 def test_the_scan_sees_each_seeded_spelling(snippet: str) -> None:

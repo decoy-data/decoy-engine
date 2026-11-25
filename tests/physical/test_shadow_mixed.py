@@ -528,7 +528,16 @@ def test_validators_are_admitted_and_change_no_output(tmp_path: Path) -> None:
     """EXPECT-OFF-ROUTE S2: a `validators:` list no longer declines the mixed driver."""
     accounts = _accounts_source()
     outputs = []
-    for validators in (None, [{"name": "regex_match", "columns": {"accounts": ["acct_id"]}}]):
+    for validators in (
+        None,
+        [
+            {
+                "name": "regex_match",
+                "columns": {"accounts": ["acct_id"]},
+                "params": {"pattern": ".*"},
+            }
+        ],
+    ):
         config = _mixed_config(
             tmp_path,
             mask_sources={"accounts": accounts},

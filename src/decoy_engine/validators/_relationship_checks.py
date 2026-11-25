@@ -372,7 +372,7 @@ class ReconciliationFold:
         self._tolerance: float = float(params.get("tolerance", 1e-6))
         if self._op not in _OPS:
             raise ValueError(
-                f"reconciliation_holds: unknown op {self._op!r}. Known ops: {sorted(_OPS)}."
+                f"reconciliation_holds: params.op is not a known op. Known ops: {sorted(_OPS)}."
             )
         edge = _edge_for(
             config,

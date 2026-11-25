@@ -48,7 +48,6 @@ __all__ = [
     "finalize_validators_and_quarantine",
     "stamp_execution_metrics",
     "stamp_validation",
-    "validate_rendered",
 ]
 
 # `run_pipeline`'s execution-knob defaults. Owned here (not `_pipeline.py`,
@@ -392,7 +391,7 @@ def finalize_validators_and_quarantine(
     outputs: dict[str, pa.Table],
     *,
     config: dict[str, Any],
-    caller_sources: dict[str, pa.Table],
+    caller_sources: Mapping[str, Any],
     mask_row_errors: tuple[Any, ...],
     quality_metrics: dict[str, Any],
 ) -> tuple[dict[str, pa.Table], dict[str, set[int]]]:
@@ -417,7 +416,9 @@ def finalize_validators_and_quarantine(
     """
     from decoy_engine.validators import run_resident_validation
 
-    v_report = run_resident_validation(outputs, config, caller_sources)
+    # Only resident tables pair with an output; `caller_sources` must be aligned to these outputs.
+    resident = {name: src for name, src in caller_sources.items() if isinstance(src, pa.Table)}
+    v_report = run_resident_validation(outputs, config, resident)
     if v_report is not None:
         stamp_validation(quality_metrics, config, v_report)
     return finalize_quarantine(
@@ -427,31 +428,6 @@ def finalize_validators_and_quarantine(
         mask_row_errors=mask_row_errors,
         quality_metrics=quality_metrics,
     )
-
-
-def validate_rendered(
-    outputs: dict[str, pa.Table],
-    *,
-    config: dict[str, Any],
-    sources: Mapping[str, Any],
-    quality_metrics: dict[str, Any],
-) -> dict[str, pa.Table]:
-    """Validators for a lane that returns finished outputs, judged on the rendered bytes.
-
-    `sources` must already be aligned to the rendered rows (declared casting may have dropped
-    some). The verdict then goes through the same quarantine tail full-frame uses.
-    """
-    from decoy_engine.validators import run_resident_validation
-
-    resident = {name: src for name, src in sources.items() if isinstance(src, pa.Table)}
-    v_report = run_resident_validation(outputs, config, resident)
-    if v_report is None:
-        return outputs
-    stamp_validation(quality_metrics, config, v_report)
-    outputs, _ = finalize_quarantine(
-        outputs, v_report, config=config, mask_row_errors=(), quality_metrics=quality_metrics
-    )
-    return outputs
 
 
 def finalize_quarantine(

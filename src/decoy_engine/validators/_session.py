@@ -119,8 +119,10 @@ class ValidationSession:
         entries: list[Any] = config.get("validators") or []
         self._names: list[str] = []
         self._folds: list[Fold] = []
-        for entry in entries:
-            name, fold = build_fold(entry, config, cap=cap, budget=budget, sources=sources)
+        for index, entry in enumerate(entries):
+            name, fold = build_fold(
+                entry, config, cap=cap, budget=budget, sources=sources, index=index
+            )
             self._names.append(name)
             self._folds.append(fold)
         self._rows: dict[str, int] = {}
@@ -206,6 +208,10 @@ class ValidationSession:
     def paired_tables(self) -> frozenset[str]:
         """The tables a check reads a source for, so a caller loads only those sources."""
         return frozenset().union(*(fold.paired_tables() for fold in self._folds))
+
+    def reads_every_source(self) -> bool:
+        """True when a whole-table function is open: it may read the source of any table."""
+        return any(getattr(fold, "reads_sources", False) for fold in self._folds)
 
     def table_complete(self, table: str) -> None:
         """The table has delivered every row; keyed folds may resolve what waited on it."""

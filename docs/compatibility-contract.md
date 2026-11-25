@@ -1195,9 +1195,7 @@ only this site moves.
   slice, the mixed route or the physical drivers; they run on the output of the route chosen.
   The physical plan hash no longer includes the validator count. Validators do not change what a
   plain callable `sink` receives. On the unified slice, full frame, the mixed route and the physical
-  drivers, a validator failure raises before the run returns. The out-of-core route writes each batch
-  to its sink before the run's validation finishes, so a plain callable there may already hold
-  batches when the run fails; a `TransactionalSink` aborts instead.)
+  drivers, a validator failure raises before the run returns. The out-of-core route validates each batch as the sink receives it, after declared formatting, and a `TransactionalSink` aborts on a failure; it does not take a plain callable sink.)
   With `ParquetTransactionalSink` the published file is byte-identical to
   `pq.write_table` of the resident table whenever no row group was cut by the byte cap.
   `run_pipeline` now admits a `LazySource` in `sources` to auto-chunk and to the B7 split

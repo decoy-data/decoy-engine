@@ -105,10 +105,11 @@ def _render_and_seal(
     if cast_run is not None:
         outputs, aligned, _ = cast_run.post_mask(result.outputs, sources)
         result = dataclasses.replace(result, outputs=outputs)
-    outputs = _pipeline_finalize.validate_rendered(
+    outputs, _ = _pipeline_finalize.finalize_validators_and_quarantine(
         dict(result.outputs),
         config=config,
-        sources=aligned,
+        caller_sources=aligned,
+        mask_row_errors=(),
         quality_metrics=result.quality_metrics,
     )
     result = dataclasses.replace(result, outputs=outputs)

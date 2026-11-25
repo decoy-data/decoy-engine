@@ -127,7 +127,7 @@ def test_plan_hash_ignores_the_validator_count_and_keeps_the_resident_fit(
     resident-fit verdict that replaced them in S2's scope still does."""
     import dataclasses
 
-    from decoy_engine.execution.pipeline._resident_fit import ResidentFit
+    from decoy_engine.execution.pipeline import ResidentFit
 
     inputs = _flat_inputs(tmp_path)
     counted = dataclasses.replace(inputs, validators=({"name": "luhn"}, {"name": "npi"}))

@@ -62,6 +62,7 @@ from decoy_engine.execution._transforms_admission import stamp_out_of_core_decli
 from decoy_engine.execution.pipeline import store_resident_fit
 from decoy_engine.execution.pipeline._post_scan import attach_cast_run
 from decoy_engine.profile._readers import LazySource
+from decoy_engine.validators import active_validation_session
 
 if TYPE_CHECKING:
     from decoy_engine.execution._pipeline_context import PipelineRunContext, RouteDecision
@@ -289,14 +290,24 @@ def _run_admitted(
                 "rejections": {},
             }
         stamp_out_of_core_declined(quality_metrics, decision.ooc_declined)
+        outputs = {} if streamed else stitch_generate_mask_outputs(generate_outputs, mask_outputs)
+        if outputs and active_validation_session() is not None:
+            # The rendered outputs against the same typed, row-aligned source masking read
+            # (streamed output declines validators), before the seal and the publish.
+            aligned = sources if cast_run is None else cast_run.align_sources(sources, mask_outputs)
+            outputs, _ = _pipeline_finalize.finalize_validators_and_quarantine(
+                outputs,
+                config=ctx.config,
+                caller_sources=aligned,
+                mask_row_errors=(),
+                quality_metrics=quality_metrics,
+            )
         quarantine_token = None
         if cast_run is not None:
             # Seal last: only the publish itself remains.
             quality_metrics["declared_casting"], quarantine_token = cast_run.finish()
         result = ExecutionResult(
-            outputs={}
-            if streamed
-            else stitch_generate_mask_outputs(generate_outputs, mask_outputs),
+            outputs=outputs,
             timings=tuple(timings),
             boundary_conversion_ms=conversion_ms,
             warnings=tuple(warnings),

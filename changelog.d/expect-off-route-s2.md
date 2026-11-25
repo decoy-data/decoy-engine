@@ -7,8 +7,10 @@ a bad validator entry fails at the start of the run. It feeds the session every 
 no earlier step folded, finishes it before `settle`, and stores the report in
 `quality_metrics["validation"]`. On the unified slice, full frame, the mixed route and the physical
 drivers, a failing check raises `ValidatorFailedError` before the run returns. The out-of-core route
-writes each batch to its sink before its validation finishes, so only a `TransactionalSink` there is
-sure to publish nothing on a failure. A table has one folding observer: a second observer adds nothing.
+checks each batch as the sink receives it, after declared formatting, and a `TransactionalSink`
+aborts on a failure. A standalone `ShadowCoordinator.run` of a generation or mixed plan also raises
+when its configured validators reject the result. A bad validator entry or parameter is reported by
+entry index and parameter name, never by value. A table has one folding observer: a second observer adds nothing.
 Validators do not change what a plain callable sink receives. The unified slice judges the rendered
 bytes after post-mask quarantine, as full frame does. A lazy source that a check pairs with its output
 is read in batches.
