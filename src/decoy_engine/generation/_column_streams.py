@@ -47,7 +47,11 @@ from decoy_engine.generators.derivation import (
     column_identity,
     with_table,
 )
-from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+from decoy_engine.internal.faker_setup import (
+    get_faker_providers,
+    open_column_faker,
+    requested_locale,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -171,20 +175,12 @@ class PerRowFakerStream:
         from decoy_engine.generation.synthesize import _get_default_faker
 
         faker_type = col.get("faker_type", "word")
-        locale = col.get("locale")
         raw_kwargs = col.get("faker_kwargs") or {}
         self._kwargs: dict[str, Any] = raw_kwargs if isinstance(raw_kwargs, dict) else {}
         self._ctx = ctx
-        pre_seed: int | None
-        if locale:
-            self._inst = make_faker(locale)
-            pre_seed = None
-        elif instance_default_locale:
-            self._inst = make_faker(instance_default_locale)
-            pre_seed = seed
-        else:
-            self._inst = _get_default_faker()
-            pre_seed = seed
+        self._inst, pre_seed = open_column_faker(
+            col.get("locale"), instance_default_locale, seed, _get_default_faker
+        )
         providers = get_faker_providers(self._inst, provider_snapshot=provider_snapshot)
         self._provider = providers.get(faker_type) or providers["word"]
         if pre_seed is not None:
@@ -374,10 +370,10 @@ def _faker_stream(
     faker_payload: int | None,
 ) -> ColumnStream:
     faker_type = col.get("faker_type", "word")
-    requested_locale = col.get("locale") or instance_default_locale
+    requested = requested_locale(col.get("locale"), instance_default_locale)
     # Pool admission is the TABLE row count, fixed for the column before the first batch.
     if _faker_pool.pool_eligible(
-        faker_type, requested_locale, rows, opted_out=_faker_pool.pool_opted_out(col)
+        faker_type, requested, rows, opted_out=_faker_pool.pool_opted_out(col)
     ):
         raw_kwargs = col.get("faker_kwargs") or {}
         # Reserve before the provider calls that build the pool allocate anything.
@@ -391,7 +387,7 @@ def _faker_stream(
             faker_type=faker_type,
             faker_kwargs=raw_kwargs if isinstance(raw_kwargs, dict) else {},
             gen_ctx=ctx,
-            effective_locale=requested_locale,
+            effective_locale=requested,
             provider_snapshot=provider_snapshot,
         )
         if selector is not None:

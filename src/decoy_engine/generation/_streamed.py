@@ -64,6 +64,7 @@ from decoy_engine.generation.pool import (
 )
 from decoy_engine.generation.relational import reference_policies
 from decoy_engine.generation.stream import check_width, table_batches
+from decoy_engine.internal.faker_setup import requested_locale
 from decoy_engine.progress import get_active_channel
 
 if TYPE_CHECKING:
@@ -195,7 +196,7 @@ def _pooled_columns(
         if c.get("type") == "faker"
         and pool_eligible(
             c.get("faker_type", "word"),
-            c.get("locale") or instance_default_locale,
+            requested_locale(c.get("locale"), instance_default_locale),
             rows,
             opted_out=pool_opted_out(c),
         )

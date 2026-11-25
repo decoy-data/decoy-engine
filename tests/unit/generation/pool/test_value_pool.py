@@ -107,3 +107,25 @@ class TestConstructionPeakFloor:
         assert (
             construction_floor(n, strings=False) <= measured_pool_bytes(ints) + 3 * 8 * n + 16 * n
         )
+
+
+class TestNestedArrowRetention:
+    def test_a_dictionary_inside_a_struct_counts_its_value_buffers(self) -> None:
+        import pyarrow as pa
+
+        big = "x" * 1_000_000
+        dictionary = pa.array([big, "y"])
+        indices = pa.array([0], type=pa.int8())
+        nested = pa.StructArray.from_arrays(
+            [pa.DictionaryArray.from_arrays(indices, dictionary)], names=["d"]
+        )
+        pool = _make_pool(np.array([1], dtype=np.int64), arrow=nested)
+        assert measured_pool_bytes(pool) >= 1_000_000
+
+    def test_a_buffer_shared_by_two_nested_arrays_counts_once(self) -> None:
+        import pyarrow as pa
+
+        shared = pa.array(["z" * 1000, "w"])
+        nested = pa.StructArray.from_arrays([shared, shared], names=["a", "b"])
+        pool = _make_pool(np.array([1], dtype=np.int64), arrow=nested)
+        assert measured_pool_bytes(pool) < 2 * 1000 + 100

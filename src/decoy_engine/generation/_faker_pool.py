@@ -51,7 +51,7 @@ from decoy_engine.generators.derivation import (  # noqa: F401  (the families ar
     GenDeriveContext,
 )
 from decoy_engine.generators.derivation import pool_seeds as _pool_seeds
-from decoy_engine.internal.faker_setup import make_faker, resolve_pool_provider
+from decoy_engine.internal.faker_setup import make_faker, requested_locale, resolve_pool_provider
 
 # Codex round-2 spec C, ROUND-3 confirmed: an IMMUTABLE closed allowlist, not
 # "reflection exists => poolable". Exact-semantic, non-key, non-structured
@@ -314,8 +314,8 @@ def try_pool(
     against the live custom-provider registry exactly as before.
     """
     faker_type = col.get("faker_type", "word")
-    requested_locale = col.get("locale") or instance_default_locale
-    if not pool_eligible(faker_type, requested_locale, n, opted_out=pool_opted_out(col)):
+    requested = requested_locale(col.get("locale"), instance_default_locale)
+    if not pool_eligible(faker_type, requested, n, opted_out=pool_opted_out(col)):
         return None
     gen_ctx = GenDeriveContext.for_column(
         derive_key=derive_key, column_config=col, fallback_seed=seed
@@ -325,7 +325,7 @@ def try_pool(
         faker_kwargs=faker_kwargs,
         n=n,
         gen_ctx=gen_ctx,
-        effective_locale=col.get("locale") or instance_default_locale,
+        effective_locale=requested,
         provider_snapshot=provider_snapshot,
     )
 

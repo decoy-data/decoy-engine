@@ -109,18 +109,36 @@ def _arrow_retained_bytes(array: pa.Array[Any]) -> int:
     A sliced or IPC-read buffer is a zero-copy view that holds its parent (Arrow's memory model,
     `pyarrow.Buffer.parent`), so a one-value view of a large message body keeps the whole body.
     """
-    arrays = [array]
-    if pa.types.is_dictionary(array.type):
-        arrays.append(array.dictionary)
     roots: dict[tuple[int, int], int] = {}
-    for arr in arrays:
-        for buf in arr.buffers():
-            if buf is None:
-                continue
-            while buf.parent is not None:
-                buf = buf.parent
-            roots[(buf.address, buf.size)] = buf.size
+    _collect_arrow_roots(array, roots)
     return sum(roots.values())
+
+
+def _collect_arrow_roots(array: pa.Array[Any], roots: dict[tuple[int, int], int]) -> None:
+    """Add every root buffer of ``array``, its child arrays and its dictionaries to ``roots``.
+
+    `Array.buffers()` flattens children but not dictionaries, and a dictionary can sit inside a
+    struct, list or map, so each nested array is walked here. Shared roots count once."""
+    for buf in array.buffers():
+        if buf is None:
+            continue
+        while buf.parent is not None:
+            buf = buf.parent
+        roots[(buf.address, buf.size)] = buf.size
+    typ = array.type
+    if pa.types.is_dictionary(typ):
+        _collect_arrow_roots(array.dictionary, roots)
+    elif pa.types.is_struct(typ):
+        for i in range(typ.num_fields):
+            _collect_arrow_roots(array.field(i), roots)
+    elif pa.types.is_map(typ):
+        _collect_arrow_roots(array.keys, roots)
+        _collect_arrow_roots(array.items, roots)
+    elif pa.types.is_list(typ) or pa.types.is_large_list(typ) or pa.types.is_fixed_size_list(typ):
+        _collect_arrow_roots(array.values, roots)
+    elif pa.types.is_union(typ):
+        for i in range(typ.num_fields):
+            _collect_arrow_roots(array.field(i), roots)
 
 
 def construction_floor(size: int, *, strings: bool) -> int:

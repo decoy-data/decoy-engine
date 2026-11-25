@@ -136,7 +136,7 @@ ALLOWLIST: dict[str, int] = {
     # one StreamFkJoiner lifecycle class (stage, orphan count, ordered and bounded-reorder joins, resolve); explain/optimizer helpers live in _stream_join_plan.py.
     "src/decoy_engine/execution/out_of_core/_stream_join.py": 665,
     # custom-provider registry snapshot for the shadow-parity gate; one cohesive module, no split identified.
-    "src/decoy_engine/internal/faker_setup.py": 688,
+    "src/decoy_engine/internal/faker_setup.py": 700,
     # FF1 span path and sub-floor policy (synthetic values split to _text_mask_synthetic.py).
     "src/decoy_engine/transforms/text_mask.py": 670,
     # scripts/: pre-existing one-off tooling, recorded when the sentry started scanning scripts/.

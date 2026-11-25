@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import inspect as _inspect
 import json
+import locale as pylocale
 import logging
 import os
 import stat
@@ -499,7 +500,10 @@ def get_faker_providers(
             continue
         if name in _FAKER_DENYLIST:
             continue
-        attr = getattr(fake, name, None)
+        try:
+            attr = getattr(fake, name, None)
+        except NotImplementedError:
+            continue  # a multi-locale proxy raises on its single-factory helpers; not providers
         if not callable(attr):
             continue
         providers[name] = _reflect(fake, name, attr)
@@ -640,16 +644,33 @@ def list_generate_faker_providers(locale: str | list[str] | None = None) -> tupl
 DEFAULT_GENERATE_LOCALE = "en_US"
 
 
+def requested_locale(column_locale: Any, default_locale: Any = None) -> Any:
+    """The locale a column asks for: its own, else the run default, else None."""
+    return column_locale or default_locale or None
+
+
 def effective_locale(column_locale: Any, default_locale: Any = None) -> Any:
     """The locale a generate column runs in: its own, else the run default, else en_US."""
-    return column_locale or default_locale or DEFAULT_GENERATE_LOCALE
+    return requested_locale(column_locale, default_locale) or DEFAULT_GENERATE_LOCALE
 
 
 def locale_entries(locale: Any) -> tuple[str, ...]:
-    """The distinct locales Faker opens for ``locale``, in order. Faker reads `-` as `_`."""
+    """The locales Faker opens for ``locale``, in order, by Faker's resolved name (`it` is `it_IT`)."""
     entries = locale if isinstance(locale, list) else [locale]
     names = (str(e).replace("-", "_") if e else DEFAULT_GENERATE_LOCALE for e in entries)
-    return tuple(dict.fromkeys(names)) or (DEFAULT_GENERATE_LOCALE,)
+    distinct = tuple(dict.fromkeys(names)) or (DEFAULT_GENERATE_LOCALE,)
+    return tuple(pylocale.normalize(n).split(".")[0] for n in distinct)
+
+
+def open_column_faker(
+    column_locale: Any, default_locale: Any, seed: int, default_faker: Callable[[], Faker]
+) -> tuple[Faker, int | None]:
+    """The per-row Faker and its pre-seed: a column locale gives no pre-seed, else ``seed``."""
+    if column_locale:
+        return make_faker(column_locale), None
+    if default_locale:
+        return make_faker(default_locale), seed
+    return default_faker(), seed
 
 
 def make_faker(locale: str | list[str] | None = None) -> Faker:
@@ -659,13 +680,8 @@ def make_faker(locale: str | list[str] | None = None) -> Faker:
     locale. Invalid locales fall back to `en_US` so a single bad pipeline
     rule doesn't poison the run.
 
-    QA-internal-synth-providers F7 (2026-06-01, MEDIUM correctness):
-    a typo like `faker_locale: de_AT` no longer silently produces en_US
-    output; the fallback now logs a warning so an operator who picked
-    the locale on purpose can see that their request was ignored.
-    Names, addresses, and phone numbers from a wrong-locale Faker can
-    fail downstream format validations + break anonymization contracts
-    that rely on locale-appropriate output.
+    QA-internal-synth-providers F7 (2026-06-01): the fallback logs a warning, so an operator who
+    picked a locale on purpose (`faker_locale: de_AT`) can see that the request was ignored.
 
     Caller is responsible for seeding the returned instance via
     `seed_instance(...)` for deterministic output."""

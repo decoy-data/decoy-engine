@@ -49,6 +49,20 @@ class _DrainSink:
         return None
 
 
+def _resolved_names(fake: Faker) -> tuple[str, ...]:
+    """The locale each factory under ``fake`` really built, read from Faker's own generator.
+
+    `Faker.locales` keeps the submitted alias (`it`); the generator config holds the name Faker
+    resolved it to (`it_IT`), which is the locale whose tables the open allocates."""
+    names: list[str] = []
+    for factory in fake._factory_map.values():
+        if isinstance(factory, Faker):
+            names.extend(_resolved_names(factory))
+        else:
+            names.append(factory._Generator__config["locale"])
+    return tuple(names)
+
+
 class _Trace:
     """The order of reservations and Faker opens in one run, and the locales each open read."""
 
@@ -76,7 +90,7 @@ def trace(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Trace]:
     def spy_init(self: Faker, *args: Any, **kwargs: Any) -> None:
         real_init(self, *args, **kwargs)
         t.order.append("open")
-        t.opened.append(tuple(self.locales))
+        t.opened.append(_resolved_names(self))
 
     real_reserve = GenerationBudgetLedger.reserve
 
@@ -106,6 +120,8 @@ def _provider_config(rows: int) -> dict[str, Any]:
 # (config, instance default locale): one per route that opens a Faker locale.
 _PROBES: dict[str, tuple[dict[str, Any], str | None]] = {
     "per_row_run_default": (faker_config("prefix", 1), "it_IT"),
+    "per_row_run_default_alias": (faker_config("prefix", 1), "it"),
+    "pooled_run_default_alias": (faker_config("prefix", 50_000), "it"),
     "per_row_explicit": (faker_config("prefix", 1, locale="de_AT"), None),
     "pooled": (faker_config("prefix", 50_000, locale="it_IT"), None),
     "provider_column": (_provider_config(4), None),
@@ -203,3 +219,16 @@ def test_the_locale_rule_normalizes_and_defaults() -> None:
     assert locale_entries(effective_locale("", "it-IT")) == ("it_IT",)
     assert locale_entries(["en-US", None, "en_US", "de_AT"]) == ("en_US", "de_AT")
     assert locale_entries([]) == ("en_US",)
+
+
+def test_locale_entries_read_a_faker_alias_as_the_locale_faker_opens() -> None:
+    assert locale_entries("it") == ("it_IT",)
+    assert locale_entries(["de-AT", "it"]) == ("de_AT", "it_IT")
+
+
+@pytest.mark.serial
+def test_a_validated_locale_list_generates_rows() -> None:
+    config = prepared_config(faker_config("prefix", 3, locale=["de_AT", "it_IT"]))
+    out = synthesize._generate_tables_from_config(config)
+    assert out["t"].num_rows == 3
+    assert all(isinstance(v, str) and v for v in out["t"].column("v").to_pylist())
