@@ -16,7 +16,7 @@ from decoy_engine.fileaccess._errors import guarded, guarded_iter
 from decoy_engine.fileaccess._types import FileHandle, StageDir
 from decoy_engine.safe_output import output_schema, output_table
 
-T = TypeVar("T")
+_T = TypeVar("_T")
 
 
 def _strict(handle: FileHandle) -> bool:
@@ -78,15 +78,15 @@ def iter_batches(
 def collect_batches(
     handle: FileHandle,
     parquet_file: pq.ParquetFile,
-    collect: Callable[[Iterator[pa.RecordBatch]], T],
+    collect: Callable[[Iterator[pa.RecordBatch]], _T],
     **kwargs: Any,
-) -> T:
+) -> _T:
     """`collect(parquet_file.iter_batches(**kwargs))` as one guarded call under a strict handle.
 
     The conversion `collect` does (Arrow to pandas) fails on a bad cell with the cell in its
     text, after every batch read cleanly, so the guard must span it as well as the reads."""
 
-    def read() -> T:
+    def read() -> _T:
         return collect(parquet_file.iter_batches(**kwargs))
 
     return guarded(handle.display, _strict(handle), read)
