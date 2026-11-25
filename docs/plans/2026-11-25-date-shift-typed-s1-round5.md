@@ -28,6 +28,10 @@ storage range; (b) a masking probe inside the shared `to_pandas_fk_safe` refused
 work (`when:` on `time64[ns]`, the Faker null mask on a far `date32`); (c) a bound table for
 masking cannot cover every physical/target unit pair. The masking half is now a different
 rule: metadata never decides, checked by a differential test, at the pandas masking sites only.
+Codex plan R2 NO-GO (three V1): a stale-only reconciliation let correct Arrow-backed hints
+change `when:` null semantics, kept a stale `timezone` member, and let a raw Arrow error quote
+a value. Folded: masking reconciles every temporal entry, exactly as the profile does, and the
+helper turns a temporal conversion failure into a column-only error.
 
 ## Established solutions
 
@@ -84,14 +88,14 @@ with no temporal metadata (listed under Deferred, not this class).
    column) is reconciled to the physical field. The `pandas_type` and `metadata` members come
    from the existing registry, `_pandas_meta` (`pairs_for(field.type)[0]` and
    `column_metadata(field.type)`, `src/decoy_engine/_pandas_meta/_descriptors.py:89,107`), so
-   no temporal fact is decided twice. The profile keeps one local override, `numpy_type`
+   no temporal fact is decided twice. The function adds one override, `numpy_type`
    `"object"`, which makes pyarrow use the physical default. All other entries and
    `index_columns` / `column_indexes` stay as they are. One function,
-   `reconcile_temporal_metadata(table, *, only_stale: bool) -> pa.Table`, in
-   `internal/pandas_compat.py`. With `only_stale=True` (masking) it rewrites only an entry
-   whose `(pandas_type, numpy_type)` pair is not in `pairs_for(field.type)`, and writes the
-   registry's plain pair. It never raises: unparseable metadata returns the table unchanged;
-   an entry with no matching field, or a duplicated field name, is skipped.
+   `reconcile_temporal_metadata(table) -> pa.Table`, in `internal/pandas_compat.py`, used by
+   the profile and by pandas masking alike. It rewrites every temporal entry, including the
+   `metadata.timezone` member, so neither a stale nor a correct Arrow-backed hint survives. It
+   never raises: unparseable metadata returns the table unchanged; an entry with no matching
+   field, or a duplicated field name, is skipped.
 2. **One bounds table.** `temporal_bounds(kind, *, coerce_ns)` in `decoy_engine/_arrow_types.py`
    returns `(low, high, step)` on the physical integer. The target unit is `ns` when
    `coerce_ns`, else the physical unit. `coerce_ns` comes from one helper,
@@ -110,23 +114,27 @@ with no temporal metadata (listed under Deferred, not this class).
    five pandas masking sites: the adapter ingestion (`_pandas_adapter.py:205`), sequential
    (`_sequential.py:415`), unified admission (`_unified_slice_admission.py:347`), and the two
    attribution retries (`_pipeline_full_frame.py:81`, `_chunked_carry.py:143`). It does two
-   things, then calls `to_pandas_fk_safe` unchanged:
-   - `reconcile_temporal_metadata(table, only_stale=True)`: a stale entry (F1, and the
-     `s`/`ms` unit pairs of Codex plan R1) is replaced by the registry's plain pair, so pyarrow
-     never casts to a unit or kind the physical field does not have.
-   - For each temporal field whose remaining entry names an Arrow-backed dtype (`numpy_type`
-     ending in `[pyarrow]`), a trial conversion of that one column with the entry set to the
-     plain pair. If the trial fails, the helper raises `ValueError(f"column {name!r} holds a
-     temporal value pandas cannot represent")` `from None`. The trial is what the same column
-     with no metadata would do, so the outcome matches the no-metadata run. The successful
-     trial frame is dropped; the real conversion keeps the Arrow-backed dtype, so in-range
-     output is unchanged.
+   two things around `to_pandas_fk_safe`:
+   - Before: `reconcile_temporal_metadata(table)` (rule 1). The frame the masking rules and
+     `when:` predicates see is then the frame the same source with no metadata gives: numpy
+     dtypes and the physical zone. This closes F1 and F5 on masking, the `s`/`ms` unit pairs,
+     a stale `timezone` member over a zoned field, and the `when:` null semantics difference
+     (`<NA>` from an Arrow-backed column versus `False`/`True` from numpy, Codex plan R2).
+   - On failure: if the conversion raises a conversion error (`_conversion_errors()` of
+     `_chunked_carry.py:46`), the helper converts each temporal column alone; the first whose
+     own conversion fails names the column, and the helper raises `ValueError(f"column
+     {name!r} holds a temporal value pandas cannot represent")` `from None`. If no temporal
+     column fails alone, the original error is re-raised unchanged (non-temporal failures keep
+     today's behaviour). So no Arrow or pandas text about a temporal cell leaves the helper on
+     any pandas masking route, including a masked column the chunked attribution does not cover.
    The error text depends on the column name only, so each attribution retry (which calls the
    same helper) reproduces it and assigns the released code: `full_frame_value_unrepresentable`
    with table and column on full frame and sequential, `chunked_passthrough_value_unrepresentable`
    for a read passthrough on the chunked oracle, and a decline in unified admission (which then
-   reaches the legacy route's coded refusal, so flag-on and flag-off stay equal). The sentinel
-   is not special here: `INT64_MIN` converts to `NaT` in the trial as it does with no metadata.
+   reaches the legacy route's coded refusal, so flag-on and flag-off stay equal). A masked
+   temporal column on the chunked oracle raises the helper's value-free `ValueError`, as an
+   uncoded but value-free error (a code for it is outside this class). The sentinel is not
+   special here: `INT64_MIN` converts to `NaT` as it does with no metadata.
 
 ### Bounds table (inclusive, physical unit P, target unit T)
 
@@ -174,7 +182,7 @@ bound, so its pre-1677 values read as null in a profile. That is safe and is rec
 
 | Id | Case | File |
 |---|---|---|
-| P1 | Local Parquet, `timestamp[s]` cells `[0, 16725225600, 1]` (year 2500) with stale `timestamp[ns][pyarrow]` metadata: `scan_sources(strategy="full")` and `profile_source` return; on pandas 2 the middle cell is kept as 2500-01-01 and the dtype is `datetime64[s]`; no output, warning or exception text holds `16725225600` | `tests/unit/profile/test_profile_frame_unrepresentable.py` |
+| P1 | `timestamp[s]` cells `[0, 16725225600, 1]` (year 2500) with stale `timestamp[ns][pyarrow]` metadata. Resident table through `profile_frame`: on pandas 2 the middle cell is kept as 2500-01-01 and the dtype is `datetime64[s]`. Local Parquet through `scan_sources(strategy="full")` and `profile_source` (Parquet stores `timestamp[ms]`, so the stale entry still names ns): both return, the middle cell is kept, the dtype is `datetime64[ms]`. No output, warning or exception text holds `16725225600` or `16725225600000` | `tests/unit/profile/test_profile_frame_unrepresentable.py` |
 | P1b | Same cells, stale `datetimetz` metadata naming `America/New_York` over the naive field: same result, and the profiled column is naive (the physical type, not the metadata zone) | same |
 | P1c | A table from `pa.Table.from_pandas` with a named non-range index plus P1's stale entry: `profile_frame` keeps the index values and name; `__index_level_0__` is not a column | same |
 | P2a | Full Parquet scan, `timestamp[s, America/New_York]` at year 1 day 2 and epoch, in a child process (`sys.executable`): exit code 0, the year-1 cell null, epoch kept | same |
@@ -182,10 +190,12 @@ bound, so its pre-1677 values read as null in a profile. That is safe and is rec
 | P2c | `profile_frame`, `timestamp[s, UTC]` at noon 0001-01-01 and noon 9999-12-31: both kept | same |
 | P2d | `timestamp[s, +05:30]`: the instant whose wall time is 9999-12-31T23:59:59 is kept, one second later is null; the mirror at year 1 | same |
 | P2e | `timestamp[s, Asia/Kolkata]` at year 1 day 10, in a child process: exit 0, null, no `KeyError` | same |
-| P2f | Rendered profile (top values, `profiler.py:99`) of `timestamp[ns, +05:30]` at `INT64_MAX` and `INT64_MAX - 5.5 h`: the first is null, the second is kept and renders as year 2262. Mirror for `timestamp[ns, -05:00]` at `NS_LOW` (null) and `NS_LOW + 5 h` (kept, year 1677). No `OutOfBoundsDatetime` and no timestamp text in any output | same |
+| P2f | Rendered profile (top values, `profiler.py:99`) of `timestamp[ns, +05:30]` at `INT64_MAX` and `INT64_MAX - 5.5 h`: the first is null, the second is kept and renders as year 2262. Mirror for `timestamp[ns, -05:00]` at `NS_LOW` (null) and `NS_LOW + 5 h` (kept, year 1677). No `OutOfBoundsDatetime`, and the rejected cells' integers and their rendered timestamps appear in no output | same |
 | P3 | `timestamp[s]` `[0, 2500-01-01, 1]` with `pandas_coerces_temporal_ns` patched to `True`: only the middle cell is null and the dtype is `datetime64[ns]`. The builder also runs `profile_frame` alone (the package does not import on pandas 1.5.3 for an unrelated reason) under pandas 1.5.3 in a throwaway venv and records the result (evidence, not CI) | `tests/unit/profile/test_profile_frame_unrepresentable.py` |
 | P4 | Full Parquet scan of `timestamp[ns]` `[INT64_MIN, 0, INT64_MIN, 1]`: null count 2 with default metadata and 2 with `timestamp[ns][pyarrow]` metadata; the same for `duration[ns]` | same |
-| P5 | Differential, pandas masking forced, on full frame, sequential and the chunked oracle (passthrough column plus the masked `name` sibling, as in `test_full_frame_value_unrepresentable.py`). For each fixture, run once with the given metadata and once with the `pandas` metadata removed; assert the same outcome: both succeed with equal output values, or both raise `ExecutionError` with the same code (full frame, sequential: `full_frame_value_unrepresentable`, table and column named). Fixtures: `date32` `[0, 2932897, 1]` with `date32[day][pyarrow]` (F5: red today, the metadata run raises an uncoded `OverflowError`); `time64[ns]` `[1, 2]` with `time64[ns][pyarrow]`; `timestamp[s]` year 2500 with stale `timestamp[ns][pyarrow]`; `timestamp[s]` `10**16` with stale `timestamp[ms][pyarrow]`; `timestamp[ms]` `12345` with stale `timestamp[s][pyarrow]`; in-range `timestamp[us]` with `timestamp[us][pyarrow]` (both succeed). No `str(exc)` or rendered chain holds a fixture integer or its year | `tests/unit/execution/test_full_frame_value_unrepresentable.py` |
+| P5 | Differential, pandas masking forced, on full frame, sequential and the chunked oracle (passthrough column plus the masked `name` sibling, as in `test_full_frame_value_unrepresentable.py`). For each fixture, run once with the given metadata and once with the `pandas` metadata removed; assert the same outcome: both succeed with equal output values, or both raise with the same code (full frame, sequential: `full_frame_value_unrepresentable`, table and column named). Fixtures: `date32` `[0, 2932897, 1]` with `date32[day][pyarrow]` (F5: red today, the metadata run raises an uncoded `OverflowError`); `time64[ns]` `[1, 2]` with `time64[ns][pyarrow]`; `timestamp[s]` year 2500 with stale `timestamp[ns][pyarrow]`; `timestamp[s]` `10**16` with stale `timestamp[ms][pyarrow]`; `timestamp[ms]` `12345` with stale `timestamp[s][pyarrow]`; physical `timestamp[us, UTC]` at midnight with a stale `timezone: America/New_York` member; in-range `duration[us]`, `timestamp[us, UTC]` and `date32` with their pyarrow-written Arrow-backed entries (both succeed). No `str(exc)` or rendered chain holds a fixture integer or its year | `tests/unit/execution/test_full_frame_value_unrepresentable.py` |
+| P5w | `when:` parity, the R2 reproduction: nullable `timestamp[us]` `[null, 2050, 2200]` with `timestamp[us][pyarrow]`, `when: not (t < '2100-01-01')`, `name` redacted. On full frame, sequential and the chunked oracle, the masked `name` values equal those of the same run without metadata, and the null row's `name` is masked in both | same |
+| P5x | Chunked oracle, a masked (not passthrough) `time64[ns]` column with tick `123456789` and `time64[ns][pyarrow]`: the run raises; no `str(exc)` and no rendered chain holds `123456789`; the same with the metadata removed | same |
 | P5b | Chunked oracle, the far `date32` column read by a `when:` with `date32[day][pyarrow]`: the same `chunked_passthrough_value_unrepresentable` code, `'chunk '` in the message, `__cause__` set, as the same run without metadata | same |
 | P5c | Unified admission flag on and off, P5's `date32` fixture with Arrow-backed metadata: both give `full_frame_value_unrepresentable` (admission declines) | same |
 | P5d | Regression guards, green today and kept: native `when:` on Arrow-backed `time64[ns]` ticks `[1, null, 0]` selects the expected rows and returns the column exactly; the chunked positional Faker job on Arrow-backed `date32` year 10000 succeeds; the zoned rev9 shapes (`tests/native/_rev9_support.py:64`) stay `"exact"`; `tests/native/test_c8_i_when_mask.py` and `test_chunked_entry_rev9_shapes.py` stay green unchanged | same, and existing files |
@@ -212,10 +222,11 @@ today; every other P case records red on `b6c7785d5`.
 | M6 | ignore `coerce_ns` in the bound | P3 |
 | M7 | admit `INT64_MIN` | P4, P7 |
 | M8 | one masking site back to `to_pandas_fk_safe` | P5e, and P5 on that route |
-| M9 | restore the whole-column fallback for bounded types, with a patched bound that admits one bad cell so the conversion fails after bounding | P3 variant with the patched bound (only that cell null, not the column) |
+| M9 | restore the whole-column fallback for bounded types; red is shown with a patched bound that admits one bad cell, so the conversion fails after bounding | P3 variant: expects the column-only `ValueError` of rule 4, gets a nulled column |
 | M10 | the arithmetic sentry matches the bare call name only | P8 |
-| M11 | the masking helper skips the trial conversion | P5 (`date32`, `time64` fixtures), P5b, P5c |
-| M12 | the masking helper reconciles every entry, not only stale ones | P5 in-range fixture (output dtype changes), P5d |
+| M11 | the masking helper skips reconciliation | P5 (`date32`, stale-zone fixtures), P5w, P5b, P5c |
+| M12 | the masking helper reconciles only entries absent from `pairs_for` | P5w, P5 stale-zone fixture |
+| M15 | the helper re-raises the original error for a temporal failure | P5x |
 | M13 | the fixed-offset bound drops the `S - off` term | P2f, P7 |
 | M14 | the probe moved back into `to_pandas_fk_safe` | P5d (native `when:` and Faker guards), P5e |
 
@@ -223,16 +234,16 @@ today; every other P case records red on `b6c7785d5`.
 
 | # | Class | Structure that closes it | Proof | Mutation |
 |---|---|---|---|---|
-| 1 | Value-bearing output | metadata reconciled and the cell nulled on Arrow before conversion; the masking helper raises a column-only message `from None` | P1, P1b, P2f, P5 | M1, M11 |
+| 1 | Value-bearing output | metadata reconciled and the cell nulled on Arrow before conversion; the masking helper raises a column-only message `from None` for any temporal conversion failure | P1, P1b, P2f, P5, P5x | M1, M15 |
 | 2 | Cleanup missing on an exit path | N/A: no resource is opened; every new function is pure over an Arrow table | none needed | N/A |
 | 3 | State machine and concurrency | N/A: no shared state; `coerce_ns` is read per call | none needed | N/A |
 | 4 | Route parity and silent fallback | every profile route calls `profile_frame`; every pandas masking site calls `to_pandas_masking_frame` (sentry-pinned); unified admission uses it too, so flag on and off agree | P4, P5, P5c, P5e | M8, one site reverted |
 | 5 | Referential integrity | N/A: no key path changes | none needed | N/A |
 | 6 | Untrusted producer | pandas metadata from a source file never decides a profile bound or a masking outcome | P1, P1b, P4, P5 | M1, no reconcile |
 | 7 | Check then use on a path (TOCTOU) | N/A: no path is opened | none needed | N/A |
-| 8 | Weak tests and overclaimed evidence | each P case records red on `b6c7785d5` except P6 (new surface); child-process isolation for the segfault cases | builder report | M1 to M14 |
+| 8 | Weak tests and overclaimed evidence | each P case records red on `b6c7785d5` except P6 (new surface); child-process isolation for the segfault cases | builder report | M1 to M15 |
 | 9 | Behaviour-preserving refactor drift | P6 pins that correct metadata converts exactly as before | P6 equality test | M2, metadata dropped |
-| 10 | Frozen contract drift | no released code changes route; native callers unchanged; in-range Arrow-backed masking output unchanged | P5b, P5d pins | M12, M14 |
+| 10 | Frozen contract drift | no released code changes route; native callers unchanged; pandas masking output equals the no-metadata run (disclosed dtype change) | P5, P5b, P5d pins | M11, M14 |
 
 ## Enumerations
 
@@ -264,7 +275,8 @@ today; every other P case records red on `b6c7785d5`.
 - profile raise: a bounded column fails; `ValueError` naming the column, `from None`
 - masking refusal: the helper's `ValueError`, then the route's existing coded `ExecutionError`,
   or an admission decline, no value
-- masking pass: stale entries reconciled, otherwise conversion as today
+- masking pass: every temporal entry reconciled, then conversion as for a source with no
+  temporal metadata
 
 ### FK shapes
 
@@ -307,8 +319,9 @@ All new tests extend existing files: `tests/unit/profile/test_profile_frame_unre
 
 None changed. `full_frame_value_unrepresentable` and `chunked_passthrough_value_unrepresentable`
 keep their routes. The profile dtype label for a column with correct Arrow-backed temporal
-metadata changes to the physical default (P6b); a pandas masking run on a source with stale
-temporal metadata writes the physical default dtype in its output metadata. The PR adds one
+metadata changes to the physical default (P6b); a pandas masking run on a source with
+Arrow-backed or stale temporal metadata computes on, and writes, the physical default dtype,
+as for the same source with no metadata. The PR adds one
 CHANGELOG line covering both.
 
 ## Slices
@@ -347,8 +360,10 @@ under pandas 1.5.3.
 - A pandas masking run that succeeds today with Arrow-backed metadata is now refused: only
   when the same source without metadata is refused today (P5 differential); native callers
   are untouched (P5d).
-- The trial conversion doubles conversion cost: it runs only for temporal columns with an
-  Arrow-backed entry, one column at a time.
+- A masking rule relied on an Arrow-backed temporal dtype: it now sees what a source with no
+  metadata gives, which is the common case and already tested; P5 and P5w compare outputs.
+- The failure-path per-column retry is slow on a wide table: it runs only after a failure,
+  over temporal columns only.
 - The attribution retry does not reproduce the helper's error: it calls the same helper on
   `select([name])`, which keeps the schema metadata, and the text depends on the name only.
   P5 and P5b catch a mismatch.
@@ -363,9 +378,8 @@ under pandas 1.5.3.
 - `__context__` on the coded pandas-route error, as in round 3.
 - An Arrow-backed `timestamp[ns]` sentinel on a masking route keeps the existing ArrowDtype
   representation; only its refusal behaviour is pinned (P5c).
-- A pandas masking route on a source with no temporal metadata can surface a raw Arrow error
-  that quotes the integer, for a column the chunked attribution does not cover (Codex plan R1
-  finding 3). It predates this PR and is not the metadata class; it needs its own row.
+- A masked temporal column on the chunked oracle that pandas cannot hold raises the helper's
+  value-free `ValueError` without a released code. A code for it needs its own row.
 - `verification/canary/_canonical.py:42` holds a second copy of `DATE32_MIN_DAY` and
   `DATE32_MAX_DAY`; make it import them.
 - A profile of a named-zone column reads a 9999 "open end" value as null (named zones take the
