@@ -50,13 +50,11 @@ def keyed_uuid_array(
     The key arrives in an `OpaqueBox` and is unpacked only inside the call that consumes it, so
     no frame of this function holds the bytes. A null value stays null."""
     if hash_kernel is None:
-        digits = hash_array(
-            values, seed=key.open()[0], namespace=namespace, truncate=UUID_HEX_DIGITS
-        )
+        digits = hash_array(values, seed=key.item(0), namespace=namespace, truncate=UUID_HEX_DIGITS)
     else:
         digits = hash_kernel.derive_batch(
             values,
-            mask_key=key.open()[0],
+            mask_key=key.item(0),
             namespace=namespace,
             truncate=UUID_HEX_DIGITS,
             native_threads=native_threads,
@@ -88,7 +86,7 @@ def deterministic_computed_array(
         values,
         pool=spec,
         namespace=namespace,
-        mask_key=mask_key.open()[0],
+        mask_key=mask_key.item(0),
         index_kernel=index_kernel,
         native_threads=native_threads,
     )
