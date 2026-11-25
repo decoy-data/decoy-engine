@@ -25,6 +25,12 @@ a one-off patch:
 | R4 | a rebuilt `OrderedDict` loses its `move_to_end` order | none yet | |
 | R4 | `mappingproxy` passes through, `%s` prints the exception text (strict xfail) | none yet | |
 
+Dennis plan review R1 (GO-WITH-FIXES) is folded in below: the lone-mapping path always returns a
+truthy `_NamedArgs` (V1-1), the existing tests the rule turns red are listed (V1-2), the exception
+and mapping rows come before the depth check (V1-3), the guarantee is narrowed (D1), the builtin
+call form is fixed (D2), three mutations are added (D3), and lone `ChainMap`, `mappingproxy` and
+`UserDict` rows are added to the behavior table.
+
 ## Defect class
 
 **Open-ended reconstruction of caller objects.** The filter tries to keep each caller mapping
@@ -36,10 +42,21 @@ reached through class 6 (untrusted producer).
 
 ## Guarantee and non-goals
 
-Guarantee: after `SafeRecordFilter`, nothing reachable from `record.msg` or `record.args` is a
-caller exception or a caller mapping object, and the filter runs no caller code (no
-`__getitem__`, `__missing__`, `__iter__`, `items`, `__eq__` or factory of a caller type). Named
-`%(name)` lookups on a lone plain-dict-backed mapping keep their stored values.
+Guarantee, inside the scan depth only:
+
+- The scan reaches `record.msg` and one container level inside it, and each positional argument
+  (or each value of a lone mapping) and one container level inside it.
+- At every position the scan reaches, a caller exception becomes its label and a non-plain
+  mapping becomes the placeholder. No reference to either stays in what the filter writes back.
+- For each value it inspects, the filter makes exact type checks and calls only the builtin
+  methods named under Choke point (`dict.items`, `dict.get`, iteration of an exact `list`,
+  `tuple`, `set` or `frozenset`). It calls no `__getitem__`, `__missing__`, `__iter__`, `items`,
+  `__eq__`, `__hash__` or factory of a caller type.
+- Named `%(name)` lookups on a lone mapping whose items are in a plain `dict` (the mapping
+  itself, or a `UserDict`'s `data`) keep their stored values.
+
+Values past the scan depth, objects that are not exceptions or mappings, and caller metaclasses
+that change `issubclass` are outside the guarantee (the documented gaps and V2).
 
 Non-goals, unchanged from the audit plan: pre-formatted text in `msg`, `exc.args` passed as an
 argument, arbitrary wrapper objects whose `__str__` formats an exception, values deeper than the
@@ -169,15 +186,33 @@ One closed type table in one function, `_safe_value(value, depth)`, in
 comes from it. It decides by exact type (`type(value) is X`), never by `isinstance`, and it runs
 no caller code.
 
-| Input (exact type unless stated) | Output |
-|---|---|
-| any `BaseException` subclass | its closed type label (`_label`, as today) |
-| `str`, `bytes`, `int`, `float`, `complex`, `bool`, `None` | the value itself |
-| `list`, `tuple`, `set`, `frozenset` | a new builtin of the same type with each item through `_safe_value(item, depth - 1)`; the value itself when no item changes |
-| `dict` whose keys all have an exact type of `str`, `int`, `float`, `bool` or `None` | a new `dict` with each value through `_safe_value(value, depth - 1)` and the keys unchanged; the value itself when no value changes |
-| `dict` with any other key type (an exception key included) | the placeholder |
-| any other mapping: `issubclass(type(value), collections.abc.Mapping)` or a `UserDict` subclass. This covers dict subclasses, `OrderedDict`, `Counter`, `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap`, `ConfigParser` sections and caller mapping classes | the placeholder |
-| anything else, or any value at `depth == 0` | the value itself (the documented wrapper gap, unchanged) |
+Rows are checked in this order. The first match wins. Rows 1 and 2 come before the depth check,
+so an exception or a non-plain mapping is replaced at every position the scan reaches, depth 0
+included.
+
+| # | Input (exact type unless stated) | Output |
+|---|---|---|
+| 1 | any `BaseException` subclass | its closed type label (`_label`, as today) |
+| 2 | any mapping that is not an exact `dict`: `issubclass(type(value), collections.abc.Mapping)` or a `UserDict` subclass. This covers dict subclasses, `OrderedDict`, `Counter`, `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap`, `ConfigParser` sections and caller mapping classes | the placeholder |
+| 3 | any value at `depth == 0` | the value itself (the documented depth gap) |
+| 4 | `str`, `bytes`, `int`, `float`, `complex`, `bool`, `None` | the value itself |
+| 5 | `list`, `tuple`, `set`, `frozenset` | a new builtin of the same type with each item through `_safe_value(item, depth - 1)`; the value itself when no item changes |
+| 6 | `dict` whose keys all have an exact type of `str`, `int`, `float`, `bool` or `None` | a new `dict` with each value through `_safe_value(value, depth - 1)` and the keys unchanged; the value itself when no value changes |
+| 7 | `dict` with any other key type (an exception key or a `str` subclass included) | the placeholder |
+| 8 | anything else | the value itself (the documented wrapper gap, unchanged) |
+
+Builtin call form (D2). The filter reads containers only in these forms, and test 18 accepts no
+other:
+
+- row 6 reads pairs with `dict.items(value)`, an unbound call on an exact `dict`;
+- named lookups read with `dict.get(store, name, _ABSENT)`;
+- row 5 iterates with `for item in value`, which is safe only because the type check is exact;
+- key checks use `type(key) in _PLAIN_KEY_TYPES` on the type object, never `isinstance` and never
+  a comparison of the key itself;
+- "no item changes" is decided with `is`, never `==`, so no caller `__eq__` runs.
+
+Test 18 allows an attribute read of `items`, `keys`, `values` or `get` only when the receiver is
+the name `dict` (`dict.<method>(...)`).
 
 The placeholder is one module constant, `_MAPPING_PLACEHOLDER = _Label("<mapping>")`. It holds no
 reference to the caller object, its type, its factory or its items. The filter never reads the
@@ -202,10 +237,12 @@ Decisions the table makes:
 mapping. Named lookups must keep working for that case. One function, `_named_args(msg, mapping)`,
 handles it, and `_scrub` calls it only for that case:
 
-1. When `msg` is not a `str`, or holds no `%(name)` field, the lone mapping is a positional
-   value: `record.args = (_safe_value(mapping, _ARGS_DEPTH - 1),)`. `"%s" % (x,)` prints the same
-   as `"%s" % x` for a mapping `x`.
-2. Otherwise read the field names from `msg` with the CPython key rule above.
+1. `_named_args` always returns a `_NamedArgs`, also when `msg` has no `%(name)` field. It never
+   turns the lone mapping into a tuple: `"done" % ("<mapping>",)` raises "not all arguments
+   converted", while `"done" % {"a": 1}` prints `done`. Stock `%` with a mapping argument ignores
+   unused keys, and `_NamedArgs` keeps that.
+2. Read the field names from `msg` with the CPython key rule above. A `msg` that is not a `str`
+   has no fields.
 3. Find the store without running caller code: the mapping itself when
    `issubclass(type(m), dict)`; `vars(m)["data"]` when `m` is a `UserDict` and that attribute is
    an exact `dict`; otherwise no store.
@@ -214,9 +251,16 @@ handles it, and `_scrub` calls it only for that case:
 5. An absent name, or any name when there is no store, takes a value-free default from one closed
    table: `0` for a `Counter`; `factory()` for a `defaultdict` whose factory `is` one of the
    builtins in `_EMPTY_FACTORIES`; `_MAPPING_PLACEHOLDER` for all others.
-6. `record.args` becomes a `_NamedArgs`: a `dict` subclass holding only the names from step 2.
-   Its `__missing__` returns `_MAPPING_PLACEHOLDER` and its `__repr__` is the plain dict repr of
-   those names. It holds no reference to the caller mapping.
+6. `record.args` becomes a `_NamedArgs`: a `dict` subclass holding only the names from step 2,
+   plus one fixed display string. It holds no reference to the caller mapping.
+   - `__missing__` returns `_MAPPING_PLACEHOLDER`.
+   - `__bool__` returns True, also with no keys. `LogRecord.getMessage` formats only when
+     `self.args` is truthy, so an empty `_NamedArgs` would leave `%%` unformatted.
+   - `__str__` and `__repr__` both return the display string. This is what `%s` and `%r` print
+     for the lone mapping (`"x %s" % m` formats the whole mapping). The display string is
+     `repr(_safe_value(mapping, _ARGS_DEPTH - 1))` when the mapping is an exact `dict` that row 6
+     keeps, which prints the same as stock logging for a clean dict, and `<mapping>` for every
+     other mapping (rows 2 and 7).
 
 Only names from the format string become keys, and values come from exact-key reads of the store.
 The exception key in `{"ValueError": 7, ValueError(): 11}` is never read, so `%(ValueError)d`
@@ -239,6 +283,12 @@ outcome as a missing key in stock logging.
 | lone `defaultdict` with a caller factory, missing name | factory called, result scanned | `<mapping>` |
 | lone `Counter` or `defaultdict(int)`, missing name | `0` | `0`, without calling the mapping |
 | dict holding a `defaultdict`, `{args[nested][missing]}` | label | the nested value is the `<mapping>` string, so the brace field fails and prints nothing from the caller |
+| lone `ChainMap`, `%(a)s` | passed through; the ChainMap's own lookup prints the value | `<mapping>` (no plain store) |
+| lone `mappingproxy`, `%(a)s` | passed through; prints the value, or exception text for an exception value | `<mapping>` (no plain store) |
+| lone `UserDict`, `%(a)s` with `a` stored | the value, rebuilt as a dict when it changed | the value read from `data` with `dict.get`, through `_safe_value` |
+| lone `UserDict`, `%(missing)s` | `KeyError`, a stock logging error | `<mapping>` |
+| lone mapping, `"x %s"` or `"x %r"` | the mapping's own `str` or `repr` | an exact clean `dict` prints as before; any other mapping prints `<mapping>` |
+| lone dict with an exception or tuple key, `"failed: %s"` | the key relabelled | `failed: <mapping>` |
 
 On `cade66080` no engine logger call passes a `Counter`, `OrderedDict`, `defaultdict`,
 `MappingProxyType` or `ChainMap` directly (grep of logger calls). The builder repeats that check
@@ -287,6 +337,18 @@ Earlier-round repros, kept or rewritten to the new rule (each was red on its rou
 13. `test_mapping_with_nothing_to_replace_passes_through` keeps only the `dict` case. The
     `counter`, `ordereddict`, `defaultdict_int` and `userdict` cases move to a new parametrized
     `test_clean_non_plain_mapping_is_the_placeholder`.
+13a. Existing tests the new rule turns red on purpose (Dennis V1-2). Each is rewritten in the
+    same commit as the code change, with the new expected output below. No assertion is dropped
+    without a replacement.
+
+    | Test (line on `cade66080`) | Old expectation | New expected output |
+    |---|---|---|
+    | `test_exception_inside_container_arg_becomes_label[dict_key]` (:259) | `ValueError` in the output | `x <mapping>`, no canary (row 7: exception key) |
+    | `test_exception_inside_mapping_arg_container_becomes_label[dict_key]` (:268) | `ValueError` in the output | `x <mapping>`, no canary (the value of `c` is a dict with an exception key) |
+    | `test_tuple_key_in_lone_mapping_arg_becomes_label` (:292) | `ValueError` in the output | `failed: <mapping>`, no canary (row 7: tuple key; `_NamedArgs` display string); renamed `test_tuple_key_in_lone_mapping_arg_is_the_placeholder` |
+    | `test_mapping_needing_replacement_keeps_missing_lookup` (:321, `defaultdict(lambda: 0, ...)`) | `WARNING ValueError 0` | the field changes to `%(missing)s` and the output is `WARNING ValueError <mapping>` (caller factory, not called). A second cell keeps `%(missing)d` and asserts the stock logging error on stderr, with no canary on stderr and nothing in the handler output |
+    | `test_fallback_clears_live_exc_info` (:236, monkeypatches `_scan`) | fallback runs | monkeypatches `_safe_value` instead (`_scan` is removed, and `monkeypatch.setattr` fails on a missing name); assertions unchanged |
+
 14. Removed with the code they tested: `test_missing_lookup_returning_exception_becomes_label`,
     `test_missing_lookup_returning_container_is_scanned`,
     `test_failing_missing_lookup_carries_no_exception_text`,
@@ -301,20 +363,48 @@ New guards:
     `defaultdict` with such a factory; a `UserDict` with such a `__getitem__`; a
     `collections.abc.Mapping` with such `__getitem__` and `__iter__`. Positional and lone-mapping
     shapes, with `%s`, `%r` and `%(a)s`. Assert no method was called and no canary in the output.
+    Two more cells for D3:
+    - a plain `dict` whose key is a `str` subclass with a recording `__hash__` and `__eq__`: the
+      output is `<mapping>` (row 7) and neither method ran;
+    - a plain `list` and a plain `dict` holding an exception next to a caller object whose
+      `__eq__` records a call: the exception is relabelled and `__eq__` did not run.
 16. `test_any_mapping_type_is_value_free` (Hypothesis): nests one and two levels deep built from
     `dict`, `OrderedDict`, `Counter`, `defaultdict` (empty-builtin and caller factories),
     `UserDict`, `mappingproxy`, `ChainMap`, a `ConfigParser` section and a caller `Mapping`, with
     the canary exception planted as a key, a value, a factory bound argument or a factory result.
     Format with `%s`, `%r`, a named field from the generated keys, and a `{`-style formatter over
     `{args}`. Assert no canary, and that `_reachable(record.args)` holds no planted object.
+    Depth limits (V1-3), which the strategy follows:
+    - positional: `record.args` is scanned at depth 2. Each argument is checked at depth 1 and
+      the items of a plain container argument at depth 0.
+    - lone mapping: each stored value is scanned at depth 1 and the items of a plain container
+      value at depth 0.
+    - `msg`: depth 1, so the items of a plain container `msg` are checked at depth 0.
+    - At depth 0, rows 1 and 2 still apply, so an exception or a non-plain mapping is planted at
+      every level up to depth 0. A plain `list`, `tuple` or `dict` at depth 0 is not opened, so
+      the strategy plants nothing inside one. That is the `too_deep` strict xfail cell.
+    - One fixed example runs on every run: a `UserDict` holding the canary exception inside a
+      positional `list` prints `x [<mapping>]`.
 17. `test_named_args_holds_only_format_fields`: after filtering a lone mapping with fields `a` and
     `b`, `record.args` is a `_NamedArgs` with exactly the keys `{"a", "b"}`. Parser cells: a key
     with nested parentheses and a `%%` before a field, compared with CPython's own `%` result on
-    a plain dict.
+    a plain dict. A `%%(a)s %(b)s` cell gives exactly the keys `{"b"}` (D3).
+19. `test_lone_mapping_keeps_mapping_semantics` (V1-1). The lone mapping goes through an engine
+    handler. Each cell compares the output with stock logging on a clean plain dict, and asserts
+    `record.args` is a truthy `_NamedArgs`:
+    - no conversions, `"x"` (the msg of test 9) and `"done"`: prints `x` and `done`, no logging
+      error;
+    - a `%%`-only message, `"100%%"`: prints `100%`;
+    - `"x %s"` and `"x %r"` of a clean plain dict `{"k": 1}`: prints `x {'k': 1}`, the same as
+      stock;
+    - `"x %s"` and `"x %r"` of a `Counter`: prints `x <mapping>`;
+    - `"x %s"` of a plain dict holding an exception value: prints `x {'k': ValueError}` (the
+      label prints bare under `repr`), no canary.
 18. `test_filter_builds_only_closed_types` (sentry, same file, because it guards one module): an
     AST walk of `_log_filter.py` finds no call to `OrderedDict`, `Counter`, `defaultdict`,
-    `UserDict`, `copy` or `type(...)(...)`, and no attribute read of `default_factory`, `items`,
-    `keys` or `values`. A seeded `defaultdict(...)` call in a scratch copy turns it red.
+    `UserDict`, `copy` or `type(...)(...)`, no attribute read of `default_factory`, and no
+    attribute read of `items`, `keys`, `values` or `get` unless the receiver is the name `dict`
+    (D2). It also finds no `isinstance` call and no `==` or `!=` comparison in `_safe_value`. A seeded `defaultdict(...)` call in a scratch copy turns it red.
 
 The other documented gaps stay strict xfails: `exc_args`, `wrapper_str`, `too_deep`, and the
 pre-formatted text cells.
@@ -336,6 +426,12 @@ each mutation ran on). The builder records the results in the PR body.
 | M8 | copy every stored key into `_NamedArgs`, not only the format fields | 2, 17 |
 | M9 | drop the `Counter` row of the default table | 10 |
 | M10 | remove the `addFilter` call in `_new_engine_handler` (existing guard) | `test_every_engine_handler_carries_the_filter`, 4 |
+| M11 | key check with `isinstance(key, (str, int, float, bool, type(None)))` instead of the exact type | 15 (`str` subclass key cell) |
+| M12 | decide "no item changes" with `==` instead of `is` | 15 (recording `__eq__` cell) |
+| M13 | the field parser reads `%%(a)s` as a field | 17 (`%%(a)s %(b)s` cell) |
+| M14 | lone mapping with no fields becomes a one-item tuple | 19 (`"done"`, `"x"` cells) |
+| M15 | `_NamedArgs.__bool__` removed, so an empty one is falsy | 19 (`100%%` cell) |
+| M16 | rows 1 and 2 moved after the depth check | 16 (fixed cell: a `UserDict` holding the canary exception inside a positional `list`, at depth 0) |
 
 ## Failure modes
 
