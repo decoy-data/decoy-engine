@@ -147,6 +147,7 @@ def _build_ctx(
     source_loader: Any = None,
     vault_writer: Any = None,
     fidelity_report: bool = False,
+    validation_config: Any = None,
 ) -> ShadowContext:
     ns_registry = build_namespace_registry(config, inputs.profile)
     projection_policy = resolve_unconfigured_column_policy(config)
@@ -165,6 +166,7 @@ def _build_ctx(
         source_loader=source_loader,
         vault_writer=vault_writer,
         fidelity_report=fidelity_report,
+        validation_config=validation_config,
     )
 
 

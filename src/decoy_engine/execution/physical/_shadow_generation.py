@@ -245,11 +245,13 @@ def enforce_validators(
     outputs: Mapping[str, pa.Table],
     sources: Mapping[str, pa.Table],
 ) -> None:
-    """Fail a standalone generation or mixed result that its configured validators reject.
+    """Fail a standalone shadow result that its configured validators reject.
 
-    The dispatch has admitted the plan's generation payload, so its config decodes. Under a
-    `run_pipeline` the route boundary owns validation and one session feeds every table once,
-    so this stands down when that session is bound.
+    The config is the one the caller handed the context (`ctx.validation_config`), else the
+    generation payload the plan embeds. A context with neither has an enclosing caller that
+    validates the result itself (the unified slice does, on the rendered bytes), so nothing runs
+    here. With a session bound to the run the outputs feed that session, which fails at its own
+    finish; they are never skipped.
 
     Raises:
         ValidatorFailedError: A configured validator found a failing row in `outputs`.
@@ -257,11 +259,16 @@ def enforce_validators(
     from decoy_engine.errors import ValidatorFailedError
     from decoy_engine.validators import active_validation_session, run_resident_validation
 
-    generation = ctx.plan.generation if ctx.plan is not None else None
-    if generation is None or active_validation_session() is not None:
+    config = ctx.validation_config
+    if config is None and ctx.plan is not None and ctx.plan.generation is not None:
+        config = _decode_generation_config_shallow(ctx.plan.generation.config_json)
+    if config is None:
         return
-    config = _decode_generation_config_shallow(generation.config_json)
-    report = run_resident_validation(outputs, config, sources)
+    session = active_validation_session()
+    if session is not None:
+        session.observe_unobserved(outputs, sources)
+        return
+    report = run_resident_validation(outputs, dict(config), sources)
     if report is not None and not report.passed:
         raise ValidatorFailedError(report)
 

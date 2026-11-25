@@ -193,7 +193,9 @@ def dispatch_mixed(
     # `admitted_edges` (default `()`) is the only new signal threaded
     # through: every pre-5b-ii caller of `run()` leaves it at that default.
     mask_only_plan = dataclasses.replace(plan, synthesis=None)
-    mask_result = coordinator.run(mask_only_plan, merged_snapshot, admitted_edges=admitted_edges)
+    mask_result = coordinator.run(
+        mask_only_plan, merged_snapshot, admitted_edges=admitted_edges, validate_result=False
+    )
 
     outputs = stitch_generate_mask_outputs(generate_outputs, mask_result.outputs)
     # `driver_invocation` names the generate half's seam (mirroring slice

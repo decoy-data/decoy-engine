@@ -30,7 +30,7 @@ EXPECTED: dict[str, tuple[tuple[Any, ...], ...]] = {
             "t",
             "cc",
             (1, 2),
-            "2 row(s) in t.cc do not match pattern 'ab\\\\d'",
+            "2 row(s) in t.cc do not match the configured pattern",
         ),
     ),
     "column_in_set": (

@@ -150,6 +150,9 @@ class ShadowContext:
     unconfigured_column_policy: UnconfiguredColumnPolicy | None = None
     full_frame_adapter: ExecutionAdapter | None = None
     quarantine_requested: bool = False
+    # The pipeline config whose `validators:` judge a standalone result. None means the caller
+    # validates the result itself (the unified slice checks the rendered bytes).
+    validation_config: Mapping[str, Any] | None = field(default=None, repr=False)
     provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None = None
 
     def _validate(self) -> None:
@@ -177,6 +180,7 @@ class ShadowContext:
         unconfigured_column_policy: UnconfiguredColumnPolicy | None = None,
         full_frame_adapter: ExecutionAdapter | None = None,
         quarantine_config: Any = None,
+        validation_config: Mapping[str, Any] | None = None,
         provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None = None,
     ) -> ShadowContext:
         """Resolve `mask_key` the same way `run_pipeline` does
@@ -236,5 +240,6 @@ class ShadowContext:
             unconfigured_column_policy=unconfigured_column_policy,
             full_frame_adapter=full_frame_adapter,
             quarantine_requested=quarantine_config is not None,
+            validation_config=validation_config,
             provider_snapshot=provider_snapshot,
         )

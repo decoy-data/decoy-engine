@@ -43,6 +43,7 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine.errors import ValidatorStateError
 from decoy_engine.validators._fold import CappedIndices, FoldResult, finding_index_cap, run_whole
+from decoy_engine.validators._params import numeric_param
 from decoy_engine.validators._scope import (
     _COMPOSITE_PROVIDERS,
     EXCLUDED,
@@ -99,8 +100,14 @@ class LeakCheckFold:
 
     def __init__(self, entry: dict[str, Any], config: dict[str, Any], *, cap: int | None) -> None:
         params: dict[str, Any] = entry.get("params") or {}
-        self._max_ratio = float(params.get("max_identical_ratio", 0.02))
-        self._min_rows = int(params.get("min_rows", 1))
+        self._max_ratio = float(
+            numeric_param(
+                params, "max_identical_ratio", kind=float, default=0.02, validator="leak_check"
+            )
+        )
+        self._min_rows = int(
+            numeric_param(params, "min_rows", kind=int, default=1, validator="leak_check")
+        )
         self._plan = plan_scope(config, entry)
         # One state per occurrence in scope order: a column listed twice is two checks.
         self._by_table: dict[str, list[int]] = {}

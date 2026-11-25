@@ -153,6 +153,27 @@ class ShadowCoordinator:
         *,
         admitted_edges: tuple[RelationshipEdge, ...] = (),
         when_masks: Mapping[str, pa.Array] | None = None,
+        validate_result: bool = True,
+    ) -> ShadowRunResult:
+        """Run the plan and return its result, judged by the configured validators.
+
+        `validate_result=False` is for a caller that validates the finished result itself: the
+        mixed dispatch runs the mask half through here and validates the stitched whole.
+        """
+        result = self._dispatch(
+            plan, snapshot, admitted_edges=admitted_edges, when_masks=when_masks
+        )
+        if validate_result:
+            self._validated(snapshot, result)
+        return result
+
+    def _dispatch(
+        self,
+        plan: PhysicalPlan,
+        snapshot: ShadowSnapshot,
+        *,
+        admitted_edges: tuple[RelationshipEdge, ...],
+        when_masks: Mapping[str, pa.Array] | None,
     ) -> ShadowRunResult:
         # Task 4.6 slice 5a: a PURE-GENERATE plan (no mask tables at all)
         # dispatches through the Task 4.2 SynthesisStageAdapter instead of
@@ -162,14 +183,14 @@ class ShadowCoordinator:
         # synthesis stage at once outside the mixed case handled next) falls
         # straight through, byte-unchanged.
         if not plan.tables and plan.synthesis is not None:
-            return self._validated(snapshot, self._dispatch_synthesis(plan.synthesis, snapshot))
+            return self._dispatch_synthesis(plan.synthesis, snapshot)
         if plan.tables and plan.synthesis is not None:
             # Task 4.6 slice 5b-i/5b-ii: a MIXED plan (both present),
             # independent or FK-coupled. `_dispatch_mixed` admits via its own
             # contract, runs generation, reuses THIS loop for the mask half
             # (recursing into `run()` with `synthesis` stripped and an
             # admitted-edge allowlist), and stitches -- see `_shadow_mixed.py`.
-            return self._validated(snapshot, self._dispatch_mixed(plan, snapshot))
+            return self._dispatch_mixed(plan, snapshot)
 
         # Task 4.6 slice 3: an OUT_OF_CORE mask-table plan dispatches through
         # the Task 4.2 `OutOfCoreAdapter` (which owns the FK machinery via
@@ -198,8 +219,8 @@ class ShadowCoordinator:
         )
 
     def _validated(self, snapshot: ShadowSnapshot, result: ShadowRunResult) -> ShadowRunResult:
-        """The generation and mixed branches return finished output, so the configured
-        validators judge it here, at the outer result boundary, before it leaves `run`."""
+        """Every branch returns finished output, so the configured validators judge it here, at
+        the one result boundary, before it leaves `run`."""
         from decoy_engine.execution.physical._shadow_generation import enforce_validators
 
         enforce_validators(self.ctx, result.outputs, dict(snapshot.tables))

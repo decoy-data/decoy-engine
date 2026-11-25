@@ -20,3 +20,9 @@ validators. The streamed and bounded routes (auto-chunk streamed, sequential for
 out-of-core, multi-table split) still keep a validator-bearing job resident until the next slice.
 `ShadowContext.from_key_provider` no longer takes `validators` and `ShadowContext` has no
 `validators_requested`, because validators do not decide admission.
+
+A validator parameter error or finding never carries the parameter text: a bad regex, a non-numeric
+`max_identical_ratio`, `min_rows` or `tolerance` is reported by validator and parameter name through one
+parser (`validators/_params.py`), and a failing `regex_match` finding no longer quotes its pattern.
+A standalone shadow run with a validation session bound feeds that session instead of skipping it, and a
+standalone full-frame run judges its result when the context carries `validation_config`.

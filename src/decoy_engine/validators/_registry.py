@@ -67,6 +67,7 @@ from decoy_engine.validators._generic import (
     validate_regex_match,
 )
 from decoy_engine.validators._leak_check import LeakCheckFold, validate_leak_check
+from decoy_engine.validators._params import ParamError
 from decoy_engine.validators._relationship_checks import (
     ParentWindowFold,
     ReconciliationFold,
@@ -178,10 +179,16 @@ class _WholeTableFold:
         return frozenset()
 
     def finish(self) -> FoldResult:
-        sources = {**(self._sources or {}), **self._paired}
-        return FoldResult(
-            self._fn(self._tables, self._entry, self._config, sources=sources or self._sources)
-        )
+        # The caller's own mapping reaches the validator untouched unless a table was paired from
+        # batches the caller does not hold whole.
+        held = self._sources or {}
+        extra = {
+            name: tbl
+            for name, tbl in self._paired.items()
+            if not isinstance(held.get(name), pa.Table) or held[name].num_rows != tbl.num_rows
+        }
+        sources = {**held, **extra} if extra else self._sources
+        return FoldResult(self._fn(self._tables, self._entry, self._config, sources=sources))
 
 
 def validator_function(name: str) -> _ValidatorFn:
@@ -193,29 +200,9 @@ def validator_function(name: str) -> _ValidatorFn:
     return _REGISTRY[name]
 
 
-# Numeric parameters, by validator. Checked by type before any `float()` or `int()` runs, because
-# Python's conversion errors echo the supplied text, and a config value may be a credential.
-_NUMERIC_PARAMS: dict[str, dict[str, type]] = {
-    "leak_check": {"max_identical_ratio": float, "min_rows": int},
-    "reconciliation_holds": {"tolerance": float},
-}
-
-
-def _require_numeric_params(name: str, entry: dict[str, Any], index: int) -> None:
-    params = entry.get("params") or {}
-    if not isinstance(params, dict):
+def _require_params_mapping(entry: dict[str, Any], index: int) -> None:
+    if not isinstance(entry.get("params") or {}, dict):
         raise ValueError(f"validators entry {index}: params must be a mapping.")
-    for param, kind in _NUMERIC_PARAMS.get(name, {}).items():
-        if param not in params:
-            continue
-        value = params[param]
-        accepted = (int, float) if kind is float else (int,)
-        if isinstance(value, bool) or not isinstance(value, accepted):
-            raise ValueError(
-                f"validators entry {index}: params.{param} must be a number."
-                if kind is float
-                else f"validators entry {index}: params.{param} must be an integer."
-            )
 
 
 def build_fold(
@@ -245,10 +232,19 @@ def build_fold(
             f"validators entry {index} names an unknown validator. "
             f"Known validators: {sorted(_REGISTRY)}"
         )
-    _require_numeric_params(name, entry, index)
+    _require_params_mapping(entry, index)
     spec = _SPECS.get(name)
     if spec is not None and spec.fn is fn:
-        return name, spec.factory(entry, config, cap, budget)
+        fold: Fold | None = None
+        locator: str | None = None
+        try:
+            fold = spec.factory(entry, config, cap, budget)
+        except ParamError as exc:
+            locator = str(exc)
+        if fold is None:
+            # Raised outside the handler so the error carries no exception context.
+            raise ValueError(f"validators entry {index}: {locator}")
+        return name, fold
     return name, _WholeTableFold(fn, entry, config, sources)
 
 

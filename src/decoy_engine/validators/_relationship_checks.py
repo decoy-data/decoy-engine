@@ -43,6 +43,7 @@ from decoy_engine.validators._fold import (
     finding_index_cap,
     run_whole,
 )
+from decoy_engine.validators._params import numeric_param
 from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
 
@@ -369,7 +370,11 @@ class ReconciliationFold:
         self._child_table: str = params["child_table"]
         self._child_column: str = params["child_column"]
         self._op: str = str(params.get("op", "sum"))
-        self._tolerance: float = float(params.get("tolerance", 1e-6))
+        self._tolerance: float = float(
+            numeric_param(
+                params, "tolerance", kind=float, default=1e-6, validator="reconciliation_holds"
+            )
+        )
         if self._op not in _OPS:
             raise ValueError(
                 f"reconciliation_holds: params.op is not a known op. Known ops: {sorted(_OPS)}."
