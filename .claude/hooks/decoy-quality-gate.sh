@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Decoy pre-PR/push quality gate (PreToolUse hook on Bash).
 #
-# Blocks `git push` and `gh pr create` until the Decoy quality gate has passed
+# Blocks `gh pr create` until the Decoy quality gate has passed
 # for the EXACT current HEAD. The pass is recorded in .git/decoy-quality-gate by
 # decoy-gate-pass.sh, which should be run only after:
 #   1. the `dennis` agent reviewed the change (he runs /code-review +
@@ -20,8 +20,9 @@ cmd=$(printf '%s' "$input" \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" \
   2>/dev/null || echo "")
 
-# Only gate commands that send work off the branch.
-if ! printf '%s' "$cmd" | grep -Eq 'git[[:space:]]+push|gh[[:space:]]+pr[[:space:]]+create'; then
+# Owner 2026-11-25: every agent may push, since a push only backs up work.
+# Only opening a PR waits for the gate.
+if ! printf '%s' "$cmd" | grep -Eq 'gh[[:space:]]+pr[[:space:]]+create'; then
   exit 0
 fi
 
