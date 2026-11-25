@@ -8,6 +8,8 @@
 - AT-S5b: the nine words the grammar may grow into are refused as column names. Reserved names
   match exactly and case-sensitively, so `NULL` and `Between` stay columns.
 - AT-S5c: an exact snapshot of the set. Adding or removing a name edits this file on purpose.
+- AT-S5d: the words that may prefix a column before a dot are exactly `source` and `masked`.
+  A third prefix is a grammar change, so it edits this file on purpose.
 """
 
 from __future__ import annotations
@@ -71,7 +73,7 @@ EXPECTED_RESERVED_NAMES = frozenset(
 # The regex terminals the grammar may have. A new one can hide a keyword, so it fails the guard
 # until a person looks at it and adds the name here.
 EXPECTED_REGEX_TERMINALS = frozenset(
-    {"CMP", "IDENT", "NUMBER", "SQ_STRING", "DQ_STRING", "__IGNORE_0"}
+    {"CMP", "IDENT", "NUMBER", "QUOTED_NAME", "SQ_STRING", "DQ_STRING", "__IGNORE_0"}
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -208,3 +210,27 @@ def test_a_pandas_name_keeps_the_pandas_reason() -> None:
     with pytest.raises(ValidationError) as info:
         parse_when("sin > 1")
     assert "pandas eval would not read it as a column" in str(info.value)
+
+
+# Contract 3.4: the only words that may prefix a column before a dot.
+EXPECTED_PHASE_PREFIXES = frozenset({"source", "masked"})
+
+
+def test_the_reference_prefix_set_is_pinned() -> None:
+    """AT-S5d: the parser's prefix set, and the refusal of any other prefix, are the contract's."""
+    assert _when_parser._PHASES == EXPECTED_PHASE_PREFIXES
+    for prefix in sorted(EXPECTED_PHASE_PREFIXES - {"masked"}):
+        assert parse_when(f"{prefix}.v == 1") == parse_when("v == 1")
+    for prefix in ("src", "orig", "Source", "MASKED", "raw"):
+        with pytest.raises(ValidationError) as info:
+            parse_when(f"{prefix}.v == 1")
+        assert info.value.code == WHEN_OUTSIDE_GRAMMAR_CODE, prefix
+
+
+@pytest.mark.parametrize("name", ["index", "sin", "null", "__x__"])
+def test_a_quoted_name_does_not_bypass_the_reserved_names(name: str) -> None:
+    """AT-S5b for the quoted form: quoting applies `_name` to the column part too."""
+    for expr in (f"`{name}` == 1", f"source.`{name}` == 1", f"source.{name} == 1"):
+        with pytest.raises(ValidationError) as info:
+            parse_when(expr)
+        assert info.value.code == WHEN_OUTSIDE_GRAMMAR_CODE, expr

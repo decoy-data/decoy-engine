@@ -60,6 +60,9 @@ __all__ = [
     "INVALID_SUBSTRATE",
     "LAZY_SOURCE_NULL_COUNT_UNAVAILABLE",
     "MASKS_ONE_TABLE_PER_RUN",
+    "NONFK_FULL_FRAME_FITS",
+    "NONFK_FULL_FRAME_PROBE_FITS",
+    "NONFK_FULL_FRAME_UNVERIFIED",
     "NON_PANDAS_SUBSTRATE_REQUESTED",
     "NON_SCALAR_COMPOSITE",
     "NON_SCALAR_NODE",
@@ -261,6 +264,23 @@ LAZY_SOURCE_NULL_COUNT_UNAVAILABLE = _d(
 MASKS_ONE_TABLE_PER_RUN = _d("masks_one_table_per_run", "Masks one table per run.")
 NO_MASK_TABLES = _d("no_mask_tables", "No mask tables.")
 NO_RELATIONSHIP_ROUTE = _d("no_relationship_route", "No relationship route.")
+_d = _catalog.route("decoy_engine.execution.pipeline._resident_fit")
+NONFK_FULL_FRAME_FITS = _d(
+    "nonfk_full_frame_fits",
+    "A job with no foreign keys fits in memory by the byte estimate.",
+    since="1.34.0",
+)
+NONFK_FULL_FRAME_PROBE_FITS = _d(
+    "nonfk_full_frame_probe_fits",
+    "A job with no foreign keys fits in memory by a measured probe.",
+    since="1.34.0",
+)
+NONFK_FULL_FRAME_UNVERIFIED = _d(
+    "nonfk_full_frame_unverified",
+    "A job with no foreign keys could not be shown to fit or not fit, so it runs as before.",
+    since="1.34.0",
+)
+_d = _catalog.route("decoy_engine.execution.physical._reasons")
 NO_RELATIONSHIPS = _d("no_relationships", "No relationships.")
 NON_PANDAS_SUBSTRATE_REQUESTED = _d(
     "non_pandas_substrate_requested", "Non pandas substrate requested."

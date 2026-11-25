@@ -51,11 +51,13 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine.contracts.bucketize_width import EXACT_INT_BOUND
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
     option,
     provider_config_to_dict,
+    require_shape_declared,
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -68,15 +70,13 @@ _PRESETS: dict[str, dict[str, Any]] = {
     "hipaa_age": {"cap": 89, "over_label": "90+"},
 }
 
-# float64 represents every integer up to 2**53 exactly; beyond it consecutive
-# integers collapse (2**53 and 2**53+1 both round to 2**53). A cap/floor at or
-# past this magnitude cannot be compared exactly against a null-bearing column
-# (Arrow int64+null widens to float64 on ingest), so a true tail value could
-# round DOWN to the cap and escape generalization -- a silent leak Codex
-# reproduced. Bounds must stay strictly inside [-2**53, 2**53]; the check module
-# rejects the rest at compile, this is the handler backstop. Shared with
-# plan/_checks_top_code.py as the single source of truth for the threshold.
-_MAX_EXACT_INT: int = 2**53
+# A cap/floor at or past 2**53 cannot be compared exactly against a null-bearing column
+# (Arrow int64+null widens to float64 on ingest), so a true tail value could round DOWN to the
+# cap and escape generalization -- a silent leak Codex reproduced. Bounds must stay strictly
+# inside [-2**53, 2**53]; the check module rejects the rest at compile, this is the handler
+# backstop. The limit itself is `contracts.bucketize_width.EXACT_INT_BOUND`; the old private
+# name stays as an alias for callers inside this module.
+_MAX_EXACT_INT: int = EXACT_INT_BOUND
 
 
 def _is_usable_bound(value: Any) -> TypeGuard[int | float]:
@@ -152,6 +152,7 @@ class TopCodeStrategyHandler:
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
+        require_shape_declared("top_code", column, ctx)
         bound = self._resolve_top_bound(cfg)
         if bound is None:
             # Fail closed (mirrors bucketize's `_resolve_width is None` raise):

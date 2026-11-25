@@ -18,9 +18,6 @@ table admits, and on the pandas oracle otherwise, behind one contract:
   both routes. The sink receives one `ExecutionResult` per chunk whose
   `quality_metrics["chunked_route"]` records each column's planned and executed
   backend (see `_chunked_evidence`).
-
-The public oracle `run_mask_pipeline_chunked` is unchanged. Wiring callers to
-this function is a separate step.
 """
 
 from __future__ import annotations
@@ -32,6 +29,8 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._pandas_meta import stored_index_fields
+from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts
 from decoy_engine.execution import _chunked, _chunked_oracle
 from decoy_engine.execution import _chunked_bucket_perturb as bucket_perturb_gate
 from decoy_engine.execution import _chunked_dgrn as dgrn
@@ -48,13 +47,8 @@ from decoy_engine.execution._output_projection import (
     known_output_columns,
 )
 from decoy_engine.execution._row_error_summary import chunk_row_error_summary
-from decoy_engine.execution._transforms import stored_index_fields
-from decoy_engine.execution.native._categorical_prepared import (
-    PreparedCategorical,
-)
-from decoy_engine.execution.native._chunk_masking import (
-    _mask_chunk_native,
-)
+from decoy_engine.execution.native._categorical_prepared import PreparedCategorical
+from decoy_engine.execution.native._chunk_masking import _mask_chunk_native
 from decoy_engine.execution.native._chunk_schema import cast_null_columns
 from decoy_engine.execution.native._chunked_evidence import (
     ColumnPlan,
@@ -281,17 +275,15 @@ def _native_route(
     # The oracle's own predicate function decides each `when:` column's rows (see `_when_mask`).
     when = plan_when_masks(col_seed_by_name, state, table=table)
     faker_nulls = plan_faker_null_masks(col_seed_by_name, state, table=table)
-    # The native text_mask columns, so the per-chunk source-dtype guard below matches the oracle
-    # leg's (`_chunked_oracle`): a later null-typed or non-string chunk is rejected, not cast
-    # (C6b-i 3d). A large_string/numeric first chunk already declined to the oracle at admission.
+    # The native text_mask columns, so the per-chunk dtype guard below matches the oracle leg's:
+    # a later null-typed or non-string chunk is rejected, not cast (C6b-i 3d).
     native_text_mask_cols = [
         n for n, p in params_by_column.items() if isinstance(p, TextMaskParams)
     ]
 
     def _guard(raw: pa.Table) -> pa.Table:
-        # The oracle route re-checks this on every chunk before masking; without it a
-        # later null-typed chunk would be cast to string here and masked, where the
-        # oracle route raises, so the two routes would disagree on that input.
+        # The oracle route re-checks this on every chunk; without it a later null-typed chunk
+        # would be cast and masked here where the oracle raises, so the routes would disagree.
         if state.bucket_perturb_cols:
             bucket_perturb_gate.reject_unsafe_bucket_perturb_chunk_schema(
                 raw.schema, state.bucket_perturb_cols, table=table
@@ -436,14 +428,15 @@ def _run_chunked(
     route_evidence_sink: list[NativeRouteEvidence] | None = None,
     pool_cache: PoolCache | None = None,
     enforce_schema_rule: bool = True,
+    sources: SourceFacts,
 ) -> Iterator[pa.Table]:
     """Preflight, route choice and the two chunk loops behind both public entry
     points. `enforce_schema_rule=False` is the legacy `run_native_or_oracle_chunked`
     contract: each route yields what it produces, with no type normalization."""
     from decoy_engine.execution._chunked_input import _FixedSchemaChunks
 
-    # C5c-ii: capture the producer's guaranteed schema BEFORE preflight turns `chunks` into a
-    # wrapped iterator. An arbitrary iterable carries no guarantee and admits no C5c-ii column.
+    # C5c-ii: the producer's guaranteed schema, taken before preflight wraps `chunks`; an
+    # arbitrary iterable carries none and admits no C5c-ii column.
     captured_schema = chunks.source_schema if isinstance(chunks, _FixedSchemaChunks) else None
     state = _chunked_oracle._oracle_preflight(
         config,
@@ -460,6 +453,7 @@ def _run_chunked(
         warm_pools=False,
         carry_passthrough=enforce_schema_rule,
         source_schema=captured_schema,
+        sources=sources,
     )
     if state.first is None:
         state.close_secret()
@@ -480,6 +474,7 @@ def _run_chunked(
             route_evidence_sink=route_evidence_sink,
             enforce_schema_rule=enforce_schema_rule,
             captured_schema=captured_schema,
+            siblings=sources,
         )
     except BaseException:
         state.close_secret()
@@ -501,6 +496,7 @@ def _route_chunked(
     route_evidence_sink: list[NativeRouteEvidence] | None,
     enforce_schema_rule: bool,
     captured_schema: Any,
+    siblings: SourceFacts,
 ) -> Iterator[pa.Table]:
     """Everything after admission and preflight: route choice and the two chunk loops."""
 
@@ -517,12 +513,13 @@ def _route_chunked(
         unconfigured_policy=state.projection_policy if enforce_schema_rule else None,
         registry=state.registry,
         c5c_ii_admission=c5c_ii_admission,
+        siblings=siblings,
     )
     decision = preflight.evidence
     if decision.native_admitted and enforce_schema_rule:
-        # The native masker passes through the columns it has no plan node for, while the
-        # warning (and, under `error`, the refusal) comes from `known_output_columns`. If
-        # the two ever disagree, a column could pass through unmasked with no warning.
+        # The native masker passes through columns with no plan node, but the warning (and
+        # the `error` refusal) comes from `known_output_columns`: if they disagree, a column
+        # could pass through unmasked with no warning.
         stored_index = frozenset(stored_index_fields(state.first.schema))
         oracle_set = (
             set(state.first.schema.names) - known_output_columns(state.plan, table) - stored_index
@@ -547,6 +544,7 @@ def _route_chunked(
             engine_version=engine_version,
             registry=state.registry,
             first_schema=state.first.schema,
+            siblings=siblings,
         )
         if chunk_result_sink is not None
         else ()
@@ -683,6 +681,7 @@ def run_mask_chunked(
         route_evidence_sink=route_evidence_sink,
         pool_cache=pool_cache,
         file_access=file_access,
+        sources=NO_SOURCES,
     )
 
 

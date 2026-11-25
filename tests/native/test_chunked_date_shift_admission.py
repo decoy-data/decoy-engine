@@ -18,6 +18,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import run_pipeline
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_output_sink import OutputEvidenceAccumulator
@@ -106,6 +107,7 @@ def test_static_route_decision_no_longer_emits_the_date_shift_veto() -> None:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert "date_shift_not_native_chunked_route" not in (decision.reroute_reason or "")
     assert decision.native_admitted is True
@@ -122,6 +124,7 @@ def test_the_evidence_planner_plans_the_companion_for_date_shift() -> None:
         table=TABLE,
         engine_version=ENGINE_VERSION,
         registry=get_default_registry(),
+        siblings=NO_SOURCES,
     )
     assert {p.column: p.planned_backend for p in plans}["d"] == "rust_companion"
 

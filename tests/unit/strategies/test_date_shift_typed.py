@@ -21,7 +21,7 @@ import pytest
 from decoy_engine import reasons, run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.config import PipelineConfig
 from decoy_engine.contracts.column_shape import ColumnShape, source_facts_of
-from decoy_engine.declared_casting._boundary import native_date_columns
+from decoy_engine.declared_casting._boundary import declared_date_shift_columns, plan_column_shapes
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._pipeline import run_pipeline
@@ -409,7 +409,7 @@ def _ctx(native: dict[tuple[str, str], ColumnShape]) -> StrategyContext:
         relationship_graph=RelationshipGraph(edges=(), ordering=()),
         namespace_registry=NamespaceRegistry(bindings=()),
         job_seed=(0x42).to_bytes(8, "big"),
-        native_date_columns=native,
+        column_shapes=native,
     )
     object.__setattr__(ctx, "current_table", "t")
     return ctx
@@ -430,15 +430,21 @@ def test_handler_backstop_keys_on_plan() -> None:
     assert exc2.value.code == reasons.runtime.DATE_SHIFT_REQUIRES_DATE_FORMAT
 
 
+def _native_view(plan: Any) -> dict[tuple[str, str], ColumnShape]:
+    ctx = _ctx(plan_column_shapes(plan))
+    object.__setattr__(ctx, "declared_date_columns", declared_date_shift_columns(plan))
+    return ctx.native_date_columns
+
+
 def test_native_date_columns_come_from_the_plan_shapes(tmp_path: Path) -> None:
     table = _table(DATES, pa.date32())
     plan = _compile(_cfg(tmp_path, table), table)
-    assert native_date_columns(plan) == {("t", "d"): ColumnShape.DATE}
+    assert _native_view(plan) == {("t", "d"): ColumnShape.DATE}
     text = _table([d.isoformat() if d else None for d in DATES], pa.string())
     text_plan = _compile(_cfg(tmp_path, text, provider_config={"date_format": "%Y-%m-%d"}), text)
-    assert native_date_columns(text_plan) == {}
+    assert _native_view(text_plan) == {}
     stripped = dataclasses.replace(plan, column_shapes=())
-    assert native_date_columns(stripped) == {}
+    assert _native_view(stripped) == {}
     assert {s.shape for s in plan.column_shapes} == {ColumnShape.DATE}
 
 

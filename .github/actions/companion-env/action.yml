@@ -1,0 +1,24 @@
+name: companion-env
+description: Lock venv with the dev extra, then build and install the native companion from source and assert it loads. Run after checkout.
+inputs:
+  extras:
+    description: Space-separated uv extras for the lock venv.
+    default: "dev"
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/lock-env
+      with:
+        extras: ${{ inputs.extras }}
+    - name: Install stable Rust (companion build only; the core needs none)
+      uses: dtolnay/rust-toolchain@stable
+    - name: Build and install the companion (maturin, same-platform)
+      shell: bash
+      # Build backends are not in uv.lock: --build-constraint pins maturin inside uv's isolated
+      # build env (.github/build-constraints.txt), the version the wheel jobs pin.
+      run: uv pip install --python "$RUNNER_TEMP/venv/bin/python" --build-constraint .github/build-constraints.txt ./decoy-engine-native
+    # Every test that follows skips when the companion is absent, so a companion that builds but
+    # fails to load would otherwise leave the job green with nothing run.
+    - name: Assert the companion loads
+      shell: bash
+      run: python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); print(st); assert st.ok, st"

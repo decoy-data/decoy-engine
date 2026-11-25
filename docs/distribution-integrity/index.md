@@ -99,6 +99,7 @@ All paths are under `src/decoy_engine/`.
 | `dp_schedule.py` | Frozen query-schedule dataclasses. |
 | `dp_ledger.py` | Sums composed totals across distinct release IDs at plan compile. |
 | `dp_provenance.py` | Certified-stack gate for fit and for generation. |
+| `dp_certified_stacks.py` | The certified lock-fingerprint rows (data only; release prep adds rows). |
 | `dp_fit_schema.py`, `dp_policy.py`, `dp_schema.py` | Column-schema parsing, the normalization policy text, schema constants. |
 | `carriers.py`, `carrier_adapter.py` | Typed carriers (`number`, `text`, `flag`) and the pandas boundary. |
 | `plan/_checks_dp.py`, `plan/_checks_dp_carrier.py` | Compile-time checks for `global_settings.dp`. |

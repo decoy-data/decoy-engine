@@ -417,9 +417,9 @@ def test_f5a_whole_column_cardinality_modes_stay_python(
 def test_f5b_a_provider_outside_the_allowlist_stays_python(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for seed in (faker_seed(provider="person_email"), positional_seed(provider="person_email")):
+    for seed in (faker_seed(provider="person_dob"), positional_seed(provider="person_dob")):
         trio = run_trio(payload_shape({"f": (cells(40), seed)}), monkeypatch)
-        _declined(trio, "f", "faker_provider_not_native:f:person_email")
+        _declined(trio, "f", "faker_provider_not_native:f:person_dob")
 
 
 @pytest.mark.parametrize(
@@ -504,11 +504,14 @@ def test_f5e_the_declined_pool_is_a_cache_hit_for_the_python_assembly(
     assert builds == [1]  # one build serves the declined seam call and the Python assembly
 
 
-def test_f5f_a_deterministic_faker_without_a_pool_size_declines_with_oracle_output(
+def test_f5f_a_deterministic_faker_without_a_pool_size_is_native_and_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The size resolves through the shared identity to the default, so the oracle's output holds.
     shape = payload_shape({"f": (cells(40), faker_seed(pool_size=None))})
-    _declined(run_trio(shape, monkeypatch), "f", "faker_not_deterministic_reuse_variant:f")
+    trio = run_trio(shape, monkeypatch)
+    assert_trio_strict(trio)
+    assert_native_witness(trio.native, "f")
 
 
 def test_f5c_missing_namespace_surfaces_the_oracles_error(

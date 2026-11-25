@@ -31,6 +31,10 @@ name: native-companion
 
 on:
   pull_request:
+  # Main runs the companion lane too: a companion-gated test skips in every other lane, so a
+  # merge that broke one stayed unseen on main until someone ran the lane by hand.
+  push:
+    branches: [main]
   schedule:
     - cron: "37 3 * * *"
   workflow_dispatch:
@@ -304,22 +308,10 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/lock-env
-        with:
-          extras: "dev"
-      - name: Install stable Rust (companion build only; the core needs none)
-        uses: dtolnay/rust-toolchain@stable
-      - name: Build and install the companion (maturin, same-platform)
-        # Build backends are not in uv.lock: --build-constraint pins maturin inside uv's isolated
-        # build env (.github/build-constraints.txt), the version the wheel jobs pin.
-        run: uv pip install --python "$RUNNER_TEMP/venv/bin/python" --build-constraint .github/build-constraints.txt ./decoy-engine-native
-      # Every test below skips when the companion is absent, so a companion that
-      # builds but fails to load would otherwise leave this job green with nothing run.
-      - name: Assert the companion loads
-        run: python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); print(st); assert st.ok, st"
+      - uses: ./.github/actions/companion-env
       # ENGINE-THREADS-DEFAULT: default thread count against one thread, byte-equal on every
       # route, and the gap9 grant wiring; the per-route cells skip without the companion.
       - name: Thread default and grant parity (companion-present case)
@@ -408,6 +400,7 @@ jobs:
           python scripts/ci/pytest_must_not_skip.py --require-companion
           --allow-skip '*::test_without_the_real_companion_the_unpatched_route_is_python'
           -- tests/parity/native tests/parity/*native*.py
+          --deselect=tests/parity/test_faker_native_widen.py::test_p5b_mimesis_real_runs_native_and_equals_full_frame
           tests/unit/execution/test_o1_when_routes.py
           -v --tb=short
 
@@ -419,6 +412,36 @@ jobs:
           pytest tests/native -m "not serial" -n 4 --dist loadfile -q --tb=short
           pytest tests/native -m "serial" -q --tb=short || [ $? -eq 5 ]
 
+      # The Mimesis extra rebinds the person_* providers to Mimesis (the adoption matrix), which
+      # moves the frozen Faker KATs in tests/native, so it cannot be in the venv for the steps
+      # above. The P5b test runs the real adapter on the native lane and importorskips mimesis;
+      # this job forbids skips, so it is deselected above (a glob names its file explicitly, and
+      # pytest still collects an explicit file under --ignore) and runs last, in a second lock
+      # venv with the extra. The lock sync is exact, so the companion is rebuilt and reasserted.
+      - uses: ./.github/actions/companion-env
+        with:
+          extras: "dev mimesis"
+      - name: Faker native widen with the Mimesis extra (companion-present case, must not skip)
+        run: python scripts/ci/pytest_must_not_skip.py --require-companion -- tests/parity/test_faker_native_widen.py::test_p5b_mimesis_real_runs_native_and_equals_full_frame -v --tb=short
+
+  # core-companion-wide: the companion-gated tests outside tests/native, in a job of their own so a
+  # slow run cannot push core-companion-present over its timeout. A test there that no step in that
+  # job names skips in every other lane, so it can go red with no signal (57 were red on main when
+  # this job was added). Same two-pass split and marker filter as ci.yml's regression gate. Push to
+  # main, schedule and dispatch only: a red main is fixed first, and a PR keeps its fast lane. One
+  # run on the Dell took 42 minutes for the parallel pass and 2 for the serial pass.
+  core-companion-wide:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/companion-env
+      - name: Whole tests/parity and tests/unit/execution directories (companion-present case)
+        run: |
+          pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial" -n 4 --dist loadfile -q --tb=short
+          pytest tests/parity tests/unit/execution -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and serial" -q --tb=short || [ $? -eq 5 ]
+
   # companion-fuzz-sanitizer: the KeyedDerivationKernel is the one security-sensitive native
   # unit, so it gets fuzz + sanitizer evidence beyond the KAT/proptest/clippy gates above. A
   # bounded libFuzzer campaign over the PyO3-free `batch::derive_array` path (built
@@ -429,15 +452,19 @@ jobs:
   # sanitizer-instrumented, or the linker rejects the ABI mismatch between instrumented and
   # plain std). A crash, a sanitizer report, or an unexpected process exit fails the job.
   companion-fuzz-sanitizer:
+    # Merge-required, so the job itself is unconditional (a skipped job reports success). Its steps
+    # skip on a push to main, where the PR already ran them; schedule and dispatch run them.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Install nightly Rust with rust-src (build-std needs it)
+        if: github.event_name != 'push'
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
       - name: Install cargo-fuzz
+        if: github.event_name != 'push'
         run: cargo install cargo-fuzz --locked
       # +nightly is REQUIRED: decoy-engine-native/rust-toolchain.toml pins stable
       # 1.98.0 for reproducible cdylib builds, which overrides the nightly default
@@ -445,15 +472,18 @@ jobs:
       # flags are nightly-only, so the pin must be overridden per-invocation (the
       # exact form the crate README documents and we verified locally).
       - name: Bounded fuzz campaign over derive_array
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         run: cargo +nightly fuzz run derive_array -- -max_total_time=120
       # The index kernel (Task 2.3) gets its own bounded campaign over the PyO3-free
       # batch::derive_index_array path: same admitted-type array generation as derive_array plus a
       # full-range i64 pool_size that drives both pool guards and the modulo arithmetic between them.
       - name: Bounded fuzz campaign over derive_index
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         run: cargo +nightly fuzz run derive_index -- -max_total_time=120
       - name: Crate tests under AddressSanitizer
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         env:
           RUSTFLAGS: -Zsanitizer=address
@@ -466,12 +496,13 @@ jobs:
       # `--lib`, so a filter would silently miss a newly added parallel test. The unit tests are
       # fast even under `-Zbuild-std`.
       - name: Unit tests under ThreadSanitizer
+        if: github.event_name != 'push'
         working-directory: decoy-engine-native
         env:
           RUSTFLAGS: -Zsanitizer=thread
         run: cargo +nightly test --lib -Zbuild-std --target x86_64-unknown-linux-gnu
       - name: Upload fuzz artifacts on failure
-        if: failure()
+        if: failure() && github.event_name != 'push'
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-crash-artifacts

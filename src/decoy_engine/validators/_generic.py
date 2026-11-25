@@ -16,15 +16,91 @@ author already controls the whole pipeline.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.validators._catalog import ColumnFold
+from decoy_engine.validators._fold import finding_index_cap, run_whole
 from decoy_engine.validators._types import ValidatorFinding
 
 
-def _columns_map(entry: dict[str, Any]) -> dict[str, list[str]]:
-    return entry.get("columns") or {}
+class RegexMatchFold(ColumnFold):
+    """regex_match: every non-null value matches ``params.pattern`` whole-cell.
+
+    Match rule is `re.fullmatch` on `str(value)`; an operator wanting substring semantics writes
+    `.*pattern.*`. Nulls are skipped (a null is not a pattern violation).
+
+    Raises:
+        ValueError: `params.pattern` missing, or fails to compile (at construction, before any
+            row is read).
+    """
+
+    name = "regex_match"
+
+    def __init__(self, entry: dict[str, Any], *, cap: int | None) -> None:
+        super().__init__(entry, cap=cap)
+        params: dict[str, Any] = entry.get("params") or {}
+        pattern_raw = params.get("pattern")
+        if not pattern_raw or not isinstance(pattern_raw, str):
+            raise ValueError(
+                "regex_match validator requires params.pattern (a non-empty regex string)."
+            )
+        try:
+            self._compiled = re.compile(pattern_raw)
+        except re.error as exc:
+            raise ValueError(
+                f"regex_match validator: params.pattern is not a valid regex: {exc}"
+            ) from exc
+        self._pattern = pattern_raw
+
+    def failing_positions(self, values: list[Any]) -> Iterable[int]:
+        for i, val in enumerate(values):
+            if val is not None and self._compiled.fullmatch(str(val)) is None:
+                yield i
+
+    def describe(self, count: int, table: str, column: str) -> str:
+        return f"{count} row(s) in {table}.{column} do not match pattern {self._pattern!r}"
+
+
+class ColumnInSetFold(ColumnFold):
+    """column_in_set: every value belongs to ``params.allowed_values``.
+
+    Comparison canonicalizes both sides via `str()`, consistent with the check-digit validators.
+    Nulls are skipped by default; `params.allow_null: false` flips null cells to findings.
+
+    Raises:
+        ValueError: `params.allowed_values` missing or empty (at construction).
+    """
+
+    name = "column_in_set"
+
+    def __init__(self, entry: dict[str, Any], *, cap: int | None) -> None:
+        super().__init__(entry, cap=cap)
+        params: dict[str, Any] = entry.get("params") or {}
+        allowed_raw = params.get("allowed_values")
+        if not allowed_raw or not isinstance(allowed_raw, list):
+            raise ValueError(
+                "column_in_set validator requires params.allowed_values "
+                "(a non-empty list of allowed values)."
+            )
+        self._allowed: set[str] = {str(v) for v in allowed_raw}
+        self._allow_null = bool(params.get("allow_null", True))
+
+    def failing_positions(self, values: list[Any]) -> Iterable[int]:
+        for i, val in enumerate(values):
+            if val is None:
+                if not self._allow_null:
+                    yield i
+            elif str(val) not in self._allowed:
+                yield i
+
+    def describe(self, count: int, table: str, column: str) -> str:
+        return (
+            f"{count} row(s) in {table}.{column} are not in the allowed set "
+            f"({len(self._allowed)} value(s))"
+        )
 
 
 def validate_regex_match(
@@ -34,16 +110,12 @@ def validate_regex_match(
     *,
     sources: dict[str, pa.Table] | None = None,
 ) -> tuple[ValidatorFinding, ...]:
-    """regex_match: every non-null value in the named columns matches `pattern`.
-
-    Match rule is `re.fullmatch` on `str(value)` (whole-cell assertion); an
-    operator wanting substring semantics writes `.*pattern.*`. Nulls are
-    skipped (a null is not a pattern violation).
+    """regex_match over whole tables: one span per table (see `RegexMatchFold`).
 
     Args:
         outputs: Read-only pipeline outputs.
         entry: Config block; requires `params.pattern` (str).
-        config: Full pipeline config dict (unused).
+        config: Full pipeline config dict (read for the quarantine setting only).
         sources: Unused by this validator (registry contract, D2).
 
     Returns:
@@ -52,47 +124,8 @@ def validate_regex_match(
     Raises:
         ValueError: `params.pattern` missing, or fails to compile.
     """
-    params: dict[str, Any] = entry.get("params") or {}
-    pattern_raw = params.get("pattern")
-    if not pattern_raw or not isinstance(pattern_raw, str):
-        raise ValueError(
-            "regex_match validator requires params.pattern (a non-empty regex string)."
-        )
-    try:
-        compiled = re.compile(pattern_raw)
-    except re.error as exc:
-        raise ValueError(
-            f"regex_match validator: params.pattern is not a valid regex: {exc}"
-        ) from exc
-
-    findings: list[ValidatorFinding] = []
-    for table_name, col_names in _columns_map(entry).items():
-        table = outputs.get(table_name)
-        if table is None:
-            continue
-        for col_name in col_names:
-            if col_name not in table.schema.names:
-                continue
-            values = table.column(col_name).to_pylist()
-            failing = [
-                i
-                for i, val in enumerate(values)
-                if val is not None and compiled.fullmatch(str(val)) is None
-            ]
-            if failing:
-                findings.append(
-                    ValidatorFinding(
-                        validator="regex_match",
-                        table=table_name,
-                        column=col_name,
-                        failing_row_indices=tuple(failing),
-                        detail=(
-                            f"{len(failing)} row(s) in {table_name}.{col_name} "
-                            f"do not match pattern {pattern_raw!r}"
-                        ),
-                    )
-                )
-    return tuple(findings)
+    fold = RegexMatchFold(entry, cap=finding_index_cap(config))
+    return run_whole(fold, outputs).findings
 
 
 def validate_column_in_set(
@@ -102,16 +135,12 @@ def validate_column_in_set(
     *,
     sources: dict[str, pa.Table] | None = None,
 ) -> tuple[ValidatorFinding, ...]:
-    """column_in_set: every value in the named columns belongs to `allowed_values`.
-
-    Comparison canonicalizes both sides via `str()`, consistent with the
-    check-digit validators (`_catalog.py`). Nulls are skipped by default;
-    `params.allow_null: false` flips null cells to findings (GE symmetry).
+    """column_in_set over whole tables: one span per table (see `ColumnInSetFold`).
 
     Args:
         outputs: Read-only pipeline outputs.
         entry: Config block; requires `params.allowed_values` (non-empty list).
-        config: Full pipeline config dict (unused).
+        config: Full pipeline config dict (read for the quarantine setting only).
         sources: Unused by this validator (registry contract, D2).
 
     Returns:
@@ -120,44 +149,5 @@ def validate_column_in_set(
     Raises:
         ValueError: `params.allowed_values` missing or empty.
     """
-    params: dict[str, Any] = entry.get("params") or {}
-    allowed_raw = params.get("allowed_values")
-    if not allowed_raw or not isinstance(allowed_raw, list):
-        raise ValueError(
-            "column_in_set validator requires params.allowed_values "
-            "(a non-empty list of allowed values)."
-        )
-    allowed: set[str] = {str(v) for v in allowed_raw}
-    allow_null = bool(params.get("allow_null", True))
-
-    findings: list[ValidatorFinding] = []
-    for table_name, col_names in _columns_map(entry).items():
-        table = outputs.get(table_name)
-        if table is None:
-            continue
-        for col_name in col_names:
-            if col_name not in table.schema.names:
-                continue
-            values = table.column(col_name).to_pylist()
-            failing: list[int] = []
-            for i, val in enumerate(values):
-                if val is None:
-                    if not allow_null:
-                        failing.append(i)
-                    continue
-                if str(val) not in allowed:
-                    failing.append(i)
-            if failing:
-                findings.append(
-                    ValidatorFinding(
-                        validator="column_in_set",
-                        table=table_name,
-                        column=col_name,
-                        failing_row_indices=tuple(failing),
-                        detail=(
-                            f"{len(failing)} row(s) in {table_name}.{col_name} "
-                            f"are not in the allowed set ({len(allowed)} value(s))"
-                        ),
-                    )
-                )
-    return tuple(findings)
+    fold = ColumnInSetFold(entry, cap=finding_index_cap(config))
+    return run_whole(fold, outputs).findings

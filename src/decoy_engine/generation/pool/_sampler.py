@@ -2,7 +2,7 @@
 
 Two paths per S5 spec §5:
 - Deterministic: one batched `derive_index_batch(source, mask_key=seed,
-  namespace, pool_size)` over the non-null source values (`_derive_pool_indices`),
+  namespace, pool_size)` over the non-null source values (`derive_pool_indices`),
   byte-identical to the former per-row `derive_index(seed, namespace,
   canonical_source, pool_size)` loop.
 - Non-deterministic: `np.random.default_rng(seed_int)` per the NEP-19 contract.
@@ -144,7 +144,7 @@ def derive_validated_indices(
         raise
 
 
-def _derive_pool_indices(
+def derive_pool_indices(
     nonnull_source: pd.Series, *, seed: bytes, namespace: str, pool_size: int
 ) -> np.ndarray[Any, Any]:
     """One pool index per non-null source value, row order preserved.
@@ -347,7 +347,7 @@ class PoolSampler:
         """Batched derive_index path with positional null preservation.
 
         The per-row `derive_index` loop is replaced by ONE `derive_index_batch`
-        call over the non-null source values (`_derive_pool_indices`), the same
+        call over the non-null source values (`derive_pool_indices`), the same
         drop-in that made Phase 2 pool selection ~13x on the masking route. The
         HMAC that was the irreducible per-row cost is now batched into the
         compiled kernel (or the byte-identical Python reference when the native
@@ -371,7 +371,7 @@ class PoolSampler:
             output: list[Any] = [pd.NA] * n
             nonnull_positions = np.flatnonzero(~is_null)
             if nonnull_positions.size:
-                idx_np = _derive_pool_indices(
+                idx_np = derive_pool_indices(
                     source.iloc[nonnull_positions],
                     seed=seed,
                     namespace=namespace,
@@ -509,7 +509,7 @@ class PoolSampler:
                 is_null = source.isna().to_numpy()
                 nonnull_positions = np.flatnonzero(~is_null)
                 if nonnull_positions.size:
-                    idx_np = _derive_pool_indices(
+                    idx_np = derive_pool_indices(
                         source.iloc[nonnull_positions],
                         seed=seed,
                         namespace=namespace,

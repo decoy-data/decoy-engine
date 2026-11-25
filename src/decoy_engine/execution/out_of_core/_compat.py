@@ -51,8 +51,8 @@ _GROUP_B_SUPPORTED_STRATEGIES = frozenset({"fpe", "text_redact", "categorical"})
 _GROUP_C_ALWAYS_SUPPORTED = frozenset({"text_mask"})
 _GROUP_C_CONDITIONAL = frozenset({"code_set", "bucket_perturb"})
 _GROUP_C_SUPPORTED_STRATEGIES = _GROUP_C_ALWAYS_SUPPORTED | _GROUP_C_CONDITIONAL
-# B4: `faker` is admitted only for the deterministic-REUSE person-name variant the
-# run-scoped pool context (B3) selects natively through the compiled index kernel
+# B4: `faker` is admitted only for the deterministic-REUSE variant, with an allowlisted string
+# provider, that the run-scoped pool context (B3) selects natively through the compiled index kernel
 # (`_faker_conditional_rejection` below; see `_faker_native.py`). Payload only; the
 # PARENT-KEY surface stays `_INITIAL_SUPPORTED_STRATEGIES`, so a faker FK key is a
 # fail-closed MISS. The exact-`string` source requirement is enforced later
@@ -368,12 +368,11 @@ def _faker_conditional_rejection(
     node: WorkNode, source_types: Mapping[tuple[str, str], pa.DataType] | None
 ) -> OutOfCoreRejection | None:
     """Reject a faker node whose plan shape is not the admitted deterministic-REUSE
-    person-name variant, or (when `source_types` is in hand) whose source is not an
+    allowlisted-provider variant, or (when `source_types` is in hand) whose source is not an
     exact `string`; None admits it.
 
     The admitted shape is the one `_faker_native` runs: a provider on the native
-    allowlist, `deterministic` with `cardinality_mode=reuse`, a namespace, and an
-    explicit pool_size. Non-deterministic/positional REUSE and UNIQUE/MATCH/SCALE
+    allowlist, `deterministic` with `cardinality_mode=reuse`, and a namespace. Non-deterministic/positional REUSE and UNIQUE/MATCH/SCALE
     decline on the shape alone, so the job keeps the sequential/full-frame route.
 
     The exact-`string` source gate is the no-regression fix: a non-string source
@@ -389,7 +388,7 @@ def _faker_conditional_rejection(
         return OutOfCoreRejection(
             "out_of_core_faker_pool_unsupported",
             f"{node.table}.{node.columns}: out-of-core faker admits only deterministic REUSE with "
-            "a person-name provider, a namespace, and an explicit pool_size; other shapes fall "
+            "an allowlisted poolable provider and a namespace; other shapes fall "
             "back to sequential/full-frame.",
         )
     if source_types is not None:

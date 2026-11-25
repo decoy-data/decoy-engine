@@ -22,7 +22,7 @@ from decoy_engine.declared_casting import stage_typed_sources
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._chunked_input import check_opened, source_facts
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution._pipeline_route_exec import resolve_temp_disk_budget
+from decoy_engine.execution.out_of_core import resolve_temp_disk_budget
 from decoy_engine.execution.out_of_core._scratch import engine_scratch_root
 from decoy_engine.execution.pipeline._sample import approximate_columns
 from decoy_engine.profile import LazySource, Profile, TableProfile
@@ -155,7 +155,7 @@ class SubsetStageScope:
             resident_fn=resident_fn,
             root=root,
             batch_rows=_BATCH_ROWS,
-            max_bytes=resolve_temp_disk_budget(),
+            max_bytes=resolve_temp_disk_budget(root.parent),
             stem=_STEM,
             open_fn=open_fn,
         )
@@ -256,22 +256,29 @@ def resolve_subset(
     `source_loader` run. `"skip"` leaves the stage inert; a `SubsetRequest` replaces the block."""
     if subset_request in ("config", "skip") and config.get("subset") is None:
         return config, SubsetStageScope(None, None)
-    from decoy_engine.subset import SubsetRequest, split_subset_config
+    from decoy_engine.subset import SubsetRequest, drop_subset_block, split_subset_config
 
     if not (isinstance(subset_request, SubsetRequest) or subset_request in ("config", "skip")):
         raise ExecutionError(
             code=reasons.runtime.INVALID_EXECUTION_KNOB,
             message="subset_request must be 'config', 'skip' or a SubsetRequest.",
         )
-    split = split_subset_config(config)
-    request, fingerprint = split.request, split.fingerprint
-    if subset_request == "skip":
-        request = None
-    elif isinstance(subset_request, SubsetRequest):
+    request: SubsetRequest | None
+    fingerprint: str | None
+    if isinstance(subset_request, SubsetRequest):
+        # The override replaces the block, so the block it discards is not checked; the
+        # override itself is checked by `select_subset`.
         request, fingerprint = subset_request, subset_request.fingerprint()
+        run_config, declared = drop_subset_block(config), config.get("subset") is not None
+    else:
+        split = split_subset_config(config)
+        request, fingerprint = split.request, split.fingerprint
+        run_config, declared = split.run_config, split.request is not None
+        if subset_request == "skip":
+            request = None
     if request is not None and source_loader is not None:
         refuse_subset_source_loader()
-    return split.run_config, SubsetStageScope(request, fingerprint, split.request is not None)
+    return run_config, SubsetStageScope(request, fingerprint, declared)
 
 
 __all__ = ["SubsetStageScope", "resolve_subset"]

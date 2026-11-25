@@ -11,19 +11,23 @@ carries its own registry entry.
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
 from pathlib import Path
 
 from decoy_engine.fileaccess import _durable, _osflags
 from decoy_engine.fileaccess._fdtree import _close
+from decoy_engine.fileaccess._link import raise_link_error
 from decoy_engine.fileaccess._output import (
     STAGE_PREFIX,
     _call,
     _mark_publication_stage,
+    link_noclobber_at,
     make_parent_dir_at,
     make_stage_dir_at,
 )
+from decoy_engine.fileaccess._types import LinkUnsupported
 
 
 def _open_dir(directory: Path) -> int:
@@ -103,3 +107,25 @@ def _publish_durable_dir(stage: Path, held: HeldStage, target: Path) -> None:
     _durable._sync_tree(held.fd)
     _call(os.replace, stage, target)
     held.close()
+
+
+def link_noclobber_beside(staged: Path, target: Path) -> None:
+    """Link `staged` to `target`, both names in one folder, without replacing `target`: the
+    ambient exclusive publish. The descriptor primitive goes first; a backend with no descriptor
+    form (Windows, or an `os.link` with no `dir_fd`) answers ENOSYS and takes the plain two-path
+    call. Both answer through `raise_link_error`."""
+    parent_fd = _open_dir(target.parent)
+    try:
+        link_noclobber_at(parent_fd, staged.name, parent_fd, target.name)
+        return
+    except LinkUnsupported as exc:
+        if exc.errno != errno.ENOSYS:
+            raise
+    finally:
+        _close(parent_fd)
+    code = 0
+    try:
+        os.link(staged, target)
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    raise_link_error(code)

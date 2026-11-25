@@ -92,7 +92,6 @@ ALLOWLIST: dict[str, int] = {
     # F06: one declared-casting route guard per route owner (the sentry in test_f06_declared_casting
     # inventories them) and the cast_run threaded through the sequential and out-of-core executors;
     # no casting logic of its own lives in these routers.
-    "src/decoy_engine/execution/_pipeline_route_exec.py": 632,
     # wiring of the fk-dtype hazard and D3a validator signals into the one routing call site, plus
     # the B4 source-type admission threading (_source_arrow_types + the source_types param); split
     # the probe-recovery resolver into its own module.
@@ -107,7 +106,7 @@ ALLOWLIST: dict[str, int] = {
     # compile-check ownership table; split into per-strategy check modules once the check set stabilises.
     "src/decoy_engine/plan/_checks.py": 700,
     # statistical-column check threading; same per-strategy-check decomposition target as _checks.py.
-    "src/decoy_engine/plan/_compile.py": 674,
+    "src/decoy_engine/plan/_compile.py": 673,
     # dispatch entry plus the table-keyed params, the job-seed hand-off and the eager string-pool
     # check for the position-keyed faker; dense exception, the pool check itself lives in _chunk_masking.
     # OBS-2: threads the decline records and branch-call snapshot onto each chunk's evidence.
@@ -147,7 +146,7 @@ ALLOWLIST: dict[str, int] = {
     "scripts/bench-unified-slice/bench_compare.py": 894,
     "scripts/build_golden_fixtures.py": 626,
     "scripts/fk_memory_probe.py": 1046,
-    "scripts/gen_proof_manifest.py": 1230,
+    "scripts/gen_proof_manifest.py": 1229,
     "scripts/native-baseline/bench_c1_oracle.py": 758,
     "scripts/tb3_cgroup_validation.py": 623,
     "scripts/tq_mutate.py": 822,

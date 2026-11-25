@@ -28,6 +28,7 @@ from decoy_engine.profile._readers import LazySource
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from decoy_engine.execution.pipeline import ResidentFit
     from decoy_engine.plan._types import Plan
     from decoy_engine.profile._types import Profile
     from decoy_engine.providers_v2 import ProviderRegistry
@@ -69,6 +70,7 @@ def build_live_physical_plan_inputs(
     out_of_core_budget_bytes: int | None,
     engine_version: str,
     chunked_dispatcher_enabled: bool = True,
+    resident_fit: ResidentFit | None = None,
 ) -> PhysicalPlanInputs:
     """Task 4.5 D4: build a `PhysicalPlanInputs` from `run_pipeline`'s OWN
     already-produced `profile` / `plan` / route facts, for the unified
@@ -173,4 +175,5 @@ def build_live_physical_plan_inputs(
         native_companion_reason=native_companion_status().reason,
         engine_version=engine_version,
         chunked_dispatcher_enabled=chunked_dispatcher_enabled,
+        resident_fit=resident_fit,
     )

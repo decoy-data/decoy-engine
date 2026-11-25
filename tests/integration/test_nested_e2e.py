@@ -71,6 +71,22 @@ def test_nested_pipeline_e2e_metadata_phone_redacted():
         assert "id" in parsed
 
 
+def test_nested_pipeline_short_array_branch_leaves_the_long_one_masked():
+    """An index past the end of one element's array must not stop the other element's mask."""
+    cfg = (("strategy", "redact"), ("target", "$.items[*].tags[2]"))
+    rows = [json.dumps({"items": [{"tags": ["a", "b", "SECRET"]}, {"tags": ["a", "b"]}]})]
+    result = PandasExecutionAdapter().run(
+        _envelope(_col(cfg)),
+        {"t": pa.table({"data": rows})},
+        registry=get_default_registry(),
+        relationship_graph=RelationshipGraph(edges=(), ordering=()),
+        namespace_registry=NamespaceRegistry(bindings=()),
+    )
+    items = json.loads(result.outputs["t"].column("data").to_pylist()[0])["items"]
+    assert items[0]["tags"] == ["a", "b", "REDACTED"]
+    assert items[1]["tags"] == ["a", "b"]
+
+
 def test_nested_manifest_carries_nested_config_tree():
     """The plan serializer round-trips the nested config so a downstream
     consumer can inspect target + strategy + strategy_config."""

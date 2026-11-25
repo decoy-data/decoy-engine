@@ -83,6 +83,8 @@ declared integers, `date_shift` anchors, `top_code` columns and `group_key` sibl
 `NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
 that passes through is written as `int64` instead of `double`.
 
+**Pre-GA additive name with VALIDATE-SUBSET-EDGES E1 (2026-11-24).** `decoy_engine.subset.drop_subset_block(config) -> dict` returns the run config with its `subset` block set to `None`, or the input dict itself when it has no block. `split_subset_config` now also refuses a bad `subset.edge_directions` entry (`subset_unknown_edge`, `subset_dangling_not_acknowledged`) before any read; no reason code, schema or config key changes, and a config that passed before passes now.
+
 **Pre-GA additive name with GEN-CATALOG GC3-E (2026-11-17).** `decoy_engine.code_set_catalog() -> dict[str, str]` returns each shipped code set name with its one-line description, in name order, read from the engine registry. It returns a new dict per call and reads no corpus file. No reason code, schema, config key or exit code changes.
 
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
@@ -188,6 +190,8 @@ artifact tag changes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from `profil
 content unchanged.
 
 PRE-SCAN-RUN E1 (additive): writing a `pre_scan` block now turns the run-start pre-scan on, so the dump keeps a written block even when every field is the default (it still drops a block that was never written, so a config without one dumps as before). `decoy_engine.config.pre_scan_requested(config)` is the one reader of that switch. `pre_scan` gains `on_findings: warn | fail` (default `warn`, omitted from the dump while `warn`; a reader from before this change refuses the key). The block stays out of the plan hash under `warn`. Under `fail` the hash takes `{on_findings, detectors, ner_model}` with their effective values (`ner_model` only when `ner` is listed), because those decide whether a run blocks. `decoy-run-result/v1` gains the check id `pre_scan` (a tolerant `RunResultRead` keeps an unknown id as a token), and `build_run_result(pre_checks=...)` accepts at most one `pre_scan` then at most one `scan_drift` check, in that order. New reasons, pending: `pre_scan.uncovered_pii`, `pre_scan.uncovered_pii_blocked` and `warning.drift_not_checked`. `scan_baseline.on_drift` is not read by any run yet: the run-start drift check is planned (row 32 DRIFT), and the run warns with `warning.drift_not_checked` until it lands.
+
+PRE-SCAN-RUN E2 (additive): `decoy_engine.profiling.evaluate_pre_scan(config, core)` returns a value-free `PreScanVerdict` (table names, column names and detector source names only) and `PreScanVerdict.to_check()` builds the `pre_scan` run result check. `PreScanBlockedError` (code `pre_scan.uncovered_pii_blocked`) and `PreScanFailedError` (code `pre_scan.profile_failed`) are registered coded families in the reason adapter, so the codes reach the run result instead of `decoy.unexpected_error`. `PreScanWarning` is a `UserWarning`. No run calls them yet.
 
 **Pre-GA correction (one environment flag rule, DUP-FREEZE E3, 2026-11-14).** Every boolean engine flag reads
 through one parser (`decoy_engine.internal.env_flags.env_flag`). The accepted set, after `strip().lower()`, is
@@ -307,8 +311,62 @@ pass (`decoy validate`) defers a column whose type it cannot see, so a missing `
 pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
 date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
 
+**Pre-GA correction (COLUMN-SHAPE E2, 2026-11-22).** `bucket_perturb` no longer detects a date format from
+its cells. A text column (CSV, fixed width, a string column, a `nested` child) with no `provider_config.date_format`
+is refused at plan compile with `plan/column_shape_required` (new, ships in 0.28.4, registry 1.34.0); the config-only pass
+refuses it for CSV and fixed-width sources and defers a Parquet, database or Arrow column to compile, as for
+`date_shift`. A source column that is natively a date runs with no format, keeps its Arrow type, and shifts as a
+calendar date with no pandas date range limit; the digest input is its ISO text, so one namespace gives one
+position across a CSV table and a Parquet table. A `date_format` on such a column is accepted and not used
+(`plan/column_shape_format_unused`), and `preserve_values` needs no format there. A zoned or naive timestamp,
+integer, float, decimal, boolean or other column is refused with `plan/column_shape_mismatch`. A bucket position
+that falls outside years 1 to 9999 on a typed date is a `format_error` row error. `apply_bucket_perturb` takes
+`date_format` as a required `str`; a missing, blank or non-text value raises
+`runtime/bucket_perturb_requires_date_format`. Detection stays in `decoy scan`, the starter config and the free
+text strategies only (`tests/sentry/test_no_runtime_format_detection.py`). No stored format moves.
+
+**Pre-GA correction (COLUMN-SHAPE E3, 2026-11-21).** Breaking for configs, no shim. `bucketize` and `top_code`
+refuse a text column unless it declares `logical_type` (integer with a `parse_format`, or for `bucketize` a decimal
+with precision 15 or less), at compile with `plan/column_shape_required`. A shape the strategy cannot read is
+`plan/column_shape_mismatch`: a decimal under `top_code`, a decimal wider than 15 digits under `bucketize`, or a
+decimal `bucketize` whose width is not a whole number from 1 to 10^15. A typed integer or float needs nothing, a
+typed decimal runs only under `bucketize` with a whole-number width. The handlers refuse a column the plan does
+not list as typed with `runtime/column_shape_required`. A `bucketize` or `top_code` over an undeclared text column
+therefore stops compiling, and their per-row `format_error` can no longer come from a compiled run. The nested
+`bucketize` child is always text, so it is always refused. `bucketize` reads `preset` and `width` in one place,
+`contracts/bucketize_width.py`; a sentry pins its callers. The F06 declared-casting output rule now covers
+`top_code` on an integer and `bucketize` on a decimal, and a preset on a declared integer is admitted. The plan
+hash and the physical plan hash move for any pipeline that uses `bucketize`, `top_code` or `fpe`. Adding the
+recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
+`column_shape_required` (plan and runtime) ships in 0.28.4 (registry 1.34.0).
+
+**Pre-GA correction (BUCKET-TOPCODE-NATIVE S1a, 2026-11-24).** Three byte changes in the `bucketize` handler, on every route that runs it. With an integer width, a finite value of magnitude 2**53 or more (B2) and either infinity (B3) now give one `format_error` row error with the reason `value is out of range under bucketize` and a null cell; before, the label was rounded or the cast failed with no code. A valid NaN stays ordinary missing. With quarantine on the row leaves the main output; with the fail policy the job fails before it publishes. With a float width, an integer source of any pandas dtype is converted to float64 with round-to-nearest before the division (B4), so `int64[pyarrow]` gives the labels NumPy `int64` and nullable `Int64` already gave and no longer raises with the value in the message: 9007199254740993 at width 2.5 gives lower `9007199254740992.0`. Values below 2**53 and float sources are unchanged. No plan hash, seed protocol, route or reason code moves.
+
+**Pre-GA correction (COMPANION-REDS, 2026-11-23).** The physical `plan_hash` and `activation_hash` of an auto-routed
+no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, ships in 0.28.4), and its byte
+figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
+hash still covers `facts.budget_bytes`, so it can differ between hosts when no explicit budget is set.
+`pipeline_config_hash` does not move. No schema version moves.
+
+**Pre-GA correction (GEN-NONFAKER-DRAWS S1a, 2026-11-23).** The physical `plan_hash` and `activation_hash` move once
+for every unified-slice job, because `CapabilityMatrix` gains a `draw` field (`pool` or `computed`) and
+`registry_fingerprint()` hashes the dump of every provider's matrix. Both hashes are written to output evidence. No
+other input to the fingerprint changes: with `draw` removed the fingerprint equals the one on the previous main, and a test
+pins that. `pipeline_config_hash` does not move. No schema version moves.
+
+**Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
+version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
+stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to
+`table`, `quarantine` or `report`; the path rule is stricter and shared by writer and reader (at most 8
+components, no reserved name, no path that is a folder of another); duplicate paths give `bad_path` (the order
+check is `a > b`, so an equal pair reaches the duplicate rule). `StageDir` gains `open_subdir` and `entries`, and
+`publish_unit` takes `members=` beside `tables=`. An older reader that meets such a unit cannot load its
+descriptor, treats the folder as occupied and refuses; it never overwrites the unit. Rerunning the same run id on
+such a reader refuses, and a new run id is unaffected.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
+
 
 ## 2. The compatibility surface is wider than the API
 
@@ -478,6 +536,20 @@ numeric histogram accompanying `exact_values` or `quantile_grid` has one bin; wi
 it has equal-width bins on a 1, 2, 5 grid and every non-empty bin is held by at least 10 rows.
 `numeric_bins` outside 1 to 1000 is refused with `quality.numeric_bins_invalid` (new, `since`
 unreleased) by every snapshot writer, and above 1000 by the DP fit (`dp_numeric_bins_invalid`).
+
+`cell_format.char_class` (FIT-CODES-TEXT, 2026-11) is one new optional member of the `cell_format` block
+of a `freetext` column entry. It carries on both `distribution-snapshot/v1` (the raw writer and
+`include_values=True`, through `compute_distribution_snapshot(..., cell_format=True)`) and
+`distribution-snapshot/v2` (the plain redacted writer). Its only value is `"digits"`: every non-blank
+cell of the column is ASCII `0` to `9` (`re.fullmatch("[0-9]+", cell)`), so the sampler draws digit strings
+at the fitted lengths. It is one enum token with no source value, so `scrub_cell_format` keeps `"digits"`
+and nulls any other value. This engine reads it under both tags, and a snapshot without it generates as
+before. This is a recorded exception to the additive-field rule below: an engine older than this
+change does not ignore the member. Its strict decoder refuses it with `statistical_cell_format_invalid`
+and never misreads it. The same holds for a pinned plan: an older engine that reads a plan whose stored
+`cell_format` holds `char_class` requires exactly six members and refuses it with the same code. A new tag was not minted: the old reader fails closed with a coded refusal,
+and one member does not justify a v3. After 1.0 the member and its single value are frozen; a new value
+is additive in 1.x and needs the same old-reader note.
 
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
@@ -994,13 +1066,16 @@ only this site moves.
   Non-deterministic `reuse` Faker joined the chunked route on 2026-10-06 (slice C5b-ii). It
   keeps the position-keyed draw of slice C5b-i, taken at the chunk's global row offset, so
   chunked output equals the whole-frame run for any chunk size. A column is admitted when it
-  declares an explicit `pool_size` (top level or `provider_config`), uses a provider in the C1
-  string-output allowlist (`person_first_name`, `person_last_name`), has no `when:` and is not
+  uses a provider in the C1
+  string-output allowlist (the `faker` operator's `provider_allowlist` in
+  `execution/_operator_registry.py`), has no `when:` and is not
   `unique`, `match_source_cardinality` or `scale_source_cardinality`; the namespace stays
   optional. A string source runs the compiled path and any other source type runs the chunked
   oracle leg with the same draw. A column that fails one of these conditions keeps running
-  whole-frame, and a missing `pool_size` or a provider outside the allowlist reports
-  `chunked_strategy_conditions_unmet` naming the unmet condition. A column that is admitted and
+  whole-frame, and a provider outside the allowlist reports
+  `chunked_strategy_conditions_unmet` naming the unmet condition. A missing `pool_size` is not a
+  condition (FAKER-DEFAULT-POOL, 2026-11-22): the pool takes the default of 10,000 on every
+  route, as the whole-frame run does. A column that is admitted and
   carries `when:` fails with `chunked_faker_nondeterministic_when_not_supported`, because the
   oracle numbers only the matching rows. The chunked output type of an admitted column is
   pinned to `string` on both chunked legs, with or without the companion. Under
@@ -1037,6 +1112,13 @@ only this site moves.
   route carries none, the same metadata difference the other pinned strategies record here. A custom
   provider registered under the configured name whose pool holds non-string values fails closed with
   `faker_provider_output_not_string` before any chunk is written, as for the position-keyed variant.
+  FAKER-DEFAULT-POOL (2026-11-22): a deterministic or non-deterministic `reuse` Faker with no
+  `pool_size` (absent or null, at top level or in `provider_config`) is admitted exactly as the
+  same column declaring `pool_size: 10000`, on the unified, chunked, sequential and out-of-core
+  routes. Values are unchanged. The ROUTE-OUTPUT-CONTRACT string typing of an empty or all-null
+  output applies to the newly admitted chunked columns. An out-of-core job whose faker pools
+  exceed the pool budget now fails with `out_of_core_faker_pool_budget_exceeded` before the run
+  starts, and the message no longer carries the provider, pool size or byte counts.
   `ColumnConfig` gained an optional `when: str` field (2026-10-06, slice C8-i), additive. It accepts
   a closed grammar only (a comparison of one column and one literal, `in` and `not in` over a
   literal list, `and`, `or`, `not` and parentheses), validated when the config loads with the
@@ -1055,6 +1137,14 @@ only this site moves.
   infers (Arrow `null`), while the chunked route yields `string`; values are unchanged. The
   auto-chunk planner keeps such a table chunked only when every column the predicate reads is a
   `string`. The unified full-frame route and out-of-core still decline `when:`.
+  The `when:` grammar gained reference forms (2026-11-22, WHEN-READS-SOURCE S1), additive: a column
+  is a bare name or `source.<name>` (the same thing: the original value), a backtick-quoted name
+  (`` `a.b` ``, with or without the prefix) for a name outside `[A-Za-z0-9_]`, or `masked.<name>`,
+  which parses and is refused with the new error type `when_masked_reference_unsupported`
+  (V1 reads original values only). The prefix set is exactly `source` and `masked`; any other
+  dotted prefix stays `when_outside_closed_grammar`. A quoted name holds no backtick, backslash or
+  control character, and `RESERVED_NAMES` applies to the name inside the quotes. Every predicate that
+  parsed before parses to the same tree and selects the same rows.
   `run_pipeline` gains two keyword-only arguments (2026-10-01): `native_threads: int = 1`
   (the default moved on 2026-11-20 to `None`, see the ENGINE-THREADS-DEFAULT entry below; 1 to 1024; the kernel thread budget of the auto-chunk dispatcher lane, no output
   byte depends on it) and `chunked_dispatcher_enabled: bool = True` (the kill switch that
@@ -1076,6 +1166,17 @@ only this site moves.
   values, column names, other Arrow types, nullability and row-group layout do not change. The
   public names `output_schema` and `output_table` are additive. In-memory results returned
   to a caller are outside this promise.
+  ROUTE-OUTPUT-CONTRACT, untouched columns (UF-DOMAIN S1, 2026-11-22): on every pandas-built
+  route (full-frame, sequential, unified slice) a column no rule changes is written from the
+  source Arrow column as stored, not from a pandas round trip. A `decimal` keeps its precision,
+  a nullable integer not declared lossless stays an integer, carried text follows the
+  pass-through text width rule (O3) on every route, an all-null or zero-row column keeps its source type (not `null`), and a float
+  NaN stays NaN (pandas turned it into null); this is what the chunked lane already wrote. One function,
+  `table_from_pandas_keeping_source_types`, builds that output from the source table's row
+  count and column order, and raises `ExecutionError` (`output_assembly_rows_changed`, `output_assembly_columns_mismatch`)
+  before any output exists if the frame no longer holds the source's rows. A carried column keeps
+  the pandas dtype hint its source named.
+  The earlier output of those routes changes for the lossy types named above.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
   that would auto-chunk alone dispatches on the same lane, so the auto-chunk shape above now
@@ -1325,6 +1426,23 @@ for `int` fails the row (`nested_cell_number_out_of_range`). A leaf list of inte
 the child as integers and a null, not as `float64` with `NaN`, so `hash` and `tokenize` accept it. A child
 output of `NaN` or a pandas null is written as JSON `null`; an infinite output fails the row
 (`nested_child_non_finite`). A null-free leaf list and an all-float-exact cell give the bytes they gave before.
+
+**Nested target grammar (NESTED-FREEZE, 2026-11-23).** Recorded pre-GA change. `provider_config.target` of a
+`nested` column is a closed subset of RFC 9535 JSONPath. It is `$` followed by segments: `.name`, `.*`,
+`['name']` or `["name"]` (RFC escapes), `[*]`, `[index]` and `[start:end:step]`. An index is an integer with no
+leading zero, not `-0`, within plus or minus 2^53 - 1; a slice start, end and step follow the same integer rules. A step is 1 or more. A quoted name allows only the RFC escapes and no raw control character or unpaired surrogate. Nothing else is accepted: no `..`,
+filter, function, union or blank space outside a quoted name, no missing `$`, no dot-quoted name, no quoted name
+`*`, and none of the jsonpath-ng extensions (`|`, `&`, `where`, backticks). A target outside the grammar is refused by
+`compile_plan` and `run_config_only_checks` with the new plan reason `plan.nested_target_unsupported`. The
+message names table, column, config path, character position and form, and shows the target text up to 64
+characters (a longer one reads `first 64 of N characters`); it never shows a cell. `nested_jsonpath_parse_error`
+stays as the handler backstop when the handler runs without a compiled plan. The engine evaluates the grammar itself (`TargetPath.find`), so what a target selects does not depend on the
+any JSONPath library. A name selects a member of an object. `.*` selects the members of an object or the items of an
+array, at any depth. A quoted name decodes its RFC 9535 2.3.1.2 escapes. `[*]`, an index and a slice select items of an array only; on an object or a scalar they fail closed with
+`nested_target_unwritable_container` (the index case was a bare `KeyError`), and on a null they select nothing. An
+index outside an array selects nothing for that branch only. `nested_jsonpath_path_overlap` stays registered and is no
+longer raised, because no subset target can match a path and its prefix. The engine no longer depends on jsonpath-ng:
+the requirement is removed and `tests/sentry/defects/test_nested_target_choke_point.py` fails on any import of it.
 
 ### 3.5 Disguises
 

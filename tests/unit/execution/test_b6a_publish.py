@@ -321,7 +321,7 @@ def _strip_ms(value: Any) -> Any:
 
 def _fk_run(tmp_path: Path, mode: str, sink: Any, **extra: Any) -> Any:
     config, manifest = _fk_config(tmp_path)
-    sources = {name: pq.read_table(path) for name, path in manifest.items()}
+    sources = {name: pq.read_table(entry["path"]) for name, entry in manifest.items()}
     return run_pipeline(
         config,
         sources,

@@ -37,7 +37,10 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.declared_casting._boundary import declared_date_shift_columns, native_date_columns
+from decoy_engine.declared_casting._boundary import (
+    declared_date_shift_columns,
+    plan_column_shapes,
+)
 from decoy_engine.execution._adapter import (
     ExecutionResult,
     StrategyContext,
@@ -54,7 +57,6 @@ from decoy_engine.execution._fk_keys import (
     fk_nullable_int_array,
     lossless_fk_int_values,
     lossless_int_columns,
-    table_from_pandas_keeping_source_types,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._fk_resolve import (
@@ -79,6 +81,7 @@ from decoy_engine.execution._strategies._fpe import FpeStrategyHandler
 from decoy_engine.execution._strategies._orphan import make_remap_fn
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._when_gate import run_with_when_gate
+from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -232,7 +235,7 @@ class PandasExecutionAdapter:
             code_set_records=dict(code_set_records) if code_set_records else {},
             vault_writer=token_vault_writer,
             declared_date_columns=declared_date_shift_columns(plan),
-            native_date_columns=native_date_columns(plan),
+            column_shapes=plan_column_shapes(plan),
         )
 
         ordered = order_work(build_work_list(plan, registry), relationship_graph)
@@ -318,8 +321,14 @@ class PandasExecutionAdapter:
             {
                 t: table_from_pandas_keeping_source_types(
                     f,
-                    sources[t].schema,
-                    untouched_columns((n for n in ordered if n.table == t), f.columns, registry),
+                    sources[t],
+                    untouched_columns(
+                        (n for n in ordered if n.table == t),
+                        f.columns,
+                        registry,
+                        relationship_graph.edges,
+                        t,
+                    ),
                     [c for (table, c) in ctx.native_date_columns if table == t],
                 )
                 for t, f in frames.items()

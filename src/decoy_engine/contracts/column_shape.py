@@ -32,8 +32,10 @@ __all__ = [
     "declared_shape",
     "is_bounded_decimal",
     "is_nested_type",
+    "native_date_shapes",
     "source_facts_of",
     "source_format_for",
+    "table_source_facts",
 ]
 
 # IEEE 754 binary64 carries 15 significant decimal digits exactly (DBL_DIG).
@@ -90,6 +92,15 @@ def build_source_facts(
     )
 
 
+def table_source_facts(table: str, schema: pa.Schema | None, siblings: SourceFacts) -> SourceFacts:
+    """The job's ``siblings`` with the one table a route is masking set to its own schema: a
+    per-table route still shapes the other tables by their schemas, not by their descriptors."""
+    own = build_source_facts(caller={table: schema})
+    return SourceFacts(
+        schemas={**siblings.schemas, **own.schemas}, resident=siblings.resident | own.resident
+    )
+
+
 def source_facts_of(
     tables: Mapping[str, Any] | None, loader: Mapping[str, pa.Schema] | None = None
 ) -> SourceFacts:
@@ -134,6 +145,17 @@ ColumnShapes = Mapping[tuple[str, str], ColumnShape]
 TYPED_DATE_SHAPES = frozenset({ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ})
 
 
+def native_date_shapes(
+    shapes: Mapping[tuple[str, str], ColumnShape], declared: Collection[tuple[str, str]]
+) -> dict[tuple[str, str], ColumnShape]:
+    """The (table, column) entries of ``shapes`` that are native dates or zoned timestamps.
+
+    The one producer of that view: ``StrategyContext.native_date_columns`` and the chunked source
+    gate both call it. A declared date column keeps its text output, so ``declared`` leaves it out.
+    """
+    return {k: v for k, v in shapes.items() if v in TYPED_DATE_SHAPES and k not in declared}
+
+
 def is_bounded_decimal(precision: Any, scale: Any) -> bool:
     """Whether ``0 <= scale <= precision <= 15``: a decimal float64 can bucket exactly."""
     return (
@@ -157,6 +179,9 @@ def classify_column(*, source_format: str | None, arrow_type: pa.DataType | None
     if arrow_type is None:
         return ColumnShape.UNKNOWN
     t = arrow_type
+    # A dictionary-encoded string holds text; the encoding is not a different shape.
+    if pa.types.is_dictionary(t) and is_text(t.value_type):
+        return ColumnShape.TEXT
     if is_text(t):
         return ColumnShape.TEXT
     if pa.types.is_date(t):

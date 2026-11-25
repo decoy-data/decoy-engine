@@ -327,17 +327,13 @@ def test_o14_hash_evidence_reports_python_when_the_companion_is_absent(
 
 # Section 5: pre-existing strict gaps, pinned with a scalar control each.
 
-_NAN_PARENT_DIMS = {
-    **o.METADATA_ONLY,
-    "row_set": False,
-    "row_order": False,
-    "cellwise_values": False,
-    "null_vs_nan": False,
-}
+# Rule 3 (UF-DOMAIN S1): an unchanged parent key component is written from the source, so
+# the oracle keeps NaN as the out-of-core route does and only field metadata differs.
+_NAN_PARENT_DIMS = {**o.METADATA_ONLY}
 
 
 @pytest.mark.parametrize("policy", [P, R])
-def test_d0_g2_nan_in_a_parent_key_component_is_null_on_the_oracle_and_nan_out_of_core(
+def test_d0_g2_nan_in_a_parent_key_component_stays_nan_on_the_oracle_and_out_of_core(
     policy: OrphanPolicy,
 ) -> None:
     shape = o.nan_parent_component_shape(policy)
@@ -345,9 +341,9 @@ def test_d0_g2_nan_in_a_parent_key_component_is_null_on_the_oracle_and_nan_out_o
     report = o.strict(oracle, run)
     assert report == {"P": _NAN_PARENT_DIMS, "C": o.METADATA_ONLY}
     assert o.strict_modulo_pandas(oracle, run)["C"] == d.ALL_TRUE
-    assert oracle.outputs["P"].column("n").to_pylist() == [1.0, None]
-    got = run.outputs["P"].column("n").to_pylist()
-    assert got[0] == 1.0 and got[1] != got[1]  # NaN
+    for table in (oracle.outputs["P"], run.outputs["P"]):
+        got = table.column("n").to_pylist()
+        assert got[0] == 1.0 and got[1] != got[1]  # NaN
 
 
 _WIDTH_DIMS = {**o.METADATA_ONLY, "schema_structure": False, "type_width": False}
@@ -373,7 +369,7 @@ def test_g5_zero_row_parent_is_typed_double_by_the_oracle_and_string_out_of_core
         parent_nan_row=None,
     )
     control_oracle, control_ooc = _run_oracle(plan, sources, graph), _run_ooc(plan, sources, graph)
-    assert sc.schema_signature(control_oracle.outputs["parent"]) == "pk:double,payload:null"
+    assert sc.schema_signature(control_oracle.outputs["parent"]) == "pk:double,payload:string"
     assert sc.schema_signature(control_ooc.outputs["parent"]) == "pk:string,payload:string"
 
 

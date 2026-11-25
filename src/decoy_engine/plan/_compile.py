@@ -58,7 +58,6 @@ from decoy_engine.plan._checks import (
     check_basic_uniqueness_pre_flight,
     check_composite_columns_length_match,
     check_fpe_checksum_scheme,
-    check_non_poolable_provider_with_pool_backend,
     check_null_bearing_int_unsupported,
     check_text_mask_ner_available,
     check_text_redact_ner_available,
@@ -106,6 +105,8 @@ from decoy_engine.plan._types import (
 from decoy_engine.plan.checks import (
     DEFERRED,
     check_generate_columns,
+    check_nested_targets,
+    check_pool_routing,
     check_required_strategy_settings,
     column_shape_warnings,
 )
@@ -194,7 +195,7 @@ def compile_plan(
     # Row 11 (audit H5, 2026-06-12): structural (config + registry only),
     # runs in both branches right after unknown_provider so a missing
     # provider still surfaces as row 2 first.
-    check_non_poolable_provider_with_pool_backend(config)
+    check_pool_routing(config)
     # DPS Scope B (guide 4.7/5): read-and-pin once so every check below sees the same bytes;
     # DP verification runs first, as check_statistical_columns needs its dp_verified verdicts.
     check_dp_generate_contract(config)  # Row 31 (DPS-3): config-only, so before any snapshot read
@@ -203,11 +204,10 @@ def compile_plan(
     # Row 13 (capability-gaps WS2, 2026-06-12): text_redact `ner` opt-in requires the spacy
     # extra + model on THIS host; both branches + run_config_only_checks.
     check_text_redact_ner_available(config)
-    # Row 30 (TX-2, 2026-07-20): text_mask `ner` opt-in requires the same
-    # spacy extra + model on THIS host. Config + installed packages only;
-    # both branches + run_config_only_checks.
+    # Row 30 (TX-2): text_mask `ner` opt-in needs the same spacy extra + model on THIS host.
     check_text_mask_ner_available(config)
     check_text_mask_strategies(config)  # E-F0: detector ids and strategy pairs text_mask can run
+    check_nested_targets(config)  # NESTED-FREEZE: the one JSONPath subset, before any read
     # Row 14 (deferred follow-up 1, 2026-06-12): vault: true needs a
     # namespace and a one-way strategy. Config-only; both branches +
     # run_config_only_checks.
@@ -242,7 +242,7 @@ def compile_plan(
     # bound (silent-passthrough leak). Config-only; both branches +
     # run_config_only_checks.
     check_top_code_config(config)
-    check_bucket_perturb_config(config)
+    check_bucket_perturb_config(config, column_shapes)
     # Rows 24-26 (silent-passthrough leaks), then the required strategy settings.
     check_categorical_categories(config)
     check_fpe_charset_config(config)
@@ -524,27 +524,26 @@ def run_config_only_checks(
     check_when_with_coherent_with(config)
     check_when_grammar(config)
     deterministic_namespace_completeness(config)
-    check_non_poolable_provider_with_pool_backend(config)
+    check_pool_routing(config)
     # DPS Scope B (guide 4.7/5): same read-verify-validate order as above.
     check_dp_generate_contract(config)  # Row 31 (DPS-3), before any snapshot read
     # Row 12 (WS3): config plus its snapshot artifacts, so config-only callers catch a bad one.
     pin_and_check_snapshots(config, base_dir=base_dir)
     # Row 13 (WS2): text_redact `ner` opt-in needs spacy + model here.
     check_text_redact_ner_available(config)
-    # Row 30 (TX-2, 2026-07-20): text_mask `ner` opt-in needs the same
-    # spacy + model check. Config-only.
-    check_text_mask_ner_available(config)
+    check_text_mask_ner_available(config)  # Row 30 (TX-2): config-only
     check_text_mask_strategies(config)  # E-F0: detector ids and strategy pairs text_mask can run
+    check_nested_targets(config)  # NESTED-FREEZE: same refusal as compile_plan
     # Row 14 (vault): vault: true needs a namespace + a one-way strategy.
     check_vault_columns(config)
     # Row 15 (SP-04): reject unknown or structurally unsupported FPE checksum schemes.
     check_fpe_checksum_scheme(config)
     # Rows 16-20 column refs plus GEN-STRICT E2 generate column checks (one wrapper, as above).
     check_generate_columns(config, default_locale=instance_default_locale)
-    # Row 27 (HC-3a): reject date_shift columns with a missing group_by
-    # (entity-anchor) column ref. Config-only.
+    # Row 27 (HC-3a): reject date_shift columns with a missing group_by column ref.
     check_date_shift_group_by_refs(config)
-    check_date_preserve_values(config, build_column_shapes(config, sources=NO_SOURCES))
+    config_shapes = build_column_shapes(config, sources=NO_SOURCES)
+    check_date_preserve_values(config, config_shapes)
     check_date_shift_window(config)
     # Row 21 (SP-46 / fpe_join_group): validate fpe_join_group declarations.
     # Warnings are discarded here (config-only callers do not build a Plan).
@@ -557,7 +556,7 @@ def run_config_only_checks(
     # Row 28 (HC-3b, 2026-07-17): reject top_code columns with no resolvable
     # bound (silent-passthrough leak). Config-only.
     check_top_code_config(config)
-    check_bucket_perturb_config(config)
+    check_bucket_perturb_config(config, config_shapes)
     # Rows 24-26 (categorical shape, fpe charset, faker provider) and the required strategy
     # settings: config-only, so safe for decoy validate.
     check_categorical_categories(config)

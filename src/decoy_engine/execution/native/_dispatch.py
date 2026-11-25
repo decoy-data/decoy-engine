@@ -44,8 +44,9 @@ from typing import Any, Literal
 
 import pyarrow as pa
 
+from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.config._subset_run import refuse_unapplied_subset
-from decoy_engine.contracts.column_shape import build_source_facts
+from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts, table_source_facts
 from decoy_engine.execution._guards import prepare_declared_execution_sources
 from decoy_engine.execution._operator_registry import OPERATORS, POSITIONAL_FAKER_SOURCE_TYPES
 from decoy_engine.execution._transforms_gate import reject_per_table_transforms
@@ -237,6 +238,7 @@ def _static_route_decision(
     engine_version: str,
     registry: Any = None,
     first_schema: pa.Schema | None = None,
+    siblings: SourceFacts,
 ) -> NativeRouteEvidence:
     """Config/profile-only admission: no I/O, no compiled-extension probe.
 
@@ -269,7 +271,7 @@ def _static_route_decision(
         profile,
         engine_version=engine_version,
         registry=registry,
-        sources=build_source_facts(caller={table: first_schema}),
+        sources=table_source_facts(table, first_schema, siblings),
         resident_sources=sibling_resident_sources(config, table, first_schema),
     )
     table_nodes = [n for n in plan.nodes if n.table == table]
@@ -397,6 +399,7 @@ def plan_native_route(
     unconfigured_policy: Literal["warn", "error"] | None = None,
     registry: Any,
     c5c_ii_admission: C5cIiAdmissionContext | None = None,
+    siblings: SourceFacts,
 ) -> NativePreflight:
     """The full PREFLIGHT decision for `table`: config/profile admission, then
     (when `first_schema` is given) the actual first-chunk coverage + faker
@@ -440,6 +443,7 @@ def plan_native_route(
         engine_version=engine_version,
         registry=registry,
         first_schema=first_schema,
+        siblings=siblings,
     )
     # A declined `when:` column names the reroute reason even when another column would
     # have vetoed the table anyway: its meaning (leave unselected rows untouched)
@@ -465,7 +469,6 @@ def plan_native_route(
     if first_schema is not None:
         if decision.native_admitted:
             covered = {n.column for n in decision.node_routes}
-            from decoy_engine.execution._transforms import stored_index_fields
 
             # A stored pandas index field is consumed as the index on the oracle route and
             # never yielded, so it is neither covered nor unconfigured.
@@ -666,6 +669,7 @@ def run_native_or_oracle_chunked(
         route_evidence_sink=route_evidence_sink,
         pool_cache=pool_cache,
         enforce_schema_rule=False,
+        sources=NO_SOURCES,
     )
 
 

@@ -141,6 +141,8 @@ from decoy_engine.config._targets import (
     duplicate_target_groups,
 )
 from decoy_engine.config._transforms import (
+    DERIVED_ORIGIN,
+    SOURCE_ORIGIN,
     DedupeOp,
     DeriveOp,
     DropColumnOp,
@@ -148,13 +150,17 @@ from decoy_engine.config._transforms import (
     LimitOp,
     SortOp,
     TransformOp,
+    final_bindings,
+    parse_ops,
 )
 
 __all__ = [
+    "DERIVED_ORIGIN",
     "FILE_SOURCE_PATH_FIELDS",
     "NAMESPACE_PLACEHOLDER_PREFIX",
     "NO_SINK_KIND",
     "SOURCE_LOCATOR_FIELDS",
+    "SOURCE_ORIGIN",
     "SOURCE_PATH_FIELDS",
     "UNIQUE_FAKER_ATTEMPTS",
     "ColumnConfig",
@@ -205,6 +211,7 @@ __all__ = [
     "declares_unique",
     "distinct_categories",
     "duplicate_target_groups",
+    "final_bindings",
     "generate_columns_of",
     "generate_option_catalog",
     "generated_arrow_type",
@@ -217,6 +224,7 @@ __all__ = [
     "parent_key_problem",
     "parent_lookup_problems",
     "parse_delivery_config",
+    "parse_ops",
     "parse_output_type",
     "parse_pipeline_config",
     "parse_relationship_config",

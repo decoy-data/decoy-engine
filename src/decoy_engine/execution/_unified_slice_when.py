@@ -65,7 +65,7 @@ def when_columns_admitted(
         if when_native_rejection(column, entries, registry, table=table, schema=source.schema):
             return False
         ast = parsed_when(entry)
-        if ast is None or not set(when_column_refs(ast)) <= set(source.column_names):
+        if ast is None or not {r.column for r in when_column_refs(ast)} <= set(source.column_names):
             return False
     return True
 

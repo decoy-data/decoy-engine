@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.sentry.parallel._resources import parse_marker_expr
+from tests.sentry.ratchet import is_sentry_glob
 
 ROOT = Path(__file__).resolve().parents[2]
 GATES = ROOT / "scripts" / "dev" / "gates.sh"
@@ -33,7 +34,8 @@ OUTSIDE_SENTRIES = (
 
 def sentry_files(root: Path) -> set[str]:
     """Every sentry test file under ``tests/sentry``, nested folders included."""
-    return {p.relative_to(root).as_posix() for p in (root / "tests" / "sentry").rglob("test_*.py")}
+    found = (p.relative_to(root).as_posix() for p in (root / "tests" / "sentry").rglob("*"))
+    return {p for p in found if is_sentry_glob(p)}
 
 
 # By the CODEMAP rule every test file under tests/sentry/ is a sentry, so the glob is the list.
@@ -101,8 +103,14 @@ def route_findings(text: str) -> list[str]:
     )
     if not (step and runs):
         found.append("no layers step runs exactly $LAYER_TEST")
-    if not re.search(r'\$\{LAYER_IGNORE\[@\]\+"\$\{LAYER_IGNORE\[@\]\}"\} \$\{SENTRY_PATHS', text):
-        found.append("the sentry step does not apply LAYER_IGNORE")
+    # The sentry step builds its command in split_pytest_cmds, which puts LAYER_IGNORE before the
+    # paths in every pass; the step must hand that builder SENTRY_PATHS.
+    split_lines = [line for line in text.splitlines() if "${SPLIT_PATHS[@]" in line]
+    ignore_then_paths = '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS'
+    if not split_lines or any(ignore_then_paths not in line for line in split_lines):
+        found.append("the shared split builder does not apply LAYER_IGNORE")
+    if not re.search(r"^\s+SPLIT_PATHS=\(\$\{SENTRY_PATHS\[@\]\+", text, re.MULTILINE):
+        found.append("the sentry step does not run SENTRY_PATHS")
     return found
 
 
@@ -185,9 +193,21 @@ def test_a_broken_route_split_is_detected() -> None:
     assert stray != text
     assert any("outside LAYER_IGNORE" in f for f in route_findings(stray))
     unignored = text.replace(
-        '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS', "${SENTRY_PATHS"
+        '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS', "${SPLIT_PATHS"
     )
-    assert "the sentry step does not apply LAYER_IGNORE" in route_findings(unignored)
+    assert "the shared split builder does not apply LAYER_IGNORE" in route_findings(unignored)
+    # Dropping the ignore from any one pass alone must also be caught.
+    target = '${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SPLIT_PATHS'
+    count = text.count(target)
+    assert count >= 2
+    for nth in range(count):
+        at = -1
+        for _ in range(nth + 1):
+            at = text.index(target, at + 1)
+        one_pass = text[:at] + "${SPLIT_PATHS" + text[at + len(target) :]
+        assert "the shared split builder does not apply LAYER_IGNORE" in route_findings(one_pass)
+    other_paths = re.sub(r"SPLIT_PATHS=\(\$\{SENTRY_PATHS", "SPLIT_PATHS=(${OTHER_PATHS", text)
+    assert "the sentry step does not run SENTRY_PATHS" in route_findings(other_paths)
 
 
 def test_a_nested_new_sentry_is_picked_up(tmp_path: Path) -> None:

@@ -33,6 +33,10 @@ from decoy_engine.providers_v2._adapter import (
     ProviderSpec,
 )
 from decoy_engine.providers_v2._errors import AdapterError, ProviderError
+from decoy_engine.providers_v2._faker_draw_contracts import (
+    faker_draw_adapter_defaults,
+    faker_draw_method_view,
+)
 
 # Semantic name -> Faker method name. Frozen; lookup table only.
 # Post-S6 (per spec §7): the 5 swap targets (synthetic_ssn / ein / npi /
@@ -40,7 +44,7 @@ from decoy_engine.providers_v2._errors import AdapterError, ProviderError
 # registry; FakerAdapter no longer routes them. The 3 remaining
 # synthetic identifiers (account_number, member_id, plan_id) stay
 # Faker-bound.
-_FAKER_METHOD_MAP: dict[str, str] = {
+_STATIC_METHOD_MAP: dict[str, str] = {
     # Identifiers (3 Faker-bound; 5 swapped to DecoyNative per S6)
     "synthetic_account_number": "bban",
     "synthetic_member_id": "numerify",
@@ -61,10 +65,9 @@ _FAKER_METHOD_MAP: dict[str, str] = {
     "address_full": "address",
     # Generic
     "lorem_text": "text",
-    "uuid": "uuid4",
-    "random_int_range": "random_int",
-    "random_choice": "random_element",
 }
+# The computed draws (uuid, random_int_range, random_choice) come from one contract.
+_FAKER_METHOD_MAP: dict[str, str] = {**_STATIC_METHOD_MAP, **faker_draw_method_view()}
 
 
 # Per-provider kwargs for Faker methods that need shape hints. Post-S6:
@@ -73,7 +76,7 @@ _FAKER_METHOD_MAP: dict[str, str] = {
 _FAKER_DEFAULT_KWARGS: dict[str, dict[str, Any]] = {
     "synthetic_member_id": {"text": "MBR########"},
     "synthetic_plan_id": {"text": "PLN######"},
-    "random_choice": {"elements": ("a", "b", "c")},
+    **{alias: dict(kwargs) for alias, kwargs in faker_draw_adapter_defaults().items()},
 }
 
 
