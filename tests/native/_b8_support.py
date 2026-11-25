@@ -22,6 +22,7 @@ from unittest import mock
 
 import pyarrow as pa
 
+from decoy_engine._pandas_meta import arrow_columns
 from decoy_engine.execution import _chunked
 from decoy_engine.execution._chunked import run_mask_pipeline_chunked
 from decoy_engine.execution._chunked_oracle import _mask_pipeline_chunked
@@ -34,7 +35,6 @@ from decoy_engine.profile import (
     PreparedDeclaredSources,
     prepare_declared_sources,
 )
-from decoy_engine.profile._declared_columns import arrow_columns
 from decoy_engine.providers_v2 import get_default_registry
 from tests.native._chunked_entry_support import (
     ENGINE_VERSION,

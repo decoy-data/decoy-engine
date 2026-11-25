@@ -17,12 +17,18 @@ Messages name site keys only (file, function, rule), never the copied text.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests.sentry import _baseline_sources, _ratchet
 from tests.sentry.safe_output._copies import Copy, census, scan_source, scan_tree
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
@@ -62,7 +68,7 @@ def test_merge_base_ratchet_catches_a_raised_pin_and_a_site_swap() -> None:
 
 def test_the_pin_is_registered_with_the_merge_base_ratchet() -> None:
     reg = (ROOT / _ratchet.REGISTRY).read_text(encoding="utf-8")
-    rows, findings = _ratchet.parse_registry(reg)
+    rows, findings = _ratchet.parse_registry(tomllib.loads(reg))
     assert findings == []
     assert rows[SENTRY_ID] == str(BASELINE.relative_to(ROOT))
 

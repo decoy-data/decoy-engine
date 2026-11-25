@@ -69,6 +69,7 @@ __all__ = [
     "RECORD_KIND_RESERVED",
     "SCAN_SOURCE_FAILED",
     "SCRATCH_ACL_FAILED",
+    "SCRATCH_ROOT_UNUSABLE",
     "SCRATCH_UNSAFE",
     "SHUFFLE_REQUIRES_NAMESPACE",
     "SORT_ASCENDING_LENGTH_MISMATCH",
@@ -424,6 +425,16 @@ SCRATCH_ACL_FAILED = _d("scratch_acl_failed", "Scratch ACL failed.", since="1.7.
 _d = _catalog.runtime("ProtectedDirUnsafe")
 
 SCRATCH_UNSAFE = _d("scratch_unsafe", "Scratch unsafe.", since="1.7.0")
+
+_d = _catalog.runtime("ScratchRootUnusable")
+
+SCRATCH_ROOT_UNUSABLE = _d(
+    "scratch_root_unusable",
+    "The directory a temp variable names cannot hold scratch files.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
+)
 
 _d = _catalog.runtime("RecordError")
 
