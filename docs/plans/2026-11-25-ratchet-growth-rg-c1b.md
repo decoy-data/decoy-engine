@@ -9,8 +9,10 @@ catalogs/recurring-defects; owner notes on the V1 threat model and plan-defines-
 Row: RATCHET-GROWTH. Parent plan: engine `docs/plans/2026-11-24-postmask-fail-closed-and-ratchet-growth.md`
 (section "RG-C1b"), owner decisions Q1 to Q7 of 2026-11-24. Work lands in the CLI repo.
 
-Risk: R2 (test tooling). Size: one day (about +20 `_ratchet.py`, +60 helpers, +15 sources,
-+8 TOML, one new baseline, +200 tests). Depends on RG-C1a merged on CLI main and on RG-E2
+Risk: R2 (test tooling). Size: 1.5 days. Copied from the engine with CLI edits: about 480
+helper lines (`_bindings.py`, `_bounds.py`, `_limit_constants.py`) and about 500 test lines from
+engine `ratchet/test_bounds.py`. New logic: about +30 `_ratchet.py`, +20 `_baseline_sources.py`,
++10 TOML, one baseline, about +120 CLI-only tests. Depends on RG-C1a merged on CLI main and on RG-E2
 (engine PR #801) merged on engine main. Anchor: CLI main `d6b9e4c7`, engine #801 head
 `f15adce3f`. The builder re-anchors on both merge commits first.
 
@@ -41,10 +43,14 @@ Non-goals:
 ## What exists (reuse, do not rebuild)
 
 - Engine RG-E2 (#801): `tests/sentry/ratchet/_limit_constants.py` (261 lines, `LIMITS`,
-  `NOT_A_BOUND`, `direction_problems`), `_bindings.py` (31), `_bounds.py` (186, `live_bounds`,
-  guard successor rules), and in `tests/sentry/_ratchet.py` `GUARD_KEYS` (line 51),
-  `bound_loosened` (274), `parse_retired_growth` (177) and the guard handling in `_check`
-  (463-557). Tests in `tests/sentry/ratchet/test_bounds.py` and `test_reader_guard.py`.
+  `NOT_A_BOUND`, `direction_problems`), `_bindings.py` (31), `_bounds.py` (186, file-free:
+  `loosened_fields`, guard successor and retirement rules at `:110-133`), `live_bounds` in
+  `tests/sentry/_baseline_sources.py:95-107` (the one source reader), and in
+  `tests/sentry/_ratchet.py` `GUARD_KEYS` (line 51), the strict baseline read (`:232-238`),
+  `parse_retired_growth` (177), the floor comparison through `loosened_findings` (`:544-546`) and
+  the guard handling in `_check` (463-557). Tests in `tests/sentry/ratchet/test_bounds.py`
+  (512 lines), `test_baseline_types.py` and `test_reader_guard.py` (which forbids file reads in
+  `_bounds.py`, `:32-36`).
 - CLI after RG-C1a: `tests/sentry/ratchet/` with `_integrity.py` (mirror) and `_base_run.py`
   (vendored), the `[retired]` tables, `--with-base`.
 - CLI `_baseline_sources.py:99-105` `READERS` and `KINDS` (`:31`).
@@ -52,11 +58,16 @@ Non-goals:
 ## Design
 
 1. Helpers in CLI `tests/sentry/ratchet/`:
-   - `_bindings.py` and `_bounds.py`: vendored byte for byte when the engine files take no
-     engine path; otherwise a declared `[[mirror]]` in `ci/vendored.toml` whose header lists
-     each difference. The builder diffs first and picks one; no silent fork.
+   - `_bindings.py`: vendored byte for byte if the diff shows no engine path; else a mirror.
+   - `_bounds.py`: a declared `[[mirror]]` in `ci/vendored.toml`, not a byte copy. The one CLI
+     change: `CEILING_FIELDS = ("max", "count", "sites")`, so one comparison
+     (`loosened_fields`) covers the existing CLI ceilings and the new floor. The header names
+     that difference. It stays file-free, as in the engine.
    - `_limit_constants.py`: a mirror. Same `AnnAssign` and bool rules, same `DIRECTIONS`,
-     CLI `LIMITS` and `NOT_A_BOUND` tables.
+     CLI `LIMITS` and `NOT_A_BOUND` tables, and the engine's exception for vendored fixtures
+     (engine `tests/sentry/test_baseline_registry.py:211-238`).
+   - Update the ledger pins in CLI `tests/sentry/test_ci_lock_installs.py:501-507` (vendored
+     paths and the mirror count) on the RG-C1a base.
 2. CLI `LIMITS` (each row names the comparison line, checked by the builder on CLI main):
 
    | File | Constant | Direction |
@@ -74,25 +85,38 @@ Non-goals:
    `CANARY_INT`, `test_report_raw_value_isolation.py` `_NUMERIC_SENTINEL`,
    `test_engine_internal_boundary.py` `_MAX_ALIAS_ROUNDS` (the scan fails closed past it),
    `release/test_qa_checklist_shape.py` `EXPECTED_CHECKS`, `EXPECTED_GROUPS` (exact-equality
-   pins). If the builder finds a constant compared with `<`, `<=`, `>` or `>=` that this
+   pins), `io_policy/test_private_files.py` `LAUNCHER_MODE` (`0o755`, an equality pin at
+   `:115,541`). Tuple bindings the reader refuses (`ci_scan/test_identity.py:20`,
+   `release/test_frozen_surface_map.py:25`, column indices) are listed by name with a reason;
+   the census must pass on CLI main with them, not only report them. If the builder finds a constant compared with `<`, `<=`, `>` or `>=` that this
    table calls not a bound, it moves to `LIMITS`; the census decides, not this list.
-3. `tests/sentry/_ratchet.py` (+20): `FLOOR_FIELDS = ("min",)` beside `CEILING_FIELDS`,
-   `GUARD_KEYS = frozenset({"sentry-limits"})`, `bound_loosened` for both directions, and the
-   exact-key fresh approval for a raised max. A base approval does not excuse a raise
-   (`tests/sentry/_ratchet.py:312-317` already rejects it; kept).
+3. `tests/sentry/_ratchet.py` (+30): replace the CLI `max_raised` ceiling check
+   (`:170-194`) with the one `_bounds.loosened_fields` comparison for surviving and successor
+   keys, so `max`, `count`, `sites` and `min` follow one rule. Keep the new-ceiling-beside-an-
+   old-one rule. Add `GUARD_KEYS = frozenset({"sentry-limits"})`, the strict baseline read
+   (port of engine `_ratchet.py:232-238`: an int field that is a bool, a string or a float is a
+   finding on head and on base), the exact-key fresh approval for a raised max or lowered min,
+   and guard retirement: one fresh `[retired]` decision for the id plus a fresh
+   `[retired_growth]` row for each lost key without a qualifying successor. Freshness compares
+   both approval locations against base (engine `_ratchet.py:476-477,554-560`). A base
+   approval does not excuse a raise (`:312-317`, kept).
 4. `sentry-limits` baseline `tests/sentry/baselines/sentry-limits.json` with `created_in`,
-   one entry per `LIMITS` row holding `max` or `min`. Registry row with `kind = "from_scan"`
-   (+8 TOML). Reader in `READERS` returning the live values through `_bounds.live_bounds`
-   (+15).
-5. `tests/sentry/test_baseline_registry.py`: extend `test_recomputed_keys_match_the_registered_baseline`
-   at its existing assertion. Keys stay equal; for the numeric reader also compare each live
-   key's field and integer value to the recorded `max` or `min`. Reject missing, extra,
-   wrong-direction and non-integer bounds, bool included. No new test in that file (416 lines).
+   one entry per `LIMITS` row holding `max` or `min`, each with a substantive `reason`
+   (`_ratchet.py:143-151`). Registry row with `kind = "from_scan"`, placed before `lint-debt`
+   (`tests/sentry/test_lint_debt.py:53-57` copies the registry tail). Reader
+   `live_bounds` in CLI `_baseline_sources.py` (+20), the one source reader, as in #801.
+5. `tests/sentry/test_baseline_registry.py`: add `sentry-limits` to `CREATED_IN`
+   (`:103-107`) and extend `test_recomputed_keys_match_the_registered_baseline` (`:121-125`).
+   For the numeric reader it also compares each live key's value to the recorded `max` or
+   `min`; a source-only change in either direction fails. Lowering a recorded floor in JSON
+   still needs an approval in the checker.
 6. CHANGELOG entry. CODEMAP "Sentry test" row: name `sentry-limits` and the helpers.
 
-Choke point: `_bounds.live_bounds` is the one reader of bound values; the registry mirror and
-the checker both read through it. Guard: `test_cli_mirror_rejects_constant_only_loosening`.
-Mutation: have the mirror compare keys only (today's code); the guard fails.
+Choke points: `_baseline_sources.live_bounds` is the one reader of source values (used by the
+mirror); `_bounds.loosened_fields` is the one comparison of base and head JSON (used by the
+checker). Guard: `test_cli_mirror_rejects_constant_only_loosening` and the ported
+`test_bound_loosened_reads_both_directions`. Mutation: the mirror compares keys only (today's
+code); the first guard fails.
 
 Design notes: no new pattern. RG-E2 already set the structure (one `LIMITS` map, one reader,
 one guard baseline); the CLI takes the same files through the vendoring ledger.
@@ -115,33 +139,42 @@ one guard baseline); the CLI takes the same files through the vendoring ledger.
 | Same raise, baseline raised, fresh exact-key approval in the diff | Pass |
 | Approval already on base, reused for a new raise | Fail (pin) |
 | Reworded base approval | Fail (pin) |
-| `FLOOR = 6` in `test_tag_census.py` | Mirror fails; ratchet fails without approval |
-| A floor raised | Pass |
+| `FLOOR = 6` in `test_tag_census.py`, JSON untouched | Mirror fails |
+| `FLOOR = 6` and JSON `min` lowered, no fresh approval | Ratchet fails |
+| A floor raised in source only | Mirror fails (record the new value) |
+| A floor raised in source and JSON | Pass |
+| `count` or `sites` raised on an existing baseline | Fail, as on main |
 | A `sentry-limits` key removed | Fail without approval |
 | A key added to `sentry-limits` | Pass (a new guard tightens) |
-| Whole `sentry-limits` id retired | Fail unless every lost key has a `[retired]` approval |
-| `max = true` or `max = "800"` | Fail, non-integer |
+| Whole `sentry-limits` id retired | Fail unless a fresh `[retired]` decision and a fresh `[retired_growth]` row per lost key |
+| JSON `max: true`, `"800"` or `800.0`, on head or on base | Fail, non-integer |
+| `FLOOR - 1` used at the comparison site, declaration untouched | Consumer boundary test fails |
 | A new module-level int under `tests/sentry` in neither table | Census test fails |
 
 ## Acceptance tests (red first)
 
 Tags: `red-before` fails on CLI main on its assertion; `pin` passes on main.
 
-Ported from engine `test_bounds.py`, run on CLI temp repos with CLI sources: every red-before
-case, including both PRs of `test_fresh_guard_deletion_passes_then_merged_approval_is_not_stale`,
-the whole-id case `test_retired_guard_requires_every_lost_key_approval`,
-`test_read_int_handles_annassign_and_refuses_bool`, `test_bound_loosened_reads_both_directions`
-and the guard successor cases. Engine-only source cases (log interpolation, locator waivers,
-faker floors) are not ported. The builder lists each ported name with its red result.
+Ported from engine `test_bounds.py` and `test_baseline_types.py`, on CLI temp repos with valid
+CLI rows (each row carries `kind`, per RG-C1a). Classify each ported test on CLI main as one of:
+red-before (assertion fails on main), pin (passes on main, for example
+`test_limit_raise_without_approval_fails`, already enforced at `_ratchet.py:312-317`), or
+post-change (needs a helper main does not have; not red evidence). Port: both PRs of
+`test_fresh_guard_deletion_passes_then_merged_approval_is_not_stale`, each seeded on its own
+so the first failure cannot hide the second; `test_retired_guard_requires_every_lost_key_approval`;
+`test_read_int_handles_annassign_and_refuses_bool`; `test_bound_loosened_reads_both_directions`;
+the guard successor cases; the head and base stored-type cases of
+`test_baseline_types.py:42-68`. Engine-only source cases (log interpolation, locator waivers,
+faker floors) are not ported. The builder lists each name with its class and its red run.
 
 CLI-only:
 
-1. `test_cli_mirror_rejects_constant_only_loosening` (red-before): in a scratch tree install
-   the numeric reader and a matching baseline; seed a reader in the existing mirror fixture
-   on main so the test collects on main and runs its key comparison. Run the mirror before
-   and after raising only `layout/test_module_size.py` `LIMIT`; repeat with only
-   `release/test_tag_census.py` `FLOOR` lowered. Keys and JSON stay byte-identical. Assert the
-   mirror names the key. Main's key-only mirror accepts both.
+1. `test_cli_mirror_rejects_constant_only_loosening` (red-before): call the existing mirror
+   function directly (`test_baseline_registry.py:121-125`) with a seeded numeric reader and a
+   matching baseline, so it runs on main. Raise only `layout/test_module_size.py` `LIMIT`;
+   then lower only `release/test_tag_census.py` `FLOOR`; then raise only that `FLOOR`. Keys and
+   JSON stay byte-identical. Assert the exact diagnostic names the key. Main's key-only mirror
+   accepts all three.
 2. `test_every_cli_module_int_is_a_bound_or_named` (red-before): census of module-level ints
    under `tests/sentry`; each is in `LIMITS` or `NOT_A_BOUND`.
 3. `test_live_sentry_limits_match_the_constants` (red-before): the live reader equals the
@@ -149,34 +182,47 @@ CLI-only:
 4. `test_module_size_ceiling_raise_needs_approval` (pin): `baselines/module-size.json:4-8`
    records the max and the checker rejects the raise (`tests/sentry/_ratchet.py:312-317`).
 5. `test_reworded_base_approval_does_not_exempt_a_raise` (pin).
+6. `test_tag_census_floor_is_enforced_at_its_use` (red-before): a scratch copy of
+   `release/test_tag_census.py` with the comparison at `:22` changed to `FLOOR - 1` must fail
+   the consumer check. Use sites are recorded per `LIMITS` row, including the delegation at
+   `layout/test_module_size.py:42` and `layout/test_package_fanout.py:54-55`. Engine
+   `_limit_constants.py:238-247` ignores same-file uses; the CLI mirror adds this case.
+7. `test_ceiling_and_floor_share_one_comparison` (post-change): `count`, `sites` and a new
+   ceiling beside an old one stay refused (CLI `tests/sentry/test_ratchet_check.py:402,432,454`
+   kept unchanged and green).
 
 Mutations (final head):
 
 | ID | Mutation | Test that must fail |
 |---|---|---|
 | B1 | Mirror compares keys only | 1 |
-| B2 | Drop `FLOOR_FIELDS` from `bound_loosened` | ported floor test, 1 (floor half) |
-| B3 | Accept bool as an integer | ported `test_read_int_handles_annassign_and_refuses_bool` |
+| B2 | Drop `FLOOR_FIELDS` from `loosened_fields` | ported `test_bound_loosened_reads_both_directions` (engine `test_bounds.py:400-407`) |
+| B3a | Source reader accepts bool | ported `test_read_int_handles_annassign_and_refuses_bool` |
+| B3b | Strict baseline read accepts JSON `true` | ported `test_baseline_types.py` head and base cases |
 | B4 | Drop `"sentry-limits"` from `GUARD_KEYS` | ported removed-key test |
-| B5 | Drop one `LIMITS` row | 2 and 3 |
+| B5 | Drop one `LIMITS` row, JSON fixed | 2 and 3 (complete key-set compare) |
 | B6 | Accept a base approval for a fresh raise | ported base-approval pin goes red |
+| B7 | Drop `count` from CLI `CEILING_FIELDS` | `test_ratchet_check.py:402` |
+| B8 | Ignore use sites in the census | 6 |
 
 ## Enumerations
 
 ### Exit paths
 
 - `ratchet_check.py`: exit 1 on any finding (`scripts/dev/ratchet_check.py:53-55`), now also
-  for loosened bounds, stray or stale approvals and retired guards.
+  for loosened bounds, stray or stale approvals and retired guards; exit 2 when no merge base
+  is found (`:40-48`, unchanged).
 - Registry mirror test: assertion failure naming the key and field
   (`tests/sentry/test_baseline_registry.py:121-125`).
 - Census test: assertion failure naming file and constant.
 
 ### Routes
 
-- Gate sentry step (`scripts/dev/gates.sh:269`) runs `ratchet_check.py --with-base` and then
-  pytest, which runs the mirror and census.
-- PR CI "Baselines only shrink" (`.github/workflows/ci.yml:283-285`) runs the checker; the
-  sentry pytest job runs the mirror and census.
+- Gate sentry step (`scripts/dev/gates.sh:269`): on CLI main it runs the checker without
+  `--with-base`; RG-C1a adds the flag on the branch label. Pytest then runs mirror and census.
+- PR CI "Baselines only shrink" (`.github/workflows/ci.yml:283-285`): `--base <PR base sha>`,
+  `--with-base` after RG-C1a. The mirror and census run in the combined
+  "pytest unit + sentry" step (`ci.yml:121-122`).
 - Direct harness tests in `tests/sentry/ratchet/`.
 
 ### FK shapes
@@ -195,7 +241,8 @@ N/A. Repo files only; no keyed data.
 
 ### Output surfaces
 
-- `ratchet_check.py` report lines: sentry id, key and field only.
+- `ratchet_check.py` report lines: sentry id, key, field, counts, paths and the approved
+  decision text (`_ratchet.py:293-305`). All are repo facts; no user data.
 - Mirror and census assertion messages: file, constant and key names only. No values from
   scanned data; the integers printed are the bounds themselves.
 
@@ -203,15 +250,15 @@ N/A. Repo files only; no keyed data.
 
 | # | Class | Closing structure | Test | Mutation |
 |---|---|---|---|---|
-| 1 | Value-bearing output | Findings name ids, keys and fields | test 1 message assertion | Print the parsed baseline: assertion fails |
+| 1 | Value-bearing output | Findings name ids, keys and fields | test 1 exact diagnostic | Print the parsed baseline: exact-match assertion fails |
 | 2 | Cleanup on an exit path | N/A: no temp state beyond pytest `tmp_path`; the base run cleanup is RG-C1a's | RG-C1a tests | N/A |
-| 3 | Shared state | `LIMITS` is a constant; the reader caches nothing across calls | test 3 runs twice | B5, drop a row |
+| 3 | Shared state | `LIMITS` is a constant; the reader caches nothing across calls | test 3 edits a source between two reads | Cache the reader: second read stale |
 | 4 | Route parity | Checker and mirror both read through `live_bounds` | tests 1 and 3 | B1, keys only |
 | 5 | Referential integrity | Every `LIMITS` row names a real file and constant; census closes the set | test 2 | B5, drop a row |
 | 6 | Untrusted producer | N/A for V1: repo files under review (accidental-only threat model) | none | N/A |
 | 7 | Check-then-use (toctou) | Bounds read once per run from one tree; base side from the one resolved sha (RG-C1a) | ported unreachable-base pin | Resolve twice: review finding |
 | 8 | Weak tests | Pins never used as red evidence; seeded mirror fixture makes test 1 collect on main | builder report | B6, base approval accepted |
-| 9 | Refactor drift | `max_raised` and `move_findings` unchanged; their tests unchanged | `tests/sentry/test_ratchet_check.py` | N/A |
+| 9 | Refactor drift | `max_raised` folded into `loosened_fields`; `move_findings` unchanged; existing tests unchanged | `tests/sentry/test_ratchet_check.py:402,432,454` | B7, drop `count` |
 | 10 | Frozen contract drift | N/A: test tooling only; no CLI surface changes | release-freeze sentries | N/A |
 
 ### Recurring defect catalog (11 classes)
@@ -219,7 +266,7 @@ N/A. Repo files only; no keyed data.
 | # | Class | Result |
 |---|---|---|
 | 1 | Anchored validation | Decisions through `is_dated_owner_decision`; keys compared exactly, no prefix match |
-| 2 | Strict wire types | `max` and `min` must be `int` and not `bool` (B3) |
+| 2 | Strict wire types | `max` and `min` must be `int` and not `bool`, in source (B3a) and in stored JSON on head and base (B3b) |
 | 3 | No exception context | Read errors become findings |
 | 4 | Versioned read models | A base without `sentry-limits` is a fresh guard; tested |
 | 5 | Normalized guard scanners | Constants read with `ast`, `AnnAssign` and signed literals included |
@@ -244,7 +291,8 @@ None. Test tooling only.
 
 One slice, one CLI PR: `feat(sentry): record CLI caps and floors in the ratchet`.
 Test depth: T0 the CLI ratchet tests; T1 impact selection. Triggers: test tooling, so one full
-CLI suite at merge with `gates.sh --full`, diffed against the stored main baseline.
+CLI suite at merge with `gates.sh --full --baseline-file <stored main baseline>`. No module-size
+baseline change: CLI `layout/test_module_size.py:3-6,19-20` excludes tests.
 
 ## Pre-mortem
 
@@ -263,7 +311,7 @@ CLI suite at merge with `gates.sh --full`, diffed against the stored main baseli
   trailers, file lists or test counts.
 - Test depth as in "Slices"; use `~/bin/pytest-one`.
 - Never raise a recorded bound to make a test pass. Never write owner decision rows.
-- New tests go in `tests/sentry/ratchet/`; `test_baseline_registry.py` gets only the one
-  extended assertion.
+- New tests go in `tests/sentry/ratchet/`; `test_baseline_registry.py` gets only the
+  `CREATED_IN` row and the extended mirror assertion.
 - Red-before tests run red on CLI main first; pins are not red evidence.
 - `ruff check`, `ruff format --check`, `mypy` before each commit. CHANGELOG entry before merge.
