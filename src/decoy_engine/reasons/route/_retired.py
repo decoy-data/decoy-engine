@@ -20,9 +20,13 @@ POST_SCAN_INTEGRITY_REQUESTED = _catalog.route("decoy_engine.execution._pipeline
 )
 
 # A `when:` now reads original values on every route, so no table declines for reading a column an
-# earlier node masks (WHEN-READS-SOURCE). No replacement: the decline is gone.
+# earlier node masks (WHEN-READS-SOURCE). The registry has no removal form, so the
+# tombstone points at the one live code for a `when:` that asks for a masked value: the `masked.`
+# form is the only way to ask now, and V1 rejects it with `when_masked_reference_unsupported`.
+# The old decline itself is never produced again.
 WHEN_READS_MASKED_COLUMN = _catalog.route("RouteDeclineCode")(
     "when_reads_masked_column",
     "When reads masked column.",
     deprecated_in=UNRELEASED,
+    replaced_by=("runtime", "when_masked_reference_unsupported"),
 )

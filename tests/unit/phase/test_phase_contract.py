@@ -121,6 +121,9 @@ def test_post_validation_runner_does_not_capture_exception_text_or_mutate_result
         raise ValueError("leaky cell value 4111111111111111")
 
     monkeypatch.setattr(_runner, "SCANS", (("boom", boom),))
+    # `timing_per_phase` holds a float whose repr can contain "4111" by chance; a frozen clock
+    # keeps the `"4111" not in repr(summary)` check about the exception text alone.
+    monkeypatch.setattr(_runner, "time", SimpleNamespace(perf_counter=lambda: 0.0))
     result = ExecutionResult(outputs={}, warnings=())
     summary = PostValidationRunner().run(
         plan=SimpleNamespace(),  # type: ignore[arg-type]
@@ -135,6 +138,9 @@ def test_post_validation_runner_does_not_capture_exception_text_or_mutate_result
     assert summary is not None and summary.failed_checks == ("boom",)
     assert "4111" not in repr(summary)
     assert summary.quality_warnings[0].detail == {"error_type": "ValueError"}
+    for warning in summary.quality_warnings:
+        text = " ".join(map(str, (warning.code, warning.provider, warning.column, warning.detail)))
+        assert "leaky" not in text and "4111111111111111" not in text
     assert "quality_summary" not in result.quality_metrics
 
 
