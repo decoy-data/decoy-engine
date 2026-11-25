@@ -1,4 +1,4 @@
-Status: plan (revision 4, 2026-11-25, Dennis rounds 1-2 and Codex round 1 folded; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
+Status: plan (revision 5, 2026-11-25, Dennis rounds 1-2 and Codex rounds 1-2 folded; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
 
 # FPE-CHECKSUM-NATIVE slices S2a, S2b-core and S2b: check digits, the Rust batch path, then the keyword and ABI
 
@@ -15,6 +15,10 @@ Anchors: a Python path with no prefix is under `src/decoy_engine/`. Rust paths a
 - HIGH: the new Rust modules and items are `pub`, as `fpe` and `text_redact` are (`lib.rs:34-48`). `pub(crate)` items cannot be reached from `tests/kat_checksum.rs` or `tests/kat_fpe.rs`, and a `pub fn` that takes a crate-private `Scheme` trips `private_interfaces`, which clippy `-D warnings` fails (`native-companion.yml:294`).
 - MEDIUM: the full list of `fpe.rs` visibility changes is in section 5.2 and counted against the 700-line cap. `FPE_CHECKSUM_KAT` moves to `_fpe_ext.py` so `_crypto_ext.py` stays under 600 with TEXT-REDACT-RUST-SPLICE S1b.
 - LOW: 13 test calls; translator line `_fpe_ext.py:52`; CI test commands; `arrow_ffi.rs` size; restated chunked mutation; per-scheme fixed prefixes; K6 carrier net +1.
+
+## Changes in revision 5 (Codex round 2)
+
+- V2-LOG: the `0IO` inverse vector pins `preserve_separators=True` and the batch row code `fpe_checksum_unsupported`; two reuse-inventory anchors corrected.
 
 ## Changes in revision 4 (Codex round 1)
 
@@ -67,8 +71,8 @@ The parent section 2 holds the survey: products keep the check digit outside the
 
 ### Reuse inventory
 
-- `fpe.rs::permute`, `ResolvedConfig` and the FF1 instance: the checksum path permutes the body through the same function and builds the config through a `ResolvedConfig::new` extracted from the struct literal in `fpe_transform_array` (`fpe.rs:400-411`).
-- `fpe.rs::row_ranges`, `fill_range` and the rayon split, pool install and concatenation inline at :437-462: the one batch driver. S2b-core extracts it as a generic `run_rows` so the checksum entry does not copy it.
+- `fpe.rs::permute`, `ResolvedConfig` and the FF1 instance: the checksum path permutes the body through the same function and builds the config through a `ResolvedConfig::new` extracted from the struct literal in `fpe_transform_array` (`fpe.rs:407-418`).
+- `fpe.rs::row_ranges`, `fill_range` and the rayon split, pool install and concatenation inline from :432: the one batch driver. S2b-core extracts it as a generic `run_rows` so the checksum entry does not copy it.
 - `fpe.rs::luhn_check_digit` (:137): moves to `checksum.rs` as `pub`.
 - `text_redact/validators.rs:13` and `:37-60`: keep their detector input rules and call `checksum::` for the arithmetic.
 - `decoy-engine-native/vectors/generate_fpe_kat.py` and `fpe_ff1_kat.json`: the layout for the two new corpora.
@@ -175,7 +179,7 @@ Visibility changes in `fpe.rs`, all `pub(crate)` because only `fpe_checksum.rs` 
 
 `arrow_ffi.rs` does not change in S2b-core. No Python caller reaches the new entry; it is proved only by Rust tests.
 
-Vectors: the same generator writes `fpe_checksum_kat.json` (`format_version: 1`, provenance) with 50 valid identifiers per scheme, with and without separators, canonical and reversed digit charsets, VIN under `ALPHANUM` and `ZYXWVUTSRPNMLKJHGFEDCBA9876543210`, the lowercase check-slot case, a lowercase VIN body case (so the "uppercase VIN body before `permute`" mutation fails in S2b-core) and the `0IO` VIN fallback case. The `0IO` case is forward-only: the oracle's decrypt of its output (`03088129469621430` under the fixed synthetic key and tweak) raises `fpe.checksum_unsupported`, and the JSON row records that inverse error, which the Rust inverse must match. `kat_fpe.rs` gains a checksum section that rejects an unknown `format_version` for the new file and runs the full corpus through `fpe_checksum_transform_array` in both directions. The existing `fpe_ff1_kat.json` reader is left as it is.
+Vectors: the same generator writes `fpe_checksum_kat.json` (`format_version: 1`, provenance) with 50 valid identifiers per scheme, with and without separators, canonical and reversed digit charsets, VIN under `ALPHANUM` and `ZYXWVUTSRPNMLKJHGFEDCBA9876543210`, the lowercase check-slot case, a lowercase VIN body case (so the "uppercase VIN body before `permute`" mutation fails in S2b-core) and the `0IO` VIN fallback case. The `0IO` case is forward-only: the oracle's decrypt of its output (`03088129469621430` under the fixed synthetic key and tweak) with `preserve_separators=True` gives the batch row code `fpe_checksum_unsupported` (the Python exception behind it is `fpe.checksum_unsupported`; with `False` the code is `fpe_unencryptable_value`). The JSON row pins `preserve_separators=True` and the row code `fpe_checksum_unsupported`, which the Rust inverse must match. `kat_fpe.rs` gains a checksum section that rejects an unknown `format_version` for the new file and runs the full corpus through `fpe_checksum_transform_array` in both directions. The existing `fpe_ff1_kat.json` reader is left as it is.
 
 ### 5.3 S2b: FFI keyword and ABI
 
