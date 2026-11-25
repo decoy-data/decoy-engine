@@ -420,6 +420,8 @@ def test_corpus_materialization_is_value_free(tmp_path: Path, strict: bool) -> N
     assert missing_report.ok is False
     assert missing_report.problems[0].startswith("code_set_corpus_missing_code_column: ")
     assert "'code' string column" in missing_report.problems[0]
+    # A `PlanCompileError` prints its `path` itself, so the message must not repeat the position.
+    assert not missing.value.message.startswith(missing.value.path)
     assert "PRIVATE_ZONE_CANARY" not in "".join(missing_report.problems)
 
 

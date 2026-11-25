@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pyarrow as pa
+import pytest
 
 from decoy_engine import _arrow_types
 from decoy_engine._config_text import Kind
@@ -28,3 +31,13 @@ def test_timestamp_renders_without_the_zone() -> None:
     refusal = config_refusal(config_position("id"), Problem.WRONG_TYPE, got_kind=kind)
     assert "timestamp" in refusal.text
     assert "PRIVATE_ZONE" not in refusal.text
+
+
+def test_loader_names_the_kind_of_a_bad_id_column(tmp_path: Path) -> None:
+    import pyarrow.parquet as pq
+
+    bad = tmp_path / "id32.parquet"
+    pq.write_table(pa.table({"id": pa.array([1], pa.int32())}), bad)
+    with pytest.raises(ValueError) as raised:
+        _loader.load_table(f"customer:{bad}")
+    assert "reference_table.id: wrong type; expected int64, got integer" in str(raised.value)
