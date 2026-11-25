@@ -469,11 +469,18 @@ def test_an_out_of_grammar_predicate_is_rejected_at_compile(tmp_path: Path) -> N
     assert getattr(err[1], "code", None) == "when_outside_closed_grammar"
 
 
-def test_a_numeric_reference_masked_earlier_is_declined(tmp_path: Path) -> None:
+def test_a_numeric_reference_masked_earlier_is_admitted_and_reads_the_original(
+    tmp_path: Path,
+) -> None:
+    # WHEN-READS-SOURCE: `f` is redacted to 9.0 before `s`, but the predicate reads the original
+    # `f`, so the chunked route admits it and selects the same rows as the whole frame.
     refs = {"f": _col([0.5 * (i % 4) for i in range(N)], pa.float64())}
     columns = [{**redact("s"), "when": "f > 0.5"}, redact("f", redact_with=9.0)]
     cfg, source, oracle = _setup(tmp_path, columns, _table(refs), "resident")
-    assert _declined_columns(_declined(cfg, source, oracle)) == ["s"]
+    auto, full = _auto(cfg, source, 7), _full(cfg, oracle)
+    assert auto.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    assert _canon(auto.outputs[TABLE]) == _canon(full.outputs[TABLE])
+    assert _selected(auto) == [0.5 * (i % 4) > 0.5 for i in range(N)]
 
 
 def test_a_non_string_target_is_declined(tmp_path: Path) -> None:

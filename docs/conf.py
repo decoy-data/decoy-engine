@@ -172,6 +172,14 @@ nitpick_ignore = [
     # or `tuple[int, ...]`); autoapi renders it as a class reference that no
     # intersphinx inventory ships.
     ("py:class", "Ellipsis"),
+    # Public names that `execution.work_order` signatures reference but whose own modules are not
+    # documented pages (`NodeKey` and `OpKind` are type aliases autoapi renders as bare classes).
+    ("py:class", "NodeKey"),
+    ("py:class", "OpKind"),
+    ("py:class", "decoy_engine.execution.work_order.operations.NodeKey"),
+    ("py:class", "decoy_engine.relationships.RelationshipGraph"),
+    ("py:class", "decoy_engine.relationships.RelationshipEdge"),
+    ("py:class", "decoy_engine.generation.pool.QualityWarning"),
     # Stdlib / third-party classes that the intersphinx inventories don't
     # expose under their canonical dotted path — listed individually rather
     # than relaxing nitpicky globally.

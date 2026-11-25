@@ -14,7 +14,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked
-from decoy_engine.execution import _fk_keys
+from decoy_engine.execution import _pandas_adapter
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.execution._strategies._redact import RedactHandler
@@ -396,14 +396,14 @@ def test_sibling_reference_puts_the_passthrough_column_in_the_read_set(
     config = make_config(columns)
     expected = run_public(config, chunks)
     seen: list[pa.DataType] = []
-    real = _fk_keys.to_pandas_fk_safe
+    real = _pandas_adapter.to_pandas_fk_safe
 
     def spy(table: pa.Table, fk: Any) -> Any:
         if ref in table.column_names:
             seen.append(table.schema.field(ref).type)
         return real(table, fk)
 
-    monkeypatch.setattr(_fk_keys, "to_pandas_fk_safe", spy)
+    monkeypatch.setattr(_pandas_adapter, "to_pandas_fk_safe", spy)
     out, sink, ev = run_entry(config, chunks)
     if case == "group_key" and ev[0].native_admitted:
         # The native leg stringifies the sibling inside its kernel; the pandas adapter never
