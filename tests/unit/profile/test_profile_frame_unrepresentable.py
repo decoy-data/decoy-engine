@@ -99,3 +99,67 @@ def test_a_scan_of_past_dates_carries_the_value_nowhere(tmp_path: Path, rows: in
     for table in scan.tables:
         _no_literal(json.dumps(table.profile.to_dict(), default=str))
         _no_literal(json.dumps(profile_document(table.profile), default=str))
+
+
+# Round 4: every temporal column is bounds-checked per cell before pandas, whatever the metadata.
+
+
+def _with_arrow_dtype_metadata(days: list[int]) -> pa.Table:
+    """A table whose pandas metadata names `date32[day][pyarrow]`, so `to_pandas` keeps the
+    Arrow values instead of failing on one pandas cannot hold."""
+    seed = pd.DataFrame({"d": pd.array([None] * len(days), dtype="date32[day][pyarrow]")})
+    base = pa.Table.from_pandas(seed, preserve_index=False)
+    return base.set_column(0, base.schema.field(0), pa.array(days, pa.int32()).cast(pa.date32()))
+
+
+def test_arrow_dtype_metadata_does_not_skip_the_bound() -> None:
+    table = _with_arrow_dtype_metadata([0, PAST, 1])
+    assert b"date32[day][pyarrow]" in table.schema.metadata[b"pandas"]
+    frame = profile_frame(table)
+    assert frame["d"].isna().tolist() == [False, True, False]
+
+
+def test_a_full_scan_with_arrow_dtype_metadata_keeps_valid_dates(tmp_path: Path) -> None:
+    path = tmp_path / "t.parquet"
+    pq.write_table(_with_arrow_dtype_metadata([0, PAST, 1]), path)
+    descriptor = {"type": "file", "format": "parquet", "path": str(path)}
+    scan = scan_sources({"t": descriptor}, strategy="full")
+    _no_literal(json.dumps(scan_set_to_dict(scan, detail=True), default=str))
+    (table,) = scan.tables
+    assert (table.row_count, table.null_counts["d"]) == (3, 1)
+
+
+DAY_S = 86_400
+LAST_DAY = 2_932_896  # 9999-12-31
+
+
+@pytest.mark.parametrize(
+    ("kind", "values"),
+    [
+        (pa.date32(), [0, 23_936_616, 1]),  # Arrow's year kernel wraps on this day count
+        (pa.time64("ns"), [1000, 1001, 2000]),  # sub-microsecond: datetime.time cannot hold it
+        (pa.date64(), [0, PAST * DAY_S * 1000, DAY_S * 1000]),
+        (pa.timestamp("s"), [0, PAST * DAY_S, 1]),
+        # The last UTC hour of 9999-12-31 is year 10000 in a zone ahead of UTC.
+        (pa.timestamp("s", tz="Asia/Kolkata"), [0, (LAST_DAY + 1) * DAY_S - 3600, 1]),
+        (pa.time32("s"), [0, DAY_S, 1]),
+    ],
+    ids=["date32-wrap", "time64ns", "date64", "timestamp-s", "timestamp-tz", "time32-s"],
+)
+def test_only_the_unrepresentable_cell_is_null(kind: pa.DataType, values: list[int]) -> None:
+    storage = pa.int32() if kind.bit_width == 32 else pa.int64()
+    column = pa.array(values, storage).cast(kind)
+    frame = profile_frame(pa.table({"d": column, "n": pa.array([1, 2, 3])}))
+    assert frame["d"].isna().tolist() == [False, True, False]
+    assert frame["n"].tolist() == [1, 2, 3]
+
+
+def test_the_profile_bound_and_the_date_shift_check_share_one_table() -> None:
+    import numpy as np
+
+    from decoy_engine._arrow_types import temporal_bounds
+    from decoy_engine.transforms.date_shift import DATE32_MAX_DAY, DATE32_MIN_DAY, date32_in_range
+
+    assert temporal_bounds(pa.date32()) == (DATE32_MIN_DAY, DATE32_MAX_DAY, 1)
+    edges = np.array([DATE32_MIN_DAY - 1, DATE32_MIN_DAY, DATE32_MAX_DAY, DATE32_MAX_DAY + 1])
+    assert date32_in_range(edges).tolist() == [False, True, True, False]

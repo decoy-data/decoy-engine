@@ -49,7 +49,7 @@ from decoy_engine.profile._fixed_width_reader import (
 from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
-from decoy_engine.profile.arrow._frame import profile_frame
+from decoy_engine.profile.arrow import profile_frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence

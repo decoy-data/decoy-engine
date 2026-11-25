@@ -21,6 +21,12 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+
+# The bounds live with the other temporal bounds, below `profile/` in the import tiers, so the
+# profile read and this kernel share them; the names stay importable from here.
+from decoy_engine._arrow_types import DATE32_MAX_DAY as DATE32_MAX_DAY
+from decoy_engine._arrow_types import DATE32_MIN_DAY as DATE32_MIN_DAY
+from decoy_engine._arrow_types import date32_in_range as date32_in_range
 from decoy_engine.plan._errors import PlanCompileError
 
 # The handler's defaults when a config names no bound.
@@ -134,12 +140,6 @@ _COMMON_FORMATS = [
 ]
 
 
-# The date32 day numbers of 0001-01-01 and 9999-12-31: the years Python's `datetime.date` (and so
-# the ISO key `_canonicalize_source` builds) can represent.
-DATE32_MIN_DAY = -719_162
-DATE32_MAX_DAY = 2_932_896
-
-
 def date32_days(array: pa.Array) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
     """`(days, valid)` of a `date32` array: the int64 day numbers (0 in a null slot) and the
     non-null mask. Reading the physical integer never converts a value to Python."""
@@ -148,11 +148,6 @@ def date32_days(array: pa.Array) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, 
     days = pc.fill_null(array.cast(pa.int32()), 0).to_numpy(zero_copy_only=False)
     valid = array.is_valid().to_numpy(zero_copy_only=False)
     return days.astype(np.int64), valid
-
-
-def date32_in_range(days: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
-    """Which day numbers fall inside years 1 to 9999."""
-    return (days >= DATE32_MIN_DAY) & (days <= DATE32_MAX_DAY)
 
 
 def shift_typed_days(

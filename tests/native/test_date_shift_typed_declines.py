@@ -197,7 +197,7 @@ def test_one_when_target_rule_serves_every_route(monkeypatch: pytest.MonkeyPatch
     assert wa.when_target_rejection("d", pa.string()) is None
     # The unified and chunked verdict asks the shared rule for a known target type: a restored
     # separate type check there would not return the probe's sentinel.
-    entries = [{"name": "d", "strategy": "date_shift", "when": "p > 5"}]
+    entries = [{**_ds(date_format="%Y-%m-%d"), "when": "p > 5"}]
     monkeypatch.setattr(wa, "when_target_rejection", lambda column, _t: f"probe:{column}")
     verdict = wa.when_native_rejection(
         "d", entries, None, table="t", schema=pa.schema([("d", pa.date32())])
