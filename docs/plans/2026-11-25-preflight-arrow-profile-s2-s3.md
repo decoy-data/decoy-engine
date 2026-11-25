@@ -59,7 +59,7 @@ Findings:
 - pandas 2.0 keeps non-nanosecond resolutions for datetime and timedelta. pandas 1.5 coerces them to nanoseconds, which is the Dennis finding. That alone needs 2.0.
 - The engine's pinned execution path uses `future.infer_string` (added in pandas 2.1) and `future.no_silent_downcasting` (added in pandas 2.2) (`generation/_pinned_execute.py:192-194`). The real working floor is therefore 2.2.0, whatever the metadata says today.
 - pandas 2.2.2 is the first release built against numpy 2, so it imports with numpy 1.26 and 2.x. Earlier releases (2.0.x, 2.1.0 to 2.1.3, 2.2.0, 2.2.1) need numpy below 2, and only some of them (for example 2.1.4) declare that cap in metadata (Dennis R1 P1-2, Codex R2). A 2.2.2 floor removes that gap. pandas 2.2.2 has wheels for CPython 3.9 to 3.12, so the floor is testable on every Python the engine supports (`pyproject.toml:13`).
-- PyPA guidance: declare the lowest version you test. SPEC 0 says projects may drop dependency versions older than two years; pandas 2.2.2 (April 2024) is inside that window in November 2026.
+- PyPA guidance: declare the lowest version you test. SPEC 0 says projects may drop dependency versions older than two years; pandas 2.2.2 (April 2024) is about 31 months old in November 2026, so SPEC 0 would allow dropping it; the floor is set by what the engine needs, not by SPEC 0 (Codex R3).
 - The engine already has a floor sentry, `tests/sentry/dependencies/test_dependency_floors.py`. It reads the floor with `packaging.requirements` and checks the lock against it (the `uv lock --check` idea as a test). S2a adds pandas cells to it.
 
 The design follows PyPA (declare the tested floor), the F06 evidence pattern and the existing floor sentry. The only new check is "docs state the same floor", because no tool compares prose with package metadata.
@@ -283,6 +283,8 @@ Post-release check for S2b: install 0.28.5 from the built wheel in a clean venv 
 - The default chunked route falls back to pandas on a CI leg without the companion, so the exit-0 cells fail. F4 covers it with the existing marker rules.
 - The release stamp's certified-stack step needs CLI pin files for 0.28.5 that do not exist yet. The stamp runs with `--cli-pins-base` at the 0.28.4 file, as #782 did; the CLI pins are certified in S3.
 - A pandas 1.5 compatibility branch in `pandas_compat.py` becomes dead. It is left in place: removing it is a refactor with its own risk and is a follow-up.
+
+Review status: Codex R3 (the last allowed round) returned GO-WITH-FIXES with one PAP finding (the pandas 2.2.2 age note), folded after that round.
 
 ## 16. Follow-ups (not in this row)
 
