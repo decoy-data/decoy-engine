@@ -301,7 +301,7 @@ def test_dict_msg_with_exception_becomes_label() -> None:
 
 def test_tuple_key_in_lone_mapping_arg_is_the_placeholder() -> None:
     engine, buf = _engine_handler()
-    logger = logging.getLogger("decoy_engine.t_key")
+    logger = logging.getLogger("f31_ae3_t_key")
     logger.propagate = False
     logger.handlers = [engine]
     logger.error("failed: %s", {(ValueError(_CANARY),): 1})
@@ -319,7 +319,7 @@ def test_non_dict_mapping_msg_and_arg_are_the_placeholder() -> None:
 
 def test_valid_record_is_not_dropped_by_the_filter() -> None:
     engine, buf = _engine_handler()
-    logger = logging.getLogger("decoy_engine.t_counter")
+    logger = logging.getLogger("f31_ae3_t_counter")
     logger.propagate = False
     logger.handlers = [engine]
     logger.setLevel(logging.INFO)
@@ -335,7 +335,7 @@ def test_mapping_needing_replacement_keeps_missing_lookup(
     mapping: collections.defaultdict[str, object] = collections.defaultdict(
         lambda: 0, e=ValueError(_CANARY)
     )
-    logger = logging.getLogger("decoy_engine.t_missing")
+    logger = logging.getLogger("f31_ae3_t_missing")
     logger.propagate = False
     logger.handlers = [engine]
     # The caller factory is not called: a missing name is the placeholder.
