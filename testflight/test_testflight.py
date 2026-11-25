@@ -317,8 +317,13 @@ def test_job_passes_all_invariants(manifest_path: Path) -> None:
 
     result = run_job(manifest_path)
     n_failed = sum(1 for r in result.invariant_results if not r.passed)
-    assert result.passed, f"Job '{result.job_name}' failed {n_failed} invariant(s):\n" + "\n".join(
-        f"  [{r.family}] {r.detail}" for r in result.invariant_results if not r.passed
+    # A job that errors before any invariant runs has no invariant_results; show
+    # its error so the message does not read "failed 0 invariant(s)" with no cause.
+    error_line = f"\n  job error: {result.error}" if result.error else ""
+    assert result.passed, (
+        f"Job '{result.job_name}' failed {n_failed} invariant(s):\n"
+        + "\n".join(f"  [{r.family}] {r.detail}" for r in result.invariant_results if not r.passed)
+        + error_line
     )
 
     # LOW-5: assert expected family set actually ran for known jobs.
