@@ -21,8 +21,7 @@ import pytest
 from decoy_engine import read_fixed_width
 from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
 from decoy_engine.plan import PlanCompileError
-from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
-from decoy_engine.profile._readers import LazySource
+from decoy_engine.profile import FixedWidthLazySource, LazySource
 from decoy_engine.progress import CallbackSink
 from tests.native._chunked_entry_support import key_provider
 
