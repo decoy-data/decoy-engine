@@ -45,6 +45,13 @@ The plan reviews then found these cases against earlier drafts of this plan:
   `Decimal("4111111111111111.00")` read as written hides a PAN; (C2) `np.longdouble("35.001417")`
   rounds to a different binary64 than its own `str` export; (C3) no mutation proves the one-run
   detector rule; (C4) integral detector text rendered `10**33` as `1E33`.
+- Senior review round 1 on this plan (GO-WITH-FIXES, fixed in this text): (D1, MEDIUM) the
+  distribution source pass still counted keys through `_distinct_or_error`; (D2) the guarantee
+  said integral Decimals reach detectors as written; (D3) a false length bound on the numeral
+  text; (D4) `np.timedelta64` skipped `_python_scalar` in detector text; (D5)
+  `source_distinct_failed` was not named; (D6) wide floats rendered for detectors through
+  `float(v)`; (D7) non-integral Decimal detector text follows the context's `capitals`; and
+  recurring class 9, the mutation head was not recorded.
 
 ## Root cause
 
@@ -58,7 +65,7 @@ each reader one array that serves only that reader:
 |---|---|
 | identity count, bytes-identical flag (`_add_identity`) | the comparison key |
 | detectors (`_add_detectors`) | the detector text only (one run per batch, as now) |
-| source and output distinct counts | the cells (`source_distinct`) |
+| source and output distinct counts, in `column_facts` and in the distribution source pass (`distinct_counts`) | the cells, through the one choke point `_distinct_or_error` |
 | value tally (`_ValueTally.add`) | the key array, unchanged (string type, nulls only) |
 | `_require_preserved` | cells and keys: lost equality, and constant cells with varied keys |
 
@@ -97,10 +104,13 @@ Guarantee, for text-keyed columns on the resident frame path:
   expansion, integer digits). Outside binary64 range the key is the exact value, or a band.
 - Number keying (the numeric and numeral branches) never raises, and gives the same keys under
   every `sys.set_int_max_str_digits` value and every decimal context, traps included.
-- Detectors read text, bytes and Decimal cells as written, and int and float cells in the
-  6efd06af7 rendering with exact integral digits. This is what 6efd06af7 and the frame path
-  (`check_residual_pii`) read.
-- Source spelling diversity never lowers the source distinct count used for grading.
+- Detectors read text, bytes and non-integral Decimal cells as written. Int, float and
+  integral Decimal cells read as exact plain digits (`Decimal("4111111111111111.00")` reads
+  `4111111111111111`); non-integral floats read in the 6efd06af7 rendering. This is what
+  6efd06af7 and the frame path (`check_residual_pii`) read, except that integral Decimals drop
+  their zero fraction so a PAN stays visible.
+- Source spelling diversity never lowers a source distinct count, in the column facts or in
+  the distribution `distinct_ratio` check.
 - A source whose cells are constant but whose keys vary still fails the table, as now.
 
 Non-goals (record as follow-ups, not blockers): detectors reading a numeral string in a
@@ -137,8 +147,9 @@ leading digit) is in [-325, 308], let `f` be its nearest binary64: the cell itse
 `float` or `np.float64`, `float(v)` for NumPy floats narrower than binary64, `float(str(v))`
 for NumPy floats wider than binary64 (so a wide cell keys like its own `str` export; equal
 wide cells have equal `str`), and `float(t)` for the rest, where
-`t` is the numeral text built from the reduced form (at most about 330 characters in this
-range; never a Decimal-float operation, so no context trap can fire). If `f` is finite, the
+`t` is the numeral text built from the reduced form (its length follows the cell's
+coefficient, with no fixed bound; `float()` is linear in it; never a Decimal-float operation,
+so no context trap can fire). If `f` is finite, the
 value becomes the value of `repr(f)`; `f` equal to zero keys `0`. Otherwise, or outside the
 range, the exact value stays.
 
@@ -179,7 +190,10 @@ characters.
 
 ### Detector text (new `detector_text`)
 
-One text per non-null cell, read by the detectors in place of the key, in one run per batch:
+One text per non-null cell, read by the detectors in place of the key, in one run per batch.
+Each cell first goes through `_python_scalar` (src/decoy_engine/internal/cell_text.py:192), as
+in `_number_key`, so `np.timedelta64` (a subclass of `np.integer`) reads as the duration
+`cell_text` gives it, not as nanosecond digits.
 
 - str and bytes cells, and any other non-number cell: `cell_text` (characters as written;
   numerals are not parsed).
@@ -191,14 +205,25 @@ One text per non-null cell, read by the detectors in place of the key, in one ru
 - Non-integral Decimal cells: `cell_text`, as written. `Decimal("212555.0100")` reads
   `212555.0100`.
 - Non-integral float and NumPy float cells: `repr(float(v))`, the 6efd06af7 rendering. `0.1`
-  reads `0.1`.
+  reads `0.1`. NumPy floats wider than binary64 read `repr(float(str(v)))`, the same binary64
+  as their key (C2), so `np.longdouble("35.001417")` reads `35.001417`.
 
 ### Diversity
 
 For a text-keyed column, `source_distinct` and `output_distinct` are counted on the cells with
 `source_distinct` (src/decoy_engine/verification/postmask/_column_facts.py:273), the count
 `_require_preserved` already uses. A count that raises records the class name as
-`distinct_error`, as now. `_frozen` (src/decoy_engine/verification/postmask/_column_facts.py:248)
+`distinct_error`, as now; on the source side it also sets `source_distinct_failed`
+(src/decoy_engine/verification/postmask/_column_facts.py:417), which `residual_pii.py:526`
+grades as unknown diversity.
+
+Choke point: `_distinct_or_error` (src/decoy_engine/verification/postmask/_column_facts.py:343)
+is the only place a distinct count is taken. It returns the view's `distinct` and
+`distinct_error` when `table.cell_views` has the column, else counts the table column as now.
+Both callers go through it: `column_facts` (both sides) and `distinct_counts`, which the
+distribution source pass calls (src/decoy_engine/verification/postmask/distribution.py:321).
+So the `distinct_ratio` check compares a cell count with a cell count. Guard test A4g; mutation:
+the view lookup moved into `column_facts` only. `_frozen` (src/decoy_engine/verification/postmask/_column_facts.py:248)
 turns `bytearray` and `memoryview` cells into `bytes`, so they are hashable; Python already
 compares `bytearray(b"ab") == b"ab"` as equal, so identity counts do not change.
 
@@ -227,9 +252,10 @@ no longer grade wrong.
 - `_column_facts.py` `column_facts`: when `output.cell_views` has the column, `_add_detectors`
   gets the matching slice of `detector_text` instead of `out_s`. The output row offset advances
   once per yielded output batch, by `out_batch.num_rows`, after all columns, on both the
-  compared and the output-only route. The distinct count of each side comes from its view
-  instead of `_distinct_or_error`. Columns without a view are unchanged (all native and lazy
-  tables).
+  compared and the output-only route. Columns without a view are unchanged (all native and
+  lazy tables).
+- `_column_facts.py` `_distinct_or_error`: reads the view first (see Diversity). No caller
+  reads `cell_views.distinct` directly.
 - `runner.py` `_require_preserved`: one-direction diversity check as above.
 
 ## Design notes
@@ -269,6 +295,9 @@ Finding 1, R2, B3, detector input:
   verdict blocking. Same shape for the `device_id` case Codex reproduced.
 - A1b. `detector_text` keeps `"212555.0100"`, `"02134"`, `"+1 212 555 0100"` and
   `Decimal("212555.0100")` as written, while `key_text` gives `212555.01` for the first.
+  `detector_text` of `np.timedelta64(5, "s")` equals its `cell_text` (no nanosecond digits)
+  (D4). On hosts with a wide longdouble, `detector_text` of `np.longdouble("35.001417")` is
+  `"35.001417"` (D6).
 - A1c (green before and after). Mixed column of float phone cells `2125550100.0` and one str
   cell: `detector_text` gives `2125550100` and the run still reports the phone hit.
 - A1e (R2). Neutral column `v`: 60 unchanged ints `411111111111111936` (synthetic Luhn-valid)
@@ -347,6 +376,14 @@ Finding 4, R5, R6, source spellings and diversity:
   patched emitter changes only the output's first key on an unchanged, varied column, so one
   real equality is lost; the backstop blocks. The old patch (one key for every row) relied on
   the dropped direction.
+- A4g (D1). Mixed column `v` with `distinct_ratio` declared in the distribution check: source
+  `["1.0", "1.00", "x"]`, output `["a", "b", "c"]`. `ColumnSides` for `v` gets source distinct
+  3 and output distinct 3, and the `distinct_ratio` check does not fail. Also
+  `distinct_counts(src, ["v"])` returns 3.
+- A4h (D5). Patch the cell count to raise `RuntimeError` for the source frame only, on a
+  mixed `phone` column of unchanged synthetic phones: the fact has `distinct_error ==
+  "RuntimeError"` and `source_distinct_failed` true, the residual finding takes the
+  unknown-diversity grade, and `distinct_counts` returns `None` for the column.
 
 Tests changed on purpose because non-integral and wide values now round to binary64 (each keeps
 its run and context assertions):
@@ -387,6 +424,10 @@ Decimal tests, and the round-4 tiny Decimal and Decimal spelling tests.
 | no leading-zero strip on the exponent | A3a |
 | band by raw exponent instead of adjusted exponent | A3c boundary case |
 | distinct counts read keys again | A4b |
+| view lookup in `column_facts` only, not in `_distinct_or_error` | A4g |
+| a source-view count error leaves `source_distinct_failed` false | A4h |
+| `detector_text` skips `_python_scalar` | A1b timedelta case |
+| wide NumPy float detector text through `float(v)` | A1b longdouble case |
 | `_frozen` leaves `bytearray` as it is | A4d |
 | both diversity directions dropped | A4e |
 | `_require_preserved` loses its lost-equality half | A4f, Fraction backstop test |
@@ -402,6 +443,9 @@ Decimal tests, and the round-4 tiny Decimal and Decimal spelling tests.
 - Detectors read cells as written: a numeral string in an exporter's float spelling
   (`"2125550100.0"`) is not normalized for detectors. Same as 6efd06af7 and the frame path;
   recorded as a known limit.
+- Detector text for a non-integral Decimal is `str(Decimal)`, which follows the decimal
+  context's `capitals` setting (`1.5e-10` with `capitals=0`). Keys do not depend on it.
+  Recorded as a known limit (D7, V2-LOG); only the `E` letter's case changes.
 - Cost: step 2 adds one `float()` per numeric cell in range. Only text-keyed (mixed) columns on
   the resident frame path pay it, plus one extra string array per such column.
 
@@ -413,7 +457,9 @@ table covers each one. A second likely cause is a number type that skips step 2;
 A2c property test cover every type in the step 1 table. A third is a cell type equal under `==`
 but keyed apart; the one-direction diversity guard and the lost-equality half fail those tables
 closed. Plan round 3 returned NO-GO with two V1 findings (C1, C2) and two low ones; all four
-are fixed in this text. A fourth review round needs owner direction.
+are fixed in this text. A fourth review round needs owner direction. Senior review round 1
+found a second reader of the distinct count (D1); `_distinct_or_error` is now the one choke
+point, guarded by A4g.
 
 ## Slices
 
@@ -425,10 +471,12 @@ All on the PR #784 branch, in order, one builder:
    `fix(postmask): key numbers by binary64 spelling with a bounded exponent`.
 2. **S2 split readers** (`_stream_input.py`, `_column_facts.py`, `runner.py`): `CellView`;
    detectors read detector text; distinct reads the view; `_frozen` handles bytes-like cells;
-   `_require_preserved` keeps one diversity direction. Red-first: A1a, A1c, A1e, A1f, A1g, A1h, A1i, A2a,
-   A2e, A3a, A4a-A4f. Commit `fix(postmask): read detector text and diversity from the cells`.
-3. **S3 close-out**: update `changelog.d/postmask-fail-closed.md`; run the mutation table; ruff
-   and mypy on touched files. Tests through `vm-run` only (T0 per file, T1 impact set on the
+   `_require_preserved` keeps one diversity direction; `_distinct_or_error` reads the view.
+   Red-first: A1a, A1c, A1e, A1f, A1g, A1h, A1i, A2a, A2e, A3a, A4a-A4h. Commit `fix(postmask): read detector text and diversity from the cells`.
+3. **S3 close-out**: update `changelog.d/postmask-fail-closed.md`; run the mutation table on
+   the final head and record that head's SHA with each mutation's red test in the PR body and
+   the hand-back (recurring class 9). A commit after the run makes the record stale; rerun
+   the table on the new head. Ruff and mypy on touched files. Tests through `vm-run` only (T0 per file, T1 impact set on the
    head).
 
 ## Reuse inventory
@@ -458,10 +506,12 @@ All on the PR #784 branch, in order, one builder:
 - Detector call in `column_facts`
   (src/decoy_engine/verification/postmask/_column_facts.py:405).
 - Distinct count `_distinct_or_error`
-  (src/decoy_engine/verification/postmask/_column_facts.py:343).
+  (src/decoy_engine/verification/postmask/_column_facts.py:343), the one choke point, called by
+  `column_facts` and by `distinct_counts` (the distribution source pass,
+  src/decoy_engine/verification/postmask/distribution.py:321). Both read the view.
 - Value tally `values.add` (src/decoy_engine/verification/postmask/_column_facts.py:408): reads
   the key array, unchanged; string type, so only rows and nulls count.
-- Not changed: native and lazy tables (no view), the distribution source pass, and
+- Not changed: native and lazy tables (no view), and
   `check_residual_pii`'s frame path
   (src/decoy_engine/verification/postmask/residual_pii.py:145), which runs detectors on the raw
   frame.
@@ -474,6 +524,9 @@ N/A: keys are per column; the FK check reads the frames, not the text keys.
 
 - `TableBatches.cell_views` (new, src/decoy_engine/verification/postmask/_stream_input.py:25).
 - `ColumnFacts.source_distinct` and `output_distinct` for text-keyed columns, now from cells.
+- `ColumnFacts.source_distinct_failed`: set when the source view's count raised (unchanged
+  meaning).
+- `ColumnSides` source distinct for `distinct_ratio` on text-keyed columns, now from cells.
 
 ### Output surfaces
 
@@ -486,7 +539,7 @@ N/A: no new report field; keys and detector text reach no report or log.
 | 1 | value | one rule: every in-range number keys as its nearest binary64's shortest text | A2a-A2e, A3a | non-integral key back to exact expansion |
 | 2 | cleanup | N/A: no resources are opened | | |
 | 3 | state | N/A: pure functions; the `sys` limit and decimal context are restored in the tests | A3a, A3d | |
-| 4 | route | each reader named: identity reads keys, detectors read detector text, diversity reads cells | A1a, A1g, A4b | detectors read the key array again |
+| 4 | route | each reader named: identity reads keys, detectors read detector text, diversity reads cells through `_distinct_or_error` | A1a, A1g, A4b, A4g | detectors read the key array again; view lookup in `column_facts` only |
 | 5 | referential | N/A: no FK or reference handling changes | | |
 | 6 | untrusted | bounded exponent, no int conversion past 25 digits, value bands, no Decimal-float mix | A3a-A3d | `int()` on raw exponent text |
 | 7 | toctou | N/A: no check-then-use on files or state | | |
