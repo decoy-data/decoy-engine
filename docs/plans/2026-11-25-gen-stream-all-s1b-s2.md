@@ -4,7 +4,7 @@ Status: plan
 
 Rules consulted: `/home/cam/dev-rules/00-universal.md`, `/home/cam/dev-rules/risk-and-exceptions.md`, `/home/cam/dev-rules/development-loop.md`, `/home/cam/dev-rules/cross-cutting-concerns.md`, `/home/cam/dev-rules/testing.md` (Test depth), `/home/cam/dev-rules/workspace-and-vcs.md` (Commit messages), the plan contract and defect catalog (`obsidian-vault/30_Resources/Decoy-Plan-Contract-and-Defect-Catalog.md`), and the row's master plan `origin/plan/gen-stream-all:docs/plans/2026-11-22-gen-stream-all.md` (sections 5 to 10, owner decision 2026-11-23).
 
-Row: GEN-STREAM-ALL (every fast generator kind streamed). Repo: decoy-engine. Risk: R2 (byte changes on a frozen output contract, determinism). Anchor: PR #813 (S1a) head `abbb6241d`, plus the uncommitted locale-helper fix in its worktree (`requested_locale` and `open_column_faker` in `faker_setup`). S1b and S2 re-anchor on the head that merges #813; every line number below is from `abbb6241d` and moves with it.
+Row: GEN-STREAM-ALL (every fast generator kind streamed). Repo: decoy-engine. Risk: R2 (byte changes on a frozen output contract, determinism). Anchor: PR #813 (S1a) head `abbb6241d`, plus the uncommitted locale-helper fix in its worktree (`requested_locale` and `open_column_faker` in `faker_setup`). S1b and S2 re-anchor on the head that merges #813; every line number below is from that worktree (`abbb6241d` plus its uncommitted changes) and moves with the merge.
 
 This file plans S1b and S2 in full. S3 and S4 are an outline (section 13) and get their own plan after S2 merges.
 
@@ -52,7 +52,7 @@ Searches run: NumPy `Generator` documentation on sequential draws, the CPython `
 | Resident pool sizing | `faker_pool_resident_bytes` | `generation/pool/_resident.py` (S1a) |
 | Value caps | `FAKER_VALUE_CAPS`, `faker_value_cap` | `generation/_bounds.py:55`, `:125` |
 | Per-type certification | `certified_pairs.json`, `check_determinism.py` | `scripts/faker-determinism/` |
-| Locale handling | `requested_locale` | `generation/faker_setup.py` (S1a fix) |
+| Locale handling | `requested_locale` | `internal/faker_setup.py:647` (S1a fix) |
 | Provider draw paths | `draw_path`, `PoolBuilder`, `PoolSampler` | `generation/kinds/_provider.py:45`, `generation/pool/_builder.py:116` |
 | Lookup draw | `lookup_values`, `lookup_column_values` | `generation/kinds/_lookup.py` |
 | Null mask on streams | `NullMaskedStream` | `generation/_column_streams.py:249` |
@@ -65,16 +65,16 @@ Searches run: NumPy `Generator` documentation on sequential draws, the CPython `
 
 New `generation/pool/_keys.py` (about 60 lines) has two functions:
 
-- `pool_key_columns(configs) -> frozenset[tuple[str, str]]`: every `(reference_table, reference_column)` of a `type: reference` column, and every inherit parent key, read from `GenerateInputRef.source_key` of each edge that `iter_generate_input_refs` yields (`config/_generate_relational/__init__.py:543`). An edge with an empty `source_key` is skipped. Composite targets add each member column.
+- `pool_key_columns(configs) -> frozenset[tuple[str, str]]`: every `(reference_table, reference_column)` of a `type: reference` column, and every inherit parent key, read as `(edge.source_table, edge.source_key)` from each edge that `iter_generate_input_refs` yields (`config/_generate_relational/__init__.py:543`). An edge with an empty `source_key` is skipped. `source_key` is set for every input read through a foreign key, not only inherit (`config/_generate_relational/__init__.py:499-502`), so the set is slightly wider than reference and inherit targets; every member is a key another table reads, so a per-row draw for it is the safe side. Composite targets add each member column.
 - `referenced_key_columns(configs)`: the reference targets only. `_streamed._referenced_keys` (`generation/_streamed.py:180-187`) is replaced by this one, because the same set drives KeyPool collection in `_preflight` (`:230`) and `_consume_table` (`:420`), and S1b does not change what KeyPool collects. S3 decides whether inherit keys join KeyPool.
 
-`pool_opted_out(col, *, table, key_columns)` (`generation/_faker_pool.py:244`) gains one rule: `(table, col["name"])` is in `key_columns`. `table` is an explicit argument because the raw column dicts in `_streamed._pooled_columns` and in the window carry no `TABLE_KEY`; only `synthesize._generate_column` runs `with_table`. Both arguments are keyword-only with no default.
+`pool_opted_out(col, *, table, key_columns)` (`generation/_faker_pool.py:244`) gains one rule: `(table, col["name"])` is in `key_columns`. `table` is an explicit argument because the raw column dicts in `_streamed._pooled_columns` carry no `TABLE_KEY` (the window's dicts do, through `with_table` at `generation/window.py:192`); one explicit argument keeps every route the same. Both arguments are keyword-only with no default.
 
 Every route that reaches `pool_eligible` passes the set, and every function on each chain takes `key_columns` as a required keyword with no default:
 
-- Legacy resident: `generate_tables` computes the set once, then `synthesize._generate_column`, `synthesize._faker` (`:455`), `_faker_pool.try_pool` (`:292`).
-- Pinned: `execute_pinned` (`generation/_pinned_execute.py:201`, public through `generation/pinned.py`) calls `_run`, which calls `synthesize._generate_column` directly (about `:240`) and never enters `generate_tables` or `classify_plan`. `execute_pinned` computes the set from the pinned configs with `pool_key_columns` and passes it to `_run`. Without this, a 20,000-row pinned `users.email` that is a reference target would draw from 10,000 pool values with replacement and give duplicate parent keys.
-- Streamed: `_streamed._pooled_columns` (`generation/_streamed.py:197`) and `make_column_stream` to `_column_streams._faker_stream` (`:347`), reading the new `PlanAdmission.key_columns` that `classify_plan` fills.
+- Legacy resident: `synthesize._generate_tables_from_config` (`generation/synthesize.py:104`, entered from `generate_tables` at `generation/_plan_entry.py:215`) computes the set once, then `synthesize._generate_column` (call at `:186`), `synthesize._faker` (`:455`), `_faker_pool.try_pool` (`:292`).
+- Pinned: `execute_pinned` (`generation/_pinned_execute.py:202`, public through `generation/pinned.py`) calls `_run`, which calls `synthesize._generate_column` directly (`:242`) and never enters `generate_tables` or `classify_plan`. `execute_pinned` computes the set from the pinned configs with `pool_key_columns` and passes it to `_run`. Without this, a 20,000-row pinned `users.email` that is a reference target would draw from 10,000 pool values with replacement and give duplicate parent keys.
+- Streamed: `_streamed._pooled_columns` (`generation/_streamed.py:197`) and `make_column_stream` (`generation/_column_streams.py:300`) to `_column_streams._faker_stream` (`:360`, `pool_eligible` call at `:375`), reading the new `PlanAdmission.key_columns` that `classify_plan` fills.
 - Window: `window._build_streams` (`generation/window.py:195-202`), where the pool or per-row choice is made once pooled Faker is Class A (5.4). `_window_admission.py:383` and `:437-440` call `pool_eligible` only to skip `_check_faker` and to return Class B; S1b removes both calls, so the window admission has no pool decision left.
 
 Guards:
@@ -109,18 +109,18 @@ Today a pooled column is Class B (`generation/_window_admission.py:440`, reason 
 
 New `generation/stream/_window_pool.py` (about 90 lines): `WindowPoolDraw`, one per column, built once per `generate_rows` call and reused for every chunk.
 
-- Build order (`rows <= 10_000`): it builds `min(window_end, P)` values. Build order is prefix-stable, so this gives the same bytes as a full build, and page 0 of a 9,000-row table costs 100 Faker calls, not 9,000. Value `i` is `pool[i]`. A read with `window_end > P` refuses with `CODE_WINDOW_INVALID` and a fixed message ("window passes the pool of a pooled column").
+- Build order (`rows <= 10_000`): it builds `min(window_end, 10_000)` values. Build order is prefix-stable and does not depend on `rows`, so value `i` is the same for every table length, equal to the full run's value `i` for `i < rows`, and page 0 (count 100) of a 9,000-row table costs 100 Faker calls, not 9,000. A read with `window_end > 10_000` refuses with `CODE_WINDOW_INVALID` and a fixed message ("window passes the pool of a pooled column"). Reads past `row_count` and inside 10,000 are served, as for any Class A column.
 - Selector (`rows > 10_000`): it builds the pool of `P` values and holds a `PooledSelector` with a cursor. A chunk at `offset == cursor` takes `size` and advances. A chunk at `offset > cursor` calls the new `PooledSelector.skip(n)`, which draws and discards indices in chunks of at most 1,048,576, so no large array is held. A chunk at `offset < cursor` reopens the selector from the seed and skips. Offsets past `row_count` are served.
 - `_window_admission._class_b_reason` no longer returns `pooled_faker`. A pooled column runs `_check_faker` like a per-row column, so the cell cap still applies.
 - `window._build_streams` (`generation/window.py:195-202`) uses `WindowPoolDraw` when `pool_eligible` admits the column and `PerRowFakerStream` otherwise. The decision is the same `pool_eligible(..., rows, opted_out=pool_opted_out(col, table=..., key_columns=...))` call as the full run, with `rows` the declared `row_count`. The window computes `key_columns` once per `generate_rows` call from the config it already holds.
-- The pool build runs after the first `deadline_s` check in `generate_rows` (`generation/window.py:263`), so a call whose deadline has passed does not build. The build and a skip inside one chunk are not interrupted by the deadline; 14 states the cost.
+- `WindowPoolDraw` is built lazily: `_build_streams` (`generation/window.py:322`) only records the column, and the pool is built on the first draw call, inside the chunk loop after its `deadline_s` check (`generation/window.py:353`). A call whose deadline has passed before the first chunk does not build. The build and a skip inside one chunk are not interrupted by the deadline; 14 states the cost.
 
-The refusal past the pool is a contract change. The `window.py` docstring (about `:283`) says "Offsets past the declared row_count are served: Class A values do not depend on the table length". After S1b, a pooled small column's values depend on `row_count` (P = min(rows, 10,000)). S1b changes the docstring to say so and records a `Breaking:` line. Callers:
+The refusal past 10,000 is a contract change. The `window.py` docstring (`:283-284`) says "Offsets past the declared row_count are served: Class A values do not depend on the table length". That stays true for values. S1b adds one sentence: a pooled column on a table of at most 10,000 rows refuses a window that ends past 10,000. It records a `Breaking:` line. Callers:
 
 - The V1 CLI does not call `generate_rows`; `decoy run --rows` scales `row_count`.
 - The platform `generation_child.py` passes user offsets and maps `CODE_WINDOW_INVALID` to `window_invalid`. The platform is parked; the changelog line names this mapping.
 
-A read past `P` on a table of at most 10,000 rows is a value the full run never produces, so the refusal is not a V1 function break.
+A read past 10,000 on a table of at most 10,000 rows is a value the full run never produces, so the refusal is not a V1 function break.
 - `PooledSelector.skip` is about 12 lines in `_faker_pool.py`.
 
 ### 5.5 Native shadow and draw sites
@@ -133,9 +133,9 @@ A read past `P` on a table of at most 10,000 rows is a value the full run never 
 
 New `generation/stream/_provider.py` (about 160 lines). `make_column_stream` (`generation/_column_streams.py:330-358`) dispatches `provider` to `open_provider_stream(col, ctx, registry, ...)`, which reads `draw_path(caps)` (`generation/kinds/_provider.py:45`) once:
 
-- `"pool"`: `PooledProviderStream` builds the pool once with the same `PoolBuilder(registry).build(size=DEFAULT_POOL_SIZE, job_seed=build_seed)` call and keeps one `np.random.default_rng(selection_seed)`. Each batch draws `integers(0, pool.size, size=batch)`, the call `PoolSampler.sample(..., REUSE)` makes for the whole table (`pool/_sampler.py:279-281`; AT-S2-1 proves the two agree). Provider pools keep `DEFAULT_POOL_SIZE` and do not take `pool_size_for`: S2 is a parity slice and changes no bytes. The Faker and provider rules differ on purpose until a later row decides otherwise.
+- `"pool"`: `PooledProviderStream` builds the pool once with the same `PoolBuilder(registry).build(size=DEFAULT_POOL_SIZE, job_seed=build_seed, locale=locale)` call (`generation/kinds/_provider.py:127-129`) and keeps one `np.random.default_rng(selection_seed)`. Each batch draws `integers(0, pool.size, size=batch)`, the call `PoolSampler.sample(..., REUSE)` makes for the whole table (`pool/_sampler.py:279-281`; AT-S2-1 proves the two agree). Provider pools keep `DEFAULT_POOL_SIZE` and do not take `pool_size_for`: S2 is a parity slice and changes no bytes. The Faker and provider rules differ on purpose until a later row decides otherwise.
 - Provider pool memory: `_streamed._preflight` (`:241`) reserves only Faker pooled columns today. S2 adds provider pool columns to the same preflight, so routing sees the full cost and a tight budget refuses before the first write (AT-S2-7).
-- `"keyed"`: `KeyedProviderStream` calls `adapter.generate(spec, seed=family_bytes("faker"), source_value=offset + i)` per row. Stateless.
+- `"keyed"`: `KeyedProviderStream` calls `adapter.generate(provider, spec=ProviderSpec(locale, deterministic=True, namespace=namespace, seed=value_seed), source_value=offset + i)` per row, the exact legacy call (`generation/kinds/_provider.py:146-151`). Stateless.
 - `"batch"`: `BatchProviderStream` holds one seeded provider instance across batches. `generate_batch` (`providers_v2/_faker_adapter.py:197`) builds a fresh instance per call (`:230-234`), so calling it per batch would restart the sequence. S2 adds `open_batch_cursor(provider, spec) -> Callable[[int], list]` to the Faker adapter only, about 15 lines: it builds the seeded instance once and returns `k` values per call. `generate_batch` becomes `open_batch_cursor(...)(count)`, so legacy bytes do not change. `draw_path` (`kinds/_provider.py:45`) returns `"batch"` only for `backend_type == "faker"`, so the Mimesis adapter needs no cursor. An adapter without `open_batch_cursor` keeps that column declined (legacy path).
 - `"computed"` (only if GNF S3a has merged): the stream dispatches to `ComputedDrawStream` from `generation/stream/_computed_draw.py`. If S3a has not merged, S2 does not add this branch.
 
@@ -145,7 +145,7 @@ Every stream applies `_as_text` and the same error boundary as `provider_generat
 
 ### 5.7 S2: lookup streams
 
-`LookupStream` in the same module: one `random.Random(ctx.base_int("py"))` held across batches; each batch is `choices(values, weights, k=batch)`. The list comes from `legacy_kwargs["lookup_lists"][(table, name)]`, and the context is built with `content_digests=lookup_digests(...)` exactly as `lookup_column_values` does. The stream holds a reference to the resident list, not a copy. `make_column_stream` wraps the stream in `NullMaskedStream(inner, ctx, null_prob)`; for a lookup column that outer `ctx` is the same digest-carrying context, so the null seed matches the legacy `null_seed_digests(..., lookup_lists)` path. AT-S2-3 uses a file-backed lookup to prove it.
+`LookupStream` in the same module: one `random.Random(ctx.base_int("py"))` held across batches; each batch is `choices(values, weights, k=batch)`. The list comes from `legacy_kwargs["lookup_lists"][(table, name)]`, and the context is built with `content_digests=lookup_digests(...)` exactly as `lookup_column_values` does. The stream holds a reference to the resident list, not a copy. Today `make_column_stream` builds `ctx` without content digests (`generation/_column_streams.py:319`), and `GenDeriveContext.for_column` fingerprints at construction (`generators/derivation.py:300`), which refuses a file-backed lookup without digests (`kinds/_lookup.py:262-263`). So S2 adds a `lookup_lists` keyword to `make_column_stream` (passed by `_streamed` from its `legacy_kwargs`) and, for a lookup column, builds `ctx` with `content_digests=lookup_digests(col, lookup)` before dispatch. That one context feeds both `LookupStream` and the outer `NullMaskedStream(inner, ctx, null_prob)`, so the null seed matches the legacy `null_seed_digests(..., lookup_lists)` path. AT-S2-3 uses a file-backed lookup to prove it.
 
 ### 5.8 S2: admission
 
@@ -182,7 +182,7 @@ Every stream applies `_as_text` and the same error boundary as `provider_generat
 | Group B column in an uncertified locale | Per-row, as today. |
 | Column that is a `reference` target or inherit parent key | Per-row on every site (G2). |
 | `unique: true` | Per-row, as today. |
-| Window read on a pooled small table past 10,000 | `GenerationWindowError(CODE_WINDOW_INVALID)`, fixed message. |
+| Window read ending past 10,000 on a pooled table of at most 10,000 rows | `GenerationWindowError(CODE_WINDOW_INVALID)`, fixed message. |
 | Window read on a pooled large table at offset 9M | Skip from the cursor; bytes equal the full run. |
 | Pool build declined (custom override, locale unavailable) | `open_pooled_selector` returns `None` and the column runs per-row, as today. |
 | Budget too small for the pool | The ledger refuses before the build, as S1a. |
@@ -198,10 +198,10 @@ Each test fails before its slice unless marked as a control. Master plan numbers
 S1b:
 
 - AT-S1b-1 [A1]. `pool_eligible` admits the legacy 10 in `pt_BR`; it admits each certified Group A and B pair and refuses an uncertified pair; no clock-dependent type is admitted in any locale (checked against `_CLOCK_FAKER_EXACT`).
-- AT-S1b-2 [A12]. For a plan where `users.email` is a `reference` target and `orders.addr` is an inherit parent key, a spy on `open_pooled_selector` and `try_pool` sees no call for those columns on the legacy path, the streamed path, `generate_rows` and `execute_pinned`. A sibling ordinary `email` column pools on all four. A pinned 20,000-row `users.email` reference target has 20,000 distinct values.
+- AT-S1b-2 [A12]. For a plan where `users.email` is a `reference` target and `orders.addr` is an inherit parent key, a spy on `open_faker_pool_draw` sees no call for those columns on the legacy path, the streamed path, `generate_rows` and `execute_pinned`, and a spy on `pool_eligible` returns false for them on all four. A sibling ordinary `email` column calls `open_faker_pool_draw` on all four, at 9 rows and at 20,000 rows. A pinned 20,000-row `users.email` reference target has 20,000 distinct values.
 - AT-S1b-3 [A15]. Tables of 0 and 1 rows generate on all routes with no pool error. A 9-row table with a Group B column reserves exactly `faker_pool_resident_bytes(9, payload)` and its values equal the first 9 provider calls of a fresh seeded instance.
 - AT-S1b-4 [A4]. `faker_value_cap` returns a fixed cap for all 16 new types; preflight runs with a provider snapshot that raises on any call.
-- AT-S1b-5. Window parity (page 0 of a 9,000-row table builds 100 values, counted by a spy): for `email` at 9 rows and at 120,000 rows, `generate_rows` at offsets `{0, 7, 4096, 119_990}` (those inside the table) with counts `{1, 13, 5000}` equals the full streamed run's slice. The 120,000-row case reads offsets out of order (4096, then 7) to cover the reopen path. Fails before: the 120,000-row table is Class B, and the 9-row values differ.
+- AT-S1b-5. Window parity. A 9,000-row `email` table read at `offset=0, count=100` builds 100 values, counted by a spy. For `email` at 9 rows: `(0, 1)`, `(0, 9)` and `(7, 2)` equal the full run's slice (all inside the table, all inside 10,000). For `email` at 120,000 rows: `(0, 1)`, `(7, 13)`, `(4096, 5000)` and `(119_990, 10)` equal the full streamed run's slice. The 120,000-row case reads offsets out of order (4096, then 7) to cover the reopen path. Fails before: the 120,000-row table is Class B, and the 9-row values differ.
 - AT-S1b-6. A 9-row pooled table read at `offset=9_995, count=10` refuses with `CODE_WINDOW_INVALID`; the message contains no generated value. A read at `offset=9, count=1` (past `row_count`, inside 10,000) returns the build-order value 9, and the docstring of `generate_rows` no longer says Class A values do not depend on the table length.
 - AT-S1b-7. `PooledSelector.skip(n)` then `take(k)` equals `take(n + k)[n:]` for `n` in `{0, 1, 1_048_575, 1_048_577, 3_000_001}`, plus a Hypothesis property on `n` up to 4M.
 - AT-S1b-8. `pool/_eligible.py` equals the output of `write_eligible.py` on the committed `certified_pairs.json` (drift guard).
@@ -246,8 +246,8 @@ Each must turn the named test red on the final head.
 
 ## 9. Frozen contracts and byte changes
 
-- Generate output bytes change for: pool-eligible legacy-10 columns with fewer than 50,000 rows (now pooled); legacy-10 columns of 50,000 rows or more that are reference or inherit targets (now per-row under the key opt-out); and Group A and B columns in certified locales at every row count. The CLI `decoy run --rows N` preview (`decoy/src/decoy/cli/gen/_preview.py`) is in build order and is no longer a prefix of the full run below 10,000 rows (it already was not at 50,000 and above); the changelog says so. One `Breaking:` line in `changelog.d/gen-stream-all-s1b.md` and an entry in `docs/compatibility-contract.md` section 1 as a pre-GA correction. Types and value sets do not change.
-- `generate_rows` reads past 10,000 on a small pooled table now refuse, and pooled Class A values on small tables depend on `row_count`. Same `Breaking:` line, which names the platform `window_invalid` mapping in `generation_child.py`.
+- Generate output bytes change for: pool-eligible legacy-10 columns with fewer than 50,000 rows (now pooled); legacy-10 columns of 50,000 rows or more that are reference or inherit targets (now per-row under the key opt-out); and Group A and B columns in certified locales at every row count. The CLI `decoy run --rows N` preview (`decoy/src/decoy/cli/gen/_preview.py`) scales `row_count`. When the full table has at most 10,000 rows, preview and full run both use build order, so the preview is a prefix of the full run. When the full table has more than 10,000 rows (before S1b, 50,000 or more), the full run uses the selector and the preview is not a prefix; the changelog says so. One `Breaking:` line in `changelog.d/gen-stream-all-s1b.md` and an entry in `docs/compatibility-contract.md` section 1 as a pre-GA correction. Types and value sets do not change.
+- `generate_rows` windows ending past 10,000 on a pooled table of at most 10,000 rows now refuse. Values do not depend on `row_count`. Same `Breaking:` line, which names the platform `window_invalid` mapping in `generation_child.py`.
 - S2 changes no bytes (AT-S2-1 is parity).
 - Golden files regenerated by the harness, by name (master plan section 10): `tests/native/test_determinism_goldens.py`, `tests/native/test_pooled_faker_draw_sites.py`, `tests/unit/test_v2_generation.py`, `tests/unit/generation/test_fr0_budget.py`, `tests/unit/test_r3_10_generation_key_contract.py`, `tests/unit/generation/test_fr0_preflight_lifetime.py`, `tests/unit/generation/test_generate_determinism_ratchets.py`, `tests/unit/generation/test_faker_pool_eligible.py`, `tests/unit/generation/unique/test_pool_opted_out.py`, `tests/parity/_f_audit_support.py`, `tests/parity/test_phase_f_f2_mixed_backend_witness.py`, `tests/parity/_f0_matrix.py`, `tests/parity/_f0_fixtures.py`, `tests/parity/test_phase_f_f0_invariants.py`, and the pinned goldens: `tests/unit/generation/test_pinned_*.py`, `tests/unit/generation/relational/test_routes.py` and `tests/unit/generation/_cf_routes_support.py` (the builder confirms exact paths at the anchor). Any other golden that moves is a stop: the builder reports it and does not regenerate it.
 - No change to `GEN_FAMILIES`, the Faker pin, any reason code, or the mask side.
@@ -374,7 +374,7 @@ Steps:
 | File | Now | After |
 |---|---|---|
 | `generation/stream/_provider.py` | new | about 160 |
-| `generation/_column_streams.py` | about 418 | about 430 |
+| `generation/_column_streams.py` | about 418 | about 440 (lookup ctx with digests) |
 | `generation/_streamed.py` | about 585 | about 598 (provider preflight) |
 | `generation/_admission.py` | about 310 | about 320 |
 | `generation/kinds/_provider.py` | 159 | about 165 |
