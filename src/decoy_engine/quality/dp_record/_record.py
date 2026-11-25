@@ -1,7 +1,4 @@
-"""The proof-stack provenance types and the coercion of a recorded provenance.
-
-Split from `dp_provenance` for size; that module re-exports every public name here.
-"""
+"""The proof-stack provenance types and the coercion of a recorded provenance."""
 
 from __future__ import annotations
 
@@ -34,7 +31,7 @@ class ProvenanceError(DecoyError):
         super().__init__(f"[{code}] {message}")
 
 
-def _refusal_error(code: str, refusal: Refusal) -> ProvenanceError:
+def refusal_error(code: str, refusal: Refusal) -> ProvenanceError:
     return ProvenanceError(code=code, message=refusal.text)
 
 
@@ -80,7 +77,7 @@ def coerce_recorded(recorded: object) -> Provenance:
         return recorded
     if not isinstance(recorded, Mapping):
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
                 config_refusal(
                     config_position("dp", "recorded"),
@@ -93,7 +90,7 @@ def coerce_recorded(recorded: object) -> Provenance:
     absent = next((k for k in _RECORD_KEYS if k not in recorded), None)
     if absent is not None:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
                 config_refusal(
                     config_position("dp", "recorded", Name(absent)),
@@ -107,7 +104,7 @@ def coerce_recorded(recorded: object) -> Provenance:
     fingerprint = recorded["fingerprint"]
     if not isinstance(cpython, str) or not isinstance(fingerprint, str):
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
                 config_refusal(
                     config_position("dp", "recorded"),
@@ -129,7 +126,7 @@ def _coerce_platform(value: object) -> PlatformTriple:
         absent = next((k for k in _PLATFORM_KEYS if k not in value), None)
         if absent is not None:
             raise_bare(
-                _refusal_error(
+                refusal_error(
                     reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
                     config_refusal(
                         config_position("dp", "recorded", "platform", Name(absent)),
@@ -147,7 +144,7 @@ def _coerce_platform(value: object) -> PlatformTriple:
     elif isinstance(value, (list, tuple)):
         if len(value) != 4:
             raise_bare(
-                _refusal_error(
+                refusal_error(
                     reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
                     config_refusal(
                         at_platform,
@@ -159,7 +156,7 @@ def _coerce_platform(value: object) -> PlatformTriple:
         fields = (value[0], value[1], value[2], value[3])
     else:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
                 config_refusal(
                     at_platform,
@@ -174,7 +171,7 @@ def _coerce_platform(value: object) -> PlatformTriple:
         )
     if not all(isinstance(field, str) for field in fields):
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_PROVENANCE_RECORD_MALFORMED,
                 config_refusal(
                     at_platform,

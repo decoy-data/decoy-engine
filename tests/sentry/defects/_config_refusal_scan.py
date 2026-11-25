@@ -44,7 +44,7 @@ ZERO_SET = frozenset(
         "reference_tables/_loader.py",
         "profiling/model_pack/loader.py",
         "quality/dp_provenance.py",
-        "quality/_dp_record.py",
+        "quality/dp_record/_record.py",
     }
 )
 # The one function allowed to rebuild a refusal from the text it already held (a pickle round trip).

@@ -74,14 +74,14 @@ from decoy_engine._config_text import (
 )
 from decoy_engine._error_base import raise_bare
 from decoy_engine.fileaccess import FileRequest, FileRole
-from decoy_engine.quality._dp_record import (
+from decoy_engine.quality.dp_certified_stacks import CERTIFIED_ROWS
+from decoy_engine.quality.dp_record import (
     PlatformTriple,
     Provenance,
     ProvenanceError,
-    _refusal_error,
     coerce_recorded,
+    refusal_error,
 )
-from decoy_engine.quality.dp_certified_stacks import CERTIFIED_ROWS
 
 __all__ = [
     "CERTIFIED_PLATFORM",
@@ -119,7 +119,7 @@ def installed_distribution_set() -> tuple[tuple[str, str], ...]:
         raw_name = dist.metadata["Name"]
         if raw_name is None:
             raise_bare(
-                _refusal_error(
+                refusal_error(
                     reasons.quality.DP_PROVENANCE_DISTRIBUTION_UNNAMED,
                     config_refusal(
                         config_position("dp", "distributions"),
@@ -141,7 +141,7 @@ def installed_distribution_set() -> tuple[tuple[str, str], ...]:
             # ambiguity the fingerprint cannot resolve; those fail closed.
             if seen[name] != version:
                 raise_bare(
-                    _refusal_error(
+                    refusal_error(
                         reasons.quality.DP_PROVENANCE_DUPLICATE_DISTRIBUTION,
                         config_refusal(
                             config_position("dp", "distributions", Name(name)),
@@ -292,7 +292,7 @@ def check_fit_environment() -> None:
     plat = current_platform()
     if plat != CERTIFIED_PLATFORM:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_PLATFORM_UNCERTIFIED,
                 config_refusal(
                     config_position("dp", "platform"),
@@ -310,7 +310,7 @@ def check_fit_environment() -> None:
     certified = _CERTIFIED_STACKS.get((plat, cpython))
     if certified is None or fingerprint not in certified:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_STACK_UNCERTIFIED,
                 config_refusal(
                     config_position("dp", "proof_stack"),
@@ -338,7 +338,7 @@ def validate_recorded_provenance(recorded: object) -> None:
     prov = coerce_recorded(recorded)
     if prov.platform != CERTIFIED_PLATFORM:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_PLATFORM_UNCERTIFIED,
                 config_refusal(
                     config_position("dp", "recorded", "platform"),
@@ -350,7 +350,7 @@ def validate_recorded_provenance(recorded: object) -> None:
     certified = _CERTIFIED_STACKS.get((prov.platform, prov.cpython))
     if certified is None or prov.fingerprint not in certified:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_STACK_UNCERTIFIED,
                 config_refusal(
                     config_position("dp", "recorded", "proof_stack"),
@@ -419,13 +419,13 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
     lock = read_config(
         _parse,
         at_lock,
-        lambda r: _refusal_error(reasons.quality.DP_LOCK_PARSE_ERROR, r),
+        lambda r: refusal_error(reasons.quality.DP_LOCK_PARSE_ERROR, r),
     )
 
     packages = lock.get("package")
     if not isinstance(packages, list):
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_LOCK_PARSE_ERROR,
                 config_refusal(
                     at_lock,
@@ -458,7 +458,7 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
 
     if strays or drift:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.quality.DP_LOCK_INSTALLED_MISMATCH,
                 config_refusal(
                     at_lock,
