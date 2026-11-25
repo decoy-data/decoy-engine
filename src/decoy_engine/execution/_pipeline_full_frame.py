@@ -64,7 +64,7 @@ def _raise_if_source_value_unrepresentable(
     was not the ingest conversion -- return None and let the caller re-raise the
     original exception unchanged. The caller raises the coded error after its
     handler ends: the pandas/Arrow error quotes the cell, and `from None` alone
-    would keep it as `__context__`. The name is kept: sentry baselines key on it."""
+    would keep it as `__context__`."""
     from decoy_engine.execution._fk_keys import fk_columns_for_table, to_pandas_fk_safe
 
     edges = getattr(graph, "edges", ())

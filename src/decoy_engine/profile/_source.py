@@ -36,7 +36,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import fileaccess, reason_adapter
-from decoy_engine._field_names import DuplicateFieldNamesError
 from decoy_engine._lexeme import profile_descriptors
 from decoy_engine.contracts.column_shape import source_format_for
 from decoy_engine.fileaccess import FileAccess, entry_point
@@ -220,11 +219,10 @@ def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
 
 
 def _passes_through(exc: Exception) -> bool:
-    """True when `exc` must reach the caller as it is: a file-access policy decision, a duplicate-name refusal or an engine error family the reason adapter classifies.
+    """True when `exc` must reach the caller as it is: a file-access policy decision or an engine
+    error family the reason adapter classifies (the duplicate-name refusal is one of them).
     Every other failure of a bounded profile is stripped to a closed label."""
-    return fileaccess.keeps_class(exc) or isinstance(
-        exc, (DuplicateFieldNamesError, *reason_adapter.loaded_families())
-    )
+    return fileaccess.keeps_class(exc) or isinstance(exc, tuple(reason_adapter.loaded_families()))
 
 
 def _profile_one_source(

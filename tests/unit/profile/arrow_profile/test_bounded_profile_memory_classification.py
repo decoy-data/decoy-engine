@@ -18,7 +18,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from decoy_engine import fileaccess
+from decoy_engine import fileaccess, reason_adapter
 from decoy_engine.fileaccess import FileRole, Root, RootedFileAccess
 from decoy_engine.fileaccess._openat2 import openat2_usable
 from tests.unit.profile.arrow_profile.support import bounded_profile
@@ -191,3 +191,13 @@ def test_capacity_hides_a_cell_quoted_by_a_memory_failure(
         with pytest.raises(ExecutionError) as wrapped:
             estimate_job_capacity(config, base)
         assert MARKER not in _formatted(wrapped.value)
+
+
+def test_the_duplicate_name_refusal_passes_through_by_the_reason_registry() -> None:
+    """`_passes_through` names no engine error class itself: the duplicate-field-name refusal
+    keeps its type because the reason adapter registers it."""
+    from decoy_engine._field_names import DuplicateFieldNamesError
+    from decoy_engine.profile._source import _passes_through
+
+    assert DuplicateFieldNamesError in reason_adapter.loaded_families()
+    assert _passes_through(DuplicateFieldNamesError("m"))

@@ -124,6 +124,7 @@ PINS = Path(__file__).parent / "pins" / "base_profiles.json"
 _RECORD_ENV = "DECOY_RECORD_BASE_SRC"
 _pins: dict[str, Any] | None = None
 _server: subprocess.Popen[bytes] | None = None
+_flushed = False
 
 
 _PANDAS_OPTIONS = ("mode.use_inf_as_na", "future.infer_string")
@@ -140,7 +141,7 @@ def _pandas_options() -> dict[str, Any]:
     return found
 
 
-def _case_key(kind: str, table: pa.Table, data: bytes, request: dict[str, Any]) -> str:
+def _case_key(kind: str, table: pa.Table, data: bytes, meta: dict[str, Any]) -> str:
     """Names the case from its inputs alone: the format, the bytes the base reader saw and the
     walk arguments."""
     digest = hashlib.sha256(kind.encode())
@@ -151,7 +152,6 @@ def _case_key(kind: str, table: pa.Table, data: bytes, request: dict[str, Any]) 
         digest.update(sink.getvalue().to_pybytes())
     else:
         digest.update(data)
-    meta = {k: request[k] for k in ("sample_rows", "declared_pk", "fk_specs", "options")}
     digest.update(
         repr(sorted((k, sorted(v) if k == "declared_pk" else v) for k, v in meta.items())).encode()
     )
@@ -165,6 +165,26 @@ def _load_pins() -> dict[str, Any]:
     return _pins
 
 
+def _record_case(
+    kind: str, table: pa.Table, data: bytes, meta: dict[str, Any], base_src: str
+) -> dict[str, Any]:
+    """The pin for one case, recorded only when re-recording: a base reader failure is pinned like
+    a walk failure, so it is part of the oracle and not read from the running environment."""
+    atexit.register(_flush_pins)  # idempotent: the pins are written once, at exit
+    try:
+        frame, schema, total = base_sample(kind, table, data, meta["sample_rows"])
+    except Exception as exc:  # the base reader itself refused the table
+        return {"raises": type(exc).__name__}
+    request = {
+        **meta,
+        "frame": frame,
+        "schema": schema,
+        "total": total,
+        "source_format": FILE_FORMAT[kind],
+    }
+    return _record(request, base_src)
+
+
 def _record(request: dict[str, Any], base_src: str) -> dict[str, Any]:
     """Ask a separate interpreter running the merge base's walk; used only to re-record pins."""
     global _server
@@ -174,7 +194,6 @@ def _record(request: dict[str, Any], base_src: str) -> dict[str, Any]:
         _server = subprocess.Popen(  # noqa: S603  (fixed script, recording only)
             [sys.executable, str(script)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env
         )
-        atexit.register(_flush_pins)
     assert _server.stdin is not None and _server.stdout is not None
     pickle.dump(request, _server.stdin)
     _server.stdin.flush()
@@ -182,6 +201,10 @@ def _record(request: dict[str, Any], base_src: str) -> dict[str, Any]:
 
 
 def _flush_pins() -> None:
+    global _flushed
+    if _flushed:
+        return
+    _flushed = True
     if _server is not None and _server.stdin is not None:
         _server.stdin.close()
     if _pins is not None and os.environ.get(_RECORD_ENV):
@@ -224,25 +247,19 @@ def base_profile(
     The pins were recorded by running the base checkout's own walk in another interpreter (set
     `DECOY_RECORD_BASE_SRC` to that checkout's `src` to re-record), so no code under test
     computes an expected value."""
-    try:
-        frame, schema, total = base_sample(kind, table, data, sample_rows)
-    except Exception as exc:  # the base reader itself refused the table
-        raise BaseRaisedError(type(exc).__name__) from None
-    request: dict[str, Any] = {
-        "frame": frame,
-        "schema": schema,
-        "total": total,
+    meta: dict[str, Any] = {
         "sample_rows": sample_rows,
         "declared_pk": declared_pk,
         "fk_specs": fk_specs or {},
-        "source_format": FILE_FORMAT[kind],
         "options": _pandas_options(),
     }
-    key = _case_key(kind, table, data, request)
+    # The key names the case from its inputs alone, so a case whose base reader refused the table
+    # is looked up in the pins like any other and never answered by the current environment.
+    key = _case_key(kind, table, data, meta)
     pins = _load_pins()
     base_src = os.environ.get(_RECORD_ENV)
     if base_src and key not in pins:
-        pins[key] = _record(request, base_src)
+        pins[key] = _record_case(kind, table, data, meta, base_src)
     if key not in pins:
         pytest.fail(f"no pinned base profile for case {key[:12]}; re-record with {_RECORD_ENV}")
     pinned = pins[key]
