@@ -246,28 +246,26 @@ fn plan_accepts_identical_duplicates_and_rejects_bad_lengths_and_ids() {
 }
 
 #[test]
-fn the_allocation_hint_follows_the_slice_not_the_backing_buffer() {
-    // V1-2: a small slice of a large buffer must not reserve the whole buffer.
-    let big: Vec<String> = (0..1000)
-        .map(|i| format!("row{i:04}-{}", "x".repeat(100)))
-        .collect();
-    let array = StringArray::from(big);
-    let slice = array.slice(10, 2);
-    let slice = slice
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("string");
-    assert!(slice.value_data().len() > 100_000);
-    assert_eq!(
-        slice_bytes(slice),
-        slice.value(0).len() + slice.value(1).len()
-    );
-    let large = LargeStringArray::from(vec!["abc", "defg", "h"]);
-    let part = large.slice(1, 1);
-    let part = part
-        .as_any()
-        .downcast_ref::<LargeStringArray>()
-        .expect("large");
-    assert_eq!(slice_bytes(part), 4);
-    assert_eq!(slice_bytes(&StringArray::from(Vec::<&str>::new())), 0);
+fn a_declined_oversized_cell_reserves_no_output_bytes() {
+    // The output grows from accepted bytes. A declined cell contributes none, so a large cell the
+    // detector refuses must not reserve its own size (or the ceiling) before the decision.
+    let plan = token_plan(&["email"], "<X>", None);
+    let big = format!("é{}", "x".repeat(4 << 20));
+    for ceiling in [PIECE_BYTE_CEILING, 1 << 30] {
+        let large = LargeStringArray::from(vec![Some(big.as_str())]);
+        let got = splice_array(&large, &plan, ceiling).expect("splice");
+        assert_eq!(mask(&got), vec![true]);
+        assert_eq!(rows(&got), vec![None]);
+        let data = got[0].values.to_data();
+        assert!(data.buffers()[1].capacity() < 4096);
+    }
+}
+
+#[test]
+fn accepted_rows_still_grow_the_piece_buffer_to_fit() {
+    let plan = token_plan(&["email"], "<X>", None);
+    let many: Vec<Option<&str>> = vec![Some("a@b.com"); 5000];
+    let got = run(&many, &plan, PIECE_BYTE_CEILING);
+    assert_eq!(mask(&got).iter().filter(|d| **d).count(), 0);
+    assert!(rows(&got).iter().all(|r| r.as_deref() == Some("<X>")));
 }

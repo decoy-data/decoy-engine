@@ -13,9 +13,7 @@
 //! behind the boundary feature. Both legacy exports stay as they are; the new entry shares their
 //! detector sweep and writer in `text_mask`.
 
-use arrow_array::{
-    Array, BooleanArray, GenericStringArray, LargeStringArray, OffsetSizeTrait, StringArray,
-};
+use arrow_array::{Array, BooleanArray, LargeStringArray, StringArray};
 use arrow_buffer::{BooleanBuffer, NullBuffer, OffsetBuffer, ScalarBuffer};
 
 use crate::text_mask::{detect_splice_cell_out, CellOutcome, SpanOut};
@@ -117,9 +115,11 @@ struct PieceBuilder {
 }
 
 impl PieceBuilder {
-    fn new(byte_hint: usize) -> Self {
+    /// No up-front reservation: the buffer grows from accepted bytes only, so a declined cell
+    /// (however large) never reserves output memory before its eligibility is known.
+    fn new() -> Self {
         Self {
-            data: Vec::with_capacity(byte_hint),
+            data: Vec::new(),
             offsets: vec![0],
             valid: Vec::new(),
             declined: Vec::new(),
@@ -164,7 +164,6 @@ impl PieceBuilder {
 /// than the real offset domain is a fixed error. Always returns at least one piece.
 pub fn splice_rows<'a, I>(
     rows: I,
-    byte_hint: usize,
     plan: &SplicePlan,
     ceiling: usize,
 ) -> Result<Vec<SplicePiece>, SpliceError>
@@ -175,9 +174,8 @@ where
     let outs: [SpanOut<'_>; CATALOG_LEN] =
         outs.try_into().map_err(|_| SpliceError::OutputInvalid)?;
     let gap = plan.gap.as_out();
-    let hint = byte_hint.min(ceiling);
     let mut pieces = Vec::new();
-    let mut current = PieceBuilder::new(hint);
+    let mut current = PieceBuilder::new();
     let mut scratch = String::new();
     for row in rows {
         let Some(text) = row else {
@@ -206,23 +204,13 @@ where
             .checked_add(scratch.len())
             .is_some_and(|n| n <= ceiling);
         if !fits && current.rows() > 0 && !scratch.is_empty() {
-            let full = std::mem::replace(&mut current, PieceBuilder::new(hint));
+            let full = std::mem::replace(&mut current, PieceBuilder::new());
             pieces.push(full.finish()?);
         }
         current.push_value(&scratch);
     }
     pieces.push(current.finish()?);
     Ok(pieces)
-}
-
-/// The bytes the array's own rows span, from its first and last offsets. `value_data()` is the
-/// whole backing buffer, which for a small slice of a large buffer would over-reserve.
-pub(crate) fn slice_bytes<O: OffsetSizeTrait>(array: &GenericStringArray<O>) -> usize {
-    let offsets = array.value_offsets();
-    match (offsets.first(), offsets.last()) {
-        (Some(first), Some(last)) => last.as_usize().saturating_sub(first.as_usize()),
-        _ => 0,
-    }
 }
 
 /// Splice an imported Arrow column. Only `Utf8` and `LargeUtf8` are accepted.
@@ -232,10 +220,10 @@ pub fn splice_array(
     ceiling: usize,
 ) -> Result<Vec<SplicePiece>, SpliceError> {
     if let Some(a) = array.as_any().downcast_ref::<StringArray>() {
-        return splice_rows(a.iter(), slice_bytes(a), plan, ceiling);
+        return splice_rows(a.iter(), plan, ceiling);
     }
     if let Some(a) = array.as_any().downcast_ref::<LargeStringArray>() {
-        return splice_rows(a.iter(), slice_bytes(a), plan, ceiling);
+        return splice_rows(a.iter(), plan, ceiling);
     }
     Err(SpliceError::UnsupportedType)
 }

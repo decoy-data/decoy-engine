@@ -177,6 +177,31 @@ def _candidates_kat_ok(candidates_fn: Callable[..., Any]) -> bool:
     return triple == (0, 0, 7) and answer[1] is None and answer[2] is None
 
 
+def _bind_additive(entry: Callable[..., Any]) -> TextSpanSplice:
+    """The one callable the job paths receive. The probe runs through it, so a companion whose
+    entry cannot take what this wrapper sends (for example `native_threads`) fails the probe."""
+
+    def call(
+        values: Any,
+        *,
+        detector_ids: Sequence[str],
+        outs: Sequence[str | None],
+        gap_out: str | None,
+        native_threads: int | None = None,
+    ) -> list[tuple[Any, Any]]:
+        return entry(
+            values,
+            detector_ids=list(detector_ids),
+            outs=list(outs),
+            gap_out=gap_out,
+            catalog_version=CATALOG_VERSION,
+            splice_contract_version=SPLICE_CONTRACT_VERSION,
+            native_threads=native_threads,
+        )
+
+    return call
+
+
 def _additive_kat_ok(additive_fn: Callable[..., Any]) -> bool:
     import pyarrow as pa
 
@@ -185,8 +210,7 @@ def _additive_kat_ok(additive_fn: Callable[..., Any]) -> bool:
         detector_ids=["email"],
         outs=[_KAT_TOKEN],
         gap_out=None,
-        catalog_version=CATALOG_VERSION,
-        splice_contract_version=SPLICE_CONTRACT_VERSION,
+        native_threads=None,
     )
     if type(result) is not list or len(result) != 1:
         return False
@@ -227,7 +251,8 @@ def _additive_entry(kernel: Any) -> Callable[..., Any] | None:
         return None
     if not _is_exact_int(getter(), SPLICE_CONTRACT_VERSION):
         return None
-    return entry if _additive_kat_ok(entry) else None
+    bound = _bind_additive(entry)
+    return bound if _additive_kat_ok(bound) else None
 
 
 def _decide(kernel: Any) -> CompanionCompat:
@@ -306,26 +331,7 @@ def load_text_span_splice() -> TextSpanSplice | None:
     entry = companion_compat().additive
     if entry is None:
         return None
-
-    def call(
-        values: Any,
-        *,
-        detector_ids: Sequence[str],
-        outs: Sequence[str | None],
-        gap_out: str | None,
-        native_threads: int | None = None,
-    ) -> list[tuple[Any, Any]]:
-        return entry(
-            values,
-            detector_ids=list(detector_ids),
-            outs=list(outs),
-            gap_out=gap_out,
-            catalog_version=CATALOG_VERSION,
-            splice_contract_version=SPLICE_CONTRACT_VERSION,
-            native_threads=native_threads,
-        )
-
-    return call
+    return entry
 
 
 def requested_rust_ids(detector_ids: list[str] | None) -> list[str]:

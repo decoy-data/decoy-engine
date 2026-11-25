@@ -541,6 +541,25 @@ def test_at6_a_failed_legacy_check_disables_legacy_splice_only(which: str, bad: 
     assert legacy is None
 
 
+def _additive_without_threads(
+    values: Any,
+    *,
+    detector_ids: Any,
+    outs: Any,
+    gap_out: Any,
+    catalog_version: Any,
+    splice_contract_version: Any,
+) -> Any:
+    return _good_additive(values)
+
+
+def test_at6_an_additive_entry_that_rejects_native_threads_is_disabled_alone() -> None:
+    # The loader's wrapper always passes `native_threads`, so the probe must call through it.
+    kernel, additive, legacy, _ = _loaded(text_span_splice=_additive_without_threads)
+    assert additive is None
+    assert kernel is not None and legacy is not None
+
+
 def test_at6_the_probe_runs_once_per_companion_instance() -> None:
     calls = _Calls()
     with pytest.MonkeyPatch.context() as mp:
