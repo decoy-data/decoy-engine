@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 206 (asserted by the sentry).
+# Count: 205 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -1822,13 +1822,13 @@ reason = "the isolated child reads its payload and writes its staged output; the
 
 [[entry]]
 module = "decoy_engine/fileaccess/_fdtree.py"
-function = "_prove_marker"
+function = "_open_leaf"
 sink = "os.open"
 ordinal = 0
 disposition = "read"
-rule = "O_RDONLY|O_NOFOLLOW|O_NONBLOCK: a fixed marker name (`.decoy-publication-stage` or `.decoy-arena`) under a held stage or arena descriptor"
+rule = "O_RDONLY|O_NOFOLLOW|O_NONBLOCK: a fixed marker name (`.decoy-publication-stage` or `.decoy-arena`) under a held stage or arena descriptor, or the fixed kernel path `/proc/self/mountinfo`"
 owner = "cam"
-reason = "F26 G1(d): the one bounded reader of a stage or arena interior proof; type, owner, mode and content are checked on the descriptor"
+reason = "F26 G1(d): the one bounded reader of a stage or arena interior proof (type, owner, mode and content are checked on the descriptor); F25 S2a-1c-ii-a0: the table of mount points, so a tree removal never crosses a mount"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_fdtree.py"
@@ -1870,16 +1870,6 @@ reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf
 
 [[entry]]
 module = "decoy_engine/fileaccess/_fdtree.py"
-function = "_read_mount_table"
-sink = "os.open"
-ordinal = 0
-disposition = "read"
-rule = "O_RDONLY: the fixed kernel path `/proc/self/mountinfo`, read once per tree removal"
-owner = "cam"
-reason = "F25 S2a-1c-ii-a0: the table of mount points, so a tree removal never crosses a mount"
-
-[[entry]]
-module = "decoy_engine/fileaccess/_fdtree.py"
 function = "_mount_roots"
 sink = "os.readlink"
 ordinal = 0
@@ -1890,11 +1880,11 @@ reason = "F25 S2a-1c-ii-a0: names the held directory so only the mounts beneath 
 
 [[entry]]
 module = "decoy_engine/fileaccess/_fdtree.py"
-function = "_mount_roots"
+function = "_path_identity"
 sink = "os.stat"
 ordinal = 0
 disposition = "read"
-rule = "a mount point listed by the kernel under the held directory, read-only identity check"
+rule = "a kernel-reported absolute path (the held directory named by `/proc/self/fd/<n>`, or a mount point listed under it), read-only identity check"
 owner = "cam"
 reason = "F25 S2a-1c-ii-a0: the (device, inode) of each mount root under the tree being removed"
 
