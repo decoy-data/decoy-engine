@@ -186,7 +186,6 @@ def test_t9_control_the_admitted_typed_column_runs_native_on_both_routes(tmp_pat
 def test_one_when_target_rule_serves_every_route(monkeypatch: pytest.MonkeyPatch) -> None:
     """DESIGN-a (Codex a2): the `when:` target rule has one owner. The unified and chunked
     verdict (`when_native_rejection`) and the sequential admit both ask it."""
-    import inspect
     from types import SimpleNamespace
 
     from decoy_engine.contracts.column_shape import ColumnShape
@@ -196,7 +195,15 @@ def test_one_when_target_rule_serves_every_route(monkeypatch: pytest.MonkeyPatch
     assert wa.when_target_rejection("d", pa.date32()) == "when_predicate_not_native:d"
     assert wa.when_target_rejection("d", None) == "when_predicate_not_native:d"
     assert wa.when_target_rejection("d", pa.string()) is None
-    assert "when_target_rejection(" in inspect.getsource(wa.when_native_rejection)
+    # The unified and chunked verdict asks the shared rule for a known target type: a restored
+    # separate type check there would not return the probe's sentinel.
+    entries = [{"name": "d", "strategy": "date_shift", "when": "p > 5"}]
+    monkeypatch.setattr(wa, "when_target_rejection", lambda column, _t: f"probe:{column}")
+    verdict = wa.when_native_rejection(
+        "d", entries, None, table="t", schema=pa.schema([("d", pa.date32())])
+    )
+    assert verdict == "probe:d"
+    monkeypatch.undo()
     monkeypatch.setattr(ops, "when_target_rejection", lambda column, _t: f"probe:{column}")
     seed: Any = SimpleNamespace(when="x")
     assert ops.date_shift_admit("d", pa.date32(), seed, ColumnShape.DATE) == "probe:d"

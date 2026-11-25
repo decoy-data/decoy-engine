@@ -151,7 +151,9 @@ def _composed_views(sources: dict[str, str]) -> set[tuple[str, int]]:
         for node in ast.walk(ast.parse(text)):
             if not isinstance(node, ast.Call) or _callee(node) != "native_date_shapes":
                 continue
-            if any(_callee(arg) in _VIEW_PARTS for arg in node.args):
+            # Positional and keyword arguments alike, at any depth of the argument expression.
+            given = [*node.args, *(k.value for k in node.keywords)]
+            if any(_callee(inner) in _VIEW_PARTS for arg in given for inner in ast.walk(arg)):
                 found.add((rel, node.lineno))
     return found
 
@@ -199,3 +201,12 @@ def test_an_inline_native_date_derivation_in_a_caller_is_red() -> None:
     assert _unlisted_reads({"execution/_chunked_bucket_perturb.py": gate_inline}) == {
         ("execution/_chunked_bucket_perturb.py", "typed_date_columns")
     }
+
+
+def test_composing_the_view_with_keyword_arguments_is_red() -> None:
+    """Mutation: the same composition spelled with keywords, or one call deeper."""
+    keyword = "native_date_shapes(shapes=plan_column_shapes(plan), declared=set())"
+    nested = "native_date_shapes(dict(plan_column_shapes(plan)), declared_date_shift_columns(p))"
+    for spelling in (keyword, nested):
+        assert len(_composed_views({"execution/x.py": f"x = {spelling}\n"})) == 1, spelling
+    assert not _composed_views({"execution/x.py": "x = native_date_shapes(shapes, declared)\n"})

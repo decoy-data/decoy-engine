@@ -157,13 +157,22 @@ _CANONICALIZE_PRIVATE_SITES = frozenset(
 
 
 def _private_canonicalize_imports(rel: str, source: str) -> set[tuple[str, str]]:
+    """Every import of the private module or a name in it, under any spelling: absolute or
+    relative, aliased, or the module itself taken from its package (`from ...pool import
+    _canonicalize as c`). The one import resolver is `_retry_scan.import_bindings`."""
     import ast
 
+    from tests.sentry._retry_scan import import_bindings, package_of
+
+    tree = ast.parse(source)
     found: set[tuple[str, str]] = set()
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.ImportFrom) and node.module == _CANONICALIZE_PRIVATE:
-            found |= {(rel, alias.name) for alias in node.names}
-        elif isinstance(node, ast.Import):
+    for target in import_bindings(tree, package_of(rel)).values():
+        if target == _CANONICALIZE_PRIVATE:
+            found.add((rel, _CANONICALIZE_PRIVATE.rsplit(".", 1)[1]))
+        elif target.startswith(_CANONICALIZE_PRIVATE + "."):
+            found.add((rel, target.removeprefix(_CANONICALIZE_PRIVATE + ".")))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
             found |= {(rel, a.name) for a in node.names if a.name == _CANONICALIZE_PRIVATE}
     return found
 
@@ -219,3 +228,16 @@ def test_a_private_canonicalize_import_in_execution_is_red() -> None:
     )
     assert mutated2 != text2
     assert _canonicalize_offenders({rel2: mutated2}) == {(rel2, "canonicalize_typed_array")}
+
+
+def test_every_spelling_of_the_private_import_is_red() -> None:
+    """Mutations: an aliased module import, a relative one, and an aliased name."""
+    spellings = [
+        "from decoy_engine.generation.pool import _canonicalize as c\n",
+        "from decoy_engine.generation.pool._canonicalize import canonicalize_typed_array as c\n",
+        "from ..generation.pool import _canonicalize\n",
+        "from ..generation.pool._canonicalize import _canonicalize_source as c\n",
+    ]
+    for spelling in spellings:
+        sources = {"execution/_chunked_x.py": spelling}
+        assert _canonicalize_offenders(sources), spelling

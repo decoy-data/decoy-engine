@@ -33,6 +33,7 @@ from decoy_engine.profile._readers import (
     estimate_csv_rows,
     head_frame_from_batches,
 )
+from decoy_engine.profile.arrow import profile_frame
 
 # One ranged read big enough to cover a CSV header + a bounded sample on a
 # typical object, while still being a tiny fraction of a large file. read_csv
@@ -267,7 +268,7 @@ class S3ParquetSource:
 
     def to_frame(self) -> pd.DataFrame:
         client = _s3_for(self._descriptor)
-        return pd.read_parquet(io.BytesIO(_s3_full(client, self._bucket, self._key)))
+        return profile_frame(pq.read_table(io.BytesIO(_s3_full(client, self._bucket, self._key))))
 
 
 class S3CsvSource:
@@ -388,7 +389,7 @@ class GcsParquetSource:
     def to_frame(self) -> pd.DataFrame:
         with _clients.gcs_client() as client:
             data = _clients.gcs_download(_gcs_blob(self._descriptor, client))
-        return pd.read_parquet(io.BytesIO(data))
+        return profile_frame(pq.read_table(io.BytesIO(data)))
 
 
 class GcsCsvSource:

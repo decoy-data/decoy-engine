@@ -15,9 +15,10 @@ A `date32` value outside years 1 to 9999, or one whose shift leaves that range, 
 the job. The full-frame and sequential routes read the whole table through pandas, which cannot
 hold such a date, so both fail the job with the coded error `full_frame_value_unrepresentable`,
 which names the table and column and no value. Before, sequential failed with an uncoded pandas
-error that quoted the year. Profiling now converts its source sample without raising on such
-a date, so the coded error also fires when the date is in the first rows.
+error that quoted the year. Every profile read now converts such a date without raising and reads it as null (local and cloud
+Parquet, the scan, and the chunked first chunk), so the coded error also fires when the date is in
+the first rows and no statistic or report carries the date.
 
-Two new route reason codes, registered unreleased: `date_shift_typed_preserve_not_native`
-(`preserve_values` on a typed column) and `date_shift_typed_type_not_native` (a typed shape over a
+Two new route reason codes, registered unreleased: `route/date_shift_typed_preserve_not_native`
+(`preserve_values` on a typed column) and `route/date_shift_typed_type_not_native` (a typed shape over a
 resident type other than `date32`, such as `date64`). Both keep the column on the oracle.

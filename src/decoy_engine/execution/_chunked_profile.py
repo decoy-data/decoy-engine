@@ -36,9 +36,10 @@ def walk_one_table(table: pa.Table, *, table_name: str, source_format: str | Non
     import random
 
     from decoy_engine.profile._walk import walk_dataframe
+    from decoy_engine.profile.arrow import profile_frame
 
     return walk_dataframe(
-        table.to_pandas(),
+        profile_frame(table),
         table_name=table_name,
         declared_pk_cols=frozenset(),
         fk_specs={},

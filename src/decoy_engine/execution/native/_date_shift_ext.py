@@ -166,23 +166,27 @@ def _typed_date_shift(
 
     A row with no key (null, or outside years 1 to 9999) derives no offset; `shift_typed_days`
     flags it, and any row whose shifted day leaves that range, as failed."""
-    keys, _ = canonicalize_typed_array(col)
-    usable = keys.is_valid().to_numpy(zero_copy_only=False)
-    offsets = np.zeros(len(col), dtype=np.int64)
-    if usable.any():
-        drawn = _derive_offsets(
-            keys.filter(pa.array(usable)),
-            range_size=range_size,
-            mask_key=mask_key,
-            namespace=namespace,
-            index_kernel=index_kernel,
-            native_threads=native_threads,
-        )
-        offsets[usable] = drawn.astype(np.int64) + min_days
-    if derive_calls is not None:
-        derive_calls.append(int(usable.any()))
-    shifted, failed = shift_typed_days(col, offsets)
-    return shifted, tuple(int(i) for i in np.flatnonzero(failed))
+    try:
+        keys, _ = canonicalize_typed_array(col)
+        usable = keys.is_valid().to_numpy(zero_copy_only=False)
+        offsets = np.zeros(len(col), dtype=np.int64)
+        if usable.any():
+            drawn = _derive_offsets(
+                keys.filter(pa.array(usable)),
+                range_size=range_size,
+                mask_key=mask_key,
+                namespace=namespace,
+                index_kernel=index_kernel,
+                native_threads=native_threads,
+            )
+            offsets[usable] = drawn.astype(np.int64) + min_days
+        if derive_calls is not None:
+            derive_calls.append(int(usable.any()))
+        shifted, failed = shift_typed_days(col, offsets)
+        return shifted, tuple(int(i) for i in np.flatnonzero(failed))
+    except BaseException:
+        del mask_key
+        raise
 
 
 def native_date_shift(

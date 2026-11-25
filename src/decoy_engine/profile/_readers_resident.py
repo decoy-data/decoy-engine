@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
-from decoy_engine.profile._frame import profile_frame as _frame_of
 from decoy_engine.profile._readers import RowCount
+from decoy_engine.profile.arrow import profile_frame as _frame_of
 
 if TYPE_CHECKING:
     import pandas as pd
