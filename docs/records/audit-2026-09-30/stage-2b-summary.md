@@ -7,7 +7,7 @@ dedicated environment (`docs/records/audit-2026-09-30/environment.json`):
 engine editable from this worktree (companion built, present, ok), platform
 installed from the detached worktree at `origin/main` `0701a954`, decoy-cli
 installed from a new detached worktree (`/home/cam/vscode/decoy/.claude/worktrees/audit-pinned`)
-at `origin/main` `b8274b0194748d5a60262b78b5969a8c85aeeac7`. Two extra
+at `origin/main` `5442b9029b134a7c3cb74948565eb68381c2ae90`. Two extra
 dev-only packages (`flask`, `flask_cors`) were added to the throwaway audit
 venv to run moto's `ThreadedMotoServer` (the platform declares `moto[s3]`,
 not `moto[server]`); no production dependency file was touched. Scripts live

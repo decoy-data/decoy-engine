@@ -188,7 +188,7 @@ def build() -> tuple[dict[str, object], dict[str, object]]:
                 sources[(ns, code)].add(f"{s.file}#{s.kind}:{s.family}")
     # Public exception classes whose ``code`` is set from a class attribute: owners are the classes.
     baseline = {
-        "baseline_commit": "2a44723ff26ffd16c69f026582ec93998d67ca5d",
+        "baseline_commit": "ac4e5dc3773a36f48b3f09565c1c2ee21c4b984b",
         "note": "append-only; a code may be added, never removed, re-homed or re-interpreted",
         "identities": [
             {

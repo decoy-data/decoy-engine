@@ -73,13 +73,13 @@
     },
     "platform": {
       "repo": "/home/cam/vscode/decoy-platform",
-      "origin_main": "0701a95422e405cff76eb38c12cfb4f372b151d4",
+      "origin_main": "d7b8bbb42826cbd7b03ef85974c1c468289e13db",
       "error": null,
       "note": "read from the local origin/main ref as of this preflight run; this script does not run `git fetch` itself (no network side effect), so re-run after fetching if the remote has moved"
     },
     "cli": {
       "repo": "/home/cam/vscode/decoy",
-      "origin_main": "b8274b0194748d5a60262b78b5969a8c85aeeac7",
+      "origin_main": "5442b9029b134a7c3cb74948565eb68381c2ae90",
       "error": null
     }
   },

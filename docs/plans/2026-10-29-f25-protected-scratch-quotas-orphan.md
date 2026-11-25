@@ -2,7 +2,7 @@ Status: plan
 
 Summary: Make every engine temporary byte an owned, quota-enforced, encrypted resource, with fenced cleanup and explicit recovery semantics.
 
-Baseline commit: `2a44723ff26ffd16c69f026582ec93998d67ca5d` (`git rev-parse HEAD`, this checkout, 2026-10-29).
+Baseline commit: `ac4e5dc3773a36f48b3f09565c1c2ee21c4b984b` (`git rev-parse HEAD`, this checkout, 2026-10-29).
 
 # F25: Protected scratch, quotas, orphan recovery
 

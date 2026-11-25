@@ -2,7 +2,7 @@
 
 **Reviewed report:** `docs/adversarial-architecture-review-2026-07-12.md`
 **Report snapshot:** 647 lines, SHA-256 `4a55102c98f20e09c2cd742bbb3478f1a26346dcef03fa6189747e179bf6b23c`
-**Code baseline:** `c1c4f2c2b33af39e1de4874788a7df78a352970c`
+**Code baseline:** `430bc3d4fecfeaea3ece4f5e76a8413f41a7d3a1`
 **Disposition:** revise before treating the report as the release decision record
 
 ## Findings

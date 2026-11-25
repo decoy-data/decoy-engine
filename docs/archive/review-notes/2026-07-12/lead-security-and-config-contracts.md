@@ -6,7 +6,7 @@ This note covers cryptographic boundaries, fail-open masking behavior, ML model-
 source-to-plan binding, schema closure, and whether accepted `PipelineConfig` fields have an
 effective runtime owner.
 
-- Frozen reviewed revision: `c1c4f2c2b33af39e1de4874788a7df78a352970c`.
+- Frozen reviewed revision: `430bc3d4fecfeaea3ece4f5e76a8413f41a7d3a1`.
 - All probes used synthetic data in temporary directories.
 - No external integration or production data service was exercised.
 

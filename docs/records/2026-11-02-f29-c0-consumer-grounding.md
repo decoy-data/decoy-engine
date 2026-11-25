@@ -11,9 +11,9 @@ Slice C0 of plan `docs/plans/2026-11-02-f29-errors-progress-remainder.md` (branc
 
 | Repo | Census merge base (`origin/main`) | Handoff base | Moved |
 |---|---|---|---|
-| Platform | `0638a97d1d98a50630ecc694f49c5a45062261ab` | `5e610156` | descends; 15 `api/jobs/` files changed; all citations re-anchored here |
-| CLI | `257706265498140466142477d2249eee0957763f` | `004afda9` | descends; `src/decoy/cli/run.py` identical; `pyproject.toml` repinned |
-| Engine | `9eec6123114e0395eafe46d2bae395c6ebccf74b` | `f5b46a2c` (`v0.18.0`) | descends; registry `1.3.0` (#365); #366 touches `subset/` only |
+| Platform | `4182f46b40f59359b1759c9aa1c49bf10a754e89` | `5e610156` | descends; 15 `api/jobs/` files changed; all citations re-anchored here |
+| CLI | `764cc3899421dda296d973151f1fbc0e7573bb5e` | `004afda9` | descends; `src/decoy/cli/run.py` identical; `pyproject.toml` repinned |
+| Engine | `6675b292fd42dffec5ae31c55b0b8a9b8e6a94f2` | `f5b46a2c` (`v0.18.0`) | descends; registry `1.3.0` (#365); #366 touches `subset/` only |
 
 ## 2. Platform failure-tail census
 
@@ -193,7 +193,7 @@ Raw string, not parsed: `web/src/pages/JobDetail.tsx:750` is `<td className="py-
 
 ## 7. Citation self-check script and output
 
-Extract the block below to `c0_check.py`, then from the engine root: `P_DIR=<platform> P_SHA=0638a97d1d98a50630ecc694f49c5a45062261ab C_DIR=<cli> C_SHA=257706265498140466142477d2249eee0957763f E_DIR=. E_SHA=9eec6123114e0395eafe46d2bae395c6ebccf74b python3 -I c0_check.py <record>`. It prints each `CITE` line it read (MISMATCH when the expected text is absent), flags a body `file:line` with no `CITE` (UNCHECKED; script and raw blocks excluded), and runs A1 to A3.
+Extract the block below to `c0_check.py`, then from the engine root: `P_DIR=<platform> P_SHA=4182f46b40f59359b1759c9aa1c49bf10a754e89 C_DIR=<cli> C_SHA=764cc3899421dda296d973151f1fbc0e7573bb5e E_DIR=. E_SHA=6675b292fd42dffec5ae31c55b0b8a9b8e6a94f2 python3 -I c0_check.py <record>`. It prints each `CITE` line it read (MISMATCH when the expected text is absent), flags a body `file:line` with no `CITE` (UNCHECKED; script and raw blocks excluded), and runs A1 to A3.
 
 <!-- script -->
 ```python

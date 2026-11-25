@@ -11,17 +11,17 @@ quota-bound and cleaned up. Each PR merges its base branch forward, so a PR's ow
 
 | PR | Branch | Head after review | Dennis | Codex review-low | CI |
 |---|---|---|---|---|---|
-| #500 | `feat/f25-s1b` | `2e35e61bd` | remote round 1, 2 DESIGN | GO | green |
-| #502 | `feat/f25-s1b-ii` | `467ab3aca` | remote round 1, 1 DESIGN (fixed) | GO | green |
-| #505 | `feat/f25-s2a-1` | `d6ca31a8d` | round 1, 1 V1 (ruled V2-LOG) | 2 V1 ruled V2-LOG, delta GO | green |
-| #507 | `feat/f25-s2a-1-ii` | `74b74ef89` | round 1, 1 DESIGN (fixed) | GO | green |
-| #509 | `feat/f25-s2a-1a` | `bc2a81e7e` | round 1, GO | 1 V1 ruled V2-LOG | green |
-| #513 | `feat/f25-s2a-1b` | `6d8d0bcfe` | round 1, GO | GO | green |
-| #516 | `feat/f25-s2a-1b-ii` | `62e422290` | round 1, GO | GO | green |
-| #518 | `feat/f25-s2a-1b-fix` | `000ce31fc` | round 1, 1 DESIGN (fixed) | GO | green |
-| #522 | `feat/f25-s2a-1c` | `b089c254f` | round 1, GO | GO | green |
+| #500 | `feat/f25-s1b` | `d7bc70833` | remote round 1, 2 DESIGN | GO | green |
+| #502 | `feat/f25-s1b-ii` | `9e1af8cfa` | remote round 1, 1 DESIGN (fixed) | GO | green |
+| #505 | `feat/f25-s2a-1` | `6beb4189d` | round 1, 1 V1 (ruled V2-LOG) | 2 V1 ruled V2-LOG, delta GO | green |
+| #507 | `feat/f25-s2a-1-ii` | `f9aca1c94` | round 1, 1 DESIGN (fixed) | GO | green |
+| #509 | `feat/f25-s2a-1a` | `b13826599` | round 1, GO | 1 V1 ruled V2-LOG | green |
+| #513 | `feat/f25-s2a-1b` | `0aae525af` | round 1, GO | GO | green |
+| #516 | `feat/f25-s2a-1b-ii` | `32dde7206` | round 1, GO | GO | green |
+| #518 | `feat/f25-s2a-1b-fix` | `28b0b8b1f` | round 1, 1 DESIGN (fixed) | GO | green |
+| #522 | `feat/f25-s2a-1c` | `23fef97f8` | round 1, GO | GO | green |
 
-A full suite (T3, legacy mode) on the stack top merged with main `1c8e413c3` passed: branch-only
+A full suite (T3, legacy mode) on the stack top merged with main `8dfc02086` passed: branch-only
 failures 0, tests 44680 passed, 0 failed, 5364 skipped.
 
 ## Fixed in the stack

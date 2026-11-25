@@ -2,7 +2,7 @@ Status: superseded (by `docs/plans/2026-10-30-f22-publication-replan.md`; the r5
 
 Summary: Complete F22 by binding validated output and evidence into one publication descriptor, recognizing committed retries, and making replacement and protected backup explicit.
 
-Baseline commit: `2a44723ff26ffd16c69f026582ec93998d67ca5d` (`git rev-parse HEAD`, this checkout).
+Baseline commit: `ac4e5dc3773a36f48b3f09565c1c2ee21c4b984b` (`git rev-parse HEAD`, this checkout).
 
 # F22: atomic and idempotent publication
 

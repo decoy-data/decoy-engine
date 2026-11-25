@@ -2,13 +2,13 @@
 
 Status: record
 
-Cross-check for the run audit, produced from code reading only (gpt-5.6-sol, read-only). Its revision header's commits do not match this audit's own pinned environment (`environment.json`: platform `origin/main` `0701a954`, CLI `origin/main` `b8274b01`). The value it labels "decoy CLI" (`0701a95422e405cff76eb38c12cfb4f372b151d4`) is in fact this audit's real platform commit, not a CLI commit at all. The value it labels "decoy-platform@origin/main" (`e04b2a2f1c83a8c92078aa0ea66c808efee05025`) is not a platform commit either -- it resolves in the `decoy-engine` repo to the PR #178 merge commit, not to anything in `decoy-platform`. So this is not a clean two-way swap: only the CLI row can be read as "actually the platform commit"; the platform row's value names a different repository's commit entirely, which means the actual platform tree Codex read is unverified, not merely mislabeled. Kept verbatim below except for this note and the en-dash-to-hyphen and stray-artifact cleanup described in `docs/records/audit-2026-09-30/stage-2d-summary.md`.
+Cross-check for the run audit, produced from code reading only (gpt-5.6-sol, read-only). Its revision header's commits do not match this audit's own pinned environment (`environment.json`: platform `origin/main` `0701a954`, CLI `origin/main` `b8274b01`). The value it labels "decoy CLI" (`d7b8bbb42826cbd7b03ef85974c1c468289e13db`) is in fact this audit's real platform commit, not a CLI commit at all. The value it labels "decoy-platform@origin/main" (`d68200040d57cf78bed731e8ca0892152df8267d`) is not a platform commit either -- it resolves in the `decoy-engine` repo to the PR #178 merge commit, not to anything in `decoy-platform`. So this is not a clean two-way swap: only the CLI row can be read as "actually the platform commit"; the platform row's value names a different repository's commit entirely, which means the actual platform tree Codex read is unverified, not merely mislabeled. Kept verbatim below except for this note and the en-dash-to-hyphen and stray-artifact cleanup described in `docs/records/audit-2026-09-30/stage-2d-summary.md`.
 
 Audit basis: code only, no execution beyond repository reads. Revisions examined:
 
-- `decoy-engine` `8dc559e554fd48d0996a7dcee02f8a57d94cc2db`
-- `decoy-platform@origin/main` `e04b2a2f1c83a8c92078aa0ea66c808efee05025`
-- `decoy` CLI `0701a95422e405cff76eb38c12cfb4f372b151d4`
+- `decoy-engine` `e3b8a32073afb54e9cac88d37e96dd9708200f39`
+- `decoy-platform@origin/main` `d68200040d57cf78bed731e8ca0892152df8267d`
+- `decoy` CLI `d7b8bbb42826cbd7b03ef85974c1c468289e13db`
 
 The central result is: **no large platform masking path executes Rust companion kernels today.** Large independent tables use the pandas chunked adapter; large supported FK trees use DuckDB plus Python/Arrow kernels. Rust companion kernels are reachable only through the narrow, resident, single-table, non-chunked Parquet unified slice.
 

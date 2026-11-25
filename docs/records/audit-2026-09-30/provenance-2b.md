@@ -16,9 +16,9 @@ used and stage 2c's R043-R068 continued in:
 - Engine: this worktree (`docs/reality-2026-09-30`), editable install, commit
   `7cadcde08ea5876217de2490b06a7f9e1ced5a40` at the time environment.json was written.
 - Platform: `/home/cam/vscode/decoy-platform/.claude/worktrees/audit-pinned`, a detached
-  worktree at `origin/main` `0701a95422e405cff76eb38c12cfb4f372b151d4`.
+  worktree at `origin/main` `d7b8bbb42826cbd7b03ef85974c1c468289e13db`.
 - CLI: `/home/cam/vscode/decoy/.claude/worktrees/audit-pinned`, `origin/main`
-  `b8274b0194748d5a60262b78b5969a8c85aeeac7`.
+  `5442b9029b134a7c3cb74948565eb68381c2ae90`.
 - Native companion: built from this worktree's pinned HEAD, `present=True, ok=True,
   abi decoy-native-abi-2, version 0.1.0`, module SHA-256
   `1a3b2d18e4e092691e05f7ab0c8e1725f6aeb94bc19e46f9adaced472510b061`.

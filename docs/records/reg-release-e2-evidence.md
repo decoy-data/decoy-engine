@@ -9,7 +9,7 @@ is not added to this branch; it stays on the plan branch.
 
 ## Heads and environment
 
-- Base: `origin/main` `c96e28554613451f5f009849d8eaacbada880d0e`. No registry minor above
+- Base: `origin/main` `79d20670d0c3dc0a753122035753a336ed182af9`. No registry minor above
   1.23.0 had landed, so `LAST_PER_PR_MINOR` is `1.23.0` as planned.
 - Red acceptance commit: `4ac1308a` (tests only).
 - Final source head: `3f9576d7` (`feat(reasons): stamp the reason registry at release time`). This

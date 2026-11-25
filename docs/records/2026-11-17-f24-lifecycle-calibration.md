@@ -2,10 +2,10 @@ Status: record
 
 # F24 lifecycle estimate: accuracy calibration (84-E1)
 
-Two runs. The first (head `b1213e83a`) found four cells below the measured peak and the plan
+Two runs. The first (head `0a02921cc`) found four cells below the measured peak and the plan
 was amended (revision 5, section 4.2a: execute priced on each column's working spec, the larger of
 its input and output cell, from the strategy handlers' own declarations). The second run, below,
-ran on head `47b0260575be1bc9f5bf7f6c8f1c94d41820783b` (revision 5 build). Later commits change handler-declaration reuse in the spill estimate and tests, not the lifecycle arithmetic.
+ran on head `c0edbe15b4118fcf5248e1d98dddcf90da026d4e` (revision 5 build). Later commits change handler-declaration reuse in the spill estimate and tests, not the lifecycle arithmetic.
 
 Method: Linux test VM through `vm-run`, one child process per cell, peak RSS from `wait4`
 `ru_maxrss` outside the child, fixtures built in a separate process. The worker reads each source
@@ -42,7 +42,7 @@ int64 columns, so they take the lower bound only. AT-E1-27 keeps the 1.5 bound a
 Realized and predicted routes differ for AT-E1-18 (sequential predicted, out_of_core realized,
 FM-6); it takes the lower bound.
 
-## First run (revision 4 model, head `b1213e83a`)
+## First run (revision 4 model, head `0a02921cc`)
 
 AT-E1-19 0.46 and 0.32, AT-E1-23 0.96 and 0.95 (predicted over measured); the other ten cells
 passed. Cause: the basis priced every column at its input cell, but those cells are rewritten to

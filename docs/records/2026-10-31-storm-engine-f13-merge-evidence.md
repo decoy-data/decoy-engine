@@ -141,9 +141,9 @@ the previous record.
 
 ```
 ============================== EVIDENCE ==============================
-repo:       decoy-engine @ 0cbf097476faeb23f438bc49ad68277d08772d56 (claude/eager-clarke-14deh1)
+repo:       decoy-engine @ c7e15a15aba554d21d015f1f3d5be468110c9dce (claude/eager-clarke-14deh1)
 dirty:      0 path(s) uncommitted
-origin/main 6ce435ceceb556451aab98975aebea495f750ac4
+origin/main afb878c67694980d13448ea3730eb90e2817aa37
 venv:       /home/user/venvs/eng310
 python:     Python 3.10.20
 ruff:       ruff 0.15.22
@@ -151,7 +151,7 @@ mypy:       mypy 2.3.0 (compiled: yes)
 pytest:     pytest 9.1.1
 steps:      env,ruff,format,mypy,sentry,tests (keep-going=1)
 test paths: explicit: tests/unit/phase tests/unit/progress tests/unit/test_reason_registry.py tests/unit/test_public_api.py tests/unit/execution
-baseline:   origin/main @ 6ce435ceceb556451aab98975aebea495f750ac4 in a detached worktree, same venv and lock as branch
+baseline:   origin/main @ afb878c67694980d13448ea3730eb90e2817aa37 in a detached worktree, same venv and lock as branch
             decoy_engine imported from: /tmp/gates.OOfzFO/baseline-tree/src/decoy_engine/__init__.py
 logs:       /tmp/gates.OOfzFO
 -- branch --

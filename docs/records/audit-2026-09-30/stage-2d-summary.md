@@ -7,9 +7,9 @@ R068, in the same dedicated environment (`docs/records/audit-2026-09-30/environm
 engine editable from this worktree (commit `7cadcde08ea5876217de2490b06a7f9e1ced5a40`, no
 `src/` change since; companion present, ok, `decoy-native-abi-2`, SHA-256
 `1a3b2d18e4e092691e05f7ab0c8e1725f6aeb94bc19e46f9adaced472510b061`), platform installed
-from the detached worktree at `origin/main` `0701a95422e405cff76eb38c12cfb4f372b151d4`,
+from the detached worktree at `origin/main` `d7b8bbb42826cbd7b03ef85974c1c468289e13db`,
 CLI installed from a detached worktree at `origin/main`
-`b8274b0194748d5a60262b78b5969a8c85aeeac7`. New scripts under `scripts/audit/`:
+`5442b9029b134a7c3cb74948565eb68381c2ae90`. New scripts under `scripts/audit/`:
 `stage2d_faker_compiled.py`, `stage2d_native_dispatch.py`, `stage2d_fk_backend.py`,
 `stage2d_cli_per_node.py`, `stage2d_platform_per_node.py`, `stage2d_cloud_full_path.py`.
 One fresh subprocess per cell; VmHWM read from `/proc/self/status` where memory mattered.
@@ -261,8 +261,8 @@ one-time answer, and is left as recorded.
   header/revisions block that followed it (both trailing terminal-output artifacts after
   the real ranked-gap table's last row); converted all 34 en-dashes to ASCII hyphens (the
   file had zero em-dashes); rewrote the "swapped" preamble -- the value it labels "decoy
-  CLI" (`0701a95422e...`) is in fact this audit's real platform commit, but the value it
-  labels "decoy-platform@origin/main" (`e04b2a2f1c8...`) is not a platform commit at all:
+  CLI" (`d7b8bbb4282...`) is in fact this audit's real platform commit, but the value it
+  labels "decoy-platform@origin/main" (`d68200040d5...`) is not a platform commit at all:
   it resolves in the `decoy-engine` repo to the PR #178 merge commit. So it is not a clean
   two-way swap; the platform tree Codex actually read is unverified, not merely mislabeled.
 

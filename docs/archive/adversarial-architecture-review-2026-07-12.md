@@ -1,7 +1,7 @@
 # Decoy Engine Adversarial Architecture Review
 
 **Review date:** 2026-07-12
-**Frozen reviewed revision:** `c1c4f2c2b33af39e1de4874788a7df78a352970c` (`main`)
+**Frozen reviewed revision:** `430bc3d4fecfeaea3ece4f5e76a8413f41a7d3a1` (`main`)
 **Release phase:** `pre-ga`
 **Scope:** `decoy-engine` architecture, application behavior, cryptography, data integrity,
 performance methodology, packaging, public contracts, tests, and operations
