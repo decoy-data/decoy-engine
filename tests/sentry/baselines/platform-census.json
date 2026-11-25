@@ -11,8 +11,8 @@
    "max": 1
   },
   "decoy_engine/fileaccess/_fdtree.py": {
-   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
-   "max": 3
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink. F25 S2a-1c-ii-a0 adds one host read: Linux needs the mount table, macOS the device test, any other POSIX host refuses",
+   "max": 4
   },
   "decoy_engine/fileaccess/_local.py": {
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",

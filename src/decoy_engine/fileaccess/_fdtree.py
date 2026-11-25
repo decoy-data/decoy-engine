@@ -1,14 +1,14 @@
 """Descriptor primitives shared by publication stages, scratch arenas and their reclaim.
 
-A leaf module: standard library and `_osflags` only, so `_output.py`, `_local_chain.py`, `_scratch.py` and the
-reclaimer can all import it without a cycle, and `fcntl` is optional, so the package still
+A leaf module: standard library, `_osflags` and the `_mountinfo` foundation only, so
+`_output.py`, `_local_chain.py`, `_scratch.py` and the reclaimer can all import it without a cycle, and `fcntl` is optional, so the package still
 imports where it is missing.
 
 Patterns: the liveness lock `systemd-tmpfiles(8)` honours (an owner holds a shared BSD `flock` on
 its directory for its whole life; a cleaner needs an exclusive one); CPython's `_rmtree_safe_fd`
 and Rust's post-CVE-2022-21658 `remove_dir_all` (`openat(O_NOFOLLOW|O_DIRECTORY)` and `unlinkat`
 relative to a held descriptor, so no planted link is followed); and an interior marker that proves
-the creator, as the F25 arena does.
+the creator, as the F25 arena does. Tree removal also stops at a mount (see "Mount detection" below).
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ import errno
 import os
 import re
 import stat
+import sys
 from typing import Any
 
+from decoy_engine._mountinfo import parse_record, records
 from decoy_engine.fileaccess import _osflags
 
 try:
@@ -100,47 +102,184 @@ def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> s
     Valid means: opened without following a link, a regular file owned by the effective user with
     mode exactly 0600, and content exactly `magic`, a token matching `token_pattern`, and one
     newline. Any `OSError` is None; nothing is raised and nothing is changed. Always None on
-    win32, where no stage is marked."""
-    if not _osflags.WINDOWS:
-        try:
-            fd = os.open(
-                name,
-                _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC,
-                dir_fd=dir_fd,
-            )
-        except OSError:
+    win32, where no stage is marked and `_open_leaf` refuses."""
+    try:
+        fd = _open_leaf(name, dir_fd)
+    except OSError:
+        return None
+    try:
+        if not _exact_stat(os.fstat(fd), stat.S_IFREG, 0o600):
             return None
-        try:
-            if not _exact_stat(os.fstat(fd), stat.S_IFREG, 0o600):
-                return None
-            data = os.pread(fd, _MARKER_MAX, 0)
-        except OSError:
-            return None
-        finally:
-            _close(fd)
-        pattern = re.escape(magic) + b"(" + token_pattern.encode("ascii") + b")\n"
-        found = re.fullmatch(pattern, data)
-        return found.group(1).decode("ascii") if found else None
-    return None
+        data = os.pread(fd, _MARKER_MAX, 0)
+    except OSError:
+        return None
+    finally:
+        _close(fd)
+    pattern = re.escape(magic) + b"(" + token_pattern.encode("ascii") + b")\n"
+    found = re.fullmatch(pattern, data)
+    return found.group(1).decode("ascii") if found else None
 
 
-def _rmtree_fd(dir_fd: int) -> None:
-    """Remove everything beneath `dir_fd` without following any link (a no-op on win32)."""
+# Mount detection. Patterns: coreutils `rm --one-file-system` and gnulib `fts` (`FTS_XDEV`) skip any
+# entry whose `st_dev` differs from its parent's; CPython's `shutil.rmtree` does no mount test and
+# relies on `rmdir` failing `EBUSY` on the mount point, which comes only after the contents are
+# gone. A bind mount from the same filesystem keeps `st_dev`, so the device test alone misses it.
+# On Linux `/proc/self/mountinfo` is read once per removal and the `(st_dev, st_ino)` of every
+# mount point under the held directory is kept; a directory whose identity is in that set is a
+# mount root whatever its device. The table is required there: when it cannot be read, parsed,
+# or matched to the held directory, or a listed mount point cannot be stat'ed, the removal fails
+# with `EBUSY` before anything is touched (fail closed). macOS has no same-device bind mount
+# (a firmlink or FUSE mount reports its own device), so the device test is the whole check
+# there. Any other POSIX host has no known table and fails closed. A mount made after the table
+# is read is not seen; that needs privilege and is outside the V1 threat model of accidental
+# leaks.
+_HOST = sys.platform
+_LINUX = _HOST.startswith("linux")
+_DEVICE_ONLY = _HOST == "darwin"
+_MOUNTINFO = "/proc/self/mountinfo"
+_PROC_FD = "/proc/self/fd/"
+_MOUNTINFO_MAX = 4 * 1024 * 1024  # a mount table is a few KiB; this bounds a hostile one
+
+
+def _undiscoverable() -> OSError:
+    return OSError(errno.EBUSY, os.strerror(errno.EBUSY))
+
+
+def _open_leaf(name: str, dir_fd: int | None = None) -> int:
+    """Open a regular file read-only without following a final link: a marker under a held
+    directory, or the fixed kernel path of the mount table. The one such opener of this leaf.
+    `ENOSYS` on win32, which has neither."""
     if not _osflags.WINDOWS:
-        for entry in list(os.scandir(dir_fd)):
-            if entry.is_dir(follow_symlinks=False):
+        return os.open(
+            name,
+            _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC,
+            dir_fd=dir_fd,
+        )
+    raise OSError(errno.ENOSYS, os.strerror(errno.ENOSYS))
+
+
+def _read_mount_table() -> str:
+    """The whole mount table; `EBUSY` when it is larger than `_MOUNTINFO_MAX`."""
+    fd = _open_leaf(_MOUNTINFO)
+    try:
+        chunks: list[bytes] = []
+        size = 0
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > _MOUNTINFO_MAX:
+                raise _undiscoverable()
+    finally:
+        _close(fd)
+    return os.fsdecode(b"".join(chunks))
+
+
+def _path_identity(path: str) -> tuple[int, int]:
+    """`(st_dev, st_ino)` of a kernel-reported absolute path."""
+    found = os.stat(path)
+    return found.st_dev, found.st_ino
+
+
+def _mount_roots(dir_fd: int) -> frozenset[tuple[int, int]]:
+    """`(st_dev, st_ino)` of each mount root at or under the directory held by `dir_fd`.
+
+    Empty on macOS, where the device test is enough. Elsewhere any failure to discover the
+    mounts raises `OSError` (`EBUSY` for a malformed or oversized table, a path that is not the
+    held directory, or a host without a table), so the caller keeps the tree."""
+    if _DEVICE_ONLY:
+        return frozenset()
+    if not _LINUX:
+        raise _undiscoverable()
+    held = os.fstat(dir_fd)
+    base = os.readlink(f"{_PROC_FD}{dir_fd}")
+    # The link text must name the held directory itself: a deleted or unreachable directory
+    # (" (deleted)", a path outside this root) gives no prefix to match mounts against.
+    if not base.startswith("/") or _path_identity(base) != (held.st_dev, held.st_ino):
+        raise _undiscoverable()
+    prefix = base.rstrip("/") + "/"
+    found: set[tuple[int, int]] = set()
+    for line in records(_read_mount_table()):
+        record = parse_record(line)
+        if record is None:
+            raise _undiscoverable()
+        if record.mountpoint == base or record.mountpoint.startswith(prefix):
+            found.add(_path_identity(record.mountpoint))
+    return frozenset(found)
+
+
+_MAX_TREE_DEPTH = 128  # open descriptors one removal may hold at once: a deeper tree is retained
+
+
+def _mount_guard(fd: int, parent_dev: int, mounts: frozenset[tuple[int, int]]) -> os.stat_result:
+    """`fstat` of a directory about to be cleared; `EBUSY` when it is a mount boundary.
+
+    A mount boundary is a device other than its parent's (`rm --one-file-system`) or an identity
+    in the mount table (a same-device bind mount). Nothing under it has been touched yet."""
+    found = os.fstat(fd)
+    if found.st_dev != parent_dev or (found.st_dev, found.st_ino) in mounts:
+        raise OSError(errno.EBUSY, os.strerror(errno.EBUSY))
+    return found
+
+
+def _listing(fd: int, proof: str | None) -> list[tuple[str, bool]]:
+    """`(name, is a real directory)` of each entry, in the order the walk pops them (from the
+    end). The entry named `proof` is put first, so it is removed after everything else."""
+    with os.scandir(fd) as listing:
+        found = [(e.name, e.is_dir(follow_symlinks=False)) for e in listing]
+    if proof is not None:
+        found.sort(key=lambda entry: entry[0] != proof)
+    return found
+
+
+def _rmtree_fd(dir_fd: int, parent_fd: int, proof: str | None) -> None:
+    """Remove everything beneath `dir_fd` without following any link or crossing a mount.
+
+    One iterative walk holds an explicit stack of descriptors, at most `_MAX_TREE_DEPTH`, so no
+    tree depth reaches the interpreter's recursion limit. Every directory, `dir_fd` itself
+    included, is tested by `_mount_guard` after it is opened and before anything under it is
+    listed, so no entry beneath a mount is removed. `parent_fd` is the held parent of `dir_fd`,
+    whose device the root is compared with. `proof` names the marker at the root that proves who
+    made the tree (a stage or an arena marker; None for a plain subtree); it goes last, so a removal stopped part way
+    leaves the proof a later reclaim needs. A limit, a mount or mounts that cannot be
+    discovered raise `OSError` (`EMFILE`, `EBUSY`) for the caller to report as retained. A
+    no-op on win32."""
+    if not _osflags.WINDOWS:
+        mounts = _mount_roots(dir_fd)
+        root_dev = _mount_guard(dir_fd, os.fstat(parent_fd).st_dev, mounts).st_dev
+        # One frame per held directory: its descriptor, the name to remove from the parent, its
+        # device and its still-unremoved entries (None until listed).
+        frames: list[list[Any]] = [[dir_fd, "", root_dev, None]]
+        try:
+            while frames:
+                top = frames[-1]
+                if top[3] is None:
+                    top[3] = _listing(top[0], proof if len(frames) == 1 else None)
+                if not top[3]:
+                    frames.pop()
+                    if frames:  # a descended directory: its contents are gone, so remove it
+                        _close(top[0])
+                        os.rmdir(top[1], dir_fd=frames[-1][0])
+                    continue
+                name, is_dir = top[3].pop()
+                if not is_dir:
+                    os.unlink(name, dir_fd=top[0])
+                    continue
+                if len(frames) >= _MAX_TREE_DEPTH:
+                    raise OSError(errno.EMFILE, os.strerror(errno.EMFILE))
                 child = os.open(
-                    entry.name,
+                    name,
                     _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
-                    dir_fd=dir_fd,
+                    dir_fd=top[0],
                 )
                 try:
-                    _rmtree_fd(child)
-                finally:
+                    child_dev = _mount_guard(child, top[2], mounts).st_dev
+                except BaseException:
                     _close(child)
-                os.rmdir(entry.name, dir_fd=dir_fd)
-            else:
-                os.unlink(entry.name, dir_fd=dir_fd)
+                    raise
+                frames.append([child, name, child_dev, None])
+        finally:
+            for held in frames[1:]:  # the root descriptor is the caller's
+                _close(held[0])
 
 
 def _try_exclusive(fd: int) -> str | None:

@@ -259,7 +259,7 @@ def _mark_publication_stage(parent_fd: int, name: str, stage_fd: int) -> None:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
     except BaseException:
         with contextlib.suppress(OSError):
-            _rmtree_fd(stage_fd)
+            _rmtree_fd(stage_fd, parent_fd, _fdtree.STAGE_MARKER)
             os.rmdir(name, dir_fd=parent_fd)
         raise
 
@@ -291,7 +291,7 @@ def _discard(state: _State) -> None:
         if state.kind == "dir":
             if state.stage_fd >= 0:
                 with contextlib.suppress(OSError):
-                    _rmtree_fd(state.stage_fd)
+                    _rmtree_fd(state.stage_fd, state.parent_fd, _fdtree.STAGE_MARKER)
             with contextlib.suppress(OSError):
                 os.rmdir(state.stage_name, dir_fd=state.parent_fd)
             _close(state.stage_fd)  # after the rmdir: the liveness lock outlives the name

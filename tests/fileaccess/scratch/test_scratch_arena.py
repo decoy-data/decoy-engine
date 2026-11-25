@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import gc
+import inspect
 import os
 import signal
 import stat
@@ -187,10 +188,6 @@ def test_refuses_unsafe_root(temp_root: Path, monkeypatch: pytest.MonkeyPatch, c
     assert sorted((p.name, os.lstat(p).st_mode) for p in temp_root.iterdir()) == before
 
 
-def _open_fds() -> int:
-    return len(os.listdir("/dev/fd"))
-
-
 @pytest.mark.parametrize("cell", ["symlinked_under", "base_open_fails", "check_fails"])
 def test_open_leaves_nothing_behind(
     temp_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cell: str
@@ -233,6 +230,103 @@ def test_a_child_keeps_its_opener_alive(temp_root: Path) -> None:
     del child
     gc.collect()
     assert [p for p in temp_root.iterdir() if p.name.startswith("decoy-arena-")] == []
+
+
+def _open_fds() -> int:
+    return (
+        len(os.listdir("/proc/self/fd"))
+        if os.path.isdir("/proc/self/fd")
+        else len(os.listdir("/dev/fd"))
+    )
+
+
+def _plant_tree(arena: ScratchArena, name: str) -> ScratchArena:
+    child = arena.create_dir(name)
+    os.close(child.create_file("top"))
+    sub = child.create_dir("sub")
+    os.close(sub.create_file("leaf"))
+    sub.create_dir("empty")
+    return child
+
+
+@pytest.fixture
+def unremovable(temp_root: Path) -> Iterator[Callable[[ScratchArena], None]]:
+    """Make a planted child impossible to clear: a read-only subdirectory holding a file."""
+    locked: list[str] = []
+
+    def lock(arena: ScratchArena) -> None:
+        path = os.path.join(arena.local_path(), "t", "sub")
+        os.chmod(path, 0o500)
+        locked.append(path)
+
+    yield lock
+    for path in locked:
+        if os.path.isdir(path):
+            os.chmod(path, 0o700)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "nested",
+        "symlinked_child",
+        "file_child",
+        "marker_refused",
+        "bad_component",
+        "unremovable",
+        "fd_closed",
+    ],
+)
+def test_remove_tree(
+    case: str, tmp_path: Path, unremovable: Callable[[ScratchArena], None]
+) -> None:
+    with ScratchArena.fresh() as arena:
+        root = Path(arena.local_path())
+        if case == "nested":
+            _plant_tree(arena, "t")
+            report = arena.remove_tree("t")
+            assert report.disposition is Disposition.REMOVED
+            assert not (root / "t").exists()
+        elif case == "symlinked_child":
+            target = tmp_path / "target"
+            target.mkdir()
+            (target / "keep").write_text("x")
+            os.symlink(target, root / "t")
+            report = arena.remove_tree("t")
+            assert report.disposition is Disposition.REMOVED
+            assert not os.path.lexists(root / "t")
+            assert (target / "keep").read_text() == "x"
+        elif case == "file_child":
+            os.close(arena.create_file("t"))
+            assert arena.remove_tree("t").disposition is Disposition.REMOVED
+            assert not os.path.lexists(root / "t")
+        elif case == "marker_refused":
+            _plant_tree(arena, "t")
+            with pytest.raises(FileAccessDenied):
+                arena.remove_tree(".decoy-arena")
+            assert (root / ".decoy-arena").is_file() and (root / "t" / "top").is_file()
+        elif case == "bad_component":
+            _plant_tree(arena, "t")
+            for bad in ("t/sub", "..", ""):
+                with pytest.raises(FileAccessDenied):
+                    arena.remove_tree(bad)
+            assert (root / "t" / "sub" / "leaf").is_file()
+        elif case == "unremovable":
+            _plant_tree(arena, "t")
+            unremovable(arena)
+            report = arena.remove_tree("t")
+            assert report.disposition is Disposition.RETAINED
+            assert report.retained_bytes is None and report.retained_inodes is None
+        else:
+            kept = [_plant_tree(arena, "ok"), _plant_tree(arena, "t")]
+            gc.collect()
+            held = _open_fds()  # `kept` pins the arena's descriptors, so only a leak can move it
+            assert arena.remove_tree("ok").disposition is Disposition.REMOVED
+            assert _open_fds() == held
+            unremovable(arena)
+            assert arena.remove_tree("t").disposition is Disposition.RETAINED
+            assert _open_fds() == held
+            assert len(kept) == 2
 
 
 def test_remove_takes_a_file_or_an_empty_directory() -> None:
@@ -476,3 +570,105 @@ def test_reader_holds_its_own_descriptor() -> None:
         assert LazySource(Path("k.parquet"), access=reader).to_table() == table
     with pytest.raises(FileAccessDenied):  # reclaimed: the file is gone beneath the descriptor
         LazySource(Path("k.parquet"), access=reader).to_table()
+
+
+def _identity(path: Path) -> tuple[int, int]:
+    found = os.stat(path)
+    return found.st_dev, found.st_ino
+
+
+@pytest.mark.parametrize("level", ["named_child", "descendant"])
+def test_remove_tree_stops_at_a_mount_root(
+    level: str, monkeypatch: pytest.MonkeyPatch, temp_root: Path
+) -> None:
+    """A mount root, named or nested, is refused before anything beneath it is removed."""
+    with ScratchArena.fresh() as arena:
+        _plant_tree(arena, "t")
+        root = Path(arena.local_path())
+        mount = root / "t" if level == "named_child" else root / "t" / "sub"
+        monkeypatch.setattr(
+            fileaccess._fdtree, "_mount_roots", lambda fd: frozenset({_identity(mount)})
+        )
+        report = arena.remove_tree("t")
+        assert report.disposition is Disposition.RETAINED
+        assert (mount / ("top" if level == "named_child" else "leaf")).is_file()
+
+
+@pytest.mark.parametrize("level", ["named_child", "descendant"])
+def test_remove_tree_stops_at_a_device_change(
+    level: str, monkeypatch: pytest.MonkeyPatch, temp_root: Path
+) -> None:
+    """A directory on another device than its parent is a mount even with no mount table."""
+    with ScratchArena.fresh() as arena:
+        _plant_tree(arena, "t")
+        root = Path(arena.local_path())
+        target = root / "t" if level == "named_child" else root / "t" / "sub"
+        monkeypatch.setattr(fileaccess._fdtree, "_mount_roots", lambda fd: frozenset())
+        ino = os.stat(target).st_ino
+        real_fstat = os.fstat
+
+        def moved(fd: int) -> os.stat_result:
+            found = real_fstat(fd)
+            if found.st_ino != ino:
+                return found
+            fields = list(found)
+            fields[2] += 1  # st_dev
+            return os.stat_result(fields)
+
+        monkeypatch.setattr(os, "fstat", moved)
+        assert arena.remove_tree("t").disposition is Disposition.RETAINED
+        assert (target / ("top" if level == "named_child" else "leaf")).is_file()
+
+
+def test_remove_tree_reads_a_real_mount_table(temp_root: Path) -> None:
+    """On Linux the table is read and a tree that is no mount is removed."""
+    with ScratchArena.fresh() as arena:
+        _plant_tree(arena, "t")
+        assert arena.remove_tree("t").disposition is Disposition.REMOVED
+
+
+def _chain(arena: ScratchArena, depth: int) -> None:
+    """A directory chain `depth` deep, built by descriptor so no path length limit applies."""
+    held = os.open(arena.local_path(), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for level in range(depth):
+            name = "d" if level else "t"
+            os.mkdir(name, 0o700, dir_fd=held)
+            nxt = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=held)
+            os.close(held)
+            held = nxt
+        os.close(os.open("leaf", os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=held))
+    finally:
+        os.close(held)
+
+
+def test_remove_tree_walk_does_not_recurse(
+    temp_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tree far deeper than the interpreter recursion limit is removed without `RecursionError`."""
+    depth = 100
+    monkeypatch.setattr(fileaccess._fdtree, "_MAX_TREE_DEPTH", depth + 5)
+    with ScratchArena.fresh() as arena:
+        _chain(arena, depth)
+        held = _open_fds()
+        limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(len(inspect.stack()) + 40)
+        try:
+            report = arena.remove_tree("t")
+        finally:
+            sys.setrecursionlimit(limit)
+        assert report.disposition is Disposition.REMOVED
+        assert not os.path.lexists(os.path.join(arena.local_path(), "t"))
+        assert _open_fds() == held
+
+
+def test_remove_tree_retains_a_tree_over_the_descriptor_budget(
+    temp_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fileaccess._fdtree, "_MAX_TREE_DEPTH", 8)
+    with ScratchArena.fresh() as arena:
+        _chain(arena, 20)
+        held = _open_fds()
+        assert arena.remove_tree("t").disposition is Disposition.RETAINED
+        assert _open_fds() == held
+        assert os.path.isdir(os.path.join(arena.local_path(), "t"))

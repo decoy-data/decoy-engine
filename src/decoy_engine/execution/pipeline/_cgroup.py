@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from decoy_engine import reasons
+from decoy_engine._mountinfo import parse_record, records
 from decoy_engine.execution._errors import ExecutionError
 
 __all__ = [
@@ -47,38 +48,21 @@ class Mount:
     super_options: frozenset[str]
 
 
-def _unescape(field: str) -> str:
-    """mountinfo octal-escapes space, tab, newline and backslash as ``\\NNN``."""
-    out: list[str] = []
-    i = 0
-    while i < len(field):
-        if field[i] == "\\" and i + 3 < len(field) and field[i + 1 : i + 4].isdigit():
-            out.append(chr(int(field[i + 1 : i + 4], 8)))
-            i += 4
-        else:
-            out.append(field[i])
-            i += 1
-    return "".join(out)
-
-
 def parse_mountinfo(text: str) -> list[Mount]:
+    """Every well-formed record of a mountinfo table; a malformed record is skipped. Record
+    parsing is the shared `decoy_engine._mountinfo` parser."""
     mounts: list[Mount] = []
-    for line in text.splitlines():
-        if " - " not in line:
-            continue
-        left, _, right = line.partition(" - ")
-        left_fields = left.split()
-        right_fields = right.split()
-        if len(left_fields) < 6 or len(right_fields) < 3:
-            continue
-        mounts.append(
-            Mount(
-                root=PurePosixPath(_unescape(left_fields[3])),
-                mountpoint=PurePosixPath(_unescape(left_fields[4])),
-                fstype=right_fields[0],
-                super_options=frozenset(right_fields[2].split(",")),
+    for line in records(text):
+        record = parse_record(line)
+        if record is not None:
+            mounts.append(
+                Mount(
+                    root=PurePosixPath(record.root),
+                    mountpoint=PurePosixPath(record.mountpoint),
+                    fstype=record.fstype,
+                    super_options=record.super_options,
+                )
             )
-        )
     return mounts
 
 

@@ -216,8 +216,9 @@
     "decoy_engine/expressions/_safe_eval.py::safe_eval::update::0": {
       "reason": "dict.update on a plain dict"
     },
-    "decoy_engine/fileaccess/_fdtree.py::_prove_marker::open::0": {
-      "reason": "os.open on a local path, not a GCS Blob"
+    "decoy_engine/fileaccess/_fdtree.py::_open_leaf::open::0": {
+      "reason": "os.open on a local path, not a GCS Blob",
+      "moved_from": "decoy_engine/fileaccess/_fdtree.py::_prove_marker::open::0"
     },
     "decoy_engine/fileaccess/_fdtree.py::_rmtree_fd::open::0": {
       "reason": "os.open on a local path, not a GCS Blob",

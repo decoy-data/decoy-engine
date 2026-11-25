@@ -107,7 +107,7 @@ approved_growth = [
   { key = "decoy_engine/fileaccess/_reclaim.py::_judge::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
   { key = "decoy_engine/fileaccess/_reclaim.py::_open_scope::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
   { key = "decoy_engine/fileaccess/_reclaim.py::_push_dir::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
-  { key = "decoy_engine/fileaccess/_fdtree.py::_prove_marker::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
+  { key = "decoy_engine/fileaccess/_fdtree.py::_open_leaf::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
 ]
 
 [[sentry]]

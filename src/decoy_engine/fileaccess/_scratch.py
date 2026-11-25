@@ -90,6 +90,26 @@ def _rmdir(name: str, dir_fd: int) -> None:
     _call(os.rmdir, name, dir_fd=dir_fd)
 
 
+def _remove_tree_at(name: str, dir_fd: int) -> None:
+    """Clear a real directory by descriptor and `rmdir` it; unlink a link or file as a leaf.
+
+    One no-follow directory open replaces a stat then open, so nothing can be swapped in between."""
+    try:
+        child = _open(name, dir_fd)
+    except OSError as exc:
+        if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+            raise
+        _unlink(name, dir_fd)  # a link or a file: the target of a link is never touched
+        return
+    # V2-LOG: a same-user rename of the held child after open moves the directory, and the final
+    # `rmdir` acts on whatever now has the name (the L6 same-user interference limit).
+    try:
+        _rmtree_fd(child, dir_fd, None)  # the same mount-aware walk as every descendant
+    finally:
+        _close(child)
+    _rmdir(name, dir_fd)
+
+
 def _quietly(fn: Callable[..., object], *args: object) -> None:
     with suppress(OSError):
         fn(*args)
@@ -128,7 +148,7 @@ def _reclaim(root: _Root) -> CleanupReport:
         _unregister(root.path)
         failed = False
         try:
-            _rmtree_fd(root.fd.fd)
+            _rmtree_fd(root.fd.fd, root.base_fd.fd, _MARKER)
             _release(root, keep_base=True)  # closing the root fd releases the shared lock
             _rmdir(root.name, root.base_fd.fd)
         except OSError:
@@ -227,7 +247,7 @@ class ScratchArena(StageWalk, StageClaim):
             final = _mark_and_publish(fd, base_fd, pending)
         except BaseException:
             if ours:
-                _quietly(_rmtree_fd, fd)
+                _quietly(_rmtree_fd, fd, base_fd, _MARKER)
                 _quietly(_rmdir, pending, base_fd)
             if fd >= 0:
                 _close(fd)
@@ -321,6 +341,20 @@ class ScratchArena(StageWalk, StageClaim):
         if not directory:
             raise failed
         _rmdir(component, self._fd.fd)
+
+    def remove_tree(self, component: str) -> CleanupReport:
+        """Remove a child and everything under it; never raises `OSError`, never follows a link.
+
+        A link or file at the name is unlinked as a leaf. A directory is cleared by descriptor and
+        then removed. Any `OSError` leaves what remains and reports RETAINED, with no sizes."""
+        self._check(component, writes=True)
+        try:
+            _remove_tree_at(component, self._fd.fd)
+        except OSError:
+            return CleanupReport(
+                disposition=Disposition.RETAINED, retained_bytes=None, retained_inodes=None
+            )
+        return CleanupReport(disposition=Disposition.REMOVED)
 
     def rename(self, src: str, dst: str) -> None:
         self._check(src, dst, writes=True)
