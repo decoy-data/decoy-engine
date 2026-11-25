@@ -151,12 +151,11 @@ READER_MATRIX: dict[str, Callable[[Env, int], ProfileSource]] = {
 }
 READERS = sorted(READER_MATRIX)
 
-# The readers that hold Arrow and hand the bounded profile a `pa.Table` (`sample_table`).
+# The Parquet readers that hand the bounded profile a `pa.Table` (`sample_table`).
 SAMPLE_TABLE_MATRIX: dict[str, Callable[[Env, int], ProfileSource]] = {
     name: READER_MATRIX[name]
     for name in (
         "decoy_engine.profile._readers.ParquetFileSource",
-        "decoy_engine.profile._readers_resident.ResidentTableSource",
         f"{_CLOUD}.S3ParquetSource",
         f"{_CLOUD}.GcsParquetSource",
     )

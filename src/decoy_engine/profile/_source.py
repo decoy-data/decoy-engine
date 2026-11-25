@@ -35,6 +35,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine import fileaccess, reason_adapter
+from decoy_engine._field_names import DuplicateFieldNamesError
 from decoy_engine._lexeme import profile_descriptors
 from decoy_engine.contracts.column_shape import source_format_for
 from decoy_engine.fileaccess import FileAccess, entry_point
@@ -54,9 +56,11 @@ from decoy_engine.profile._readers import (
 from decoy_engine.profile._readers_resident import ResidentTableSource
 from decoy_engine.profile._types import Profile, Relationship, TableProfile
 from decoy_engine.profile._walk import walk_dataframe
-from decoy_engine.profile.arrow import ArrowSampleSource, walk_arrow_table
+from decoy_engine.profile.arrow import ArrowSampleSource, recover_temporal_profile
+from decoy_engine.safe_output import safe_error_type
 
 if TYPE_CHECKING:
+    import pandas as pd
     import pyarrow as pa
 
 
@@ -206,7 +210,24 @@ def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
 
     Only Parquet and resident tables can; reading a CSV or fixed-width schema infers types
     from the file, which the bounded profile avoids."""
-    return reader.schema() if isinstance(reader, ArrowSampleSource) else None
+    from decoy_engine.profile._cloud_readers import GcsParquetSource, S3ParquetSource
+
+    if isinstance(
+        reader, (ResidentTableSource, ParquetFileSource, S3ParquetSource, GcsParquetSource)
+    ):
+        return reader.schema()
+    return None
+
+
+def _passes_through(exc: Exception) -> bool:
+    """True when `exc` must reach the caller as it is: a file-access policy decision, a memory
+    failure, a duplicate-name refusal or an engine error family the reason adapter classifies.
+    Every other failure of a bounded profile is stripped to a closed label."""
+    return (
+        fileaccess.keeps_class(exc)
+        or fileaccess.is_memory_failure(exc)
+        or isinstance(exc, (DuplicateFieldNamesError, *reason_adapter.loaded_families()))
+    )
 
 
 def _profile_one_source(
@@ -229,6 +250,11 @@ def _profile_one_source(
     total (exact for Parquet/fixed_width, estimated for CSV), while
     null/distinct come from the bounded sample and the columns are flagged
     `sampled`.
+
+    A bounded profile of a Parquet or resident source fails with
+    `bounded source profile failed (<label>)`: the producer's exception text can quote a cell,
+    so only its closed label (`safe_error_type`) is reported. A file-access decision, a memory
+    failure and a coded engine failure keep their own type.
     """
     if residency == "full":
         df = reader.to_frame()
@@ -260,50 +286,106 @@ def _profile_one_source(
     else:
         effective_sample_rows = sample_rows
 
+    # The producer's exception text can quote a cell, so a Parquet or resident source fails with
+    # its closed label only; other readers keep their own errors.
+    boundary = isinstance(reader, (ResidentTableSource, ArrowSampleSource))
+    result: TableProfile | str = ""
+    try:
+        result = _profile_bounded(
+            reader,
+            table_name=table_name,
+            declared_pk_cols=declared_pk_cols,
+            fk_specs=fk_specs,
+            sample_rows=effective_sample_rows,
+            rng=rng,
+            source_format=source_format,
+        )
+    except Exception as exc:
+        if not boundary or _passes_through(exc):
+            raise
+        result = safe_error_type(exc).value
+    # Raised after the handler ends, so the producer's exception is neither cause nor context.
+    if isinstance(result, str):
+        raise ValueError(f"bounded source profile failed ({result})")
+    return result
+
+
+def _profile_bounded(
+    reader: ProfileSource,
+    *,
+    table_name: str,
+    declared_pk_cols: frozenset[str],
+    fk_specs: dict[str, tuple[str, str]],
+    sample_rows: int,
+    rng: random.Random,
+    source_format: str | None,
+) -> TableProfile | str:
+    """The bounded profile: the true row count, one `<= sample_rows` sample, the pandas walk.
+
+    A Parquet reader hands over the sample as a table and it is converted here, so a failed
+    conversion can try `recover_temporal_profile` on the same table. The return is the profile,
+    or, when neither the whole conversion nor the recovery gave one, the closed label of the
+    whole-conversion failure (the caller raises it once no handler is active)."""
     row_count = reader.row_count()
-    # The profiled sample is read with exactly the cap, so no later row can change a
+    # The profiled frame is parsed from exactly the cap, so no later row can change a
     # column's inferred type. An estimated row count (CSV) can undershoot the sample, so
-    # when the cap is filled a second read asks for one row more. That read is only
+    # when the cap is filled a second read asks for one row more. That frame is only
     # counted, never profiled. An exact count already says the source is larger.
-    arrow_reader = reader if isinstance(reader, ArrowSampleSource) else None
-    read_sample = arrow_reader.sample_table if arrow_reader else reader.sample_frame
-    sample = read_sample(effective_sample_rows)
-    proven_total = len(sample)
+    table = reader.sample_table(sample_rows) if isinstance(reader, ArrowSampleSource) else None
+    sample_df: pd.DataFrame | None = None
+    failure = ""
+    if table is None:
+        sample_df = reader.sample_frame(sample_rows)
+    else:
+        try:
+            sample_df = table.to_pandas()
+        except (ValueError, OverflowError) as exc:
+            failure = safe_error_type(exc).value
+    proven_total = len(table) if table is not None else len(sample_df)  # type: ignore[arg-type]
     if (
         not row_count.exact
-        and proven_total == effective_sample_rows
-        and has_row_beyond(read_sample, effective_sample_rows)
+        and proven_total == sample_rows
+        and has_row_beyond(reader.sample_frame, sample_rows)
     ):
-        proven_total = effective_sample_rows + 1
+        proven_total = sample_rows + 1
     # Clamp the reported total to at least the rows actually sampled so a
     # coarse CSV estimate can never fall below the sample and break the
     # ColumnProfile `distinct_count <= row_count` invariant. Exact counts
     # (Parquet/fixed_width) already dominate the sample, so this is a no-op
     # for them.
     effective_total = max(row_count.value, proven_total)
-    if arrow_reader is not None:
-        # A reader that holds Arrow is never converted to pandas on this path.
-        table = walk_arrow_table(
-            sample,
+    shape_schema = _nested_capable_schema(reader)
+
+    def walk(frame: pd.DataFrame) -> TableProfile:
+        return walk_dataframe(
+            frame,
             table_name=table_name,
             declared_pk_cols=declared_pk_cols,
             fk_specs=fk_specs,
-            total_row_count=effective_total,
-            source_format=source_format,
-        )
-    else:
-        table = walk_dataframe(
-            sample,
-            table_name=table_name,
-            declared_pk_cols=declared_pk_cols,
-            fk_specs=fk_specs,
-            sample_rows=effective_sample_rows,
+            sample_rows=sample_rows,
             rng=rng,
             total_row_count=effective_total,
-            arrow_schema=None,
+            arrow_schema=shape_schema,
             source_format=source_format,
         )
-    return replace(table, row_count_exact=row_count.exact)
+
+    if sample_df is not None:
+        profile = walk(sample_df)
+    else:
+        # The whole-sample conversion failed; only the one flat-temporal case recovers.
+        recovered = recover_temporal_profile(
+            table,
+            table_name=table_name,
+            total_row_count=effective_total,
+            declared_pk_cols=declared_pk_cols,
+            fk_specs=fk_specs,
+            source_format=source_format,
+            walk_frame=walk,
+        )
+        if recovered is None:
+            return failure
+        profile = recovered
+    return replace(profile, row_count_exact=row_count.exact)
 
 
 # ---------------------------------------------------------------------

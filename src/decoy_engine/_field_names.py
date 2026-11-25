@@ -11,6 +11,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 
+class DuplicateFieldNamesError(ValueError):
+    """A profiled source repeats a field name. Its text is `duplicate_names_message`; the type
+    is how a boundary that strips other failures to a label tells this one apart by identity,
+    not by its words."""
+
+
 def repeated_names(names: Iterable[str]) -> frozenset[str]:
     """The names that appear more than once, empty when every name is unique."""
     seen: set[str] = set()

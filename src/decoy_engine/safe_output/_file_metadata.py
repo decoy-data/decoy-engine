@@ -27,13 +27,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine._canonical import StrictJsonError, strict_json_loads
-from decoy_engine._pandas_meta import (
-    COLUMN_INDEX_ENTRY,
-    column_entries,
-    column_metadata,
-    decode_pandas_blob,
-    pairs_for,
-)
+from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY, column_metadata, pairs_for
 
 __all__ = [
     "HANDLED_PREDICATES",
@@ -175,8 +169,10 @@ def _pandas_version() -> str | None:
 def _source_entries(columns: object) -> dict[str, dict[str, Any]]:
     """The source `columns` entry per field name, first one wins."""
     out: dict[str, dict[str, Any]] = {}
-    for field, entry in column_entries(columns):
-        out.setdefault(field, entry)
+    if isinstance(columns, list):
+        for entry in columns:
+            if isinstance(entry, dict) and isinstance(entry.get("field_name"), str):
+                out.setdefault(entry["field_name"], entry)
     return out
 
 
@@ -204,9 +200,12 @@ def _column_index_entry() -> dict[str, Any]:
 
 
 def _sanitize_pandas_blob(raw: bytes, for_schema: pa.Schema) -> bytes | None:
-    source = decode_pandas_blob(raw)
+    try:
+        source = strict_json_loads(raw, max_int_digits=None)
+    except (StrictJsonError, RecursionError):
+        return None
     version = _pandas_version()
-    if source is None or version is None:
+    if not isinstance(source, dict) or version is None:
         return None
     names = set(for_schema.names)
     stored = source.get("index_columns")

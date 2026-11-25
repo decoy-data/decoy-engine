@@ -52,7 +52,7 @@ from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
 from decoy_engine.profile.arrow._arrow_sample import head_table_from_batches
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sequence, Sized
+    from collections.abc import Callable, Iterator, Sequence
 
 # Fallback bounded sample size when a caller asks for a full scan
 # (sample_rows=None) under residency="bounded" -- see profile_source. A full
@@ -465,7 +465,7 @@ class FixedWidthFileSource(_PolicyBound):
 PROOF_READ_ERRORS: tuple[type[Exception], ...] = (pd.errors.ParserError, UnicodeDecodeError)
 
 
-def has_row_beyond(read_sample: Callable[[int], Sized], n: int) -> bool:
+def has_row_beyond(read_sample: Callable[[int], pd.DataFrame], n: int) -> bool:
     """Whether the source holds a row after the first `n`.
 
     The one end-of-source proof read. It answers that question only: its frame is counted
@@ -476,14 +476,6 @@ def has_row_beyond(read_sample: Callable[[int], Sized], n: int) -> bool:
         return len(read_sample(n + 1)) > n
     except PROOF_READ_ERRORS:
         return True
-
-
-def head_frame_from_batches(
-    batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema
-) -> pd.DataFrame:
-    """`head_table_from_batches` as a DataFrame; an empty source gives an empty frame that
-    carries the schema's columns."""
-    return head_table_from_batches(batches, sample_rows, schema).to_pandas()
 
 
 # ---------------------------------------------------------------------
@@ -574,5 +566,4 @@ __all__ = [
     "estimate_csv_rows",
     "footer_facts_of",
     "has_row_beyond",
-    "head_frame_from_batches",
 ]

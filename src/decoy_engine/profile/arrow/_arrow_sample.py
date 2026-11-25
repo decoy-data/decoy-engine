@@ -1,7 +1,9 @@
-"""The bounded Arrow sample: the head of a reader's batches as a table, and the reader contract.
+"""The bounded Arrow sample: the head of a Parquet reader's batches as a table, and the reader
+contract.
 
-A reader that already holds Arrow hands the profile a `pa.Table`; the profile walks it with
-`pyarrow.compute` and never converts it to pandas.
+A Parquet reader hands the bounded profile the `pa.Table` it converts to pandas. The profile
+converts it exactly as the reader's `sample_frame` does; only when that fails on a flat
+temporal schema does it read the table column by column (`profile.arrow._recovery`).
 """
 
 from __future__ import annotations
@@ -18,8 +20,9 @@ def head_table_from_batches(
     """Collect batches until `sample_rows` rows are gathered, as a table with `schema`.
 
     Stops reading as soon as the row target is met, so an arbitrarily large source yields
-    only `<= sample_rows` decoded rows. An empty source returns an empty table that carries
-    the schema, metadata included, so the walk still emits one profile per column."""
+    only `<= sample_rows` decoded rows. The table's schema is inferred from the batches, so a
+    batch's own metadata decides the conversion; only an empty source returns an empty table
+    that carries `schema`, so the walk still emits one profile per column."""
     collected: list[pa.RecordBatch] = []
     gathered = 0
     for batch in batches:
@@ -29,13 +32,14 @@ def head_table_from_batches(
             break
     if not collected:
         return schema.empty_table()
-    table = pa.Table.from_batches(collected, schema=schema)
+    table = pa.Table.from_batches(collected)
     return table.slice(0, sample_rows) if table.num_rows > sample_rows else table
 
 
 @runtime_checkable
 class ArrowSampleSource(Protocol):
-    """A profile reader that holds Arrow (local, S3 or GCS Parquet, a resident table)."""
+    """A profile reader over Parquet (local, S3 or GCS): its `sample_frame` is `sample_table`
+    converted to pandas."""
 
     def schema(self) -> pa.Schema: ...
 

@@ -31,7 +31,7 @@ import random
 import pandas as pd
 import pyarrow as pa
 
-from decoy_engine._field_names import duplicate_names_message
+from decoy_engine._field_names import DuplicateFieldNamesError, duplicate_names_message
 from decoy_engine.contracts.column_shape import ColumnShape, classify_column, is_nested_type
 from decoy_engine.internal.pandas_compat import canonical_dtype_label
 from decoy_engine.profile._pii import detect_pii_classes
@@ -109,7 +109,7 @@ def walk_dataframe(
     # producer-controlled, so it is counted, never named.
     message = duplicate_names_message(table_name, (str(c) for c in df.columns))
     if message is not None:
-        raise ValueError(message)
+        raise DuplicateFieldNamesError(message)
 
     # Resolve PII tags before walking columns (slice 3). Pre-scan runs once
     # on the full DataFrame, not per-column. When run_pii_detection is
