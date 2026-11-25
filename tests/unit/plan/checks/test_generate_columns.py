@@ -124,6 +124,34 @@ def test_known_locale_accepted(locale: Any) -> None:
     assert_accepted(cfg([faker(locale=locale)]))
 
 
+def test_a_method_the_multi_locale_faker_cannot_serve_is_refused() -> None:
+    """`del_arguments` exists on each single locale but the proxy over a list refuses it."""
+    assert_accepted(cfg([faker(faker_type="del_arguments", locale="de_AT")]))
+    assert_refused(
+        cfg([faker(faker_type="del_arguments", locale=["de_AT", "it_IT"])]),
+        "generate_faker_type_unknown",
+        p("f", "faker_type"),
+    )
+
+
+def test_a_list_provider_generates_under_a_locale_list_and_replays() -> None:
+    from decoy_engine.generation import synthesize
+    from decoy_engine.internal.faker_setup import _register_list_provider
+
+    _register_list_provider("gen_list_probe", ["a", "b", "c"])
+    try:
+        config = cfg([faker(faker_type="gen_list_probe", locale=["de_AT", "it_IT"])], n=1)
+
+        def rows() -> list[Any]:
+            return synthesize._generate_tables_from_config(config)["t"].column("f").to_pylist()
+
+        first = rows()
+        assert first and set(first) <= {"a", "b", "c"}
+        assert rows() == first
+    finally:
+        unregister_faker_provider("gen_list_probe")
+
+
 def test_locale_is_checked_before_the_provider_list() -> None:
     col = faker(locale="xx_YY", faker_type="not_a_provider")
     assert_refused(cfg([col]), "generate_locale_unknown", p("f", "locale"))

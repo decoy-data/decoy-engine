@@ -201,6 +201,14 @@ def _builtin(entry: str | None) -> tuple[Any, frozenset[str]]:
     return fake, frozenset(get_faker_providers(fake, provider_snapshot={}))
 
 
+@lru_cache(maxsize=64)
+def _proxy_names(entries: tuple[str, ...]) -> frozenset[str]:
+    """Provider names the multi-locale Faker serves, which omits single-factory helpers."""
+    from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+
+    return frozenset(get_faker_providers(make_faker(list(entries)), provider_snapshot={}))
+
+
 class _FakerView:
     """Provider and kwargs lookups for one check pass, against the effective locale only."""
 
@@ -210,8 +218,12 @@ class _FakerView:
     @staticmethod
     def _locale(locale: Any) -> tuple[Any, frozenset[str]]:
         # One Faker per entry: a multi-locale Faker proxies attribute reads and some raise.
-        built = [_builtin(entry) for entry in locale_entries(locale)]
-        return built[0][0], frozenset().union(*(names for _, names in built))
+        entries = locale_entries(locale)
+        first, names = _builtin(entries[0])
+        if len(entries) > 1:
+            # Generation draws through the multi-locale proxy, so only what it can serve counts.
+            names = _proxy_names(entries)
+        return first, names
 
     def check(
         self,

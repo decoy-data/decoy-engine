@@ -175,6 +175,25 @@ def test_a_one_row_job_in_a_heavy_default_locale_is_refused_before_faker_opens(
 
 
 @pytest.mark.serial
+def test_a_one_row_job_in_a_run_default_alias_is_charged_as_its_resolved_locale(
+    trace: _Trace,
+) -> None:
+    """`it` opens `it_IT` (59 MB real); charging the alias rate let it through 16 MiB."""
+    config = prepared_config(faker_config("prefix", 1))
+    trace.reset()
+    ledger = GenerationBudgetLedger(16 * _MIB)
+    with pytest.raises(GenerationBudgetExceeded):
+        _streamed.run_generation(
+            config,
+            sink=_DrainSink(),
+            ledger=ledger,
+            batch_rows=128,
+            instance_default_locale="it",
+        )
+    assert trace.opened == []
+
+
+@pytest.mark.serial
 def test_two_heavy_locales_are_refused_under_a_ceiling_their_cold_import_passes(
     trace: _Trace,
 ) -> None:

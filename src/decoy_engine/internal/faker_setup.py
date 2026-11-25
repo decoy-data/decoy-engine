@@ -329,7 +329,7 @@ def _register_list_provider(provider_name: str, values: list[str]) -> None:
     frozen = list(values)
 
     def _provider(fake: Faker) -> str:
-        return str(fake.random.choice(frozen))
+        return str(fake.factories[0].random.choice(frozen))  # fake.random raises on a locale list
 
     with _PROVIDER_LOCK:
         _CUSTOM_FAKER_PROVIDER_VALUES[provider_name] = list(frozen)
@@ -648,8 +648,8 @@ DEFAULT_GENERATE_LOCALE = "en_US"
 
 
 def requested_locale(column_locale: Any, default_locale: Any = None) -> Any:
-    """The locale a column asks for: its own, else the run default, else None."""
-    return column_locale or default_locale or None
+    """The locale a column asks for: its own, else the run default as given (never coerced to None)."""
+    return column_locale or default_locale
 
 
 def effective_locale(column_locale: Any, default_locale: Any = None) -> Any:
