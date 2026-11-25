@@ -22,6 +22,12 @@ next to them:
 | R2 | Arrow time zone, version pins, manifest values, DP versions, name-hint terms, statistical values | per-site rewording, 23 single-site canaries |
 | R3 | `!!int PRIVATEMARKER` reaches `str(exc)` as a `ValueError`; ambient directory in name-hint validation errors; list-valued pin `['PRIVATE_RELEASE']` and a credentialed corpus URL through `CodeSetConfig.from_dict`; joint-mask missing `reference` skips position binding; `_TYPE_KINDS` repeats `is_text`; loose test file; parser exception chained with `from exc` | none yet |
 
+Dennis R1 on this plan was GO-WITH-FIXES with no redesign. Every finding is in the plan:
+V1-1 (S5 scope), V1-2 (S1 on every construction, per-class table, one exemption), V1-3
+(`raise_refusal`), V1-4 (`read_config` pass-through), V1-5 (B1 value and name slots), V1-6
+(merge-base seed), D1 (facade imports), D2 (`!!int` has no position), D3 (AE5b tracking), D4
+(mutations N12 to N15), D5 (commit order) and the JSON position V2-LOG item.
+
 ## Defect class
 
 **Per-site message assembly in config loaders.** Each loader builds its own refusal text with
@@ -104,7 +110,12 @@ def read_config(
     position: ConfigPosition,
     raise_as: Callable[[Refusal], BaseException],
 ) -> T: ...
+def raise_refusal(exc: BaseException) -> NoReturn: ...
 ```
+
+Imports (Dennis D1): `_config_text` uses the package facades, `from decoy_engine.reasons import
+approve_name` and `from decoy_engine.fileaccess import position_key`, not the private modules.
+B5 checks that neither facade pulls pyarrow on the final head.
 
 Rules the builder applies at run time:
 
@@ -131,10 +142,30 @@ Rules the builder applies at run time:
 7. **Text.** `"<position>: <problem>[; expected <expected>][, got <kind>][. Allowed:
    <choices>][. <hint>]"`.
 
-`read_config` is the one read-and-parse wrapper. It calls `read()`, catches `Exception` (not only
-`yaml.YAMLError`, so a `ValueError` from a YAML scalar constructor is caught), and keeps only the
-YAML mark's line and column (the `yaml_error_text` rule). It raises `raise_as(refusal)` after the
-`except` block has closed, so `__cause__` and `__context__` are None.
+`raise_refusal(exc)` is the one way a zero-set module raises a refusal (Dennis V1-3). Python sets
+`__context__` at the `raise` statement to whatever exception is being handled, also one the
+caller is handling in an outer `except`, so clearing it before the raise is not enough. The
+helper raises `exc`, catches it at once, sets `__cause__` and `__context__` to None and
+`__suppress_context__` to True, and re-raises it with a bare `raise`, which does not chain
+again. This catch-and-re-raise is the one `except` with a raise that the sentry allows, and only
+inside `_config_text`. `read_config` uses it, and so does every raise in the nine modules. The
+copy of this logic in `transforms/joint_mask.py` (the `except PlanCompileError as fresh` block
+at `:147`) is deleted.
+
+`read_config` is the one read-and-parse wrapper:
+
+- It calls `read()` and catches `Exception`, not only `yaml.YAMLError`, so a `ValueError` from a
+  YAML scalar constructor is caught.
+- It does not catch, and lets pass unchanged (Dennis V1-4), `FileAccessDenied` and
+  `FileAccessUnavailable` (`fileaccess/_types.py:92`, `:135`) and `MemoryError`. These are
+  engine-owned results with value-free text that callers and the CLI already map to their own
+  exit codes. Catching them would turn a policy denial or a memory failure into "could not be
+  parsed".
+- From a caught exception it keeps only the YAML mark's line and column (the `yaml_error_text`
+  rule). An error with no mark, such as the `!!int` `ValueError`, gives the text with no line or
+  column (Dennis D2).
+- It builds `raise_as(refusal)` after the `except` block has closed and raises it through
+  `raise_refusal`.
 
 `yaml_error_text` moves into `_config_text` and `safe_output` re-exports it, so the line and
 column rule stays in one place.
@@ -145,29 +176,58 @@ column rule stays in one place.
 the F31 tagger (`RISKY_NAMES`, `risky_in`) and `tests/sentry/_ratchet.py`. The zero set is the
 nine AE5 modules, listed as a constant in the sentry.
 
-- **S1 message.** In a zero-set module, the message of every `raise` of a config refusal class
-  (`PlanCompileError`, `NameHintLoaderError`, `ModelPackLoadError`, `ProvenanceError`,
-  `ConfigError`, `StatisticalSpecError`) or of a builtin error must be one of these:
+**Refusal classes.** The roots are `PlanCompileError`, `NameHintLoaderError`,
+`ModelPackLoadError`, `ProvenanceError`, `ConfigError` and `StatisticalSpecError`. The sentry finds
+every subclass of a root with an AST walk of the class definitions in `src/decoy_engine`. A
+per-class table in the sentry names where the message and the path are passed:
+
+| Class | Message argument | Path argument |
+|---|---|---|
+| `PlanCompileError` | third positional, or `message=` | second positional, or `path=` |
+| `PipelineValidationError` (`errors.py:39`, a `ConfigError` subclass) | first positional, or `message=` | second positional, or `path=` |
+| `ConfigError`, `ConfigRuleError`, `NameHintLoaderError`, `ModelPackLoadError`, `ProvenanceError`, `StatisticalSpecError` | first positional, or `message=` | none |
+
+A subclass with its own `__init__` and no table row is a finding, so a new signature cannot slip
+past the table.
+
+- **S1 every construction (Dennis V1-2).** S1 checks every call that builds a refusal class, not
+  only calls written directly after `raise`. That covers a helper that returns the exception, a
+  value assigned to a name and raised later, and a call passed to `raise_refusal`. The message
+  argument must be one of these:
   - a `str` constant;
   - `<config_refusal(...)>.text`;
   - `<r>.text`, where `r` is bound once in the same function by `r = config_refusal(...)`.
 
-  The message is the first positional argument or `message=`. A `path=` argument must be a
-  constant or `<r>.key`.
+  The path argument must be a constant or `<r>.key`. `raise <name>` is allowed, because the
+  construction that bound the name is checked where it is built. The one named exemption is
+  `_rebuild_load_error` (`profiling/model_pack/loader.py:78`), the pickle rebuild of a
+  `ModelPackLoadError` from the text it already had. Any other function that builds a refusal
+  from a parameter is a finding.
 - **S2 builder arguments.** `problem=` and `expected=` are `Problem.X` and `Expected.X`
   attributes. `choices=` is a module-level UPPER_CASE name. `hint=` is a `str` constant. Each
   `config_position` segment is a constant, an int, or a `Name(...)` or `Member(...)` call whose
   argument the tagger does not mark as risky.
-- **S3 chaining.** In a zero-set module, no `raise <call>` sits inside an `except` body, and no
-  `raise ... from <name>` exists. A bare `raise` is allowed.
-- **S4 except names.** In a zero-set module, a name bound by `except ... as e` may appear only as
-  the argument of `isinstance`, `type(e) is`, or `safe_error_type`.
-- **S5 ratchet.** Outside the zero set, a site that breaks S1 to S4 needs an entry in
-  `tests/sentry/baselines/config-refusal-text.json`, keyed
-  `<file>::<qualname>::<digest>`. The baseline may only shrink. Zero-set modules may have no
-  entries. A new module that calls a config reader (`fileaccess` open, `serial.yaml_safe_load`,
-  `serial.json_load`, `yaml.safe_load`, `json.load`, `pq.read_*`, `urlsplit`) and raises with a
-  non-builder message therefore fails, because it has no baseline entry.
+- **S3 chaining, zero set only.** No `raise <call>` or `raise <name>` sits inside an `except`
+  body, no `raise ... from` exists, and every refusal raise goes through `raise_refusal`. A bare
+  `raise` is allowed.
+- **S4 except names, zero set only.** A name bound by `except ... as e` may appear only as the
+  argument of `isinstance`, `type(e) is`, or `safe_error_type`.
+- **S1 for builtin errors, zero set only.** In the nine modules, the message of a builtin error
+  (`ValueError`, `TypeError`, `KeyError` and the others) follows the S1 message rule.
+- **S5 ratchet (Dennis V1-1).** Outside the zero set, the sentry applies only S1 and only to the
+  refusal classes. Builtin errors, S3 and S4 are not checked there. Chaining outside the zero set
+  stays with the existing sentries `tests/sentry/defects/test_exception_context.py` and
+  `tests/sentry/safe_output/test_exception_text_copy.py`. A site that breaks S1 needs an entry in
+  `tests/sentry/baselines/config-refusal-text.json`, keyed `<file>::<qualname>::<digest>`. The
+  baseline may only shrink. Zero-set modules may have no entries. A new module that calls a
+  config reader (`fileaccess` open, `serial.yaml_safe_load`, `serial.json_load`,
+  `yaml.safe_load`, `json.load`, `pq.read_*`, `urlsplit`) and builds a refusal with a non-builder
+  message has no baseline entry, so it fails.
+- **Baseline seed (Dennis V1-6).** The baseline is seeded only from the merge base: the builder
+  runs the S1 scan on the merge-base sources (`git show <merge-base>:<path>`) and writes those
+  findings. A site that this PR adds or changes cannot enter the baseline. The sentry id is not
+  added to `REKEY_PER_SITE` (`tests/sentry/_ratchet.py:36`), so a changed message is new growth,
+  not a re-key. The PR body states the seeded entry count.
 
 Guard mutation: put `f"... {version!r}"` back into `_codeset_config_checks.py`. S1 turns red.
 
@@ -268,7 +328,7 @@ name-hint directory path. The position names the member file instead.
 
 | Input | da71c502e | After |
 |---|---|---|
-| name-hint member with `!!int <text>` | `ValueError` with the text | `NameHintLoaderError`: `pre_scan.name_hints/<file>: could not be parsed at line L, column C` |
+| name-hint member with `!!int <text>` | `ValueError` with the text | `NameHintLoaderError`: `pre_scan.name_hints/<file>: could not be parsed`, with no line or column, because the constructor `ValueError` has no YAML mark (Dennis D2) |
 | name-hint validation error, ambient policy | starts with the full directory path | starts with `pre_scan.name_hints/<file>` |
 | list-valued `corpus_source_version` | `got ['…'] of type list` | `provider_config.corpus_source_version: wrong type; expected a string or integer release id, got list` |
 | unknown shipped corpus given as a URL | the URL in `!r` | `provider_config.code_set: not found. Allowed: <shipped names>` |
@@ -286,7 +346,10 @@ Codex R3 repros, red on `da71c502e`:
 
 1. A1 `test_yaml_scalar_conversion_error_is_value_free`: a name-hint member holding
    `!!int PRIVATEMARKER` raises `NameHintLoaderError`, with no `PRIVATEMARKER` anywhere and
-   `__cause__` and `__context__` None. Cells `!!float`, `!!timestamp`.
+   `__cause__` and `__context__` None. The text is exactly
+   `pre_scan.name_hints/<file>: could not be parsed`, with no `line` and no `column`, because
+   the `ValueError` carries no YAML mark (Dennis D2). Cells `!!float`, `!!timestamp`. A YAML
+   syntax error cell keeps `at line L, column C`, so the two paths stay distinct.
 2. A2 `test_name_hint_validation_omits_the_directory`: under the ambient policy, a directory whose
    name holds a canary and a member with a mapping in `patterns`. The unmodified `str(exc)` holds
    no canary and names `pre_scan.name_hints/<member>` and `list`. The same under the strict
@@ -301,8 +364,11 @@ Codex R3 repros, red on `da71c502e`:
    `at_position("tables.orders.columns.zip")`, a missing `reference` gives
    `path == "tables.orders.columns.zip.joint_masks.reference"` and the text starts with it.
 6. A6 `test_loader_refusals_have_no_chain`: YAML syntax error, scalar conversion error, unreadable
-   member, missing reference file. Each refusal has `__cause__` and `__context__` None (the R3
-   V2-LOG item, now in scope because S3 covers it).
+   member, missing reference file. Each refusal has `__cause__` and `__context__` None and
+   `__suppress_context__` True (the R3 V2-LOG item, now in scope because S3 covers it). Outer
+   except cell (Dennis V1-3): each loader is called inside
+   `try: raise RuntimeError("OUTERCANARY") except RuntimeError: <call loader>`, and the refusal
+   still has `__context__` None, so no outer exception text reaches a traceback.
 7. A7 `test_reference_type_kinds_use_is_text`: the string row of `_TYPE_KINDS` is
    `_arrow_types.is_text` itself, in `tests/unit/reference_tables/`.
 8. The test file move is checked in the PR diff, not by a test.
@@ -329,9 +395,16 @@ the fitted-reference and fingerprint canaries, and the R2 set:
 New guards:
 
 9. B1 `test_every_loader_refusal_is_value_free` (Hypothesis): for each route in Routes, under
-   both policies, plant a canary in each supplied slot listed under Fields. Assert the canary is
-   absent from `str`, `repr`, `args`, every `str` attribute and `path`, and that the chain is
-   empty. Non-vacuity check: each case first asserts that the call raised a refusal.
+   both policies, plant a canary in each supplied slot listed under Fields. Non-vacuity check:
+   each case first asserts that the call raised a refusal. The slots split in two (Dennis V1-5):
+   - Value slots (field values, pins, URLs, file contents): the canary is never shown. Assert it
+     is absent from `str`, `repr`, `args`, every `str` attribute and `path`, and that the chain
+     is empty.
+   - Name slots (`Name(...)` and `Member(...)` segments): the canary is shaped so that
+     `approve_name` refuses it (a path, a URL, or longer than the name limit). The case asserts
+     `approve_name(canary)` refuses it, then asserts the canary is absent from the same surfaces
+     and that `<name>` or the bare file name is shown in its place. An approved name may appear
+     and is not a canary.
 10. B2 `tests/unit/config_text/test_config_refusal.py`. Cells:
     - the kind table, with `bool` before `int` and a `str` subclass shown as `other`;
     - `Name` with a URL, a path and a 200-character value, each shown as `<name>`;
@@ -339,7 +412,12 @@ New guards:
     - refused choices are dropped;
     - `at_position` binding;
     - `read_config` with a `ValueError`, an `OSError` and a `yaml.YAMLError`, checking the text,
-      that the chain is None and that the handle is closed.
+      that the chain is None and that the handle is closed;
+    - `read_config` lets `FileAccessDenied`, `FileAccessUnavailable` and `MemoryError` pass
+      unchanged (Dennis V1-4): `read` raises each one, and the test asserts the same object
+      comes out (`is`), not a refusal class;
+    - `raise_refusal` clears `__cause__` and `__context__` and sets `__suppress_context__`,
+      also when called inside an outer `except`.
 11. B3 sentry self-test: S1 to S5 run on seeded source snippets. Each snippet must be flagged:
     - an f-string message;
     - `!r`;
@@ -350,8 +428,27 @@ New guards:
     - a non-constant `choices=`;
     - a risky segment;
     - a new reader module outside the baseline.
+
+    New S1 construction cells (Dennis V1-2), each flagged:
+    - a helper `def _bad(v): return ConfigError(f"{v}")` that is never raised in that function;
+    - `err = ProvenanceError(f"{v}")` followed later by `raise err`;
+    - `PlanCompileError("code", "path", f"{v}")` (third positional argument);
+    - `PlanCompileError("code", path=v, message=r.text)` (non-literal path);
+    - a subclass of `StatisticalSpecError` defined in the snippet, built with an f-string;
+    - a subclass with its own `__init__` and no row in the per-class table;
+    - a builtin error with an f-string in a zero-set snippet; the same snippet outside the zero
+      set is not flagged (V1-1).
+
+    Cells that must pass: `err = ConfigError(r.text)` with `r = config_refusal(...)`, then
+    `raise_refusal(err)`;
+    `_rebuild_load_error` in its real module; the same body under any other name is flagged;
+    a refusal built inside an `except` outside the zero set (S3 and S4 do not apply there).
 12. B4 `test_config_refusal_text` on the real tree: zero findings in the zero set, and the
-    baseline holds under `_ratchet.check`.
+    baseline holds under `_ratchet.check`. Merge-base cell (Dennis V1-6):
+    `test_config_refusal_baseline_is_from_the_merge_base` runs the S1 scan on the merge-base
+    sources and asserts every baseline entry's `<file>::<qualname>::<digest>` is in that set. It
+    also asserts the sentry id is not in `REKEY_PER_SITE`. When no merge base is reachable (a
+    shallow clone), the cell fails, not skips.
 13. B5: the existing `test_dp_provenance_imports_neither_pandas_nor_pyarrow` stays green, which
     proves `_config_text` pulls no pyarrow.
 14. B6: the existing import-layer snapshot (`tests/sentry/layout/test_import_layers.py`) is
@@ -375,6 +472,11 @@ each mutation ran on). The builder records the results in the PR body.
 | N9 | add a baseline entry for a zero-set module | B4 |
 | N10 | `Name` skips `approve_name` | A4, B1, B2 |
 | N11 | the `_TYPE_KINDS` string row uses its own checks again | A7 |
+| N12 | S1 checks only calls written directly after `raise` (Dennis D4) | B3 (helper return, assign-then-raise cells) |
+| N13 | S1 reads the first positional argument of `PlanCompileError` as the message (Dennis D4) | B3 (third positional cell) |
+| N14 | `raise_refusal` clears `__cause__` but not `__context__` (Dennis D4) | A6 (outer except cell), B2 |
+| N15 | seed one baseline entry from the head instead of the merge base (Dennis D4) | B4 (merge-base cell) |
+| N16 | `read_config` catches `FileAccessDenied` and turns it into a refusal (Dennis V1-4) | B2 (pass-through cell) |
 
 ## Failure modes
 
@@ -409,7 +511,7 @@ New structure: one private package with one builder, its enums and one read wrap
 | `tests/sentry/baselines/config-refusal-text.json` | `tests/sentry/baselines/` | the ratchet rows (line 46), registered in `scripts/dev/sentry_registry.toml` | `validation-name-messages.json` |
 
 `.importlinter`: `_config_text` joins the tier of `safe_output` and `fileaccess` (it imports
-`fileaccess._entry` and `reasons._record` only). The layer snapshot test is updated in the same
+the `decoy_engine.fileaccess` and `decoy_engine.reasons` facades only, Dennis D1). The layer snapshot test is updated in the same
 commit.
 
 ## Size
@@ -428,8 +530,20 @@ The builder reports the measured size against these numbers before review.
 
 1. AE5 (this PR, #810, decoy-engine, `feat/f31-ae5`): `_config_text`, the sentry with the zero set
    and the baseline, the nine modules migrated, the R3 fixes and the test move. Size above.
-2. AE5b (new, decoy-engine): migrate the baselined sites (about 160) to `config_refusal` and
-   shrink the baseline to zero. Separate PR, R2, after AE5 merges.
+2. AE5b (new, decoy-engine, `feat/f31-ae5b`): migrate the baselined sites (about 160) to
+   `config_refusal` and shrink the baseline to zero. Separate PR, R2, after AE5 merges. Tracked
+   in the F31 audit plan slice table (`docs/plans/2026-11-24-f31-audit.md`) and in the vault
+   `BRANCH-LIST.md` (Dennis D3). Exit criterion: the baseline has zero entries.
+
+Commit order inside AE5 (Dennis D5):
+
+1. `_config_text` (builder, enums, `read_config`, `raise_refusal`) with its B2 tests, and the
+   sentry with the merge-base baseline. The zero set is red at this commit, and that is
+   expected.
+2. One commit per zero-set module, each turning that module green in the sentry.
+3. The R3 red tests (A1 to A7), the test move, and the `joint_mask` copy deletion.
+
+The PR body states the seeded baseline entry count (Dennis V1-6).
 
 ## Test depth
 
@@ -474,3 +588,6 @@ Ways a gate reviewer could break the built change, each now a test or a recorded
 - Hostile objects passed through the Python API whose `__eq__` or `__hash__` run during
   validation (V2 threat model).
 - About 160 non-loader refusal sites until AE5b lands, held by the shrink-only baseline.
+- JSON decode errors lose their line and column (Dennis V2-LOG): `read_config` keeps only a
+  YAML mark, so a `json.JSONDecodeError` gives `could not be parsed` with no position. Keeping
+  `lineno` and `colno` (ints, value-free) is a later change.
