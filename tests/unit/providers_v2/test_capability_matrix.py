@@ -36,8 +36,9 @@ class TestPerCatalogEntry:
         for cap in catalog:
             assert isinstance(cap, CapabilityMatrix)
 
-    def test_every_entry_has_all_14_fields(self) -> None:
-        """Per S4 spec §4 M5: 14 fields including backend_version."""
+    def test_every_entry_has_all_15_fields(self) -> None:
+        """Per S4 spec §4 M5: 14 fields including backend_version, plus `draw` (computed
+        Faker draws, GEN-NONFAKER-DRAWS)."""
         catalog = get_default_catalog()
         for cap in catalog:
             data = cap.model_dump()
@@ -56,6 +57,7 @@ class TestPerCatalogEntry:
                 "format_regex",
                 "blocklist_validators",
                 "fallback_behavior",
+                "draw",
             }
 
 

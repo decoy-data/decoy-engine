@@ -29,6 +29,7 @@ from decoy_engine.publication._descriptor import (
     descriptor_digest,
     encode_descriptor,
 )
+from decoy_engine.publication._members import Member
 from decoy_engine.publication._publish import (
     check_request,
     failed_receipt,
@@ -41,6 +42,12 @@ from decoy_engine.publication._sink_state import (
     SinkState,
     SinkStateMachine,
     recover,
+)
+from decoy_engine.publication._stage import (
+    DeliveryReceipt,
+    DeliveryStage,
+    StageDecision,
+    StagedMember,
 )
 from decoy_engine.publication._types import (
     MAX_COUNT,
@@ -71,10 +78,13 @@ __all__ = [
     "ArtifactSummary",
     "CommitReceipt",
     "CurrentPointer",
+    "DeliveryReceipt",
+    "DeliveryStage",
     "Descriptor",
     "DescriptorVault",
     "Exit",
     "LocalPointerStore",
+    "Member",
     "Outcome",
     "PointerResult",
     "PointerState",
@@ -85,6 +95,8 @@ __all__ = [
     "PublicationRequest",
     "SinkState",
     "SinkStateMachine",
+    "StageDecision",
+    "StagedMember",
     "VaultBinding",
     "build_descriptor",
     "check_request",

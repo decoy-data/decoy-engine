@@ -39,6 +39,7 @@ from decoy_engine.execution.physical._plan import PhysicalPlan
 from decoy_engine.execution.physical._snapshot import capture_physical_plan_inputs
 from decoy_engine.execution.physical._types import DriverId
 from decoy_engine.generation.pool._events import QualityWarning
+from tests._column_shapes import INT_DECL
 from tests.physical._shadow_helpers import (
     ENGINE_VERSION,
     assert_ooc_shadow_matches_oracle,
@@ -335,7 +336,12 @@ def test_text_mask_sub_floor_warning_forwarded_with_parity(tmp_path: Path) -> No
             "out_of_core_faker_pool_unsupported",
         ),
         (
-            {"strategy": "bucketize", "namespace": "dns", "provider_config": {"width": 10}},
+            {
+                "strategy": "bucketize",
+                "namespace": "dns",
+                "provider_config": {"width": 10},
+                **INT_DECL,
+            },
             ["1", "2", "3"],
             "out_of_core_row_error_strategy_unsupported",
         ),
@@ -371,17 +377,8 @@ def test_unadmitted_group_bc_payload_does_not_route_ooc(
             ["a", "b", "c"],
             "out_of_core_code_set_shape_unsupported",
         ),
-        (
-            {
-                "strategy": "bucket_perturb",
-                "namespace": "bp",
-                "provider_config": {"bucket": "month"},  # no date_format -> autodetect
-            },
-            ["2021-03-15", "2020-11-02", "2019-07-28"],
-            "out_of_core_bucket_perturb_autodetect_unsupported",
-        ),
     ],
-    ids=["code_set_gen_mode", "bucket_perturb_no_date_format"],
+    ids=["code_set_gen_mode"],
 )
 def test_wrong_shape_group_bc_payload_does_not_route_ooc(
     tmp_path: Path,
@@ -398,6 +395,23 @@ def test_wrong_shape_group_bc_payload_does_not_route_ooc(
     plan = compile_physical_plan(inputs)
 
     _assert_ooc_rejected(plan, code)
+
+
+def test_bucket_perturb_without_a_date_format_never_reaches_the_ooc_route(tmp_path: Path) -> None:
+    """COLUMN-SHAPE E2, plan 2026-11-21-column-shape-rule section 3.2 (`bucket_perturb` on text:
+    `date_format` required, else `column_shape_required`): the physical plan is never built for
+    a column that used to be declined as `out_of_core_bucket_perturb_autodetect_unsupported`."""
+    from decoy_engine.plan import PlanCompileError
+
+    sources = _payload_edge_sources(["2021-03-15", "2020-11-02", "2019-07-28"])
+    config = _payload_edge_config(
+        tmp_path,
+        sources,
+        {"strategy": "bucket_perturb", "namespace": "bp", "provider_config": {"bucket": "month"}},
+    )
+    with pytest.raises(PlanCompileError) as caught:
+        capture_physical_plan_inputs(config, sources, engine_version=ENGINE_VERSION, **_FORCE_OOC)
+    assert caught.value.code == "column_shape_required"
 
 
 @pytest.mark.parametrize(

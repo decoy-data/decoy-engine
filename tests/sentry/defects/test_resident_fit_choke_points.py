@@ -19,7 +19,7 @@ from tests.sentry._call_resolution import resolved_calls
 
 ROOT = Path(__file__).resolve().parents[3]
 PRIMITIVE = "lower_bound_bytes"
-OWNER_MODULE = "_resident_fit"
+OWNER_MODULES = ("_resident_fit", "_resident_bytes")
 FACADE = "decoy_engine.execution.pipeline"
 CONSUMERS = (ROOT / "scripts" / "bench-auto-chunk" / "bench_nonfk_fallthrough.py",)
 
@@ -38,11 +38,11 @@ def _private_imports(tree: ast.AST) -> list[str]:
     found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            private = OWNER_MODULE in (node.module or "").split(".") or any(
-                a.name == OWNER_MODULE for a in node.names
+            private = any(m in (node.module or "").split(".") for m in OWNER_MODULES) or any(
+                a.name in OWNER_MODULES for a in node.names
             )
         elif isinstance(node, ast.Import):
-            private = any(OWNER_MODULE in a.name.split(".") for a in node.names)
+            private = any(m in a.name.split(".") for a in node.names for m in OWNER_MODULES)
         else:
             continue
         if private:
@@ -102,6 +102,10 @@ def test_aliased_facade_call_is_accepted() -> None:
         "x = lower_bound_bytes([s])\n",
         "from decoy_engine.execution.pipeline import _resident_fit\nx = _resident_fit.lower_bound_bytes([s])\n",
         "import decoy_engine.execution.pipeline._resident_fit as rf\nx = rf.lower_bound_bytes([s])\n",
+        "from decoy_engine.execution.pipeline._resident_bytes import lower_bound_bytes\n"
+        "x = lower_bound_bytes([s])\n",
+        "from decoy_engine.execution.pipeline import _resident_bytes\nx = _resident_bytes.lower_bound_bytes([s])\n",
+        "import decoy_engine.execution.pipeline._resident_bytes as rb\nx = rb.lower_bound_bytes([s])\n",
         # imported but never called
         f"from {FACADE} import lower_bound_bytes\n",
         # no facade import

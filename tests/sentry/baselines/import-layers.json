@@ -53,9 +53,6 @@
   "layers::decoy_engine.internal.faker_setup -> decoy_engine.generation._dob_anchor": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
-  "layers::decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize": {
-   "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
-  },
   "layers::decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
@@ -69,9 +66,6 @@
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
   "layers::decoy_engine.profile._declared_columns -> decoy_engine.execution._pipeline_context": {
-   "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
-  },
-  "layers::decoy_engine.profile._declared_columns -> decoy_engine.execution._transforms": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
   "layers::decoy_engine.profiling._scan_integrity -> decoy_engine.execution.out_of_core._duckdb": {
@@ -93,9 +87,6 @@
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
   "policy-direction::decoy_engine.delivery.resume._records -> decoy_engine.publication": {
-   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
-  },
-  "policy-direction::decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize": {
    "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
   },
   "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors": {

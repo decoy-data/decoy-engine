@@ -40,7 +40,10 @@ from decoy_engine.execution.native._draw_sites_gen import (
     GEN_KIND_DRAW_SITES,
     GEN_SUBSTRATE_DRAW_SITES,
 )
-from decoy_engine.execution.native._draw_sites_gen_pool import GEN_POOL_DRAW_SITES
+from decoy_engine.execution.native._draw_sites_gen_pool import (
+    COMPUTED_DRAW_SITES,
+    GEN_POOL_DRAW_SITES,
+)
 from decoy_engine.execution.native._draw_sites_mask import MASK_DRAW_SITES, MASK_FORMULA_DRAW_SITE
 from decoy_engine.execution.native._draw_sites_provider_backed import PROVIDER_BACKED_DRAW_SITES
 from decoy_engine.execution.native._draw_sites_tokenize import TOKENIZE_DRAW_SITES
@@ -62,6 +65,7 @@ DRAW_SITES: tuple[DrawSite, ...] = (
     *GEN_POOL_DRAW_SITES,
     *TOKENIZE_DRAW_SITES,
     *GEN_KIND_DRAW_SITES,
+    *COMPUTED_DRAW_SITES,
 )
 
 # ---------------------------------------------------------------------------
@@ -92,7 +96,7 @@ MASK_STRATEGY_TO_SITE: dict[str, str] = {
     "group_key": "mask.group_key",
     "code_set": "mask.code_set",
     "joint_mask": "mask.joint_mask_keyed_row",
-    "faker": "mask.faker",  # + mask.faker_nondeterministic (reuse, position-keyed)
+    "faker": "mask.faker",  # + mask.faker_nondeterministic, mask.faker_computed_value|position
     "formula": "mask.formula",
     "text_mask": "mask.text_mask_faker",  # + mask.text_mask_date_shift
     "grouped_series": "mask.grouped_series_monotone_walk",

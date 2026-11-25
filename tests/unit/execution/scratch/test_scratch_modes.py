@@ -264,6 +264,7 @@ def _walk(root: Path) -> dict[str, os.stat_result]:
     return seen
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 @pytest.mark.parametrize("umask", [0o000, 0o077, 0o777], ids=lambda m: f"umask{m:04o}")
 @pytest.mark.parametrize("lane", ["batch", "reorder"])
 def test_ooc_scratch_modes(
@@ -351,6 +352,7 @@ def _key_edge() -> RelationshipEdge:
     "cell",
     ["reorder_spill", "relation_survives_gc", "relation_survives_gc_arena", "reclaim_refused"],
 )
+@pytest.mark.usefixtures("scratch_env_clean")
 def test_adopted_arena_is_non_owning(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cell: str
 ) -> None:
@@ -446,6 +448,7 @@ def _relation_survives(root: ScratchArena, base: Path, cell: str) -> None:
 # -- connections on the arena (T05, arm (c); S2a-1c) -------------------------------------------
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 @pytest.mark.parametrize("arm", ["path", "arena"])
 def test_connect_duckdb_spills_into_its_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, arm: str
@@ -473,6 +476,7 @@ def test_connect_duckdb_spills_into_its_directory(
         assert Path(setting) == spill and _mode(spill) == 0o700, (setting, oct(_mode(spill)))
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 def test_connect_duckdb_refuses_a_loose_spill_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

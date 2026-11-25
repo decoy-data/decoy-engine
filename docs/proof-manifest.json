@@ -1,5 +1,5 @@
 {
-  "engine_version": "0.28.3",
+  "engine_version": "0.28.4",
   "generated_at": "2026-06-14",
   "surface": {
     "mask": 24,
@@ -382,7 +382,7 @@
       "kind": "mask",
       "title": "Bucketization",
       "column": "age",
-      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: age\n    strategy: bucketize\n    provider_config:\n      width: 10\n      format: range",
+      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: age\n    strategy: bucketize\n    provider_config:\n      width: 10\n      format: range\n    logical_type: integer\n    parse_format:\n      id: integer/ascii/v1",
       "input": [
         {
           "age": "42"
@@ -412,7 +412,7 @@
       "kind": "mask",
       "title": "Top-coding (age 90+ generalization)",
       "column": "age",
-      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: age\n    strategy: top_code\n    provider_config:\n      preset: hipaa_age",
+      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: age\n    strategy: top_code\n    provider_config:\n      preset: hipaa_age\n    logical_type: integer\n    parse_format:\n      id: integer/ascii/v1",
       "input": [
         {
           "age": "67"
@@ -502,7 +502,7 @@
       "kind": "mask",
       "title": "Calendar-bucket date perturbation",
       "column": "event_date",
-      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: event_date\n    strategy: bucket_perturb\n    namespace: event_date\n    provider_config:\n      bucket: month",
+      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: event_date\n    strategy: bucket_perturb\n    namespace: event_date\n    provider_config:\n      bucket: month\n      date_format: '%Y-%m-%d'",
       "input": [
         {
           "event_date": "2024-01-15"

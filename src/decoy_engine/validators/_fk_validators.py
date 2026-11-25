@@ -36,15 +36,31 @@ config dict. Each entry is expected to have the shape::
 Both validators run over every relationship entry in the config regardless
 of the ``orphan_policy`` field; the validator config's intent is separate
 from the masking-phase orphan policy.
+
+Both are folds. ``no_orphan_children`` reads each child row alone. ``fk_intact`` pairs a parent
+key set with child rows that may arrive before their parent (a self-reference, or a parent table
+written after its child): a child row whose parent table is not complete waits in a pending map
+and is probed when the parent table completes. The key set and the pending map are reserved
+against the key-state budget.
 """
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Iterator
 from typing import Any
 
 import pyarrow as pa
 
-from decoy_engine.validators._types import ValidatorFinding
+from decoy_engine import reasons
+from decoy_engine.validators._fold import (
+    CappedIndices,
+    FoldResult,
+    KeyStateBudget,
+    finding_index_cap,
+    run_whole,
+)
+from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -70,29 +86,19 @@ def _extract_relationships(config: dict[str, Any]) -> list[dict[str, Any]]:
     return [r for r in rels if isinstance(r, dict)]
 
 
-def _parent_pk_set(
-    table: pa.Table,
+def _parent_keys(
+    table: pa.Table | pa.RecordBatch,
     columns: list[str],
     parent_table_name: str = "",
-) -> set[tuple[Any, ...]]:
-    """Build the set of non-null parent PK tuples from a pa.Table.
+) -> Iterator[tuple[Any, ...]]:
+    """Yield the non-null parent PK tuples of one span, in row order.
 
-    Composite PKs are represented as sorted tuples matching the column order
-    in ``columns``. Single-column PKs are wrapped in a 1-tuple for
-    consistency with composite handling.
-
-    Args:
-        table: Parent table (read-only; not mutated).
-        columns: List of column names forming the parent PK.
-        parent_table_name: Table name for error messages.
-
-    Returns:
-        Set of non-null PK tuples present in the parent table.
+    Composite PKs are tuples in the order of ``columns``; a single-column PK is a 1-tuple.
 
     Raises:
-        ValueError: If any column in ``columns`` is not present in ``table``.
-            An absent column silently produces an empty PK set, which would
-            make every child FK appear broken (mass false-positive quarantine).
+        ValueError: If any column in ``columns`` is not present in ``table``. An absent column
+            silently produces an empty PK set, which would make every child FK appear broken
+            (mass false-positive quarantine).
     """
     table_cols = set(table.schema.names)
     missing = [c for c in columns if c not in table_cols]
@@ -101,21 +107,17 @@ def _parent_pk_set(
             f"misconfigured FK validator: column(s) {missing!r} not found in parent "
             f"table {parent_table_name!r}. Available columns: {sorted(table_cols)}"
         )
+    if not columns:
+        return
     col_arrays = [table.column(c).to_pylist() for c in columns]
-    if not col_arrays:
-        return set()
-    n = len(col_arrays[0])
-    out: set[tuple[Any, ...]] = set()
-    for i in range(n):
-        row = tuple(col_arrays[j][i] for j in range(len(col_arrays)))
+    for row in zip(*col_arrays, strict=True):
         if any(v is None for v in row):
             continue  # skip null PK rows (defensive; PKs should be non-null)
-        out.add(row)
-    return out
+        yield row
 
 
 def _child_fk_values(
-    table: pa.Table,
+    table: pa.Table | pa.RecordBatch,
     columns: list[str],
 ) -> list[tuple[Any, ...] | None]:
     """Return per-row FK values for a child table.
@@ -125,27 +127,305 @@ def _child_fk_values(
     FK relationship).
 
     Args:
-        table: Child table (read-only; not mutated).
+        table: Child table (read-only; not mutated). The caller has checked it holds every
+            column; a missing one is a skip, not a silent drop.
         columns: List of column names forming the child FK.
 
     Returns:
         List of tuples (or None) with one entry per row.
     """
-    col_arrays = [table.column(c).to_pylist() for c in columns if c in table.schema.names]
+    col_arrays = [table.column(c).to_pylist() for c in columns]
     if not col_arrays:
         return []
-    n = len(col_arrays[0])
-    result: list[tuple[Any, ...] | None] = []
-    for i in range(n):
-        row = tuple(col_arrays[j][i] for j in range(len(col_arrays)))
-        # If ALL columns in the FK tuple are null, treat the whole FK as null.
-        result.append(None if all(v is None for v in row) else row)
-    return result
+    # If ALL columns in the FK tuple are null, treat the whole FK as null.
+    return [None if all(v is None for v in row) else row for row in zip(*col_arrays, strict=True)]
 
 
 # ---------------------------------------------------------------------------
-# Public validators
+# Folds
 # ---------------------------------------------------------------------------
+
+# Fixed overhead of one retained key: the tuple header (40), its slot in a set or dict (up to
+# 32 bytes once the table has grown, with its resize headroom) and the value record kept beside
+# it. Each value in the key adds a pointer, and the values themselves are charged by
+# `sys.getsizeof`. The budget is a ceiling on retained state, so the estimate leans high and a
+# test compares it with `tracemalloc` for long string and composite keys.
+_KEY_BASE_BYTES = 230
+_KEY_COLUMN_BYTES = 16
+_INDEX_BYTES = 60
+
+
+def _skip_table(skipped: list[SkippedColumn], table: str) -> None:
+    """Record a table the run did not produce, once."""
+    record = SkippedColumn(table, None, reasons.warning.VALIDATOR_SKIP_MISSING_TABLE)
+    if record not in skipped:
+        skipped.append(record)
+
+
+def key_bytes(key: tuple[Any, ...]) -> int:
+    """Estimated bytes one retained key tuple costs: the tuple, its entry and every value in it.
+
+    A string key costs its length, so a key of 1,000 characters is charged as such.
+    """
+    return _KEY_BASE_BYTES + sum(sys.getsizeof(v) + _KEY_COLUMN_BYTES for v in key)
+
+
+class _ChildEdge:
+    """One (relationship, child table) pair and what has been seen of it."""
+
+    __slots__ = (
+        "child_cols",
+        "child_table",
+        "missing",
+        "parent",
+        "pending",
+        "ref",
+        "seen",
+        "tally",
+    )
+
+    def __init__(
+        self,
+        parent: _ParentSide,
+        child_table: str,
+        child_cols: list[str],
+        cap: int | None,
+    ) -> None:
+        self.parent = parent
+        self.child_table = child_table
+        self.child_cols = child_cols
+        self.tally = CappedIndices(cap)
+        # key -> [exact count, first positions]; children whose parent table is not complete.
+        self.pending: dict[tuple[Any, ...], tuple[int, list[int]]] = {}
+        self.seen = False
+        self.missing: list[str] = []
+        self.ref = f"{parent.table}.{parent.columns} -> {child_table}.{child_cols}"
+
+    def readable(self, output: pa.Table | pa.RecordBatch) -> bool:
+        """Mark the table seen; True when it holds every FK column, else note the gaps."""
+        self.seen = True
+        gaps = [c for c in self.child_cols if c not in output.schema.names]
+        for c in gaps:
+            if c not in self.missing:
+                self.missing.append(c)
+        return not gaps
+
+    def skip_unread(self, skipped: list[SkippedColumn]) -> bool:
+        """Record why the edge was not checked. True when it was not."""
+        if not self.seen:
+            _skip_table(skipped, self.child_table)
+            return True
+        if self.missing:
+            code = reasons.warning.VALIDATOR_SKIP_MISSING_COLUMN
+            skipped.extend(SkippedColumn(self.child_table, c, code) for c in self.missing)
+            return True
+        return False
+
+
+class _ParentSide:
+    """The parent table of one relationship: its key set and whether it has completed."""
+
+    __slots__ = ("columns", "complete", "keys", "seen", "table")
+
+    def __init__(self, table: str, columns: list[str]) -> None:
+        self.table = table
+        self.columns = columns
+        self.keys: set[tuple[Any, ...]] = set()
+        self.complete = False
+        self.seen = False
+
+
+class FkIntactFold:
+    """fk_intact: every non-null child FK value resolves to a parent PK, in any table order.
+
+    Pattern: SDV HMA1 method (Patki et al., IEEE DSAA 2016; method only, no SDV code), joined
+    like a symmetric hash join (Wilschut and Apers 1991): keys of a parent that has not
+    completed go in a key set, child rows probe it once the parent table completes, and a child
+    row that arrives earlier waits in a pending map. Null FK values are NOT flagged (use
+    no_orphan_children for that).
+    """
+
+    def __init__(self, config: dict[str, Any], *, cap: int | None, budget: KeyStateBudget) -> None:
+        self._cap = cap
+        self._budget = budget
+        self._parents: list[_ParentSide] = []
+        self._edges: list[_ChildEdge] = []
+        for rel in _extract_relationships(config):
+            parent_info = rel.get("parent") or {}
+            children = rel.get("children") or []
+            if not isinstance(children, list):
+                continue
+            parent = _ParentSide(parent_info.get("table") or "", parent_info.get("columns") or [])
+            self._parents.append(parent)
+            for child_info in children:
+                if isinstance(child_info, dict):
+                    self._edges.append(
+                        _ChildEdge(
+                            parent,
+                            child_info.get("table") or "",
+                            child_info.get("columns") or [],
+                            cap,
+                        )
+                    )
+        self._tables: set[str] = set()
+
+    def paired_tables(self) -> frozenset[str]:
+        return frozenset()
+
+    def add(self, table: str, span: RowSpan) -> None:
+        self._tables.add(table)
+        for parent in self._parents:
+            if parent.table == table:
+                self._add_parent(parent, span)
+        for edge in self._edges:
+            if edge.child_table == table:
+                self._add_child(edge, span)
+
+    def _add_parent(self, parent: _ParentSide, span: RowSpan) -> None:
+        parent.seen = True
+        found = set(_parent_keys(span.output, parent.columns, parent.table))
+        new = found - parent.keys
+        self._budget.reserve(sum(key_bytes(k) for k in new), table=parent.table, column=None)
+        parent.keys |= new
+
+    def _add_child(self, edge: _ChildEdge, span: RowSpan) -> None:
+        if not edge.readable(span.output):
+            return
+        parent = edge.parent
+        for i, fk in enumerate(_child_fk_values(span.output, edge.child_cols)):
+            if fk is None:
+                continue  # null FK -> not a broken reference; skip
+            position = span.offset + i
+            if parent.complete:
+                if fk not in parent.keys:
+                    edge.tally.add(position)
+                continue
+            held = edge.pending.get(fk)
+            if held is None:
+                self._budget.reserve(
+                    key_bytes(fk) + _INDEX_BYTES, table=edge.child_table, column=None
+                )
+                edge.pending[fk] = (1, [position])
+                continue
+            count, positions = held
+            if self._cap is None or len(positions) < self._cap:
+                self._budget.reserve(_INDEX_BYTES, table=edge.child_table, column=None)
+                positions.append(position)
+            edge.pending[fk] = (count + 1, positions)
+
+    def table_complete(self, table: str) -> None:
+        for parent in self._parents:
+            if parent.table != table or parent.complete:
+                continue
+            parent.complete = True
+            for edge in self._edges:
+                if edge.parent is parent:
+                    self._resolve(edge)
+
+    def _resolve(self, edge: _ChildEdge) -> None:
+        for fk, (count, positions) in edge.pending.items():
+            if fk not in edge.parent.keys:
+                edge.tally.add_group(count, positions)
+            self._budget.release(key_bytes(fk) + _INDEX_BYTES * len(positions))
+        edge.pending.clear()
+
+    def finish(self) -> FoldResult:
+        for parent in self._parents:
+            if not parent.seen:
+                raise ValueError(
+                    f"misconfigured fk_intact validator: parent table {parent.table!r} "
+                    f"not found in outputs. Available tables: {sorted(self._tables)}"
+                )
+            self.table_complete(parent.table)
+        findings: list[ValidatorFinding] = []
+        checked: list[tuple[str, str | None]] = []
+        skipped: list[SkippedColumn] = []
+        for edge in self._edges:
+            if edge.skip_unread(skipped):
+                continue
+            checked.append((edge.child_table, None))
+            count = edge.tally.count
+            if count:
+                findings.append(
+                    ValidatorFinding(
+                        validator="fk_intact",
+                        table=edge.child_table,
+                        column=None,
+                        failing_row_indices=edge.tally.indices(),
+                        detail=(
+                            f"{count} row(s) in {edge.child_table} "
+                            f"have FK values not found in {edge.parent.table} "
+                            f"(relationship: {edge.ref})"
+                        ),
+                        failing_row_count=count,
+                    )
+                )
+        return FoldResult(tuple(findings), tuple(checked), tuple(skipped))
+
+
+class NoOrphanChildrenFold:
+    """no_orphan_children: every child row must have a non-null FK value.
+
+    Stricter than fk_intact: it flags child rows whose FK columns are all null. It reads each
+    row alone and never looks at a parent.
+    """
+
+    def __init__(self, config: dict[str, Any], *, cap: int | None) -> None:
+        self._edges: list[_ChildEdge] = []
+        for rel in _extract_relationships(config):
+            children = rel.get("children") or []
+            if not isinstance(children, list):
+                continue
+            parent_info = rel.get("parent") or {}
+            parent = _ParentSide(parent_info.get("table") or "", parent_info.get("columns") or [])
+            for child_info in children:
+                if isinstance(child_info, dict):
+                    edge = _ChildEdge(
+                        parent, child_info.get("table") or "", child_info.get("columns") or [], cap
+                    )
+                    self._edges.append(edge)
+
+    def paired_tables(self) -> frozenset[str]:
+        return frozenset()
+
+    def table_complete(self, table: str) -> None:
+        return None
+
+    def add(self, table: str, span: RowSpan) -> None:
+        for edge in self._edges:
+            if edge.child_table != table:
+                continue
+            if not edge.readable(span.output):
+                continue
+            for i, fk in enumerate(_child_fk_values(span.output, edge.child_cols)):
+                if fk is None:
+                    edge.tally.add(span.offset + i)
+
+    def finish(self) -> FoldResult:
+        findings: list[ValidatorFinding] = []
+        checked: list[tuple[str, str | None]] = []
+        skipped: list[SkippedColumn] = []
+        for edge in self._edges:
+            if edge.skip_unread(skipped):
+                continue
+            checked.append((edge.child_table, None))
+            count = edge.tally.count
+            if count:
+                findings.append(
+                    ValidatorFinding(
+                        validator="no_orphan_children",
+                        table=edge.child_table,
+                        column=None,
+                        failing_row_indices=edge.tally.indices(),
+                        detail=(
+                            f"{count} row(s) in {edge.child_table} "
+                            f"have null FK values (orphaned children) "
+                            f"for relationship {edge.ref}"
+                        ),
+                        failing_row_count=count,
+                    )
+                )
+        return FoldResult(tuple(findings), tuple(checked), tuple(skipped))
 
 
 def validate_fk_intact(
@@ -155,19 +435,10 @@ def validate_fk_intact(
     *,
     sources: dict[str, pa.Table] | None = None,
 ) -> tuple[ValidatorFinding, ...]:
-    """fk_intact: every non-null child FK value resolves to a parent PK.
+    """fk_intact over whole tables (see `FkIntactFold`).
 
-    Pattern: SDV HMA1 method (Patki et al., IEEE DSAA 2016; method only, no
-    SDV code: SDV is BUSL-1.1). Parent-first DAG; materialise parent PK set; resolve child FK values against it.
-
-    Reads every relationship declared in ``config["relationships"]``. For each
-    child table + FK columns, checks that every non-null FK tuple appears in
-    the parent PK set. Returns one ValidatorFinding per child-side violation
-    group (all failing row indices for a (child_table, child_cols) pair are
-    collected into a single finding).
-
-    Null FK values are NOT flagged by this validator (they indicate nullable
-    FK columns; use no_orphan_children to flag them).
+    Reads every relationship declared in ``config["relationships"]``; one finding per child-side
+    violation group. Null FK values are NOT flagged by this validator.
 
     Args:
         outputs: Read-only pipeline outputs keyed by table name.
@@ -177,60 +448,12 @@ def validate_fk_intact(
 
     Returns:
         Tuple of ValidatorFinding for each FK pair that has broken references.
+
+    Raises:
+        ValueError: A parent table is absent from the outputs, or a parent PK column is absent.
     """
-    findings: list[ValidatorFinding] = []
-    for rel in _extract_relationships(config):
-        parent_info = rel.get("parent") or {}
-        parent_table_name: str = parent_info.get("table") or ""
-        parent_cols: list[str] = parent_info.get("columns") or []
-
-        children = rel.get("children") or []
-        if not isinstance(children, list):
-            continue
-
-        parent_table = outputs.get(parent_table_name)
-        if parent_table is None:
-            raise ValueError(
-                f"misconfigured fk_intact validator: parent table {parent_table_name!r} "
-                f"not found in outputs. Available tables: {sorted(outputs)}"
-            )
-        pk_set = _parent_pk_set(parent_table, parent_cols, parent_table_name=parent_table_name)
-
-        for child_info in children:
-            if not isinstance(child_info, dict):
-                continue
-            child_table_name: str = child_info.get("table") or ""
-            child_cols: list[str] = child_info.get("columns") or []
-
-            child_table = outputs.get(child_table_name)
-            if child_table is None:
-                continue
-
-            fk_values = _child_fk_values(child_table, child_cols)
-            failing: list[int] = []
-            for i, fk in enumerate(fk_values):
-                if fk is None:
-                    continue  # null FK -> not a broken reference; skip
-                if fk not in pk_set:
-                    failing.append(i)
-
-            if failing:
-                ref = f"{parent_table_name}.{parent_cols} -> {child_table_name}.{child_cols}"
-                findings.append(
-                    ValidatorFinding(
-                        validator="fk_intact",
-                        table=child_table_name,
-                        column=None,
-                        failing_row_indices=tuple(failing),
-                        detail=(
-                            f"{len(failing)} row(s) in {child_table_name} "
-                            f"have FK values not found in {parent_table_name} "
-                            f"(relationship: {ref})"
-                        ),
-                    )
-                )
-
-    return tuple(findings)
+    fold = FkIntactFold(config, cap=finding_index_cap(config), budget=KeyStateBudget(None))
+    return run_whole(fold, outputs).findings
 
 
 def validate_no_orphan_children(
@@ -240,18 +463,7 @@ def validate_no_orphan_children(
     *,
     sources: dict[str, pa.Table] | None = None,
 ) -> tuple[ValidatorFinding, ...]:
-    """no_orphan_children: every child row must have a non-null FK value.
-
-    Pattern: SDV HMA1 method (Patki et al., IEEE DSAA 2016; method only, no
-    SDV code: SDV is BUSL-1.1). Parent-first DAG; child rows with
-    null FK values are orphaned children that cannot be joined to any parent.
-
-    Stricter than fk_intact: this validator flags child rows whose FK columns
-    are null (i.e. orphaned children). fk_intact ignores null FKs; this
-    validator treats them as violations.
-
-    Reads every relationship declared in ``config["relationships"]``. Returns
-    one ValidatorFinding per child-side violation group.
+    """no_orphan_children over whole tables (see `NoOrphanChildrenFold`).
 
     Args:
         outputs: Read-only pipeline outputs keyed by table name.
@@ -262,42 +474,5 @@ def validate_no_orphan_children(
     Returns:
         Tuple of ValidatorFinding for each FK pair that has orphaned children.
     """
-    findings: list[ValidatorFinding] = []
-    for rel in _extract_relationships(config):
-        children = rel.get("children") or []
-        if not isinstance(children, list):
-            continue
-
-        for child_info in children:
-            if not isinstance(child_info, dict):
-                continue
-            child_table_name: str = child_info.get("table") or ""
-            child_cols: list[str] = child_info.get("columns") or []
-
-            child_table = outputs.get(child_table_name)
-            if child_table is None:
-                continue
-
-            fk_values = _child_fk_values(child_table, child_cols)
-            failing: list[int] = [i for i, fk in enumerate(fk_values) if fk is None]
-
-            if failing:
-                parent_info = rel.get("parent") or {}
-                parent_table_name: str = parent_info.get("table") or ""
-                parent_cols: list[str] = parent_info.get("columns") or []
-                ref = f"{parent_table_name}.{parent_cols} -> {child_table_name}.{child_cols}"
-                findings.append(
-                    ValidatorFinding(
-                        validator="no_orphan_children",
-                        table=child_table_name,
-                        column=None,
-                        failing_row_indices=tuple(failing),
-                        detail=(
-                            f"{len(failing)} row(s) in {child_table_name} "
-                            f"have null FK values (orphaned children) "
-                            f"for relationship {ref}"
-                        ),
-                    )
-                )
-
-    return tuple(findings)
+    fold = NoOrphanChildrenFold(config, cap=finding_index_cap(config))
+    return run_whole(fold, outputs).findings

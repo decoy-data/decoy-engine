@@ -25,9 +25,9 @@ from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies.nested._handler import (
     NestedStrategyHandler,
-    _has_prefix_overlap,
     _path_segments,
 )
+from decoy_engine.plan._compile import run_config_only_checks
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
@@ -339,67 +339,35 @@ class TestChildTechniqueClass:
         assert json.loads(out["data"].iloc[0]) == {"x": "REDACTED"}
 
 
-class TestJsonPathOverlapSecurity:
-    """QA-3 F14 (2026-05-31, security): wildcard / recursive JSONPath
-    can produce match-sets where one match's path is a prefix of
-    another (e.g. `$..*` returns the dict AND its contents). Pre-fix
-    `jsonpath_ng.update` in original order silently lost the inner
-    write or wrote to the wrong location. Post-fix the matches are
-    sorted deepest-first and a typed QualityWarning is emitted when
-    prefix-overlap is detected so operators auditing the Post-scan integrity report
-    can see the path was ambiguous."""
+class TestRecursiveTargetsAreRefused:
+    """QA-3 F14 (2026-05-31): a recursive target (`$..*`, `$..ssn`) made matches that were a prefix
+    of each other, so a write into an outer container could erase an inner write. The target
+    subset has no descendant segment, so these targets no longer compile and no overlap can
+    happen."""
 
-    def test_nested_recursive_overlap_emits_warning(self):
-        # `$..*` returns matches at every level; the root structures
-        # are prefixes of their leaves. The strategy must emit the
-        # overlap warning and writeback deepest-first.
-        df = pd.DataFrame(
-            {
-                "data": [
-                    json.dumps({"user": {"name": "Alice", "email": "alice@x.com"}}),
-                ]
-            }
-        )
-        handler = NestedStrategyHandler()
-        _, warnings = handler.run(
-            df.copy(),
-            "data",
-            _seed({"target": "$..*", "strategy": "redact"}),
-            _FakeCtx(),
-        )
-        codes = [w.code for w in warnings]
-        assert "nested_jsonpath_path_overlap" in codes
-
-    def test_nested_recursive_no_overlap_emits_no_warning(self):
-        # `$..ssn` on siblings (not nested) returns parallel matches;
-        # no prefix-overlap, no warning.
-        df = pd.DataFrame(
-            {
-                "data": [
-                    json.dumps(
+    @pytest.mark.parametrize("target", ["$..*", "$..ssn"])
+    def test_recursive_target_is_refused_at_compile(self, target):
+        config = {
+            "global_settings": {"seed": 1},
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [
                         {
-                            "patient": {"ssn": "111"},
-                            "spouse": {"ssn": "222"},
+                            "name": "data",
+                            "strategy": "nested",
+                            "provider_config": {"target": target, "strategy": "redact"},
                         }
-                    )
-                ]
-            }
-        )
-        handler = NestedStrategyHandler()
-        _, warnings = handler.run(
-            df.copy(),
-            "data",
-            _seed({"target": "$..ssn", "strategy": "redact"}),
-            _FakeCtx(),
-        )
-        codes = [w.code for w in warnings]
-        assert "nested_jsonpath_path_overlap" not in codes
-        # And both ssns are masked.
+                    ],
+                }
+            ],
+        }
+        with pytest.raises(PlanCompileError) as exc:
+            run_config_only_checks(config)
+        assert exc.value.code == "nested_target_unsupported"
+        assert "descendant segment" in exc.value.message
 
-    def test_nested_recursive_masks_all_target_leaves(self):
-        # Even with overlap, every leaf identified by the JSONPath
-        # gets written to (deepest-first ordering preserves the
-        # contract: every match position receives the masked value).
+    def test_wildcard_then_field_masks_every_sibling(self):
         df = pd.DataFrame(
             {
                 "data": [
@@ -413,15 +381,16 @@ class TestJsonPathOverlapSecurity:
             }
         )
         handler = NestedStrategyHandler()
-        out, _ = handler.run(
+        out, warnings = handler.run(
             df.copy(),
             "data",
-            _seed({"target": "$..ssn", "strategy": "redact"}),
+            _seed({"target": "$.*.ssn", "strategy": "redact"}),
             _FakeCtx(),
         )
         parsed = json.loads(out["data"].iloc[0])
         assert parsed["patient"]["ssn"] == "REDACTED"
         assert parsed["spouse"]["ssn"] == "REDACTED"
+        assert warnings == []
 
 
 class TestBatchDelegation:
@@ -620,15 +589,15 @@ class TestRootTargetWriteback:
         assert out["data"].iloc[0] == '"REDACTED"'
         assert "123-45-6789" not in out["data"].iloc[0]
 
-    def test_backtick_this_root_target_masks_whole_cell(self):
+    def test_backtick_this_target_is_refused_by_the_handler(self):
+        # The compile check refuses it first; the handler backstop refuses it too, never masks.
         df = pd.DataFrame({"data": ['"SSN-123-45-6789"']})
         handler = NestedStrategyHandler()
-        out, warnings = handler.run(
-            df.copy(), "data", _seed({"target": "`this`", "strategy": "redact"}), _FakeCtx()
-        )
-        assert warnings == []
-        assert out["data"].iloc[0] == '"REDACTED"'
-        assert "123-45-6789" not in out["data"].iloc[0]
+        with pytest.raises(StrategyError) as exc:
+            handler.run(
+                df.copy(), "data", _seed({"target": "`this`", "strategy": "redact"}), _FakeCtx()
+            )
+        assert exc.value.code == "nested_jsonpath_parse_error"
 
 
 class TestArraySelectorOnObjectFailsClosed:
@@ -744,26 +713,6 @@ class TestWarningMachineFields:
         assert w.column == "data"
         assert w.detail == {"row_pos": "0"}
 
-    def test_overlap_warning_fields(self):
-        df = pd.DataFrame({"data": [json.dumps({"user": {"name": "Alice", "email": "a@x.com"}})]})
-        handler = NestedStrategyHandler()
-        _, warnings = handler.run(
-            df.copy(),
-            "data",
-            _seed({"target": "$..*", "strategy": "redact"}),
-            _FakeCtx(),
-        )
-        overlaps = [w for w in warnings if w.code == "nested_jsonpath_path_overlap"]
-        assert len(overlaps) >= 1
-        w = overlaps[0]
-        assert w.provider == "nested"
-        assert w.column == "data"
-        assert set(w.detail.keys()) == {"row_pos", "target", "match_count"}
-        assert w.detail["row_pos"] == "0"
-        assert w.detail["target"] == "$..*"
-        assert w.detail["match_count"].isdigit()
-        assert int(w.detail["match_count"]) >= 1
-
 
 class TestOuterColumnCtxLifecycle:
     """`run()` saves ctx.nested_outer_column, stamps the REAL outer column
@@ -868,27 +817,3 @@ class TestPathSegments:
         # `raw[1:-1]`, not `[1:-2]`: the closing paren is the only trailing
         # char removed, so the last segment keeps its full text.
         assert _path_segments(_match_with_path("(a.bc)")) == ("a", "bc")
-
-
-class TestHasPrefixOverlap:
-    """`_has_prefix_overlap` (deepest-first contract) flags a pair iff a
-    strictly-shorter path is a prefix of a longer one."""
-
-    def test_adjacent_prefix_pair_is_detected(self):
-        # `range(i + 1, n)`, not `i + 2`: the only overlapping pair here is
-        # adjacent, so skipping the neighbour would miss it.
-        deep = _match_with_path("a.b")
-        shallow = _match_with_path("a")
-        assert _has_prefix_overlap([deep, shallow]) is True
-
-    def test_shorter_non_prefix_is_not_flagged(self):
-        # `and`, not `or`: a shorter path that is NOT a prefix must not
-        # count merely for being shorter.
-        deep = _match_with_path("a.b")
-        other = _match_with_path("x")
-        assert _has_prefix_overlap([deep, other]) is False
-
-    def test_equal_length_identical_paths_are_not_flagged(self):
-        # Strict `<`, not `<=`: two equal-length paths (even identical) are
-        # not a strict-prefix overlap.
-        assert _has_prefix_overlap([_match_with_path("a.b"), _match_with_path("a.b")]) is False

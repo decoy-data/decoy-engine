@@ -26,6 +26,7 @@ from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests._column_shapes import CTX_SHAPE_ATTRS
 
 _SEED = (0x55).to_bytes(8, "big")
 
@@ -37,6 +38,7 @@ def _ctx() -> StrategyContext:
         relationship_graph=RelationshipGraph(edges=(), ordering=()),
         namespace_registry=NamespaceRegistry(bindings=()),
         job_seed=_SEED,
+        column_shapes=CTX_SHAPE_ATTRS["column_shapes"],
     )
 
 

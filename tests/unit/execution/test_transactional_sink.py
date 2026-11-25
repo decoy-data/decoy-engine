@@ -443,3 +443,28 @@ def test_callable_sink_adapter_write_batches_calls_once_with_reassembled_table(
     assert name == "t"
     assert out.schema.equals(t.schema, check_metadata=False)
     assert out.equals(t, check_metadata=False)
+
+
+@pytest.mark.parametrize("batched", [False, True])
+def test_fixed_list_refusal_blocks_commit(tmp_path, batched):
+    from decoy_engine import errors
+    from decoy_engine.publication import PublicationRefused
+
+    target = tmp_path / "out"
+    sink = ParquetTransactionalSink(target)
+    values = [None, ["PRIVATE_MARKER", "PRIVATE_MARKER"], ["z", "z"]]
+    table = pa.table({"positions": pa.array(values, pa.list_(pa.string(), 2))})
+    with pytest.raises(errors.DecoyError) as caught:
+        if batched:
+            sink.write_batches("t", table.to_batches(), schema=table.schema)
+        else:
+            sink.write("t", table)
+    error = caught.value
+    assert isinstance(error, errors.ParquetFixedListNullError)
+    assert error.code == "parquet_fixed_list_null"
+    assert "positions" in str(error) and "PRIVATE_MARKER" not in str(error)
+    assert error.__context__ is None and error.__cause__ is None
+    with pytest.raises(PublicationRefused):
+        sink.commit()
+    sink.abort()
+    assert not (target / "t.parquet").exists()

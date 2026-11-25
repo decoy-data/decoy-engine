@@ -22,7 +22,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.config import PipelineConfig
-from decoy_engine.contracts.column_shape import NO_SOURCES
+from decoy_engine.contracts.column_shape import source_facts_of
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._planner import (
     EXECUTION_MODES,
@@ -200,7 +200,9 @@ def _fk_job(tmp_path) -> tuple[dict, dict[str, pa.Table]]:
     }
 
 
-def _planner_inputs(cfg: dict, *, substrate: str) -> dict[str, Any]:
+def _planner_inputs(
+    cfg: dict, *, substrate: str, source_tables: dict[str, pa.Table] | None = None
+) -> dict[str, Any]:
     """Build classify_job's inputs the same way run_pipeline does (steps
     2-4 of its sequencing contract), without executing any masking."""
     from decoy_engine.plan import compile_plan
@@ -215,7 +217,13 @@ def _planner_inputs(cfg: dict, *, substrate: str) -> dict[str, Any]:
     )
 
     profile = profile_source(cfg, seed=_normalize_job_seed_int(cfg))
-    plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
+    # The facts run_pipeline builds: a table the caller hands over is shaped by its own schema.
+    plan = compile_plan(
+        cfg,
+        profile,
+        decoy_engine_version=_ENGINE_VERSION,
+        sources=source_facts_of(source_tables),
+    )
     ns_registry = build_namespace_registry(cfg, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(cfg, profile.relationships)
@@ -644,7 +652,7 @@ class TestChunkedGateDelegation:
         cfg, sources = _bucketize_null_job(tmp_path)
         plan = classify_job(
             cfg,
-            **_planner_inputs(cfg, substrate="pandas"),
+            **_planner_inputs(cfg, substrate="pandas", source_tables=sources),
             source_tables=sources,
             auto_chunk_threshold_rows=1,
         )

@@ -33,7 +33,7 @@ from decoy_engine.subset._sample import (
     sample_request,
 )
 from decoy_engine.subset._scope import SubsetRequest, SubsetScope, SubsetSelection, scope_for
-from decoy_engine.subset._split import SubsetSplit, split_subset_config
+from decoy_engine.subset._split import SubsetSplit, drop_subset_block, split_subset_config
 from decoy_engine.subset._types import (
     ClosureResult,
     EdgeDirection,
@@ -88,6 +88,7 @@ __all__ = [
     "SubsetSource",
     "SubsetSplit",
     "TableEstimate",
+    "drop_subset_block",
     "plan_subset",
     "relationships_from_config",
     "run_subset",

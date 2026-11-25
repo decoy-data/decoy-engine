@@ -29,7 +29,8 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
-from decoy_engine.execution._strategies._top_code import _MAX_EXACT_INT, _PRESETS
+from decoy_engine.contracts.bucketize_width import EXACT_INT_BOUND
+from decoy_engine.execution._strategies._top_code import _PRESETS
 from decoy_engine.plan._errors import PlanCompileError
 
 
@@ -69,13 +70,13 @@ def _reject_unusable_bound(
                 "and the column passes through unmasked; set a finite numeric bound."
             ),
         )
-    if abs(value) >= _MAX_EXACT_INT:
+    if abs(value) >= EXACT_INT_BOUND:
         raise PlanCompileError(
             code=code,
             path=path,
             message=(
                 f"top_code column {where} has {kind} {value!r} whose magnitude is at "
-                f"or beyond 2**53 ({_MAX_EXACT_INT}). Past that, float64 cannot compare "
+                f"or beyond 2**53 ({EXACT_INT_BOUND}). Past that, float64 cannot compare "
                 "it exactly against a null-bearing column (Arrow int64+null widens to "
                 "float64), so a true tail value can round to the bound and escape "
                 f"generalization -- a leak. Use a {kind} with magnitude below 2**53."

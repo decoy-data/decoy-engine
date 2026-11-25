@@ -174,8 +174,8 @@ def test_f5a_whole_column_modes_decline(mode: str, monkeypatch: pytest.MonkeyPat
 def test_f5b_a_provider_outside_the_allowlist_declines(
     deterministic: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seed = faker_seed(provider="person_email", deterministic=deterministic)
-    _declines(seed, cells(30), "faker_provider_not_native:f:person_email", monkeypatch)
+    seed = faker_seed(provider="person_dob", deterministic=deterministic)
+    _declines(seed, cells(30), "faker_provider_not_native:f:person_dob", monkeypatch)
 
 
 @pytest.mark.parametrize("deterministic", [True, False])
@@ -198,15 +198,15 @@ def test_f5d_no_companion_reports_the_unavailable_reason(monkeypatch: pytest.Mon
         assert result.outputs["P"].equals(run_full(shape).outputs["P"])
 
 
-def test_f5f_a_deterministic_faker_without_a_pool_size_declines(
+def test_f5f_a_deterministic_faker_without_a_pool_size_runs_native_with_the_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _declines(
-        faker_seed(pool_size=None),
-        cells(30),
-        "faker_not_deterministic_reuse_variant:f",
-        monkeypatch,
-    )
+    kernel = install_cat(monkeypatch, CatMarkingKernel())
+    seed = faker_seed(pool_size=None)
+    out = run_seq(payload_shape({"f": (strs(SRC), seed)}))
+    [call] = [c for c in kernel.calls if c.namespace == NS]
+    assert call.pool_size == 10_000
+    assert faker_entry(out, "f")["executed_backend"] == "rust_companion"
 
 
 def test_f5c_missing_namespace_is_the_oracles_error_not_a_fallback(
@@ -251,7 +251,7 @@ def test_the_seed_level_precondition_is_the_node_level_one() -> None:
     for seed in cases:
         node = SimpleNamespace(plan_slice=seed)
         assert faker_pool_precondition_met(node) is faker_pool_precondition_met_seed(seed)
-    expected = [True, False, False, False, False, False]
+    expected = [True, False, True, False, False, False]
     assert [faker_pool_precondition_met_seed(c) for c in cases] == expected
     # A group slice is never a ColumnSeed: the node wrapper keeps its guard.
     assert faker_pool_precondition_met(SimpleNamespace(plan_slice=object())) is False
@@ -263,8 +263,8 @@ def test_the_admit_reasons_are_coded_and_value_free() -> None:
     assert admit("c", string, faker_seed()) is None
     assert admit("c", string, positional_seed()) is None
     assert admit("c", string, positional_seed(None, pool_size=None)) is None
-    assert admit("c", string, faker_seed(provider="person_email")) == (
-        "faker_provider_not_native:c:person_email"
+    assert admit("c", string, faker_seed(provider="person_dob")) == (
+        "faker_provider_not_native:c:person_dob"
     )
     assert admit("c", string, replace(faker_seed(), provider=None)) == (
         "faker_provider_not_native:c:None"

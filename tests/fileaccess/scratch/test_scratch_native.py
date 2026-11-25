@@ -135,6 +135,7 @@ def _site_cell(arena: ScratchArena, monkeypatch: pytest.MonkeyPatch, cell: str) 
     _assert_value_free(info.value)
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 @pytest.mark.parametrize("cell", sorted({*NATIVE, *SITES}))
 def test_native_failure_text_is_value_free(
     tmp_path: Path,

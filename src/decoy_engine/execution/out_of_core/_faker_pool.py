@@ -16,14 +16,12 @@ bounding and identity reuse can be proven in isolation.
 
 Established pattern reused, not re-invented: ``PoolBuilder`` builds, ``PoolCache``
 stores, ``resolve_faker_pool_identity`` keys. The one thing added over a bare
-``PoolCache`` is a pre-build reservation gate: a pool is refused BEFORE the
-provider is allocated when it would not fit the run's pool allowance, so a job
-can never grow pool memory without a bound and never sizes a pool from a batch
-or source row count. The gate's per-value upper bound mirrors ``PoolCache``'s
-own 4096-byte-per-string cap in ``estimate_pool_bytes``, so the conservative
-pre-build reservation is always at least the pool's measured post-build size and
-the run cache never evicts an in-allowance workload (one build per identity
-holds across batches).
+``PoolCache`` is a build-time reservation gate: each new pool is measured with
+``measured_pool_bytes`` (the one pool-byte function, shared with ``PoolCache``) and refused when
+it would not fit the run's pool allowance, so a job can never grow pool memory
+without a bound and never sizes a pool from a batch or source row count. The stock
+``PoolBuilder`` returns exactly ``pool_size`` values, so the build itself is
+bounded by the pool size.
 """
 
 from __future__ import annotations
@@ -33,27 +31,29 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution.native._real_type_admission import C1_PROVIDER_ALLOWLIST
 from decoy_engine.generation.pool._builder import PoolBuilder
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._identity import PoolIdentity, resolve_faker_pool_identity
-from decoy_engine.generation.pool._value_pool import ValuePool
-from decoy_engine.providers_v2 import ProviderRegistry
+from decoy_engine.generation.pool._value_pool import (
+    ValuePool,
+    construction_floor,
+    measured_pool_bytes,
+)
+from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
 
-# Conservative per-value upper bound for the PRE-BUILD reservation. Mirrors the
-# 4096-byte-per-string cap PoolCache.estimate_pool_bytes applies post-build, so
-# `pool_size * _RESERVE_BYTES_PER_VALUE` is always at least the pool's measured
-# size: the run cache therefore never has to evict an in-allowance workload, and
-# the "one build per identity across batches" guarantee holds.
-#
-# This bound holds for every pool the stock PoolBuilder produces, which are
-# object-dtype arrays of exactly `size` elements (PoolBuilder.build forces
-# dtype=object), so estimate_pool_bytes takes its object branch and each element
-# contributes at most 4096 bytes. It would NOT bound a non-standard builder that
-# returned more than `size` elements or a fixed-width dtype wider than 4096 bytes
-# per item; the route only ever builds through the stock builder, and PoolCache
-# itself still fails closed (pool_exceeds_cache_budget) on any single pool larger
-# than the whole allowance.
-_RESERVE_BYTES_PER_VALUE = 4096
+
+def _is_stock_string_provider(registry: ProviderRegistry, provider: str) -> bool:
+    """True when `provider` is allowlisted for strings AND the registry resolves it to the stock
+    adapter class, not an override.
+
+    The allowlist names a provider, but `ProviderRegistry.override` can rebind that name to any
+    adapter, so the name alone says nothing about the values built. The resolved adapter's class
+    is compared with the default registration's: a rebound adapter is a different class."""
+    if provider not in C1_PROVIDER_ALLOWLIST:
+        return False
+    stock = get_default_registry().get_adapter(provider)
+    return type(registry.get_adapter(provider)) is type(stock)
 
 
 @dataclass(frozen=True)
@@ -92,7 +92,6 @@ class OocFakerPoolContext:
         job_seed: bytes,
         max_pool_bytes: int,
         builder: PoolBuilder | None = None,
-        reserve_bytes_per_value: int = _RESERVE_BYTES_PER_VALUE,
     ) -> None:
         try:
             if max_pool_bytes <= 0:
@@ -100,15 +99,9 @@ class OocFakerPoolContext:
                     code=reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_INVALID,
                     message=f"max_pool_bytes must be positive, got {max_pool_bytes}.",
                 )
-            if reserve_bytes_per_value <= 0:
-                raise ExecutionError(
-                    code=reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_INVALID,
-                    message=f"reserve_bytes_per_value must be positive, got {reserve_bytes_per_value}.",
-                )
             self._registry = registry
             self._job_seed = job_seed
             self._max_pool_bytes = max_pool_bytes
-            self._reserve_per_value = reserve_bytes_per_value
             # Reuse the builder the identity split expects; default to one bound to
             # this run's registry so a rebound provider can never alias another
             # binding's pool (PoolBuilder keys the adapter serial into the identity).
@@ -161,15 +154,27 @@ class OocFakerPoolContext:
             identity=identity,
         )
 
+    def _check_fits(self, reservation: int) -> None:
+        if self._reserved_bytes + reservation > self._max_pool_bytes:
+            raise ExecutionError(
+                code=reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED,
+                message=(
+                    "the faker pools this run needs exceed the out-of-core pool budget. "
+                    "Reduce pool_size or raise the out-of-core pool budget."
+                ),
+            )
+
     def get_pool(self, prepared: PreparedFakerPool) -> ValuePool:
         """Return the pool for ``prepared``, building it at most once per run.
 
         On a cache hit the stored pool is returned with no rebuild. On a miss the
-        pool is reserved against the run allowance BEFORE the provider is
-        allocated: an over-allowance plan raises
-        ``out_of_core_faker_pool_budget_exceeded`` and no pool is built. The
-        reservation is sized from ``pool_size`` alone, never a batch or source
-        row count.
+        pool is refused before any build when the construction-peak floor
+        (``construction_floor``: the value objects, counted only for a string-allowlisted
+        provider, plus the builder's four pointer copies and its distinct-count set) cannot fit; otherwise it is built (bounded by its
+        ``pool_size``), measured with ``measured_pool_bytes`` and reserved against the
+        run allowance. A pool that does not fit raises ``out_of_core_faker_pool_budget_exceeded``, is dropped
+        and never enters the cache. The reservation never depends on a batch or
+        source row count.
 
         A provider-primitive failure (e.g. ``PoolCapacityError`` with
         ``provider_not_poolable`` for a provider the builder cannot pool)
@@ -182,17 +187,17 @@ class OocFakerPoolContext:
         cached = self._cache.get(prepared.identity)
         if cached is not None:
             return cached
-        reservation = prepared.pool_size * self._reserve_per_value
-        if self._reserved_bytes + reservation > self._max_pool_bytes:
-            raise ExecutionError(
-                code=reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED,
-                message=(
-                    f"faker pool for provider {prepared.provider!r} "
-                    f"(pool_size {prepared.pool_size}) needs {reservation} reserved bytes; "
-                    f"{self._reserved_bytes} of {self._max_pool_bytes} already reserved for "
-                    "this run. Reduce pool_size or raise the out-of-core pool budget."
-                ),
+        # Refuse before building when even the construction-peak floor cannot fit: the build
+        # holds more than the final pool, so a huge pool_size never allocates a provider. The
+        # string floor applies only when the adapter the registry resolves is the stock string
+        # adapter of an allowlisted provider; any other adapter gets the type-free floor, since
+        # its values may cost less than a str.
+        self._check_fits(
+            construction_floor(
+                prepared.pool_size,
+                strings=_is_stock_string_provider(self._registry, prepared.provider),
             )
+        )
         pool = self._builder.build(
             prepared.provider,
             size=prepared.pool_size,
@@ -201,6 +206,8 @@ class OocFakerPoolContext:
             config=prepared.build_config,
             namespace=prepared.namespace,
         )
+        reservation = measured_pool_bytes(pool)
+        self._check_fits(reservation)
         self._cache.put(pool)
         self._reserved_bytes += reservation
         self._builds += 1
@@ -213,7 +220,7 @@ class OocFakerPoolContext:
 
     @property
     def reserved_bytes(self) -> int:
-        """Bytes reserved against the run allowance so far (conservative)."""
+        """Measured bytes of the pools built so far, reserved against the allowance."""
         return self._reserved_bytes
 
     @property

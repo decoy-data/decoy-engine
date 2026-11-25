@@ -53,6 +53,7 @@ from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests._column_shapes import CTX_SHAPE_ATTRS, integer_shapes
 from tests._declared_schema import declared_schema
 
 _REG = get_default_registry()
@@ -82,7 +83,8 @@ def _plan(col_name: str, seed: ColumnSeed) -> Any:
         seed_envelope=SeedEnvelope(
             job_seed=_SEED,
             per_table=(("t", TableSeed(per_column=((col_name, seed),), per_group=())),),
-        )
+        ),
+        column_shapes=integer_shapes("t", col_name),
     )
 
 
@@ -99,6 +101,9 @@ class _FakeCtx:
 
     job_seed = _SEED
     mask_key = _SEED
+    column_shapes = CTX_SHAPE_ATTRS["column_shapes"]
+    current_table = "t"
+    nested_outer_column = ""
 
     def __init__(self) -> None:
         self.row_errors: list[RowError] = []

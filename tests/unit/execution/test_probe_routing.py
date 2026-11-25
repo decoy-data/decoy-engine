@@ -39,10 +39,12 @@ from decoy_engine.execution._probe import (
     MIN_PLAUSIBLE_K_FULL_FRAME,
     ProbePoint,
     ProbeResult,
+    probe_peak_bytes,
 )
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.profile._types import ColumnProfile, TableProfile
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
+from tests._column_shapes import INT_DECL
 from tests._declared_schema import declare_rest
 
 _MB = 1024 * 1024
@@ -498,7 +500,12 @@ def _fk_pure_mask_config(tmp_path: Path, n: int = 200_000) -> dict[str, Any]:
                     "name": "parent",
                     "columns": [
                         _faker_col("id", "ns"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "bucketize",
+                            "provider_config": {"width": 10},
+                            **INT_DECL,
+                        },
                     ],
                 },
                 {"name": "child", "columns": [_faker_col("parent_id", "ns")]},
@@ -677,3 +684,13 @@ class TestEndToEndWiring:
         assert recovered.quality_metrics["execution"]["execution_mode"] == "full_frame"
         for table in bounded.outputs:
             assert bounded.outputs[table].equals(recovered.outputs[table]), f"{table} differs"
+
+
+def test_fixed_list_probe_inconclusive(tmp_path):
+    from tests.unit.execution._auto_chunk_support import fixed_list_job
+
+    cfg, sources = fixed_list_job(tmp_path, pa.list_(pa.int32(), 2), [[0, 0], None, [2, 2]], [0, 0])
+    result = probe_peak_bytes(
+        cfg, sources, reference_table="t", target_rows=3, floor_rows=3, engine_version="fixed-list"
+    )
+    assert not result.conclusive and "outcome='crashed'" in result.reason

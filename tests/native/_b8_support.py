@@ -22,6 +22,7 @@ from unittest import mock
 
 import pyarrow as pa
 
+from decoy_engine._pandas_meta import arrow_columns
 from decoy_engine.execution import _chunked
 from decoy_engine.execution._chunked import run_mask_pipeline_chunked
 from decoy_engine.execution._chunked_oracle import _mask_pipeline_chunked
@@ -29,13 +30,11 @@ from decoy_engine.execution._column_access import created_columns
 from decoy_engine.execution.native import _chunked_entry, _dispatch
 from decoy_engine.execution.native._chunked_entry import run_mask_chunked
 from decoy_engine.execution.native._dispatch import run_native_or_oracle_chunked
-from decoy_engine.execution.native.chunked._core import mask_chunked as _run_mask_chunked
 from decoy_engine.profile import (
     DeclarationRequest,
     PreparedDeclaredSources,
     prepare_declared_sources,
 )
-from decoy_engine.profile._declared_columns import arrow_columns
 from decoy_engine.providers_v2 import get_default_registry
 from tests.native._chunked_entry_support import (
     ENGINE_VERSION,
@@ -46,6 +45,7 @@ from tests.native._chunked_entry_support import (
     make_config,
     vault_key,
 )
+from tests.native._chunked_entry_support import mask_chunked_in_job as _run_mask_chunked
 from tests.unit.vault._support import vault_writer
 
 FORCE = "cat_force"

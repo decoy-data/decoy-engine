@@ -59,7 +59,7 @@ def _chunked(tmp: Path) -> tuple[Any, str]:
     return result, result.quality_metrics["auto_chunk"]["mode"]
 
 
-def run_pipeline_with(cfg: dict[str, Any], sources: dict[str, Any], sink: Any) -> Any:
+def run_pipeline_with(cfg: dict[str, Any], sources: dict[str, Any], sink: Any, **knobs: Any) -> Any:
     from decoy_engine.execution import run_pipeline
 
     return run_pipeline(
@@ -69,6 +69,7 @@ def run_pipeline_with(cfg: dict[str, Any], sources: dict[str, Any], sink: Any) -
         engine_version=V,
         auto_chunk_threshold_rows=1,
         chunk_size_rows=7,
+        **knobs,
     )
 
 
@@ -86,7 +87,9 @@ def _unified(tmp: Path) -> tuple[Any, str]:
         pytest.skip("decoy-engine-native companion not installed")
     cfg, sources = _single_column_job(tmp, "hash")
     cfg["post_scan"] = {"integrity": True}
-    result = run_pipeline_with(cfg, sources, None)
+    # Auto-chunk off: with the 1-row threshold the table would take the chunked lane first, and
+    # the unified slice is only reachable from the full-frame executor.
+    result = run_pipeline_with(cfg, sources, None, auto_chunk=False)
     taken = "unified_slice_activation" in result.quality_metrics
     return result, "unified_slice" if taken else "full_frame"
 

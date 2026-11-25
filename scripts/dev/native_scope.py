@@ -3,9 +3,9 @@
     native_scope.py changes --event EVENT --base SHA --head SHA >> "$GITHUB_OUTPUT"
     toJSON(needs) | native_scope.py judge
 
-`changes` prints one line, `native=true` or `native=false`. It is `false` only when a pull request
-diff was read and touched none of the native paths. Every other case is `true`: a schedule or
-dispatch run, a missing sha, a git error. A wrong `true` costs one macOS run; a wrong `false` would
+`changes` prints one line, `native=true` or `native=false`. It is `false` for a push to main
+(the PR that merged it already built the legs) and for a pull request diff that touched none of the
+native paths. Every other case is `true`: a schedule or dispatch run, a missing sha, a git error. A wrong `true` costs one macOS run; a wrong `false` would
 let a native change merge without its wheel build.
 
 `judge` reads the `needs` context of the aggregator job on stdin and exits 0 only when
@@ -45,6 +45,8 @@ def is_native(path: str) -> bool:
 
 
 def native_changed(event: str, base: str, head: str, run: Runner = _run_git) -> bool:
+    if event == "push":
+        return False
     if event != "pull_request" or not base or not head:
         return True
     # -z keeps a non-ASCII path unquoted, so the prefix test still sees it. --no-renames lists

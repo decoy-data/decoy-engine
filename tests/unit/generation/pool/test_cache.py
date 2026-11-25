@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from decoy_engine.generation.pool import PoolCache, PoolCapacityError, ValuePool
+from decoy_engine.generation.pool._value_pool import measured_pool_bytes
 
 
 def _make_pool(provider: str, size: int, seed: bytes = b"\x00" * 8) -> ValuePool:
@@ -41,7 +42,7 @@ class TestGetPut:
 class TestEviction:
     def test_lru_eviction_when_over_budget(self) -> None:
         cache = PoolCache(max_bytes=10_000)
-        # Each pool ~ 400 bytes (4 entries x 100 chars x 1 byte/char est).
+        # Each pool measures 628 bytes (4 entries x (49 + 100 + 8)).
         for i in range(5):
             cache.put(_make_pool(f"p{i}", 4, seed=bytes([i] * 8)))
         # Should have evicted some; cache stays within budget.
@@ -54,9 +55,22 @@ class TestEviction:
             cache.put(big_pool)
         assert excinfo.value.code == "pool_exceeds_cache_budget"
 
+    def test_the_budget_error_text_is_value_free_and_keeps_the_counts_as_attributes(self) -> None:
+        cache = PoolCache(max_bytes=100)
+        big_pool = _make_pool("secretprovider", 1000)
+        with pytest.raises(PoolCapacityError) as excinfo:
+            cache.put(big_pool)
+        text = str(excinfo.value)
+        assert "secretprovider" not in text
+        assert str(excinfo.value.pool_bytes) not in text
+        assert str(excinfo.value.max_bytes) not in text
+        assert not any(ch.isdigit() for ch in text.replace("pool_exceeds_cache_budget", ""))
+        assert excinfo.value.max_bytes == 100
+        assert excinfo.value.pool_bytes == measured_pool_bytes(big_pool)
+
     def test_eviction_counter_increments(self) -> None:
         cache = PoolCache(max_bytes=2000)
-        cache.put(_make_pool("a", 4, seed=b"\x01" * 8))  # ~400 bytes
+        cache.put(_make_pool("a", 4, seed=b"\x01" * 8))  # 628 bytes
         cache.put(_make_pool("b", 4, seed=b"\x02" * 8))
         cache.put(_make_pool("c", 4, seed=b"\x03" * 8))
         cache.put(_make_pool("d", 4, seed=b"\x04" * 8))
@@ -86,8 +100,8 @@ class TestQualityWarnings:
     S10 reads cache.warnings() into the manifest quality_summary (R14)."""
 
     def test_dominating_pool_emits_warning(self) -> None:
-        cache = PoolCache(max_bytes=4000)
-        cache.put(_make_pool("p", 4))  # ~1600 bytes > 25% of 4000
+        cache = PoolCache(max_bytes=2000)
+        cache.put(_make_pool("p", 4))  # 628 measured bytes > 25% of 2000
         warns = cache.warnings()
         assert len(warns) == 1
         assert warns[0].code == "pool_dominates_cache"
@@ -96,11 +110,11 @@ class TestQualityWarnings:
 
     def test_small_pool_emits_no_warning(self) -> None:
         cache = PoolCache(max_bytes=10_000_000)
-        cache.put(_make_pool("p", 4))  # ~1600 bytes, far below 25%
+        cache.put(_make_pool("p", 4))  # 628 bytes, far below 25%
         assert cache.warnings() == ()
 
     def test_clear_resets_warnings(self) -> None:
-        cache = PoolCache(max_bytes=4000)
+        cache = PoolCache(max_bytes=2000)
         cache.put(_make_pool("p", 4))
         assert cache.warnings()
         cache.clear()

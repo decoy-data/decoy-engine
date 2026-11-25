@@ -59,6 +59,27 @@ reported, because its unmasked rows keep their source values.
 Use it for names, emails, phone numbers, addresses, and other fields where you
 want realistic-looking replacements rather than a redaction.
 
+Three providers draw their value from the key instead of a pool: `uuid`,
+`random_int_range` and `random_choice`. They build no pool, so `pool_size` has no
+effect on them, and they take only the `reuse` cardinality mode (`unique`,
+`match_source_cardinality` and `scale_source_cardinality` are refused at compile).
+Deterministic mode keys the draw on the source value and the namespace, so equal
+sources give equal outputs on both sides of a key. Non-deterministic mode keys it
+on the row number, never on the source value. In both modes a null source stays null.
+
+- `uuid` writes an RFC 9562 version 4 string. It takes no arguments.
+- `random_int_range` writes an integer from `provider_config` `min`, `max` and
+  `step` (defaults 0, 9999 and 1; whole numbers only, `max` not below `min`,
+  `step` at least 1, at most 2^56 values, all inside the signed 64-bit range).
+- `random_choice` writes one of `provider_config.elements`, a non-empty list of
+  strings, whole numbers, floats or booleans of one type (default `a`, `b`, `c`).
+  The output column has that type.
+
+A namespace may not contain `/computed:`; the engine adds that suffix to keep
+these draws apart from pool draws in the same namespace. Computed providers run
+the whole frame: they are outside the chunked and out-of-core faker allowlists, so
+a forced out-of-core run refuses them and an auto-routed job runs the whole frame.
+
 ### hash
 
 Produces a deterministic, joinability-preserving token:
@@ -247,11 +268,16 @@ secret.
 - `bucket` (str, required): one of `week`, `month`, or `quarter`. An invalid
   or misspelled value raises `StrategyError(bucket_perturb_invalid_config)` at
   execution time, before any row is processed (fail-closed).
-- `date_format`: a strftime format; detected from the column if omitted, and the run
-  stops when none can be detected (set it explicitly, as detection is going away). It
-  must contain at least one date directive (`%Y`, `%m`, `%d`, ...) because the same
-  format writes each perturbed date back. `ISO8601`, `mixed`, a bare `%Q` or a
-  time-only format such as `%H:%M:%S` is rejected at compile time with
+- `date_format`: a strftime format. Required on a text column: a `bucket_perturb` column of text
+  without one is refused at plan compile (`column_shape_required`), and nothing guesses it from
+  the cells. A source column that is already a date (Parquet, DuckDB, a database or an Arrow
+  table) needs none. The column's type comes from the source schema, and the output keeps it: a
+  date stays a date. A `date_format` set on such a column is not used, and compile adds the
+  warning `column_shape_format_unused`. A timestamp (with or without a time zone), a number, a
+  boolean or a decimal column is refused at compile (`column_shape_mismatch`); cast it to a date,
+  or write it as text with a `date_format`. The format must contain at least one date directive
+  (`%Y`, `%m`, `%d`, ...) because the same format writes each perturbed date back. `ISO8601`,
+  `mixed`, a bare `%Q` or a time-only format such as `%H:%M:%S` is rejected at compile time with
   `bucket_perturb_date_format_unsupported`, and by the handler as
   `bucket_perturb_invalid_config`. Write a concrete pattern such as `%Y-%m-%d`.
   Time, fractional-second and timezone directives are allowed but write midnight,
@@ -278,11 +304,13 @@ and processes.
 Null values stay null. A non-null value that does not parse as a date is a
 `format_error` row error, as it is for `date_shift`: the run fails, or the row is
 quarantined when quarantine covers `format_error`. The source text is never written
-out as if it were masked. When no `date_format` is set and none can be detected from
-the data, the run stops with `bucket_perturb_requires_date_format`. The out-of-core
+out as if it were masked. A caller that reaches the strategy with no `date_format` on a
+column the plan does not list as a date (a run that skipped plan compile) stops with
+`bucket_perturb_requires_date_format`. The out-of-core
 route has no row-error channel, so on that route a value that does not parse stops
-the run with `bucket_perturb_unparseable_no_row_channel`. A date outside pandas' range (before 1677 or after 2262, such as 9999-12-31) is
-also a row error. To keep a known sentinel as it is, list it in `preserve_values`:
+the run with `bucket_perturb_unparseable_no_row_channel`. On a text column, a date outside pandas' range (before 1677 or after 2262, such as
+9999-12-31) is also a row error; a date column has no such limit, and only a bucket position outside the years 1
+to 9999 is a row error. To keep a known sentinel as it is, list it in `preserve_values`:
 it is kept unchanged even when it is out of that range.
 
 ```yaml
@@ -331,7 +359,7 @@ provider_config:
 ```
 
 - `date_format` is required when `preserve_values` is set on a text column; a typed date or
-  zoned timestamp column needs none, and its sentinel rows keep their source value and type.
+  zoned timestamp column (a date only, for `bucket_perturb`) needs none, and its sentinel rows keep their source value and type.
   The sentinel is matched by calendar date, so `01/01/2099` under `%d/%m/%Y` matches `2099-01-01` and a
   time of day is ignored. `%f`, `%Z`, `ISO8601` and `mixed` are rejected with it.
 - `9999-12-31` is matched explicitly. Without the option, pandas cannot represent
@@ -340,8 +368,9 @@ provider_config:
   perturbed.
 - A string source is emitted byte for byte. A typed date or timestamp source is
   rendered from its calendar date with `date_format`, so the output column stays
-  text. The exception is `date_shift` on a source column that is natively a date or a
-  zoned timestamp: its sentinel rows keep their source value and the column keeps its type.
+  text. The exception is `date_shift` or `bucket_perturb` on a source column that is natively a
+  date (or, for `date_shift`, a zoned timestamp): its sentinel rows keep their source value and
+  the column keeps its type.
 - It works on every route the operator runs on (pandas, native chunked, native
   full-frame, and out-of-core for `bucket_perturb`). Preserved rows never reach the
   keyed derivation, so a sentinel next to the 1677 or 2262 bounds is safe too.
@@ -1377,6 +1406,15 @@ same error code and is never silently dropped. The accepted forms are:
 - Membership in a non-empty literal list: `status in ['a', 'b']`,
   `status not in ['x']`.
 - `and`, `or`, `not` and parentheses.
+- A column is a bare name or `source.<name>`: the two mean the same, the column's value
+  as the source held it. `masked.<name>` is parsed and refused with the error code
+  `when_masked_reference_unsupported` (planned for 1.x; V1 reads original values only).
+  A column name that holds a dot or another character outside ASCII letters, digits and `_`
+  is written in backticks, with or without the prefix: `` `a.b` == 'x' ``,
+  ``source.`first name` == 'x' ``. A quoted name holds no backtick, backslash or control
+  character, and the reserved-name rule below applies to it too. `source` and `masked` are
+  prefixes only before a dot: a column named `source` is still read as `source == 'web'`.
+  Spaces around the dot are accepted, as in pandas: `source . status == 'x'` reads `status`.
 - Literals are integers in the int64 range, finite floats, `True`, `False` and
   strings in single or double quotes. A string holds no backslash, no quote
   character and no control character.
@@ -1385,8 +1423,9 @@ Everything else is refused with the error code `when_outside_closed_grammar`. Er
 name the position and the construct, never the predicate text, because a predicate can embed
 data values. What is refused: arithmetic, function and method calls, attributes,
 subscripts, `@` references, comparing two columns, chained comparisons, `None`, empty
-lists, bare references, bytes and f-string literals, backtick-quoted names and
-names with characters other than ASCII letters, digits and `_`. There is no null
+lists, bare references, bytes and f-string literals, a dotted name with no quote and
+names with characters other than ASCII letters, digits and `_` unless they are quoted
+with backticks (see the next paragraph). There is no null
 check in the grammar. `x >= ''` (string) and `x < 0 or x >= 0` (numeric) select the
 non-null rows. Their negations select the null rows only on numpy-backed columns; on a
 pandas nullable dtype (`string`, `Float64`, including Parquet written by pandas)

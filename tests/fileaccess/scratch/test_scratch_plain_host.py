@@ -37,7 +37,7 @@ F06_ROWS = "45aa765b12098b3f6b458566d329d47bdffa5c4f78a5f8231a2da6dae29676d4"
 
 
 @pytest.fixture(autouse=True)
-def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_env_clean: None) -> Path:
     root = tmp_path / "tmp"
     root.mkdir()
     monkeypatch.setattr("tempfile.tempdir", str(root))

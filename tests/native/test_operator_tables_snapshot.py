@@ -246,5 +246,24 @@ def test_group_key_sibling_types_and_provider_allowlist() -> None:
         == rejections._NATIVE_GROUP_KEY_SIBLING_TYPES
     )
     assert type(rejections._NATIVE_GROUP_KEY_SIBLING_TYPES) is frozenset
-    assert frozenset({"person_first_name", "person_last_name"}) == C1_PROVIDER_ALLOWLIST
+    assert (
+        frozenset(
+            {
+                "person_first_name",
+                "person_last_name",
+                "person_name",
+                "person_full_name",
+                "person_email",
+                "person_phone",
+                "address_street",
+                "address_city",
+                "address_state",
+                "address_zip",
+                "synthetic_account_number",
+                "synthetic_member_id",
+                "synthetic_plan_id",
+            }
+        )
+        == C1_PROVIDER_ALLOWLIST
+    )
     assert type(C1_PROVIDER_ALLOWLIST) is frozenset

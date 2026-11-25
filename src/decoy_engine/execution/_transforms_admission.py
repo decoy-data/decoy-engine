@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from decoy_engine.config import DERIVED_ORIGIN, final_bindings, parse_ops
 from decoy_engine.execution._transforms_gate import (
     PER_TABLE_TRANSFORMS_PRESENT,
     find_table_config,
@@ -187,13 +188,8 @@ def _row_changing(config: Mapping[str, Any], name: str) -> bool:
 def _derived_names(config: Mapping[str, Any], name: str) -> set[str]:
     """Columns bound to a derived value after the table's ops (a dropped-then-derived
     name is derived; a derived-then-dropped name is gone)."""
-    derived: set[str] = set()
-    for op in (find_table_config(config, name) or {}).get("transforms") or []:
-        if op.get("op") == "derive":
-            derived.add(op["column"])
-        elif op.get("op") == "drop_column":
-            derived -= set(op.get("columns") or [])
-    return derived
+    ops = parse_ops((find_table_config(config, name) or {}).get("transforms") or [])
+    return {col for col, origin in final_bindings([], ops) if origin == DERIVED_ORIGIN}
 
 
 def _distinct_counts(

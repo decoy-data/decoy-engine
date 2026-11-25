@@ -2,8 +2,8 @@
 
 The out-of-core route declined faker entirely before this slice. It now runs the
 ONE parity-provable variant: deterministic REUSE, an exact-`string` source, a
-person-name provider on the native allowlist, a namespace, and an explicit
-pool_size. Selection reuses the SAME compiled index kernel
+provider on the native faker allowlist, and a namespace. An absent
+pool_size resolves to the default. Selection reuses the SAME compiled index kernel
 (`sample_faker_array`) the sequential and native-chunked routes call, drawing
 from a pool the run-scoped `OocFakerPoolContext` (B3) builds once and reuses
 across batches. No keyed draw or pool-selection algorithm is re-implemented here.
@@ -77,9 +77,9 @@ def decline_reason(column: str, schema: pa.Schema, seed: ColumnSeed) -> str | No
     """None when `column` can run the deterministic-REUSE native faker payload, else a reason.
 
     The admitted subset is the exact one the sequential and chunked routes gate
-    on: a person-name provider on `C1_PROVIDER_ALLOWLIST`, the deterministic
-    REUSE precondition (`deterministic`, `cardinality_mode=reuse`, a namespace,
-    an explicit pool_size), and an exact-`string` source. The non-deterministic
+    on: an allowlisted poolable string provider on `C1_PROVIDER_ALLOWLIST`, the deterministic
+    REUSE precondition (`deterministic`, `cardinality_mode=reuse`, a namespace),
+    and an exact-`string` source. The non-deterministic
     (positional) REUSE leg needs the global row offset and is out of this slice's
     scope; UNIQUE/MATCH/SCALE need whole-column RNG state. Those all decline here.
     """

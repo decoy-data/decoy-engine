@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import shutil
+import sys
 from collections import namedtuple
 from pathlib import Path
 from typing import Any
@@ -25,8 +26,8 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
-from decoy_engine.execution import _pipeline_route_exec as route_exec
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution.out_of_core import _budget as budget_mod
 from decoy_engine.execution.out_of_core import _runner
 from decoy_engine.execution.out_of_core._batch_join import ChildFkBatchJoiner
 from decoy_engine.execution.out_of_core._reorder_budget import resolve_reorder_budgets
@@ -131,13 +132,16 @@ class Spy:
 
 
 class _ShutilProxy:
-    """The real `shutil`, except `disk_usage` returns a fixed reading (or fails), and only as
-    seen from `_pipeline_route_exec`, so no other module's disk check is disturbed."""
+    """The real `shutil`, except that `disk_usage` called by the cap resolver returns a fixed
+    reading (or fails), so the real resolver turns the `OSError` into no cap. Every other disk
+    check in the budget module sees the real disk."""
 
     def __init__(self, free: int | None) -> None:
         self._free = free
 
     def disk_usage(self, path: Any) -> Any:
+        if sys._getframe(1).f_code.co_name != "resolve_temp_disk_budget":
+            return shutil.disk_usage(path)
         if self._free is None:
             raise OSError("disk usage unavailable")
         return _Usage(self._free * 2, self._free, self._free)
@@ -147,7 +151,7 @@ class _ShutilProxy:
 
 
 def fixed_disk(monkeypatch: pytest.MonkeyPatch, free: int | None = FREE_DISK) -> None:
-    monkeypatch.setattr(route_exec, "shutil", _ShutilProxy(free))
+    monkeypatch.setattr(budget_mod, "shutil", _ShutilProxy(free))
 
 
 def run(

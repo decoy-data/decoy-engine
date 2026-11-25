@@ -63,6 +63,13 @@ from decoy_engine.profiling.bound_baseline import (
     bind_baseline,
     evaluate_drift,
 )
+from decoy_engine.profiling.pre_scan import (
+    PreScanBlockedError,
+    PreScanFailedError,
+    PreScanVerdict,
+    PreScanWarning,
+    evaluate_pre_scan,
+)
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.recommendations import (
     DEFAULT_STRATEGY_BY_DETECTOR,
@@ -133,6 +140,10 @@ __all__ = [
     "KeyBatches",
     "KeyFacts",
     "ModelHit",
+    "PreScanBlockedError",
+    "PreScanFailedError",
+    "PreScanVerdict",
+    "PreScanWarning",
     "RelationshipFacts",
     "ScanDiffCore",
     "ScanDiffCoreRead",
@@ -159,6 +170,7 @@ __all__ = [
     "diff_scan_tables",
     "distribution_snapshot_document",
     "evaluate_drift",
+    "evaluate_pre_scan",
     "get_default_strategy",
     "is_value_sensitive",
     "key_facts",
