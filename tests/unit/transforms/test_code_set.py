@@ -1448,8 +1448,10 @@ class TestCorpusSourceVersionPin:
         with pytest.raises(PlanCompileError) as exc_info:
             apply_code_set("I10", cfg, mode="mask", job_seed=_JOB_SEED)
         assert exc_info.value.code == "code_set_corpus_version_mismatch"
-        assert "FY2023" in exc_info.value.message
-        assert "FY2024" in exc_info.value.message
+        # Value-free: neither the configured pin nor the embedded version is echoed.
+        assert "FY2023" not in exc_info.value.message
+        assert "FY2024" not in exc_info.value.message
+        assert "corpus_source_version" in exc_info.value.message
 
     def test_matching_customer_version_loads(self, tmp_path: pathlib.Path):
         tbl = pa.table(

@@ -76,8 +76,8 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
             code=reasons.plan.CODE_SET_CORPUS_SOURCE_VERSION_INVALID,
             path="provider_config.corpus_source_version",
             message=(
-                f"corpus_source_version must be a string or numeric release id "
-                f"(got {version!r} of type {type(version).__name__}). Quote the "
+                "corpus_source_version must be a string or numeric release id "
+                f"(got type {type(version).__name__}). Quote the "
                 "release, e.g. corpus_source_version: '2024'."
             ),
         )

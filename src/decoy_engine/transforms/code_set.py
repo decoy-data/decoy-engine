@@ -355,7 +355,7 @@ def apply_code_set(
                     ),
                 )
             return _pick_gen(rows, job_seed=job_seed, namespace=namespace, row_index=row_index)
-        raise ValueError(f"code_set: unsupported mode {mode!r}. Use 'mask' or 'gen'.")
+        raise ValueError("code_set: unsupported mode. Use 'mask' or 'gen'.")
     except BaseException:
         del job_seed
         raise
@@ -409,8 +409,8 @@ def _apply_chapter_preserve(
                 code=reasons.plan.CODE_SET_CHAPTER_ABSENT,
                 path="provider_config.chapter_preserve",
                 message=(
-                    f"chapter_preserve: chapter {input_chapter!r} (derived from input "
-                    f"{value!r}) is not present in the corpus. Cannot preserve the chapter "
+                    "chapter_preserve: the chapter derived from the input is not present "
+                    "in the corpus. Cannot preserve the chapter "
                     "invariant: no candidates exist in this chapter. Use a larger corpus "
                     "that covers this chapter, or disable chapter_preserve for this field."
                 ),
@@ -428,9 +428,9 @@ def _apply_chapter_preserve(
                 code=reasons.plan.CODE_SET_SOLE_MEMBER_BUCKET,
                 path="provider_config.chapter_preserve",
                 message=(
-                    f"chapter_preserve: chapter {input_chapter!r} has only one code "
-                    f"({value!r}) in the corpus. Cannot produce output != input. "
-                    f"Use a larger corpus or disable chapter_preserve for this field."
+                    "chapter_preserve: the input's chapter has only one code "
+                    "in the corpus. Cannot produce output != input. "
+                    "Use a larger corpus or disable chapter_preserve for this field."
                 ),
             )
 
@@ -479,7 +479,7 @@ def _pick_mask(value: str, record: _CorpusRecord, *, mask_key: bytes, namespace:
                 code=reasons.plan.CODE_SET_SINGLE_ROW_CORPUS,
                 path="provider_config.code_set",
                 message=(
-                    f"Corpus has only one code ({value!r}) and it equals the input. "
+                    "Corpus has only one code and it equals the input. "
                     "Mask mode requires at least two distinct codes in the corpus."
                 ),
             )
