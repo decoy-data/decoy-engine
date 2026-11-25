@@ -501,7 +501,7 @@ rejected at submit time.
 
 ## Large jobs with no foreign keys
 
-Status: current. Plan: `docs/plans/2026-11-19-nonfk-oom.md`. Measured numbers:
+Status: current. Plan: `docs/plans/2026-11-19-nonfk-oom.md`. Memory before the guard:
 `docs/records/2026-11-19-nonfk-oom-baseline.md`.
 
 Under `execution_mode="auto"`, a mask job with no foreign key takes one of three routes. The
