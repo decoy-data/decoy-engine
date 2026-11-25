@@ -517,7 +517,7 @@ New guards:
     `namedtuple("Result", "issue")(ValueError(_CANARY))` as a positional `%s` argument through
     the engine file handler prints exactly `(ValueError,)`, the same as `cade66080`. Cells for a
     `list` subclass and a `set` subclass with an exception item print `[ValueError]` and
-    `{ValueError}`. A clean `namedtuple` prints its own `repr`, unchanged from stock.
+    `{ValueError}`. A clean `namedtuple` is rebuilt as a plain tuple and prints `(1,)`: only an exact builtin returns the original object (security review).
 22. `test_two_handlers_print_the_same_record` (Codex R2 V1-3). Two engine handlers built by
     `_new_engine_handler`, one stream and one file, handle the same record in turn. Use a fresh record and empty buffers per cell, with
     message-only formatters. Flush before reading the file. Compare the complete contents of

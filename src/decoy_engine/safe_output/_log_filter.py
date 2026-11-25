@@ -17,18 +17,22 @@ type (an unbound builtin iterator at most), in this order:
   `Mapping`) becomes `<mapping>`, clean or not, so no lookup, factory or order of a caller type
   can be reached. A `dict` with a key that is not an exact `str`, `int`, `float`, `bool` or
   `None` is `<mapping>` too: keys are never rewritten;
-- scalars (`str`, `bytes`, numbers, `None`, `range`, `array`) pass. A `str` subclass is copied
+- exact scalars (`str`, `bytes`, numbers, `None`, `range`, `array`) pass. A `str` subclass is copied
   to a plain `str`, so its own `__str__` and `__repr__` never run;
 - a `list`, `tuple`, `set`, `frozenset` (or subclass) is opened one level deep in `msg` and two
-  in `args`; a changed one becomes a new plain container, an unchanged one is returned as is. A
+  in `args`; a changed one, or any subclass (a `namedtuple` included), becomes a new plain container of the
+  base type, and only an unchanged exact builtin is returned as is. A
   `deque`, a dict view or a `slice` is rebuilt as a plain list (a slice as a slice). A plain
   container at the depth limit becomes `<nested>`;
 - any other iterable (a generator, a custom class with `__iter__`, an array library's object)
   becomes `<nested>`: iterating it would run caller code and could drain it;
-- a scalar-like object (`_SCALAR_LIKE`: `Path`, `Decimal`, enum member, `date`, `datetime`,
-  `time`, `timedelta`, `UUID`, a class or function, a number subclass) passes and prints as
-  usual. Every other object (`SimpleNamespace`, `argparse.Namespace`, `functools.partial`, a
-  caller class) becomes `<object>`: its repr is caller code.
+- a dataclass or attrs instance is `<object>`, ahead of every other row;
+- an exact scalar-like type (`_SCALAR_LIKE`: `Path`, `Decimal`, `date`, `datetime`, `time`,
+  `timedelta`, `UUID`, a class or function) passes and prints as usual. A subclass of one never
+  does, since it may override `__repr__`: a number subclass is copied to its base, an enum member
+  prints as `Class.NAME` built from its name, and every other object (`SimpleNamespace`,
+  `argparse.Namespace`, `functools.partial`, a caller class) is `<object>`. Only an exact builtin
+  container or scalar returns the original value; any subclass is rebuilt or replaced;
 
 Also:
 
@@ -62,6 +66,7 @@ call-site guard `tests/sentry/test_log_interpolation.py` covers them instead (pl
 
 from __future__ import annotations
 
+import abc
 import array
 import datetime
 import decimal
@@ -114,26 +119,34 @@ _ITERABLES: tuple[tuple[type, Callable[[Any], Iterator[Any]]], ...] = (
     (_VALUES_VIEW, _VALUES_VIEW.__iter__),  # type: ignore[attr-defined]
     (_ITEMS_VIEW, _ITEMS_VIEW.__iter__),  # type: ignore[attr-defined]
 )
-# Anything else that may print through its own repr. Every other object is `<object>`: a
-# `SimpleNamespace`, an `argparse.Namespace` or a `functools.partial` prints what it holds.
+# Exact types that print safely through their own repr; a subclass never does, because it may
+# override `__repr__`. Every other object is `<object>`: a `SimpleNamespace`, an
+# `argparse.Namespace` or a `functools.partial` prints what it holds.
 _SCALAR_LIKE = (
-    int,
-    float,
-    complex,
-    pathlib.PurePath,
+    pathlib.PurePosixPath,
+    pathlib.PureWindowsPath,
+    pathlib.PosixPath,
+    pathlib.WindowsPath,
     decimal.Decimal,
-    enum.Enum,
     datetime.date,
+    datetime.datetime,
     datetime.time,
     datetime.timedelta,
     uuid.UUID,
     type,
+    abc.ABCMeta,
     types.FunctionType,
     types.BuiltinFunctionType,
     types.MethodType,
     type(None),
     type(Ellipsis),
     type(NotImplemented),
+)
+# A number subclass is copied to its base with the unbound `__pos__`, which runs no caller code.
+_NUMBER_COPIES: tuple[tuple[type, Callable[[Any], object]], ...] = (
+    (int, int.__pos__),
+    (float, float.__pos__),
+    (complex, complex.__pos__),
 )
 _PLAIN_KEY_TYPES = (str, int, float, bool, type(None))
 # Factories that build an empty builtin: a missing name on such a defaultdict has a safe default.
@@ -200,17 +213,27 @@ def _is_container(kind: type) -> bool:
     )
 
 
+def _is_record_class(kind: type) -> bool:
+    """A dataclass or attrs class, read from the class attribute each one sets."""
+    return (
+        getattr(kind, "__dataclass_fields__", None) is not None
+        or getattr(kind, "__attrs_attrs__", None) is not None
+    )
+
+
 def _safe_value(value: object, depth: int) -> object:
     """`value` as it may be written back: the one closed type table (module docstring).
 
-    Rows run in order and the first match wins. Rows 1 and 2 come before the depth check, so an
-    exception or a non-plain mapping is replaced at every position the scan reaches.
+    Rows run in order and the first match wins. Rows 1 to 3 come before the depth check, so an
+    exception, a dataclass or a non-plain mapping is replaced at every position the scan reaches.
     An unknown iterable is never iterated (that would run caller code and could drain a
     generator), so it is the placeholder.
     """
     kind = type(value)
     if issubclass(kind, BaseException):
         return _label(value)  # type: ignore[arg-type]
+    if _is_record_class(kind):
+        return _OBJECT_PLACEHOLDER
     if kind is not dict and (issubclass(kind, Mapping) or issubclass(kind, UserDict)):
         return _MAPPING_PLACEHOLDER
     if kind is _Label or _is_exact(value, _PLAIN_VALUE_TYPES):
@@ -224,7 +247,7 @@ def _safe_value(value: object, depth: int) -> object:
         if issubclass(kind, base):
             items: list[object] = list(iterate(value))
             new = [_safe_value(v, depth - 1) for v in items]
-            if all(n is o for n, o in zip(new, items, strict=True)):
+            if kind is base and all(n is o for n, o in zip(new, items, strict=True)):
                 return value
             return base(new)
     for base, iterate in _ITERABLES:
@@ -247,12 +270,22 @@ def _safe_value(value: object, depth: int) -> object:
 def _other_value(value: object) -> object:
     """Any object the table has no row for: deny by default.
 
-    A scalar-like type (`_SCALAR_LIKE`) prints as it does today, an iterable is `<nested>`
-    (it is never iterated), and every other object is `<object>`.
+    Only an exact scalar-like type returns the original, because a subclass may override
+    `__repr__`. An enum member prints as `Class.NAME` built from its name, a number subclass is
+    copied to its base, an iterable is `<nested>` (never iterated), and the rest is `<object>`.
     """
     kind = type(value)
-    if any(issubclass(kind, t) for t in _SCALAR_LIKE):
+    if _is_exact(value, _SCALAR_LIKE):
         return value
+    if issubclass(kind, enum.Enum):
+        try:
+            name = vars(value)["_name_"]
+        except (KeyError, TypeError):
+            return _OBJECT_PLACEHOLDER
+        return _Label(f"{kind.__name__}.{name}")
+    for base, copy in _NUMBER_COPIES:
+        if issubclass(kind, base):
+            return copy(value)
     return _NESTED_PLACEHOLDER if issubclass(kind, Iterable) else _OBJECT_PLACEHOLDER
 
 

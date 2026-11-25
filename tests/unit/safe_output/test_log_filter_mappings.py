@@ -589,7 +589,7 @@ def test_sequence_subclass_keeps_the_safe_rule(tmp_path: pathlib.Path) -> None:
         (result(exc), "(ValueError,)"),
         (_ListSub([exc]), "[ValueError]"),
         (_SetSub([exc]), "{ValueError}"),
-        (result(1), "Result(issue=1)"),
+        (result(1), "(1,)"),
     )
     for arg, expected in cells:
         assert _both(_record("%s", (arg,), exc=False), tmp_path) == (expected + "\n",) * 2
@@ -739,13 +739,9 @@ def test_protocol_routed_objects_at_the_depth_limit(name: str) -> None:
 
 
 def test_scalars_and_plain_objects_still_print_as_before() -> None:
-    class Color(enum.Enum):
-        RED = 1
-
     values = (
         pathlib.PurePosixPath("/tmp/a"),
         decimal.Decimal("1.50"),
-        Color.RED,
         datetime.datetime(2026, 11, 25, 1, 2, 3),
         datetime.date(2026, 11, 25),
         uuid.UUID(int=7),
@@ -771,3 +767,92 @@ def test_removing_the_iterable_route_is_visible() -> None:
     record = _record("%s", (_CustomIterable(ValueError(_CANARY)),), exc=False)
     SafeRecordFilter().filter(record)
     assert record.getMessage() == "<nested>"
+
+
+# Security review: a subclass never returns the original object, so its own repr never runs.
+
+
+class _Color(enum.Enum):
+    RED = 1
+
+    def __repr__(self) -> str:
+        return _CANARY
+
+    def __str__(self) -> str:
+        return _CANARY
+
+
+class _IntSub(int):
+    def __repr__(self) -> str:
+        return _CANARY
+
+    __str__ = __repr__
+
+
+class _ListSubLeak(list):  # type: ignore[type-arg]
+    def __repr__(self) -> str:
+        return _CANARY
+
+    __str__ = __repr__
+
+
+class _PathSub(type(pathlib.PurePosixPath())):  # type: ignore[misc]
+    def __repr__(self) -> str:
+        return _CANARY
+
+    __str__ = __repr__
+
+
+class _DecimalSub(decimal.Decimal):
+    def __repr__(self) -> str:
+        return _CANARY
+
+    __str__ = __repr__
+
+
+@dataclasses.dataclass(init=False, repr=False, eq=False)
+class _RecordTuple(tuple):  # type: ignore[type-arg]
+    def __repr__(self) -> str:
+        return _CANARY
+
+    __str__ = __repr__
+
+
+def _subclass_cells() -> dict[str, tuple[object, str]]:
+    return {
+        "int_sub": (_IntSub(5), "5"),
+        "list_sub": (_ListSubLeak([1]), "[1]"),
+        "path_sub": (_PathSub("/tmp/a"), "<object>"),
+        "decimal_sub": (_DecimalSub("1.5"), "<object>"),
+        "enum": (_Color.RED, "_Color.RED"),
+        "record_tuple": (_RecordTuple((1, 2)), "<object>"),
+    }
+
+
+@pytest.mark.parametrize("name", list(_subclass_cells()))
+@pytest.mark.parametrize("where", ["positional", "lone_value", "nested"])
+@pytest.mark.parametrize("conv", ["%s", "%r"])
+def test_a_subclass_never_prints_through_its_own_repr(
+    name: str, where: str, conv: str, tmp_path: pathlib.Path
+) -> None:
+    cell, expected = _subclass_cells()[name]
+    if where == "positional":
+        record = _record(f"x {conv}", (cell,), exc=False)
+        want = f"x {expected}\n"
+    elif where == "lone_value":
+        record = _lone(f"{conv}", {"k": cell}) if False else _lone("%(k)" + conv[1:], {"k": cell})
+        want = f"{expected}\n"
+    else:
+        record = _record(f"x {conv}", ([cell],), exc=False)
+        inner = "<nested>" if name == "list_sub" else expected  # a container at the limit
+        want = f"x [{inner}]\n"
+    out = _both(record, tmp_path)
+    assert _CANARY not in out[0]
+    assert out == (want, want)
+
+
+def test_clean_exact_scalars_and_containers_keep_their_identity() -> None:
+    values = [pathlib.PurePosixPath("/a"), decimal.Decimal("1"), [1], (1,), {"a": 1}]
+    record = _record("%s %s %s %s %s", tuple(values), exc=False)
+    SafeRecordFilter().filter(record)
+    assert all(a is b for a, b in zip(record.args, values, strict=True))  # type: ignore[arg-type]
