@@ -78,3 +78,15 @@ def test_e2e_refused_cleanly(
     bench: Any, exit_code: int, stderr: str, target: bool, staging: list[str], expected: bool
 ) -> None:
     assert bench.e2e_refused_cleanly(exit_code, stderr, target, staging) is expected
+
+
+def test_passthrough_only_keeps_every_column_and_drops_every_mask(bench: Any) -> None:
+    config = bench.build_config("W-U", "/data/in.parquet")
+    names = [c["name"] for c in config["tables"][0]["columns"]]
+    plain = bench.passthrough_only(config)
+    columns = plain["tables"][0]["columns"]
+    assert [c["name"] for c in columns] == names
+    assert {c["strategy"] for c in columns} == {"passthrough"}
+    # The input config is not edited in place.
+    assert {c["strategy"] for c in config["tables"][0]["columns"]} > {"passthrough"}
+    assert len({c["strategy"] for c in config["tables"][0]["columns"]}) > 1

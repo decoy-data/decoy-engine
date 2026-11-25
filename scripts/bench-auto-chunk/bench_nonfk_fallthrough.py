@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import resource
 import statistics
 import subprocess
 import sys
@@ -253,10 +254,20 @@ def estimate(args: argparse.Namespace) -> int:
     return 0
 
 
-def e2e_config(workload: str, source: Path, target: Path) -> dict[str, Any]:
+def passthrough_only(config: dict[str, Any]) -> dict[str, Any]:
+    """The same job with every column passthrough: reads and writes, so it measures ingest."""
+    plain = json.loads(json.dumps(config))
+    for table in plain["tables"]:
+        table["columns"] = [
+            {"name": c["name"], "strategy": "passthrough"} for c in table["columns"]
+        ]
+    return plain
+
+
+def e2e_config(workload: str, source: Path, target: Path, plain: bool = False) -> dict[str, Any]:
     config = build_config(workload, str(source))
     config["targets"] = {TABLE: {"type": "file", "format": "parquet", "path": str(target)}}
-    return config
+    return passthrough_only(config) if plain else config
 
 
 def e2e(args: argparse.Namespace) -> int:
@@ -269,7 +280,7 @@ def e2e(args: argparse.Namespace) -> int:
     target = work / "out.parquet"
     target.unlink(missing_ok=True)
     cfg = work / "job.yaml"
-    cfg.write_text(yaml.safe_dump(e2e_config(args.workload, source, target)))
+    cfg.write_text(yaml.safe_dump(e2e_config(args.workload, source, target, args.passthrough_only)))
     watched = [work, Path(tempfile.gettempdir())]
     before = snapshot_entries(watched)
     cmd = [args.decoy, "run", str(cfg), "--quiet"]
@@ -280,6 +291,7 @@ def e2e(args: argparse.Namespace) -> int:
         ]  # fmt: skip
     started = time.perf_counter()
     done = subprocess.run(cmd, env=_env(), check=False, capture_output=True, text=True)  # noqa: S603
+    child_peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024
     wall_s = time.perf_counter() - started
     staging = [e for e in new_entries(before, snapshot_entries(watched)) if e != str(cfg)]
     staging = [e for e in staging if Path(e) != target]
@@ -289,6 +301,8 @@ def e2e(args: argparse.Namespace) -> int:
         "cgroup_bytes": args.cgroup_bytes,
         "exit_code": done.returncode,
         "wall_s": wall_s,
+        "passthrough_only": args.passthrough_only,
+        "child_peak_rss_bytes": child_peak,
         "code_in_stderr": REFUSAL_CODE in done.stderr,
         "target_exists": target.exists(),
         "new_entries": staging,
@@ -436,6 +450,7 @@ def main(argv: list[str]) -> int:
     e2.add_argument("--workdir", required=True)
     e2.add_argument("--out", required=True)
     e2.add_argument("--decoy", default="decoy")
+    e2.add_argument("--passthrough-only", action="store_true")
     e2.add_argument("--cgroup-bytes", type=int, default=None)
     e2.set_defaults(func=e2e)
     args = parser.parse_args(argv)
