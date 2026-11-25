@@ -18,6 +18,11 @@ Checks, in order:
    namespace='pool.city', pool_size=97)` reproduces the frozen pool-index vector, with
    the Arrow return type pinned to `uint64`.
 
+4. The detector offset check: `text_redact_candidates` returns a candidate list (not the
+   `None` decline) for a 65-byte ASCII email. A wheel built with the test-only crate feature
+   `test-detector-offset-limit` lowers the limit to 64 bytes and declines it, so this check
+   refuses to ship such a wheel.
+
 Exits 0 and prints one OK line per check on success; exits 1 with the failing check's
 message on first failure (a KAT wheel is unfit to ship, so this does not try to
 collect every failure before reporting). Checks use explicit `if not ...: raise
@@ -87,6 +92,19 @@ def main() -> int:
             f"index KAT Arrow type mismatch: got {index_result.type!r}, expected uint64"
         )
     print(f"OK: index KAT == {_INDEX_EXPECTED!r}, Arrow type == uint64")
+
+    ids = _kernel.text_redact_supported_ids()
+    email_index = ids.index("email")
+    long_email = "a" * 59 + "@b.com"  # 65 bytes: one over the test-feature limit
+    candidates = _kernel.text_redact_candidates(
+        [long_email], ids, _kernel.text_redact_catalog_version()
+    )
+    if candidates != [[(email_index, 0, len(long_email))]]:
+        raise SystemExit(
+            "detector offset check failed: a 65-byte ASCII email did not get its candidate "
+            "list. A wheel built with the test-detector-offset-limit feature is not fit to ship."
+        )
+    print("OK: detector offset limit is the production value")
 
     print("parity_smoke: all checks passed")
     return 0
