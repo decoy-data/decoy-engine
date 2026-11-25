@@ -10,7 +10,8 @@ What the filter rewrites, in place on the record:
 - an exception in `msg` or in `args` (a tuple item or a mapping value) becomes its closed type
   label (`safe_error_type`), so `%s` and `%r` print the label. The same holds one level inside
   a list, tuple, set, frozenset or mapping (keys and values; a mapping that needs no change is
-  left as is, and one that does keeps its type and `__missing__`) used as an argument or as `msg`;
+  left as is, and one that does is replaced by a dict whose missing-key lookup is scanned too; a lone mapping argument is
+  always replaced that way) used as an argument or as `msg`;
 - live `exc_info` becomes a traceback of labels and `file:line, in function` frames, with no
   exception text, no source lines and no frame locals; `exc_info` is then cleared so the
   formatter cannot render the raw one;
@@ -32,10 +33,10 @@ call-site guard `tests/sentry/test_log_interpolation.py` covers them instead:
 
 from __future__ import annotations
 
-import copy
 import logging
 from collections.abc import Mapping
 from types import TracebackType
+from typing import Any
 
 from decoy_engine.safe_output._exception import safe_error_type
 
@@ -83,21 +84,32 @@ def _scan(value: object, depth: int) -> object:
         pairs = [(k, v, _scan(k, depth - 1), _scan(v, depth - 1)) for k, v in value.items()]
         if all(nk is k and nv is v for k, v, nk, nv in pairs):
             return value
-        return _rebuild_mapping(value, [(nk, nv) for _, _, nk, nv in pairs])
+        return _SafeMapping([(nk, nv) for _, _, nk, nv in pairs], value)
     return value
 
 
-def _rebuild_mapping(
-    original: Mapping[object, object], pairs: list[tuple[object, object]]
-) -> object:
-    """A mapping of the same type as `original` (keeping `__missing__`) holding `pairs`."""
-    try:
-        clone = copy.copy(original)
-        clone.clear()  # type: ignore[attr-defined]
-        clone.update(pairs)  # type: ignore[attr-defined]
-        return clone
-    except Exception:
-        return dict(pairs)
+class _SafeMapping(dict):
+    """The mapping a formatter sees: scanned items, and a scanned fallback lookup.
+
+    The caller's mapping type is never reused, so its own `__missing__` or `__getitem__` cannot
+    hand the formatter an unscanned value. A key absent from the scanned items goes to the
+    original mapping, and the result passes through `_scan` before it is returned.
+    """
+
+    def __init__(self, pairs: list[tuple[object, object]], original: Mapping[Any, object]):
+        super().__init__(pairs)
+        self._original = original
+
+    def __missing__(self, key: object) -> object:
+        try:
+            result = self._original[key]
+            found = True
+        except Exception:
+            # No exception text is carried over: the caller sees a plain KeyError below.
+            found = False
+        if not found:
+            raise KeyError(key)
+        return _scan(result, 1)
 
 
 def _frames(tb: TracebackType | None) -> list[str]:
@@ -141,9 +153,9 @@ def _scrub(record: logging.LogRecord) -> None:
     if isinstance(args, tuple):
         record.args = tuple(_scan(a, 1) for a in args)
     elif isinstance(args, Mapping):
-        record.args = _scan(
-            args, 2
-        )  # the mapping itself is the argument list  # type: ignore[assignment]
+        # Always wrapped, even when nothing changed: the formatter's lookups must be scanned too.
+        pairs = [(_scan(k, 1), _scan(v, 1)) for k, v in args.items()]
+        record.args = _SafeMapping(pairs, args)
 
     exc = record.exc_info[1] if record.exc_info else None
     if exc is not None:

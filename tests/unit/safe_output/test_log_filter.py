@@ -322,12 +322,52 @@ def test_mapping_needing_replacement_keeps_missing_lookup() -> None:
     assert buf.getvalue().strip() == "WARNING ValueError 0"
 
 
-def test_args_object_untouched_when_nothing_to_replace() -> None:
-    counter = collections.Counter(existing=2)
-    record = _record("x", (), exc=False)
-    record.args = counter
+def test_unchanged_mapping_arg_renders_the_same() -> None:
+    engine, buf = _engine_handler()
+    record = _record("found %(missing)d %(existing)d", (), exc=False)
+    record.args = collections.Counter(existing=2)
+    engine.handle(record)
+    assert buf.getvalue().strip() == "ERROR found 0 2"
+
+
+def test_missing_lookup_returning_exception_becomes_label() -> None:
+    engine, buf = _engine_handler()
+    record = _record("%(x)s", (), exc=False)
+    record.args = collections.defaultdict(lambda: ValueError(_CANARY), a=1)
+    engine.handle(record)
+    assert buf.getvalue().strip() == "ERROR ValueError"
+
+
+def test_missing_lookup_returning_container_is_scanned() -> None:
+    engine, buf = _engine_handler()
+    record = _record("%(x)s", (), exc=False)
+    record.args = collections.defaultdict(lambda: [ValueError(_CANARY)], a=1)
+    engine.handle(record)
+    assert buf.getvalue().strip() == "ERROR [ValueError]"
+
+
+def test_failing_missing_lookup_carries_no_exception_text() -> None:
+    class _Raising(dict):  # type: ignore[type-arg]
+        def __missing__(self, key: object) -> object:
+            raise RuntimeError(_CANARY)
+
+    record = _record("%(x)s", (), exc=False)
+    record.args = _Raising(a=1)
     SafeRecordFilter().filter(record)
-    assert record.args is counter
+    with pytest.raises(KeyError) as info:
+        record.getMessage()
+    assert _CANARY not in repr(info.value)
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+
+
+@pytest.mark.xfail(strict=True, reason="a secret string from a lookup is plain data")
+def test_documented_gap_missing_lookup_returning_secret_string() -> None:
+    engine, buf = _engine_handler()
+    record = _record("%(x)s", (), exc=False)
+    record.args = collections.defaultdict(lambda: _CANARY, a=1)
+    engine.handle(record)
+    assert _CANARY not in buf.getvalue()
 
 
 def test_every_engine_handler_carries_the_filter() -> None:
