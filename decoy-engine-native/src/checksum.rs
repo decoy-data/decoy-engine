@@ -66,13 +66,14 @@ pub fn luhn_digit_sum<I: Iterator<Item = u32>>(rev_digits: I, double_even: bool)
 
 /// Luhn check digit for a string of ASCII decimal digits (python-stdnum `luhn.calc_check_digit`).
 pub fn luhn_check_digit(body: &str) -> char {
-    luhn_check_char(body.chars().rev().map(digit_or_zero))
+    luhn_check_char(body.chars().map(digit_or_zero))
 }
 
-/// The one Luhn check character for body digits given right to left. Every adapter (the string
-/// helper above and the `Scheme::Luhn` arm of `check_digit`) goes through it.
-fn luhn_check_char<I: Iterator<Item = u32>>(rev_digits: I) -> char {
-    digit_char((10 - luhn_digit_sum(rev_digits, true)) % 10)
+/// The one Luhn check character for body digits given left to right. It reverses internally, so
+/// no caller picks the direction. Every adapter (the string helper above and the `Scheme::Luhn`
+/// arm of `check_digit`) goes through it.
+fn luhn_check_char<I: DoubleEndedIterator<Item = u32>>(digits: I) -> char {
+    digit_char((10 - luhn_digit_sum(digits.rev(), true)) % 10)
 }
 
 /// Whether digits that include their final check digit pass the Luhn mod-10 test.
@@ -140,7 +141,7 @@ pub fn vin_check_char(body: &[char]) -> char {
 /// sixteen characters for vin.
 pub fn check_digit(scheme: Scheme, body: &[char]) -> char {
     match scheme {
-        Scheme::Luhn => luhn_check_char(body.iter().rev().map(|c| digit_or_zero(*c))),
+        Scheme::Luhn => luhn_check_char(body.iter().map(|c| digit_or_zero(*c))),
         Scheme::Npi => digit_char(npi_check_value(body.iter().map(|c| digit_or_zero(*c)))),
         Scheme::Ean13 | Scheme::Gtin | Scheme::Isbn13 => gs1_check_digit(body),
         Scheme::Vin => vin_check_char(body),

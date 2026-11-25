@@ -500,7 +500,7 @@ def test_kat_corpus_covers_every_scheme_with_at_least_200_bodies() -> None:
 
 
 def test_kat_length_flags_come_from_the_python_fpe_length_rule() -> None:
-    from decoy_engine.transforms._fpe_checksum import scheme_length_ok
+    from decoy_engine.checksums import scheme_length_ok
 
     for row in _committed()["values"]:
         assert row["length_ok"] == scheme_length_ok(row["scheme"], len(row["value"]))

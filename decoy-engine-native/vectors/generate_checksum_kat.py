@@ -22,7 +22,7 @@ from typing import Any
 import stdnum
 
 from decoy_engine import checksums
-from decoy_engine.transforms._fpe_checksum import scheme_length_ok
+from decoy_engine.checksums import scheme_length_ok
 
 SEED = 20261125
 FORMAT_VERSION = 1
