@@ -103,8 +103,8 @@ def live_bounds(kind: str) -> dict[str, int]:
             continue
         try:
             out[mod.key_of(f, c)] = mod.read_int((SENTRY / f).read_text(encoding="utf-8"), c)
-        except ValueError:
-            raise ValueError(f"{mod.key_of(f, c)} {mod.REFUSED}") from None
+        except ValueError as exc:
+            raise ValueError(f"{mod.key_of(f, c)} {mod.REFUSED}") from exc
     return out
 
 
