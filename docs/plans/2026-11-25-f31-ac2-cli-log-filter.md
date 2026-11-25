@@ -96,12 +96,25 @@ imports, aliases and method names, so there is one call scanner.
 3. Every logging method call (`debug`, `info`, `warning`, `error`, `exception`, `critical`,
    `log`) on a logger: the message argument is a string literal. An f-string, `%`, `+`,
    `.format()` or `str()` call is flagged, because text built before the call bypasses the
-   filter. Values go in `args`, where the filter rewrites them.
+   filter. Values go in `args`, where the filter rewrites them. Each format operand in `args` is
+   checked too, because a pre-rendered string in `args` reaches the output as text the filter
+   cannot tell from a safe one. An operand is allowed only if it is a name bound by
+   `except ... as`, a `_host_only(...)` call, a numeric literal, or the HTTP status attribute
+   (`.status` on the response, `.code` on an `HTTPError`). Anything else is flagged, for example
+   `str(exc)`, `exc.args[0]`, `exc.reason` or a raw URL name.
+4. Every module-level logging call (`logging.debug`, `info`, `warning`, `error`, `exception`,
+   `critical`, `log`) and every `logging.basicConfig` call is flagged, under any alias
+   (`import logging as lg`, `from logging import warning`). These log through the root logger
+   without the filter, and `basicConfig` adds an unfiltered root handler.
 
 Self-test: a scratch tree with a bare `addHandler(StreamHandler())`, an aliased
 `from logging import getLogger as gl; gl(__name__)`, an unbound `logging.Logger.addHandler(lg,
 h)`, a lookalike `safe_handler` defined in the scratch module, an unwrapped handler next to a
-restoration loop in the same function, and `logger.warning(f"{exc}")`; each is flagged.
+restoration loop in the same function, `logger.warning(f"{exc}")`,
+`logger.warning("x %s", str(exc))`, `logger.warning("x %s", exc.args[0])`,
+`logger.warning("x %s", url)`, `logging.warning("x")`, `from logging import warning as w;
+w("x")` and `logging.basicConfig()`; each is flagged. `logger.warning("x %s", exc)` (with `exc`
+bound by `except ... as`) and `logger.warning("x %s", _host_only(url))` are not.
 
 The runtime proof is per route, not an import census: AT-1 (`lastResort`), AT-2 (detector
 handler), AT-6 (restoration).
@@ -201,14 +214,14 @@ as the parent contract requires. No exit code, key or command changes.
 |---|---|---|
 | AT-1 | `tests/unit/safe_logging/test_safe_logging.py` (new): with pytest's root capture handlers removed for the case so `lastResort` runs, log `logger.warning("x %s", exc)` on the notify logger with the canary `DECOY_CANARY_F31_7Q4Z` in `exc`; and, inside an active `except`, `logger.warning("x", exc_info=True)`; capture stderr; assert the label and no canary | red on main (no filter on the notify logger). M3 |
 | AT-2 | same file: inside `detector_log(state, on=True)`, a record from `decoy_engine.detectors.child` (a child with no logger filter) with `"%s"` and a canary-bearing exception in `args`; assert stderr has the label and no canary; after exit the handler is gone | red on main. M1 alone must fail it |
-| AT-3 | `tests/sentry/test_notify_redaction.py` (extend): a failing job with webhook URL `http://user:DECOY_CANARY_F31_7Q4Z@hooks.example.com:8443/hook`, with pytest's root handlers removed so the warning goes through `lastResort` to stderr. Two transport cases at `_outbound.open_url`: (a) it returns a 400 response object; (b) it raises `urllib.error.HTTPError(url, 400, ...)`, as the real opener does. In both, assert exactly one POST, stderr contains the complete prefix `webhook hooks.example.com returned HTTP 400`, `delivered == false`, the job's original exit code, `target_host == "hooks.example.com"`, and canary absence from stdout, stderr, the whole `--json` document, the POST body and every file the run writes | red on main for `target_host` and for case (b). M4, M4b, M9 |
+| AT-3 | `tests/sentry/test_notify_redaction.py` (extend): a failing job with webhook URL `http://user:DECOY_CANARY_F31_7Q4Z@hooks.example.com:8443/hook`, with pytest's root handlers removed so the warning goes through `lastResort` to stderr. Two transport cases at `_outbound.open_url`: (a) it returns a 400 response object; (b) it raises `urllib.error.HTTPError(url, 400, ...)`, as the real opener does. In both, assert exactly one POST, stderr contains the complete prefix `webhook hooks.example.com returned HTTP 400`, `delivered == false`, the job's original exit code, `target_host == "hooks.example.com"`, and canary absence from stdout, stderr, the whole `--json` document, the POST body and every file the run writes. Case (c): the first call raises `HTTPError(url, 503, ...)` and the second returns 200; assert exactly two POSTs and `delivered == true`, so a branch that treats every `HTTPError` as permanent fails | red on main for `target_host` and for case (b). M4, M4b, M9, M11 |
 | AT-4 | same unit file: `safe_handler` twice on one handler and `safe_logger` twice on one name leave exactly one `_DeferredSafeFilter`; `safe_logger("other")` raises | M2 |
-| AT-5 | `tests/sentry/io_policy/log_handlers/test_log_handlers_filtered.py` (new): the guard and its self-test (bare, aliased, unbound, lookalike, unwrapped-beside-restoration and f-string cases); on the real tree nothing is flagged | M5: unwrap `safe_handler(...)` around the `NullHandler` at `ci/engine_logging.py:38`; the guard fails while the restoration loop at `:45` still passes. M7, M8 |
+| AT-5 | `tests/sentry/io_policy/log_handlers/test_log_handlers_filtered.py` (new): the guard and its self-test (bare, aliased, unbound, lookalike, unwrapped-beside-restoration and f-string cases); on the real tree nothing is flagged | M5: unwrap `safe_handler(...)` around the `NullHandler` at `ci/engine_logging.py:38`; the guard fails while the restoration loop at `:45` still passes. M7, M8, M12, M13 |
 | AT-6 | `tests/unit/safe_logging/test_engine_logging_restore.py` (new): a host handler with its own filter and formatter is on the engine logger; run the `engine_logging` context; afterwards the logger holds the same handler object, its filter list is unchanged, and a later exception record formats exactly as before the context | M6 |
 | AT-7 | `tests/e2e/test_notify_live_webhook.py:152` and `tests/e2e/test_run_notify_cl4.py:62` to `:75` (credential, IPv6, bad-port cases) updated to the hostname | red on main |
-| AT-8 | `tests/unit/safe_logging/test_safe_logging.py`: in a fresh `python -I` process, import `decoy.__main__` and `decoy.notify`; `decoy_engine` is not in `sys.modules`. Plus the existing fresh-process regression `tests/unit/test_ci_rule_codes.py:416` | M10: import `SafeRecordFilter` at module scope in `_safe_logging.py` |
+| AT-8 | `tests/unit/safe_logging/test_safe_logging.py`: in a fresh `python -I` process (which ignores `PYTHONPATH`), the child first inserts the reviewed checkout's `src` at the front of `sys.path`, passed in by the parent from the test file's own location, then imports `decoy.__main__` and `decoy.notify`, asserts `decoy.__file__` resolves inside that `src`, and asserts `decoy_engine` is not in `sys.modules`. Plus the existing fresh-process regression `tests/unit/test_ci_rule_codes.py:416` | M10: import `SafeRecordFilter` at module scope in `_safe_logging.py` |
 
-Mutations M1 to M10 run on the final head; the PR body records that head.
+Mutations M1 to M13 and M4b run on the final head; the PR body records that head.
 
 ## Mutations
 
@@ -223,8 +236,11 @@ Mutations M1 to M10 run on the final head; the PR body records that head.
 | M7 | restore `logging.getLogger(__name__)` in `notify.py` | AT-5, AT-1 |
 | M4b | change only the warning's host argument back to `host:port`; `target_host` stays correct | AT-3 stderr prefix |
 | M8 | add `logger.warning(f"{exc}")` in `notify.py` | AT-5 rule 3 |
-| M9 | remove the `HTTPError` branch, so a 400 falls to the `URLError` branch | AT-3 case (b): two POSTs, no 4xx prefix |
+| M9 | remove the `HTTPError` branch, so a 400 falls to the `URLError` branch | AT-3 case (b): three attempts instead of one POST, no 4xx prefix |
 | M10 | import `SafeRecordFilter` at module scope in `_safe_logging.py` | AT-8 |
+| M11 | make the `HTTPError` branch return a permanent failure for every status | AT-3 case (c): one POST, `delivered == false` |
+| M12 | change one `notify.py` warning operand to `str(exc)` | AT-5 rule 3 operand check |
+| M13 | add `logging.warning("x")` at module scope in a CLI file | AT-5 rule 4 |
 
 ## Failure modes
 
@@ -278,7 +294,7 @@ edits `:217` to `:256`); whichever merges second rebases.
 
 T0 on the touched test files per edit; T1 impact selection per commit; T2 gate on the exact
 head: T1 plus AT-1 to AT-8, `tests/unit/test_ci_rule_codes.py:416`, `lint-imports`, and M1 to
-M10. `target_host` is a key of the `--json` notify entry. The CLI freeze covers JSON shape only
+M13 plus M4b. `target_host` is a key of the `--json` notify entry. The CLI freeze covers JSON shape only
 (`docs/release/versioning.md:24`): key names and types, not values. The key and its type do
 not change, so this is not a frozen-contract trigger under `testing.md:84` to `:89`. If the
 builder finds that `versioning.md:24` says otherwise on its head, the slice runs the full CLI
@@ -296,7 +312,7 @@ suite against the saved main baseline. Tests run on the gate nodes, never the de
 | D6 | private-module imports | yes | imports only `decoy_engine.safe_output.SafeRecordFilter`, lazily inside `_DeferredSafeFilter` |
 | D7 | hidden CI failures | yes | no skip or `xfail` added; the guard is in the default sentry run |
 | D8 | one trust class per entry | yes | one rule: every handler the CLI creates and every CLI logger carries the filter |
-| D9 | mutations on final head | yes | M1 to M7 on the final head, recorded |
+| D9 | mutations on final head | yes | M1 to M13 and M4b on the final head, recorded |
 | D10 | allowlisted helpers | yes | `_safe_logging.py` is the only exempt module; the restoration loop is exempt by structure (loop target in `finally`), not by function name |
 | D11 | no raised caps | yes | no baseline or cap moves |
 

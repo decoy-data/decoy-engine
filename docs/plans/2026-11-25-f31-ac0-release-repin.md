@@ -19,7 +19,12 @@ Risk: three gated steps with separate gates.
 - Publication: R3, because a pushed tag is not withdrawn. Before the owner authorizes it, the PR
   body records the tested recovery: `cut-release.sh` run without `APPLY` on the gated SHA (a dry
   run that passes every check), and the recovery path for a bad `<V>` (a patch release `<V>+1`
-  and a revert of the CLI repin commit). Publication is
+  and a revert of the CLI repin commit). The dry run covers preflight only, and `:117` to `:120`
+  tag locally, push, then read the tag back. So the publication step is also rehearsed with
+  `APPLY=1` against a disposable bare remote for two outcomes: a failed push (the local tag is
+  left and blocks a retry: delete it, then retry) and a failed readback after a good push
+  (check the remote tag's peeled SHA with `git ls-remote <remote> refs/tags/v<V>^{}` before any
+  retry). The PR body records both. Publication is
   `APPLY=1 scripts/release/cut-release.sh <gated-main-SHA>`. The default invocation stops after
   the dry run and exits 0 (`cut-release.sh:111` to `:118`), so a run without `APPLY=1` is not a
   publication.
@@ -36,8 +41,11 @@ from whatever pin CLI main holds when it starts.
 Guarantee:
 
 1. One engine release `<V>` exists whose tag contains every engine slice the CLI F31 slices
-   need: AE1a1, AE1a2, AE1b, AE1c1, AE1c2 (one stack), AE3, AE4, AE5, and the AE6 translator
-   fix (`0ea90f559` on `feat/f31-ae6`, or its equivalent). `<V>` is the next minor (expected
+   need: AE1a1, AE1a2, AE1b, AE1c1, AE1c2 (one stack), AE3, AE4, AE5, and the completed AE6
+   translator fix (`63c63c950` on `feat/f31-ae6`, or its equivalent), where both native
+   translators call `generation/pool/_errors.py:119` through the public API. The earlier
+   `0ea90f559` still builds the admission error at `_crypto_ext.py:381` and `_index_ext.py:113`
+   and is not enough. `<V>` is the next minor (expected
    0.29.0) because the release adds public names. AE5 is in the tag for the engine raise texts it
    rewrites, which AC1 renders against the installed engine, so there is one repin, not two. The
    AE6 fix is in the tag because `execution/native/_crypto_ext.py:379` and `_index_ext.py:111`
@@ -54,9 +62,16 @@ Guarantee:
    `feat/f31-ae1a1-safe-text`) when it delegates the switch to `strict_checks()`; without it,
    `tests/unit/test_safe_text.py:78` can consume the warning that `:89` expects.
    The release also exports two typed operations AC1 needs, added the same way if no AE slice
-   adds them: `safe_output.safe_error_label(exc) -> SafeText` (the closed label that
-   `safe_error_type` returns as a `SafeErrorType` enum, `safe_output/_exception.py:79` to `:89`)
-   and `reasons.safe_summary(namespace, code) -> SafeText` (a registered reason summary, typed).
+   adds them. Both live in `safe_output`, not in `reasons`: `reasons` sits below `safe_output`
+   in the engine layer map (`.importlinter:24` to `:26`), and the amended AE1 plan keeps the
+   mint inside the renderer. They reuse the renderer's existing typed paths
+   (`safe_output/_render.py:221` to `:223` for coded text, `:248` to `:249` for labels) and the
+   registry lookup:
+   - `safe_output.safe_error_label(exc) -> SafeText`: the closed label that `safe_error_type`
+     returns as a `SafeErrorType` enum (`safe_output/_exception.py:79` to `:89`);
+   - `safe_output.safe_reason_summary(namespace, code) -> SafeText | None`: the registered
+     summary of a reason code, or `None` for an unknown reason, which is the outcome AC1's local
+     fallback keys on.
    Each has engine tests for a known and an unknown input.
 3. The CLI pins `decoy-engine==<V>` in every place the 0.28.3 repin (#383) and the 0.28.4 repin
    (#408) moved, in one commit.
@@ -86,10 +101,10 @@ location, listed in the PR body. Nothing new is built.
 | Check | How |
 |---|---|
 | AE1a1 to AE1c2, AE3, AE4, AE5 and the AE6 translator fix are on engine main | `git merge-base --is-ancestor <merge> <release SHA>` for each merge commit; the AE1b to AE1c2 stack merged into main, not a non-main base |
-| Each slice's behavior holds at the release SHA | run, at the release SHA, the behavior tests each slice owns: the AE3 handler filter test (removing `handler.addFilter(...)` at `internal/logging.py:29` must fail it), the AE4 copy ratchet (`636c1b3fb`, #794), the AE1c2 producer tests, the AE5 raise-copy test `tests/security/test_f31_raise_copies.py`, and `tests/unit/test_safe_text.py` run whole and in file order (the `:78` then `:89` pair proves the warning reset). An import check alone does not prove these |
-| The native value leak is closed at the release SHA | with the native companion installed, run `tests/native/f31_canary/test_native_canary.py:359` (on `feat/f31-ae6`) and both translator metadata cases. A skip counts as a failure: the gate reads the pytest summary and stops on any skip in these ids |
+| Each slice's behavior holds at the release SHA | run, at the release SHA, the behavior tests each slice owns: the AE3 handler filter test (removing `handler.addFilter(...)` at `internal/logging.py:29` must fail it), the AE4 copy ratchet (`636c1b3fb`, #794), the AE1c2 producer tests, the AE5 raise-copy test `tests/security/test_f31_raise_copies.py`, the AE5 loader-refusal tests the AE5 amendment names (its lines 480 to 482 and 815 to 818, which catch a loader echoing `corpus_source_version` list values into `str(exc)`), `tests/sentry/defects/test_config_refusal_text.py`, and `tests/unit/test_safe_text.py` run whole and in file order (the `:78` then `:89` pair proves the warning reset). An import check alone does not prove these |
+| The native value leak is closed at the release SHA | with the native companion installed, run `tests/native/f31_canary/test_native_canary.py:359`, both compiled-wrapper cases at `:402` (on `feat/f31-ae6`) and both translator metadata cases. A skip counts as a failure: the gate reads the pytest summary and stops on any skip in these ids |
 | No tag sits between AE1b and AE1c2 | `git tag --contains <AE1b merge>` lists no tag that lacks AE1c2 |
-| `strict_checks()`, `strict_checks_enabled()`, `safe_error_label` and `reasons.safe_summary` are public | each is in its package's `__all__`; else the release preparation adds them (guarantee 2) |
+| `strict_checks()`, `strict_checks_enabled()`, `safe_error_label` and `safe_reason_summary` are public | each is in its package's `__all__`; else the release preparation adds them (guarantee 2) |
 | `_CLI_REGISTRAR` names the module AC1 creates | open item 1 |
 
 ## Steps
@@ -201,7 +216,10 @@ The engine pin (additive move to a newer minor). No CLI JSON key, exit code or c
   instead of passing with a withheld message. Outside the test session nothing changes: a
   production run stays non-strict and gets `WITHHELD`.
 - If CLI main still pins 0.28.3 when AC0 starts, the repin also carries the 0.28.4 changes that
-  #408 recorded (dialect and chunked-run text); AT-4 treats them the same way.
+  #408 made: the import fix for `tests/unit/test_sources_dialect.py:10` (it imports the removed
+  `VALIDATION_CODES`, which breaks collection), and the change at
+  `tests/e2e/test_run_chunked.py:150` from `EXIT_USAGE` to a successful chunked run whose output
+  matches the plain run byte for byte.
 
 ## Failure modes
 
@@ -218,10 +236,10 @@ The engine pin (additive move to a newer minor). No CLI JSON key, exit code or c
 
 | Id | Test | Red-first or mutation |
 |---|---|---|
-| AT-1 | `tests/sentry/release/test_engine_f31_surface.py` (new, CLI): import `SafeText`, `SafeName`, `SafePath`, `WITHHELD`, `render_failure`, `safe_text_of`, `register_mint_callers`, `SafeRecordFilter`, `strict_checks`, `strict_checks_enabled` and `safe_error_label` from `decoy_engine.safe_output`, and `safe_summary` from `decoy_engine.reasons`. Public imports only; the installed version and commit are checked by `scripts/dev/bootstrap.sh --check` (AT-2), and slice behavior at the release SHA (preconditions) | red on CLI main (0.28.3 lacks the names) |
+| AT-1 | `tests/sentry/release/test_engine_f31_surface.py` (new, CLI): import `SafeText`, `SafeName`, `SafePath`, `WITHHELD`, `render_failure`, `safe_text_of`, `register_mint_callers`, `SafeRecordFilter`, `strict_checks`, `strict_checks_enabled`, `safe_error_label` and `safe_reason_summary` from `decoy_engine.safe_output`. Public imports only; the installed version and commit are checked by `scripts/dev/bootstrap.sh --check` (AT-2), and slice behavior at the release SHA (preconditions) | red on CLI main (0.28.3 lacks the names) |
 | AT-2 | `scripts/dev/bootstrap.sh --check` in the repin environment (it compares the installed distribution with the pyproject pin and its commit with the lock, `bootstrap.sh:35`, `:73` to `:94`), the central guard `tests/sentry/test_ci_lock_installs.py:283` to `:289`, `test_launch_pin_check.py`, `test_pyproject_metadata.py` and `scripts/dev/lock.sh --check` at `<V>`. The negative control in `test_launch_pin_check.py:55` to `:57` uses `v0.29.0` as the wrong tag; it changes to a tag derived as one patch above `<V>`, so it can never equal the pin | M1: leave `scripts/dev/lock_version.sh` at the old tag; the central guard fails |
 | AT-3 | `tests/sentry/tooling/test_strict_fixture.py` (new, CLI): (a) under the autouse fixture, `SafeText.const` on a runtime-built string raises `TypeError`; (b) a subprocess runs `python -I -c` that calls `pytest.main()` on test (a) alone and asserts its return code is 0 with exactly one passed test (a pytest plugin object passed to `pytest.main` counts the reports), so a collection error or an early exit cannot pass. Only then, in that same interpreter after pytest returns, it calls `SafeText.const` on a runtime-built string and asserts it returns `WITHHELD` and `strict_checks_enabled()` is false | red-first: (a) fails before step 4. M2: drop the restore in `strict_checks()` in an engine checkout installed editable in a scratch venv; the child prints `decoy_engine.__file__` and the engine commit, the PR body records both, and (b) fails |
-| AT-4 | full CLI suite on the repin head and on the CLI base SHA, on the same host, each in its own venv built from its own lock (`decoy-vm-t3` once per SHA, not the `gates.sh` baseline mode, which reuses the branch venv and lock at `gates.sh:286` and `:330`). The evidence records the installed engine version and commit for each run, so an engine regression cannot fail on both and look pre-existing. Each id that fails on the head and passes on the base is resolved before merge: a fix, or a text assertion updated to an engine change named in the engine CHANGELOG under F31 (or the 0.28.4 changes of #408) with the engine test that pins it. Every test the repin adds must pass, though it has no base result. No id is merged as "listed for the owner" | gate evidence |
+| AT-4 | full CLI suite on the repin head and on the CLI base SHA, on the same host, each in its own venv built from its own lock (`decoy-vm-t3` once per SHA, not the `gates.sh` baseline mode, which reuses the branch venv and lock at `gates.sh:286` and `:330`). The evidence records the installed engine version and commit for each run, so an engine regression cannot fail on both and look pre-existing. Each id that fails on the head and passes on the base is resolved before merge: a fix, or a text assertion updated to an engine change named in the engine CHANGELOG under F31 (or the 0.28.4 changes of #408) with the engine test that pins it. Collection must succeed on both SHAs with zero collection errors before ids are compared. Every test the repin adds must pass, though it has no base result. No id is merged as "listed for the owner" | gate evidence |
 
 M1 and M2 run on the final repin head and M3 on the release SHA; the PR bodies record those
 heads and, for M2, the mutated engine commit.
@@ -297,7 +315,7 @@ thing.
 1. `_CLI_REGISTRAR` (AE1a2) is an engine constant that names one CLI module. AC1 proposes
    `decoy._safe_mints`. AE1a2 must use that name, or AC1 follows AE1a2's name. Check before the
    release is cut; a rename needs another release.
-2. The names `safe_error_label` and `reasons.safe_summary` are proposals from the AC1 plan. The
+2. The names `safe_error_label` and `safe_reason_summary` are proposals from the AC1 plan. The
    engine owner confirms them, or AC1 follows the names an AE slice ships, before the release is
    cut.
 
