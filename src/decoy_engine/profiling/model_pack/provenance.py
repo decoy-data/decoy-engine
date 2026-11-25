@@ -159,13 +159,10 @@ def sign_pack(pack_dir: Path, key: bytes) -> str:
     try:
         if not key:
             raise ValueError("sign_pack: key must be non-empty bytes")
-        shown = _packio.member_display(pack_dir)
         try:
             data = _packio.read_member(pack_dir, "manifest.json")
             if data is None:
-                raise FileNotFoundError(
-                    errno.ENOENT, os.strerror(errno.ENOENT), f"{shown}/manifest.json"
-                )
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), "manifest.json")
             raw = json.loads(data.decode("utf-8"))
             manifest = ModelPackManifest.from_dict(raw)
         except (OSError, json.JSONDecodeError, TypeError, KeyError) as exc:
@@ -176,7 +173,7 @@ def sign_pack(pack_dir: Path, key: bytes) -> str:
             if fileaccess.keeps_class(exc):
                 raise
             raise ValueError(
-                f"sign_pack: cannot read manifest in {shown}: {safe_error_type(exc).value}"
+                f"sign_pack: cannot read the pack manifest: {safe_error_type(exc).value}"
             ) from exc
         digest = sign_manifest(manifest, key)
         raw["manifest_hmac"] = digest

@@ -335,6 +335,47 @@ def test_a_fitted_reference_with_credentials_in_the_locator_keeps_them_out() -> 
         assert "snapshot_file could not be read." in str(info.value)
 
 
+_PW = "DECOY_CANARY_F31_PW"
+
+
+def _assert_no_password(exc: BaseException) -> None:
+    assert _PW not in str(exc)
+    assert all(_PW not in repr(a) for a in exc.args)
+    assert _PW not in getattr(exc, "path", "")
+
+
+@pytest.mark.parametrize("kind", ["oversize", "schema", "not-object", "bad-json"])
+def test_snapshot_read_messages_keep_a_locator_with_credentials_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Oversize, schema, not-an-object and bad-JSON refusals name the config position only."""
+    from decoy_engine.generation.statistical._spec import StatisticalSpecError, _load_snapshot
+    from decoy_engine.plan import _generation
+
+    body = {
+        "oversize": b'{"schema_version": "x", "pad": "' + b"a" * 64 + b'"}',
+        "schema": b'{"schema_version": "zzz"}',
+        "not-object": b"[1, 2]",
+        "bad-json": b"{not json",
+    }[kind]
+    target = tmp_path / f"user:{_PW}@host.json"
+    target.write_bytes(body)
+    config = stat_config()
+    config["tables"][0]["generate_columns"][0]["snapshot_file"] = str(target)
+    if kind == "oversize":
+        monkeypatch.setattr(_generation, "EMBEDDED_SNAPSHOT_MAX_BYTES", 8)
+        with pytest.raises(PlanCompileError) as info:
+            _generation.read_and_pin_snapshots(config)
+        _assert_no_password(info.value)
+        return
+    _, failures = _generation.read_and_pin_snapshots(config)
+    (failure,) = failures.values()
+    _assert_no_password(failure)
+    with pytest.raises(StatisticalSpecError) as second:
+        _load_snapshot(str(target))
+    _assert_no_password(second.value)
+
+
 def test_the_fingerprint_digest_error_drops_the_locator() -> None:
     from decoy_engine.generators.derivation import _snapshot_content_digest
 

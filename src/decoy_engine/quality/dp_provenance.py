@@ -63,7 +63,7 @@ from typing import NamedTuple
 
 from packaging.utils import canonicalize_name
 
-from decoy_engine import fileaccess, reasons, safe_output
+from decoy_engine import fileaccess, reasons
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileRequest, FileRole
 from decoy_engine.quality.dp_certified_stacks import CERTIFIED_ROWS
@@ -490,8 +490,8 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
         raise ProvenanceError(
             code=reasons.quality.DP_LOCK_PARSE_ERROR,
             message=(
-                f"could not read/parse lockfile {fileaccess.shown(str(path), 'dp.lock_path')!r}: "
-                f"{safe_output.safe_error_type(exc).value}"
+                # `safe_output` pulls pyarrow in, and this module must import neither it nor pandas.
+                f"could not read/parse the dp lockfile: {type(exc).__name__}"
             ),
         ) from exc
 
@@ -499,7 +499,7 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
     if not isinstance(packages, list):
         raise ProvenanceError(
             code=reasons.quality.DP_LOCK_PARSE_ERROR,
-            message=f"lockfile {fileaccess.shown(str(path), 'dp.lock_path')!r} has no [[package]] array",
+            message="the dp lockfile has no [[package]] array",
         )
 
     # canonical name -> set of versions active in THIS environment.

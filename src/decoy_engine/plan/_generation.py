@@ -257,7 +257,6 @@ def read_and_pin_snapshots(
     pinned: dict[str, ReadSnapshot] = {}
     failures: dict[str, Any] = {}
     for path, field_key in _snapshot_field_keys(config).items():
-        shown = fileaccess.shown(path, field_key)
         read = read_pinned_artifact(
             FileRole.SNAPSHOT,
             path,
@@ -268,9 +267,9 @@ def read_and_pin_snapshots(
         if read.oversize:
             raise PlanCompileError(
                 code=reasons.plan.DP_SNAPSHOT_EMBEDDED_ARTIFACT_TOO_LARGE,
-                path=f"<snapshot_file={shown}>",
+                path=f"<snapshot_file={field_key}>",
                 message=oversize_message(
-                    "snapshot_file", shown, read.oversize, EMBEDDED_SNAPSHOT_MAX_BYTES
+                    "snapshot_file", field_key, read.oversize, EMBEDDED_SNAPSHOT_MAX_BYTES
                 ),
             )
         if read.raw is None:
@@ -284,14 +283,14 @@ def read_and_pin_snapshots(
         raw = read.raw
         digest = read.sha256
         try:
-            parsed = parse_snapshot_json(raw, shown=shown)
+            parsed = parse_snapshot_json(raw, shown=field_key)
         except StatisticalSpecError as exc:
             failures[path] = exc
             continue
         guard = snapshot_content_guard.get()
         if guard is not None:
             guard(parsed)
-        mismatch = snapshot_schema_failure(parsed, shown)
+        mismatch = snapshot_schema_failure(parsed, field_key)
         if mismatch is not None:
             failures[path] = mismatch
             continue
@@ -329,7 +328,7 @@ def resolve_pinned_snapshot(
             failure = StatisticalSpecError(
                 code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
                 message=(
-                    f"snapshot_file {fileaccess.shown(snapshot_file, 'snapshot_file')!r} has no "
+                    "snapshot_file has no "
                     "pinned content and no "
                     "recorded read failure from this compile's read-once pass; "
                     "refusing rather than reopening the path."

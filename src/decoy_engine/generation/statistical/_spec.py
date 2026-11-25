@@ -178,7 +178,6 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
     """Read + parse a snapshot artifact. Returns `(content_sha256, parsed)`.
     No caching: every call is a fresh read + hash + parse."""
     key = fileaccess.position_key(field_key)
-    shown = fileaccess.shown(path, key)
     failure: str | None = None
     try:
         raw = fileaccess.read_all(FileRole.SNAPSHOT, path, key)
@@ -191,21 +190,21 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
         # context (its text can name the file). The message holds the class label only.
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-            message=f"snapshot_file {shown!r} could not be read: {failure}",
+            message=f"{key} could not be read: {failure}",
         )
     digest = hashlib.sha256(raw).hexdigest()
-    snap = parse_snapshot_json(raw, shown=shown)
+    snap = parse_snapshot_json(raw, shown=key)
     if not isinstance(snap, dict):
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
-            message=f"snapshot_file {shown!r} does not contain a JSON object at the top level.",
+            message=f"{key} does not contain a JSON object at the top level.",
         )
     version = snap.get("schema_version")
     if version not in dsc.ACCEPTED_SCHEMA_VERSIONS:
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
             message=(
-                f"snapshot_file {shown!r} declares schema {version!r}; this engine "
+                f"{key} declares an unsupported schema; this engine "
                 f"consumes {dsc.ACCEPTED_SCHEMA_VERSIONS!r}."
             ),
         )

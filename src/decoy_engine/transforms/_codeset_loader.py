@@ -45,9 +45,8 @@ _SHIPPED_PATHS: dict[str, Path] = {n: _CODESETS_DIR / f"{n}.parquet" for n in _S
 
 
 def _where(path: Path | str | None) -> str:
-    """How a diagnostic names a corpus file: the path under the ambient CLI policy, the config
-    position under any other (a locator never crosses)."""
-    return fileaccess.shown(str(path), "code_set.corpus_source")
+    """How a diagnostic names a corpus file: its config position, never the locator."""
+    return "code_set.corpus_source"
 
 
 def _unknown_shipped_corpus() -> PlanCompileError:
@@ -225,7 +224,7 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
         raise PlanCompileError(
             code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
             path="provider_config.corpus_source",
-            message=f"customer corpus not found at path {handle.display}.",
+            message="customer corpus not found.",
         ) from None
     finally:
         handle.close()
@@ -286,7 +285,7 @@ def _get_corpus_record(
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
                 path="provider_config.corpus_source",
-                message=f"customer corpus at {handle.display} became unavailable after the existence check.",
+                message="the customer corpus became unavailable after the existence check.",
             ) from exc
         except OSError as exc:
             if fileaccess.keeps_class(exc):
@@ -294,7 +293,7 @@ def _get_corpus_record(
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
                 path="provider_config.corpus_source",
-                message=f"failed to stat customer corpus at {handle.display}: {safe_error_type(exc).value}",
+                message=f"failed to stat the customer corpus: {safe_error_type(exc).value}",
             ) from exc
         # Best-effort file identity, not a content hash (see the module-level
         # comment on `_customer_cache` for why ctime is included and a hash is
@@ -463,10 +462,7 @@ def _read_corpus_record(
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
                 path="provider_config.corpus_source",
-                message=(
-                    f"failed to read corpus Parquet at {handle.display}: "
-                    f"{safe_error_type(exc).value}"
-                ),
+                message=(f"failed to read the corpus Parquet: {safe_error_type(exc).value}"),
             ) from exc
     finally:
         if owned:

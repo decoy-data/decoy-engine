@@ -121,7 +121,6 @@ def load_table(
             ) from exc
     finally:
         handle.close()
-    shown = handle.display
 
     if "id" not in arrow_table.schema.names:
         raise ValueError(
@@ -137,15 +136,14 @@ def load_table(
             f"(schema convention -- see reference_tables/__init__.py)."
         )
 
-    _check_version(name, arrow_table, shown)
+    _check_version(name, arrow_table)
     return ReferenceTable(arrow_table, name=name)
 
 
-def _check_version(name: str, table: Any, shown: str) -> None:
+def _check_version(name: str, table: Any) -> None:
     """Emit a WARNING when file version metadata does not match expected.
 
-    `shown` is the display the caller already resolved (the path under the ambient CLI, the
-    config position otherwise), so these diagnostics never carry a raw locator."""
+    The diagnostics name the table, never its location."""
     expected = _SHIPPED_VERSIONS.get(name)
     if expected is None:
         return  # Unknown table name: no version expectation, skip check.
@@ -154,10 +152,9 @@ def _check_version(name: str, table: Any, shown: str) -> None:
     actual_bytes = schema_meta.get(b"decoy_table_version")
     if actual_bytes is None:
         _LOG.debug(
-            "reference table %r at %s has no decoy_table_version metadata "
+            "reference table %r has no decoy_table_version metadata "
             "(expected %r). Continuing with loaded data.",
             name,
-            shown,
             expected,
         )
         return
@@ -165,12 +162,10 @@ def _check_version(name: str, table: Any, shown: str) -> None:
     actual = actual_bytes.decode("utf-8", errors="replace")
     if actual != expected:
         _LOG.warning(
-            "reference table %r version mismatch: file has %r, engine "
-            "expects %r (path: %s). Using the available version. If this "
+            "reference table %r version mismatch: engine "
+            "expects %r. Using the available version. If this "
             "is a customer-provided table, update the table or adjust "
             "_SHIPPED_VERSIONS in _loader.py.",
             name,
-            actual,
             expected,
-            shown,
         )

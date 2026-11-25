@@ -199,13 +199,12 @@ def test_r3_snapshot_read_errors() -> None:
     missing = _raises(lambda: _load_snapshot("nope.json"))
     assert isinstance(missing, StatisticalSpecError)
     assert _text(missing) == (
-        "[statistical_snapshot_unreadable] snapshot_file 'nope.json' could not be read: "
-        "FileNotFoundError"
+        "[statistical_snapshot_unreadable] snapshot_file could not be read: FileNotFoundError"
     )
     Path("s.json").write_text("{")
     bad = _raises(lambda: _load_snapshot("s.json"))
     assert _text(bad) == (
-        "[statistical_snapshot_unreadable] snapshot_file 's.json' could not be read: "
+        "[statistical_snapshot_unreadable] snapshot_file could not be read: "
         "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
     )
     digest = _raises(lambda: _snapshot_content_digest("nope.json"))

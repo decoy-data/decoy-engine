@@ -136,11 +136,7 @@ class ModelPackLoader:
         self._pack_dir = pack_dir if self._handle is None else self._handle.display
         # What a message or log line calls the pack: its path for the ambient CLI policy, its
         # config position for any other (a locator never crosses).
-        self._label = (
-            self._handle.display
-            if self._handle is not None
-            else (str(pack_dir) if fileaccess.is_ambient(self._policy) else "pre_scan.model_pack")
-        )
+        self._label = self._handle.display if self._handle is not None else "pre_scan.model_pack"
         self._trusted = trusted
 
     def _open_dir(self) -> DirHandle:

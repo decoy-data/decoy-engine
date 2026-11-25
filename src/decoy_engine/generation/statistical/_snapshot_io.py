@@ -31,5 +31,5 @@ def parse_snapshot_json(raw: bytes, *, shown: str) -> Any:
         failure = str(exc)
     raise StatisticalSpecError(
         code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-        message=f"snapshot_file {shown!r} could not be read: {failure}",
+        message=f"{shown} could not be read: {failure}",
     )
