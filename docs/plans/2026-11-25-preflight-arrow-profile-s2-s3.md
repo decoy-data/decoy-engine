@@ -14,7 +14,7 @@ Risk: R2. S2a changes a dependency floor and the lock (full-suite trigger). S2b 
 
 After S1b, the engine's bounded profile no longer fails on a Parquet sample whose time has a fractional microsecond or whose date is outside Python's year range (rev 6 sections 3 to 5). The CLI cannot use the fix until three more things happen:
 
-1. The engine declares a pandas floor it supports. `pyproject.toml:61` says `pandas>=1.5.0,<3`. No CI job runs pandas 1.5 or 2.0. In the S1b review, Dennis found that pandas 1.5 returns second-unit durations in nanoseconds, so the S1b recovery profile and the base profile disagree on a version the package claims to support (owner question Q-PAP-D7, vault `OWNER-QUESTIONS.md:264`, update at `:268`). Owner default A was to raise the floor to 2.0.3 in S2, with a CI floor job as a follow-up row. Codex R2 found that the engine already needs pandas 2.2: every pinned generation run enters `pd.option_context` with `future.infer_string` (pandas 2.1) and `future.no_silent_downcasting` (pandas 2.2) (`generation/_pinned_execute.py:192`, `:194`, `:218`), so on 2.0.3 a valid pinned job raises `OptionError`. This plan therefore raises the floor to 2.2.2 (OWNER CALL, section 14).
+1. The engine declares a pandas floor it supports. `pyproject.toml:61` says `pandas>=1.5.0,<3`. No CI job runs pandas 1.5 or 2.0. In the S1b review, Dennis found that pandas 1.5 returns second-unit durations in nanoseconds, so the S1b recovery profile and the base profile disagree on a version the package claims to support (owner question Q-PAP-D7, vault `OWNER-QUESTIONS.md:264`, update at `:268`). Owner default A was to raise the floor to 2.0.3 in S2, with a CI floor job as a follow-up row. Codex R2 found that the engine already needs pandas 2.2: every pinned generation run enters `pd.option_context` with `future.infer_string` (pandas 2.1) and `future.no_silent_downcasting` (pandas 2.2) (`src/decoy_engine/generation/_pinned_execute.py:192`, `:194`, `:218`), so pandas 2.0.3 cannot enter that context. On the anchored engine, import fails even earlier at `src/decoy_engine/validators/_dates.py:13`. This plan therefore raises the floor to 2.2.2 (OWNER CALL, section 14).
 2. A release with #805 and the floor. The latest tag is `v0.28.4`.
 3. A CLI pin of that release, and CLI tests that stop characterizing the old refusal. Today `CLI:tests/e2e/test_run_chunked_parquet.py:539` asserts that `decoy run --chunked` exits 1 with "source not parsed" for the two fixture files, and `_direct` (`:527`) bypasses the CLI preflight to reach the engine at all. `CLI:CHANGELOG.md:32` documents the refusal as a known limit "tracked as row PREFLIGHT-ARROW-PROFILE".
 
@@ -25,7 +25,7 @@ V1 bar: a valid Parquet file with these values cannot be masked through `decoy r
 S2a guarantees:
 
 1. The wheel metadata requires `pandas>=2.2.2,<3`. `uv.lock` changes only in the pandas specifier line (`uv.lock:668`). The resolved pandas stays 2.3.3.
-2. The floor is proven for the environment it names, not only claimed. A floor environment (Python 3.10, 3.11 and 3.12, pandas 2.2.2, pyarrow 16.1.0, once with numpy 1.26.4 and once with numpy 2.0.2) passes the pinned generation cells (`tests/unit/generation/test_pinned_numeric_parity.py:63`) and the #805 profile and capacity tests, including its eligible recovery fixtures, as floor characterization. (#805's selection has no second-unit duration cell, and its recovery excludes duration companions, so the pandas 1.5 duration finding is the reason for the floor, not a before cell this run can show; Codex R1.) An evidence file records the versions, commands, pass counts and every failure with its base reproduction, as `docs/plans/evidence/2026-10-30-f06-r2-evidence.md:85` did for F06.
+2. The floor is proven for the environment it names, not only claimed. A floor environment (Python 3.10, 3.11 and 3.12, pandas 2.2.2, pyarrow 16.1.0, once with numpy 1.26.4 and once with numpy 2.0.2) passes the pinned generation cells (`tests/unit/generation/test_pinned_numeric_parity.py:63`) and the #805 profile and capacity tests that use types available on that Arrow version, including all three eligible recovery fixtures. AT-S2-3 also runs the complete cross-type parity catalogue with the locked Arrow version. (#805's selection has no second-unit duration cell, and its recovery excludes duration companions, so the pandas 1.5 duration finding is the reason for the floor, not a before cell this run can show; Codex R1.) An evidence file records the versions, commands, pass counts and every failure with its base reproduction, as `docs/plans/evidence/2026-10-30-f06-r2-evidence.md:85` did for F06.
 3. Every engine doc or source comment that states a pandas lower bound states the pyproject floor, and a sentry keeps it so.
 
 S2b guarantees: engine 0.28.5 is stamped by the normal process (`scripts/release/stamp_release.py:559`), with the version bump the stamp does not do (Codex R1 P1-7; release #782 did the same): `pyproject.toml:10`, `src/decoy_engine/release.py:50` `__version__`, and the engine entry in `uv.lock`. S2b also regenerates `docs/proof-manifest.json` with `scripts/gen_proof_manifest.py` after the bump, because `tests/unit/test_version_agreement.py:98` holds its stamp to the pyproject version (Codex R2). Before the tag, the built wheel's metadata version, the installed `decoy_engine.__version__`, the proof manifest and the whole of `tests/unit/test_version_agreement.py` agree. The reason registry keeps its own sequence (`reasons/_registry.py:24`, `REGISTRY_VERSION`), so the check reads the release association in its stamped record, not numeric equality with 0.28.5. Then it is tagged and built. Its changelog lists #805 and S2a, with a `Breaking:` line for the floor.
@@ -43,7 +43,7 @@ Non-goals: the CI floor job (follow-up row, owner default A); the pyarrow floor 
 
 Size:
 
-- S2a: about 15 changed lines (pyproject, lock specifier, two comments, one doc sentence, a changelog fragment), two new test functions in an existing sentry file (about 40 lines), and one evidence file. No new public names.
+- S2a: about 15 changed lines (pyproject, lock specifier, two comments, one doc sentence, a changelog fragment), two new test functions in an existing sentry file (about 40 lines), one evidence file, and the AT-3 catalogue test move in section 7. No new public names.
 - S2b: the stamp output plus the three version lines.
 - S3: about 30 changed pin and config lines along #408's file set, about 150 changed test lines, and about 20 doc and changelog lines. No new public names.
 
@@ -57,9 +57,9 @@ Search run on 2026-11-25:
 Findings:
 
 - pandas 2.0 keeps non-nanosecond resolutions for datetime and timedelta. pandas 1.5 coerces them to nanoseconds, which is the Dennis finding. That alone needs 2.0.
-- The engine's pinned execution path uses `future.infer_string` (added in pandas 2.1) and `future.no_silent_downcasting` (added in pandas 2.2) (`generation/_pinned_execute.py:192-194`). The real working floor is therefore 2.2.0, whatever the metadata says today.
+- The engine's pinned execution path uses `future.infer_string` (added in pandas 2.1) and `future.no_silent_downcasting` (added in pandas 2.2) (`src/decoy_engine/generation/_pinned_execute.py:192-194`). The two option names require at least pandas 2.2.0. AT-S2-3 checks the selected 2.2.2 release through the public pinned runner.
 - pandas 2.2.2 is the first release built against numpy 2, so it imports with numpy 1.26 and 2.x. Earlier releases (2.0.x, 2.1.0 to 2.1.3, 2.2.0, 2.2.1) need numpy below 2, and only some of them (for example 2.1.4) declare that cap in metadata (Dennis R1 P1-2, Codex R2). A 2.2.2 floor removes that gap. pandas 2.2.2 has wheels for CPython 3.9 to 3.12, so the floor is testable on every Python the engine supports (`pyproject.toml:13`).
-- PyPA guidance: declare the lowest version you test. SPEC 0 says projects may drop dependency versions older than two years; pandas 2.2.2 (April 2024) is about 31 months old in November 2026, so SPEC 0 would allow dropping it; the floor is set by what the engine needs, not by SPEC 0 (Codex R3).
+- PyPA guidance: declare the lowest version you test. pandas 2.2.2 shipped on April 10, 2024, about 31 months before this review. SPEC 0 measures its two years from the 2.2.0 feature release (January 2024). The engine keeps 2.2.2 for its pinned options and NumPy 2 wheel compatibility. [pandas release notes](https://pandas.pydata.org/docs/whatsnew/v2.2.2.html), [SPEC 0](https://scientific-python.org/specs/spec-0000/).
 - The engine already has a floor sentry, `tests/sentry/dependencies/test_dependency_floors.py`. It reads the floor with `packaging.requirements` and checks the lock against it (the `uv lock --check` idea as a test). S2a adds pandas cells to it.
 
 The design follows PyPA (declare the tested floor), the F06 evidence pattern and the existing floor sentry. The only new check is "docs state the same floor", because no tool compares prose with package metadata.
@@ -100,6 +100,7 @@ S3 adds no rule with more than one site. The CLI keeps its one preflight-to-chec
 | New file | Directory | CODEMAP "Where Things Go" row | Beside |
 |---|---|---|---|
 | `2026-11-2x-pandas-floor-evidence.md` | `docs/plans/evidence/` | "Plans, decisions, records": `docs/plans/` | `docs/plans/evidence/2026-10-30-f06-r2-evidence.md` |
+| `test_bounded_parquet_catalogue.py` | `tests/unit/profile/` | Unit test beside the profile tests | Move the exhaustive AT-3 parity parametrization and its catalogue builder from `test_bounded_parquet_recovery.py`. Both modules reuse `_arrow_support.assert_matches_base`. |
 | `pandas-floor.md` | `changelog.d/` | "Changelog fragments" (`CODEMAP.md:302`): `changelog.d/<slice-slug>.md` | `changelog.d/preflight-arrow-profile.md` (from #805) |
 
 The sentry cells go in an existing file, `tests/sentry/dependencies/`, which the "Sentry test" row names for "dependency floor rules". S2b and S3 add no file.
@@ -108,7 +109,7 @@ The sentry cells go in an existing file, `tests/sentry/dependencies/`, which the
 
 | Case | Before | After |
 |---|---|---|
-| install with pandas 1.5 to 2.2.1 already present | installs; pinned generation raises `OptionError` below 2.2; S1b recovery can disagree on durations below 2.0 | the resolver upgrades pandas to 2.2.2 or newer, or reports a conflict |
+| install with pandas 1.5 to 2.2.1 already present | metadata admits the install. On 2.0.3 engine import fails, and the pinned option tuple independently raises `OptionError`. 2.2.0 and 2.2.1 wheels require a compatible NumPy 1.x installation | the resolver upgrades pandas to 2.2.2 or newer, or reports a conflict |
 | install on Python 3.12 | resolver picks a pandas with a 3.12 wheel | resolves pandas 2.2.2 or newer |
 | `decoy validate preflight` on the three fixtures | `capacity.source_unreadable`, exit 1 | no capacity failure |
 | `decoy run --chunked`, bad row at 0 or 9,999 | exit 1 "source not parsed" | exit 0, `t` exact |
@@ -120,7 +121,7 @@ The sentry cells go in an existing file, `tests/sentry/dependencies/`, which the
 
 Failure modes the plan checks for:
 
-- F1: a floor-environment failure in a test #805 did not touch. The builder runs the same test on the S2a base in the same environment. If it fails on base, it is recorded in the evidence file as pre-existing (as F06 did for `test_phase_f_f2_mixed_admission.py`) and not fixed in S2a. If it is new with the floor, S2a stops and reports.
+- F1: A failed import, collection error or missing required cell invalidates the floor run. A failure in pinned generation, eligible recovery, capacity or full-frame behavior stops S2a even if it reproduces on base. Record unrelated failures separately with a same-environment base reproduction and the observed behavior. For example, Arrow 16.1.0 refuses duplicate fields with different upstream wording in `test_duplicate_header_readers.py`.
 - F2: `uv lock` rewrites more than the specifier line. The builder uses the uv version of the last lock change, and AT-S2-2 fails on any other changed line.
 - F3: the release stamp picks up a fragment from a PR that is not on main. The stamp runs on a fresh `origin/main` worktree only.
 - F4: the CLI default route on a CI leg without the companion. The chunked carry is chosen by the stock adapter (`execution/_chunked_carry.py:274-287`), not by the companion, so the exit-0 cells run on every leg, companion-free legs included, with no companion marker (Codex R1). The `--no-native` and plain-run cells also run on every leg.
@@ -135,8 +136,8 @@ Fail-before is recorded on the parent commit of each slice.
 |---|---|---|---|
 | AT-S2-1 | S2a | `uv pip install --dry-run` of the built wheel into a venv with pandas 2.2.1 reports an upgrade or a conflict. On Python 3.10, 3.11 and 3.12, a clean resolver install of the built wheel with `pandas==2.2.2` and no numpy constraint, then `python -c "import pandas, decoy_engine"`, passes | 2.2.1 accepted (metadata says 1.5.0) |
 | AT-S2-2 | S2a | `git diff` of `uv.lock` against the parent changes only the pandas specifier line | guards F2 |
-| AT-S2-3 | S2a | floor run on Python 3.10, 3.11 and 3.12 with pandas 2.2.2 and pyarrow 16.1.0, with numpy 1.26.4 and with numpy 2.0.2: `tests/unit/generation/test_pinned_numeric_parity.py`, `tests/unit/profile/`, `tests/unit/execution/test_capacity_arrow_profile.py`, `tests/unit/execution/test_full_frame_value_unrepresentable.py` (all from #805), and T1 on the S2a diff; pass counts and every failure with its base reproduction in the evidence file | the pinned cells raise `OptionError` on pandas 2.0.3 (recorded once in the evidence file); the rest is characterization |
-| AT-S2-4 | S2a | the two sentry cells in section 6 pass, and M-1 turns the statements cell red | floor cell fails on 1.5.0 |
+| AT-S2-3 | S2a | In all six floor environments from section 2, run `tests/unit/generation/test_pinned_numeric_parity.py`, `tests/unit/profile/` (with the catalogue selection below), `tests/unit/execution/test_capacity_arrow_profile.py` and `tests/unit/execution/test_full_frame_value_unrepresentable.py`. Record versions, node IDs, outcomes and base reproductions. Run T1 on the S2a diff. | On Python 3.10 with pandas 2.0.3 and numpy 1.26.4, engine import fails at `guess_datetime_format`. Independently, passing the exact pinned option tuple to pandas raises `OptionError` for `future.infer_string`. The positive floor cells must execute. |
+| AT-S2-4 | S2a | the two sentry cells in section 6 pass, and M-1 and each M-1b turn the statements cell red | floor cell fails on 1.5.0 |
 | AT-S2-5 | S2b | before tagging: the 0.28.5 wheel metadata has `Version: 0.28.5` and `Requires-Dist: pandas<3,>=2.2.2` (the floor S2a merged); installed `decoy_engine.__version__` is `0.28.5`; `tests/unit/test_version_agreement.py` passes in full, including the proof-manifest stamp; `CHANGELOG.md` has the `Breaking:` floor line and the #805 entry | 0.28.4 metadata says 1.5.0 |
 | AT-S3-1 | S3 | `decoy validate preflight` on the three fixtures: no `capacity.source_unreadable` in text or `--json`; a truncated Parquet still has it, exit 1 | exit 1 on the three fixtures |
 | AT-S3-2 | S3 | `decoy run --chunked`, default route, bad row at 0, 9,999 and 10,000, each fixture: exit 0, `t` equals the source column. Every other row is built from exact microsecond values, because the current time fixture starts with `1, 2, 3` nanoseconds, which are already unrepresentable (`CLI:tests/e2e/test_run_chunked_parquet.py:514`, Codex R2). A control cell shows that only the row-10,000 file passes the old preflight | rows 0 and 9,999 exit 1 |
@@ -148,6 +149,8 @@ Fail-before is recorded on the parent commit of each slice.
 
 The S3 edits to `TestValuesPandasRefuses` replace a characterization of a known defect. They do not weaken an assertion: each old exit 1 becomes a stronger assertion on values, codes and leaks.
 
+AT-S2-3 keeps the full #805 parity inventory. On the anchored head, importing the recovery test builds `tests/native/_rev9_type_catalogue.py` at collection. Its `pa.json_` factory is absent on Arrow 16.1.0, so even selecting a single recovery node fails. Move only the exhaustive AT-3 catalogue case and its builder to the file in section 7. On 16.1.0 exclude that single file by path before collection. Require the text and numeric pinned cases and all three temporal recovery fixtures to run. Run the moved catalogue on pandas 2.2.2 with the locked pyarrow 24.0.0, and keep it in the normal full suite. Compare its collected case IDs (apart from module path) and counts before and after the move on the locked stack.
+
 ## 10. Named mutations
 
 | ID | Mutation | Must turn red |
@@ -155,6 +158,7 @@ The S3 edits to `TestValuesPandasRefuses` replace a characterization of a known 
 | M-1 | the `docs/quickstart.md` floor sentence says 1.5 | AT-S2-4 statements cell |
 | M-1b | one `pandas_compat.py` comment alone (`:6`, then `:25`) says "pandas 2.0.2-2.x" | AT-S2-4 statements cell, once per comment |
 | M-2 | `pyproject.toml:61` stays at 1.5.0 | AT-S2-1, AT-S2-4 floor cell |
+| M-2b | Restore the eager AT-3 catalogue import to the recovery module | AT-S2-3 fails collection on Arrow 16.1.0 before the required temporal fixtures run |
 | M-3 | S3 pins the CLI to 0.28.4 (no #805) | AT-S3-1, AT-S3-2 |
 | M-4 | in a scratch engine build, #805's recovery rejects every date32 recovery | AT-S3-1 and the in-sample AT-S3-2 cells (bad row 0 and 9,999) for the two date32 fixtures |
 | M-5 | the CLI error renderer appends a known sentinel built from the source cell (the engine exception's `__context__` is already empty at `#805:execution/_pipeline_full_frame.py:222-236`, so printing it shows nothing) | AT-S3-3, AT-S3-4 |
@@ -181,7 +185,7 @@ M-4 runs against a local editable engine in the CLI venv. It is a gate probe, no
 | 5 | Referential integrity | N/A the CLI fixtures have no relationships; the FK pricing cell is an #805 engine test | #805 tests | N/A no FK code changes |
 | 6 | Untrusted producer | the Parquet file is the untrusted producer; a truncated file is still refused at preflight | AT-S3-1 truncated cell | M-3 |
 | 7 | Check then use (TOCTOU) on a path | N/A no new path check; the CLI reads the source once per stage as today | existing preflight tests | N/A no check-then-open added |
-| 8 | Weak tests and overclaimed evidence | the floor claim rests on a recorded run; old characterization cells become stronger assertions; every floor failure has a base reproduction | AT-S2-3 evidence, AT-S3-6 | M-2, M-4 |
+| 8 | Weak tests and overclaimed evidence | the floor claim rests on a recorded run; old characterization cells become stronger assertions; every floor failure has a base reproduction | AT-S2-3 evidence, AT-S3-6 | M-2, M-2b, M-4 |
 | 9 | Behavior-preserving refactor drift | S2a and S2b change no engine source except two comments; S3 changes no CLI source except pins and docs | `git diff --stat` limited to sections 7 and 13.4 | M-3 |
 | 10 | Frozen contract drift | the floor and the exit-code change are named in both changelogs and the compatibility contract | AT-S2-5, section 11 | M-1 |
 
@@ -252,7 +256,7 @@ Install: resolves pandas 2.2.2 or newer, or reports a resolver conflict. No run-
 
 | Slice | Repo | Content | Depends on | Risk | Test depth |
 |---|---|---|---|---|---|
-| S2a | engine | floor in `pyproject.toml:61`, `uv lock`, the two `pandas_compat.py` comments, the quickstart sentence, the two sentry cells, `changelog.d/pandas-floor.md` with a `Breaking:` line, the evidence file; AT-S2-1 to AT-S2-4 | #805 merged (the floor run covers its tests) | R2 | T1, then the full engine suite (dependency floor and lock trigger) diffed against the saved main baseline; gate Codex then Dennis |
+| S2a | engine | floor in `pyproject.toml:61`, `uv lock`, the two `pandas_compat.py` comments, the quickstart sentence, the two sentry cells, `changelog.d/pandas-floor.md` with a `Breaking:` line, the evidence file and AT-3 catalogue test move; AT-S2-1 to AT-S2-4 | #805 merged (the floor run covers its tests) | R2 | T1, then the full engine suite (dependency floor and lock trigger) diffed against the saved main baseline; gate Codex then Dennis |
 | S2b | engine | `chore(release): 0.28.5` from `stamp_release.py` on fresh main, plus the version in `pyproject.toml:10`, `release.py:50` and `uv.lock`, and a regenerated `docs/proof-manifest.json`; the AT-S2-5 agreement check before the tag; tag `v0.28.5`, the release workflow | #805 and S2a merged | R2 (release path) | the release workflow's own checks; gate Codex. Engine releases are pre-authorized before GA |
 | S3 | CLI | repin to 0.28.5 along #408's file set; flip `TestValuesPandasRefuses`, delete `_direct`, add a `date32_late` fixture (+3,000,000 days), parametrize the bad row over 0, 9,999 and 10,000, add the plain-run and validate-preflight cells, docs and changelog; AT-S3-1 to AT-S3-7 | S2b tagged and CLI #408 merged | R2 (version pin, exit codes) | T1, then the CLI full suite with `gates.sh --full` (version pin trigger); gate Codex then Dennis |
 
@@ -262,7 +266,7 @@ OWNER CALL (recommended non-breaking option taken): S2a and S2b are separate PRs
 
 Order: #805, S2a, S2b, S3. The S2a branch may be prepared on top of #805's head while #805 is in gate, but the S2a PR targets `main` and is opened only after #805 merges, rebased on that main. A PR merged into a non-main base never ships. Its floor run is repeated on the merged #805.
 
-OWNER CALL (recommended non-breaking option taken; open for the owner to confirm): the floor is 2.2.2, not the 2.0.3 of owner default A for Q-PAP-D7. Codex R2 showed that pandas below 2.2 cannot run pinned generation at all (`generation/_pinned_execute.py:192-194`), so a 2.0.3 floor would advertise a version where a valid job raises `OptionError`, which is a function break. 2.2.2 removes no install that can run every engine feature today, needs no numpy note, and is testable on every supported Python. Lowering the pinned options to fit 2.0.3 would change pinned output, which is out of scope. If the owner still wants a lower floor, the only consistent value is 2.2.0 with a `numpy<2` note; S2a then changes only the floor value, the evidence environment and the doc sentence. The S2b tag waits for the owner to confirm the value.
+OWNER CALL (breaking metadata correction, pending owner confirmation): the floor is 2.2.2, not the 2.0.3 of owner default A for Q-PAP-D7. Codex R2 showed that pandas below 2.2 cannot run pinned generation at all (`src/decoy_engine/generation/_pinned_execute.py:192-194`), so a 2.0.3 floor would advertise a version where a valid job cannot start, which is a function break. This excludes 2.2.0 and 2.2.1 installs even with compatible NumPy 1.x wheels. Keeping either version would need a separate resolver-safe dependency proposal and matching install and pinned-run evidence. A prose note cannot prevent an incompatible wheel combination. The S2b tag waits for the owner to confirm the value.
 
 Rollback (`release-and-rollback.md`):
 
@@ -275,7 +279,7 @@ Post-release check for S2b: install 0.28.5 from the built wheel in a clean venv 
 ## 15. Pre-mortem
 
 - The floor run fails on something unrelated to #805, as F06 did. F1 covers it: reproduce on base, record it, do not fix it in S2a.
-- A user has pandas 2.0 or 2.1 pinned for another package. They get a resolver conflict. Today they get an `OptionError` on pinned jobs, so the conflict is the better failure. The `Breaking:` line names it.
+- A user has pandas 2.0 or 2.1 pinned for another package. They get a resolver conflict. Today an engine import or pinned job can fail, so the conflict is the better failure. The `Breaking:` line names it.
 - The owner prefers the 2.0.3 default. Section 14 shows why that floor is not consistent with the pinned path; the S2b tag waits for the decision.
 - #805 changes again in gate. S2a only cites its test paths, and the floor run is repeated on the merged head.
 - #408 is replaced by a 0.28.5 pin PR before S3 starts. S3 then edits only the flipped tests, docs and changelog. AT-S3-7 checks the pin wherever it came from.
@@ -284,7 +288,7 @@ Post-release check for S2b: install 0.28.5 from the built wheel in a clean venv 
 - The release stamp's certified-stack step needs CLI pin files for 0.28.5 that do not exist yet. The stamp runs with `--cli-pins-base` at the 0.28.4 file, as #782 did; the CLI pins are certified in S3.
 - A pandas 1.5 compatibility branch in `pandas_compat.py` becomes dead. It is left in place: removing it is a refactor with its own risk and is a follow-up.
 
-Review status: Codex R3 (the last allowed round) returned GO-WITH-FIXES with one PAP finding (the pandas 2.2.2 age note), folded after that round.
+Review status: Codex R4 verified the R3 age correction and the pinned options at `src/decoy_engine/generation/_pinned_execute.py:192-195,218`. R4 reproduced the 2.0.3 import and option failures and the Arrow 16.1.0 collection failure. AT-S2-3 and M-2b cover the floor evidence on the S2a implementation head.
 
 ## 16. Follow-ups (not in this row)
 
