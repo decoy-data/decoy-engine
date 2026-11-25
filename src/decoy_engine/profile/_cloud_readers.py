@@ -28,6 +28,7 @@ import pyarrow.parquet as pq
 
 from decoy_engine._lexeme import LEXEME_KEY, pandas_lexeme_kwargs
 from decoy_engine.connectors import _clients
+from decoy_engine.fileaccess._errors import guarded
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.fileaccess.adapters import pandas as pandas_adapter
 from decoy_engine.fileaccess.adapters.memory import StreamHandle
@@ -208,12 +209,33 @@ def _csv_sample_from_window(
 
     If the window is a prefix of a larger object it may end mid-row; the last
     fragment is dropped before parsing so `read_csv` never sees a torn line.
+    `low_memory=False` infers each column's type over the whole window, so a column that
+    mixes numbers and text is text throughout, not a mix of both.
+
+    A `UnicodeDecodeError` holds the input bytes in its arguments, so it leaves as a new one
+    with none (the proof read still tells it apart from a parse failure by type).
     """
     if len(window) < size:
         window = window.rsplit(b"\n", 1)[0] + b"\n"
-    return pd.read_csv(
-        io.BytesIO(window), nrows=sample_rows, **pandas_lexeme_kwargs(lexeme_columns)
-    )
+    try:
+        return pd.read_csv(
+            io.BytesIO(window),
+            nrows=sample_rows,
+            low_memory=False,
+            **pandas_lexeme_kwargs(lexeme_columns),
+        )
+    except UnicodeDecodeError:
+        pass
+    raise UnicodeDecodeError("utf-8", b"", 0, 1, "invalid byte sequence in the CSV window")
+
+
+def _csv_schema_from_window(
+    window: bytes, size: int, lexeme_columns: Any, provider: str
+) -> pa.Schema:
+    """The Arrow schema of a CSV's leading window. The conversion is guarded: Arrow's error
+    text names the cell it could not convert."""
+    head = _csv_sample_from_window(window, size, _CSV_ESTIMATE_ROWS, lexeme_columns)
+    return guarded(provider, True, pa.Table.from_pandas, head, preserve_index=False).schema
 
 
 def _csv_rows_from_ranges(
@@ -242,13 +264,17 @@ def _csv_rows_from_ranges(
         if end > len(buffer):
             buffer += _fetch_span(fetch, len(buffer), end - 1, provider)
         whole = len(buffer) >= size
+        unparsed = False
         try:
             frame = _csv_sample_from_window(buffer, size, n + 1, lexeme_columns)
         except PROOF_READ_ERRORS:
+            unparsed = True
+        if unparsed:
             if whole:
                 # Row `n + 1` is on the object and does not parse: a row exists past `n`,
                 # which is all the proof asks. The `n` rows themselves must still parse,
-                # and an error there is raised as `to_frame` would.
+                # and an error there is raised as `to_frame` would. Read outside the
+                # `except` block so the first error is not left as the second's context.
                 return _csv_sample_from_window(buffer, size, n, lexeme_columns)
         else:
             if len(frame) <= n:
@@ -367,12 +393,8 @@ class S3CsvSource:
 
     def schema(self) -> pa.Schema:
         size, window = self._size_and_window()
-        # Reuse the sample parser so a window truncated mid-row is trimmed to
-        # whole lines before pandas infers the schema.
-        head = _csv_sample_from_window(
-            window, size, _CSV_ESTIMATE_ROWS, self._descriptor.get(LEXEME_KEY)
-        )
-        return pa.Table.from_pandas(head, preserve_index=False).schema
+        # The sample parser trims a window cut mid-row to whole lines first.
+        return _csv_schema_from_window(window, size, self._descriptor.get(LEXEME_KEY), "S3")
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
         size, fetch = _s3_bind(self._descriptor)
@@ -478,12 +500,8 @@ class GcsCsvSource:
 
     def schema(self) -> pa.Schema:
         size, window = self._size_and_window()
-        # Reuse the sample parser so a window truncated mid-row is trimmed to
-        # whole lines before pandas infers the schema.
-        head = _csv_sample_from_window(
-            window, size, _CSV_ESTIMATE_ROWS, self._descriptor.get(LEXEME_KEY)
-        )
-        return pa.Table.from_pandas(head, preserve_index=False).schema
+        # The sample parser trims a window cut mid-row to whole lines first.
+        return _csv_schema_from_window(window, size, self._descriptor.get(LEXEME_KEY), "GCS")
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
         return _with_gcs_reads(
