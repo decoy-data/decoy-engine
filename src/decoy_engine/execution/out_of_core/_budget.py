@@ -24,16 +24,13 @@ ever sized by table cardinality.
 Spill is bounded too: `check_temp_disk_budget` measures the on-disk footprint
 under the route's `temp_dir` (relation/join staging plus DuckDB spill) and
 fails closed with a coded error before the disk fills, the same guard-rail
-role as DuckDB's `max_temp_directory_size` setting -- `_pipeline_route_exec.
-run_out_of_core_route` threads a `shutil.disk_usage`-derived budget into
-`run_fk_out_of_core` so this cap is enforced on the pipeline path (OOC-D).
-`check_disk_spill_preflight` is the forward-looking counterpart: given a
-*predicted* footprint, it checks free disk up front rather than after the
-fact. The predicted-footprint estimator + the routing call site (OOC-D, per
-the OOM-avoidance routing redesign §3.6) now live in the sibling
-`_spill_estimate.py` module (`predict_ooc_disk_bytes` /
-`enforce_ooc_disk_preflight`), a conservative two-term (spill + output) upper
-bound, split out to hold this module's own LOC cap.
+role as DuckDB's `max_temp_directory_size` setting. `resolve_temp_disk_budget`
+derives its cap from the free space where the run spills, and `run_fk_out_of_core`
+derives it itself when a caller passes none (OOC-D). `check_disk_spill_preflight` is
+the forward-looking counterpart: given a *predicted* footprint, it checks free disk
+up front. The estimator and routing call site (OOC-D, OOM-avoidance routing redesign
+§3.6) live in the sibling `_spill_estimate.py` (`predict_ooc_disk_bytes` /
+`enforce_ooc_disk_preflight`), split out to hold this module's own LOC cap.
 
 The effective ceiling `resolve_budget` fractions prefers a cgroup memory
 limit over raw host RAM (`detect_effective_memory_bytes`): a process almost
@@ -86,32 +83,21 @@ the reserve floor -- rather than a quarter of it, and still spills to
 `temp_directory` whenever a query's working set exceeds even that generous
 share.
 
-CONCURRENCY (a second, independent divisor `resolve_ooc_memory_limit` alone
-applies): `connect_duckdb` opens a FRESH `:memory:` DuckDB instance per call,
-and `memory_limit` bounds only THAT ONE instance -- DuckDB has no
-cross-instance accounting. `_runner.py` can hold several instances open at
-once: `_stream_table` opens one `ChildFkBatchJoiner` connection PER INCOMING
-FK EDGE up front (`_batch_join.py`). On the sink path, joiners close after
-the rewrite stream drains (via `on_stream_consumed` in `_emit.py`), before
-`_relation.py::build_parent_key_relation` opens for OUTGOING edges; on the
-resident path (no sink), joiners stay open during the build (both live in the
-same `_stream_table` try block). So the sink path peaks at max(incoming_edges,
-1), the resident path at incoming_edges + 1. `_max_concurrent_ooc_instances`
-computes the resident peak (incoming_edges + 1) as the divisor for both paths:
-it is exact for residents and conservative (over-provisions) for sinks. Only
-one table streams at a time (`run_fk_out_of_core`'s per-table loop is
-sequential, never concurrent), so the run's ceiling is the max over every
-table. But incoming-edge fan-in is a property of the PLAN's relationship
-graph, which this module never sees -- both budget functions take only byte
-counts, by design, so neither depends on `decoy_engine.relationships` or
-`decoy_engine.plan`. So `max_concurrent_instances` is an explicit CONSERVATIVE
-default (`_DEFAULT_MAX_CONCURRENT_DUCKDB_INSTANCES`), not a computed one: real FK
-schemas rarely fan many incoming edges into one table (the 100M-row cloud
-benchmark's chain peaks at 2). A caller with graph visibility and a wider
-fan-in passes `max_concurrent_instances` from its own edge count. The
-resolved `memory_limit` is `budget_bytes // max_concurrent_instances`, so the SUM
-of every live instance's cap stays within `budget_bytes`, which already excludes
-the reserve above.
+CONCURRENCY (a second, independent divisor `resolve_ooc_memory_limit` alone applies):
+`connect_duckdb` opens a FRESH `:memory:` DuckDB instance per call, and `memory_limit`
+bounds only THAT ONE instance; DuckDB has no cross-instance accounting. `_runner.py` can
+hold several open at once: `_stream_table` opens one `ChildFkBatchJoiner` connection PER
+INCOMING FK EDGE up front (`_batch_join.py`). On the sink path joiners close after the
+rewrite stream drains (`on_stream_consumed` in `_emit.py`), before the build for OUTGOING
+edges opens; on the resident path they stay open during the build. So the sink path peaks
+at max(incoming_edges, 1) and the resident path at incoming_edges + 1;
+`_max_concurrent_ooc_instances` uses the resident peak for both, exact for residents and
+conservative for sinks. Only one table streams at a time. Fan-in is a property of the
+PLAN's relationship graph, which this module never sees, so `max_concurrent_instances` is
+an explicit CONSERVATIVE default (`_DEFAULT_MAX_CONCURRENT_DUCKDB_INSTANCES`); a caller
+with graph visibility passes its own edge count. The resolved `memory_limit` is
+`budget_bytes // max_concurrent_instances`, so the SUM of every live cap stays within
+`budget_bytes`, which already excludes the reserve above.
 """
 
 from __future__ import annotations
@@ -607,6 +593,19 @@ def check_disk_spill_preflight(path: Path, *, predicted_spill_bytes: int) -> Dis
     )
 
 
+# OOC-D: a fraction of the free space, not all of it: other processes share the filesystem.
+_TEMP_DISK_SAFETY_FRACTION = 0.9
+
+
+def resolve_temp_disk_budget(root: Path) -> int | None:
+    """The runtime temp-disk cap: a safety fraction of the free space at `root`, where the run
+    spills, or `None` when undetectable (the cap is then unset, not newly blocking)."""
+    try:
+        return int(shutil.disk_usage(root).free * _TEMP_DISK_SAFETY_FRACTION)
+    except OSError:
+        return None
+
+
 __all__ = [
     "DiskSpillPreflight",
     "OutOfCoreBudget",
@@ -618,5 +617,6 @@ __all__ = [
     "resolve_budget",
     "resolve_conservative_ooc_budget_bytes",
     "resolve_ooc_memory_limit",
+    "resolve_temp_disk_budget",
     "temp_disk_bytes",
 ]

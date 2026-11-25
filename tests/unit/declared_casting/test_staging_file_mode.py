@@ -87,7 +87,7 @@ def test_staged_copy_is_0600_while_written_and_after(
     call = {"cast_run": run, "plan": object(), "sources": {"t": source}, "temp_dir": caller}
     # The engine runs, and creates the missing caller-root, under the umask.
     with _umask(umask_value) as umask:
-        assert run_staged(fn, call, 1000) == "ok"
+        assert run_staged(fn, call, 1000, lambda _root: None) == "ok"
 
     assert len(seen["after"]) == 1, seen  # non-vacuity: exactly one staged copy was observed
     assert set(seen["after"].values()) == {0o600}, (oct(umask), seen["after"])

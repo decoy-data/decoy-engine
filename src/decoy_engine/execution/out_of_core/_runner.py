@@ -60,7 +60,10 @@ from decoy_engine.execution._publication_observer import observed_abort, observe
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution.out_of_core import _join as _join_ooc
 from decoy_engine.execution.out_of_core import _validate_batch
-from decoy_engine.execution.out_of_core._budget import check_temp_disk_budget
+from decoy_engine.execution.out_of_core._budget import (
+    check_temp_disk_budget,
+    resolve_temp_disk_budget,
+)
 from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext
 from decoy_engine.execution.out_of_core._hash_run import OocHashRun, fk_child_skip_columns
 from decoy_engine.execution.out_of_core._mask import mask_batch  # noqa: F401 -- patch seam
@@ -191,7 +194,12 @@ def run_fk_out_of_core(
     if cast_run is not None and not _staged and cast_run.tables() & set(sources):
         # F06: declared sources are cast once into typed sources (see `run_staged`), then this
         # function runs again over them.
-        return _declared.run_staged(run_fk_out_of_core, dict(locals()), _join_ooc._JOIN_BATCH_ROWS)
+        return _declared.run_staged(
+            run_fk_out_of_core,
+            dict(locals()),
+            _join_ooc._JOIN_BATCH_ROWS,
+            resolve_temp_disk_budget,
+        )
     pre = run_preflight(
         plan,
         sources,
@@ -242,6 +250,9 @@ def run_fk_out_of_core(
     if _arena is None:
         _arena = owned = ScratchArena.fresh(under=temp_dir)
     root = Path(_arena.local_path())
+    if temp_disk_budget_bytes is None:
+        # A direct caller gets the same cap the route computes, measured on the arena itself.
+        temp_disk_budget_bytes = resolve_temp_disk_budget(root)
     try:
         parent_relations: dict[RelationshipEdge, ParentKeyRelation] = {}
         outputs: dict[str, pa.Table] = {}
