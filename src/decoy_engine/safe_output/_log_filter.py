@@ -3,28 +3,35 @@
 Pattern source: the stdlib logging cookbook ("Using Filters to impart contextual information")
 and the OWASP Logging Cheat Sheet, which says to sanitize at the logging layer rather than at
 each call. A `logging.Filter` on a handler runs before that handler's formatter, so it sees the
-record while it can still change what is printed.
+record while it can still change what is printed. The closed type table follows the Sentry SDK
+serializer (walk the types you know, send everything else through one fallback) with a fixed
+placeholder as the fallback, because `repr` is caller code.
 
 What the filter rewrites, in place on the record:
 
-- an exception in `msg` or in `args` (a tuple item or a mapping value) becomes its closed type
-  label (`safe_error_type`), so `%s` and `%r` print the label. The same holds one level inside
-  a list, tuple, set, frozenset, dict or `UserDict` (keys and values) used as an argument or as
-  `msg`. A lone mapping argument is `args` itself and follows the same rule (`_scan_mapping`);
+- every value it writes back comes from one function, `_safe_value`, which decides by exact
+  type and runs no caller code. An exception becomes its closed type label
+  (`safe_error_type`). Any mapping that is not an exact `dict` (a `dict` subclass, `OrderedDict`,
+  `Counter`, `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap`, a `ConfigParser` section, a
+  caller `Mapping`) becomes the placeholder `<mapping>`, clean or not, so no lookup, factory or
+  order of a caller type can be reached. A `dict` with a key that is not an exact `str`, `int`,
+  `float`, `bool` or `None` is the placeholder too: keys are never rewritten. Plain containers
+  (`list`, `tuple`, `set`, `frozenset` and their subclasses, `dict`) are opened one level deep
+  in `msg` and two in `args`; a changed one is a new plain container, an unchanged one is
+  returned as is;
+- one function, `_safe_pairs`, reads the items of a `dict` (`dict.items(store)` and nothing
+  else, so no stored key is compared or hashed by caller code). Row 6, the named values and the
+  display of a lone mapping all take its result, so their depth cannot differ;
+- a lone mapping argument (`LogRecord` makes `args` the mapping itself) becomes a `_NamedArgs`:
+  a new `dict` of the exact-`str` keys with their scanned values, a value-free default for a
+  missing name, a truthy `bool`, and a display that is computed only when `%s`, `%r` or a
+  brace `{args}` asks for it. A second filter pass keeps it unchanged;
 - live `exc_info` becomes a traceback of labels and `file:line, in function` frames, with no
   exception text, no source lines and no frame locals; `exc_info` is then cleared so the
   formatter cannot render the raw one;
 - a cached `exc_text` with no live traceback is dropped unless this filter wrote it, so text a
   host formatter cached earlier never passes, while a second filtered handler prints the same
   safe traceback as the first.
-
-The scan reads containers through their builtin base type only, so it runs no caller code: no
-overridden `items` or `__iter__`, no `default_factory`, no lazy mapping such as a
-`ConfigParser` section. A container with nothing to replace is returned as is, identity
-included. One that changes is rebuilt as a new builtin of the same kind and keeps no reference
-to the caller's object, so no formatter field (`{args.x[y]}`) can reach an original value, and
-the caller's data is never changed. A mapping whose missing-key lookup the filter cannot
-vouch for is rebuilt even when its items are clean (`_Lookup`).
 
 `stack_info` holds code locations and engine source lines (code, not data) and is kept.
 
@@ -34,19 +41,16 @@ call-site guard `tests/sentry/test_log_interpolation.py` covers them instead:
 - text already formatted into `msg` (an f-string, or `str(exc)` passed as an argument), which
   cannot be told apart from any other text here;
 - `exc.args` (or any part of an exception) passed as an argument, since it is plain data;
-- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`, including a
-  mapping type other than dict and `UserDict`, which the scan does not open;
-- an exception nested deeper than one container level.
+- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`;
+- an exception nested deeper than the scan depth.
 """
 
 from __future__ import annotations
 
 import logging
-from collections import Counter, OrderedDict, UserDict, defaultdict
-from collections.abc import Callable
-from enum import Enum
+from collections import Counter, UserDict, defaultdict
+from collections.abc import Mapping, Sequence
 from types import TracebackType
-from typing import Any, cast
 
 from decoy_engine.safe_output._exception import safe_error_type
 
@@ -57,15 +61,21 @@ _MAX_CHAIN = 16
 _UNRENDERABLE = "log record could not be made safe"
 # `args` holds the arguments themselves, so it is scanned one container level deeper than `msg`.
 _ARGS_DEPTH = 2
-_SEQUENCES = (list, tuple, set, frozenset)
-# Factories that build an empty builtin: a defaultdict using one keeps its identity.
+# Each base type with its unbound iterator, so a subclass `__iter__` never runs.
+_SEQUENCES = (
+    (list, list.__iter__),
+    (tuple, tuple.__iter__),
+    (set, set.__iter__),
+    (frozenset, frozenset.__iter__),
+)
+_PLAIN_VALUE_TYPES = (str, bytes, int, float, complex, bool, type(None))
+_PLAIN_KEY_TYPES = (str, int, float, bool, type(None))
+# Factories that build an empty builtin: a missing name on such a defaultdict has a safe default.
 _EMPTY_FACTORIES = (int, float, complex, bool, str, bytes, list, tuple, dict, set, frozenset)
-_FACTORY_FAILED = "default factory failed"
-_NO_VALUE = object()
 
 
 class _Label(str):
-    """A type label that prints the same under `%s` and `%r`."""
+    """A text that prints the same under `%s` and `%r`."""
 
     __slots__ = ()
 
@@ -73,136 +83,135 @@ class _Label(str):
         return str.__str__(self)
 
 
+_MAPPING_PLACEHOLDER = _Label("<mapping>")
+
+
 def _label(exc: BaseException) -> _Label:
     return _Label(safe_error_type(exc).value)
 
 
-class _Lookup(Enum):
-    """What a missing-key lookup on a mapping does, read from its type alone."""
-
-    BUILTIN = "builtin"  # KeyError, Counter's 0, or a factory from `_EMPTY_FACTORIES`
-    FACTORY = "factory"  # defaultdict: calls a caller's `default_factory`
-    CALLER = "caller"  # a `__getitem__` or `__missing__` the caller wrote
-
-
-def _factory_of(value: dict[object, object]) -> Callable[[], object] | None:
-    # The C slot `defaultdict.__missing__` reads, not an attribute a subclass may override.
-    slot: Any = vars(defaultdict)["default_factory"]
-    return cast("Callable[[], object] | None", slot.__get__(value))
-
-
-def _lookup_of(value: dict[object, object] | UserDict[object, object]) -> _Lookup:
+def _is_exact(value: object, types: tuple[type, ...]) -> bool:
     kind = type(value)
-    # Identity checks only: `in` or `==` would call a caller's `__eq__`.
-    getitem = kind.__getitem__
-    if getitem is not dict.__getitem__ and getitem is not UserDict.__getitem__:
-        return _Lookup.CALLER
-    missing = getattr(kind, "__missing__", None)
-    if missing is None or missing is Counter.__missing__:
-        return _Lookup.BUILTIN
-    if missing is defaultdict.__missing__:
-        factory = _factory_of(value)  # type: ignore[arg-type]
-        if factory is None or any(factory is f for f in _EMPTY_FACTORIES):
-            return _Lookup.BUILTIN
-        return _Lookup.FACTORY
-    return _Lookup.CALLER
+    return any(kind is t for t in types)
 
 
-class _ScannedFactory:
-    """A copy's `default_factory`: the caller's factory, with its result scanned.
+def _safe_pairs(
+    store: dict[object, object], depth: int
+) -> tuple[list[tuple[object, object]], bool, bool]:
+    """The one reader of mapping items: `(pairs, plain, changed)` from a single traversal.
 
-    Holds the factory only. A formatter field cannot call it, so no value it builds is
-    reachable from the record; `repr` is the factory's, so the copy prints like the original.
+    `pairs` holds each admitted key (exact plain type) with its value scanned once at
+    `depth - 1`. `plain` is true when every key was admitted. `changed` is true when a scanned
+    value is not the stored one.
     """
-
-    __slots__ = ("_depth", "_factory")
-
-    def __init__(self, factory: Callable[[], object], depth: int) -> None:
-        self._factory = factory
-        self._depth = depth
-
-    def __call__(self) -> object:
-        value = _NO_VALUE
-        try:
-            value = _scan(self._factory(), self._depth)
-        except Exception:
-            # The factory's own error text is not carried over.
-            pass
-        if value is _NO_VALUE:
-            raise LookupError(_FACTORY_FAILED)
-        return value
-
-    def __repr__(self) -> str:
-        return repr(self._factory)
+    pairs: list[tuple[object, object]] = []
+    plain = True
+    changed = False
+    for key, value in dict.items(store):
+        if not _is_exact(key, _PLAIN_KEY_TYPES):
+            plain = False
+            continue
+        scanned = _safe_value(value, depth - 1)
+        if scanned is not value:
+            changed = True
+        pairs.append((key, scanned))
+    return pairs, plain, changed
 
 
-def _store_of(value: object) -> dict[object, object] | None:
-    """The builtin dict holding a mapping's items, or None for a type the scan does not open."""
-    # `issubclass(type(...))`, not `isinstance`, which falls back to a caller's `__class__`.
-    if issubclass(type(value), dict):
-        return value  # type: ignore[return-value]
-    if issubclass(type(value), UserDict):
-        data = vars(value).get("data")
-        return data if issubclass(type(data), dict) else None
-    return None
+def _safe_value(value: object, depth: int) -> object:
+    """`value` as it may be written back: the one closed type table (module docstring).
 
-
-def _scan_pairs(store: dict[object, object], depth: int) -> list[tuple[object, object]] | None:
-    """`store`'s items with keys and values scanned, or None when none of them change.
-
-    The one key/value scan: every mapping, the lone mapping argument included, goes through it.
-    """
-    pairs = list(dict.items(store))
-    scanned = [(_scan(k, depth), _scan(v, depth)) for k, v in pairs]
-    if all(nk is k and nv is v for (k, v), (nk, nv) in zip(pairs, scanned, strict=True)):
-        return None
-    return scanned
-
-
-def _scan_mapping(value: object, store: dict[object, object], depth: int) -> object:
-    lookup = _lookup_of(value)  # type: ignore[arg-type]
-    scanned = _scan_pairs(store, depth - 1)
-    if scanned is None and lookup is _Lookup.BUILTIN:
-        return value
-    pairs = scanned if scanned is not None else list(dict.items(store))
-    if lookup is _Lookup.CALLER:
-        # The caller's lookup cannot be reused, so a missing key raises a plain KeyError.
-        return dict(pairs)
-    kind = type(value)
-    if issubclass(kind, defaultdict):
-        factory = _factory_of(value)  # type: ignore[arg-type]
-        if factory is not None and lookup is _Lookup.FACTORY:
-            factory = _ScannedFactory(factory, depth - 1)
-        return defaultdict(factory, pairs)
-    if issubclass(kind, Counter):
-        return Counter(dict(pairs))
-    if issubclass(kind, OrderedDict):
-        return OrderedDict(pairs)
-    return dict(pairs)
-
-
-def _scan(value: object, depth: int) -> object:
-    """`value` with exceptions swapped for labels, `depth` container levels down.
-
-    Dispatches on `type(value)` and reads containers through their builtin base, so no caller
-    code runs. Returns `value` itself when nothing in it changes.
+    Rows run in order and the first match wins. Rows 1 and 2 come before the depth check, so an
+    exception or a non-plain mapping is replaced at every position the scan reaches.
     """
     kind = type(value)
     if issubclass(kind, BaseException):
         return _label(value)  # type: ignore[arg-type]
-    if depth == 0:
+    if kind is not dict and (issubclass(kind, Mapping) or issubclass(kind, UserDict)):
+        return _MAPPING_PLACEHOLDER
+    if depth == 0 or _is_exact(value, _PLAIN_VALUE_TYPES):
         return value
-    for base in _SEQUENCES:
+    for base, iterate in _SEQUENCES:
         if issubclass(kind, base):
-            items: list[object] = list(cast("Any", base).__iter__(value))
-            new = [_scan(v, depth - 1) for v in items]
+            items: list[object] = list(iterate(value))  # type: ignore[arg-type]
+            new = [_safe_value(v, depth - 1) for v in items]
             if all(n is o for n, o in zip(new, items, strict=True)):
                 return value
             return base(new)
-    store = _store_of(value)
-    if store is None:
-        return value
-    return _scan_mapping(value, store, depth)
+    if kind is dict:
+        pairs, plain, changed = _safe_pairs(value, depth)  # type: ignore[arg-type]
+        if not plain:
+            return _MAPPING_PLACEHOLDER
+        return dict(pairs) if changed else value
+    return value
+
+
+class _NamedArgs(dict[object, object]):
+    """`record.args` for a lone mapping: safe named values, no caller object, lazy display."""
+
+    __slots__ = ("_default", "_display")
+
+    def __init__(
+        self,
+        pairs: Sequence[tuple[object, object]],
+        default: object,
+        display: dict[object, object] | None,
+    ) -> None:
+        super().__init__(pairs)
+        self._default = default
+        self._display = display
+
+    def __missing__(self, key: object) -> object:
+        return self._default
+
+    def __bool__(self) -> bool:
+        # `LogRecord.getMessage` formats only when `args` is truthy, so `%%` needs this.
+        return True
+
+    def __repr__(self) -> str:
+        # Computed on use: an unused value that cannot be printed must not drop the record.
+        if self._display is None:
+            return str(_MAPPING_PLACEHOLDER)
+        try:
+            return repr(self._display)
+        except Exception:
+            return str(_MAPPING_PLACEHOLDER)
+
+    __str__ = __repr__
+
+
+def _default_for(mapping: object) -> object:
+    """The value-free result for a missing name, chosen once from the mapping's exact type."""
+    kind = type(mapping)
+    if kind is Counter:
+        return 0
+    if kind is defaultdict:
+        # The C slot `defaultdict.__missing__` reads, not an attribute a subclass may override.
+        factory = vars(defaultdict)["default_factory"].__get__(mapping)
+        if any(factory is f for f in _EMPTY_FACTORIES):
+            return factory()
+    return _MAPPING_PLACEHOLDER
+
+
+def _named_args(mapping: object) -> _NamedArgs:
+    kind = type(mapping)
+    store: dict[object, object] | None = None
+    if issubclass(kind, dict):
+        store = mapping  # type: ignore[assignment]
+    elif issubclass(kind, UserDict):
+        try:
+            data = vars(mapping)["data"]
+        except (KeyError, TypeError):
+            data = None
+        if type(data) is dict:
+            store = data
+    pairs: list[tuple[object, object]] = []
+    plain = False
+    if store is not None:
+        pairs, plain, _ = _safe_pairs(store, _ARGS_DEPTH)
+    display = dict(pairs) if kind is dict and plain else None
+    named = [(k, v) for k, v in pairs if type(k) is str]
+    return _NamedArgs(named, _default_for(mapping), display)
 
 
 def _frames(tb: TracebackType | None) -> list[str]:
@@ -241,11 +250,16 @@ def _safe_traceback(exc: BaseException) -> str:
 
 
 def _scrub(record: logging.LogRecord) -> None:
-    record.msg = _scan(record.msg, 1)
-    # `args` is the positional tuple or, when the only argument is a non-empty mapping, that
-    # mapping itself (`LogRecord.__init__`). A lone mapping gets no wrapper of its own: like any
-    # mapping, it is replaced only when `_scan_mapping` must replace it.
-    record.args = _scan(record.args, _ARGS_DEPTH)  # type: ignore[assignment]
+    record.msg = _safe_value(record.msg, 1)
+    args: object = record.args
+    if type(args) is _NamedArgs:
+        # A second filter pass: the keys and values already came from one pass.
+        pass
+    elif issubclass(type(args), Mapping) or issubclass(type(args), UserDict):
+        # `LogRecord.__init__` makes `args` the mapping itself for a lone non-empty mapping.
+        record.args = _named_args(args)  # type: ignore[assignment]
+    else:
+        record.args = _safe_value(args, _ARGS_DEPTH)  # type: ignore[assignment]
 
     exc = record.exc_info[1] if record.exc_info else None
     if exc is not None:
