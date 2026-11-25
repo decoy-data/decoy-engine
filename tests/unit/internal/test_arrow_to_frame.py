@@ -170,6 +170,48 @@ def test_a_resource_failure_in_the_conversion_propagates_as_itself() -> None:
         arrow_to_series(fake, on_unrepresentable=_refuse, name="ok")
 
 
+class _CapTable:
+    """Whole-table conversion hits the hard cap (Arrow's `Wrapping ... failed`); a column alone fits."""
+
+    column_names = ("ok",)
+
+    def to_pandas(self, **_kwargs: object) -> pd.DataFrame:
+        raise pa.ArrowException("Unknown error: Wrapping 2932897 failed")
+
+    def column(self, _position: int) -> _FakeColumn:
+        return _FakeColumn(None)
+
+
+def test_a_cap_failure_that_does_not_reproduce_stays_a_memory_failure_value_free() -> None:
+    from decoy_engine.fileaccess import is_memory_failure
+
+    fake: Any = _CapTable()
+    with pytest.raises(pa.ArrowException) as caught:
+        arrow_to_frame(fake, on_unrepresentable=_refuse)
+    assert is_memory_failure(caught.value)
+    assert "2932897" not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def test_a_series_cap_failure_that_does_not_reproduce_stays_a_memory_failure() -> None:
+    from decoy_engine.fileaccess import is_memory_failure
+
+    calls: list[int] = []
+
+    class _Once:
+        def to_pandas(self, **_kwargs: object) -> pd.Series:
+            calls.append(1)
+            if len(calls) == 1:
+                raise pa.ArrowException("Unknown error: Wrapping 2932897 failed")
+            return pd.Series([1])
+
+    fake: Any = _Once()
+    with pytest.raises(pa.ArrowException) as caught:
+        arrow_to_series(fake, on_unrepresentable=_refuse, name="ok")
+    assert is_memory_failure(caught.value)
+    assert "2932897" not in str(caught.value)
+
+
 def _invalid_utf8_table() -> pa.Table:
     data = b"ok\xff\xfesecret"
     offsets = pa.array([0, 2, len(data)], pa.int32()).buffers()[1]

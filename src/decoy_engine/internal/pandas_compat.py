@@ -154,6 +154,25 @@ def _first_failing_column(table: pa.Table, types_mapper: _Mapper | None) -> str 
     return None
 
 
+def _memory_lookalike(exc: Exception) -> Exception | None:
+    """The scrubbed twin of a failure that reads as memory pressure by its text, else None.
+
+    Arrow raises the same `Wrapping <cell> failed` for an invalid UTF-8 cell and for an allocation
+    that hit the hard cap, so the text cannot decide. The caller re-probes: a failure that does
+    not reproduce is the cap, and this twin (value-free) is raised so the isolated worker still
+    names it oom_killed.
+    """
+    from decoy_engine.fileaccess import MEMORY_TEXT, is_memory_failure
+
+    if not is_memory_failure(exc):
+        return None
+    try:
+        twin = type(exc)(MEMORY_TEXT)
+    except Exception:
+        return None
+    return twin if is_memory_failure(twin) else None
+
+
 def _no_widening(widen: bool) -> None:
     if widen:
         raise NotImplementedError("widening a column pandas cannot hold is not available yet")
@@ -176,14 +195,19 @@ def arrow_to_frame(
     name, instead of restoring a stored pandas index. Code outside this module does not call `to_pandas` itself.
     """
     _no_widening(widen)
+    twin: Exception | None = None
     try:
         return table.to_pandas(types_mapper=types_mapper, ignore_metadata=ignore_metadata)
     except _UNREPRESENTABLE as exc:
         if _is_resource_failure(exc):
             raise
+        twin = _memory_lookalike(exc)
     # Probed outside the handler above, so no exception raised from here carries a context
     # that quotes the value.
-    _fail(on_unrepresentable, _first_failing_column(table, types_mapper))
+    column = _first_failing_column(table, types_mapper)
+    if column is None and twin is not None:
+        raise twin from None
+    _fail(on_unrepresentable, column)
 
 
 def arrow_to_series(
@@ -196,11 +220,20 @@ def arrow_to_series(
 ) -> pd.Series:
     """Experimental: `arrow_to_frame` for one column; `name` is what the callback is told."""
     _no_widening(widen)
+    twin: Exception | None = None
     try:
         return array.to_pandas(types_mapper=types_mapper)
     except _UNREPRESENTABLE as exc:
         if _is_resource_failure(exc):
             raise
+        twin = _memory_lookalike(exc)
+    if twin is not None:
+        try:
+            array.to_pandas(types_mapper=types_mapper)
+        except _UNREPRESENTABLE:
+            pass
+        else:
+            raise twin from None
     _fail(on_unrepresentable, name)
 
 
