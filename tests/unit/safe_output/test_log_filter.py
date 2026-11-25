@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import collections
 import collections.abc
+import dataclasses
 import io
+import json
 import logging
 import pathlib
 import types
@@ -419,3 +421,105 @@ def test_failed_scrub_blanks_every_extra_attribute(
     assert _CANARY not in buf.getvalue()
     unrenderable = _log_filter._UNRENDERABLE
     assert buf.getvalue().strip() == f"{unrenderable} | {unrenderable} | {unrenderable}"
+
+
+class _Capture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+def _capturing_logger(isolated_logger, name: str):  # type: ignore[no-untyped-def]
+    handler = _new_engine_handler(_Capture, logging.Formatter("%(message)s"))
+    return isolated_logger(name, handler, logging.INFO), handler
+
+
+def test_numeric_extra_key_is_scanned(isolated_logger) -> None:  # type: ignore[no-untyped-def]
+    logger, handler = _capturing_logger(isolated_logger, "f31_ae3_t_numkey")
+    logger.info("x", extra={7: ValueError(_CANARY)})
+    assert len(handler.records) == 1
+    record = handler.records[0]
+    assert record.msg == "x"
+    assert record.__dict__[7] == "ValueError"
+    assert _CANARY not in repr(vars(record))
+
+
+def test_numeric_extra_key_is_blanked_when_the_scrub_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_logger,  # type: ignore[no-untyped-def]
+) -> None:
+    def broken(value: object, depth: int) -> object:
+        raise RuntimeError(_CANARY)
+
+    monkeypatch.setattr(_log_filter, "_safe_value", broken)
+    logger, handler = _capturing_logger(isolated_logger, "f31_ae3_t_numkey_fail")
+    logger.info("x", extra={7: ValueError(_CANARY)})
+    assert len(handler.records) == 1
+    record = handler.records[0]
+    assert record.msg == _log_filter._UNRENDERABLE
+    assert record.__dict__[7] == _log_filter._UNRENDERABLE
+    assert _CANARY not in repr(vars(record))
+
+
+class _JsonFormatter(logging.Formatter):
+    """The shape of common JSON log formatters: it dumps the record's own attributes."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps(record.__dict__, default=str)
+
+
+def _json_handlers() -> list[tuple[str, logging.Handler, io.StringIO]]:
+    engine_buf, host_buf = io.StringIO(), io.StringIO()
+    engine = _new_engine_handler(lambda: logging.StreamHandler(engine_buf), _JsonFormatter())
+    host = logging.StreamHandler(host_buf)
+    host.setFormatter(_JsonFormatter())
+    host.addFilter(SafeRecordFilter())
+    return [("engine", engine, engine_buf), ("host", host, host_buf)]
+
+
+@pytest.mark.parametrize("which", [0, 1], ids=["engine", "host"])
+def test_json_formatter_prints_no_extra_exception_text(which: int) -> None:
+    _, handler, buf = _json_handlers()[which]
+    exc = ValueError(_CANARY)
+    extra = {"err": exc, "ctx": _Holder(exc), "rows": [exc]}
+    record = logging.getLogger("f31_ae3_t_json").makeRecord(
+        "f31_ae3_t_json", logging.INFO, __file__, 1, "x", (), None, extra=extra
+    )
+    handler.handle(record)
+    assert _CANARY not in buf.getvalue()
+    parsed = json.loads(buf.getvalue())
+    assert (parsed["err"], parsed["ctx"], parsed["rows"]) == (
+        "ValueError",
+        "<object>",
+        ["ValueError"],
+    )
+
+
+@dataclasses.dataclass
+class _Holder:
+    error: object
+
+
+@pytest.mark.parametrize("path", ["success", "fallback"])
+@pytest.mark.parametrize("which", [0, 1], ids=["engine", "host"])
+def test_cached_message_is_dropped_before_a_json_formatter(
+    path: str, which: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, handler, buf = _json_handlers()[which]
+    record = _record("failed: %s", (ValueError(_CANARY),), exc=False)
+    logging.Formatter().format(record)
+    # Positive control: an earlier stock formatter cached the exception text.
+    assert _CANARY in record.message  # type: ignore[attr-defined]
+    if path == "fallback":
+
+        def broken(value: object, depth: int) -> object:
+            raise RuntimeError(_CANARY)
+
+        monkeypatch.setattr(_log_filter, "_safe_value", broken)
+    handler.handle(record)
+    parsed = json.loads(buf.getvalue())
+    assert _CANARY not in buf.getvalue()
+    assert "message" not in parsed

@@ -12,6 +12,7 @@ import dataclasses
 import datetime
 import decimal
 import enum
+import fractions
 import functools
 import pathlib
 import types
@@ -45,6 +46,9 @@ _CALLS: list[str] = []
 @dataclasses.dataclass
 class _Holder:
     error: object
+
+    def method(self) -> None:
+        """Bound, its repr is `<bound method _Holder.method of {repr(instance)}>`."""
 
 
 class _AttrsLike:
@@ -83,6 +87,11 @@ class _CustomIterable:
         return f"CustomIterable({self.error!r})"
 
 
+def _numpy_int() -> object:
+    numpy = pytest.importorskip("numpy")
+    return numpy.int64(1)
+
+
 def _protocol_cell(name: str, exc: BaseException) -> tuple[object, str]:
     return {
         "deque": (collections.deque([exc]), "[ValueError]"),
@@ -99,6 +108,9 @@ def _protocol_cell(name: str, exc: BaseException) -> tuple[object, str]:
         "argparse_namespace": (argparse.Namespace(error=exc), "<object>"),
         "partial": (functools.partial(_ret, exc), "<object>"),
         "wrapper": (_Wrapper(exc), "<object>"),
+        "bound_method": (_Holder(exc).method, "<object>"),
+        "fraction": (fractions.Fraction(1, 2), "<object>"),
+        "numpy_int": (_numpy_int(), "<object>"),
     }[name]
 
 
@@ -117,6 +129,9 @@ _PROTOCOL_CELLS = [
     "argparse_namespace",
     "partial",
     "wrapper",
+    "bound_method",
+    "fraction",
+    "numpy_int",
 ]
 
 
@@ -220,6 +235,30 @@ class _DecimalSub(decimal.Decimal):
     __str__ = __repr__
 
 
+class _Num(enum.IntEnum):
+    RED = 1
+
+    def __repr__(self) -> str:
+        return _CANARY
+
+    __str__ = __repr__
+
+
+class _Perm(enum.IntFlag):
+    READ = 1
+
+    def __repr__(self) -> str:
+        return _CANARY
+
+    __str__ = __repr__
+
+
+if hasattr(enum, "StrEnum"):
+    _Mode = enum.StrEnum("_Mode", {"FAST": "fast"})
+else:  # Python 3.10 has no StrEnum; the str mixin takes the same row.
+    _Mode = enum.Enum("_Mode", {"FAST": "fast"}, type=str)  # type: ignore[misc]
+
+
 @dataclasses.dataclass(init=False, repr=False, eq=False)
 class _RecordTuple(tuple):  # type: ignore[type-arg]
     def __repr__(self) -> str:
@@ -236,6 +275,8 @@ def _subclass_cells() -> dict[str, tuple[object, str]]:
         "decimal_sub": (_DecimalSub("1.5"), "<object>"),
         "enum": (_Color.RED, "_Color.RED"),
         "record_tuple": (_RecordTuple((1, 2)), "<object>"),
+        "int_enum": (_Num.RED, "1"),
+        "int_flag": (_Perm.READ, "1"),
     }
 
 
@@ -266,3 +307,92 @@ def test_clean_exact_scalars_and_containers_keep_their_identity() -> None:
     record = _record("%s %s %s %s %s", tuple(values), exc=False)
     SafeRecordFilter().filter(record)
     assert all(a is b for a, b in zip(record.args, values, strict=True))  # type: ignore[arg-type]
+
+
+def test_int_enum_member_formats_under_percent_d(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The member copies to its number, so `%d` works as it does on stock logging.
+    for member in (_Num.RED, _Perm.READ):
+        assert _both(_record("x %d", (member,), exc=False), tmp_path) == ("x 1\n", "x 1\n")
+    assert capsys.readouterr().err == ""
+
+
+def test_str_enum_member_prints_its_value(tmp_path: pathlib.Path) -> None:
+    member = _Mode.FAST
+    assert _both(_record("x %s", (member,), exc=False), tmp_path) == ("x fast\n", "x fast\n")
+    assert _both(_lone("%(k)s", {"k": member}), tmp_path) == ("fast\n", "fast\n")
+    assert _both(_record("x %s", ([member],), exc=False), tmp_path) == ("x ['fast']\n",) * 2
+
+
+# B10, B11: a key outside the plain key types and a name the dict lacks print the placeholder.
+
+
+@pytest.mark.parametrize(
+    "key",
+    [(1,), b"k", frozenset({1}), _Num.RED, _Mode.FAST],
+    ids=["tuple", "bytes", "frozenset", "int_enum", "str_enum"],
+)
+def test_non_plain_key_and_missing_name_print_the_placeholder(
+    key: object, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    keyed = {key: 1}
+    record = _record("x %s %d", (keyed, 1), exc=False)
+    assert _both(record, tmp_path) == ("x <mapping> 1\n", "x <mapping> 1\n")
+    assert keyed == {key: 1}
+    assert capsys.readouterr().err == ""
+
+
+def test_missing_name_in_a_lone_dict_prints_the_placeholder(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    record = _lone("%(a)s %(missing)s", {"a": 1})
+    assert _both(record, tmp_path) == ("1 <mapping>\n", "1 <mapping>\n")
+    assert capsys.readouterr().err == ""
+
+
+# Row 12 and row 13 read a caller object with no caller method.
+
+
+def _rec(name: str, result: object):  # type: ignore[no-untyped-def]
+    def method(self: object, *_args: object) -> object:
+        _CALLS.append(name)
+        return result
+
+    return method
+
+
+def _recorders() -> dict[str, object]:
+    return {
+        "__repr__": _rec("repr", _CANARY),
+        "__str__": _rec("str", _CANARY),
+        "__format__": _rec("format", _CANARY),
+        "__eq__": _rec("eq", True),
+        "__hash__": _rec("hash", 1),
+    }
+
+
+def _recording_cells() -> list[tuple[object, str]]:
+    plain = type("_RecPlain", (), _recorders())()
+    int_sub = type(
+        "_RecInt",
+        (int,),
+        {**_recorders(), "__int__": _rec("int", 5), "__index__": _rec("index", 5)},
+    )(5)
+    float_sub = type("_RecFloat", (float,), {**_recorders(), "__float__": _rec("float", 1.5)})(1.5)
+    return [(plain, "<object>"), (int_sub, "5"), (float_sub, "1.5")]
+
+
+@pytest.mark.parametrize("index", [0, 1, 2], ids=["object", "int_sub", "float_sub"])
+@pytest.mark.parametrize("where", ["positional", "lone_value"])
+def test_other_value_runs_no_caller_code(index: int, where: str, tmp_path: pathlib.Path) -> None:
+    cell, expected = _recording_cells()[index]
+    if where == "positional":
+        record = _record("x %s", (cell,), exc=False)
+        want = f"x {expected}\n"
+    else:
+        record = _lone("%(k)s", {"k": cell})
+        want = f"{expected}\n"
+    _CALLS.clear()
+    assert _both(record, tmp_path) == (want, want)
+    assert _CALLS == []

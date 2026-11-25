@@ -28,11 +28,12 @@ type (an unbound builtin iterator at most), in this order:
   becomes `<nested>`: iterating it would run caller code and could drain it;
 - a dataclass or attrs instance is `<object>`, ahead of every other row;
 - an exact scalar-like type (`_SCALAR_LIKE`: `Path`, `Decimal`, `date`, `datetime`, `time`,
-  `timedelta`, `UUID`, a class or function) passes and prints as usual. A subclass of one never
-  does, since it may override `__repr__`: a number subclass is copied to its base, an enum member
-  prints as `Class.NAME` built from its name, and every other object (`SimpleNamespace`,
-  `argparse.Namespace`, `functools.partial`, a caller class) is `<object>`. Only an exact builtin
-  container or scalar returns the original value; any subclass is rebuilt or replaced;
+  `timedelta`, `UUID`, a class or a function) passes and prints as usual. A subclass of one never
+  does, since it may override `__repr__`: a number subclass (an `IntEnum` member too) is copied to
+  its base, any other enum member prints as `Class.NAME` built from its name, and every other
+  object (`SimpleNamespace`, `argparse.Namespace`, `functools.partial`, a bound method, a caller
+  class) is `<object>`. Only an exact builtin container or scalar returns the original value;
+  any subclass is rebuilt or replaced.
 
 Also:
 
@@ -50,7 +51,9 @@ Also:
   formatter cannot render the raw one;
 - a cached `exc_text` with no live traceback is dropped unless this filter wrote it, so text a
   host formatter cached earlier never passes, while a second filtered handler prints the same
-  safe traceback as the first.
+  safe traceback as the first;
+- the formatter's cached `record.message` is dropped, so a formatter that dumps the record's
+  attributes cannot print text an earlier formatter cached.
 
 `stack_info` holds code locations and engine source lines (code, not data) and is kept.
 
@@ -121,7 +124,8 @@ _ITERABLES: tuple[tuple[type, Callable[[Any], Iterator[Any]]], ...] = (
 )
 # Exact types that print safely through their own repr; a subclass never does, because it may
 # override `__repr__`. Every other object is `<object>`: a `SimpleNamespace`, an
-# `argparse.Namespace` or a `functools.partial` prints what it holds.
+# `argparse.Namespace`, a `functools.partial` or a bound method prints what it holds (a bound
+# method's repr includes the repr of its instance). A builtin function names only a type.
 _SCALAR_LIKE = (
     pathlib.PurePosixPath,
     pathlib.PureWindowsPath,
@@ -137,7 +141,6 @@ _SCALAR_LIKE = (
     abc.ABCMeta,
     types.FunctionType,
     types.BuiltinFunctionType,
-    types.MethodType,
     type(None),
     type(Ellipsis),
     type(NotImplemented),
@@ -271,21 +274,22 @@ def _other_value(value: object) -> object:
     """Any object the table has no row for: deny by default.
 
     Only an exact scalar-like type returns the original, because a subclass may override
-    `__repr__`. An enum member prints as `Class.NAME` built from its name, a number subclass is
-    copied to its base, an iterable is `<nested>` (never iterated), and the rest is `<object>`.
+    `__repr__`. A number subclass is copied to its base (an `IntEnum` member too), any other enum
+    member prints as `Class.NAME` built from its name, an iterable is `<nested>` (never iterated), and the rest is `<object>`.
     """
     kind = type(value)
     if _is_exact(value, _SCALAR_LIKE):
         return value
+    # Before the enum check, so an `IntEnum` member prints as its number and `%d` still works.
+    for base, copy in _NUMBER_COPIES:
+        if issubclass(kind, base):
+            return copy(value)
     if issubclass(kind, enum.Enum):
         try:
             name = vars(value)["_name_"]
         except (KeyError, TypeError):
             return _OBJECT_PLACEHOLDER
         return _Label(f"{kind.__name__}.{name}")
-    for base, copy in _NUMBER_COPIES:
-        if issubclass(kind, base):
-            return copy(value)
     return _NESTED_PLACEHOLDER if issubclass(kind, Iterable) else _OBJECT_PLACEHOLDER
 
 
@@ -403,9 +407,11 @@ def _scrub(record: logging.LogRecord) -> None:
         else:
             record.args = _safe_value(args, _ARGS_DEPTH)  # type: ignore[assignment]
     # Attributes from `extra=` reach a handler that prints `%(name)s` or a JSON formatter.
-    for key in list(vars(record)):
+    # Written through `__dict__`: `logging` accepts a non-string key in `extra=`, `setattr` does not.
+    fields = record.__dict__
+    for key in list(fields):
         if key not in _STANDARD_FIELDS and key != _SAFE_EXC_TEXT:
-            setattr(record, key, _safe_value(vars(record)[key], 1))
+            fields[key] = _safe_value(fields[key], 1)
 
     exc = record.exc_info[1] if record.exc_info else None
     if exc is not None:
@@ -432,7 +438,11 @@ class SafeRecordFilter(logging.Filter):
             record.msg, record.args = _UNRENDERABLE, ()
             record.exc_info = record.exc_text = None
             # `extra=` attributes may hold the very value that failed, so none is kept.
-            for key in list(vars(record)):
+            fields = record.__dict__
+            for key in list(fields):
                 if key not in _STANDARD_FIELDS and key != _SAFE_EXC_TEXT:
-                    setattr(record, key, _UNRENDERABLE)
+                    fields[key] = _UNRENDERABLE
+        # A formatter that ran earlier cached the unfiltered text here; a JSON formatter that
+        # dumps `record.__dict__` would print it without calling `getMessage` again.
+        record.__dict__.pop("message", None)
         return True

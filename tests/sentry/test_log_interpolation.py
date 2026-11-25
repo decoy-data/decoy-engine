@@ -290,6 +290,11 @@ _TB = "<exception traceback>"
             {(_M, "f", "exc"): 1},
         ),
         ("def f():\n    log.info('%s', row.count())\n", {}),
+        # A row-derived value in `extra=` reaches a JSON formatter as data, so `extra` is scanned.
+        (
+            "def f():\n    log.info('done', extra={'customer': row['customer_id']})\n",
+            {(_M, "f", "row"): 1},
+        ),
         # Safe forms.
         ("def f():\n    _log.warning('x %s', type(exc).__name__)\n", {}),
         ("def f():\n    _log.warning('x %s', len(values))\n", {}),

@@ -10,6 +10,8 @@ A list, tuple, set, frozenset or dict that sits deeper than the filter scans pri
 
 Any other iterable (a generator, a custom class with `__iter__`, an array library object) prints as `<nested>`, a dataclass or attrs instance prints as `<object>`, and a `deque`, dict view or `slice` is shown with its exception items as labels. Attributes passed with `extra=` go through the same filter.
 
-An object the filter has no row for (a `SimpleNamespace`, an `argparse.Namespace`, a `functools.partial`, or any caller class) now prints as `<object>`. Numbers, paths, `Decimal`, enum members, dates and times, `UUID`, classes and functions still print as before. When the filter itself fails, attributes passed with `extra=` are replaced as well as the message.
+An object the filter has no row for (a `SimpleNamespace`, an `argparse.Namespace`, a `functools.partial`, a bound method, or any caller class) now prints as `<object>`. Numbers, paths, `Decimal`, enum members, dates and times, `UUID`, classes and functions still print as before. When the filter itself fails, attributes passed with `extra=` are replaced as well as the message.
 
-Only an exact builtin or an exact scalar type (`Path`, `Decimal`, `date`, `datetime`, `UUID` and similar) prints through its own repr. A subclass is rebuilt as the plain builtin (a `namedtuple` prints as a plain tuple), a number subclass is copied to `int`, `float` or `complex`, an enum member prints as `Class.NAME`, and any other subclass prints as `<object>`.
+Only an exact builtin or an exact scalar type (`Path`, `Decimal`, `date`, `datetime`, `UUID` and similar) prints through its own repr. A subclass is rebuilt as the plain builtin (a `namedtuple` prints as a plain tuple), a number subclass (an `IntEnum` member too, so `%d` still works) is copied to `int`, `float` or `complex`, any other enum member prints as `Class.NAME`, and any other subclass prints as `<object>`.
+
+The filter also drops the formatter's cached `record.message`, so a JSON formatter that dumps the record's attributes cannot print text an earlier formatter cached, and an `extra=` key that is not a string no longer sends the record to the fallback.
