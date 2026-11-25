@@ -319,6 +319,28 @@ _CHECK_DIGIT_FUNCS: dict[str, Callable[[str], str]] = {
     "gtin": _gtin_calc_check_digit,
 }
 
+# Valid length(s) per scheme, shared by the FPE strategy and the native companion's check-digit
+# corpus generator so the length rule has one definition. NPI, ISBN-13, EAN-13 and VIN have exact
+# lengths; GTIN has four (GS1); Luhn only needs a body plus a check digit.
+EXACT_LENGTHS: dict[str, frozenset[int]] = {
+    "npi": frozenset({10}),
+    "isbn13": frozenset({13}),
+    "ean13": frozenset({13}),
+    "vin": frozenset({17}),
+    "gtin": frozenset({8, 12, 13, 14}),
+}
+MIN_LENGTHS: dict[str, int] = {"luhn": 2}
+
+
+def scheme_length_ok(scheme: str, n: int) -> bool:
+    """Whether ``n`` characters is a legal length for ``scheme`` (schemes with no rule pass)."""
+    exact = EXACT_LENGTHS.get(scheme)
+    if exact is not None:
+        return n in exact
+    minimum = MIN_LENGTHS.get(scheme)
+    return minimum is None or n >= minimum
+
+
 _KNOWN_SCHEMES: frozenset[str] = frozenset(_VALIDATORS.keys())
 
 # Per-scheme minimum required charset for FPE mode.  A configured FPE charset
