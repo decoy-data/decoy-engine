@@ -25,6 +25,7 @@ Run on a Linux node under the box-wide lock, from a worktree with the companion 
 
     PYTHONPATH=src python scripts/bench-auto-chunk/bench_nonfk_fallthrough.py drive --out run.json
 
+`--phase after` expects W-P on the chunked route (the lower bound binds full-frame trials only).
 `--cgroup-bytes M` runs each worker under `systemd-run --user --scope -p MemoryMax=M`.
 """
 
@@ -59,6 +60,62 @@ def refusal_evidence(exc: BaseException) -> dict[str, Any]:
         "code": getattr(exc, "code", None),
         "clean_chaining": exc.__cause__ is None and exc.__context__ is None,
     }
+
+
+def is_expected_refusal(exc: BaseException) -> bool:
+    """Only the registered capacity refusal is an outcome; any other failure must surface."""
+    return getattr(exc, "code", None) == REFUSAL_CODE
+
+
+def fresh_run_dir(workdir: Path) -> Path:
+    """A new empty directory under the caller's workdir, so a run never touches their files."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="nonfk-e2e-", dir=workdir))
+
+
+def cgroup_command(cmd: list[str], cgroup_bytes: int | None) -> list[str]:
+    """The one launcher for every capped run, so before and after runs get the same limits."""
+    if not cgroup_bytes:
+        return cmd
+    return [
+        "systemd-run", "--user", "--scope", "-q",
+        "-p", f"MemoryMax={cgroup_bytes}", "-p", "MemorySwapMax=0", *cmd,
+    ]  # fmt: skip
+
+
+def route_of_trial(trial: dict[str, Any]) -> str:
+    """`full_frame` only when the run took the full-frame route and did not chunk."""
+    mode = (trial.get("execution") or {}).get("execution_mode")
+    return "full_frame" if mode == "full_frame" and not trial.get("chunked_route") else "chunked"
+
+
+def expected_route(workload: str, phase: str) -> str:
+    """W-P is the part-(a) trigger: chunked after the row, full-frame before it."""
+    return "chunked" if workload == "W-P" and phase == "after" else "full_frame"
+
+
+def lower_bound_checks(trials: list[dict[str, Any]], workload: str, phase: str) -> dict[str, Any]:
+    """The strict lower bound binds a measured full-frame run only; a chunked run is meant to fall below."""
+    want = expected_route(workload, phase)
+    checks: dict[str, Any] = {
+        "route_mismatch": any(route_of_trial(t) != want for t in trials),
+        "peak_at_least_lb": None,
+        "increment_at_least_lb": None,
+    }
+    full = [t for t in trials if route_of_trial(t) == "full_frame"]
+    if full:
+        lb = full[0]["lower_bound_bytes"]
+        checks["peak_at_least_lb"] = min(t["peak_bytes"] for t in full) >= lb
+        # The increment leaves out the interpreter and imports: the stricter reading.
+        checks["increment_at_least_lb"] = min(t["increment_bytes"] for t in full) >= lb
+    return checks
+
+
+def unexpected_exit(status: int, cgroup_bytes: int | None) -> bool:
+    """A kill for memory is the recorded before-case under a cap; any other non-zero exit is a failure."""
+    if status == 0:
+        return False
+    return not (cgroup_bytes and status in (137, -9))
 
 
 def snapshot_entries(roots: list[Path]) -> set[str]:
@@ -217,10 +274,12 @@ def run(args: argparse.Namespace) -> int:
             native_threads=1,
         )
     except ExecutionError as exc:
+        if not is_expected_refusal(exc):
+            raise
         refusal = refusal_evidence(exc)
     wall_s = time.perf_counter() - started
     hwm = _status("VmHWM")
-    leftover = [e for e in new_entries(before, snapshot_entries(watched)) if "evidence" not in e]
+    leftover = new_entries(before, snapshot_entries(watched))
     kill = detect_effective_memory_bytes()
     evidence = {
         "workload": args.workload,
@@ -237,6 +296,7 @@ def run(args: argparse.Namespace) -> int:
         "new_entries": leftover,
         "auto_chunk": result.quality_metrics.get("auto_chunk") if result else None,
         "execution": result.quality_metrics.get("execution") if result else None,
+        "chunked_route": bool(result and "chunked_route" in result.quality_metrics),
         "resident_fit": result.quality_metrics.get("resident_fit") if result else None,
     }
     Path(args.out).write_text(json.dumps(evidence, allow_nan=False, indent=1))
@@ -274,21 +334,14 @@ def e2e(args: argparse.Namespace) -> int:
     """One `decoy run` under a cgroup cap; the verdict is `e2e_refused_cleanly` on what it left."""
     import yaml
 
-    work = Path(args.workdir)
-    work.mkdir(parents=True, exist_ok=True)
+    work = fresh_run_dir(Path(args.workdir))
     source = Path(args.source)
     target = work / "out.parquet"
-    target.unlink(missing_ok=True)
     cfg = work / "job.yaml"
     cfg.write_text(yaml.safe_dump(e2e_config(args.workload, source, target, args.passthrough_only)))
     watched = [work, Path(tempfile.gettempdir())]
     before = snapshot_entries(watched)
-    cmd = [args.decoy, "run", str(cfg), "--quiet"]
-    if args.cgroup_bytes:
-        cmd = [
-            "systemd-run", "--user", "--scope", "-q",
-            "-p", f"MemoryMax={args.cgroup_bytes}", "-p", "MemorySwapMax=0", *cmd,
-        ]  # fmt: skip
+    cmd = cgroup_command([args.decoy, "run", str(cfg), "--quiet"], args.cgroup_bytes)
     started = time.perf_counter()
     done = subprocess.run(cmd, env=_env(), check=False, capture_output=True, text=True)  # noqa: S603
     child_peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024
@@ -329,29 +382,24 @@ def _env() -> dict[str, str]:
     }
 
 
+def trial_command(
+    cell: dict[str, Any], source: Path, work: Path, cgroup_bytes: int | None
+) -> list[str]:
+    cmd = [
+        sys.executable, str(SELF), "run",
+        "--workload", cell["workload"], "--rows", str(cell["rows"]),
+        "--source", str(source), "--input", cell["input"],
+        "--workdir", str(work / "w"), "--out", str(work / "evidence.json"),
+    ]  # fmt: skip
+    return cgroup_command(cmd, cgroup_bytes)
+
+
 def _trial(
     cell: dict[str, Any], source: Path, work: Path, cgroup_bytes: int | None
 ) -> dict[str, Any]:
     out = work / "evidence.json"
     out.unlink(missing_ok=True)
-    cmd = [
-        sys.executable, str(SELF), "run",
-        "--workload", cell["workload"], "--rows", str(cell["rows"]),
-        "--source", str(source), "--input", cell["input"],
-        "--workdir", str(work / "w"), "--out", str(out),
-    ]  # fmt: skip
-    if cgroup_bytes:
-        cmd = [
-            "systemd-run",
-            "--user",
-            "--scope",
-            "-q",
-            "-p",
-            f"MemoryMax={cgroup_bytes}",
-            "-p",
-            "MemorySwapMax=0",
-            *cmd,
-        ]
+    cmd = trial_command(cell, source, work, cgroup_bytes)
     done = subprocess.run(cmd, env=_env(), check=False)  # noqa: S603
     if done.returncode != 0 or not out.exists():
         return {"exit_status": done.returncode}
@@ -392,11 +440,8 @@ def drive(args: argparse.Namespace) -> int:
                     cell["peak_bytes"] = [t["peak_bytes"] for t in ok]
                     cell["peak_median"] = statistics.median(cell["peak_bytes"])
                     cell["increment_bytes"] = [t["increment_bytes"] for t in ok]
-                    cell["peak_at_least_lb"] = min(cell["peak_bytes"]) >= cell["lower_bound_bytes"]
-                    # The increment leaves out the interpreter and imports: the stricter reading.
-                    cell["increment_at_least_lb"] = (
-                        min(cell["increment_bytes"]) >= cell["lower_bound_bytes"]
-                    )
+                    cell["routes"] = [route_of_trial(t) for t in ok]
+                    cell.update(lower_bound_checks(ok, workload, args.phase))
                     cell["wall_s_median"] = statistics.median(t["wall_s"] for t in ok)
                 cells.append(cell)
                 source.unlink()
@@ -410,7 +455,17 @@ def drive(args: argparse.Namespace) -> int:
     ]
     for c in bad:
         print(f"PEAK BELOW LOWER BOUND: {c['workload']} {c['rows']}", file=sys.stderr)
-    return 1 if bad else 0
+    wrong_route = [c for c in cells if c.get("route_mismatch")]
+    for c in wrong_route:
+        print(f"UNEXPECTED ROUTE: {c['workload']} {c['rows']}", file=sys.stderr)
+    crashed = [
+        c
+        for c in cells
+        if any(unexpected_exit(t["exit_status"], args.cgroup_bytes) for t in c["trials"])
+    ]
+    for c in crashed:
+        print(f"UNEXPECTED EXIT: {c['workload']} {c['rows']}", file=sys.stderr)
+    return 1 if bad or wrong_route or crashed else 0
 
 
 def main(argv: list[str]) -> int:
@@ -424,6 +479,7 @@ def main(argv: list[str]) -> int:
     d.add_argument("--rounds", type=int, default=3)
     d.add_argument("--warmup", type=int, default=1)
     d.add_argument("--cgroup-bytes", type=int, default=None)
+    d.add_argument("--phase", choices=("before", "after"), default="before")
     d.add_argument("--no-estimate", action="store_true")
     d.add_argument("--workdir", default=tempfile.gettempdir())
     d.set_defaults(func=drive)
