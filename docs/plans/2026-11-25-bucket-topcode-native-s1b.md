@@ -395,3 +395,26 @@ full suite on the merge head against the stored main baseline.
   venv.
 - Expected labels and registry facts are literals; never refresh a snapshot to pass.
 - `ruff check`, `ruff format --check`, `mypy` before each commit; changelog fragment in the PR.
+
+## Round 3 review: open findings
+
+Codex round 3 (the last review round) gave GO-WITH-FIXES. The findings below are quoted from that
+review and are not yet folded into the plan above, except where a note says so. The builder
+or the next planner resolves each one, checked against the cited lines on the re-anchored
+base, before code starts.
+
+1. P1 V1: The metadata-failure contract preserves a public value leak. S1b:54-56,169,200-201 requires the oracle’s public error. On engine `origin/main` (`2b8a47fbe`), I reproduced `run_mask_chunked` exposing the input `1099511627776` in `str(exc)` with physical `int64` and pandas `Int32` metadata. A bad first chunk fails during profiling at `_chunked_profile.py:41` and `_chunked_oracle.py:253-256`. A bad later chunk fails in the adapter and is re-raised at `_chunked_oracle.py:448-471`. Require a coded, value-free error at both boundaries. Test both positions, assert the sentinel is absent from `str(exc)`, and verify the transactional sink commits nothing. Correct S1b:275’s unconditional success claim.
+
+2. P1 V1: P2 still specifies incorrect NaN output and permits a spurious row error. S1b:166-168 forbids native `"nan"` for extension NaN, and :198 allows an “exact NaN error.” Parent:172,260 and #807 `_strategies/_top_code.py:204-214` require a present `"nan"` for extension top_code and float-width lower, `"nan-nan"` for extension float-width range, and zero NaN row errors. Pin those literals and validity bits on both chunk legs. For ordinary NaN on unified, also pin the round-trip decline required by parent:275 and `_unified_slice_admission.py:386-400`.
+
+3. P2 V2-LOG: A15 and A16 can survive. At S1b:267, `python_float_str` already returns `"nan"` for a present NaN (#807 `kernel/_bucket.py:145-157`), so the top_code or lower-format case cannot distinguish A15. Target float-width range, where the mutant produces `"nan"` instead of `"nan-nan"`. At S1b:268, skipping the sibling can prevent the metadata-stripping rebuild entirely (`native/_chunk_schema.py:145-156`). Keep the sibling, assert that raw chunk two retains metadata and its normalized copy loses it, then mutate the renderer to read the normalized copy.
+
+4. P2 V2-LOG: The red-before instructions still mix bases and green controls. S1b:183,375 names S1r alone. Parent:347-351 and S1b:390-391 require the first main SHA containing both S1d and S1r. That base does not exist yet, so final-head mutations remain unverified. At S1b:193-204,237-242, distinguish activation and published-decline assertions from existing oracle output, failure/no-commit behavior, and #807’s direct kernel checks (`kernel/_bucket.py:214,294`). For P2a, the value-free error assertion in finding 1 supplies a demonstrable red.
+
+5. P2 V2-LOG: Two negative controls still name the wrong detector. S1b:124-131 directs the same `INT_DECL` fixture to use a kernel-less strategy and assert a bucketize-specific rejection. Split it into a kernel-less control and a bucketize declaration control (`test_native_plan_config_aware.py:405-409,564-580`). S1b:376-377 still credits A1 and raw strings with catching a wrong default. Strings already fail the numeric gate (`test_shadow_full_frame.py:456-478`). Point that claim to A13 and the raw `int64` control at S1b:215-217,265.
+
+6. P2 V2-LOG: P5 and P8 still leave claimed checks unobserved. S1b:231-232 pins handler records, but parent:311 also requires retained rows, trigger totals and quarantine JSONL contents. Those are separate outputs at `quarantine.py:258-282`. Assert each, including the masked sibling and null bucketize cell. S1b:293-295,323 credits the sequential FK pair with detecting key admission. The chunk dispatcher declines the whole relationship table at `native/_dispatch.py:254-267`. Exercise that dispatcher and assert its `FK_RELATIONSHIP` record for the mutation.
+
+7. P2 V2-LOG: Clarify ownership of unified decline publication. S1b:75 assigns transport to S1e, while :115-123 instructs S1b to add its collector and publisher. Parent:242,346 assigns transport through public evidence to S1e. Have S1b feed the new causes into S1e’s existing collector and serializer at the single publication site after `_pipeline_full_frame.py:285-293`.
+
+8. P2 V2-LOG: Correct the remaining references and gate list. S1b:20’s main-only convention conflicts with :93,106,195,202-203. Mark the kernel and NaN-renderer references as #807 (`f2c5bd225`) and the date tests as #790 (`a5c33ec0a`). S1b:366-386 omits parent:367’s three Dell timing and peak-RSS runs at 120k and 1M rows, including float-width range and fractional top_code. Assign those runs explicitly. The cited module counts and ceilings match `tests/sentry/test_module_size.py:113,116,124`. No census increase is indicated.

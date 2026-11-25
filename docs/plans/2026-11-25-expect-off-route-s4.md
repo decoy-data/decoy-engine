@@ -398,3 +398,28 @@ suite at merge, diffed against the stored main baseline (CLI `gates.sh --full --
 - Card and JSON text: names, codes, counts and statuses only; run V13c after each change.
 - Do not edit the CLI half before the repin lands on CLI main.
 - `ruff check`, `ruff format --check`, `mypy` before each commit. CHANGELOG entries in both repos.
+
+## Round 3 review: open findings
+
+Codex round 3 (the last review round) gave GO-WITH-FIXES. The findings below are quoted from that
+review and are not yet folded into the plan above, except where a note says so. The builder
+or the next planner resolves each one, checked against the cited lines on the re-anchored
+base, before code starts.
+
+1. P1 V1: The validate advisory changes CI and pre-commit exits. S4:57-58,163-169 promises only one new refusal. Both CI validation modes consume the shared gate, and `fail_on_warning` defaults to true. A previously green pipeline that names a kept column can now fail CI and pre-commit. Keep the advisory in the two validate commands, or explicitly document and test the CI change. CLI `ci/adapters.py:119,138-151`, `ci/contracts.py:515`, `ci/runner.py:81-87`.
+
+2. P1 DESIGN: The warning writer still loses entry identity. S4:116-123 requires `entry_index` for deduplication, but S4:350 leaves the writer untouched. Engine `validators/_scope.py:215-223` drops the index, and PR #812 `execution/_pipeline_finalize.py:370-387` serializes only table and reason in `detail`. Preserve the public skip helper’s return contract, carry the index into the warning builder, and deduplicate there before either channel consumes the records. Update the exact detail assertion at `tests/unit/validators/test_leak_check_skips.py:179`. The writer is 527 lines on #812, so this needs no size-pin increase.
+
+3. P1 V1: Whole-table expansion can turn a passing run into an exception. S4:113-115 expands every explicit column. Engine `config/_validators.py:75-77` accepts `columns: {absent_table: [""]}`, and `validators/_scope.py:161-171` retains it. The current table skip at `validators/_leak_check.py:187-192` succeeds, but constructing the new `QualityWarning(column="")` raises at `generation/pool/_events.py:75-76`. Define the representation for this input or reject it during config validation with a fixed error. Test the real run boundary.
+
+4. P1 V1: A malformed report can still display a pass. S4:135-149 checks names, indices and individual field types, but permits `passed=true` alongside a failed entry. It also leaves `checked.column` ambiguous at S4:308, although a valid FK check emits `(child_table, None)`. Reject contradictory aggregate and entry verdicts through both producer forms, and explicitly accept null checked columns. Engine `validators/_fold.py:103-117`, `validators/_types.py:85-90`, `validators/_fk_validators.py:343-353`.
+
+5. P1 V1: Two required human outputs lack acceptance assertions. Parent:283 requires the `Checks 1 failed` summary, and parent:284 requires validate to explain that the column is kept. S4:159-165,202,214,231-244 can pass with an entry line and a bare column name. Assert the failed count on normal stderr and the readable skip reason in both validate commands. CLI `run/_result.py:437-438`, `cli/validate.py:244-249`.
+
+6. P2 V2-LOG: Three mutations can survive their named tests. At S4:266, R12 needs the same-length name-mismatch fixture at S4:236, since index coverage independently rejects a missing entry. At S4:267, R13 leaves `entry_index` in the key, so two entries still produce two warnings. Mutate away the index and use identical skips across entries, with a repeated column inside one entry as the dedup control. Engine `validators/_fold.py:100-109`, `validators/_leak_check.py:104-108`. At S4:268, run R14 in human mode against the `finally` call because JSON also abandons the layout at CLI `run/_errors.py:315-316` before `run/_flow.py:227-230`.
+
+7. P2 V2-LOG: Tighten the red-before claims. S4:223-227 compares the entire warnings tuple with the stamped validation-only list while requiring unrelated warnings to survive. Compare serialized validation warnings and assert unrelated warnings separately. At S4:231-237, only the *absence of a default-scope warning* is a pin. The card line and JSON skip at S4:207 are red-before. Engine `execution/_adapter.py:71-72`, PR #812 `execution/_pipeline_finalize.py:384-387`, CLI `run/_render.py:117-153`. The post-S3b and repinned pre-S4c heads are future dependencies, so the reds and mutation outcomes here are source judgments, not observed runs.
+
+8. P2 V2-LOG: Correct the remaining citations and fixture instructions. S4:26’s main warning helper ends at `execution/_pipeline_finalize.py:376`. S4:192’s CLI `CODEMAP.md:50-54` permits `tests/unit/` and assigns gate tests separately. S4:216’s generate scope belongs in top-level `columns`, per `validators/_scope.py:161-166`. S4:246’s engine test checks report representation and logs, not a CLI emitter (`test_validator_value_free.py:81-88`), so inject the marked report through CLI `run/_errors.py:340-349`. S4:291’s preview engine call is at CLI `run/_execute.py:525-537`. At S4:376-378, schedule the full suite before the gate, as `dev-rules/testing.md:84-88` requires.
+
+9. P2 V2-LOG: Qualify the `run --all` guarantee. S4:36-40,274-292 omits fan-out. Child JSON carries the new member, but aggregate human output shows only pipeline, exit and folder. Specify that the card guarantee covers single-pipeline invocations and pin the nested JSON location. CLI `run/_flow.py:131-132`, `cli/project/_run_all.py:125-129,170-174,221-236`.

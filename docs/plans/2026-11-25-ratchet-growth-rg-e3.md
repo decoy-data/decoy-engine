@@ -249,7 +249,7 @@ Mutations (the builder runs each on the final head and records the result):
 
 - `ratchet_check.py --with-base`: head finding (exit 1); base sha missing (exit 1); listing
   fails (exit 1); checker listed but unreadable or not a regular blob (exit 1); waiver rule
-  fails (exit 1); base lacks the waiver flag while pairs exist (exit 1); archive or extraction
+  fails (exit 1); archive or extraction
   fails (exit 1); base run non-zero (exit 1); checker absent on base (skip line, exit 0 if the
   head passed); both pass (exit 0). No merge base and no `--base` keeps exit 2
   (`scripts/dev/ratchet_check.py:55-57`).
@@ -380,3 +380,29 @@ diffed against the saved main baseline.
 - Lint own edits: `ruff check`, `ruff format --check`, `mypy` before each commit.
 - CHANGELOG fragment before merge.
 - Stop and report if the same defect class comes back after a fix.
+
+## Round 3 review: open findings
+
+Codex round 3 (the last review round) gave NO-GO. Finding 1 is folded (the exit-path list now
+matches Design part 3: a base without the flag gets one plain child run). The other findings below are quoted from that
+review and are not yet folded into the plan above, except where a note says so. The builder
+or the next planner resolves each one, checked against the cited lines on the re-anchored
+base, before code starts.
+
+1. P0 V1: The historical checker still has two prescribed outcomes. Plan:112-117,187 says to propagate the plain child’s status. Plan:250-254 says nonempty pairs must exit 1 if the base lacks the flag. `cb06f318e:scripts/dev/ratchet_check.py:38-41` accepts only the plain arguments, and its `tests/sentry/_ratchet.py:55-64` permits extra fields. Follow parent:674-680 throughout. Test 22 should assert one plain invocation for approved pairs on both success and failure.
+
+2. P1 V1: A missing decision can still pass against that historical base. Plan:84-86 returns no pairs when there is no fresh decision, and plan:116-117 assumes the head already rejected the addition. Once the head recognizes F, `tests/sentry/_ratchet.py:403-410` and `tests/sentry/ratchet/_integrity.py:285-300` have no such check. The historical child then accepts F too. Derive added fields from the row diff before the empty-pairs return. Run test 5 with F recognized by the head, no decision, and the permissive historical child.
+
+3. P1 DESIGN: The Git helper consolidation breaks the reader guard. Plan:348-351 routes `resolve_commit` through `_git`. At #801, `tests/sentry/ratchet/test_reader_guard.py:41-44,84-86` forbids that caller, and `_integrity.py:40-57` gives the two calls different failure semantics. Update the exact caller allowlist, remove `resolve_commit`’s obsolete direct-`run` grant, and preserve its missing-ref result. Add the guard, `_integrity.py`, and `pyproject.toml` to the placement table at plan:154-160.
+
+4. P1 DESIGN: The plan adds a second Git rename parser. Plan:105-107 decodes NUL-delimited status records and both rename endpoints. `tests/sentry/ratchet/_integrity.py:502-517` already decodes that format. Share the record decoder and test a non-ASCII rename. Keep the existing retirement comparison against committed `HEAD` and the waiver comparison against the working tree.
+
+5. P1 V1: Test 28b makes a transient PR head a permanent gate dependency. Plan:198,212-221,269-270 puts a live-tree comparison to `f15adce3f` in the recurring suite. A squash merge need not retain that object in fresh checkouts. Even when reachable, a later approved field addition followed by a legitimate baseline edit would fail plan:94-97 when compared cumulatively to #801. Run 28b once as builder evidence and use a fixed scratch tree for lasting compatibility coverage. Keep 28c as the live check. Neither success-only case is red-before under the plain fallback at plan:208-210 without evidence of a child invocation (`scripts/dev/ratchet_check.py:59-68`).
+
+6. P2 V2-LOG: Test 6r can pass before implementation and survive M17. Plan:189,201-212,244 leaves staging and the assertion unspecified. An unstaged move exposes the old path as deleted. Updating the loader also qualifies independently under plan:87-90. Stage a rename of the conditionally loaded `_rehome.py`, leave `_ratchet.py` untouched, and assert the extracted child actually used the waiver (`tests/sentry/_ratchet.py:524-532`, `ratchet/_integrity.py:285-291`).
+
+7. P2 V2-LOG: The gate fixtures do not isolate M11 or M3b. Test 18 at plan:183,204-206,238 needs two workers and `tests/_xdist_safe_reports.py` in both trees. The harness defaults to one worker, which produces no separate serial JUnit (`tests/unit/scripts/_gates_harness.py:31-34`, `scripts/dev/gates.sh:449-459`). Assert a shared serial failure and an empty reporter verdict before checking the marker. For tests 24-27, assert the baseline-specific diagnostic or recorded invocation. A forced branch failure alone can keep the gate red after M3b (`scripts/dev/_gates_report.py:300-313`).
+
+8. P2 V2-LOG: The CI route citations still count one job twice. Plan:39,268-270 cites the same hosted `fast` job twice. `.github/workflows/gate-selfhosted.yml:68-85` runs it on `ubuntu-latest`. The self-hosted gate runs on eligible main pushes or dispatch, with the sentry step on shard 1 (`:110-118,144-158`). `.github/workflows/ci.yml:22-28,134-135,194-205` runs regression pytest on schedule or dispatch. Correct the three route descriptions.
+
+9. P2 V2-LOG: Remaining references and counts. Plan:360-361 assigns the #801 compatibility run to test 20, which is the unused-decision case at plan:185. Point it to 28b. Plan:101,325 gives two launcher projections, 115 and 125 lines, from a 72-line base (`scripts/dev/ratchet_check.py:71-72`). Reconcile the estimate. Neither projection requires a size census or baseline change (`tests/sentry/test_module_size.py:72-75,157-158`).

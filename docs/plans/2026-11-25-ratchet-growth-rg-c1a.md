@@ -375,3 +375,28 @@ selection per commit. Triggers: CI config and test tooling, so one full CLI suit
 - Lint own edits: `ruff check`, `ruff format --check`, `mypy` before each commit.
 - CHANGELOG entry before merge, net-zero in length.
 - Stop and report if the same defect class comes back after a fix.
+
+## Round 3 review: open findings
+
+Codex round 3 (the last review round) gave NO-GO. The findings below are quoted from that
+review and are not yet folded into the plan above, except where a note says so. The builder
+or the next planner resolves each one, checked against the cited lines on the re-anchored
+base, before code starts.
+
+1. P0 V1: Both historical bases fail before the child runs. Plan lines 91-92, 173-176 and 209-217 account for the old registry and archive layouts, but both commits declare `SENTRIES` in `tests/sentry/test_sentry_manifest.py:24-45`. I ran #801’s `outside_sentries` on both blobs. It returned `None` each time, which raises `BaseReadError` at `tests/sentry/ratchet/_integrity.py:423-434,470-472`. Teach the base-side manifest reader the historical literal `SENTRIES` format, preserving its outside paths and strict HEAD validation. Exercise both original manifest shapes.
+
+2. P1 V1: The test job lacks the history required by tests 8 and 12. Plan lines 209-217 and 361-362 rely on named commits. CLI `.github/workflows/ci.yml:112-122` runs the sentries in a shallow checkout. The full-history checkout at lines 270-273 belongs to a different job, and `tests/sentry/test_ratchet_check.py:56-63` creates a separate repository. Seed representative commits in that scratch repository. Run any literal-SHA and live-merge-base checks in the full-history job, including the port of RG-E3 lines 217-221.
+
+3. P1 V1: The vendoring census still gives conflicting instructions. Plan lines 73 and 100-101 say six mirrors today and five becoming six. CLI `tests/sentry/test_ci_lock_installs.py:501-508` asserts exactly five mirrors. `_integrity.py` and the launcher at plan lines 87 and 128 bring that to seven. Register both mirrors with their required headers, set line 507 to seven, and add `_base_run.py` to the separate vendored-path set.
+
+4. P1 V1: The shared reader changes `lintdebt`’s failure exit. Plan lines 93-96 route `load_allowlist` through `open_input`. Invalid UTF-8 now raises `InputReadError`, outside the exceptions caught by CLI `scripts/dev/lintdebt.py:150-155`, so the command produces a traceback and exits 1 instead of its handled exit 2. The `--init` check at plan line 230 returns before the loader runs. Preserve the handled error at the loader boundary and test invalid UTF-8 in normal mode. See #801 `tests/sentry/ratchet/_integrity.py:106-111,172-188`.
+
+5. P1 V1: One engine assertion contradicts the preserved CLI decision grammar. Plan lines 43-46 identify the weak-decision examples, but #801 `tests/sentry/ratchet/test_integrity.py:540-546` separately requires baseline reasons and decisions to agree for a 14-character reason. CLI `tests/sentry/_ratchet.py:143-151` rejects that baseline reason, while `src/decoy/distribution/release_identity.py:38-41,58-69` accepts the dated decision. Replace the equality assertion with a CLI pin for both outcomes.
+
+6. P1 V1: Five suppressions in the test ports fail CLI Ruff. Plan lines 79-96 and 221-224 cover helper lint and the reader scanner. CLI Ruff also reproduced `RUF100` at #801 `tests/sentry/ratchet/test_integrity.py:59,400,476` and `test_malformed_registry.py:489-490`. Remove those engine-only `S603` and `S607` suppressions in the adapted tests. CLI enables `RUF` at `pyproject.toml:313-317`.
+
+7. P2 V2-LOG: Test 13 is already green, and C14 survives its input. Plan lines 218-219 and 249 use a raised numeric `max`. CLI `tests/sentry/_ratchet.py:318-324,337-340` already rejects it, and `tests/sentry/test_ratchet_check.py:383-397` pins the diagnostic. Mark it as a pin. To kill a numeric-`>` mutation, transfer a key that drops its ceiling or lowers `max` while adding `sites`.
+
+8. P2 V2-LOG: C1 and C3 still name incorrect outcomes. At plan lines 145 and 236, removing the `kind` requirement leaves every valid live row passing (`tests/sentry/test_baseline_registry.py:82-84,96-103`). Name negative test 1 alone or seed an invalid row. At plan line 238, omitting `release_identity.py` also breaks the valid control because CLI `tests/sentry/_ratchet.py:52-63` imports it unconditionally. Require that control to pass before mutation and assert that the mutant loses the child’s decision diagnostic.
+
+9. P2 V2-LOG: Port classifications and placement are incomplete. Plan lines 191-195 attribute both suites to RG-E2 despite line 57 and the RG-E1 headers in `test_baseline_types.py:1` and `test_reader_guard.py:1`. The promised per-case classification is absent. Also, #801 `test_integrity.py:19-22` imports exports unavailable on CLI main, so the plain-command fallback alone cannot produce assertion-level red evidence. Specify how the red tests collect, list their CLI classifications, and add `__init__.py`, `conftest.py`, and `test_integrity_base.py` from plan lines 104-106 and 221-224 to Placement. The split requires no module-size baseline increase under CLI `tests/sentry/layout/test_module_size.py:19-31`.

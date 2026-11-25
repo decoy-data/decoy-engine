@@ -353,3 +353,26 @@ baseline change: CLI `layout/test_module_size.py:3-6,19-20` excludes tests.
 - Red-before tests run red on CLI main first; pins are not red evidence.
 - `ruff check`, `ruff format --check`, `mypy` before each commit. CHANGELOG entry before merge,
   net-zero in length.
+
+## Round 3 review: open findings
+
+Codex round 3 (the last review round) gave GO-WITH-FIXES. The findings below are quoted from that
+review and are not yet folded into the plan above, except where a note says so. The builder
+or the next planner resolves each one, checked against the cited lines on the re-anchored
+base, before code starts.
+
+1. P1 V1: Rewriting the identity fixture breaks the CLI vendor check. Plan 101-104 treats both tuple assignments as column indices. CLI `tests/sentry/ci_scan/test_identity.py:20` binds three strings, and `ci/vendored.toml:41-45` pins the file byte-for-byte. Even updating the local digest leaves the cross-repo comparison red (`ci_scan/_identity.py:65-74`). Keep #801’s exact fixture exception at `test_baseline_registry.py:211-238`. Rewrite only `release/test_frozen_surface_map.py:25`.
+
+2. P1 DESIGN: The proposed checker-helper registry fails its own guard. Plan 81-82 adds three helpers. RG-E3 lines 76-77 require exact equality with literal `_helper(...)` calls, and lines 87-93 explicitly exclude source-reader edits from waiver eligibility. Only `_bounds` is checker-loaded (#801 `_ratchet.py:74-75`, `_baseline_sources.py:82-91`, `ratchet/_limit_constants.py:12`). Register only `_bounds`. For B13 at plan 243, seed a base that already loads it and retain the negative control for a source-only edit.
+
+3. P1 V1: The proposed mirror accepts an extra CLI ceiling. I ran #801 `test_baseline_registry.py:336-357` in memory. An entry containing `reason`, the correct `max`, and an extra `count` returned zero findings because line 348 discards every field except `max` and `min`. Plan 119-122 and 219-220 require exact fields. Compare the complete key set with `{"reason", expected_direction}` and seed both an extra `count` and a second direction through the mirror.
+
+4. P1 V1: The vendoring steps omit the second pin for `_bindings.py`. Plan 66 and 79-80 update `ci/vendored.toml` and `test_ci_lock_installs.py`. C1a lines 85-86 and 100-103 also extend the ledger-to-`PINS` comparison in CLI `layout/test_vendored_files.py:44-59` to repo-relative helper paths. Add `_bindings.py`, its digest and its matching engine commit to that existing pin table.
+
+5. P2 V2-LOG: Test 8 is a pin on the required build base. Plan 15-17 requires merged C1a. C1a lines 111-113 already reject malformed `count` and `sites` on both sides. Even on the earlier CLI anchor, `count: 2` → `true` is refused as a dropped ceiling, and a raised `count` beside an added `max` already fails (`_ratchet.py:170-193`, `test_ratchet_check.py:425-442`). Split plan 216-218 into parameterized pins. Keep B9 and B10 as final-head mutations and assert the diagnostic so a traceback cannot satisfy the test.
+
+6. P2 V2-LOG: B12 can survive test 10. Plan 221 and 242 pair a tuple-unpacking mutation with a rebind test. After the indices become plain assignments, #801 `ratchet/_limit_constants.py:198-204` still rejects the second binding independently. Add a once-bound tuple fixture to kill B12. Keep the rebind as a separate case.
+
+7. P2 V2-LOG: The use-site inventory still omits enforcement and legitimate arithmetic. Plan 83-93 and 208-215 miss CLI `layout/test_module_size.py:63`, `layout/test_package_fanout.py:70`, `_ratchet.py:149` and `release/test_retired_name_residual.py:311`. Record those comparisons alongside the delegated arguments. Run the scanner against the untouched files, including the valid fixture arithmetic at `layout/test_module_size.py:109,116` and `layout/test_package_fanout.py:159-167`.
+
+8. P2 V2-LOG: Correct the remaining references and route descriptions. Plan 51 and 69-70 attribute the added-field rule to engine `_ratchet.py:184-193`. The rule is at CLI `_ratchet.py:184-193`. Plan 166 and 277 should name `[retired_growth]` only for lost keys without a qualifying successor (#801 `ratchet/_bounds.py:114-133`). At plan 292-293, test 1 performs the source reread, test 3 specifies one comparison, and the checker compares stored entries (#801 `_ratchet.py:544-546`). At plan 310, record the package import in #801 `ratchet/_limit_constants.py:12`.
