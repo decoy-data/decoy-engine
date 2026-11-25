@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-25, Dennis round 1 folded; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
+Status: plan (revision 3, 2026-11-25, Dennis rounds 1-2 folded; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
 
 # FPE-CHECKSUM-NATIVE slices S2a, S2b-core and S2b: check digits, the Rust batch path, then the keyword and ABI
 
@@ -15,6 +15,11 @@ Anchors: a Python path with no prefix is under `src/decoy_engine/`. Rust paths a
 - HIGH: the new Rust modules and items are `pub`, as `fpe` and `text_redact` are (`lib.rs:34-48`). `pub(crate)` items cannot be reached from `tests/kat_checksum.rs` or `tests/kat_fpe.rs`, and a `pub fn` that takes a crate-private `Scheme` trips `private_interfaces`, which clippy `-D warnings` fails (`native-companion.yml:294`).
 - MEDIUM: the full list of `fpe.rs` visibility changes is in section 5.2 and counted against the 700-line cap. `FPE_CHECKSUM_KAT` moves to `_fpe_ext.py` so `_crypto_ext.py` stays under 600 with TEXT-REDACT-RUST-SPLICE S1b.
 - LOW: 13 test calls; translator line `_fpe_ext.py:52`; CI test commands; `arrow_ffi.rs` size; restated chunked mutation; per-scheme fixed prefixes; K6 carrier net +1.
+
+## Changes in revision 3 (Dennis round 2)
+
+- MEDIUM: the `fpe.rs` visibility table now matches the code: extract `ResolvedConfig::new` and a generic `run_rows` batch driver; `row_ranges` stays non-generic (5.2).
+- LOW: `arrow_ffi.rs` line count, oracle line cite, CI command sentence, KAT vectors in two files logged as deferred.
 
 ## 1. Frame
 
@@ -38,7 +43,7 @@ What S1 gives these slices, read at `4819de8b2`:
 What the companion has today, read at the same head:
 
 - `decoy-engine-native/src/fpe.rs` is 682 lines (cap 700). `luhn_check_digit` (:137) is private and used at :258 and in a test at :646. `ResolvedConfig` (:154), `permute` (:174), `fpe_pure_value` (:246), `fpe_one` (:269), `row_ranges` (:313), `fill_range` (:331), `pub fn fpe_transform_array` (:373, nine positional arguments). Thirteen unit-test calls to `fpe_transform_array` sit at :481-663.
-- `decoy-engine-native/src/arrow_ffi.rs` calls `fpe_transform_array` once (:515) from `fpe_transform_batch_checked` (:491). The PyO3 entry `fpe_transform_batch` is at :556 and is registered at :613. The file is 600 lines at #803 and 618 at #806 (TEXT-REDACT-RUST-SPLICE S1a).
+- `decoy-engine-native/src/arrow_ffi.rs` calls `fpe_transform_array` once (:515) from `fpe_transform_batch_checked` (:491). The PyO3 entry `fpe_transform_batch` is at :556 and is registered at :613. The file is 615 lines at #803 (same as main) and 618 at #806 (TEXT-REDACT-RUST-SPLICE S1a).
 - `decoy-engine-native/src/text_redact/validators.rs`: `luhn_valid` (:13) and `npi_valid` (:37-60). Both are used by `text_redact/detect.rs:47,51` and `text_redact/tests.rs`.
 - `decoy-engine-native/src/lib.rs`: module lines at :33-47 and `ABI_VERSION = "decoy-native-abi-3"` at :57.
 - `decoy-engine-native/tests/kat_fpe.rs:29-31` reads `format_version: u32` but never checks it (`#[allow(dead_code)]`).
@@ -55,8 +60,8 @@ The parent section 2 holds the survey: products keep the check digit outside the
 
 ### Reuse inventory
 
-- `fpe.rs::permute`, `ResolvedConfig` and the FF1 instance: the checksum path permutes the body through the same function and builds the config with the same constructor.
-- `fpe.rs::row_ranges` and `fill_range` (:313, :331): the one batch driver. S2b-core makes it generic over the per-row transform so the checksum entry does not copy the rayon split.
+- `fpe.rs::permute`, `ResolvedConfig` and the FF1 instance: the checksum path permutes the body through the same function and builds the config through a `ResolvedConfig::new` extracted from the struct literal in `fpe_transform_array` (`fpe.rs:400-411`).
+- `fpe.rs::row_ranges`, `fill_range` and the rayon split, pool install and concatenation inline at :437-462: the one batch driver. S2b-core extracts it as a generic `run_rows` so the checksum entry does not copy it.
 - `fpe.rs::luhn_check_digit` (:137): moves to `checksum.rs` as `pub`.
 - `text_redact/validators.rs:13` and `:37-60`: keep their detector input rules and call `checksum::` for the arithmetic.
 - `decoy-engine-native/vectors/generate_fpe_kat.py` and `fpe_ff1_kat.json`: the layout for the two new corpora.
@@ -145,19 +150,20 @@ New `decoy-engine-native/src/fpe_checksum.rs`, `pub mod fpe_checksum;` in `lib.r
 
 - `pub fn fpe_checksum_transform_array(array, mask_key, namespace, tweak, charset, preserve_separators, scheme: Scheme, forward, threads) -> Result<FpeArrayResult, FpeKernelError>`.
 - Per batch: prepare the permutation alphabet once (canonical digits for numeric schemes; configured-order VIN filtering with the oracle's digits fallback when fewer than two symbols remain). Build the symbol map, `ResolvedConfig` and FF1 with that alphabet and radix (33 for VIN under `ALPHANUM`). Derive the key once and build the cipher once.
-- Per row: `checksum_one` runs the section 4.1 order and calls `fpe::permute` on the original body characters. The body split follows the parent's per-scheme rules: npi keeps `s[0]` fixed and permutes the rest of the body, isbn13 keeps the `978`/`979` prefix `s[:3]` fixed, and vin keeps position 8 (the check character) out of the permuted body and recomputes it there. The oracle code is `_fpe_checksum.py:40-68`.
+- Per row: `checksum_one` runs the section 4.1 order and calls `fpe::permute` on the original body characters. The body split follows the parent's per-scheme rules: npi keeps `s[0]` fixed and permutes the rest of the body, isbn13 keeps the `978`/`979` prefix `s[:3]` fixed, and vin keeps position 8 (the check character) out of the permuted body and recomputes it there. The oracle split is at `_fpe_checksum.py:198-230` (npi :198, isbn13 :206, vin :213).
 
 Visibility changes in `fpe.rs`, all `pub(crate)` because only `fpe_checksum.rs` in the same crate calls them (no `pub` signature exposes them):
 
 | Item | Line | Change |
 |---|---|---|
-| `ResolvedConfig` and its constructor | :154 | `pub(crate)` struct and fn |
+| `ResolvedConfig` | :154 | `pub(crate)` struct; extract `pub(crate) fn ResolvedConfig::new(...)` from the struct literal at :400-411, about +10 lines |
 | `permute` | :174 | `pub(crate)` |
 | key derivation and FF1 construction helper | inside `fpe_transform_array` today | extract to `pub(crate) fn build_cipher(...)`, about +8 lines |
-| `row_ranges` | :313 | `pub(crate)`, generic over a row function `F: Fn(&str) -> Result<String, &'static str> + Sync` |
-| `fill_range` | :331 | `pub(crate)`, same generic |
+| `row_ranges` | :313 | unchanged, private (it takes no row function) |
+| `fill_range` | :331 | private, generic over a row function `F: Fn(&str) -> Result<String, &'static str> + Sync` |
+| batch driver | inline at :437-462 | extract `pub(crate) fn run_rows<F>(array, threads, f: F)` that owns `row_ranges`, the pool install and the per-range concatenation, about +12 lines |
 
-`fpe_transform_array` keeps its nine-argument signature and passes its existing `fpe_one` closure. Line budget: 682, minus about 15 for the moved Luhn helper (S2a), plus about 8 for `build_cipher` and about 4 for the generic bounds, gives about 679, at or below 700.
+`fpe_transform_array` keeps its nine-argument signature and passes its existing `fpe_one` closure. Line budget: 682, minus about 15 for the moved Luhn helper (S2a), plus about 8 for `build_cipher`, about 10 for `ResolvedConfig::new` and about 12 for `run_rows` and the generic bounds, gives about 697 before the extracted code replaces its inline copies, and about 690 after. This is close to the 700 cap, so S2b-core records the measured count in its PR body. If it is over 700, move `run_rows` and `fill_range` to a new `fpe_batch.rs`; the cap is not raised.
 
 `arrow_ffi.rs` does not change in S2b-core. No Python caller reaches the new entry; it is proved only by Rust tests.
 
@@ -185,7 +191,7 @@ Vectors: the same generator writes `fpe_checksum_kat.json` (`format_version: 1`,
 
 ## 6. Slices and size
 
-Each slice is R2, merges separately and starts from the merged previous slice. Write the named tests first, run them on the slice base and record the expected failures. Code gate: Codex and Dennis. Test depth: T0 per edit, T1 impact selection per commit, T2 on the exact gate head. Each Rust slice runs clippy with `-D warnings` and `cargo test --no-default-features`, the two commands CI runs (`.github/workflows/native-companion.yml:292-300`). A plain `cargo test` with the PyO3 default feature can fail to link outside a Python build, so it is not a gate and records an arm64 build on the Mac. S2b hits the full-suite escalation triggers (version pin, frozen ABI contract), so its gate runs T3 on the merge head against the saved main baseline, on Linux and on the Mac.
+Each slice is R2, merges separately and starts from the merged previous slice. Write the named tests first, run them on the slice base and record the expected failures. Code gate: Codex and Dennis. Test depth: T0 per edit, T1 impact selection per commit, T2 on the exact gate head. Each Rust slice runs `cargo clippy --all-targets -- -D warnings` (so integration tests are linted) and `cargo test --no-default-features`, the two commands CI runs (`.github/workflows/native-companion.yml:294,300`). A plain `cargo test` with the default `extension-module` feature can fail to link outside a Python build, so it is not a gate. Each Rust slice also records an arm64 build on the Mac. S2b hits the full-suite escalation triggers (version pin, frozen ABI contract), so its gate runs T3 on the merge head against the saved main baseline, on Linux and on the Mac.
 
 | Slice | Depends on | Content | Size | Gate evidence |
 |---|---|---|---|---|
@@ -282,4 +288,4 @@ Dependencies: S2a has none and can start now. S2b-core needs S2a merged. S2b nee
 
 ## 13. Deferred (V2-LOG)
 
-Unchanged from the parent: native checksum fpe on `int64` sources; iban; charsets wider than the native alphabet.
+Unchanged from the parent: native checksum fpe on `int64` sources; iban; charsets wider than the native alphabet. Added: KAT vectors live in two files (`FPE_KAT` in `_crypto_ext.py`, `FPE_CHECKSUM_KAT` in `_fpe_ext.py`); the JSON pin test limits drift, and the V2 structure pass decides one home.
