@@ -116,14 +116,19 @@ def _arrow_retained_bytes(array: pa.Array[Any]) -> int:
 
 
 # Accessors pyarrow gives a nested array for its child arrays. `Array.buffers()` already flattens
-# every child's buffers, so the walk exists only to reach what it skips: a dictionary, wherever it
-# sits. A layout pyarrow adds later is covered by its accessor name or by `field(i)`, and the
+# every child's buffers but skips a dictionary, so the walk exists to find dictionaries, wherever
+# they sit. A layout pyarrow adds later is covered by its accessor name or by `field(i)`, and the
 # type-parametrized test in test_value_pool.py fails when one is not.
-_VISITS = [0]  # child-visit counter read by the linearity test
 _CHILD_ACCESSORS = ("dictionary", "storage", "values", "run_ends", "keys", "items")
 
 
-def _child_arrays(array: pa.Array[Any]) -> Iterator[pa.Array[Any]]:
+def _array_buffers(array: pa.Array[Any]) -> list[pa.Buffer | None]:
+    """The flattened buffers of ``array``: one seam so a test can count the slots returned."""
+    return list(array.buffers())
+
+
+def _child_arrays(array: pa.Array[Any]) -> Iterator[tuple[pa.Array[Any], bool]]:
+    """Each child array of ``array`` with whether it is a dictionary (Arrow's buffers() omits those)."""
     is_map = pa.types.is_map(array.type)
     for name in _CHILD_ACCESSORS:
         if is_map and name == "values":
@@ -133,30 +138,33 @@ def _child_arrays(array: pa.Array[Any]) -> Iterator[pa.Array[Any]]:
         except (AttributeError, NotImplementedError, pa.ArrowException):
             continue
         if isinstance(child, pa.Array):
-            yield child
+            yield child, name == "dictionary"
     for i in range(getattr(array.type, "num_fields", 0)):
         try:
             child = array.field(i)
         except (AttributeError, NotImplementedError, TypeError, pa.ArrowException):
             continue
         if isinstance(child, pa.Array):
-            yield child
+            yield child, False
 
 
-def _collect_arrow_roots(array: pa.Array[Any], roots: dict[tuple[int, int], int]) -> None:
+def _collect_arrow_roots(
+    array: pa.Array[Any], roots: dict[tuple[int, int], int], *, flatten: bool = True
+) -> None:
     """Add every root buffer of ``array`` and of everything nested under it to ``roots``.
 
-    A shared root counts once, whichever path reaches it. Each child is visited once per path,
-    so the walk is linear in the number of arrays."""
-    _VISITS[0] += 1
-    for buf in array.buffers():
-        if buf is None:
-            continue
-        while buf.parent is not None:
-            buf = buf.parent
-        roots[(buf.address, buf.size)] = buf.size
-    for child in _child_arrays(array):
-        _collect_arrow_roots(child, roots)
+    A shared root counts once, whichever path reaches it. `buffers()` flattens a whole subtree, so
+    it is read only at the top and at each dictionary (which it skips); every other node is
+    visited just to find dictionaries below it. Buffer work is linear in the number of arrays."""
+    if flatten:
+        for buf in _array_buffers(array):
+            if buf is None:
+                continue
+            while buf.parent is not None:
+                buf = buf.parent
+            roots[(buf.address, buf.size)] = buf.size
+    for child, is_dictionary in _child_arrays(array):
+        _collect_arrow_roots(child, roots, flatten=is_dictionary)
 
 
 def construction_floor(size: int, *, strings: bool) -> int:

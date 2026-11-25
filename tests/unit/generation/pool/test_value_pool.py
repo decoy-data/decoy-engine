@@ -179,20 +179,32 @@ def test_every_nested_layout_counts_its_dictionary_and_the_cache_refuses_it(layo
         PoolCache(max_bytes=1024).put(pool)
 
 
-def test_the_byte_walk_is_linear_on_deeply_nested_maps() -> None:
-    import time
-
+def test_the_byte_walk_is_linear_on_deeply_nested_maps(monkeypatch: pytest.MonkeyPatch) -> None:
     import pyarrow as pa
 
     from decoy_engine.generation.pool import _value_pool
 
-    arr: Any = pa.MapArray.from_arrays(pa.array([0, 1], pa.int32()), pa.array(["k"]), pa.array([1]))
-    depth = 16
-    for _ in range(depth - 1):
-        arr = pa.MapArray.from_arrays(pa.array([0, 1], pa.int32()), pa.array(["k"]), arr)
-    _value_pool._VISITS[0] = 0
-    start = time.perf_counter()
-    _value_pool._arrow_retained_bytes(arr)
-    elapsed = time.perf_counter() - start
-    assert _value_pool._VISITS[0] <= 4 * depth
-    assert elapsed < 0.25
+    slots = [0]
+    real = _value_pool._array_buffers
+
+    def counting(array: Any) -> Any:
+        bufs = real(array)
+        slots[0] += len(bufs)
+        return bufs
+
+    monkeypatch.setattr(_value_pool, "_array_buffers", counting)
+
+    def slots_at(depth: int) -> int:
+        arr: Any = pa.MapArray.from_arrays(
+            pa.array([0, 1], pa.int32()), pa.array(["k"]), pa.array([1])
+        )
+        for _ in range(depth - 1):
+            arr = pa.MapArray.from_arrays(pa.array([0, 1], pa.int32()), pa.array(["k"]), arr)
+        slots[0] = 0
+        _value_pool._arrow_retained_bytes(arr)
+        return slots[0]
+
+    s16, s32, s64 = slots_at(16), slots_at(32), slots_at(64)
+    # linear: doubling the depth about doubles the slots (quadratic walks gave 898/3330/12802)
+    assert s32 <= 2.2 * s16
+    assert s64 <= 2.2 * s32
