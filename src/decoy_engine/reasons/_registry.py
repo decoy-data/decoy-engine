@@ -192,15 +192,31 @@ def manifest() -> dict[str, object]:
     }
 
 
-def check_integrity() -> list[str]:
-    """Structural problems in the catalog; an empty list means it is internally consistent."""
+def check_integrity(catalog: Iterable[ReasonSpec] | None = None) -> list[str]:
+    """Structural problems in the catalog (the live one by default); empty means consistent."""
+    by_id = dict(_SPECS) if catalog is None else {spec.identity: spec for spec in catalog}
     problems: list[str] = []
-    for spec in specs():
+    for spec in by_id.values():
         name = f"{spec.namespace}.{spec.code}"
         if not spec.rules:
             problems.append(f"{name}: no phase rules")
-        if spec.replaced_by is not None and spec.deprecated_in is None:
+        if spec.replaced_by is None:
+            continue  # live, or retired with no successor
+        if spec.deprecated_in is None:
             problems.append(f"{name}: a replacement is only meaningful on a deprecated entry")
-        if spec.replaced_by is not None and spec.replaced_by not in _SPECS:
+        end = by_id.get(spec.replaced_by)
+        if end is None:
             problems.append(f"{name}: replacement {spec.replaced_by} is not a declared identity")
+            continue
+        seen = {spec.identity}
+        for _ in range(3):  # a tombstone's shipped pin cannot move, so a chain may be a few links
+            if end is None or end.deprecated_in is None or end.replaced_by is None:
+                break
+            if end.identity in seen:
+                problems.append(f"{name}: replacement chain loops")
+                break
+            seen.add(end.identity)
+            end = by_id.get(end.replaced_by)
+        if end is not None and end.deprecated_in is not None:
+            problems.append(f"{name}: replacement chain has no live end")
     return problems

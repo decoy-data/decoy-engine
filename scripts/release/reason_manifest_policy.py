@@ -38,7 +38,7 @@ LAST_PER_PR_MINOR = "1.24.0"  # the last minor the old per-PR process made; not 
 _FIX = "; run scripts/dev/registry_renumber.py --to-unreleased"  # the fix for a numeric bump
 PENDING_ARGUMENTS = ("since", "deprecated_in")  # catalog arguments that may be UNRELEASED
 # The two accepted pending edits to a released reason and the fields each may change before the
-# release stamp. Every pin, stamp and renumber decision reads this one descriptor.
+# release stamp; every pin, stamp and renumber decision reads this descriptor.
 PENDING_EDITS = {"summary": ("summary",), "deprecation": ("deprecated_in", "replaced_by")}
 PIN_FIELDS = tuple(sorted((*_SEMANTIC_FIELDS, "symbol", "summary", "deprecated_in", "replaced_by")))
 _CODE_SPAN = re.compile(r"`([^`\n]+)`")
@@ -103,15 +103,11 @@ def append_only_violations(pinned: dict, live: dict, marked: frozenset = frozens
     if added and live_version[:2] == pinned_version[:2] and live_version[2] == pinned_version[2]:
         problems.append("identities were added without a registry minor version bump")
     for entry in live["entries"]:
-        link = entry["replaced_by"]
+        link, name = entry["replaced_by"], "{}.{}".format(*_ident(entry))
         if link is not None and entry["deprecated_in"] is None:
-            problems.append(
-                f"{entry['namespace']}.{entry['code']}: replacement without deprecation"
-            )
+            problems.append(f"{name}: replacement without deprecation")
         if link is not None and tuple(link) not in live_by_id:
-            problems.append(
-                f"{entry['namespace']}.{entry['code']}: replacement {tuple(link)} is not an identity"
-            )
+            problems.append(f"{name}: replacement {tuple(link)} is not an identity")
     return problems
 
 
@@ -285,8 +281,8 @@ def entries_since(manifest: dict, version: str) -> list[dict]:
 
 
 def contract_versions(node: object) -> frozenset[str]:
-    """Every ``registry_version`` value anywhere inside a parsed JSON document; a value that is not
-    a string is reported as ``<non-string>`` so it can never equal a version."""
+    """Every ``registry_version`` value inside a parsed JSON document; a non-string value is
+    reported as ``<non-string>`` so it never equals a version."""
     if isinstance(node, dict):
         found = {
             (v if isinstance(v, str) else "<non-string>")
@@ -312,9 +308,8 @@ def restamp(node: object, version: str) -> object:
 def owned_schema_roots(
     changed: Callable[[str], bool], merge_values: Callable[[str], Iterable[tuple[str, str]]]
 ) -> frozenset[str]:
-    """Schema roots a branch owns: changed by one of its own commits (``changed(root)``), or set by
-    a merge to a value its second parent does not hold (``merge_values(root)`` yields
-    ``(merge value, second parent value)`` pairs)."""
+    """Schema roots a branch owns: changed by its own commit (``changed(root)``), or merged to a
+    value its second parent lacks (``merge_values(root)`` yields ``(merge, second parent)``)."""
     return frozenset(
         root
         for root in SCHEMA_ROOTS
