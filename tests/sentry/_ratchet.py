@@ -496,7 +496,11 @@ def _check(
 
     removed = set(base_reg) - set(head)
     # Every base baseline, retired ids included, was already read by ``load_side``.
-    donors = {s: base_reg_loaded.baselines[s].reasons for s in sorted(removed - fresh["retired"])}
+    # A guard id is judged only by ``bounds.retired_guards_findings``; two transfer rules would disagree.
+    donors = {
+        s: base_reg_loaded.baselines[s].reasons
+        for s in sorted(removed - fresh["retired"] - GUARD_KEYS)
+    }
     successors: dict[str, dict[str, object]] = {}
     for sid, base in sorted(loaded.items()):
         path = head[sid]
@@ -547,7 +551,8 @@ def _check(
             findings += loose
             report += approved_raises
         elif removed:
-            successors[sid] = base.reasons
+            if sid not in GUARD_KEYS:
+                successors[sid] = base.reasons
         else:
             # Newly registered in this diff: the one way a first inventory is admitted.
             report.append(f"{sid}: first inventory, {len(base.keys)} key(s), review required")

@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import ast
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from tests.sentry import _ratchet
+from tests.sentry import ratchet as _ratchet_package
 from tests.sentry.ratchet import _limit_constants as lc
 from tests.sentry.ratchet.test_integrity import _commit, _red_from, _run_from
 from tests.sentry.test_baseline_registry import UPPER, module_int_constants, refused_constants
@@ -103,18 +105,31 @@ def test_reworded_base_approval_does_not_exempt_a_raise(repo: Path) -> None:  # 
 
 
 def _raise_real(repo: Path, sid: str) -> None:
-    """Base is the committed baseline as it is today; head adds one to a key's ``max``."""
+    """Base is the live baseline's header with one scratch bounded entry; head adds one to its ``max``.
+
+    The entry is made here, so the live list may shrink to nothing without breaking the test.
+    """
     name = f"{sid}.json"
     doc = json.loads((ROOT / "tests/sentry/baselines" / name).read_text(encoding="utf-8"))
+    doc["entries"] = {"scratch::KEY": {"reason": REASON, "max": 1}}
     (repo / A).unlink()
     path = f"tests/sentry/baselines/{name}"
     _write(repo, path, json.dumps(doc))
     _write(repo, REG, _reg({sid: (path, [])}))
     _commit(repo, "real baseline")
-    key = sorted(doc["entries"])[0]
-    doc["entries"][key]["max"] = doc["entries"][key].get("max", 0) + 1
+    doc["entries"]["scratch::KEY"]["max"] = 2
     _write(repo, path, json.dumps(doc))
     _assert_red(repo, "max raised or dropped for key(s)")
+
+
+def test_raise_mutation_does_not_depend_on_live_entries(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:  # red-before
+    live = tmp_path_factory.mktemp("live")
+    sid = "locator-waivers"
+    _write(live, f"tests/sentry/baselines/{sid}.json", _bl(sid, {}))
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", live)
+    _raise_real(repo, sid)
 
 
 def test_module_size_ceiling_raise_needs_approval(repo: Path) -> None:  # red-before
@@ -443,6 +458,33 @@ def test_a_guard_successor_never_excuses_another_missing_key() -> None:  # red-b
     assert len(found) == 1 and "b::B was dropped with its retired id" in found[0]
 
 
+def _rename_guard(repo: Path, bound: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retire ``sentry-limits`` with a fresh decision and register ``sentry-limits-v2`` as its guard heir."""
+    monkeypatch.setattr(_ratchet, "GUARD_KEYS", frozenset({GUARD, "sentry-limits-v2"}))
+    _two_sentries(repo)
+    (repo / LIM).unlink()
+    heir = "tests/sentry/baselines/sentry-limits-v2.json"
+    _write(repo, heir, _bl("sentry-limits-v2", {GOAL: bound, FLOOR: {"min": 146}}))
+    tables = f'[retired]\n"{GUARD}" = "{D1}"\n\n'
+    _write(repo, REG, _reg({"sentry-limits-v2": (heir, []), "a": (A, [])}, tables))
+
+
+def test_an_approved_guard_rename_that_tightens_a_ceiling_passes_check(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # red-before
+    _rename_guard(repo, {"max": 590}, monkeypatch)
+    findings, _ = _ratchet.check(repo, "HEAD")
+    assert findings == []
+
+
+def test_an_approved_guard_rename_that_raises_a_ceiling_fails_check(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # pin
+    _rename_guard(repo, {"max": 610}, monkeypatch)
+    findings, _ = _ratchet.check(repo, "HEAD")
+    assert any(f"guard key {GOAL} was dropped with its retired id" in f for f in findings)
+
+
 # --- the consumer of an imported bound ---------------------------------------------------------
 
 HOME = "_faker_lock_lists"
@@ -510,3 +552,14 @@ def _degrade_to(locales: dict, field: str, fields: tuple[str, ...], count: int) 
 
 def test_read_int_reads_signed_literals() -> None:  # red-before
     assert lc.read_int("_F = -5\n", "_F") == -5
+
+
+def test_reason_when_rows_imports_the_binding_helper_from_the_public_api() -> None:  # red-before
+    source = (ROOT / "tests/sentry/_reason_when_rows.py").read_text(encoding="utf-8")
+    private = [
+        n.module
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("tests.sentry.ratchet._")
+    ]
+    assert private == []
+    assert "bound_names" in _ratchet_package.__all__

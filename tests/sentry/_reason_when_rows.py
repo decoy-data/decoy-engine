@@ -16,7 +16,7 @@ import ast
 from collections.abc import Iterator
 from pathlib import Path
 
-from tests.sentry.ratchet._bindings import bound_names
+from tests.sentry.ratchet import bound_names
 
 WHEN_ROW_FUNCTIONS = frozenset(
     {
