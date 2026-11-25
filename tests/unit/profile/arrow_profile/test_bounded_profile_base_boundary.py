@@ -2,7 +2,7 @@
 
 AT-3b/3c (pandas metadata), AT-5/AT-12 (the public error), AT-8 (a resident table with a stored
 index), AT-12f (the float option), AT-13/14 (text and dictionary columns). The reference is built
-in `_arrow_support` from pyarrow and pandas alone. Do not edit it to pass a cell.
+in `support` from pyarrow and pandas alone. Do not edit it to pass a cell.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from decoy_engine import fileaccess, reasons
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.fileaccess import FileAccessDenied, FileRole, Root, RootedFileAccess
 from decoy_engine.fileaccess._openat2 import openat2_usable
-from tests.unit.profile._arrow_support import (
+from tests.unit.profile.arrow_profile.support import (
     SAFE_FAILURE,
     assert_matches_base,
     bounded_profile,
@@ -143,6 +143,50 @@ def test_at5_every_ordinary_failure_is_a_label_only(
         pytest.fail("no error")
 
 
+def test_at5_a_memory_failure_reaches_the_caller_as_the_fixed_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Arrow's value-conversion failure under a cap quotes the cell in its text; the caller
+    still classifies it as memory, from a rebuilt error that carries no cell."""
+    leaky = pa.ArrowInvalid(f"Unknown error: Wrapping {MARKER} failed")
+    reader = _reader_raising(leaky, tmp_path, monkeypatch)
+    with pytest.raises(pa.ArrowInvalid) as caught:
+        bounded_profile(reader, "local")
+    assert fileaccess.is_memory_failure(caught.value)
+    assert caught.value is not leaky
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+    assert MARKER not in _formatted(caught.value)
+
+
+def test_at5_capacity_hides_a_cell_quoted_by_a_memory_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pyarrow.parquet as pq
+
+    from decoy_engine.execution.capacity import estimate_job_capacity
+    from decoy_engine.profile import _readers
+
+    def leak(self: Any, sample_rows: int) -> Any:
+        raise pa.ArrowInvalid(f"Unknown error: Wrapping {MARKER} failed")
+
+    monkeypatch.setattr(_readers.ParquetFileSource, "sample_table", leak)
+    path = tmp_path / "t.parquet"
+    pq.write_table(pa.table({"a": [1, 2]}), path)
+    config = {
+        "version": 2,
+        "global_settings": {"job_name": "j", "seed": 7},
+        "sources": {"t": {"type": "file", "path": str(path), "format": "parquet"}},
+        "targets": {
+            "t": {"type": "file", "path": str(tmp_path / "o.parquet"), "format": "parquet"}
+        },
+        "tables": [{"name": "t", "columns": [{"name": "a", "strategy": "passthrough"}]}],
+    }
+    with pytest.raises(ExecutionError) as caught:
+        estimate_job_capacity(config, tmp_path)
+    assert caught.value.code == "capacity_source_unprofilable"
+    assert MARKER not in _formatted(caught.value)
+
+
 def test_at5_a_coded_engine_failure_keeps_its_type(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -186,6 +230,16 @@ def test_at5_a_real_duplicate_keeps_the_shared_message(
         with pytest.raises(ValueError) as caught:
             bounded_profile(reader, kind)
         assert str(caught.value) == "table 't' has 1 duplicated field name(s)"
+
+
+def test_at5_a_duplicate_has_the_registered_reason_and_stays_a_value_error() -> None:
+    from decoy_engine._field_names import DuplicateFieldNamesError
+    from decoy_engine.reason_adapter import reason_from_exception
+
+    exc = DuplicateFieldNamesError("table 't' has 1 duplicated field name(s)")
+    assert isinstance(exc, ValueError)
+    record = reason_from_exception(exc)
+    assert record.code == str(reasons.runtime.DUPLICATE_SOURCE_FIELD_NAMES)
 
 
 # ------------------------------------------------------------------ AT-8: a stored index

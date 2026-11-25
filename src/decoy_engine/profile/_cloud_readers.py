@@ -32,7 +32,7 @@ from decoy_engine.profile._readers import (
     RowCount,
     estimate_csv_rows,
 )
-from decoy_engine.profile.arrow._arrow_sample import head_table_from_batches
+from decoy_engine.profile.arrow import head_table_from_batches
 
 # One ranged read big enough to cover a CSV header + a bounded sample on a
 # typical object, while still being a tiny fraction of a large file. read_csv

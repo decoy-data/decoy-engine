@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from decoy_engine._field_names import repeated_names
 from decoy_engine.profile.arrow._walk_arrow import arrow_column_profile, holds_date32
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ def _eligible(schema: pa.Schema) -> bool:
     least one temporal field. Dictionary and extension types are out whatever their storage."""
     if b"pandas" in (schema.metadata or {}):
         return False
-    if len(set(schema.names)) != len(schema.names):
+    if repeated_names(schema.names):
         return False
     types = [field.type for field in schema]
     if not all(_is_temporal(t) or pa.types.is_string(t) or pa.types.is_integer(t) for t in types):

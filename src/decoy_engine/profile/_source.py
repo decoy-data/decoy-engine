@@ -220,13 +220,10 @@ def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
 
 
 def _passes_through(exc: Exception) -> bool:
-    """True when `exc` must reach the caller as it is: a file-access policy decision, a memory
-    failure, a duplicate-name refusal or an engine error family the reason adapter classifies.
+    """True when `exc` must reach the caller as it is: a file-access policy decision, a duplicate-name refusal or an engine error family the reason adapter classifies.
     Every other failure of a bounded profile is stripped to a closed label."""
-    return (
-        fileaccess.keeps_class(exc)
-        or fileaccess.is_memory_failure(exc)
-        or isinstance(exc, (DuplicateFieldNamesError, *reason_adapter.loaded_families()))
+    return fileaccess.keeps_class(exc) or isinstance(
+        exc, (DuplicateFieldNamesError, *reason_adapter.loaded_families())
     )
 
 
@@ -290,6 +287,7 @@ def _profile_one_source(
     # its closed label only; other readers keep their own errors.
     boundary = isinstance(reader, (ResidentTableSource, ArrowSampleSource))
     result: TableProfile | str = ""
+    fresh: BaseException | None = None
     try:
         result = _profile_bounded(
             reader,
@@ -303,8 +301,16 @@ def _profile_one_source(
     except Exception as exc:
         if not boundary or _passes_through(exc):
             raise
-        result = safe_error_type(exc).value
+        # A memory failure's text can quote a cell, so it is rebuilt from fixed text by the
+        # shared classifier instead of being forwarded.
+        classified = fileaccess.classified_failure(exc)
+        if classified is not None and classified.fresh is not None:
+            fresh = classified.fresh
+        else:
+            result = safe_error_type(exc).value
     # Raised after the handler ends, so the producer's exception is neither cause nor context.
+    if fresh is not None:
+        raise fresh from None
     if isinstance(result, str):
         raise ValueError(f"bounded source profile failed ({result})")
     return result

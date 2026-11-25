@@ -136,6 +136,11 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.errors", "EmptyParentPoolError", reasons.config.FK_EMPTY_PARENT_POOL),
     ("decoy_engine.errors", "UnknownFKColumnError", reasons.config.FK_UNKNOWN_COLUMN),
     ("decoy_engine.errors", "ConfigError", reasons.config.UNTAGGED),
+    (
+        "decoy_engine._field_names",
+        "DuplicateFieldNamesError",
+        reasons.runtime.DUPLICATE_SOURCE_FIELD_NAMES,
+    ),
     ("decoy_engine.config._errors", "PipelineConfigError", reasons.config.UNTAGGED),
     ("decoy_engine.errors", "RowErrorsFailedError", reasons.decoy.ROW_ERRORS_FAILED),
     ("decoy_engine.errors", "ValidatorFailedError", reasons.decoy.VERIFICATION_FAILED),

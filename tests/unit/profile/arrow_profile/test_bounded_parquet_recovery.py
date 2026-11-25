@@ -3,7 +3,7 @@
 A valid Parquet file can hold a `time64[ns]` with a sub-microsecond part or a `date32` past year
 9999. The whole-sample conversion to pandas fails; the profile then reads the sample column by
 column and profiles the unholdable temporal column from Arrow (plan rev 6, sections 3 to 7).
-Every other profile is the base one. The reference is built in `_arrow_support` from pyarrow and
+Every other profile is the base one. The reference is built in `support` from pyarrow and
 pandas alone. Do not edit it to pass a cell.
 """
 
@@ -18,7 +18,7 @@ import pytest
 
 from decoy_engine.profile import _source
 from decoy_engine.profile.arrow import _recovery
-from tests.unit.profile._arrow_support import (
+from tests.unit.profile.arrow_profile.support import (
     PARQUET_KINDS,
     SAFE_FAILURE,
     assert_matches_base,
