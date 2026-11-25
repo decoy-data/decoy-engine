@@ -1,4 +1,4 @@
-Status: plan (revision 1, 2026-11-25)
+Status: plan (revision 2, 2026-11-25, after Dennis round 1)
 
 # BUCKET-TOPCODE-NATIVE S1b: activate the Arrow bucketize and top_code operators on chunked and unified
 
@@ -59,10 +59,10 @@ S1b adds no algorithm. It follows the activation pattern the engine already used
 ### Reuse inventory
 
 - Registry rows and `ResidentTypeDomain` (`execution/_operator_registry.py`, 312 lines on main): the single activation switch and the numeric domain.
-- `dispatch_full_frame_if_applicable` and `ADMITTED_GLOBAL_STRATEGIES` (`execution/physical/_shadow_full_frame.py:119`, `:124`): the wrapper trigger set 10a narrows for top_code.
+- `ADMITTED_GLOBAL_STRATEGIES` and `dispatch_full_frame_if_applicable` (`execution/physical/_shadow_full_frame.py:119`, `:124`): the wrapper trigger set 10a narrows for top_code.
 - `ShadowCoordinator.run` (`execution/physical/_shadow_coordinator.py:149`): gains the post-cast keyword.
 - The unified call site (`execution/_unified_slice.py:254`): the only caller that passes it.
-- `_require_admitted_global_strategies` (`execution/physical/_shadow_full_frame.py:296`): keeps top_code in the executable set, unchanged.
+- `_require_admitted_global_strategies` (`execution/physical/_shadow_full_frame.py:288`, check at `:296`): keeps top_code in the executable set, unchanged.
 - The parent plan's P-gate fixtures (P4 metadata rows, P9 HIPAA column) and the existing snapshot tests (`tests/native/test_operator_tables_snapshot.py`, `tests/native/test_obs2_decline_records.py`).
 
 ## 4. Guarantee and non-goals
@@ -94,16 +94,19 @@ Non-goals: raw physical snapshots skipping the wrapper (S1p); sequential native 
 
 | Route | Before S1b | After S1b |
 |---|---|---|
-| chunked (`execution/native/_chunked_entry.py:287`, the per-chunk gate S1r extends) | oracle for both strategies | Arrow per chunk where admitted; declined chunks on the oracle (S1r) |
+| chunked (`execution/native/_chunked_entry.py:284`, `_guard`, where S1r adds the per-chunk decision) | oracle for both strategies | Arrow per chunk where admitted; declined chunks on the oracle (S1r) |
 | unified slice, bucketize | oracle (no kernel) | per-node Arrow step |
-| unified slice, top_code | wrapper (`execution/physical/_shadow_full_frame.py:119`, called from `execution/_unified_slice.py:254`) | per-node Arrow step when the snapshot is marked post-cast and the three candidate checks hold (10a); wrapper otherwise |
+| unified slice, top_code | wrapper (`execution/physical/_shadow_full_frame.py:119`, called from `execution/_unified_slice.py:254`) | per-node Arrow step when unified admission admits the table (10a). The wrapper cannot run in unified: the unified `ShadowContext` has no relationship graph, namespace registry or full-frame adapter, so `_require_full_frame_deps` (`execution/physical/_shadow_full_frame.py:220`) raises and `_unified_slice.py:257` turns it into `UnifiedSliceInvariantError`, which fails the job. Invariant: unified admission admits a top_code column only if 10a admits it, enforced by one shared predicate (step 4) |
+| mixed lane (`execution/_pipeline_mixed_route.py:228` calls `run_auto_chunk`; also reached from `execution/_pipeline_multi_table.py:385` and `execution/_pipeline_route_exec.py:574`) | bucketize on the oracle, including FK-coupled child tables | bucketize on Arrow where admitted, in the independent and FK-coupled topologies; B2/B3 row errors fail closed as on the chunked route; top_code still declines through `_mixed_admission.chunk_unstable_warning_column` |
+| physical chunked driver (`execution/physical/drivers/_chunked.py:169`) | oracle | same per-chunk decision as the chunked route |
 | physical raw snapshot | wrapper for top_code | unchanged (S1p) |
 | sequential FK, out-of-core | handler; out-of-core refuses bucketize (`execution/out_of_core/_compat.py:78`) and has no top_code entry | unchanged (P8 controls) |
 | full frame | handler (reference) | unchanged |
 
 ### FK shapes
 
-- FK relationship tables: the chunk dispatcher declines them as on main; unified admission keeps its existing FK checks. No FK table reaches the new operators through a new path.
+- FK relationship tables on the plain chunked route: the chunk dispatcher declines them as on main; unified admission keeps its existing FK checks.
+- FK-coupled child tables on the mixed lane: non-key columns already run native operators there (hash is the witness in `tests/parity/test_phase_f_f2_mixed_sweep.py`, topologies `coupled_int` and `coupled_str`). After S1b a bucketize non-key column on such a table runs Arrow too. Both operators are unkeyed and row-local, so a coupled table gains no cross-table dependency; AT-12 pins the output.
 - Sequential FK non-key child column: the handler masks it, unchanged (P8 control).
 - bucketize or top_code on a key column: compile refuses as on main; S1b adds no admission for key columns.
 
@@ -122,7 +125,7 @@ Non-goals: raw physical snapshots skipping the wrapper (S1p); sequential native 
 | warnings | one `top_code_generalized` per column per scope with summed counts |
 | row errors and quarantine | B2/B3 records at rebased indices (unchanged texts from S1a) |
 | `unified_slice_activation` | published for pure top_code unified plans |
-| docs | CODEMAP rows, route contract in `docs/execution-backends.md`, changelog fragment naming the activation and route evidence |
+| docs | CODEMAP rows, route contract in `docs/execution-backends.md`, activation entry in `docs/compatibility-contract.md`, changelog fragment |
 
 ## 6. Acceptance tests
 
@@ -139,7 +142,12 @@ S1b's gate is the parent plan's gate set for this slice. They are referenced, no
 | AT-7 | P8 other lanes: sequential FK non-key pair and out-of-core controls unchanged | P8 | none (control) |
 | AT-8 | P9 HIPAA `hipaa_age` top_code at 120,000 typed rows, unified and chunked, `arrow_python` | P9 | oracle on main |
 | AT-9 | P11 unified top_code on the per-node runner: typed undeclared int64 and declared post-cast input run `native_top_code` with no wrapper call and no `UnifiedSliceInvariantError`; raw declared-string control `test_top_code_warning_and_row_error_parity` unchanged on the wrapper; unified `Float32` control declines before the coordinator; direct coordinator test with a post-cast snapshot and `Float32` metadata takes the wrapper | P11 | `UnifiedSliceInvariantError` path on main once the operator exists; M1 |
-| AT-10 | Atomic activation: with the registry rows present and any one of the config, type or metadata gates disconnected, at least one of AT-2, AT-3 or AT-5 fails (shown once per gate in the builder report) | P4, P6 | M2, M3, M5 |
+| AT-10 | Atomic activation: with the registry rows present and any one of the config, type or metadata gates disconnected, at least one of AT-1, AT-2, AT-3 or AT-5 fails (shown once per gate in the builder report) | P2, P4, P6 | M2, M3, M5, M11 |
+| AT-12 | Mixed lane: rewrite `tests/parity/test_phase_f_f2_mixed_sweep.py` (`test_mask_strategy_matches_the_oracle_in_every_topology`) with literal expectations. Keep `route == "mixed"`, assert `arrow_python` for the bucketize column in `independent`, `coupled_int` and `coupled_str`, and output equal to the oracle. Do not just flip the spec's `native` flag. Assert top_code still declines on this lane. Add a B2 case on the mixed lane that fails closed with the expected route and backend evidence. Update the SIBLINGS comment that calls bucketize "no operator" | P4, P8 | the sweep's `pandas_oracle` assertion goes red on activation |
+| AT-13 | Admission equals 10a: for every P4 and P11 fixture, unified admission's decision equals the 10a decision (both call the shared predicate); a spy proves 10a calls it and `ResidentTypeDomain.admits` | P11 | M12 |
+| AT-14 | Phase D audit: `tests/parity/_d_audit_matrix.py` classifies the chunked cell from registry fields (`required_kernel`, planned backend) so bucketize and top_code get the Arrow class, not `COMPILED_RUST`. `tests/parity/test_phase_d_audit_no_legacy.py` (`test_native_chunked_compiled_cells_cite_their_real_kernel_suite`) stays green without listing them as compiled, and the new chunked suites are cited | P7 | the audit test goes red on activation |
+| AT-15 | Unified with a native sibling: top_code plus a hash column in one table runs both per node, no wrapper, output equal to forced full frame. Unified failed-cast control: a declared top_code column whose cast fails takes fallback before the coordinator | P11 | M1 |
+| AT-16 | Companion-present and companion-absent legs for the route cases in AT-1 and AT-2, and the Dell perf record (wall time and RSS at 120,000 and 1,000,000 rows, three runs each, Arrow against forced full frame) | parent section 7 | none (evidence) |
 | AT-11 | Message scan on AT-4 and AT-9 fixtures with distinctive values: no value in warnings, row-error reasons, decline details or logs | P5 | M6 |
 
 ## 7. Named mutations
@@ -154,7 +162,10 @@ S1b's gate is the parent plan's gate set for this slice. They are referenced, no
 | M6 | add the cell value to the B2 reason | AT-11 |
 | M7 | set `chunk_degenerate_null` true on text_mask | AT-6 exact set |
 | M8 | replace warning accumulation with assignment | AT-2 warning row ((5,5) becomes (3,4)) |
-| M9 | in the 10a candidate check, read the numeric domain from a local list instead of the registry, with float32 added | AT-9 direct coordinator test |
+| M9 | remove the identity condition from the shared predicate as 10a calls it (parent P11 10a mutation) | AT-9 direct coordinator test: the post-cast snapshot with `Float32` metadata on a physical `double` column gives `over` and a warning instead of `"16777216"` and none |
+| M10 | disable only top_code's `chunk_degenerate_null` fact (parent P7 underreach) | AT-2 degenerate-shapes row: a string-typed all-null chunk reaches normalization |
+| M11 | admit float32 in the type decision (parent P2) | AT-1 published float32 decline |
+| M12 | in 10a, rebuild the type and metadata check by hand instead of calling the shared predicate, with the metadata check left out | AT-13 |
 
 Mutations run on the final S1b head; the gate records the head.
 
@@ -183,16 +194,16 @@ Mutations run on the final S1b head; the gate records the head.
 
 ### Placement
 
-No new source files. New tests go beside their parent-plan siblings: `tests/native/test_btn_activation.py` (P4, P6, AT-10), `tests/physical/test_unified_top_code_per_node.py` (P11, 10a), `tests/parity/native/test_btn_hipaa.py` (P9). These directories already hold native, physical and native-parity tests (CODEMAP "Native companion bridge" and "Physical seam" rows).
+No new source files. Cross-route tests go in `tests/parity/native/test_bucket_topcode_native.py` as the parent places them (P2 route, P4, P4b public, P6, P9, AT-10). The 10a coordinator tests go in `tests/physical/test_unified_top_code_per_node.py` (CODEMAP "Physical seam" row). No slice codes in file names; `tests/native/` is crowded and takes no new file.
 
 ### Steps
 
 1. Registry (`execution/_operator_registry.py`): add the two rows per section 5 (Fields) and set `chunk_degenerate_null=True` on both. Correct top_code's stale capability note.
-2. Dispatch and binding: confirm on the S1b base which ID-keyed entries S1w left unreachable; add only the remaining membership entries (for example the native scalar slice and kernel sets) so they derive from the rows. Replace the bucket special column set in `native/_chunked_entry.py` with the direct map (parent item 9), within its 688-line ceiling.
+2. Dispatch and binding: confirm on the S1b base which ID-keyed entries S1w left unreachable; add only the remaining membership entries (for example the native scalar slice and kernel sets) so they derive from the rows. S1d owns replacing the bucket special column set in `native/_chunked_entry.py` with the direct map (parent item 9); S1b only asserts the map is present and does not edit that file unless a membership entry needs it. If it does, the secret-material census pin for `_native_route` `key_box` (line 260) moves with any line added above it, and only that census line is updated.
 3. Gates: connect the shared config rejection in `native/_plan.py` and `native/_requirements.py`, the type decision via `ResidentTypeDomain.admits`, and the identity predicate, in the same commit as step 1.
-4. 10a: `ShadowCoordinator.run` gains `post_cast: bool = False`, passed through to `dispatch_full_frame_if_applicable`. `_unified_slice.py:256` passes `post_cast=True`. In `_shadow_full_frame.py`, a top_code node is not a trigger when `post_cast` is true, its snapshot Arrow type is in the top_code spec's domain, its binding resolves to `native_top_code`, and the identity predicate admits its column. Shuffle, grouped_series and derived_aggregate always trigger. Without `post_cast` every top_code node stays a trigger.
+4. 10a: `ShadowCoordinator.run` gains `post_cast: bool = False`, passed through to `dispatch_full_frame_if_applicable`. `_unified_slice.py:256` passes `post_cast=True`. In `_shadow_full_frame.py`, a top_code node is not a trigger when `post_cast` is true, its binding resolves to `native_top_code`, and the shared predicate `numeric_operator_admits(spec, arrow_type, metadata)` in `native/_real_type_admission.py` admits its column. That predicate is the one function unified admission, the S1r chunk routing and 10a all call: it applies `ResidentTypeDomain.admits` and S1g's identity predicate. If S1g and S1r land the two checks as separate calls, S1b folds them into this one predicate (no new module). Shuffle, grouped_series and derived_aggregate always trigger. Without `post_cast` every top_code node stays a trigger.
 5. Rewrite the three negative controls (AT-6).
-6. Docs: CODEMAP rows for the two operators, the route contract section in `docs/execution-backends.md`, and the changelog fragment.
+6. Docs: CODEMAP rows for the two operators, the route contract section in `docs/execution-backends.md`, the activation entry in `docs/compatibility-contract.md` (route evidence, controls, fallback and warning scope, beside the per-operator `executed_backend` entry), and the changelog fragment.
 
 ## 10. Size budgets
 
@@ -221,19 +232,21 @@ No census, allowlist, baseline, cap or pin change (parent section 7). If a budge
 - #790 keeps slipping. Every slice except S1k and S1b's own docs waits on it. If #790 is not merged by 2026-12-01, re-plan S1e and S1w against main and move #790's overlap into whichever lands second (owner call candidate, not assumed here).
 - S1w lands the bindings already reachable (the spec IDs alone make the physical path pick them). Then S1w is an activation and the slice order breaks. The S1w gate must show the bindings are unreachable without the registry rows; S1b's AT-10 shows the inverse.
 - `_chunked_entry.py` is at its ceiling. S1r and S1b both touch it. If S1r uses the reclaimed lines, S1b has none for step 2; the direct map must replace the special set line for line.
-- A unified top_code plan with a declared column whose cast failed earlier: the snapshot is still marked post-cast, but the cast error has already sent the table to fallback, so the coordinator never runs. AT-9 covers the declared happy path; the builder adds the failed-cast control if the cast error does not fall back before the coordinator.
+- A unified top_code plan with a declared column whose cast failed earlier: the snapshot is still marked post-cast, but the cast error has already sent the table to fallback, so the coordinator never runs. AT-9 covers the declared happy path; AT-15 makes the failed-cast control mandatory.
+- A builder launders the mixed sweep or the Phase D audit by flipping a `native` flag or listing the new operators as compiled. AT-12 and AT-14 require literal expectations and registry-derived classification.
 - The negative-control rewrite weakens a test. The reviewer diffs each rewritten test and checks its route, kernel-call and parity assertions are kept (parent P7).
 
 ## 13. Slices
 
 | Slice | Content | Size | Risk | Starts after | Gate |
 |---|---|---|---|---|---|
-| S1b. Activate chunked and unified | steps 1 to 6 | 1.25 builder-days | R2 | S1g, S1d, S1r merged (so #790, S1e, S1w also merged) | AT-1 to AT-11; M1 to M9 on the final head |
+| S1b. Activate chunked and unified | steps 1 to 6 | 1.5 builder-days (mixed lane and audit rewrites added) | R2 | S1g, S1d, S1r merged (so #790, S1e, S1w also merged) | AT-1 to AT-16; M1 to M12 on the final head |
 
-Test depth: T0 per edit; T1 impact selection per commit, plus the native, physical, unified and chunked parity packages; T2 on the exact head with the mutations above. Full suite: yes, once at the gate head against the saved main baseline, because S1b edits the frozen registry snapshot tests and rewrites three existing tests (escalation triggers: frozen contract, changed tests).
+Test depth: T0 per edit; T1 impact selection per commit, plus the native, physical, unified and chunked parity packages; T2 on the exact head with the mutations above. Full suite: yes, once at the gate head against the saved main baseline, because S1b edits the frozen registry snapshot tests and rewrites five existing tests (three negative controls, the mixed sweep, the Phase D audit) (escalation triggers: frozen contract, changed tests).
 
 ## 14. Owner calls and open items
 
 - Inherited, unchanged (parent section 12): keep the nullable-integer top_code auto-chunk gate and the bucketize null-count gate for V1. Defaults stand.
 - Open item 1 (blocking): S1b cannot start until #790 and five sibling slices merge (section 0).
+- Follow-up (not this slice): `native/_kernels_scalar.__all__` and `_STRING_SOURCE_STRATEGIES` (`native/_real_type_admission.py:62`) are hand-written lists; the membership sets S1b relies on are already derived from the registry.
 - Open item 2 (OWNER CALL). "Native fast path on every route": after S1b and S1p, bucketize and top_code are native on chunked, unified and physical, but sequential FK still runs the handler and out-of-core refuses bucketize (`execution/out_of_core/_compat.py:78`) and does not list top_code. Both need a row-error channel on those routes. Default: keep these as V2-LOG (parent section 13) and name the handler on the run card, as owner direction 2026-11-22 allows where no faster build exists.
