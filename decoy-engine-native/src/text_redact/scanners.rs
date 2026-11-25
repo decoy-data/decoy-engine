@@ -1,5 +1,7 @@
 //! Hand-written ASCII byte scanners for the lookaround detectors (`ssn`, `us_zip`, `street_address`).
 
+use super::detect::narrow_offset;
+
 // ── lookaround detectors: hand-written ASCII byte scanners (plan 2) ───────────────────────────
 //
 // Each scanner runs ONLY on an eligible (all-ASCII, no 0x1c-0x1f) cell, so byte offsets equal
@@ -52,7 +54,7 @@ fn scan_ssn(b: &[u8], idx: u32, out: &mut Vec<(u32, u32, u32)>) {
     let mut p = 0;
     while p < n {
         if let Some(end) = ssn_match_at(b, n, p) {
-            out.push((idx, p as u32, end as u32));
+            out.push((idx, narrow_offset(p), narrow_offset(end)));
             p = end;
         } else {
             p += 1;
@@ -105,7 +107,7 @@ fn scan_us_zip(b: &[u8], idx: u32, out: &mut Vec<(u32, u32, u32)>) {
     let mut p = 0;
     while p < n {
         if let Some(end) = zip_match_at(b, n, p) {
-            out.push((idx, p as u32, end as u32));
+            out.push((idx, narrow_offset(p), narrow_offset(end)));
             p = end;
         } else {
             p += 1;
@@ -214,7 +216,7 @@ fn scan_street(b: &[u8], idx: u32, out: &mut Vec<(u32, u32, u32)>) {
     let mut p = 0;
     while p < n {
         if let Some(end) = street_match_at(b, n, p) {
-            out.push((idx, p as u32, end as u32));
+            out.push((idx, narrow_offset(p), narrow_offset(end)));
             p = end;
         } else {
             p += 1;
