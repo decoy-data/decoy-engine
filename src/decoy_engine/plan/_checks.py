@@ -513,7 +513,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.checksum",
                     message=(
                         f"column {col_name!r} in table {table_name!r} uses "
-                        f"strategy fpe with unknown checksum scheme {checksum!r}. "
+                        "strategy fpe with an unknown checksum scheme. "
                         f"Known schemes: {sorted(_KNOWN_SCHEMES)}. "
                         "Check for typos; valid fpe checksum schemes are "
                         "luhn, npi, vin, isbn13, ean13, gtin "
@@ -553,7 +553,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
                         message=(
                             f"column {col_name!r} in table {table_name!r} uses "
                             f"strategy fpe with checksum={checksum!r} but the "
-                            f"configured charset {charset_spec!r} is missing "
+                            "the configured charset is missing "
                             f"characters required by the {checksum!r} scheme: "
                             f"{sorted(missing)!r}. A charset that cannot represent "
                             "the scheme alphabet causes source values to pass through "

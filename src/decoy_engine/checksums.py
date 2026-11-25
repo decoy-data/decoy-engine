@@ -363,9 +363,7 @@ def validate(scheme: str, value: str) -> bool:
         ValueError: If ``scheme`` is not a recognised checksum scheme.
     """
     if scheme not in _KNOWN_SCHEMES:
-        raise ValueError(
-            f"unknown checksum scheme {scheme!r}. Known schemes: {sorted(_KNOWN_SCHEMES)}"
-        )
+        raise ValueError(f"unknown checksum scheme. Known schemes: {sorted(_KNOWN_SCHEMES)}")
     return _VALIDATORS[scheme](value)
 
 
@@ -393,7 +391,5 @@ def calc_check_digit(scheme: str, body: str) -> str:
         ValueError: If ``scheme`` is not a recognised checksum scheme.
     """
     if scheme not in _KNOWN_SCHEMES:
-        raise ValueError(
-            f"unknown checksum scheme {scheme!r}. Known schemes: {sorted(_KNOWN_SCHEMES)}"
-        )
+        raise ValueError(f"unknown checksum scheme. Known schemes: {sorted(_KNOWN_SCHEMES)}")
     return _CHECK_DIGIT_FUNCS[scheme](body)

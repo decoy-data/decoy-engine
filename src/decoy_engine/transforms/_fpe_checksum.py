@@ -48,7 +48,7 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
     if exact is not None and len(s) not in exact:
         expected = " or ".join(str(n) for n in sorted(exact))
         raise FpeChecksumError(
-            f"FPE checksum scheme {scheme!r} requires exactly {expected} character(s); "
+            f"FPE checksum scheme requires exactly {expected} character(s); "
             f"got {len(s)}. A value outside the scheme's fixed length cannot "
             "be format-preserving-encrypted without leaking or truncating a character, "
             "so the engine fails closed. Fix the source data or route this column "
@@ -58,7 +58,7 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
     minimum = _MIN_LENGTHS.get(scheme)
     if minimum is not None and len(s) < minimum:
         raise FpeChecksumError(
-            f"FPE checksum scheme {scheme!r} requires at least {minimum} characters "
+            f"FPE checksum scheme requires at least {minimum} characters "
             f"(body + check digit); got {len(s)}. The engine fails closed "
             "rather than pass the value through unmasked.",
             scheme=scheme,
@@ -146,7 +146,7 @@ def _fpe_checksum_permute(
         # H2: unknown scheme - fail closed.
         if scheme not in _KNOWN_SCHEMES:
             raise FpeChecksumError(
-                f"FPE checksum mode received unknown scheme {scheme!r}. "
+                "FPE checksum mode received an unknown scheme. "
                 f"Known schemes: {sorted(_KNOWN_SCHEMES)}. "
                 "Check your config for typos; valid fpe checksum schemes are "
                 "luhn, npi, vin, isbn13, ean13, gtin (iban is not supported for FPE).",
@@ -177,8 +177,8 @@ def _fpe_checksum_permute(
         # which every supported scheme's check-digit arithmetic is indifferent to.
         if forward and not validate(scheme, s):
             raise FpeChecksumError(
-                f"FPE checksum mode: source value fails checksums.validate() for "
-                f"scheme {scheme!r}; its check digit does not match its body. "
+                "FPE checksum mode: source value fails checksums.validate() for "
+                "the configured scheme; its check digit does not match its body. "
                 "Permuting an already-invalid identifier would produce output "
                 "that looks checksum-valid but has no honest source, so the "
                 "engine fails closed. Fix the source data or route this column "
@@ -225,7 +225,7 @@ def _fpe_checksum_permute(
 
         # Should never reach here: all known non-IBAN schemes handled above.
         raise FpeChecksumError(
-            f"Unhandled scheme {scheme!r} in _fpe_checksum_permute (internal error).",
+            "Unhandled scheme in _fpe_checksum_permute (internal error).",
             scheme=scheme,
         )
     except BaseException:

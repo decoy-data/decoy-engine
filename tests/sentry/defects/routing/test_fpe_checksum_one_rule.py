@@ -21,7 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.sentry.defects._defect_scan import ModuleIndex, attr_chain, module_name
+from tests.sentry._call_resolution import local_names
+from tests.sentry.defects._defect_scan import ModuleIndex, attr_chain
 
 ROOT = Path(__file__).resolve().parents[4] / "src" / "decoy_engine"
 REJ = "execution/native/_operator_config_rejections.py"
@@ -72,21 +73,30 @@ ADAPTER_CALLERS: dict[Edge, str] = {
 # result govern the table's route.
 CHUNKED_CALLERS: dict[Edge, str] = {(ADM, "real_type_decline"): "chunked decision"}
 
-# Where the scheme and context go. Kinds: `last` = the last positional argument of a call to one
-# of the names; `kw` = the `checksum=` keyword of any call; `arg1` = the second positional
-# argument of the decision; `ctx` = `arg1` plus `context=<the function's own context parameter>`;
-# `ret4` = the fourth item of the returned tuple.
+# Where the scheme and context go. Kinds: `bind` = the argument that binds to the destination's
+# `checksum` parameter (by keyword or by that parameter's position in its `def`); `kw` = the
+# `checksum=` keyword of any call; `arg1` = what binds to the decision's `scheme` parameter;
+# `ctx` = `arg1` plus `context=<the function's own context parameter>`; `ret4` = the fourth item
+# of the returned tuple. `transform` is the oracle's local `encrypt if forward else decrypt`.
+DEST_ALIAS: dict[str, str] = {"transform": "fpe_encrypt_value"}
+
+# Where a refusal must lead, by `(path, function)`; the default is a returned non-None reason.
+# `none` is the unified binding, where declining means "unbound" (`return None`).
+GOVERN_OUTCOME: dict[Edge, str] = {
+    ("execution/physical/_shadow_bindings.py", "execution_binding_for_slice_node"): "none",
+    ("execution/native/_fpe_ext.py", "_CompiledFpeKernel.run"): "raise",
+}
 DELIVERIES: dict[Edge, tuple[str, frozenset[str]]] = {
     ("execution/_strategies/_fpe.py", "FpeStrategyHandler.run.encrypt_one"): (
-        "last",
+        "bind",
         frozenset({"fpe_encrypt_value"}),
     ),
     ("execution/out_of_core/_mask_group_b.py", "fpe_array"): (
-        "last",
+        "bind",
         frozenset({"fpe_encrypt_value"}),
     ),
     ("execution/native/_crypto_reference.py", "_ReferenceFpe._run"): (
-        "last",
+        "bind",
         frozenset({"transform"}),
     ),
     ("execution/native/_crypto_ext.py", "FpeConfig.from_mapping"): ("kw", frozenset()),
@@ -102,52 +112,6 @@ CONTEXT_FORWARDERS: dict[Edge, str] = {
     ("execution/_sequential_native_ops.py", "_fpe_admit"): "payload",
     ("execution/_sequential_native_ops.py", "_fpe_key_admit"): "key",
 }
-
-
-class Resolver:
-    """Resolves a call's callee through the shared `ModuleIndex` import tables, so an alias, a
-    package re-export or a module attribute still lands on the defining function."""
-
-    def __init__(self, index: ModuleIndex) -> None:
-        self.index = index
-        self.defs: dict[str, set[str]] = {}
-        for path, tree in index.trees.items():
-            self.defs[module_name(path, index.src)] = {
-                n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-            }
-
-    def follow(self, mod: str, name: str, depth: int = 0) -> tuple[str, str]:
-        if name in self.defs.get(mod, ()) or depth > 8:
-            return (mod, name)
-        if (mod, name) in self.index.imports:
-            base, original = self.index.imports[(mod, name)]
-            return self.follow(base, original, depth + 1)
-        return (mod, name)
-
-    def module_of(self, mod: str, chain: list[str]) -> str | None:
-        head = chain[0]
-        if (mod, head) in self.index.module_aliases:
-            dotted = self.index.module_aliases[(mod, head)]
-        elif (mod, head) in self.index.imports:
-            base, original = self.index.imports[(mod, head)]
-            dotted = f"{base}.{original}"
-        else:
-            return None
-        dotted = ".".join([dotted, *chain[1:]])
-        return dotted if dotted in self.index.module_paths else None
-
-    def callee(self, mod: str, call: ast.Call) -> tuple[str, str] | None:
-        chain = attr_chain(call.func)
-        if chain is None:
-            return None
-        if len(chain) == 1:
-            return self.follow(mod, chain[0])
-        owner = self.module_of(mod, chain[:-1])
-        return self.follow(owner, chain[-1]) if owner else ("?", chain[-1])
-
-
-def _mod(rel: str, index: ModuleIndex) -> str:
-    return module_name(index.src / rel, index.src)
 
 
 def _is_str(node: ast.AST | None, value: str) -> bool:
@@ -228,51 +192,97 @@ def scheme_reads(source: str, rel: str) -> Counter[Edge]:
     return out
 
 
-def callers(
-    index: ModuleIndex, rel: str, tree: ast.Module, target: tuple[str, str]
-) -> list[tuple[Edge, str, bool]]:
-    """Calls whose final name is `target`'s, as `(edge, context literal, resolves to target)`.
-    A same-named function elsewhere is listed with `False`, so a private copy is never hidden.
-    A non-literal context reads `<forwarded>` and a missing one `<none>`."""
-    res = Resolver(index)
-    mod = _mod(rel, index)
-    out: list[tuple[Edge, str, bool]] = []
-    for scope, node in _scoped(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        found = res.callee(mod, node)
-        if found is None or found[1] != target[1]:
-            continue
-        ctx = "<none>"
-        for kw in node.keywords:
-            if kw.arg == "context":
-                ctx = str(kw.value.value) if isinstance(kw.value, ast.Constant) else "<forwarded>"
-        out.append(((rel, scope), ctx, found == target))
-    return out
-
-
-def context_forwarders(index: ModuleIndex, rel: str, tree: ast.Module) -> list[tuple[Edge, str]]:
-    """Calls to `_fpe_config_reason` with the literal context they pass."""
-    res = Resolver(index)
-    mod = _mod(rel, index)
+def callers(rel: str, tree: ast.Module, target: str) -> list[tuple[Edge, str]]:
+    """Calls of `target` under any local spelling (import alias, assignment alias, attribute),
+    as `(edge, context literal)`. A non-literal context reads `<forwarded>`, a missing one
+    `<none>`."""
+    names = local_names(tree, target)
     out: list[tuple[Edge, str]] = []
     for scope, node in _scoped(tree):
-        if isinstance(node, ast.Call) and res.callee(mod, node) == (mod, "_fpe_config_reason"):
+        if isinstance(node, ast.Call) and _is_call_of(node, names, target):
             ctx = "<none>"
             for kw in node.keywords:
-                if kw.arg == "context" and isinstance(kw.value, ast.Constant):
-                    ctx = str(kw.value.value)
+                if kw.arg == "context":
+                    ctx = (
+                        str(kw.value.value) if isinstance(kw.value, ast.Constant) else "<forwarded>"
+                    )
             out.append(((rel, scope), ctx))
     return out
 
 
-def _tests_of(node: ast.AST) -> bool:
-    """True when the branch taken on a test ends the function: it returns or raises."""
-    return any(
-        isinstance(n, (ast.Return, ast.Raise))
-        for b in getattr(node, "body", ())
-        for n in ast.walk(b)
+def _is_call_of(call: ast.Call, names: set[str], target: str) -> bool:
+    f = call.func
+    return (isinstance(f, ast.Name) and f.id in names) or (
+        isinstance(f, ast.Attribute) and f.attr == target
     )
+
+
+def context_forwarders(rel: str, tree: ast.Module) -> list[tuple[Edge, str]]:
+    """Calls to `_fpe_config_reason` with the literal context they pass."""
+    names = local_names(tree, "_fpe_config_reason")
+    out: list[tuple[Edge, str]] = []
+    for scope, node in _scoped(tree):
+        if isinstance(node, ast.Call) and _is_call_of(node, names, "_fpe_config_reason"):
+            literal = {k.arg: k.value for k in node.keywords}.get("context")
+            out.append(
+                (
+                    (rel, scope),
+                    str(literal.value) if isinstance(literal, ast.Constant) else "<none>",
+                )
+            )
+    return out
+
+
+def defining_modules(index: ModuleIndex, name: str) -> list[str]:
+    """Every module under `execution/` that defines a function called `name`, so a private
+    copy of the decision, the adapter or the chunked wrapper is a failure of its own."""
+    return sorted(
+        rel
+        for rel, tree in _trees(index)
+        if rel.startswith("execution/")
+        and any(
+            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name
+            for n in ast.walk(tree)
+        )
+    )
+
+
+def _admits(value: ast.AST | None) -> bool:
+    """A returned value that means "no refusal": nothing, `None`, or a tuple of only `None`."""
+    if value is None or (isinstance(value, ast.Constant) and value.value is None):
+        return True
+    return isinstance(value, ast.Tuple) and all(_admits(e) for e in value.elts)
+
+
+def _branch_outcome_ok(branch: ast.If, outcome: str) -> bool:
+    """What the refusal branch does: `raise`, return a reason (`value`), or return `None`."""
+    exits = [n for b in branch.body for n in ast.walk(b) if isinstance(n, (ast.Return, ast.Raise))]
+    returns = [n for n in exits if isinstance(n, ast.Return)]
+    if outcome == "raise":
+        return any(isinstance(n, ast.Raise) for n in exits)
+    if not returns:
+        return False
+    if outcome == "none":
+        return all(_admits(r.value) for r in returns)
+    return all(not _admits(r.value) for r in returns)
+
+
+def _mentions(expr: ast.AST, call: ast.Call, names: set[str]) -> bool:
+    return any(
+        n is call or (isinstance(n, ast.Name) and n.id in names and isinstance(n.ctx, ast.Load))
+        for n in ast.walk(expr)
+    )
+
+
+def _polarity_ok(test: ast.AST, call: ast.Call, names: set[str]) -> bool:
+    """The branch runs when a refusal exists: no `is None` / `== None` / `not` on the result."""
+    for n in ast.walk(test):
+        if isinstance(n, ast.Compare) and _mentions(n.left, call, names):
+            if any(isinstance(op, (ast.Is, ast.Eq)) for op in n.ops):
+                return False
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not) and _mentions(n, call, names):
+            return False
+    return True
 
 
 def _parents(tree: ast.Module) -> dict[ast.AST, ast.AST]:
@@ -283,16 +293,19 @@ def _contains(root: ast.AST, node: ast.AST) -> bool:
     return any(n is node for n in ast.walk(root))
 
 
-def _loads(expr: ast.AST, names: set[str]) -> bool:
-    return any(
-        isinstance(n, ast.Name) and n.id in names and isinstance(n.ctx, ast.Load)
-        for n in ast.walk(expr)
-    )
+def _inside_if(parents: dict[ast.AST, ast.AST], node: ast.AST, stop: ast.AST) -> bool:
+    """A conditional return is judged by its `if`, not as a return of the bound result."""
+    while node in parents and node is not stop:
+        node = parents[node]
+        if isinstance(node, ast.If):
+            return True
+    return False
 
 
-def _result_governs(tree: ast.Module, call: ast.Call) -> bool:
-    """The call's result decides a route or refusal: it is returned, tested by an `if` whose
-    branch returns or raises, or bound to a name that is. A bare call or an unused binding fails."""
+def _result_governs(tree: ast.Module, call: ast.Call, outcome: str) -> bool:
+    """The call's result decides the outcome: it is returned, or an `if` on it (directly or
+    through the name it is bound to) refuses on a reason and takes the pinned `outcome`.
+    A bare call, an unused binding, a reversed test or a branch that admits fails."""
     parents = _parents(tree)
     node: ast.AST = call
     while node in parents:
@@ -300,7 +313,7 @@ def _result_governs(tree: ast.Module, call: ast.Call) -> bool:
         if isinstance(parent, ast.Return):
             return True
         if isinstance(parent, ast.If) and _contains(parent.test, call):
-            return _tests_of(parent)
+            return _polarity_ok(parent.test, call, set()) and _branch_outcome_ok(parent, outcome)
         if isinstance(parent, (ast.Expr, ast.FunctionDef, ast.AsyncFunctionDef)):
             return False
         if isinstance(parent, (ast.Assign, ast.AnnAssign)):
@@ -310,34 +323,35 @@ def _result_governs(tree: ast.Module, call: ast.Call) -> bool:
             while fn in parents and not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 fn = parents[fn]
             for sub in ast.walk(fn):
-                if isinstance(sub, ast.If) and _loads(sub.test, names) and _tests_of(sub):
-                    return True
-                if (
-                    isinstance(sub, ast.Return)
-                    and sub.value is not None
-                    and _loads(sub.value, names)
-                ):
-                    return True
+                if isinstance(sub, ast.If) and _mentions(sub.test, call, names):
+                    if _polarity_ok(sub.test, call, names) and _branch_outcome_ok(sub, outcome):
+                        return True
+                if isinstance(sub, ast.Return) and sub.value is not None:
+                    if _mentions(sub.value, call, names) and not _inside_if(parents, sub, fn):
+                        return True
             return False
         node = parent
     return False
 
 
 def ungoverned_calls(
-    index: ModuleIndex, target: tuple[str, str], under: str = "execution/"
+    index: ModuleIndex,
+    target: str,
+    outcomes: dict[Edge, str] | None = None,
+    under: str = "execution/",
 ) -> list[Edge]:
-    """Every call of `target` whose result does not govern the outcome."""
+    """Every call of `target` whose result does not govern the pinned outcome."""
     out: list[Edge] = []
     for rel, tree in _trees(index):
         if not rel.startswith(under):
             continue
-        res = Resolver(index)
-        mod = _mod(rel, index)
+        names = local_names(tree, target)
         scopes = {id(n): sc for sc, n in _scoped(tree)}
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and (found := res.callee(mod, node)) is not None:
-                if found[1] == target[1] and not _result_governs(tree, node):
-                    out.append((rel, scopes.get(id(node), "")))
+            if isinstance(node, ast.Call) and _is_call_of(node, names, target):
+                edge = (rel, scopes.get(id(node), ""))
+                if not _result_governs(tree, node, (outcomes or {}).get(edge, "value")):
+                    out.append(edge)
     return out
 
 
@@ -403,11 +417,40 @@ def _bound_scheme_names(tree: ast.Module, scope: str) -> set[str]:
     return good - bad
 
 
+def _positional_params(index: ModuleIndex, fname: str) -> tuple[list[str], list[str]] | None:
+    """`(positional parameter names, every parameter name)` of the function `fname`."""
+    for _rel, tree in _trees(index):
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fname:
+                a = node.args
+                pos = [x.arg for x in (*a.posonlyargs, *a.args)]
+                return pos, [*pos, *(x.arg for x in a.kwonlyargs)]
+    return None
+
+
+def _bound_arg(index: ModuleIndex, call: ast.Call, fname: str, param: str) -> ast.AST | None:
+    """The expression a call binds to `param` of `fname`: by keyword, or by that parameter's
+    position in the `def`. Absent, or not resolvable (a starred argument), reads `None`."""
+    for kw in call.keywords:
+        if kw.arg == param:
+            return kw.value
+    params = _positional_params(index, fname)
+    if (
+        params is None
+        or param not in params[0]
+        or any(isinstance(a, ast.Starred) for a in call.args)
+    ):
+        return None
+    i = params[0].index(param)
+    return call.args[i] if i < len(call.args) else None
+
+
 def delivery_violations(
     index: ModuleIndex, table: dict[Edge, tuple[str, frozenset[str]]]
 ) -> list[str]:
-    """Each pinned carrier hands the configured scheme (and context) to its declared destination.
-    `None`, a constant or any other expression in that position is a violation."""
+    """Each pinned carrier hands the configured scheme (and context) to the destination
+    parameter it is meant for. `None`, a constant, another expression, or the scheme landing in
+    a neighbouring parameter is a violation."""
     problems: list[str] = []
     trees = dict(_trees(index))
     for (rel, scope), (kind, names) in sorted(table.items()):
@@ -429,14 +472,16 @@ def delivery_violations(
                 chain = attr_chain(node.func)
                 final = chain[-1] if chain else None
                 if kind == "kw":
-                    kws = [k for k in node.keywords if k.arg == SCHEME]
-                    sites += [_scheme_expr(k.value, bound) for k in kws]
-                elif final in names and kind == "last":
-                    sites.append(bool(node.args) and _scheme_expr(node.args[-1], bound))
+                    sites += [
+                        _scheme_expr(k.value, bound) for k in node.keywords if k.arg == SCHEME
+                    ]
+                elif final in names and kind == "bind":
+                    dest = DEST_ALIAS.get(final, final)
+                    sites.append(_scheme_expr(_bound_arg(index, node, dest, SCHEME), bound))
                 elif final in names:
-                    ok = len(node.args) > 1 and _scheme_expr(node.args[1], bound)
+                    ok = _scheme_expr(_bound_arg(index, node, final, "scheme"), bound)
                     if kind == "ctx":
-                        ctx = {k.arg: k.value for k in node.keywords}.get("context")
+                        ctx = _bound_arg(index, node, final, "context")
                         ok = ok and isinstance(ctx, ast.Name) and ctx.id == "context"
                     sites.append(ok)
         if not sites or not all(sites):
@@ -444,34 +489,38 @@ def delivery_violations(
     return problems
 
 
+def _conjuncts(expr: ast.AST) -> list[ast.AST]:
+    if isinstance(expr, ast.BoolOp) and isinstance(expr.op, ast.And):
+        return [c for v in expr.values for c in _conjuncts(v)]
+    return [expr]
+
+
+def _compares(c: ast.AST, name: str, op: type, value: object) -> bool:
+    return (
+        isinstance(c, ast.Compare)
+        and isinstance(c.left, ast.Name)
+        and c.left.id == name
+        and len(c.ops) == 1
+        and isinstance(c.ops[0], op)
+        and isinstance(c.comparators[0], ast.Constant)
+        and c.comparators[0].value == value
+    )
+
+
 def text_mask_restriction_pinned(source: str) -> bool:
-    """`NATIVE_FPE_DETECTORS` keeps only digit detectors with no checksum scheme (until S3)."""
+    """`NATIVE_FPE_DETECTORS` keeps a detector only when BOTH hold, as separate AND conditions:
+    its scheme is `None` and its charset is `digits` (until S3). An `or`, a `not`, or either
+    test missing admits PAN or NPI to the plain kernel."""
     for node in ast.parse(source).body:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if node.target.id != "NATIVE_FPE_DETECTORS":
+            if node.target.id != "NATIVE_FPE_DETECTORS" or node.value is None:
                 continue
-            for gen in ast.walk(node.value) if node.value else ():
+            for gen in ast.walk(node.value):
                 if isinstance(gen, ast.GeneratorExp):
-                    conds = [c for g in gen.generators for i in g.ifs for c in ast.walk(i)]
-                    no_scheme = any(
-                        isinstance(c, ast.Compare)
-                        and isinstance(c.left, ast.Name)
-                        and c.left.id == "checksum"
-                        and isinstance(c.ops[0], ast.Is)
-                        and isinstance(c.comparators[0], ast.Constant)
-                        and c.comparators[0].value is None
-                        for c in conds
+                    conds = [c for g in gen.generators for i in g.ifs for c in _conjuncts(i)]
+                    return any(_compares(c, "checksum", ast.Is, None) for c in conds) and any(
+                        _compares(c, "charset", ast.Eq, "digits") for c in conds
                     )
-                    digits = any(
-                        isinstance(c, ast.Compare)
-                        and isinstance(c.left, ast.Name)
-                        and c.left.id == "charset"
-                        and isinstance(c.ops[0], ast.Eq)
-                        and isinstance(c.comparators[0], ast.Constant)
-                        and c.comparators[0].value == "digits"
-                        for c in conds
-                    )
-                    return no_scheme and digits
     return False
 
 
@@ -511,41 +560,36 @@ def index() -> ModuleIndex:
     return ModuleIndex(ROOT)
 
 
-def _call_sites(index: ModuleIndex, rel_target: str, name: str) -> list[tuple[Edge, str, bool]]:
-    target = (_mod(rel_target, index), name)
-    out: list[tuple[Edge, str, bool]] = []
+def _call_sites(index: ModuleIndex, name: str) -> list[tuple[Edge, str]]:
+    out: list[tuple[Edge, str]] = []
     for rel, tree in _trees(index):
         if _under_execution(rel):
-            out += callers(index, rel, tree, target)
+            out += callers(rel, tree, name)
     return out
 
 
 def test_decision_callers_are_the_adapter_and_the_wrapper(index: ModuleIndex) -> None:
-    sites = _call_sites(index, REJ, DECISION)
-    assert sorted(e for e, _c, _x in sites) == sorted(DECISION_CALLERS), sites
-    assert all(exact for _e, _c, exact in sites), "a private copy of the decision"
+    sites = _call_sites(index, DECISION)
+    assert sorted(e for e, _c in sites) == sorted(DECISION_CALLERS), sites
+    assert defining_modules(index, DECISION) == [REJ], "a private copy of the decision"
 
 
 def test_adapter_callers_are_the_route_sites_with_their_context(index: ModuleIndex) -> None:
-    sites = _call_sites(index, REJ, ADAPTER)
-    found = {e: c for e, c, _x in sites}
+    sites = _call_sites(index, ADAPTER)
     # the rejections module itself defines, never calls, the adapter
-    assert found == ADAPTER_CALLERS and len(found) == len(sites), sites
-    assert all(exact for _e, _c, exact in sites), "a private copy of the adapter"
+    assert dict(sites) == ADAPTER_CALLERS and len(set(sites)) == len(sites), sites
+    assert defining_modules(index, ADAPTER) == [REJ], "a private copy of the adapter"
 
 
 def test_the_chunked_wrapper_has_one_caller(index: ModuleIndex) -> None:
-    sites = _call_sites(index, ADM, CHUNKED)
-    assert sorted(e for e, _c, _x in sites) == sorted(CHUNKED_CALLERS), sites
-    assert all(exact for _e, _c, exact in sites)
+    sites = _call_sites(index, CHUNKED)
+    assert sorted(e for e, _c in sites) == sorted(CHUNKED_CALLERS), sites
+    assert defining_modules(index, CHUNKED) == [ADM]
 
 
 def test_every_decision_result_governs_its_route_or_refusal(index: ModuleIndex) -> None:
-    targets = [(REJ, DECISION), (REJ, ADAPTER), (ADM, CHUNKED)]
-    found = {
-        (rel, name): ungoverned_calls(index, (_mod(rel, index), name)) for rel, name in targets
-    }
-    assert found == {t: [] for t in targets}, found
+    found = {n: ungoverned_calls(index, n, GOVERN_OUTCOME) for n in (DECISION, ADAPTER, CHUNKED)}
+    assert found == {DECISION: [], ADAPTER: [], CHUNKED: []}, found
 
 
 def test_the_scheme_and_context_reach_each_destination(index: ModuleIndex) -> None:
@@ -559,8 +603,7 @@ def test_text_mask_detector_restriction_is_pinned_until_s3() -> None:
 
 def test_sequential_admission_callers_pin_payload_and_key_context(index: ModuleIndex) -> None:
     rel = "execution/_sequential_native_ops.py"
-    tree = dict(_trees(index))[rel]
-    assert dict(context_forwarders(index, rel, tree)) == CONTEXT_FORWARDERS
+    assert dict(context_forwarders(rel, dict(_trees(index))[rel])) == CONTEXT_FORWARDERS
 
 
 # Seeded spellings: each must be seen by the scanner it targets.
@@ -604,134 +647,211 @@ def _seeded(tmp_path: Path, files: dict[str, str]) -> ModuleIndex:
     return ModuleIndex(root)
 
 
-_GOOD_ORACLE = (
-    "def f(cfg, v):\n"
-    "    checksum = cfg.get('checksum') or None\n"
-    "    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, checksum)\n"
+_ORACLE_DEF = (
+    "def fpe_encrypt_value(val, key, charset, tweak, preserve_separators=True,\n"
+    "                      validate_luhn=False, checksum=None):\n    return val\n"
 )
 _ORACLE_EDGE: dict[Edge, tuple[str, frozenset[str]]] = {
-    ("execution/o.py", "f"): ("last", frozenset({"fpe_encrypt_value"}))
+    ("execution/o.py", "f"): ("bind", frozenset({"fpe_encrypt_value"}))
 }
 
 
+def _oracle(tmp_path: Path, call: str, pre: str = "") -> ModuleIndex:
+    body = (
+        "def f(cfg, v):\n    checksum = cfg.get('checksum') or None\n"
+        f"{pre}    return fpe_encrypt_value({call})\n"
+    )
+    return _seeded(tmp_path, {"execution/o.py": body, "transforms/fpe.py": _ORACLE_DEF})
+
+
 def test_delivery_accepts_the_configured_scheme(tmp_path: Path) -> None:
-    index = _seeded(tmp_path, {"execution/o.py": _GOOD_ORACLE})
-    assert delivery_violations(index, _ORACLE_EDGE) == []
+    for call in (
+        "v, 1, 2, 3, 4, 5, checksum",
+        "v, 1, 2, 3, 4, 5, checksum=checksum",
+        "v, 1, 2, 3, checksum=checksum",
+    ):
+        assert delivery_violations(_oracle(tmp_path, call), _ORACLE_EDGE) == [], call
 
 
 @pytest.mark.parametrize(
-    "tail",
+    "call, pre",
     [
-        "    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, None)\n",
-        "    checksum = None\n    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, checksum)\n",
-        "    return fpe_encrypt_value(v, 1, 2, 3, 4, 5, 'luhn')\n",
+        ("v, 1, 2, 3, 4, 5, None", ""),
+        ("v, 1, 2, 3, 4, 5, checksum", "    checksum = None\n"),
+        ("v, 1, 2, 3, 4, 5, 'luhn'", ""),
+        ("v, 1, 2, 3, 4, checksum", ""),  # one argument short: the scheme lands in validate_luhn
+        ("v, 1, 2, 3, checksum", ""),  # scheme lands in preserve_separators
+        ("v, 1, 2, 3, 4, 5, 6, checksum", ""),  # past the end of the signature
+        ("v, 1, 2, 3, 4, checksum, checksum=None", ""),
+        ("*args", ""),
     ],
-    ids=["none-literal", "rebound-to-none", "constant"],
+    ids=[
+        "none",
+        "rebound",
+        "constant",
+        "validate-luhn-slot",
+        "separator-slot",
+        "overlong",
+        "kw-none",
+        "starred",
+    ],
 )
-def test_delivery_rejects_a_scheme_replaced_before_the_oracle_transform(
-    tmp_path: Path, tail: str
+def test_delivery_rejects_a_scheme_that_misses_the_checksum_parameter(
+    tmp_path: Path, call: str, pre: str
 ) -> None:
-    src = "def f(cfg, v):\n    checksum = cfg.get('checksum') or None\n" + tail
-    index = _seeded(tmp_path, {"execution/o.py": src})
-    assert delivery_violations(index, _ORACLE_EDGE)
+    assert delivery_violations(_oracle(tmp_path, call, pre), _ORACLE_EDGE)
 
 
 def test_delivery_rejects_a_dropped_context_and_a_missing_destination(tmp_path: Path) -> None:
     table = {("execution/r.py", "adapter"): ("ctx", frozenset({DECISION}))}
+    decl = "def fpe_checksum_rejection(column, scheme, resolved_charset, *, context):\n    pass\n"
     ok = (
         "def adapter(column, cfg, *, context):\n"
         "    scheme = cfg.get('checksum') or None\n"
         "    return fpe_checksum_rejection(column, scheme, 'x', context=context)\n"
     )
-    assert delivery_violations(_seeded(tmp_path, {"execution/r.py": ok}), table) == []
-    for bad in (ok.replace("context=context", "context='payload'"), "def adapter():\n    pass\n"):
-        idx = _seeded(tmp_path / "bad", {"execution/r.py": bad})
-        assert delivery_violations(idx, table), bad
+    files = {"execution/r.py": ok, "execution/native/_operator_config_rejections.py": decl}
+    assert delivery_violations(_seeded(tmp_path, files), table) == []
+    bad_cases = (
+        ok.replace("context=context", "context='payload'"),
+        ok.replace("column, scheme, 'x'", "column, 'x', scheme"),  # scheme in the charset slot
+        "def adapter():\n    pass\n",
+    )
+    for n, bad in enumerate(bad_cases):
+        files = {"execution/r.py": bad, "execution/native/_operator_config_rejections.py": decl}
+        assert delivery_violations(_seeded(tmp_path / str(n), files), table), bad
 
 
 _DECISION_DEF = "def fpe_checksum_config_rejection(c, p, *, context):\n    return None\n"
 
 
-def _governed_case(tmp_path: Path, body: str) -> list[Edge]:
+def _governed_case(tmp_path: Path, body: str, outcome: str = "value") -> list[Edge]:
     files = {
         "execution/native/_operator_config_rejections.py": _DECISION_DEF,
-        "execution/native/__init__.py": (
-            "from ._operator_config_rejections import fpe_checksum_config_rejection as adapter\n"
-        ),
         "execution/route.py": (
-            "from decoy_engine.execution.native import adapter as ask\ndef route(c, p):\n" + body
+            "from decoy_engine.execution.native import fpe_checksum_config_rejection as ask\n"
+            "def route(c, p):\n" + body
         ),
     }
-    target = (
-        "decoy_engine.execution.native._operator_config_rejections",
+    return ungoverned_calls(
+        _seeded(tmp_path, files),
         "fpe_checksum_config_rejection",
+        {("execution/route.py", "route"): outcome},
     )
-    return ungoverned_calls(_seeded(tmp_path, files), target)
+
+
+_BOUND = "    r = ask(c, p, context='payload')\n"
 
 
 @pytest.mark.parametrize(
-    "body",
+    "body, outcome",
     [
-        "    return ask(c, p, context='payload')\n",
-        "    r = ask(c, p, context='payload')\n    if r is not None:\n        return r\n    return None\n",
-        "    if ask(c, p, context='payload') is not None:\n        raise ValueError('x')\n",
+        ("    return ask(c, p, context='payload')\n", "value"),
+        (_BOUND + "    if r is not None:\n        return r\n    return None\n", "value"),
+        (_BOUND + "    if r:\n        return ('x', r)\n    return None\n", "value"),
+        (
+            "    if ask(c, p, context='payload') is not None:\n        raise ValueError('x')\n",
+            "raise",
+        ),
+        (_BOUND + "    if c or r is not None:\n        return None\n    return 1\n", "none"),
     ],
-    ids=["returned", "bound-then-tested", "tested-inline"],
+    ids=["returned", "bound-then-tested", "truthy", "raise", "unbound-on-refusal"],
 )
-def test_a_result_that_governs_the_outcome_is_accepted(tmp_path: Path, body: str) -> None:
-    assert _governed_case(tmp_path, body) == []
+def test_a_result_that_governs_the_outcome_is_accepted(
+    tmp_path: Path, body: str, outcome: str
+) -> None:
+    assert _governed_case(tmp_path, body, outcome) == []
 
 
 @pytest.mark.parametrize(
-    "body",
+    "body, outcome",
     [
-        "    ask(c, p, context='payload')\n    return None\n",
-        "    r = ask(c, p, context='payload')\n    return None\n",
-        "    r = ask(c, p, context='payload')\n    if r is not None:\n        pass\n    return None\n",
+        ("    ask(c, p, context='payload')\n    return None\n", "value"),
+        (_BOUND + "    return None\n", "value"),
+        (_BOUND + "    if r is not None:\n        pass\n    return None\n", "value"),
+        # the refusal branch admits the column
+        (_BOUND + "    if r is not None:\n        return None\n    return 'ok'\n", "value"),
+        (_BOUND + "    if r is not None:\n        return (None, None)\n    return 'ok'\n", "value"),
+        # the test is reversed: a refusal takes the admit path
+        (_BOUND + "    if r is None:\n        return 'x'\n    return None\n", "value"),
+        (_BOUND + "    if not r:\n        return 'x'\n    return None\n", "value"),
+        # raise expected, a return found; and the reverse
+        (_BOUND + "    if r is not None:\n        return r\n", "raise"),
+        (_BOUND + "    if r is not None:\n        raise ValueError('x')\n", "value"),
     ],
-    ids=["discarded", "bound-unused", "tested-no-exit"],
+    ids=[
+        "discarded",
+        "bound-unused",
+        "tested-no-exit",
+        "branch-admits",
+        "branch-admits-tuple",
+        "reversed-is-none",
+        "reversed-not",
+        "return-for-raise",
+        "raise-for-return",
+    ],
 )
-def test_a_discarded_decision_result_is_rejected(tmp_path: Path, body: str) -> None:
-    assert _governed_case(tmp_path, body) == [("execution/route.py", "route")]
+def test_a_discarded_or_reversed_decision_result_is_rejected(
+    tmp_path: Path, body: str, outcome: str
+) -> None:
+    assert _governed_case(tmp_path, body, outcome) == [("execution/route.py", "route")]
 
 
-def test_an_import_alias_and_a_private_copy_are_told_apart(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "from decoy_engine.execution.native import fpe_checksum_config_rejection as r\n",
+        "from decoy_engine.execution.native import fpe_checksum_config_rejection\nr = fpe_checksum_config_rejection\n",
+        "from decoy_engine.execution.native import fpe_checksum_config_rejection as a\nr = a\n",
+        "import decoy_engine.execution.native as n\nr = n.fpe_checksum_config_rejection\n",
+    ],
+    ids=["import-alias", "assignment-alias", "alias-of-alias", "module-attribute-alias"],
+)
+def test_every_local_spelling_of_the_adapter_is_a_caller(tmp_path: Path, spelling: str) -> None:
+    src = spelling + "def f():\n    return r('c', {}, context='payload')\n"
+    index = _seeded(tmp_path, {"execution/a.py": src})
+    ((rel, tree),) = _trees(index)
+    assert callers(rel, tree, "fpe_checksum_config_rejection") == [
+        (("execution/a.py", "f"), "payload")
+    ]
+
+
+def test_a_private_copy_of_a_decision_function_is_seen(tmp_path: Path) -> None:
     files = {
         "execution/native/_operator_config_rejections.py": _DECISION_DEF,
-        "execution/native/__init__.py": (
-            "from ._operator_config_rejections import fpe_checksum_config_rejection\n"
-        ),
-        "execution/a.py": (
-            "from decoy_engine.execution.native import fpe_checksum_config_rejection as r\n"
-            "def f():\n    return r('c', {}, context='payload')\n"
-        ),
-        "execution/b.py": (
-            "def fpe_checksum_config_rejection(c, p, *, context):\n    return None\n"
-            "def g():\n    return fpe_checksum_config_rejection('c', {}, context='payload')\n"
-        ),
+        "execution/b.py": "def fpe_checksum_config_rejection(c, p, *, context):\n    return None\n",
     }
     index = _seeded(tmp_path, files)
-    target = (
-        "decoy_engine.execution.native._operator_config_rejections",
-        "fpe_checksum_config_rejection",
-    )
-    seen = {
-        e: exact
-        for rel, tree in _trees(index)
-        for e, _c, exact in callers(index, rel, tree, target)
-    }
-    assert seen == {("execution/a.py", "f"): True, ("execution/b.py", "g"): False}
+    assert defining_modules(index, "fpe_checksum_config_rejection") == [
+        "execution/b.py",
+        "execution/native/_operator_config_rejections.py",
+    ]
 
 
-def test_the_text_mask_restriction_check_sees_a_dropped_clause() -> None:
-    kept = (
-        "NATIVE_FPE_DETECTORS: frozenset[str] = frozenset(\n"
-        "    d for d, (charset, checksum) in _FPE_CONFIG.items()\n"
-        "    if checksum is None and charset == 'digits'\n)\n"
-    )
-    assert text_mask_restriction_pinned(kept)
-    assert not text_mask_restriction_pinned(kept.replace("checksum is None and ", ""))
-    assert not text_mask_restriction_pinned(kept.replace(" and charset == 'digits'", ""))
+_MASK = (
+    "NATIVE_FPE_DETECTORS: frozenset[str] = frozenset(\n"
+    "    d for d, (charset, checksum) in _FPE_CONFIG.items()\n"
+    "    if {cond}\n)\n"
+)
+
+
+@pytest.mark.parametrize(
+    "cond, pinned",
+    [
+        ("checksum is None and charset == 'digits'", True),
+        ("checksum is None and charset == 'digits' and d != 'fax_number'", True),
+        ("checksum is None or charset == 'digits'", False),
+        ("not (checksum is None and charset == 'digits')", False),
+        ("(checksum is None or d == 'x') and charset == 'digits'", False),
+        ("charset == 'digits'", False),
+        ("checksum is None", False),
+        ("checksum is not None and charset == 'digits'", False),
+    ],
+)
+def test_the_text_mask_restriction_check_reads_the_boolean_relation(
+    cond: str, pinned: bool
+) -> None:
+    assert text_mask_restriction_pinned(_MASK.format(cond=cond)) is pinned
 
 
 def test_a_second_read_inside_a_listed_function_changes_the_count() -> None:

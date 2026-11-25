@@ -327,7 +327,8 @@ def fpe_checksum_rejection(
     reason = f"fpe_checksum_not_native:{column}"
     if context == "key":
         return reason
-    if scheme not in OPERATORS["fpe"].checksum_schemes:
+    # A non-string scheme is malformed config: decline it coded instead of hashing it.
+    if not isinstance(scheme, str) or scheme not in OPERATORS["fpe"].checksum_schemes:
         return reason
     allowed = _NATIVE_CHECKSUM_ALPHABET.get(scheme, _ASCII_DIGITS)
     if not resolved_charset or any(ch not in allowed for ch in resolved_charset):

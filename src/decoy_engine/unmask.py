@@ -130,7 +130,7 @@ def _decrypt_column(
                 code=reasons.runtime.FPE_CHARSET_DEGENERATE,
                 message=(
                     f"column {column!r} in table {table_name!r} uses fpe but its "
-                    f"resolved charset {charset_spec!r} -> {charset!r} has fewer than 2 "
+                    "resolved charset has fewer than 2 "
                     "distinct characters. A degenerate charset has nothing to permute "
                     "over, so this column cannot be reversed."
                 ),

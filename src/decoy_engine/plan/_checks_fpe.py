@@ -116,8 +116,8 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.charset",
                     message=(
                         f"fpe column {col_name!r} in table {table_name!r} resolves to a "
-                        f"charset with {len(resolved)} distinct character(s) "
-                        f"({charset_spec!r} -> {resolved!r}). A degenerate charset (<2 "
+                        f"charset with {len(resolved)} distinct character(s)"
+                        ". A degenerate charset (<2 "
                         "distinct characters) leaves the column unmasked at run; use a "
                         "named charset (digits/alpha/ALPHA/alphanum/ALPHANUM) or a "
                         "literal charset with at least 2 distinct characters."

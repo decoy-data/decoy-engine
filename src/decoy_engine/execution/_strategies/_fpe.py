@@ -152,7 +152,7 @@ class FpeStrategyHandler:
                 strategy="fpe",
                 message=(
                     f"column {column!r} uses fpe but its resolved charset "
-                    f"{charset_spec!r} -> {charset!r} has fewer than 2 distinct "
+                    "has fewer than 2 distinct "
                     "characters. A degenerate charset has nothing to permute over "
                     "and would leave the column unmasked."
                 ),

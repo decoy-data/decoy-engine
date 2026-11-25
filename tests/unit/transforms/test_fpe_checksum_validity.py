@@ -294,18 +294,24 @@ class TestFpeMinimumLength:
 
     def test_npi_too_short_raises(self) -> None:
         short = "12345"  # 5 chars, not >= 10
-        with pytest.raises(FpeChecksumError, match="npi"):
+        with pytest.raises(FpeChecksumError) as info:
             fpe_encrypt_value(short, _KEY, _DIGITS, _TWEAK, checksum="npi")
+        assert info.value.scheme == "npi"  # the error names the scheme as a field, not in text
+        assert "scheme 'npi'" not in str(info.value)
 
     def test_vin_too_short_raises(self) -> None:
         short = "1HGCM826"  # 8 chars, not 17
-        with pytest.raises(FpeChecksumError, match="vin"):
+        with pytest.raises(FpeChecksumError) as info:
             fpe_encrypt_value(short, _KEY, _VIN_ALPHA, _TWEAK, checksum="vin")
+        assert info.value.scheme == "vin"  # the error names the scheme as a field, not in text
+        assert "scheme 'vin'" not in str(info.value)
 
     def test_isbn13_too_short_raises(self) -> None:
         short = "97831614"  # 8 chars, not 13
-        with pytest.raises(FpeChecksumError, match="isbn13"):
+        with pytest.raises(FpeChecksumError) as info:
             fpe_encrypt_value(short, _KEY, _DIGITS, _TWEAK, checksum="isbn13")
+        assert info.value.scheme == "isbn13"  # the error names the scheme as a field, not in text
+        assert "scheme 'isbn13'" not in str(info.value)
 
 
 # ---------------------------------------------------------------------------

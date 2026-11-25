@@ -183,3 +183,12 @@ def test_wrapper_forwards_an_admitted_checksum_config_to_the_ffi() -> None:
         config=FpeConfig.from_mapping({"checksum": "luhn"}),
     )
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize("scheme", [["luhn"], {"luhn": 1}, {"luhn"}, 7])
+def test_a_malformed_non_string_scheme_declines_coded_not_raises(
+    populated: None, scheme: Any
+) -> None:
+    """An unhashable or non-string scheme is malformed config. The decision keeps the coded
+    decline it gave before the registry check existed, instead of raising `TypeError`."""
+    assert fpe_checksum_config_rejection("c", {"checksum": scheme}, context="payload") == DECLINE

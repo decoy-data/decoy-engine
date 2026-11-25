@@ -84,7 +84,7 @@ def check_charset_unique(charset_spec: str, charset: str) -> None:
     """
     if len(set(charset)) != len(charset):
         raise FpeUnencryptableError(
-            f"fpe charset {charset_spec!r} -> {charset!r} contains duplicate "
+            "fpe charset contains duplicate "
             "symbols; FF1 requires an ordered, duplicate-free alphabet. Remove "
             "the repeated character(s) from the charset.",
             code=reasons.runtime.FPE__UNENCRYPTABLE_LENGTH,
