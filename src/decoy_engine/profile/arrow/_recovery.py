@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from decoy_engine import fileaccess
 from decoy_engine._field_names import repeated_names
 from decoy_engine.profile.arrow._walk_arrow import arrow_column_profile, holds_date32
 
@@ -100,7 +101,10 @@ def recover_temporal_profile(
         projection = table.select([name])
         try:
             frame = projection.to_pandas()
-        except (ValueError, OverflowError):
+        except (ValueError, OverflowError) as exc:
+            # A memory failure is not a pandas limit: leave it to the bounded profile's classifier.
+            if fileaccess.is_memory_failure(exc):
+                raise
             column = projection.column(0)
             if not _is_temporal(column.type) or not _explains_failure(column):
                 return None

@@ -299,13 +299,16 @@ def _profile_one_source(
             source_format=source_format,
         )
     except Exception as exc:
-        if not boundary or _passes_through(exc):
+        if not boundary:
             raise
         # A memory failure's text can quote a cell, so it is rebuilt from fixed text by the
-        # shared classifier instead of being forwarded.
+        # shared classifier instead of being forwarded. This runs before the pass-through
+        # test: a strict policy keeps a memory-shaped error as it is, cell text included.
         classified = fileaccess.classified_failure(exc)
         if classified is not None and classified.fresh is not None:
             fresh = classified.fresh
+        elif _passes_through(exc):
+            raise
         else:
             result = safe_error_type(exc).value
     # Raised after the handler ends, so the producer's exception is neither cause nor context.
@@ -346,6 +349,9 @@ def _profile_bounded(
         try:
             sample_df = table.to_pandas()
         except (ValueError, OverflowError) as exc:
+            # A memory failure is not a pandas limit: leave it to the classifier above.
+            if fileaccess.is_memory_failure(exc):
+                raise
             failure = safe_error_type(exc).value
     proven_total = len(table) if table is not None else len(sample_df)  # type: ignore[arg-type]
     if (
