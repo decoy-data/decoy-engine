@@ -92,17 +92,11 @@
     "decoy_engine/execution/_pipeline_finalize.py::_filter_sampled_values_source_equality::update::0": {
       "reason": "set.update on a set held in a dict of sets"
     },
-    "decoy_engine/execution/_pipeline_generate_mask.py::run_generate_and_mask_steps::open::0": {
-      "reason": "chunked OutputPublish.open, not a GCS Blob"
-    },
     "decoy_engine/execution/_pipeline_generate_mask.py::run_generate_and_mask_steps::update::0": {
       "reason": "dict.update on a plain dict"
     },
     "decoy_engine/execution/_pipeline_generate_mask.py::run_generate_and_mask_steps::update::1": {
       "reason": "dict.update on a plain dict"
-    },
-    "decoy_engine/execution/_pipeline_mixed_route.py::_run_admitted::open::0": {
-      "reason": "chunked OutputPublish.open, not a GCS Blob"
     },
     "decoy_engine/execution/_pipeline_mixed_route.py::_run_admitted::update::0": {
       "reason": "dict.update on a plain dict"
