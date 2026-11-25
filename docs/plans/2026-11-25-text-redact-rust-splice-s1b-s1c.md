@@ -1,4 +1,4 @@
-Status: plan (revision 1, 2026-11-25; slice plan for S1b and S1c; anchored to PR #806 head `1a13d250b`, branch `feat/trs-s1a`)
+Status: plan (revision 2, 2026-11-25, Dennis round 1 folded; slice plan for S1b and S1c; anchored to PR #806 head `1a13d250b`, branch `feat/trs-s1a`)
 
 # TEXT-REDACT-RUST-SPLICE slices S1b and S1c: the text_redact Arrow splice helper, then its routes
 
@@ -9,6 +9,12 @@ Parent plan: `docs/plans/2026-11-22-text-redact-rust-splice.md` revision 9.1 on 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN), `feature-dev.md`, `reuse-first.md`, `scope-discipline.md`, `proportionality.md`, `testing.md` (test depth), `architecture.md`, `cross-cutting-concerns.md`, `api-and-compatibility.md`, `security.md`, `performance.md`, `documentation.md`, `workspace-and-vcs.md`, `catalogs/recurring-defects.md`; engine `CLAUDE.md`, `CONTRIBUTING.md` and `CODEMAP.md`.
 
 Anchors: paths starting with `execution/` or `reasons/` are under `src/decoy_engine/`. All Python line numbers are read at `1a13d250b` (#806). That head equals engine main `2b8a47fbe` for every Python file named here except `execution/native/_text_redact_kernel.py`, which S1a extends.
+
+## Changes in revision 2 (Dennis round 1)
+
+- HIGH: today sequential and out-of-core already report `rust_companion` for an admitted text_redact column that ran nothing in Rust. S1c moves those idle columns to `arrow_python` and writes the label in the two `entry()` methods (sections 5.5, 7, 10).
+- MEDIUM: splice translation uses an F29-visible table lookup (5.3); one extracted label helper (5.1, M2); a CI conversion guard for M7 (AT-9b); combined `_crypto_ext.py` budget with FPE S2b (7).
+- LOW: unresolvable explicit detector lists, `__all__` line, reason release checks, `MemoryError` passthrough, reason block comment.
 
 ## 1. Frame
 
@@ -28,6 +34,8 @@ What S1a gives S1b, read at `1a13d250b`:
 - `execution/native/_text_redact_kernel.py` (436 lines): `CATALOG_VERSION = 2` (:69), `SPLICE_CONTRACT_VERSION = 1` (:115), `_EXPECTED_ABI` (:118), `_KAT_CELLS` (:121), `CompanionCompat` (:140), `_decide` (:233), `companion_compat()` (:266), `load_text_redact_kernel` (:290), `load_text_span_splice` (:304), `requested_rust_ids` (:331), `merge_text_redact_spans` (:354).
 - `load_text_span_splice()` returns a callable `call(values, *, detector_ids, outs, gap_out, native_threads=None) -> list[tuple[Array, Array]]`, or `None` for E1 and E1b. It fixes `catalog_version` and `splice_contract_version` itself.
 - `requested_rust_ids(None)` still returns `list(SUPPORTED_IDS)` in catalog order (:340). Parent M9 is still open and is S1b's.
+
+Run-card labels today (Dennis round 1): the sequential `ColumnDecision.entry()` (`execution/_sequential_native_decisions.py:62-73`) writes `executed_backend: self.backend` when `rows > 0`, and the out-of-core `TextRedactColumnDecision.entry()` (`out_of_core/_text_redact_native.py:112-118`) writes it when `native_calls > 0`. For an admitted text_redact column `self.backend` is `rust_companion`, so both routes report `rust_companion` today even though the list-based helper ran nothing in Rust. `tests/parity/test_ooc_text_redact_native_routing.py:179` asserts that for an all-null column.
 
 Today's helper, `native_text_redact` at `execution/native/_kernels_scalar.py:149` (file 384 lines), converts the column with `to_pylist`, stringifies non-null values, calls `text_redact_candidates` in batches of `_TEXT_REDACT_KERNEL_BATCH = 65_536` (:146), merges in Python, splices each cell with `_splice` and rebuilds with `pa.array(..., pa.string())`. Four route sites call it:
 
@@ -83,7 +91,7 @@ Parent section 4.2 holds the full list. The S1b mapping:
 
 1. E1: `load_text_span_splice()` and `load_text_redact_kernel()` both return `None`. Full Python detection and `_splice` per non-null cell. `ran=False`.
 2. E1b: additive entry `None`, candidates loader bound. Apply the Python offset guard (section 5.2) before calling candidates, then the old candidates-plus-merge path on fitting rows and full Python on guarded rows. `ran=False`.
-3. E2 (private zero detectors): `detectors == ()` returns stringified values with nulls and `ran=False`, with no kernel call. `detectors is None` means all built-ins.
+3. E2 (private zero detectors): `detectors == ()`, or an explicit list that resolves to no supported id (for example `["foo"]`), returns stringified values with nulls and `ran=False`, with no kernel call. `detectors is None` means all built-ins.
 4. E3: a null input row is null in the output, with no decline and no splice credit.
 5. E4: a non-null row the Rust predicate declines (mask bit true) is repaired in Python with `iter_spans` plus `_splice`. A token that fails the UTF-8 check takes the E1 path for the whole call, matching today's behavior, including success for a no-match cell.
 6. E5: an eligible non-null row takes the Rust output. `ran=True` if any such row exists.
@@ -103,7 +111,7 @@ N/A: S1b and S1c change how an admitted text column is executed. FK admission, k
 
 - `detectors`: `None` means all built-ins, expanded in `_SPAN_DETECTORS` insertion order (`detection/detectors.py:841`) and filtered to `SUPPORTED_IDS` (M9 fix). Explicit lists keep first-seen order. Unknown names are dropped as the oracle drops them.
 - `token`: sent as the Replace literal only when `label_token` is false. A token that fails the shared UTF-8 check selects E1.
-- `label_token`: when true, each detector's literal is the shared label `[REDACTED:<id>]` from the label formatter, and the token is not encoded, checked or sent.
+- `label_token`: when true, each detector's literal is `redaction_label(id)` (section 5.1), and the token is not encoded, checked or sent.
 - `ner`: unchanged config rejection in `execution/native/_operator_config_rejections.py`.
 
 ### 4.5 Output surfaces
@@ -115,7 +123,7 @@ N/A: S1b and S1c change how an admitted text column is executed. FK admission, k
 
 ### 4.6 Codes
 
-Five runtime reasons, declared in S1b in the ExecutionError block of `reasons/runtime/_part3.py` (the block that starts at :449). Each has a fixed summary and `since=UNRELEASED` (`CONTRIBUTING.md:57`):
+Five runtime reasons, declared in S1b in the ExecutionError block of `reasons/runtime/_part3.py` (the block that starts at :449), under their own section comment, since the block's existing comment covers post-scan codes. Each has a fixed summary and `since=UNRELEASED` (`CONTRIBUTING.md:57`):
 
 - `runtime/text_splice_unsupported_type`
 - `runtime/text_splice_catalog_mismatch`
@@ -129,10 +137,10 @@ Five runtime reasons, declared in S1b in the ExecutionError block of `reasons/ru
 
 ### 5.1 The helper (S1b)
 
-Add `splice_text_redact` to `execution/native/_kernels_scalar.py` below `native_text_redact` and export it in `__all__` (:382). Steps, in order:
+Add `splice_text_redact` to `execution/native/_kernels_scalar.py` below `native_text_redact` and export it in `__all__` (:378). Today the label is an inline f-string in `_splice` (`_strategies/_text_redact.py:216`). S1b extracts it as `redaction_label(detector_id) -> str` in the same module; `_splice` and the helper both call it, so there is one copy. Steps, in order:
 
-1. Resolve the detector list. `()` returns E2 without a kernel call. Otherwise `ids = requested_rust_ids(detectors)` after the M9 fix.
-2. Resolve literals. Label mode: one label per id through the shared label formatter. Literal mode: run the shared UTF-8 check on the token. A failure selects E1.
+1. Resolve the detector list. `ids = requested_rust_ids(detectors)` after the M9 fix. An empty `ids` (from `()` or from a list of unknown names) returns E2 without a kernel call.
+2. Resolve literals. Label mode: one `redaction_label(id)` per id. Literal mode: run the shared UTF-8 check on the token. A failure selects E1.
 3. Bind. `entry = load_text_span_splice()`. If `None`, take E1b or E1 (section 5.2 guard first). Keep non-string wrapper inputs (integer, float, Boolean) on the old null-aware stringification path and send them to the E1b or E1 logic, as today.
 4. Walk. For each chunk of a `ChunkedArray` (or the single Array), cut zero-copy slices of at most `_TEXT_REDACT_KERNEL_BATCH` rows. Call `entry(slice, detector_ids=ids, outs=outs, gap_out=None)` once per slice. A zero-row input returns `pa.array([], pa.string())` and `ran=False` with no call.
 5. Validate. Pass every returned sequence through `_checked_splice_output(source_slice, pieces)`: a non-empty list of pairs; each pair a `string` or `large_string` Array and a `bool` Array of equal length; piece lengths sum to the slice length; the mask has zero nulls; no true bit on a null source row; output null exactly where the source is null or the mask is true. Any failure raises `text_splice_output_invalid`.
@@ -151,7 +159,7 @@ Extend `_translate_compiled_kernel_error` in `_crypto_ext.py:362` with a keyword
 
 - `crypto`: unchanged. `seed_wrong_length` and `namespace_empty` give `DeterminismError`, `mixed_object_not_native` gives `GenerationError(NATIVE_TYPE_NOT_ADMITTED)`, anything else returns `exc`.
 - `fpe`: the two determinism codes only. Anything else returns `exc` unchanged. This is today's `_translate_compiled_fpe_error` behavior.
-- `splice`: match the prefix against the five registered splice codes and build `ExecutionError` from the registry symbol and its fixed summary. Any other code, and any non-`ValueError` exception, maps to `text_splice_output_invalid`. The detail after `": "` is never read.
+- `splice`: a module-level dict `_SPLICE_REASONS` maps each of the five Rust code strings to its registry symbol (all values are registry symbols). The translator checks `code in _SPLICE_REASONS`, then indexes `_SPLICE_REASONS[code]`, and builds `ExecutionError` from that symbol and its fixed summary. No `.get(code, default)`: the F29 scanner (`tests/sentry/_reason_scan.py:247-290`) counts only a direct symbol or a subscript of an all-symbol module dict as registry-backed, and a `.get` call adds an inventory row. Any other code, and any exception other than `ValueError` and `MemoryError`, maps to `text_splice_output_invalid`. `MemoryError` propagates unchanged so an out-of-memory failure is not reported as bad output. The detail after `": "` is never read.
 
 `_translate_compiled_fpe_error` in `execution/native/_fpe_ext.py:50` becomes a one-line delegate, `return _translate_compiled_kernel_error(exc, family="fpe")`. Its caller at `_fpe_ext.py:157` does not change. The helper raises the translated error outside the `except` block so `__cause__` and `__context__` are both `None`.
 
@@ -179,7 +187,8 @@ The crypto census key stays. New splice factories pass registry symbols, so the 
 5. Sequential: replace the recorder at `_sequential_native.py:470` at zero net lines so it records each call once and ORs `ran` into `spliced`. The file stays at 700 lines.
 6. Out-of-core: keep a sticky positive flag across batches in the text_redact accumulator.
 7. Set `planned_backend=RUST_COMPANION` in the text_redact spec (`_operator_registry.py:162-172`). Keep `required_kernel=None` and `positive_kernel_evidence=False`. With `True`, an admitted idle unified column would be rejected (`execution/_unified_slice_evidence.py:125`), so M8 checks this.
-8. Every route books the executed backend through `executed_backend(RUST_COMPANION, native_admitted=True, kernel_idle=not ran)`. Do not copy that rule into `_sequential_native_decisions.py`, `_text_redact_native.py` or the step.
+8. Every route books the executed backend through `executed_backend(RUST_COMPANION, native_admitted=True, kernel_idle=not ran)`. The sequential `ColumnDecision` and the out-of-core `TextRedactColumnDecision` gain a `spliced: bool = False` field. Their `entry()` methods call `executed_backend()` for text_redact only, with `kernel_idle=not self.spliced`, when the existing `ran` test is true. Other strategies keep their current label logic. The rule itself stays in `_chunked_evidence.py`; the two `entry()` methods only call it.
+9. Label change this causes: an admitted sequential or out-of-core text_redact column that splices nothing in Rust (all-null, all-declined, E1 or E1b) moves from `rust_companion` to `arrow_python`. Update `test_ooc_text_redact_native_routing.py:179` and the matching sequential expectations to `arrow_python`. Unified and chunked already follow `executed_backend()` and move from `arrow_python` to `rust_companion` only for a column that spliced.
 
 `_COMPANION_STRATEGIES` (`_chunked_evidence.py:59`) derives from the registry, so it gains `text_redact` without an edit. `_COMPILED_BACKENDS` in `pipeline/_route_summary.py:36` reads only specs with a `required_kernel`, so text_redact stays out of it and a route summary does not count text_redact as proof of a compiled run. That is today's behavior and S1c keeps it.
 
@@ -195,7 +204,7 @@ The crypto census key stays. New splice factories pass registry symbols, so the 
 
 ## 6. Slices
 
-Each slice is R2, merges separately and starts from the merged previous slice. Write the named acceptance tests first, run them on the slice base and record the expected failures. Record the already-green legacy guards separately. Then implement, rerun and run the slice's mutations. Code gate: Codex and Dennis. Test depth: T0 per edit, T1 impact selection per commit, T2 on the exact gate head with the real companion built. S1b hits the full-suite escalation triggers for test config (census, F29 fixture, adapter registry) and a frozen contract (reason registry), so its gate also runs a full suite against the saved main baseline.
+Each slice is R2, merges separately and starts from the merged previous slice. Write the named acceptance tests first, run them on the slice base and record the expected failures. Record the already-green legacy guards separately. Then implement, rerun and run the slice's mutations. Code gate: Codex and Dennis. Test depth: T0 per edit, T1 impact selection per commit, T2 on the exact gate head with the real companion built. S1b hits the full-suite escalation triggers for test config (census, F29 fixture, adapter registry) and a frozen contract (reason registry), so its gate also runs a full suite against the saved main baseline, plus `python scripts/release/reason_release_pin.py --check` and `python scripts/dev/registry_renumber.py --check --main origin/main` (`CONTRIBUTING.md:57`).
 
 | Slice | Depends on | Content | Size | Gate evidence |
 |---|---|---|---|---|
@@ -206,7 +215,7 @@ Each slice is R2, merges separately and starts from the merged previous slice. W
 
 **S1c existing-suite edits** (parent section 8, re-anchored): direct helper callers in `tests/native/test_c6c_i_text_redact_kernel.py` and `test_c6c_ii_text_redact_rust.py:72` (keep the non-string case at :331); `tests/parity/test_phase_d_audit_no_legacy.py:482` text_redact parameter only, now marking an additive result after the probe; the all-null expectation at `test_ooc_text_redact_native_routing.py:179`; the real splice at `test_c6c_i_text_redact_chunked.py:70`; `tests/sentry/test_unified_backend_map.py:40` (`ARROW_PYTHON` to `RUST_COMPANION`); `tests/native/test_operator_tables_snapshot.py:86` (`"arrow_python"` to `"rust_companion"`) and :215 (add `"text_redact"` to the expected `_COMPANION_STRATEGIES` set). Run the `test_phase_d_text_redact_seq.py:179` config-bypass cases and `test_ooc_text_redact_native_real.py` as already-green guards. Run candidates-only fixtures on an explicitly legacy stub.
 
-**Fragments.** `changelog.d/text-redact-splice-reasons.md` (S1b) names each code as an exact code span and states that no job uses them yet. `changelog.d/text-redact-rust-splice.md` (S1c) states that text_redact now splices in Rust on all four routes, that bytes do not change, and that the planned backend moves from `arrow_python` to `rust_companion`, with `arrow_python` still reported for an idle admitted column. Format per `changelog.d/README.md`.
+**Fragments.** `changelog.d/text-redact-splice-reasons.md` (S1b) names each code as an exact code span and states that no job uses them yet. `changelog.d/text-redact-rust-splice.md` (S1c) states that text_redact now splices in Rust on all four routes, that bytes do not change, and the per-route label changes in section 10 item 2. Format per `changelog.d/README.md`.
 
 **Bench.** S1b updates `scripts/bench_text_redact.py`: the equivalence helper and a new Arrow splice worker call `splice_text_redact` directly; the baseline8 and new11 workers stay bound to their candidates paths; the oracle worker forces full Python. Each worker checks its expected entry on an untimed call. Record the Dell CPU, build SHA, wheel, fixture seed and ten samples in the PR body.
 
@@ -217,9 +226,9 @@ Each slice is R2, merges separately and starts from the merged previous slice. W
 | `splice_text_redact`, walk and assembly | `execution/native/_kernels_scalar.py` | about 480 at S1b, about 430 at S1c after the old body goes. Must stay under 600 at every head. |
 | `_checked_splice_output`, repair scatter, `partition_detector_rows` | `execution/native/_text_mask_native_splice.py` | about 320. S2a reuses all three for text_mask. |
 | Resolver fix | `execution/native/_text_redact_kernel.py:331` | about 436, net zero |
-| Translator family | `execution/native/_crypto_ext.py:362`, `_fpe_ext.py:50` | about +20 and -8 |
+| Translator family | `execution/native/_crypto_ext.py:362`, `_fpe_ext.py:50` | `_crypto_ext.py` 536 to about 560; `_fpe_ext.py` about -8. FPE-CHECKSUM-NATIVE S2b keeps its new probe vectors out of `_crypto_ext.py`, so the combined total stays under 600. |
 | Reasons | `reasons/runtime/_part3.py` (or `_text_splice.py` per section 4.6) | under 600 |
-| Route switch and evidence (S1c) | the four call sites, `_operator_step.py`, `_sequential_native.py`, `_sequential_native_ops.py`, `out_of_core/_text_redact_native.py`, `_operator_registry.py`, `native/__init__.py` | `_sequential_native.py` stays at 700; `_sequential_native_ops.py` at or below 600 |
+| Route switch and evidence (S1c) | the four call sites, `_operator_step.py`, `_sequential_native.py`, `_sequential_native_ops.py`, `_sequential_native_decisions.py` (112 lines), `out_of_core/_text_redact_native.py` (251 lines), `_operator_registry.py`, `native/__init__.py` | `_sequential_native.py` stays at 700; `_sequential_native_ops.py` at or below 600 |
 | Unit tests | new `tests/unit/execution/native/test_text_redact_splice_helper.py` | within the module-size budget |
 
 No new production module in `execution/native/`; the package fan-out stays at 55 (`tests/sentry/layout/test_package_fanout.py:36`). Run import-linter and the module-size sentry. No census, allowlist or cap increases.
@@ -255,6 +264,7 @@ Each fails on its slice base unless marked already-green. IDs match the parent.
 - **AT-6 (S1b translation and fallback; S1c route outcomes).** Wrapper: a post-probe raise of each known code gives its registered error, an unknown code or a `TypeError` gives `text_splice_output_invalid`, and no Python retry happens (zero candidates calls after the raise). The FPE family returns an unknown FPE code unchanged and maps the two determinism codes as today. S1c: the unified coordinator reroutes the fault to the full-frame oracle; chunked, sequential and out-of-core propagate it.
 - **AT-7 (S1b helper; S1c route surfaces).** Interleave eligible, null, distinct Unicode and ASCII controls (tab, NUL, DEL, CRLF). Ordered bytes match the oracle. Inject a unique data sentinel in a known-code detail and in an unknown exception. Require fixed messages, no sentinel in the error, warnings or Job.log, and no cause or context.
 - **AT-9 (S1b).** Dell, WSL2, the parent section 1 fixture (120,000 mixed cells), release wheel from the S1a head. Probe before timing, warm up once in a fresh worker, time ten complete helper calls with `perf_counter`. Median elapsed seconds x 1,000,000 / 120,000 must be at most 3.0. Compare bytes and validity to full Python outside the timer. On an all-eligible call, forbid per-cell repair, `to_pylist` on input or output and list-backed `pa.array`.
+- **AT-9b (S1b, CI).** A unit test with a stub additive entry patches `pa.Array.to_pylist`, `pa.ChunkedArray.to_pylist` and list input to `pa.array` to raise, and calls the helper on an all-eligible input. It runs in CI on every commit, so M7 fails without the Dell run.
 - **AT-5 (S1c).** Every case in section 5.6 on all four routes. Public `detectors: []`, token `<X>`, `mail a@b.com now` gives `mail <X> now` and `rust_companion` on each route with the current wheel. Absent companion, non-string decline, no rows, all-null and all-ineligible columns. Sequential invalid configs `{"token": 5}`, `{"detectors": "email"}`, `{"detectors": 7}`: unchanged bytes, none, zero native calls and the existing reasons (already-green guard).
 - **AT-5 predicate (S1c).** Chunked text_redact with `when:` selecting a non-ASCII row with an email: masked bytes, unchanged unselected bytes, `arrow_python` and one activation. Zero selection: original bytes, `arrow_python`, no strategy entry. A selected no-match Python row: same bytes and backend, different counts.
 - **AT-3 capacity through routes (S1c).** The parent's full route case with the real helper and the reduced ceiling at builder, scatter and consumer.
@@ -264,10 +274,10 @@ Named mutations (run each alone against the passing tests, restore before the ne
 
 | ID | Mutation | Must fail | Slice |
 |---|---|---|---|
-| M2 | drop the detector id from a label in the outcome builder | AT-1 | S1b |
+| M2 | drop the detector id in `redaction_label` | AT-1 pinned literal | S1b |
 | M3 | shift a repaired row by one position | AT-7 | S1b |
 | M4 | catch a post-probe failure and use Python | AT-6 | S1b |
-| M7 | rebuild eligible output with `pa.array` from a list | AT-9 guard | S1b |
+| M7 | rebuild eligible output with `pa.array` from a list | AT-9b | S1b |
 | M9 | expand `None` in catalog order | resolver unit test | S1b |
 | M10 | process only the first input chunk | AT-3 wrapper | S1b |
 | M5 | report the planned backend regardless of `ran` | AT-5 all-idle column | S1c |
@@ -280,7 +290,7 @@ No masked-byte change in either slice. AT-1 and AT-10 gate it.
 Named changes:
 
 1. **S1b.** Five new runtime reason identities (section 4.6), `since=UNRELEASED`. Release prep owns the registry version, manifest, consumer contract and release fixture (`CONTRIBUTING.md:57`). No public Python signature changes; `splice_text_redact` is private to the native package. The FPE translator keeps its name and behavior.
-2. **S1c.** The text_redact planned backend moves from `arrow_python` to `rust_companion`. A run that spliced in Rust now reports `rust_companion`; an idle admitted column still reports `arrow_python`. This is a run-card change, not a byte change. The fragment says so in both directions.
+2. **S1c.** The text_redact planned backend moves from `arrow_python` to `rust_companion`. Executed backend, per route: unified and chunked report `rust_companion` for a column that spliced in Rust (was `arrow_python`) and keep `arrow_python` for an idle admitted column. Sequential and out-of-core report `arrow_python` for an idle admitted column (was `rust_companion`) and keep `rust_companion` for a column that spliced. This is a run-card change, not a byte change. The S1c fragment states both directions per route.
 
 The ABI stays `decoy-native-abi-3` (`_crypto_ext.py:359`). The additive entry is a capability under rule 4 of `docs/native/supported-matrix.md:119`, bound by S1a's probe.
 
