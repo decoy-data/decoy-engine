@@ -7,11 +7,11 @@ exception. Two properties hold it value-free, and each gets its own cell:
    error: not its cause, its context or its attributes. A translator that returned the native
    error itself, or chained it, would pass these. Green.
 2. The detail text is copied as given, so a detail that carries input text reaches the translated
-   message. The translators do not scrub: the native canary (`tests/native/test_f31_native_canary.py`)
+   message. The translators do not scrub: the native canary (`tests/native/f31_canary/test_native_canary.py`)
    is what keeps the detail value-free. Strict xfail, recorded in the V2-LOG.
 
 These cells feed the translators directly, so they need no native companion and run in every lane.
-`tests/native/test_f31_native_canary.py` feeds them errors from the real kernel.
+`tests/native/f31_canary/test_native_canary.py` feeds them errors from the real kernel.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-from tests.security._f31_canary import CANARY, assert_no_canary, leak_xfail
-from tests.security._surfaces import rendered_surfaces
+from tests._exception_surfaces import rendered_surfaces
+from tests._f31_canary import CANARY, assert_no_canary, leak_xfail
 
 _FIXED_DETAIL = "fixed native detail"
 _F3 = "V2-LOG 2026-11-25 F31 AE6-F3 native translators copy the native detail verbatim"
@@ -92,6 +92,13 @@ _MAPPED: list[tuple[str, str, str, str]] = [
     ("_fpe_ext", "_translate_compiled_fpe_error", "namespace_empty", "DeterminismError"),
 ]
 
+# Both fold an unadmitted Arrow type into a fixed message: the native detail formats the type,
+# field names and metadata values included, so these two codes do not forward it.
+_DETAIL_DROPPED = {
+    ("_crypto_ext", "mixed_object_not_native"),
+    ("_index_ext", "mixed_object_not_native"),
+}
+
 _IDS = [f"{module.strip('_')}-{code}" for module, _, code, _ in _MAPPED]
 
 
@@ -118,7 +125,11 @@ def test_translated_error_forwards_only_code_and_detail(
     translated = _translate(module, translator, _native_error_with_marker_outside_the_detail(code))
     if type(translated).__name__ != expected:
         pytest.fail(f"expected {expected}, got {type(translated).__name__}")
-    if _FIXED_DETAIL not in str(translated):
+    forwarded = _FIXED_DETAIL in str(translated)
+    if (module, code) in _DETAIL_DROPPED:
+        if forwarded:
+            pytest.fail("the translator forwarded a native detail it must drop")
+    elif not forwarded:
         pytest.fail("the translator dropped the native detail")
     assert_no_canary(rendered_surfaces(translated))
 
@@ -166,11 +177,7 @@ def test_text_mask_translator_drops_the_value_the_error_was_given() -> None:
     assert_no_canary(rendered_surfaces(translated))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=f"{_F3}: _text_mask_route, the source message is embedded",
-)
+@leak_xfail(f"{_F3}: _text_mask_route, the source message is embedded")
 def test_text_mask_translator_copies_the_message_it_is_given() -> None:
     from decoy_engine.errors import FpeUnencryptableError
 

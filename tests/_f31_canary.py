@@ -1,7 +1,7 @@
 """Shared harness for the F31 engine canary corpus (AE6).
 
 `observe(call)` runs one failure shape and returns every surface the engine can write text to:
-the exception (every form in `tests/security/_surfaces.py`, including instance attributes and
+the exception (every form in `tests/_exception_surfaces.py`, including instance attributes and
 `records` along the cause and context chain), every
 log record on the `decoy_engine` logger through a stock formatter on a stream handler and on a
 DEBUG file handler, every `warnings.warn`, and the progress events. A cell asserts that its
@@ -24,9 +24,12 @@ from typing import Any
 
 import pytest
 
-from tests.security._surfaces import rendered_surfaces
+from tests._exception_surfaces import rendered_surfaces
 
 CANARY = "DECOY_CANARY_F31_7Q4Z"
+# A second marker for cells where a config or structural name and a row value both reach the same
+# error: a leak of the name must not hide a leak of the row text.
+ROW_CANARY = "DECOY_CANARY_F31_ROW_3M8V"
 
 _LOGGER_NAME = "decoy_engine"
 _STOCK_FORMAT = "%(levelname)s %(name)s %(message)s"
@@ -48,9 +51,9 @@ class Observed:
         return canary_surfaces(self.surfaces)
 
 
-def canary_surfaces(surfaces: dict[str, str]) -> list[str]:
+def canary_surfaces(surfaces: dict[str, str], marker: str = CANARY) -> list[str]:
     """The names of the surfaces whose text carries the marker."""
-    return sorted(name for name, text in surfaces.items() if CANARY in text)
+    return sorted(name for name, text in surfaces.items() if marker in text)
 
 
 def leak_xfail(reason: str) -> Any:
@@ -71,8 +74,8 @@ def assert_path_ran(seen: Observed, *, code: str | None, exc_name: str | None = 
         pytest.fail(f"expected code {code!r}, got {seen.code!r}")
 
 
-def assert_no_canary(surfaces: dict[str, str]) -> None:
-    leaked = canary_surfaces(surfaces)
+def assert_no_canary(surfaces: dict[str, str], marker: str = CANARY) -> None:
+    leaked = canary_surfaces(surfaces, marker)
     assert not leaked, f"marker reached surfaces: {leaked}"
 
 

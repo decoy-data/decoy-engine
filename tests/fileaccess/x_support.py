@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from decoy_engine.fileaccess import _rooted
+from tests._exception_surfaces import rendered  # noqa: F401 - re-exported for the X tests
 from tests.fileaccess.support import RootRelative
-from tests.security._surfaces import rendered  # noqa: F401 - re-exported for the X tests
 
 LOCATOR_SENTINEL = "LOCSENT" + uuid.uuid4().hex[:10]
 

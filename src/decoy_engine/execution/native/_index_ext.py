@@ -108,7 +108,12 @@ def _translate_compiled_index_kernel_error(exc: ValueError) -> Exception:
         # Arrow type with one coded ValueError, where the reference's canonicalizer
         # raises a finer-grained GenerationError code per value type. The exception
         # TYPE is the drop-in guarantee, not the specific code.
-        return GenerationError(code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED, message=detail)
+        # The native detail formats the Arrow type, and that text carries field names and
+        # metadata values from the caller's data. A fixed message keeps the error value-free.
+        return GenerationError(
+            code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED,
+            message="the native kernel does not admit the input column type",
+        )
     return exc
 
 
@@ -147,7 +152,10 @@ class _CompiledIndexKernel:
                     native_threads=native_threads,
                 )
             except ValueError as exc:
-                raise _translate_compiled_index_kernel_error(exc) from exc
+                translated = _translate_compiled_index_kernel_error(exc)
+            # Raised outside the handler: the native error formats the Arrow type (field names
+            # and metadata values), so it must be neither this error's cause nor its context.
+            raise translated
         except BaseException:
             del mask_key
             raise

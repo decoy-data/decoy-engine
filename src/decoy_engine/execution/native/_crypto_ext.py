@@ -376,7 +376,12 @@ def _translate_compiled_kernel_error(exc: ValueError) -> Exception:
         # kernel folds all of these into one coded rejection at the array's Arrow
         # type, so the exception TYPE is what a caller can rely on matching, not a
         # specific one of the reference's finer-grained codes.
-        return GenerationError(code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED, message=detail)
+        # The native detail formats the Arrow type, and that text carries field names and
+        # metadata values from the caller's data. A fixed message keeps the error value-free.
+        return GenerationError(
+            code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED,
+            message="the native kernel does not admit the input column type",
+        )
     # An unrecognized code means the compiled kernel raised something this wrapper
     # was not built to translate; surface it as-is rather than guess at a mapping.
     return exc
@@ -422,7 +427,10 @@ class _CompiledKeyedDerivationKernel:
                     native_threads=native_threads,
                 )
             except ValueError as exc:
-                raise _translate_compiled_kernel_error(exc) from exc
+                translated = _translate_compiled_kernel_error(exc)
+            # Raised outside the handler: the native error formats the Arrow type (field names
+            # and metadata values), so it must be neither this error's cause nor its context.
+            raise translated
         except BaseException:
             del mask_key
             raise

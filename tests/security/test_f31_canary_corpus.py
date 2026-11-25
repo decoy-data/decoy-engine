@@ -34,16 +34,16 @@ from decoy_engine.expressions._lark_parser import compile_expr
 from decoy_engine.profile._source import profile_source
 from decoy_engine.profiling.scan_set import scan_sources
 from decoy_engine.unmask import unmask_pipeline
-from tests.connectors.conftest import (
-    ext_dir,  # noqa: F401 - the shared fixture and its DECOY_REQUIRE_PG policy
-)
-from tests.security._f31_canary import (
+from tests._f31_canary import (
     CANARY,
     Observed,
     assert_no_canary,
     assert_path_ran,
     leak_xfail,
     observe,
+)
+from tests.connectors.conftest import (
+    ext_dir,  # noqa: F401 - the shared fixture and its DECOY_REQUIRE_PG policy
 )
 
 _TABLE = "records"
@@ -466,8 +466,22 @@ def test_corpus_cell(
     assert_no_canary(seen.surfaces)
 
 
-def test_expression_validate_ran_and_wrote_nothing(tmp_path: Path) -> None:
+def test_expression_validate_ran_and_wrote_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import decoy_engine.expressions as expressions
+
+    real_compile = expressions.compile_expr
+    compiled: list[str] = []
+
+    def spy(text: str, *args: Any, **kwargs: Any) -> Any:
+        compiled.append(text)
+        return real_compile(text, *args, **kwargs)
+
+    monkeypatch.setattr(expressions, "compile_expr", spy)
     seen = _cell_expression_validate(tmp_path)
+    if compiled != [_EXPRESSION]:
+        pytest.fail("the real expression compiler did not receive the planted expression")
     if seen.exc is not None or "derived_column_refs" not in (seen.result or ()):
         pytest.fail("the derived-column check did not run to completion")
     assert_no_canary(seen.surfaces)

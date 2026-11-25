@@ -16,13 +16,18 @@ from typing import Any
 
 import pytest
 
-from tests.security._f31_canary import CANARY, assert_no_canary, canary_surfaces, observe
-from tests.security._surfaces import exception_chain, rendered, rendered_surfaces
+from tests._exception_surfaces import exception_chain, rendered, rendered_surfaces
+from tests._f31_canary import CANARY, assert_no_canary, canary_surfaces, observe
 
 
 @dataclass(frozen=True)
 class _Record:
     reason: str
+
+
+@dataclass(frozen=True)
+class _MarkedEvent:
+    text: str
 
 
 class _AttributeError(Exception):
@@ -127,12 +132,13 @@ def test_the_chain_follows_cause_and_context_and_stops_on_a_cycle() -> None:
 
 
 def test_a_marker_in_a_log_record_a_warning_and_a_progress_event_is_seen(tmp_path: Path) -> None:
-    def noisy(**_: Any) -> None:
+    def noisy(*, progress: Any) -> None:
         logging.getLogger("decoy_engine").debug("value %s", CANARY)
         warnings.warn(CANARY, stacklevel=1)
+        progress.on_event(_MarkedEvent(CANARY))
 
     seen = observe(noisy, tmp_path, with_progress=True)
-    assert {"log.stream", "log.file", "warnings"} <= set(seen.surfaces_with_canary())
+    assert {"log.stream", "log.file", "warnings", "progress"} <= set(seen.surfaces_with_canary())
 
 
 def test_a_marker_in_a_row_error_reason_is_seen_through_the_raised_error(tmp_path: Path) -> None:

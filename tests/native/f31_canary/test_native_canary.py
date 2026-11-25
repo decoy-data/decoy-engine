@@ -26,8 +26,8 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from tests.security._f31_canary import CANARY, assert_no_canary, leak_xfail
-from tests.security._surfaces import rendered_surfaces
+from tests._exception_surfaces import rendered_surfaces
+from tests._f31_canary import CANARY, ROW_CANARY, assert_no_canary, leak_xfail
 
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("decoy_engine_native") is None,
@@ -46,6 +46,12 @@ def _kernel() -> Any:
 def _struct_with_canary_field() -> pa.Array:
     """An Arrow type the kernels do not admit, whose field name carries the marker."""
     return pa.array([{CANARY: 1}])
+
+
+def _struct_with_canary_metadata() -> pa.Array:
+    """The same unadmitted type with a clean field name: the marker is only in a metadata value."""
+    child = pa.field("child", pa.int64(), metadata={"note": CANARY})
+    return pa.array([{"child": 1}], pa.struct([child]))
 
 
 def _strings() -> pa.Array:
@@ -90,6 +96,7 @@ def _leak(entry: str, site: str, what: str) -> Any:
 
 _NAME = "formats the config id into the error"
 _TYPE = "formats the Arrow type, struct field names included"
+_TYPE_META = "formats the Arrow type, child field metadata values included"
 
 # (id, callable, exception type, the site's message prefix, leak mark or None). The prefix is the
 # `code: ` the site writes, or its whole fixed text where the site has no code. A cell that
@@ -101,6 +108,13 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "mixed_object_not_native: ",
         _leak(_F2, "batch/string.rs:53", _TYPE),
+    ),
+    (
+        "derive_unadmitted_type_metadata_value",
+        lambda k: _derive(k, _struct_with_canary_metadata()),
+        ValueError,
+        "mixed_object_not_native: ",
+        _leak(_F2, "batch/string.rs:53", _TYPE_META),
     ),
     (
         "derive_empty_namespace",
@@ -129,6 +143,13 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "mixed_object_not_native: ",
         _leak(_F2, "batch/index.rs:93", _TYPE),
+    ),
+    (
+        "index_unadmitted_type_metadata_value",
+        lambda k: _index(k, _struct_with_canary_metadata()),
+        ValueError,
+        "mixed_object_not_native: ",
+        _leak(_F2, "batch/index.rs:93", _TYPE_META),
     ),
     (
         "index_pool_size_text",
@@ -174,7 +195,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
     ),
     (
         "redact_unknown_detector",
-        lambda k: k.text_redact_candidates([CANARY], [CANARY], k.text_redact_catalog_version()),
+        lambda k: k.text_redact_candidates([ROW_CANARY], [CANARY], k.text_redact_catalog_version()),
         ValueError,
         "unknown_detector_id: ",
         _leak(_F1, "pyboundary.rs:48", _NAME),
@@ -188,7 +209,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
     ),
     (
         "redact_unknown_validator",
-        lambda k: k.text_redact_validate(CANARY, CANARY),
+        lambda k: k.text_redact_validate(CANARY, ROW_CANARY),
         ValueError,
         "unknown validator ",
         _leak(_F1, "pyboundary.rs:151", _NAME),
@@ -203,7 +224,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
     (
         "mask_unknown_detector",
         lambda k: k.text_mask_detect_splice(
-            [CANARY], [CANARY], [False], "x", False, k.text_redact_catalog_version()
+            [ROW_CANARY], [CANARY], [False], "x", False, k.text_redact_catalog_version()
         ),
         ValueError,
         "unknown_detector_id: ",
@@ -240,6 +261,11 @@ _PARAMS = [
 ]
 
 
+_UNMARKED = [
+    pytest.param(raiser, exc, prefix, id=name) for name, raiser, exc, prefix, _ in _RAISERS
+]
+
+
 def _raised(raiser: Callable[[Any], Any], exc_type: type[Exception], prefix: str) -> Exception:
     """The error the intended site raised. `pytest.fail` keeps a miss out of a leak mark."""
     try:
@@ -260,6 +286,15 @@ def test_native_error_carries_no_input_text(
     assert_no_canary(rendered_surfaces(_raised(raiser, exc_type, prefix)))
 
 
+@pytest.mark.parametrize(("raiser", "exc_type", "prefix"), _UNMARKED)
+def test_native_error_carries_no_row_text(
+    raiser: Callable[[Any], Any], exc_type: type[Exception], prefix: str
+) -> None:
+    """The row marker is checked apart from the name-echo leak marks above, so a mark on a cell
+    that echoes its config id cannot hide a leak of the row text into the same error."""
+    assert_no_canary(rendered_surfaces(_raised(raiser, exc_type, prefix)), ROW_CANARY)
+
+
 # The translator, the exception class it returns for the native error below, and the native
 # error. The native error comes from the real kernel, so the cell proves the translated class
 # for a real input. `tests/security/test_f31_translator_canary.py` feeds each translator a
@@ -271,7 +306,6 @@ _TRANSLATORS: list[Any] = [
         "GenerationError",
         lambda k: _derive(k, _struct_with_canary_field()),
         id="crypto",
-        marks=leak_xfail(f"{_F2}: batch/string.rs:53, the translator copies the detail"),
     ),
     pytest.param(
         "decoy_engine.execution.native._index_ext",
@@ -279,7 +313,20 @@ _TRANSLATORS: list[Any] = [
         "GenerationError",
         lambda k: _index(k, _struct_with_canary_field()),
         id="index",
-        marks=leak_xfail(f"{_F2}: batch/index.rs:93, the translator copies the detail"),
+    ),
+    pytest.param(
+        "decoy_engine.execution.native._crypto_ext",
+        "_translate_compiled_kernel_error",
+        "GenerationError",
+        lambda k: _derive(k, _struct_with_canary_metadata()),
+        id="crypto_metadata_value",
+    ),
+    pytest.param(
+        "decoy_engine.execution.native._index_ext",
+        "_translate_compiled_index_kernel_error",
+        "GenerationError",
+        lambda k: _index(k, _struct_with_canary_metadata()),
+        id="index_metadata_value",
     ),
     pytest.param(
         "decoy_engine.execution.native._group_key_ext",
@@ -307,3 +354,18 @@ def test_translator_output_carries_no_input_text(
     if type(translated).__name__ != expected:
         pytest.fail(f"expected {expected}, got {type(translated).__name__}")
     assert_no_canary(rendered_surfaces(translated))
+
+
+def test_public_index_derivation_error_carries_no_metadata_value() -> None:
+    """The caller-facing path: `derive_validated_indices` hands the array to the compiled kernel
+    and raises the translated error. The field name is clean, so only a metadata value can leak."""
+    from decoy_engine.generation.pool import GenerationError, derive_validated_indices
+
+    try:
+        derive_validated_indices(
+            _struct_with_canary_metadata(), mask_key=_KEY, namespace="ns", pool_size=10
+        )
+    except GenerationError as raised:
+        assert_no_canary(rendered_surfaces(raised))
+        return
+    pytest.fail("derive_validated_indices did not raise GenerationError")
