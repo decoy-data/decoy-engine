@@ -85,8 +85,12 @@ Non-goals: per-row Faker (GEN-NONFAKER-DRAWS); pooled Faker (GSA); `windowed_dat
 | E3 | sequence value for any planned row outside int64 | today's Python loop; decided at construction from `rows` with `_fits` (`generation/_numeric_typing.py:90`) | S1 |
 | E4 | empty reference pool | a null array of the column type, as today's `[None] * size` (`ReferenceStream`, `generation/_column_streams.py:212`) | S2 |
 | E5 | `size == 0` | empty array; the RNG is not advanced (CPython `choices(k=0)` draws nothing) | S1, S2 |
-| E6 | weights length differs from values, total not positive or not finite, a negative weight, a cumulative weight beyond 2**53 in magnitude, an empty category list, or a reference pool of more than 2**32 keys | CPython draw for that stream, so today's `ValueError` or `IndexError` is raised with the same text at the same batch, or today's values come out | S2 |
+| E6 | weights length differs from values, total not positive or not finite, a negative weight, a cumulative weight beyond 2**53 in magnitude, an empty category list, or a reference pool of at least 2**32 keys (bit length 33); a weight that is not an `int` or `float` | CPython draw for that stream, so today's `ValueError` or `IndexError` is raised with the same text at the same batch, or today's values come out | S2 |
 | E7 | the drawn array's type differs from the schema field | #813's list fallback (`generation/stream/_batches.py:98`); bytes equal | S1, S2 |
+| E8 | `offset + size > rows` on a sequence (a caller reading past the planned rows) | the list path for that batch, so int64 cannot wrap silently | S1 |
+| E9 | the parent key list does not convert to the child's schema field type | every child reference stream over that parent uses the list path, decided once at seal; the reservation stays charged (over-charge only) | S2 |
+
+Order, so a cell that matches two rows takes the CPython result: reference E4 (empty pool gives nulls, no weight check) before E6; categorical E6 before E5 (CPython `choices(k=0)` still raises on bad weights, and zero-size pieces exist); E2 before E1. `weights: []` is normalized to `None` and takes the unweighted floor form under `distribution: weighted`; an unknown reference `distribution` takes the `choice` branch, as today.
 
 ### Routes
 
@@ -104,7 +108,7 @@ No new reason codes. E2 is a debug record, not a warning: it changes no output.
 
 ### FK shapes
 
-- `reference` to a parent table: the sealed parent key list keeps its insertion order. S2 builds one Arrow copy of it per referenced parent key column, reserved in the ledger (section 5.4), shared by every child reference stream on the array path, and gathers from it with `pc.take`. The indices are the ones CPython would draw.
+- `reference` to a parent table: the sealed parent key list keeps its insertion order. S2 builds one Arrow copy of it per referenced parent key column that some child reference column reads on the array path (section 5.4), typed with the parent key's schema field type, reserved in the ledger, stored in the same `key_pools` entry as the list, shared by every such child stream, and gathered with `pc.take`. The indices are the ones CPython would draw.
 - A column that is itself a reference target: it has a collector, so it stays on #813's list path. No change.
 - `reference` with cardinality repair or fitted fan-out: not streamed today (admission), unchanged.
 
@@ -138,7 +142,7 @@ Constant: `pa.repeat(value, size)` for a non-null value, a null array for `None`
 
 ### 5.2 Sequence (S1)
 
-At construction, `_fits(start, start + step * (rows - 1))` decides the vector form (E3). Numeric form: `np.arange(offset, offset + size, dtype=np.int64) * step + start` as `pa.int64()`. Text form: the int64 array cast to string, then for `pad_length > 0` the sign-aware pad (non-negative values: `utf8_lpad(pad)`; negative values: `"-"` joined to `utf8_lpad(abs, pad - 1)`), then `binary_join_element_wise(prefix, body, suffix, "")`. The stream needs `rows`, which `make_column_stream` already has (`generation/_column_streams.py:304`).
+At construction, `_fits(start, start + step * (rows - 1))` decides the vector form (E3). Numeric form: `np.arange(offset, offset + size, dtype=np.int64) * step + start` as `pa.int64()`. Text form: the int64 array cast to string, then for `pad_length > 0` the sign-aware pad (non-negative values: `utf8_lpad(width=pad, padding="0")`; negative values: `"-"` joined to `utf8_lpad(body, width=pad - 1, padding="0")`, where `body` is the cast string with its leading `"-"` sliced off, not `pc.abs`, which wraps at `INT64_MIN`), then `binary_join_element_wise(prefix, body, suffix, "")`. The stream needs `rows`, which `make_column_stream` already has (`generation/_column_streams.py:304`). numpy int64 wraps silently, so `next_array` checks `offset + size <= rows` and takes the list path otherwise (E8).
 
 ### 5.3 Replay (S2)
 
@@ -153,19 +157,23 @@ So the `random.Random` a stream already holds stays the one source of truth. `ne
 Functions:
 
 - `replay_choices(rng, n, cum_weights, k) -> np.ndarray[int64]`: `random()` from word pairs, then `floor(u * float(n))` or `min(searchsorted(cum, u * total, "right"), n - 1)`. Each value takes exactly two words, so the words consumed are `2 * k`.
-- `replay_randbelow(rng, n, k) -> np.ndarray[int64]`: `kbits = n.bit_length()`, words shifted by `32 - kbits`, rejection in order. The word count is not known in advance: draw a block on a copy of the state, find the position of the `k`th accepted word, then advance the real state by exactly that many words. Rejected words are consumed, as in CPython.
-- `replay_ok() -> bool`: a fixed self-test, run once per process on first use and cached: three seeds, sizes 0, 1, 7 and 4096, each function against `random.Random` on the same seed, including a weighted case with a zero weight and an `n` just above a power of two. Any mismatch sets E2 and writes the debug record.
+- `replay_randbelow(rng, n, k) -> np.ndarray[int64]`: `kbits = n.bit_length()`, words shifted by `32 - kbits`, rejection in order. The word count is not known in advance: draw a block of `k + k // 2 + 64` words on a copy of the state; while fewer than `k` are accepted, draw another block of the same rule on that copy and append; then find the position of the `k`th accepted word and advance the real state by exactly that many words. Rejected words are consumed, as in CPython. The block rule changes only speed, never values (AT-5 covers acceptance rates near one half).
+- `replay_ok() -> bool`: a fixed self-test (tests force E2 through the module seam `_mt_replay._replay_ok_override`, never by patching `random.Random`), run once per process on first use and cached: three seeds, sizes 0, 1, 7 and 4096, each function against `random.Random` on the same seed, including a weighted case with a zero weight and an `n` just above a power of two. Any mismatch sets E2 and writes the debug record.
 
 Callers:
 
 - `generation/kinds/_categorical.py` (GSA S2's `weighted_draw` module) gains `weighted_indices(rng, n, weights, k)`, which returns replay indices, or `None` when E2 or E6 applies. `weighted_draw` is unchanged. `CategoricalStream.next_array` gathers `pc.take(self._cats_array, indices)`; on `None` it returns `pa.array(weighted_draw(...))`. The AT-S2-10 guard adds `weighted_indices` to its allowed helpers for the streamed categorical caller; no local `choices` copy appears.
 - `ReferenceStream.next_array`: `random` calls `replay_randbelow(rng, len(vals), size)`; `weighted` calls `weighted_indices` with `k=size` (one `random()` per row, as `choices(k=1)` per row does); `sequential` uses `np.arange(offset, offset + size) % len(vals)` and no RNG. Values are `pc.take(parent_array, indices)`.
 
-S2 keeps CPython for a case where the measured end-to-end batch is slower with the replay (expected: unweighted categorical with few categories). That choice is a constant in `_categorical.py`, chosen from the AT-4 measurement and recorded in the PR; the replay still serves weighted categorical and every reference form.
+S2 keeps CPython for a case where the measured end-to-end batch is slower with the replay (expected: unweighted categorical with few categories). In that case `next_array` is `pa.array(weighted_draw(...), type=field_type)`: it skips `next_batch`, `to_pylist` and `restore_declared`, and AT-3 asserts exactly that for the case. That choice is a constant in `_categorical.py`, chosen from the AT-4 measurement and recorded in the PR; the replay still serves weighted categorical and every reference form.
 
 ### 5.4 Reservation for the parent array (S2)
 
-The Arrow copy of a sealed parent key list is new memory, so it is priced before it is built. One rule decides whether a parent key column needs the copy: some child reference column to it is on the array path under `array_columns`. `reference_array_bytes(parent_rows, key_payload)` in `generation/_bounds.py` (Arrow value bytes plus offsets and validity) is called by the preflight term beside `generation/_streamed.py:238` and by the live reservation beside `generation/_streamed.py:485` (label `parent_key_array:<t>.<c>`), released when the stage that holds `parent_key_pool` closes. One helper, two callers, the pattern of #813's `faker_pool_resident_bytes`. A shortfall raises `GenerationBudgetExceeded` before the child's first batch. Under an unbounded ledger the reservation is recorded and never refuses.
+The Arrow copy of a sealed parent key list is new memory, so it is priced before it is built. The rule that decides whether a child column reads the parent array must give the same answer at preflight (no streams exist yet), at the parent's live reservation (the child's streams do not exist yet) and in `array_columns` (streams exist). So it is a config-only rule, one function in `generation/stream/_batches.py`:
+
+`reference_reads_array(col, table_cols)`: `col` is a `reference` column with no declared output type, it is not a key collector (no child reads it), and no later column of its table reads it (`sibling_read_names` on #813; GEN-PER-COLUMN S1 replaces that with `TableColumnPlan.batch_reads`, and this rule then calls that). `ReferenceStream.supports_array` is the constant `True`; E2, E4 and E6 are handled inside `next_array` (CPython indices or nulls, then `pc.take`, or `pa.array(list, type=field_type)` for E2 and E6), so the stream cannot change the decision. `array_columns` calls `reference_reads_array` for reference columns; the preflight and the live reservation call it to find the parent key columns that need a copy.
+
+`reference_array_bytes(parent_rows, key_type, key_payload)` in `generation/_bounds.py` delegates to `arrow_column_bytes` (`src/decoy_engine/_arrow_types.py:243`, which `_bounds.py` already uses for the other Arrow terms); it adds no sizing of its own. Callers: the preflight term beside `generation/_streamed.py:238` and the live reservation on `run_stack` beside the `parent_key_pool` charge (`generation/_streamed.py:483-488`), label `parent_key_array:<t>.<c>`, released when the run ends, as `parent_key_pool` is. The copy is built at seal (`generation/_streamed.py:512-513`) with the parent key's schema field type and stored in the same `key_pools` value as the list, as a `SealedKeys(keys, array)` record (array `None` when no child needs it or E9 applies). There is no second dict. A shortfall raises `GenerationBudgetExceeded` before the parent's first batch. Under an unbounded ledger the reservation is recorded and never refuses.
 
 ## 6. Placement
 
@@ -175,11 +183,12 @@ The Arrow copy of a sealed parent key list is new memory, so it is priced before
 | `next_array` on constant, distribution | `generation/kinds/_constant.py` (40, about +8), `generation/kinds/_parametric.py` (77, about +6) | `kinds/` row | the list forms |
 | replay | `generation/kinds/_mt_replay.py` (new, about 110), exported by `generation/kinds/__init__.py` (83, about +3) | `kinds/` row | `_categorical.py` |
 | `weighted_indices` | `generation/kinds/_categorical.py` (72 on #813, about 82 after GSA S2, about +15) | `kinds/` row | `weighted_draw` |
-| `reference_array_bytes` | `generation/_bounds.py` (572 on #813, about 595 after GSA S2, about +8) | "Generation" bounds | `key_pool_bytes` |
-| preflight and live reservation | `generation/_streamed.py` (592 on #813, target 600 after GSA S2; about +8) | "Generation" | the `key_pool_bytes` terms |
+| `reference_array_bytes` | `generation/pool/_resident.py` after the move below (about +8) | "Generation" pool | `key_pool_bytes` |
+| `reference_reads_array` | `generation/stream/_batches.py` (121 on #813, about +15) | "Generation streamed batch assembly" | `array_columns` |
+| preflight and live reservation, `SealedKeys` | the helper moved out of `generation/_streamed.py` (below), about +20 | "Generation" | the `key_pool_bytes` terms |
 | tests | `tests/unit/generation/stream/test_vector_streams.py`, `tests/unit/generation/kinds/test_mt_replay.py` | generation unit tests | #813's stream tests |
 
-`generation/` keeps its 26 direct modules; `kinds/` takes one. If `_bounds.py` would pass 600, S2 first moves `key_pool_bytes` and `reference_array_bytes` together into `generation/pool/_resident.py` beside `faker_pool_resident_bytes`, behind the same import, in its own commit. If `_streamed.py` has no room after GSA S2 and S3, the builder first moves the parent key reservation code (preflight term and live reservation) into one helper in `_bounds.py` or `pool/_resident.py`, in its own commit. Neither move raises a size ceiling.
+`generation/` keeps its 25 counted modules (the fan-out limit; `__init__.py` is not counted); `kinds/` takes one. By the numbers above both files would pass 600, so S2 starts with two moves, each its own commit with no behavior change: (1) `key_pool_bytes` moves from `_bounds.py` into `generation/pool/_resident.py` beside `faker_pool_resident_bytes`, behind the same import (GEN-PER-COLUMN S2 names the same move; whichever row lands first makes it); (2) the parent key reservation code (preflight term, live reservation, seal) moves out of `_streamed.py` into one helper in `pool/_resident.py`. Neither move raises a size ceiling.
 
 ## 7. Defect classes
 
@@ -188,7 +197,7 @@ The Arrow copy of a sealed parent key list is new memory, so it is priced before
 | # | Class | Where it applies | Structure that closes it | Proof | Mutation that must turn it red |
 |---|---|---|---|---|---|
 | 1 | Value-bearing output | the E2 debug record; E6 errors | the record names only the stream kind and Python version; E6 reuses CPython's own error text, which carries no generated value | AT-7 | M7 |
-| 2 | Cleanup missing on an exit path | the parent-array reservation | reserved through the same stage `ExitStack` as `parent_key_pool`, released on every exit | AT-8 | M8 |
+| 2 | Cleanup missing on an exit path | the parent-array reservation | reserved on `run_stack` with `parent_key_pool`, released on every exit | AT-8 | M8 |
 | 3 | Shared state and concurrency | RNG state across batches and across `next_batch` and `next_array` | the replay reads and writes back the stream's one `random.Random`; streams are per column and not shared across threads | AT-2, AT-5 | M3 |
 | 4 | Route parity and silent fallback | array vs list path; E2, E6, E7 | every fallback is CPython or #813's list path, byte-equal, decided once | AT-1, AT-6 | M1 |
 | 5 | Referential integrity | reference columns | same parent list, same order, same indices | AT-1 reference cells | M4 |
@@ -208,11 +217,11 @@ The Arrow copy of a sealed parent key list is new memory, so it is priced before
 | 4 | Versioned read models | no | - |
 | 5 | Normalized guard scanners | yes, GSA's AT-S2-10 AST guard gains one allowed helper | AT-S2-10 still red on a seeded local `choices` copy |
 | 6 | No reaching into private modules | `_mt_replay.py` is reached only through `generation.kinds` | import-linter and the `kinds/_` rule |
-| 7 | No hidden CI failures | AT-5 runs on every Python leg of the matrix with `fail-fast: false` | CI review |
+| 7 | No hidden CI failures | unit tests run on 3.10 only; the 3.11.9 and 3.12.7 legs run import smoke and `faker_output_lock` (`.github/workflows/ci.yml` at #813, lines 63-96). S2 adds marker `mt_replay` on `test_mt_replay.py` and a CI job running `pytest -m mt_replay` on 3.10.20, 3.11.9 and 3.12.7 with `fail-fast: false` | the job in the S2 PR |
 | 8 | One input, one trust class | no | - |
 | 9 | Mutations on the final head | yes | named mutations on the final head of each slice, head recorded |
 | 10 | Allowlisted helpers are still checked | yes, `weighted_indices` joins the AT-S2-10 list | the guard spies on it on the matching branch |
-| 11 | No raised caps | `generation/` fan-out 26, module size | new module in `kinds/`; sizes in section 6 |
+| 11 | No raised caps | `generation/` fan-out 25, module size | new module in `kinds/`; sizes in section 6 |
 
 ## 8. Acceptance tests
 
@@ -220,15 +229,15 @@ Goldens are captured on the dependency head, before any stream change, through t
 
 | ID | Test | Fail-before | Slice |
 |---|---|---|---|
-| AT-1 | Golden parity: for each stream and each field form in section 4 (negative start with pad, pad shorter than the value, prefix and suffix, numeric form, constant `None` and string, uniform with and without clip, weighted with a zero weight, reference `random`, `weighted`, `sequential`, empty pool, null probability 0, 0.3 and 1 over each), tables of 1, 7 and 120,000 rows equal the goldens, schema included. S1 covers its three streams; S2 the other two | passes before (guard); fail-before is AT-3 | S1, S2 |
+| AT-1 | Golden parity (tables hold no Faker, lookup or provider columns, so GSA S1b's intended byte changes cannot move the goldens): for each stream and each field form in section 4 (negative start with pad, pad shorter than the value, prefix and suffix, numeric form, constant `None` and string, uniform with and without clip, weighted with a zero weight, reference `random`, `weighted`, `sequential`, empty pool, null probability 0, 0.3 and 1 over each), tables of 1, 7 and 120,000 rows equal the goldens, schema included. S1 covers its three streams; S2 the other two | passes before (guard); fail-before is AT-3 | S1, S2 |
 | AT-2 | Partition invariance: batch layouts `[1]*7`, `[7, 4096, 3]`, `[65536]` and one batch give equal tables | passes before; guards state carry | S1, S2 |
-| AT-3 | Array path taken: for each stream of its slice, with no declared cast, collector or sibling reader, a spy sees `next_array`, no `next_batch`, and no `pa.array` over a list for that column; with a sibling reader (a `windowed_date` anchor on a sequence, a `condition_on` parent on a categorical) the list path is used and values equal AT-1 | list today | S1, S2 |
+| AT-3 | Array path taken: for each stream of its slice, with no declared cast, collector or sibling reader, a spy sees `next_array`, no `next_batch`, and no `pa.array` over a list for that column; with a sibling reader (a `windowed_date` anchor on a sequence, a `condition_on` parent on a categorical) the list path is used and values equal AT-1. For the unweighted categorical kept on CPython (section 5.3) the spy asserts no `next_batch`, no `to_pylist` and no `restore_declared`; `pa.array` over the drawn list is allowed for that case only. `reference_reads_array` gives the same answer from config before streams exist and from `array_columns` after (AT-8 spies both) | list today | S1, S2 |
 | AT-4 | Speed, `perf`, Dell vm-run: a 10,000,000-row table with one reference column over 100,000 parent keys at or under 60 ns per row for that column (468 ns today); the S2 PR records unweighted and weighted categorical with and without the replay and the constant chosen in section 5.3 | 468 ns today | S2 |
-| AT-5 | Replay equality and mixing: on every CI Python leg, `replay_choices` and `replay_randbelow` equal `random.Random` for `random`, `_randbelow`, `choice`, `choices` with and without weights, over seeds and sizes 0, 1, 7, 4096; after each call `rng.getstate()` equals the CPython generator's state after the same draws. A stream that alternates `next_batch` and `next_array` over `[7, 4096, 3]` equals the one-path golden. A monkeypatched `random.Random.random` makes `replay_ok()` false; output then still equals AT-1 | no replay today | S2 |
-| AT-6 | E6 cells: weights length mismatch, zero total, a negative weight with a positive total, a cumulative weight of 2**53 + 1, empty categories: each raises the same exception type and text at the same batch as the golden run, or (negative weight, large weight) gives the golden values through CPython | no replay today | S2 |
+| AT-5 | Replay equality and mixing: on every CI Python leg, `replay_choices` and `replay_randbelow` equal `random.Random` for `random`, `_randbelow`, `choice`, `choices` with and without weights, over seeds and sizes 0, 1, 7, 4096; after each call `rng.getstate()` equals the CPython generator's state after the same draws. A stream that alternates `next_batch` and `next_array` over `[7, 4096, 3]` equals the one-path golden. `_replay_ok_override = False` forces E2; output then still equals AT-1. Crafted state: a helper sets the MT key at `pos` to untempered words that give `u = 0.5` exactly; with weights `[1, 1]` the replay picks index 1 as `bisect` does (kills `side="left"`). `replay_randbelow` at `n = 2**k + 1` (acceptance near one half) for `k` 4096 crosses several blocks. Runs under marker `mt_replay` on 3.10.20, 3.11.9 and 3.12.7 | no replay today | S2 |
+| AT-6 | E6 cells: weights length mismatch, zero total, a negative weight with a positive total, a cumulative weight above 2**53, empty categories, a pool of 2**32 keys (bit length checked, no allocation), a `Decimal` weight. For the negative-weight and above-2**53 cells the test uses the AT-5 crafted-state helper to pick a `u` where the bare replay (E6 check off) differs from CPython, and asserts that precondition first. Each cell: each raises the same exception type and text at the same batch as the golden run, or (negative weight, large weight) gives the golden values through CPython | no replay today | S2 |
 | AT-7 | The E2 debug record names only the Python version and stream kind; a test seeds a category value and asserts it is absent from every record and error | no record today | S2 |
-| AT-8 | Parent-array reservation: the live ledger event equals `reference_array_bytes(100_000, payload)`; preflight and live call the one helper (spy); a ceiling of exactly the plan's reservations completes and one byte less refuses with `GENERATION_BUDGET_EXCEEDED` before the child's first batch and before any sink write; the reservation is released when the stage closes, also when a later column raises; a parent whose only child reference column has a declared cast reserves no array | no reservation today | S2 |
-| AT-9 | E3: a sequence whose last planned value passes int64 uses the list path and equals the golden | passes before (control) | S1 |
+| AT-8 | Parent-array reservation: the live ledger event equals `reference_array_bytes(100_000, payload)`; preflight and live call the one helper (spy); the preflight's stage peak grows by exactly `reference_array_bytes(...)` against the same plan with the child on the list path; the band-adjusted ceiling (the smallest ceiling `_fits` passes, `_streamed.py:268-271`) completes and the next lower ceiling refuses with `GENERATION_BUDGET_EXCEEDED` before the parent's first batch and before any sink write; on a ledger directly an exact reservation passes and one byte less refuses; the parent array has the parent key's Arrow type; a mixed-type key list (E9) sends every child over it to the list path with equal values; the reservation is released when the stage closes, also when a later column raises; a parent whose only child reference column has a declared cast reserves no array | no reservation today | S2 |
+| AT-9 | E3: a sequence whose last planned value passes int64 uses the list path and equals the golden. E8: a direct `next_array(rows - 2, 5)` call takes the list path | passes before (control) | S1 |
 
 ## 9. Named mutations
 
@@ -239,10 +248,12 @@ Goldens are captured on the dependency head, before any stream change, through t
 | M3 | the replay does not write the state back to `rng` | AT-2, AT-5 mixing cell |
 | M4 | `replay_randbelow` drops rejected words without consuming them | AT-1 reference cell, AT-5 |
 | M5 | `CategoricalStream` and `ReferenceStream` lose `supports_array` | AT-3 |
-| M6 | `searchsorted` with `side="left"`, or no clip to `n - 1` | AT-1 weighted cells, AT-5 |
+| M6 | `searchsorted` with `side="left"` | AT-5 crafted-state cell. (Removing the clip to `n - 1` is an equivalent mutant: `u * total < total` in IEEE round to nearest; the clip stays to match CPython's `hi = n - 1` and is not a named mutation) |
 | M7 | the E2 record logs the first drawn value | AT-7 |
 | M8 | the parent-array reservation is not entered on the stage (never released), or preflight leaves it out | AT-8 |
-| M9 | E6 check removed for negative weights | AT-6 |
+| M9 | E6 check removed for negative weights, or for cumulative weights above 2**53 | AT-6 (precondition cells) |
+| M10 | `array_columns` decides the reference array path from the stream (`supports_array` and type) instead of `reference_reads_array` | AT-8 (preflight and live disagree with the stream decision on a declared-cast child) |
+| M11 | sequence `next_array` drops the `offset + size <= rows` check | AT-9 E8 cell |
 
 ## 10. Frozen contracts
 
@@ -264,15 +275,15 @@ Goldens are captured on the dependency head, before any stream change, through t
 
 | Slice | Content | Size | Gate | Test depth |
 |---|---|---|---|---|
-| S1 NO-RNG-ARRAYS | `next_array` and `supports_array` on sequence (with E3), constant and distribution; AT-1, AT-2, AT-3, AT-9 for those streams; M2, M5 | S: about 60 lines code, 200 lines tests | Codex | T0 per edit; T1 impact selection (generation unit, parity, `tests/generation`) per commit; T2 on the exact head with AT-1 and the mutations. No full suite: no escalation trigger |
-| S2 MT-REPLAY | `_mt_replay.py`, `weighted_indices`, `next_array` on categorical and reference, the parent-array reservation, the AT-S2-10 guard entry; AT-1 to AT-8 for those streams; M1, M3 to M9 | M: about 210 lines code, 350 lines tests | Codex and Dennis (R2) | T0, T1 as S1; T2 on the exact head with AT-5 on every Python leg, AT-8 and the mutations; AT-4 on the Dell. No full suite unless a golden outside AT-1 moves, which is a stop |
+| S1 NO-RNG-ARRAYS | `next_array` and `supports_array` on sequence (with E3 and E8), constant and distribution; AT-1, AT-2, AT-3, AT-9 for those streams; M2, M5, M11 | S: about 60 lines code, 200 lines tests | Codex | T0 per edit; T1 impact selection (generation unit, parity, `tests/generation`) per commit; T2 on the exact head with AT-1 and the mutations. No full suite: no escalation trigger |
+| S2 MT-REPLAY | `_mt_replay.py`, `weighted_indices`, `next_array` on categorical and reference, the two moves (section 6), `reference_reads_array`, `SealedKeys`, the parent-array reservation, the AT-S2-10 guard entry, the `mt_replay` CI job; AT-1 to AT-8 for those streams; M1, M3 to M10 | M: about 210 lines code, 350 lines tests | Codex and Dennis (R2) | T0, T1 as S1; T2 on the exact head with AT-5 in the new `mt_replay` CI job on three Pythons, AT-8 and the mutations; AT-4 on the Dell. The CI job is a test-tooling change, an escalation trigger, so one full suite runs on the S2 head against the saved main baseline. A golden outside AT-1 moving is a stop |
 
 Order and dependencies:
 
 1. #813 (GSA S1a) merges. S1 here can start that day, in parallel with GSA S1b. Both touch `_column_streams.py` in different classes; the second to merge rebases.
 2. GSA S1b and S2 merge in their own order. S2 here starts after GSA S2, because it extends `weighted_draw`'s module and the AT-S2-10 guard.
 3. S2 here can build in parallel with GSA S3. Both may touch the `_streamed.py` preflight; the second to merge rebases and recounts its size.
-4. GEN-PER-COLUMN (plan on `origin/plan/gen-per-column`) starts after GSA S3 and does not need this row. If GEN-PER-COLUMN lands its DAG-order assembler first, S2 here rebases onto it; `array_columns` stays the one list rule in both plans.
+4. GEN-PER-COLUMN (plan on `origin/plan/gen-per-column`) starts after GSA S3 and does not need this row. Its S1 replaces `sibling_read_names` with `TableColumnPlan.batch_reads`; whichever lands second points `array_columns` and `reference_reads_array` at the surviving read rule. `array_columns` stays the one list rule in both plans.
 5. Follow-up, not in this row: GSA's `LookupStream` can call `weighted_indices` for an array path; it is the same helper and needs no new design.
 
 Both slices fit before 2026-12-15.
