@@ -63,32 +63,45 @@ Searches run: NumPy `Generator` documentation on sequential draws, the CPython `
 
 ### 5.1 Choke point: one key-column set
 
-New `generation/pool/_keys.py` (about 50 lines): `pool_key_columns(config) -> frozenset[tuple[str, str]]`. It returns every `(reference_table, reference_column)` of a `type: reference` column, and every inherit parent key: for each `iter_generate_input_refs` edge, the reference column of the edge's `via` FK. `_streamed._referenced_keys` is replaced by a call to it, so there is one definition.
+New `generation/pool/_keys.py` (about 60 lines) has two functions:
 
-`pool_opted_out(col, *, key_columns)` (`generation/_faker_pool.py:244`) gains one rule: the column's `(table, name)` is in `key_columns`. The parameter is keyword-only with no default, so a caller that omits it fails mypy and fails at the first call. Every caller passes it:
+- `pool_key_columns(configs) -> frozenset[tuple[str, str]]`: every `(reference_table, reference_column)` of a `type: reference` column, and every inherit parent key, read from `GenerateInputRef.source_key` of each edge that `iter_generate_input_refs` yields (`config/_generate_relational/__init__.py:543`). An edge with an empty `source_key` is skipped. Composite targets add each member column.
+- `referenced_key_columns(configs)`: the reference targets only. `_streamed._referenced_keys` (`generation/_streamed.py:180-187`) is replaced by this one, because the same set drives KeyPool collection in `_preflight` (`:230`) and `_consume_table` (`:420`), and S1b does not change what KeyPool collects. S3 decides whether inherit keys join KeyPool.
 
-- legacy `synthesize._faker` through `try_pool` (`generation/_faker_pool.py:292`), which gains a `key_columns` keyword; the synthesize entry computes the set once per plan;
-- `_window_admission.py:383` and `:437` (computed once per `classify_window_table` call);
-- `_column_streams._faker_stream` (`generation/_column_streams.py:347`), through `make_column_stream`;
-- `_streamed._pooled_columns` (`generation/_streamed.py:197`), reading the new `PlanAdmission.key_columns` that `classify_plan` fills.
+`pool_opted_out(col, *, table, key_columns)` (`generation/_faker_pool.py:244`) gains one rule: `(table, col["name"])` is in `key_columns`. `table` is an explicit argument because the raw column dicts in `_streamed._pooled_columns` and in the window carry no `TABLE_KEY`; only `synthesize._generate_column` runs `with_table`. Both arguments are keyword-only with no default.
 
-Guard: AT-S1b-2 runs all three routes with a spy. A second guard (AT-S1b-10) walks the AST of `src/decoy_engine/generation/` and fails on any call to `pool_eligible` whose `opted_out` argument is not a `pool_opted_out(..., key_columns=...)` call. Mutation M-1 and M-2.
+Every route that reaches `pool_eligible` passes the set, and every function on each chain takes `key_columns` as a required keyword with no default:
 
-`_streamed.py` is at 592 lines against a 600 cap. Its edit replaces `_referenced_keys` with an import, so the file shrinks.
+- Legacy resident: `generate_tables` computes the set once, then `synthesize._generate_column`, `synthesize._faker` (`:455`), `_faker_pool.try_pool` (`:292`).
+- Pinned: `execute_pinned` (`generation/_pinned_execute.py:201`, public through `generation/pinned.py`) calls `_run`, which calls `synthesize._generate_column` directly (about `:240`) and never enters `generate_tables` or `classify_plan`. `execute_pinned` computes the set from the pinned configs with `pool_key_columns` and passes it to `_run`. Without this, a 20,000-row pinned `users.email` that is a reference target would draw from 10,000 pool values with replacement and give duplicate parent keys.
+- Streamed: `_streamed._pooled_columns` (`generation/_streamed.py:197`) and `make_column_stream` to `_column_streams._faker_stream` (`:347`), reading the new `PlanAdmission.key_columns` that `classify_plan` fills.
+- Window: `window._build_streams` (`generation/window.py:195-202`), where the pool or per-row choice is made once pooled Faker is Class A (5.4). `_window_admission.py:383` and `:437-440` call `pool_eligible` only to skip `_check_faker` and to return Class B; S1b removes both calls, so the window admission has no pool decision left.
+
+Guards:
+
+- AT-S1b-2 runs all four routes with a spy.
+- AT-S1b-10 is a signature sentry: for each function on the four chains above, `inspect.signature` shows `key_columns` (and `table` on `pool_opted_out`) as keyword-only with no default. A seeded default makes it red, so M-2 is caught.
+- AT-S1b-11 walks the AST of `src/decoy_engine/generation/` and fails on any call to `pool_eligible` whose `opted_out` argument is not a `pool_opted_out(..., table=..., key_columns=...)` call.
+
+`_streamed.py` is at 592 lines against the 600 goal. Its edit replaces `_referenced_keys` with an import, so the file shrinks before S2 adds anything.
 
 ### 5.2 The eligible set and the pool size
 
-- `N_THRESHOLD` is deleted. The pool size is `P = min(rows, DEFAULT_POOL_SIZE)` with `DEFAULT_POOL_SIZE = 10_000`.
-- When `rows <= P` (so `rows <= 10_000`), the column is the pool in build order: value `i` is the `i`-th provider call after the seed. No selector runs. OWNER CALL (master plan Q1): build order for small tables. Default: build order, as recommended there.
-- When `rows > P`, today's selector runs over a pool of `P` values.
+- `N_THRESHOLD` is deleted. One function, `pool_size_for(rows) -> int` in `_faker_pool.py`, returns `P = min(rows, DEFAULT_POOL_SIZE)` with `DEFAULT_POOL_SIZE = 10_000`.
+- `pool_eligible` returns False for `rows < 1`, so a 0-row table never reaches `check_pool_size` (`determinism/_derive.py:348-358`) or `integers(0, 0)`. A 1-row table pools a pool of 1 in build order.
+- When `rows <= DEFAULT_POOL_SIZE`, the column is the pool in build order: value `i` is the `i`-th provider call after the seed. No selector runs. OWNER CALL (master plan Q1): build order for small tables. Default: build order, as recommended there.
+- When `rows > DEFAULT_POOL_SIZE`, today's selector runs over a pool of `P` values.
+- One shared draw decides between the two modes: `open_faker_pool_draw(col, rows, ...)` in `_faker_pool.py` returns either a build-order draw or a `PooledSelector`. Legacy `try_pool`, streamed `_faker_stream` and the window draw (5.4) all call it, so the rule is written once. AT-S1b-12 checks that the three routes agree.
+- Group A and B pairs decline a column with non-empty `faker_kwargs`, because certification ran with `kwargs={}` (`scripts/faker-determinism/certified_pairs.json`). The legacy 10 keep today's behavior.
 - Reservations pass `P`: `faker_pool_resident_bytes(P, payload)`.
 - New generated module `generation/pool/_eligible.py` (about 90 lines) holds `POOL_ELIGIBLE_LOCALE_PAIRS`, written by `scripts/faker-determinism/write_eligible.py` (about 40 lines) from `certified_pairs.json`. `POOL_ELIGIBLE_FAKER_TYPES` (the legacy 10) stays in `_faker_pool.py`. `_bounds.py` imports the pairs from `_eligible.py`, so there is one root.
 - Group A and B types are admitted only through certified `(type, locale)` pairs. A pair the harness has not certified stays per-row in that locale.
 - `FAKER_VALUE_CAPS` gains `free_email: 320` and `domain_name: 256`. The other 14 new types already have caps or take the `_NAME_LIKE` default; AT-S1b-4 pins all 16.
+- `_window_admission` reads the locale through `faker_setup.requested_locale` (`:649`) instead of `col.get("locale") or instance_default_locale`, so there is one locale reader.
 
 ### 5.3 Harness tier 3
 
-`scripts/faker-determinism/check_determinism.py` gains `TIER_3`: the 16 Group A and B types in en_US, en_GB, fr_FR, de_DE and es_ES. The builder runs the harness in the locked environment (`uv.lock`, Faker 40.23.0), commits the new digests to `certified_pairs.json` and `golden_digests.json`, then runs `write_eligible.py`. A pair whose pool digest is not stable across two processes is left out and stays per-row; the builder lists any left-out pair in the PR. `date_of_birth` is certified with the `_dob_anchor.py` anchor in place, because `_reproducibility.py` excludes it from `_CLOCK_FAKER_EXACT` only under that anchor.
+`scripts/faker-determinism/check_determinism.py` (597 lines) first moves its tier tables into a new `scripts/faker-determinism/_tiers.py` (about 80 lines), then `_tiers.py` gains `TIER_3`: the 16 Group A and B types in en_US, en_GB, fr_FR, de_DE and es_ES. The builder runs the harness in the locked environment (`uv.lock`, Faker 40.23.0), commits the new digests to `certified_pairs.json` and `golden_digests.json`, then runs `write_eligible.py`. A pair whose pool digest is not stable across two processes is left out and stays per-row; the builder lists any left-out pair in the PR. `date_of_birth` is certified with the `_dob_anchor.py` anchor in place, because `_reproducibility.py` excludes it from `_CLOCK_FAKER_EXACT` only under that anchor.
 
 ### 5.4 Windows keep pooled Faker as Class A
 
@@ -96,31 +109,43 @@ Today a pooled column is Class B (`generation/_window_admission.py:440`, reason 
 
 New `generation/stream/_window_pool.py` (about 90 lines): `WindowPoolDraw`, one per column, built once per `generate_rows` call and reused for every chunk.
 
-- `rows <= P` (build order): it builds `min(max(rows, window_end), P)` values, and value `i` is `pool[i]`. A read with `window_end > P` refuses with `CODE_WINDOW_INVALID` and a fixed message ("window passes the pool of a pooled column"). Before S1b such reads were served per-row. No caller in `src/` reads past `row_count` (`generate_rows` has no in-repo caller outside `window.py`), and a read past `P` on a table of at most 10,000 rows is a value the full run never produces, so the refusal is not a V1 function break. It is recorded as a `Breaking:` line.
-- `rows > P` (selector): it builds the pool of `P` values and holds a `PooledSelector` with a cursor. A chunk at `offset == cursor` takes `size` and advances. A chunk at `offset > cursor` calls the new `PooledSelector.skip(n)`, which draws and discards indices in chunks of at most 1,048,576, so no large array is held. A chunk at `offset < cursor` reopens the selector from the seed and skips. Offsets past `row_count` are served, matching the window contract (`generation/window.py:283`).
+- Build order (`rows <= 10_000`): it builds `min(window_end, P)` values. Build order is prefix-stable, so this gives the same bytes as a full build, and page 0 of a 9,000-row table costs 100 Faker calls, not 9,000. Value `i` is `pool[i]`. A read with `window_end > P` refuses with `CODE_WINDOW_INVALID` and a fixed message ("window passes the pool of a pooled column").
+- Selector (`rows > 10_000`): it builds the pool of `P` values and holds a `PooledSelector` with a cursor. A chunk at `offset == cursor` takes `size` and advances. A chunk at `offset > cursor` calls the new `PooledSelector.skip(n)`, which draws and discards indices in chunks of at most 1,048,576, so no large array is held. A chunk at `offset < cursor` reopens the selector from the seed and skips. Offsets past `row_count` are served.
 - `_window_admission._class_b_reason` no longer returns `pooled_faker`. A pooled column runs `_check_faker` like a per-row column, so the cell cap still applies.
-- `window._build_streams` (`generation/window.py:195-202`) uses `WindowPoolDraw` when `pool_eligible` admits the column and `PerRowFakerStream` otherwise. The decision is the same `pool_eligible(..., rows, opted_out=pool_opted_out(col, key_columns=...))` call as the full run, with `rows` the declared `row_count`.
+- `window._build_streams` (`generation/window.py:195-202`) uses `WindowPoolDraw` when `pool_eligible` admits the column and `PerRowFakerStream` otherwise. The decision is the same `pool_eligible(..., rows, opted_out=pool_opted_out(col, table=..., key_columns=...))` call as the full run, with `rows` the declared `row_count`. The window computes `key_columns` once per `generate_rows` call from the config it already holds.
+- The pool build runs after the first `deadline_s` check in `generate_rows` (`generation/window.py:263`), so a call whose deadline has passed does not build. The build and a skip inside one chunk are not interrupted by the deadline; 14 states the cost.
+
+The refusal past the pool is a contract change. The `window.py` docstring (about `:283`) says "Offsets past the declared row_count are served: Class A values do not depend on the table length". After S1b, a pooled small column's values depend on `row_count` (P = min(rows, 10,000)). S1b changes the docstring to say so and records a `Breaking:` line. Callers:
+
+- The V1 CLI does not call `generate_rows`; `decoy run --rows` scales `row_count`.
+- The platform `generation_child.py` passes user offsets and maps `CODE_WINDOW_INVALID` to `window_invalid`. The platform is parked; the changelog line names this mapping.
+
+A read past `P` on a table of at most 10,000 rows is a value the full run never produces, so the refusal is not a V1 function break.
 - `PooledSelector.skip` is about 12 lines in `_faker_pool.py`.
 
 ### 5.5 Native shadow and draw sites
 
 - `execution/physical/_shadow_generation.py:100` sets `SHADOW_ADMISSIBLE_FAKER_TYPES = POOL_ELIGIBLE_FAKER_TYPES`. It stays the legacy 10, so a column of a new type keeps the shadow decline it has today.
-- The `gen.faker_pool_build` notes in `execution/native/_draw_sites_gen_pool.py` cite `n >= N_THRESHOLD`; they change to "pool size `min(rows, 10_000)`; build order at or below 10,000 rows".
+- The `gen.faker_pool_build` notes in `execution/native/_draw_sites_gen_pool.py` cite `n >= N_THRESHOLD`; they change to "pool size `min(rows, 10_000)`; build order at or below 10,000 rows". The selection site note changes from `partitionable=False` to say it is partitionable through `skip`; the flag value itself is a native contract and is not changed in S1b.
+- `scripts/bench-generation-pool/bench_worker_gen.py:203` assigns `_faker_pool.N_THRESHOLD`, and its README cites it. After the deletion the assignment would do nothing. S1b removes the override argument from the script and the README line.
 
 ### 5.6 S2: provider streams
 
 New `generation/stream/_provider.py` (about 160 lines). `make_column_stream` (`generation/_column_streams.py:330-358`) dispatches `provider` to `open_provider_stream(col, ctx, registry, ...)`, which reads `draw_path(caps)` (`generation/kinds/_provider.py:45`) once:
 
-- `"pool"`: `PooledProviderStream` builds the pool once with the same `PoolBuilder(registry).build(size=DEFAULT_POOL_SIZE, job_seed=build_seed)` call and keeps one `np.random.default_rng(selection_seed)`. Each batch draws `integers(0, pool.size, size=batch)`, the call `PoolSampler.sample(..., REUSE)` makes for the whole table (AT-S2-1 proves the two agree). The pool is reserved in the ledger before the build, as `_faker_stream` does.
+- `"pool"`: `PooledProviderStream` builds the pool once with the same `PoolBuilder(registry).build(size=DEFAULT_POOL_SIZE, job_seed=build_seed)` call and keeps one `np.random.default_rng(selection_seed)`. Each batch draws `integers(0, pool.size, size=batch)`, the call `PoolSampler.sample(..., REUSE)` makes for the whole table (`pool/_sampler.py:279-281`; AT-S2-1 proves the two agree). Provider pools keep `DEFAULT_POOL_SIZE` and do not take `pool_size_for`: S2 is a parity slice and changes no bytes. The Faker and provider rules differ on purpose until a later row decides otherwise.
+- Provider pool memory: `_streamed._preflight` (`:241`) reserves only Faker pooled columns today. S2 adds provider pool columns to the same preflight, so routing sees the full cost and a tight budget refuses before the first write (AT-S2-7).
 - `"keyed"`: `KeyedProviderStream` calls `adapter.generate(spec, seed=family_bytes("faker"), source_value=offset + i)` per row. Stateless.
-- `"batch"`: `BatchProviderStream` holds one seeded provider instance across batches. `generate_batch` (`providers_v2/_faker_adapter.py:197`) builds a fresh instance per call, so calling it per batch would restart the sequence. S2 adds `open_batch_cursor(provider, spec) -> Callable[[int], list]` to the Faker adapter and the Mimesis adapter (`providers_v2/mimesis/_adapter.py:254`), about 15 lines each: it builds the seeded instance once and returns `k` values per call. `generate_batch` becomes `open_batch_cursor(...)(count)`, so legacy bytes do not change. An adapter without `open_batch_cursor` keeps that column declined (legacy path).
+- `"batch"`: `BatchProviderStream` holds one seeded provider instance across batches. `generate_batch` (`providers_v2/_faker_adapter.py:197`) builds a fresh instance per call (`:230-234`), so calling it per batch would restart the sequence. S2 adds `open_batch_cursor(provider, spec) -> Callable[[int], list]` to the Faker adapter only, about 15 lines: it builds the seeded instance once and returns `k` values per call. `generate_batch` becomes `open_batch_cursor(...)(count)`, so legacy bytes do not change. `draw_path` (`kinds/_provider.py:45`) returns `"batch"` only for `backend_type == "faker"`, so the Mimesis adapter needs no cursor. An adapter without `open_batch_cursor` keeps that column declined (legacy path).
 - `"computed"` (only if GNF S3a has merged): the stream dispatches to `ComputedDrawStream` from `generation/stream/_computed_draw.py`. If S3a has not merged, S2 does not add this branch.
+
+New seed holders (the `WindowPoolDraw` selection seed kept for reopen, the `KeyedProviderStream` value seed, the `PooledProviderStream` selection seed, the batch-cursor seed) hold the seed in an `OpaqueBox` or a `repr=False` field and get rows in `secret_material_census.json`. The census test covers them (AT-S1b-13, AT-S2-8).
 
 Every stream applies `_as_text` and the same error boundary as `provider_generate`: any failure raises `GenerationError(GENERATION_PROVIDER_FAILED)` with `from None` and a message with no value.
 
 ### 5.7 S2: lookup streams
 
-`LookupStream` in the same module: one `random.Random(ctx.base_int("py"))` held across batches; each batch is `choices(values, weights, k=batch)`. The list comes from `legacy_kwargs["lookup_lists"][(table, name)]`, and the context is built with `content_digests=lookup_digests(...)` exactly as `lookup_column_values` does. The stream holds a reference to the resident list, not a copy.
+`LookupStream` in the same module: one `random.Random(ctx.base_int("py"))` held across batches; each batch is `choices(values, weights, k=batch)`. The list comes from `legacy_kwargs["lookup_lists"][(table, name)]`, and the context is built with `content_digests=lookup_digests(...)` exactly as `lookup_column_values` does. The stream holds a reference to the resident list, not a copy. `make_column_stream` wraps the stream in `NullMaskedStream(inner, ctx, null_prob)`; for a lookup column that outer `ctx` is the same digest-carrying context, so the null seed matches the legacy `null_seed_digests(..., lookup_lists)` path. AT-S2-3 uses a file-backed lookup to prove it.
 
 ### 5.8 S2: admission
 
@@ -130,17 +155,17 @@ Every stream applies `_as_text` and the same error boundary as `provider_generat
 
 | New file | Directory | CODEMAP line | Sits beside |
 |---|---|---|---|
-| `_keys.py` | `generation/pool/` | `generation/_faker_pool.py` row (pool bridge reuses `generation/pool`) | `pool/_resident.py` |
+| `_keys.py` | `generation/pool/` (16 modules; `generation/` already has 26 direct modules) | new CODEMAP row "pool key columns"; imports config only | `pool/_resident.py` |
 | `_eligible.py` | `generation/pool/` | same | `pool/_resident.py` |
 | `_window_pool.py` | `generation/stream/` | `generation/_column_streams.py` row (persistent per-column generators); `stream/` is S1a's sub-package for them | `stream/_batches.py` |
 | `_provider.py` | `generation/stream/` | same | `stream/_batches.py` |
-| `write_eligible.py` | `scripts/faker-determinism/` | harness scripts | `check_determinism.py` |
+| `write_eligible.py`, `_tiers.py` | `scripts/faker-determinism/` | harness scripts | `check_determinism.py` |
 
 `generation/` itself takes no new module. The CODEMAP `_faker_pool.py` and `_column_streams.py` rows gain the new names in the same PR.
 
 ### 5.10 Design notes
 
-- One place per fact: key columns (`pool/_keys.py`), certified pairs (`pool/_eligible.py`, generated), pool size (`_faker_pool.py`). The window, legacy and streamed routes read these, never restate them.
+- One place per fact: key columns (`pool/_keys.py`), certified pairs (`pool/_eligible.py`, generated), pool size and mode (`pool_size_for` and `open_faker_pool_draw` in `_faker_pool.py`). The window, legacy and streamed routes read these, never restate them.
 - Open/closed: a new draw path adds one stream class and one `draw_path` branch; no other site changes.
 - No flag arguments: build-order and selector modes are two classes chosen by `rows`, not a boolean parameter.
 
@@ -148,6 +173,10 @@ Every stream applies `_as_text` and the same error boundary as `provider_generat
 
 | Case | Behavior |
 |---|---|
+| Table with 0 rows | `pool_eligible` is False; no pool, no selector. |
+| Table with 1 row | Pool of 1 in build order. |
+| Group B column with non-empty `faker_kwargs` | Per-row. |
+| Pinned run (`execute_pinned`), key column | Per-row (G2). |
 | Group B column, 9 rows, en_US | Pool of 9 in build order; the ledger reserves `faker_pool_resident_bytes(9, payload)`. |
 | Group B column, 2M rows | Pool of 10,000; selector; bytes equal on legacy, streamed and window. |
 | Group B column in an uncertified locale | Per-row, as today. |
@@ -159,6 +188,7 @@ Every stream applies `_as_text` and the same error boundary as `provider_generat
 | Budget too small for the pool | The ledger refuses before the build, as S1a. |
 | Provider raises in a streamed batch | `GenerationError(GENERATION_PROVIDER_FAILED)`, no cause, no value. |
 | Lookup list missing | Declined at admission; the legacy path keeps today's error. |
+| Budget too small for a provider pool | Preflight refuses before the first write. |
 | Custom Faker provider | Per-row legacy, as today. |
 
 ## 7. Acceptance tests
@@ -168,47 +198,58 @@ Each test fails before its slice unless marked as a control. Master plan numbers
 S1b:
 
 - AT-S1b-1 [A1]. `pool_eligible` admits the legacy 10 in `pt_BR`; it admits each certified Group A and B pair and refuses an uncertified pair; no clock-dependent type is admitted in any locale (checked against `_CLOCK_FAKER_EXACT`).
-- AT-S1b-2 [A12]. For a plan where `users.email` is a `reference` target and `orders.addr` is an inherit parent key, a spy on `open_pooled_selector` and `try_pool` sees no call for those columns on the legacy path, the streamed path and `generate_rows`. A sibling ordinary `email` column pools on all three.
-- AT-S1b-3 [A15]. A 9-row table with a Group B column reserves exactly `faker_pool_resident_bytes(9, payload)` and its values equal the first 9 provider calls of a fresh seeded instance.
+- AT-S1b-2 [A12]. For a plan where `users.email` is a `reference` target and `orders.addr` is an inherit parent key, a spy on `open_pooled_selector` and `try_pool` sees no call for those columns on the legacy path, the streamed path, `generate_rows` and `execute_pinned`. A sibling ordinary `email` column pools on all four. A pinned 20,000-row `users.email` reference target has 20,000 distinct values.
+- AT-S1b-3 [A15]. Tables of 0 and 1 rows generate on all routes with no pool error. A 9-row table with a Group B column reserves exactly `faker_pool_resident_bytes(9, payload)` and its values equal the first 9 provider calls of a fresh seeded instance.
 - AT-S1b-4 [A4]. `faker_value_cap` returns a fixed cap for all 16 new types; preflight runs with a provider snapshot that raises on any call.
-- AT-S1b-5. Window parity: for `email` at 9 rows and at 120,000 rows, `generate_rows` at offsets `{0, 7, 4096, 119_990}` (those inside the table) with counts `{1, 13, 5000}` equals the full streamed run's slice. The 120,000-row case reads offsets out of order (4096, then 7) to cover the reopen path. Fails before: the 120,000-row table is Class B, and the 9-row values differ.
-- AT-S1b-6. A 9-row pooled table read at `offset=9_995, count=10` refuses with `CODE_WINDOW_INVALID`; the message contains no generated value.
+- AT-S1b-5. Window parity (page 0 of a 9,000-row table builds 100 values, counted by a spy): for `email` at 9 rows and at 120,000 rows, `generate_rows` at offsets `{0, 7, 4096, 119_990}` (those inside the table) with counts `{1, 13, 5000}` equals the full streamed run's slice. The 120,000-row case reads offsets out of order (4096, then 7) to cover the reopen path. Fails before: the 120,000-row table is Class B, and the 9-row values differ.
+- AT-S1b-6. A 9-row pooled table read at `offset=9_995, count=10` refuses with `CODE_WINDOW_INVALID`; the message contains no generated value. A read at `offset=9, count=1` (past `row_count`, inside 10,000) returns the build-order value 9, and the docstring of `generate_rows` no longer says Class A values do not depend on the table length.
 - AT-S1b-7. `PooledSelector.skip(n)` then `take(k)` equals `take(n + k)[n:]` for `n` in `{0, 1, 1_048_575, 1_048_577, 3_000_001}`, plus a Hypothesis property on `n` up to 4M.
 - AT-S1b-8. `pool/_eligible.py` equals the output of `write_eligible.py` on the committed `certified_pairs.json` (drift guard).
-- AT-S1b-9 [A10, perf, Dell vm-run]. 10M rows of `email` stream in under 3 s; 10M `first_name` in under 1.0 s. Recorded in the PR.
-- AT-S1b-10. The AST guard of section 5.1 passes on the tree and fails on a seeded scratch file that calls `pool_eligible(..., opted_out=False)`.
+- AT-S1b-9 [A10, perf, Dell vm-run]. Also: `bench_worker_gen.py` runs with no `N_THRESHOLD` reference (grep check). 10M rows of `email` stream in under 3 s; 10M `first_name` in under 1.0 s. Recorded in the PR.
+- AT-S1b-10. The signature sentry of section 5.1 passes on the tree and fails when any function on the four chains gives `key_columns` a default.
+- AT-S1b-11. The AST guard of section 5.1 passes on the tree and fails on a seeded scratch file that calls `pool_eligible(..., opted_out=False)`.
+- AT-S1b-12. For one `email` column at 9 and 120,000 rows, legacy `try_pool`, streamed `_faker_stream` and `WindowPoolDraw` give equal bytes, and each calls `open_faker_pool_draw`. A Group B column with `faker_kwargs={"domain": "x.test"}` runs per-row on all three. `pool_opted_out` called without `table` raises `TypeError`.
+- AT-S1b-13. The secret-material census test lists the `WindowPoolDraw` seed holder, and `repr(WindowPoolDraw(...))` shows no seed bytes.
 - Controls [A2, A3]: S1a take parity and batch invariance pass at batches `{7, 4096}` for every new type.
 
 S2:
 
-- AT-S2-1 [A5]. For each draw path (`pool`, `keyed`, `batch`) and for `lookup` with and without weights, the streamed bytes at batch sizes `{1, 7, 4096}` equal the legacy bytes, and the run reports route `streamed`. The batch path runs once with a Faker provider and once with a Mimesis provider.
+- AT-S2-1 [A5]. For each draw path (`pool`, `keyed`, `batch`) and for `lookup` with and without weights, the streamed bytes at batch sizes `{1, 7, 4096}` equal the legacy bytes, and the run reports route `streamed`. The batch path runs with a Faker provider; a Mimesis provider is checked on the paths `draw_path` gives it.
 - AT-S2-2 [A6]. A plan with `sequence`, `provider` and `lookup` columns reports `streamed`; before S2 it reports legacy.
-- AT-S2-3. With `null_probability: 0.3`, provider and lookup streams equal legacy bytes (the mask positions match `_apply_null_probability`).
+- AT-S2-3. With `null_probability: 0.3`, provider and lookup streams equal legacy bytes (the mask positions match `_apply_null_probability`). The lookup cell uses a file-backed lookup, so the content digests enter the null seed.
 - AT-S2-4. A provider that raises inside batch 3 gives `GENERATION_PROVIDER_FAILED`; `__cause__` and `__context__` are `None`; the message does not contain the raised text.
-- AT-S2-5 (control). `generate_batch` output is byte-identical before and after the `open_batch_cursor` refactor for Faker and Mimesis at count 1 and 4096.
+- AT-S2-5 (control). `generate_batch` output is byte-identical before and after the `open_batch_cursor` refactor for Faker at count 1 and 4096.
 - AT-S2-6. An adapter without `open_batch_cursor` on the `"batch"` path keeps the plan on legacy, and the result equals today.
+- AT-S2-7. A plan with a pooled provider column and a budget below its pool size refuses in preflight; a spy sink sees no write.
+- AT-S2-8. The census test lists the provider stream seed holders, and their `repr` shows no seed bytes.
 
 ## 8. Named mutations
 
 Each must turn the named test red on the final head.
 
 - M-1. `pool_opted_out` ignores `key_columns`: AT-S1b-2 red.
-- M-2. `_window_admission` passes an empty key set: AT-S1b-2 (window leg) and AT-S1b-10 red.
+- M-2. `execute_pinned` passes `frozenset()`, or `_generate_column` gives `key_columns` a default of `frozenset()`: AT-S1b-2 (pinned leg) and AT-S1b-10 red.
+- M-2b. `window._build_streams` passes an empty key set: AT-S1b-2 (window leg) red.
 - M-3. Pool size stays `DEFAULT_POOL_SIZE` for `rows < P`: AT-S1b-3 red.
 - M-4. `skip` draws `n - 1` indices: AT-S1b-7 and AT-S1b-5 red.
 - M-5. The reopen path (offset below cursor) continues from the cursor: AT-S1b-5 red.
 - M-6. `_eligible.py` gains a hand-written pair: AT-S1b-8 red.
+- M-6b. `pool_eligible` drops the `rows < 1` check: AT-S1b-3 red.
+- M-6c. The streamed route computes its own build-order rule instead of `open_faker_pool_draw`: AT-S1b-12 red.
+- M-6d. Group A and B pairs ignore `faker_kwargs`: AT-S1b-12 red.
 - M-7. `PooledProviderStream` draws a fresh `default_rng(selection_seed)` per batch: AT-S2-1 red at batch 7.
 - M-8. `BatchProviderStream` calls `generate_batch` per batch: AT-S2-1 red at batch 7.
 - M-9. `LookupStream` builds `random.Random` per batch: AT-S2-1 red.
 - M-10. The provider error boundary uses `raise ... from exc`: AT-S2-4 red.
+- M-11. Preflight leaves provider pools out: AT-S2-7 red.
+- M-12. `LookupStream` is null-masked with a context built without the lookup digests: AT-S2-3 red.
 
 ## 9. Frozen contracts and byte changes
 
-- Generate output bytes change for: pool-eligible legacy-10 columns with fewer than 50,000 rows (now pooled), and Group A and B columns in certified locales at every row count. One `Breaking:` line in `changelog.d/gen-stream-all-s1b.md` and an entry in `docs/compatibility-contract.md` section 1 as a pre-GA correction. Types and value sets do not change.
-- `generate_rows` reads past 10,000 on a small pooled table now refuse. Same `Breaking:` line.
+- Generate output bytes change for: pool-eligible legacy-10 columns with fewer than 50,000 rows (now pooled); legacy-10 columns of 50,000 rows or more that are reference or inherit targets (now per-row under the key opt-out); and Group A and B columns in certified locales at every row count. The CLI `decoy run --rows N` preview (`decoy/src/decoy/cli/gen/_preview.py`) is in build order and is no longer a prefix of the full run below 10,000 rows (it already was not at 50,000 and above); the changelog says so. One `Breaking:` line in `changelog.d/gen-stream-all-s1b.md` and an entry in `docs/compatibility-contract.md` section 1 as a pre-GA correction. Types and value sets do not change.
+- `generate_rows` reads past 10,000 on a small pooled table now refuse, and pooled Class A values on small tables depend on `row_count`. Same `Breaking:` line, which names the platform `window_invalid` mapping in `generation_child.py`.
 - S2 changes no bytes (AT-S2-1 is parity).
-- Golden files regenerated by the harness, by name (master plan section 10): `tests/native/test_determinism_goldens.py`, `tests/native/test_pooled_faker_draw_sites.py`, `tests/unit/test_v2_generation.py`, `tests/unit/generation/test_fr0_budget.py`, `tests/unit/test_r3_10_generation_key_contract.py`, `tests/unit/generation/test_fr0_preflight_lifetime.py`, `tests/unit/generation/test_generate_determinism_ratchets.py`, `tests/unit/generation/test_faker_pool_eligible.py`, `tests/unit/generation/unique/test_pool_opted_out.py`, `tests/parity/_f_audit_support.py`, `tests/parity/test_phase_f_f2_mixed_backend_witness.py`, `tests/parity/_f0_matrix.py`, `tests/parity/_f0_fixtures.py`, `tests/parity/test_phase_f_f0_invariants.py`. Any other golden that moves is a stop: the builder reports it and does not regenerate it.
+- Golden files regenerated by the harness, by name (master plan section 10): `tests/native/test_determinism_goldens.py`, `tests/native/test_pooled_faker_draw_sites.py`, `tests/unit/test_v2_generation.py`, `tests/unit/generation/test_fr0_budget.py`, `tests/unit/test_r3_10_generation_key_contract.py`, `tests/unit/generation/test_fr0_preflight_lifetime.py`, `tests/unit/generation/test_generate_determinism_ratchets.py`, `tests/unit/generation/test_faker_pool_eligible.py`, `tests/unit/generation/unique/test_pool_opted_out.py`, `tests/parity/_f_audit_support.py`, `tests/parity/test_phase_f_f2_mixed_backend_witness.py`, `tests/parity/_f0_matrix.py`, `tests/parity/_f0_fixtures.py`, `tests/parity/test_phase_f_f0_invariants.py`, and the pinned goldens: `tests/unit/generation/test_pinned_*.py`, `tests/unit/generation/relational/test_routes.py` and `tests/unit/generation/_cf_routes_support.py` (the builder confirms exact paths at the anchor). Any other golden that moves is a stop: the builder reports it and does not regenerate it.
 - No change to `GEN_FAMILIES`, the Faker pin, any reason code, or the mask side.
 
 ## 10. Class tables
@@ -217,11 +258,11 @@ Each must turn the named test red on the final head.
 
 | # | Class | Structure that closes it | Proof | Mutation |
 |---|---|---|---|---|
-| 1 | Value-bearing output | the one new refusal and the provider boundary have fixed messages; `from None` | AT-S1b-6, AT-S2-4 | M-10 |
-| 2 | Cleanup missing on an exit path | pool reservations release through the `ExitStack` callback and on the `selector is None` branch, as S1a | AT-S1b-3 | M-3 |
+| 1 | Value-bearing output | the one new refusal and the provider boundary have fixed messages; `from None`; seed holders boxed and in the census | AT-S1b-6, AT-S1b-13, AT-S2-4, AT-S2-8 | M-10 |
+| 2 | Cleanup missing on an exit path | pool reservations release through the `ExitStack` callback and on the `selector is None` branch, as S1a; provider pools reserved in preflight | AT-S1b-3, AT-S2-7 | M-3, M-11 |
 | 3 | State machine and concurrency | each stream owns its RNG or cursor; the window draw keeps a cursor and reopens below it | AT-S1b-5, AT-S1b-7 | M-4, M-5 |
-| 4 | Route parity and silent fallback | one `pool_eligible` and one `pool_key_columns` on every site, with an AST guard; the admission matrix is the only route switch | AT-S1b-2, AT-S1b-10, AT-S2-2 | M-1, M-2 |
-| 5 | Referential integrity | key columns never pool, so a parent key keeps its per-row values and children reference the same values on every route | AT-S1b-2 | M-1 |
+| 4 | Route parity and silent fallback | one `pool_eligible`, one `open_faker_pool_draw` and one `pool_key_columns` on every route, required keywords with a signature sentry and an AST guard; the admission matrix is the only route switch | AT-S1b-2, AT-S1b-10, AT-S1b-11, AT-S1b-12, AT-S2-2 | M-1, M-2, M-6c |
+| 5 | Referential integrity | key columns never pool on all four routes including pinned, so a parent key keeps distinct per-row values | AT-S1b-2 | M-1, M-2 |
 | 6 | Untrusted producer | the config is the input; `requested_locale` declines a list locale; lookup lists come from pinned digests | AT-S1b-1 | M-6 |
 | 7 | Check then use (TOCTOU) on a path | N/A no filesystem access is added; lookup files are read and digested before this code by the existing loader | none needed | N/A no path checks |
 | 8 | Weak tests and overclaimed evidence | parity at batch sizes 1, 7 and 4096 with the route asserted; perf on the Dell; goldens listed by name | AT-S1b-9, AT-S2-1 | M-7, M-8, M-9 |
@@ -247,11 +288,14 @@ Each must turn the named test red on the final head.
 - Pool admitted, build declined: `open_pooled_selector` returns `None` and the column runs per-row (`generation/_faker_pool.py:491`).
 - Budget refusal before the build: the ledger raises, as S1a.
 - Window read past the pool of a small pooled column: `CODE_WINDOW_INVALID`.
+- Table of 0 rows: `pool_eligible` returns False before any build.
+- Preflight refusal for a provider pool: before the first write.
 - Provider failure in a stream: `GENERATION_PROVIDER_FAILED`, no cause.
 
 ### 11.2 Routes
 
 - Legacy resident (`synthesize._faker` via `try_pool`, `generation/_faker_pool.py:292`).
+- Pinned (`execute_pinned`, `generation/_pinned_execute.py:201`, to `synthesize._generate_column` directly; no `classify_plan`).
 - Streamed (`_run_admitted`, `generation/_streamed.py:352`).
 - Window read (`generate_rows`, `generation/window.py:263`).
 - Native shadow: unchanged; the admissible set stays the legacy 10 (`execution/physical/_shadow_generation.py:100`).
@@ -264,7 +308,7 @@ Each must turn the named test red on the final head.
 
 ### 11.4 Fields
 
-- `faker_type`, `locale`, `pooled`, `unique`, `faker_kwargs`, `null_probability` on Faker columns.
+- `faker_type`, `locale`, `pooled`, `unique`, `faker_kwargs` (non-empty declines Group A and B pooling), `null_probability` on Faker columns.
 - `provider`, provider `kwargs`, `locale` on provider columns; `values`, `weights`, `file` on lookup columns.
 - Table `row_count` (pool size and build-order mode).
 
@@ -280,34 +324,38 @@ Each must turn the named test red on the final head.
 
 Steps, in order (tests first, red before code):
 
-1. Write AT-S1b-1 to AT-S1b-8 and AT-S1b-10 and confirm they fail.
-2. Add `TIER_3` to the harness, run it in the locked env, commit digests; add `write_eligible.py` and generate `pool/_eligible.py`.
-3. Add `pool/_keys.py` and `PlanAdmission.key_columns`; make `key_columns` required on `pool_opted_out`; thread it through every caller; add the AST guard.
-4. Delete `N_THRESHOLD`; pool size `min(rows, 10_000)`; build-order mode; reservations pass `P`.
-5. Add `PooledSelector.skip`, `stream/_window_pool.py`, the window admission change and the `_build_streams` branch.
-6. Add the two caps; update the draw-site notes and the CODEMAP rows.
-7. Regenerate the named goldens with the harness; stop on any other golden.
-8. Run mutations M-1 to M-6; run AT-S1b-9 on the Dell.
+1. Write AT-S1b-1 to AT-S1b-8 and AT-S1b-10 to AT-S1b-13 and confirm they fail.
+2. Moves first, no behavior change: tier tables to `scripts/faker-determinism/_tiers.py`; `_referenced_keys` out of `_streamed.py`.
+3. Add `TIER_3` to the harness, run it in the locked env, commit digests; add `write_eligible.py` and generate `pool/_eligible.py`.
+4. Add `pool/_keys.py` and `PlanAdmission.key_columns`; make `table` and `key_columns` required on `pool_opted_out`; thread `key_columns` through all four routes with no defaults; add the signature sentry and the AST guard.
+5. Delete `N_THRESHOLD`; add `pool_size_for`, `open_faker_pool_draw`, the `rows < 1` check and the kwargs decline; reservations pass `P`.
+6. Add `PooledSelector.skip`, `stream/_window_pool.py`, the window admission change, the `_build_streams` branch and the docstring change.
+7. Add the two caps; census rows; update the draw-site notes, the bench script and README, and the CODEMAP rows.
+8. Regenerate the named goldens with the harness; stop on any other golden.
+9. Run mutations M-1 to M-6d; run AT-S1b-9 on the Dell.
 
-Files and budgets (cap about 800):
+Files and budgets. The engine module cap is a goal of 600 and a hard max of 700 (`tests/sentry/test_module_size.py`); `scripts/` is held to the same limits. The planner cap of about 800 per slice diff applies to the change, not to a module.
 
 | File | Now | After |
 |---|---|---|
-| `generation/_faker_pool.py` | 577 | at most 600 (skip +12, threshold out) |
+| `generation/_faker_pool.py` | 577 | at most 600 (skip +12, `pool_size_for` +6, `open_faker_pool_draw` +25, threshold and the in-place mode branch out); if it passes 600, the build-order draw moves to `pool/_build_order.py` |
 | `generation/pool/_eligible.py` | new | about 90 (generated) |
-| `generation/pool/_keys.py` | new | about 50 |
+| `generation/pool/_keys.py` | new | about 60 |
 | `generation/stream/_window_pool.py` | new | about 90 |
 | `generation/_window_admission.py` | 475 | about 485 |
 | `generation/window.py` | 385 | about 395 |
 | `generation/_admission.py` | 301 | about 310 |
-| `generation/_streamed.py` | 592 | at most 592 (shrinks) |
+| `generation/_streamed.py` | 592 | about 585 (shrinks) |
+| `generation/_pinned_execute.py` | measure at anchor | plus about 5 |
+| `scripts/bench-generation-pool/bench_worker_gen.py` | measure at anchor | minus a few |
 | `generation/_column_streams.py` | 413 | about 418 |
 | `generation/_bounds.py` | 572 | about 575 |
 | `generation/synthesize.py` | 587 | about 592 |
 | `scripts/faker-determinism/write_eligible.py` | new | about 40 |
-| `scripts/faker-determinism/check_determinism.py` | 597 | about 620 |
+| `scripts/faker-determinism/check_determinism.py` | 597 | about 520 (tiers moved out) |
+| `scripts/faker-determinism/_tiers.py` | new | about 100 with `TIER_3` |
 
-Public names added: `pool_key_columns`, `PlanAdmission.key_columns`, `PooledSelector.skip`, `WindowPoolDraw`.
+Public names added: `pool_key_columns`, `referenced_key_columns`, `pool_size_for`, `open_faker_pool_draw`, `PlanAdmission.key_columns`, `PooledSelector.skip`, `WindowPoolDraw`.
 
 Test depth: T0 per edit; T1 impact selection per commit (generation, parity, native draw-site tests, the harness cells for tier 3, the new guard); T2 on the exact head with the risk cells AT-S1b-2, AT-S1b-5, AT-S1b-7 and the harness. Full suite: yes, once on the final head, because S1b regenerates goldens and changes a frozen contract (escalation triggers in `testing.md`). It diffs against the saved main baseline.
 
@@ -316,21 +364,22 @@ Test depth: T0 per edit; T1 impact selection per commit (generation, parity, nat
 Steps:
 
 1. Write AT-S2-1 to AT-S2-6 and confirm the parity and route tests fail.
-2. Add `open_batch_cursor` to the Faker and Mimesis adapters; `generate_batch` calls it (AT-S2-5 stays green).
-3. Add `stream/_provider.py` with the four streams; wire `make_column_stream`.
-4. Admit `provider` and `lookup` in `ADMISSION_MATRIX`, with the two column-level declines.
-5. If GNF S3a has merged, add the `"computed"` branch; otherwise leave it out.
-6. Run M-7 to M-10.
+2. Add `open_batch_cursor` to the Faker adapter; `generate_batch` calls it (AT-S2-5 stays green).
+3. Add `stream/_provider.py` with the four streams and their census rows; wire `make_column_stream`.
+4. Add provider pools to `_streamed._preflight`.
+5. Admit `provider` and `lookup` in `ADMISSION_MATRIX`, with the two column-level declines.
+6. If GNF S3a has merged, add the `"computed"` branch and add the provider stream dispatch to GNF's draw-site choke-point sentry; otherwise leave the branch out.
+7. Run M-7 to M-12.
 
 | File | Now | After |
 |---|---|---|
 | `generation/stream/_provider.py` | new | about 160 |
 | `generation/_column_streams.py` | about 418 | about 430 |
+| `generation/_streamed.py` | about 585 | about 598 (provider preflight) |
 | `generation/_admission.py` | about 310 | about 320 |
 | `generation/kinds/_provider.py` | 159 | about 165 |
 | `generation/kinds/_lookup.py` | 289 | about 292 |
 | `providers_v2/_faker_adapter.py` | 282 | about 295 |
-| `providers_v2/mimesis/_adapter.py` | measure at anchor | plus about 15 |
 
 Public names added: `open_provider_stream`, `open_batch_cursor` (adapter method).
 
@@ -339,8 +388,8 @@ Test depth: T0 and T1 as above; T2 on the exact head with AT-S2-1 and the mutati
 ### Order and dependencies
 
 1. #813 (S1a) merges first. S1b, S2 and GNF S3a all build on its `generation/stream/` package.
-2. GSA S1b and GNF S3a (`origin/docs/plans-pap-gnf-1125:docs/plans/2026-11-25-gen-nonfaker-draws-s3.md`) can build in parallel. Both touch `_bounds.py`, `_window_admission.py`, `window._build_streams` and `_column_streams._faker_stream`; the second to merge rebases (text conflicts only). S1b pools no type that S3a computes (`uuid4`, `random_int`, `random_element`), so admission does not overlap. Where both reach `_faker_stream` and `_build_streams`, the computed check runs first, then the pool check, then per-row.
-3. GNF S3a merges before GSA S2, so S2's provider stream dispatches the `"computed"` path to `ComputedDrawStream`. If S3a slips, S2 merges without that branch and S3a adds it (its F5 note already says the second to merge rebases `kinds/_provider.py`).
+2. GSA S1b and GNF S3a (`origin/docs/plans-pap-gnf-1125:docs/plans/2026-11-25-gen-nonfaker-draws-s3.md`) can build in parallel. Both touch `_bounds.py` (`faker_payload_bound`), `_window_admission.py`, `window._build_streams` and `_column_streams._faker_stream`; the second to merge rebases (text conflicts only). S1b pools no type that S3a computes (`uuid4`, `random_int`, `random_element`), so admission does not overlap. Where both reach `_faker_stream` and `_build_streams`, the computed check runs first, then the pool check, then per-row. S1b making pooled columns Class A in windows removes the Class B block that GNF deferred `text` and `paragraph` on; GNF's plan should note this.
+3. GNF S3a merges before GSA S2, so S2's provider stream dispatches the `"computed"` path to `ComputedDrawStream`. If S3a slips, S2 merges without that branch and S3a adds it (its F5 note already says the second to merge rebases `kinds/_provider.py`). Merge-order rule: GNF's choke-point sentry names four draw sites with no free-form allowlist, and the S2 provider stream dispatch is a fifth. Whichever of GNF S3a and GSA S2 merges second adds that site to the sentry in the same PR.
 4. S2 before S3; S3 before S4. GEN-PER-COLUMN S1 starts only after S1a, S2 and S3 have landed (master plan cross-plan gate).
 
 ## 13. S3 and S4 outline
@@ -350,9 +399,10 @@ Test depth: T0 and T1 as above; T2 on the exact head with AT-S2-1 and the mutati
 
 ## 14. Pre-mortem
 
-- The window pays the pool build on every `generate_rows` call (about 1.2 s for `email` at 10,000 values). A preview that pages often pays it each page. Accepted for V1: slower, not broken; `deadline_s` still bounds it. Follow-up: a pool cache keyed by build seed (not in this row).
+- The window pays the pool build on every `generate_rows` call (up to about 1.2 s for `email` at 10,000 values; a build-order page pays only up to its end). `WindowPoolDraw` is built per call, so every page of a large table also re-skips from offset 0. A preview that pages often pays both each page. `deadline_s` is checked only between chunks, so it does not interrupt a build or a skip inside one chunk. Accepted for V1: slower, not broken. Follow-up: a pool and cursor cache keyed by build seed (not in this row).
 - A harness run on a different Faker version would certify the wrong digests. The builder runs it in the locked env, and AT-S1b-8 ties the eligible set to the committed digests.
 - A new caller of `pool_opted_out` on a parallel branch fails because `key_columns` is required. That is the intended failure.
-- `_streamed.py` grows past 600 on a rebase. The budget says it shrinks; if it cannot, the builder moves `_pooled_columns` into `_admission.py`.
-- A skip from offset 0 to 1e9 costs about 3 s. `deadline_s` bounds it; the cursor avoids it for sequential paging.
-- A Mimesis adapter whose seeded instance is not sequential would break parity. AT-S2-1 runs a Mimesis provider at batch 7; if it fails, that adapter gets no `open_batch_cursor` and the column stays legacy.
+- `_streamed.py` grows past 600 on a rebase or in S2. The builder moves `_pooled_columns` into `_admission.py` before adding the provider preflight.
+- A skip from offset 0 to 1e9 costs about 3 s, and per-call construction repeats it every page. The deadline is not checked inside it. Accepted for V1 with the cache follow-up above.
+- A new route that reaches `pool_eligible` without a key set (as pinned did before this plan). The signature sentry and the AST guard make that a test failure, not a silent pool.
+- The streamed sink on a mid-stream ledger refusal: S2's preflight closes the provider pool case before the first write. Whether the sink is transactional on other mid-stream refusals is unchanged by this plan.
