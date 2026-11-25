@@ -6,7 +6,7 @@ Owner: Cam. Author: Opus (plan author). Dates: revision 1 2026-11-22, revisions 
 
 Owner decision already recorded (vault `OWNER-OPEN-DECISIONS.md`, 2026-11-22, go-with-recommended): reproduce the CPython bytes. This revision keeps that decision and has no open owner question.
 
-Anchors. A path with no prefix is under `src/decoy_engine/` in decoy-engine. Read at engine `origin/main` `2b8a47fbe` and at GEN-STREAM-ALL S1a, PR #813, head `f329ccd46` (since `dca2db39a` only `generation/pool/_value_pool.py` changed: the retained-byte walk behind `measured_pool_bytes`; the cited stream, assembler and `_resident.py` lines are the same) (called "#813" below). Line numbers are at #813. The builder rechecks every line on the merged heads of the dependencies in section 12.
+Anchors. A path with no prefix is under `src/decoy_engine/` in decoy-engine. Read at engine `origin/main` `2b8a47fbe` and at GEN-STREAM-ALL S1a, PR #813, head `f329ccd46` (since `dca2db39a` the only change under `src/` is `generation/pool/_value_pool.py`: the retained-byte walk behind `measured_pool_bytes`; the cited stream, assembler and `_resident.py` lines are the same) (called "#813" below). Line numbers are at #813. The builder rechecks every line on the merged heads of the dependencies in section 12.
 
 Builds on:
 
