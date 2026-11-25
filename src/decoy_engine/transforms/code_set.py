@@ -112,6 +112,9 @@ from decoy_engine.determinism import derive, derive_index
 from decoy_engine.internal.crypto import hmac_hex
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms._codeset_config import CodeSetConfig as CodeSetConfig
+from decoy_engine.transforms._codeset_config_checks import (
+    check_mode as check_mode,
+)
 from decoy_engine.transforms._codeset_config_checks import (  # noqa: F401 -- re-exported
     validate_code_set_config,
 )
@@ -122,6 +125,7 @@ from decoy_engine.transforms._codeset_loader import (
     _check_source_version_pin,
     _CorpusRecord,
     _get_corpus_record,
+    _shown_name,
     load_corpus_provenance,  # noqa: F401 -- re-exported public API (see below)
     verify_corpus,  # noqa: F401 -- re-exported public API (see below)
 )
@@ -211,7 +215,7 @@ def describe_loaded_corpus(
         record = resolve_corpus_record(config)
     prov = record.provenance
     return {
-        "code_set": config.code_set,
+        "code_set": _shown_name(config.code_set),
         "source": prov.source if prov else "",
         "source_version": prov.source_version if prov else "",
         "effective_date": prov.effective_date if prov else "",
@@ -309,8 +313,7 @@ def apply_code_set(
             config.corpus_source_version when the latter is set (HC-2 D2a).
         ValueError: Unsupported mode.
     """
-    if mode not in ("mask", "gen"):
-        raise ValueError("code_set: unsupported mode. Use 'mask' or 'gen'.")
+    check_mode(mode)
     try:
         if corpus_record is None:
             corpus_name, override_path = _resolve_corpus_path(config)

@@ -49,6 +49,12 @@ def _where(path: Path | str | None) -> str:
     return fileaccess.shown(str(path), "code_set.corpus_source")
 
 
+def _shown_name(name: str) -> str:
+    """How a diagnostic names a corpus: a shipped name as is, any other label (a customer
+    corpus label is configured text, and may be a credential-bearing URL) under the policy."""
+    return name if name in _SHIPPED_CORPORA else fileaccess.shown(name, "code_set.code_set")
+
+
 def _unknown_shipped_corpus() -> PlanCompileError:
     """The one message for a name that is not a registry key; it echoes neither the name nor a
     path."""
@@ -279,22 +285,28 @@ def _get_corpus_record(
     # request the policy refuses.
     handle = _open_customer(resolved)
     try:
+        # The error is raised after the `except` blocks close, so it carries no
+        # `__context__` (an OS error's text names the file).
+        stat_code = ""
+        stat_message = ""
         try:
             stat = handle.stat()
-        except FileNotFoundError as exc:
-            raise PlanCompileError(
-                code=reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
-                path="provider_config.corpus_source",
-                message=f"customer corpus at {handle.display} became unavailable after the existence check.",
-            ) from exc
+        except FileNotFoundError:
+            stat_code = reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND
+            stat_message = f"customer corpus at {_where(resolved)} became unavailable after the existence check."
         except OSError as exc:
             if fileaccess.keeps_class(exc):
                 raise
+            stat_code = reasons.plan.CODE_SET_CORPUS_READ_ERROR
+            stat_message = (
+                f"failed to stat customer corpus at {_where(resolved)} ({type(exc).__name__})."
+            )
+        if stat_code:
             raise PlanCompileError(
-                code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
+                code=stat_code,
                 path="provider_config.corpus_source",
-                message=f"failed to stat customer corpus at {handle.display}: {exc}",
-            ) from exc
+                message=stat_message,
+            )
         # Best-effort file identity, not a content hash (see the module-level
         # comment on `_customer_cache` for why ctime is included and a hash is
         # not).
@@ -452,6 +464,7 @@ def _read_corpus_record(
     else:
         owned = False
     try:
+        read_failure = ""
         try:
             tbl = arrow_adapter.read_table(handle)
         except FileAccessDenied:
@@ -459,11 +472,13 @@ def _read_corpus_record(
         except Exception as exc:
             if fileaccess.keeps_class(exc):
                 raise
+            read_failure = type(exc).__name__
+        if read_failure:
             raise PlanCompileError(
                 code=reasons.plan.CODE_SET_CORPUS_READ_ERROR,
                 path="provider_config.corpus_source",
-                message=f"failed to read corpus Parquet at {handle.display}: {exc}",
-            ) from exc
+                message=f"failed to read corpus Parquet at {_where(path)} ({read_failure}).",
+            )
     finally:
         if owned:
             handle.close()
@@ -509,7 +524,7 @@ def _validate_provenance(
                 code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
                 path="provider_config.code_set",
                 message=(
-                    f"shipped corpus {name!r} at {where} has no provenance metadata "
+                    f"shipped corpus {_shown_name(name)!r} at {where} has no provenance metadata "
                     "(source, source_version, effective_date, license). This is a "
                     "packaging defect, not a customer-corpus configuration issue."
                 ),
@@ -541,7 +556,7 @@ def _validate_provenance(
                 code=reasons.plan.CODE_SET_CORPUS_PROVENANCE_IDENTITY_MISMATCH,
                 path="provider_config.code_set",
                 message=(
-                    f"shipped corpus {name!r} at {where} carries provenance "
+                    f"shipped corpus {_shown_name(name)!r} at {where} carries provenance "
                     f"for a different corpus ({provenance.corpus!r}). This "
                     "looks like a packaging or metadata swap; the embedded "
                     "provenance.corpus must match the requested corpus name."
@@ -562,7 +577,7 @@ def _validate_provenance(
                     code=reasons.plan.CODE_SET_CORPUS_PROVENANCE_MALFORMED_STAMP,
                     path="provider_config.code_set",
                     message=(
-                        f"shipped corpus {name!r} at {where} has a malformed "
+                        f"shipped corpus {_shown_name(name)!r} at {where} has a malformed "
                         f"provenance stamp ({'; '.join(stamp_defects)}). A "
                         "shipped corpus is a build artifact: is_seed and the "
                         "metadata format version must be explicit and current "
@@ -575,7 +590,7 @@ def _validate_provenance(
             code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
             path="provider_config.code_set",
             message=(
-                f"shipped corpus {name!r} at {where} has incomplete provenance "
+                f"shipped corpus {_shown_name(name)!r} at {where} has incomplete provenance "
                 f"metadata (missing: {', '.join(missing)})."
             ),
         )
@@ -583,7 +598,7 @@ def _validate_provenance(
         code=reasons.plan.CODE_SET_CORPUS_MISSING_PROVENANCE,
         path="provider_config.corpus_source",
         message=(
-            f"customer corpus {name!r} at {where} has partial provenance metadata "
+            f"customer corpus {_shown_name(name)!r} at {where} has partial provenance metadata "
             f"(missing: {', '.join(missing)}). Either remove the partial stamp or "
             "complete it; a half-filled provenance block is not surfaced as evidence."
         ),
@@ -656,7 +671,7 @@ def verify_corpus(path: Path, *, file_access: FileAccess | None = None) -> Corpu
     except PlanCompileError as exc:
         return CorpusVerifyReport(
             ok=False,
-            path=str(path),
+            path=_where(path),
             row_count=0,
             provenance=None,
             problems=(f"{exc.code}: {exc.message}",),
@@ -676,7 +691,7 @@ def verify_corpus(path: Path, *, file_access: FileAccess | None = None) -> Corpu
     )
     return CorpusVerifyReport(
         ok=True,
-        path=str(path),
+        path=_where(path),
         row_count=len(record.rows),
         provenance=summary,
         problems=(),

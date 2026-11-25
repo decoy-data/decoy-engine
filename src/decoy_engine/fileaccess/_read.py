@@ -6,6 +6,7 @@ import os
 import re
 import stat
 from collections.abc import Callable
+from urllib.parse import urlsplit
 
 from decoy_engine.fileaccess._entry import current, is_ambient
 from decoy_engine.fileaccess._errors import encode_field_key, passes_by_type, resurface_scrubbed
@@ -70,18 +71,29 @@ def read_checked(
 
 
 # A locator may be a URL (`s3://user:secret@host/key?token=...`), or one a `Path` has squeezed to a
-# single slash (`s3:/user:secret@host/...`). Its userinfo and query string are credentials.
-_URL_USERINFO_RE = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*:/{1,2})[^/@\s]*@")
-_URL_SCHEME_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]+:/")  # 2+ chars, so not a drive letter
-_URL_QUERY_RE = re.compile(r"\?[^\s#]*")
+# single slash (`s3:/user:secret@host/...`) or turned to backslashes on Windows. Its userinfo,
+# query and fragment are credentials. The scheme must open the text: a local path such as
+# `/tmp/a:/b@c/f?x=1` is not a URL and is left alone. Two or more characters, so not a drive letter.
+_URL_HEAD_RE = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]+):(?P<slashes>[/\\]{1,2})")
 
 
 def without_url_credentials(text: str) -> str:
-    """`text` with the userinfo and query string of any URL-shaped locator removed."""
-    if not _URL_SCHEME_RE.search(text):
+    """`text` with the userinfo, query and fragment of a URL-shaped locator removed."""
+    head = _URL_HEAD_RE.match(text)
+    if head is None:
         return text
-    out = _URL_USERINFO_RE.sub(r"\g<scheme>", text)
-    return _URL_QUERY_RE.sub("?<redacted>", out)
+    rest = text[head.end() :].replace("\\", "/")
+    try:
+        parts = urlsplit("//" + rest)
+        host = parts.netloc.rpartition("@")[2]
+    except ValueError:
+        return text[: head.end()] + "<redacted>"
+    out = f"{head['scheme']}:{head['slashes'].replace(chr(92), '/')}{host}{parts.path}"
+    if "?" in rest.split("#", 1)[0]:
+        out += "?<redacted>"
+    if parts.fragment:
+        out += "#<redacted>"
+    return out
 
 
 def shown(locator: str, field_key: str) -> str:

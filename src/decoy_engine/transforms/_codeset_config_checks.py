@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from decoy_engine import reasons
+from decoy_engine import fileaccess, reasons
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA
 from decoy_engine.transforms._codeset_provenance import RESERVED_LICENSED_NAMES
@@ -106,8 +106,18 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
             code=reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
             path="provider_config.code_set",
             message=(
-                f"corpus {name!r} not found in shipped corpora. "
+                f"corpus {fileaccess.shown(name, 'code_set.code_set')!r} not found in shipped corpora. "
                 f"Available: {sorted(_SHIPPED_CORPORA)}. "
                 f"To use a custom corpus, set corpus_source: customer:<path>."
             ),
         )
+
+
+def check_mode(mode: object) -> None:
+    """Refuse a mode other than ``mask`` or ``gen``. Value-free: the text never repeats it.
+
+    The strategy handler calls this when it consumes the config, so a column with no
+    non-null row (or no row a gate matches) is refused as well as one that dispatches.
+    """
+    if mode not in ("mask", "gen"):
+        raise ValueError("code_set: unsupported mode. Use 'mask' or 'gen'.")

@@ -83,6 +83,7 @@ from decoy_engine.transforms.code_set import (
     SHIPPED_CODE_SETS,
     CodeSetConfig,
     apply_code_set,
+    check_mode,
     describe_loaded_corpus,
     resolve_corpus_record,
 )
@@ -145,6 +146,7 @@ class CodeSetHandler:
         bad, not to record evidence.
         """
         cfg = provider_config_to_dict(plan.provider_config)
+        check_mode(str(cfg.get("mode", "mask")))
         code_cfg = CodeSetConfig.from_dict(cfg)
         describe_loaded_corpus(code_cfg)
 
@@ -157,6 +159,7 @@ class CodeSetHandler:
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
         mode = str(cfg.get("mode", "mask"))
+        check_mode(mode)
         code_cfg = CodeSetConfig.from_dict(cfg)
 
         if mode == "gen" and plan.namespace is None:

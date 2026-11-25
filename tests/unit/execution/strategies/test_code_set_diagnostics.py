@@ -88,3 +88,133 @@ def test_missing_url_source_hides_credentials() -> None:
     text = str(info.value)
     assert _PW not in text
     assert _TOK not in text
+
+
+@pytest.mark.parametrize(
+    ("locator", "expected"),
+    [
+        ("https://svc:p@ss@host.example/c?token=T", "https://host.example/c?<redacted>"),
+        ("https://host?email=x@y&token=T", "https://host?<redacted>"),
+        ("https:\\\\svc:pw@host\\c\\f?token=T", "https://host/c/f?<redacted>"),
+        ("s3:/u:p@h/k", "s3:/h/k"),
+        ("https://h/p#access_token=T", "https://h/p#<redacted>"),
+        ("/tmp/archive:/alice@local/file?rev=1", "/tmp/archive:/alice@local/file?rev=1"),
+        ("C:\\data\\a@b.parquet", "C:\\data\\a@b.parquet"),
+        ("\\\\server\\share\\a@b", "\\\\server\\share\\a@b"),
+    ],
+)
+def test_url_redactor_shapes(locator: str, expected: str) -> None:
+    from decoy_engine.fileaccess._read import without_url_credentials
+
+    assert without_url_credentials(locator) == expected
+
+
+def _no_secret(text: str) -> None:
+    assert _PW not in text
+    assert _TOK not in text
+
+
+def test_verify_corpus_report_hides_url_credentials() -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    report = verify_corpus(pathlib.Path(f"https://svc:{_PW}@host.example/c.parquet?token={_TOK}"))
+    assert not report.ok
+    _no_secret(report.path)
+    _no_secret(" ".join(report.problems))
+
+
+def test_unreadable_parquet_error_names_type_not_text(tmp_path: pathlib.Path) -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    bad = tmp_path / "bad.parquet"
+    bad.write_bytes(b"not parquet " + _PW.encode())
+    report = verify_corpus(bad)
+    assert not report.ok
+    problems = " ".join(report.problems)
+    assert "Arrow" in problems
+    assert "Parquet magic" not in problems
+    assert "__context__" not in problems
+
+
+def test_unknown_shipped_name_hides_credentials() -> None:
+    with pytest.raises(Exception) as info:
+        CodeSetConfig.from_dict({"code_set": _URL})
+    assert getattr(info.value, "code", None) == "code_set_corpus_not_found"
+    _no_secret(str(info.value))
+
+
+def test_partial_provenance_and_evidence_hide_credentials(tmp_path: pathlib.Path) -> None:
+    from decoy_engine.transforms.code_set import describe_loaded_corpus
+
+    partial = tmp_path / "p.parquet"
+    pq.write_table(
+        pa.table(
+            {"code": pa.array(["Z01", "Z02"], type=pa.string())},
+            metadata={b"decoy_corpus": b"x", b"source": b"Some Source"},
+        ),
+        str(partial),
+    )
+    cfg = CodeSetConfig.from_dict({"code_set": _URL, "corpus_source": f"customer:{partial}"})
+    with pytest.raises(Exception) as info:
+        describe_loaded_corpus(cfg)
+    assert getattr(info.value, "code", None) == "code_set_corpus_missing_provenance"
+    _no_secret(str(info.value))
+    assert info.value.__context__ is None
+
+    full = tmp_path / "f.parquet"
+    pq.write_table(
+        pa.table(
+            {"code": pa.array(["Z01", "Z02"], type=pa.string())},
+            metadata={
+                b"decoy_corpus": b"x",
+                b"source": b"s",
+                b"source_version": b"1",
+                b"effective_date": b"2026-01-01",
+                b"license": b"l",
+            },
+        ),
+        str(full),
+    )
+    cfg = CodeSetConfig.from_dict({"code_set": _URL, "corpus_source": f"customer:{full}"})
+    _no_secret(repr(describe_loaded_corpus(cfg)))
+
+
+def test_second_stat_and_read_errors_hide_credentials(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.transforms import _codeset_loader as loader
+
+    class _BoomError(OSError):
+        pass
+
+    def _raise(*_a: Any, **_k: Any) -> None:
+        raise _BoomError(f"https://svc:{_PW}@host/x?token={_TOK}")
+
+    monkeypatch.setattr(loader.arrow_adapter, "read_table", _raise)
+    cfg = CodeSetConfig.from_dict({"code_set": "ab", "corpus_source": _corpus(tmp_path)})
+    with pytest.raises(Exception) as info:
+        describe_loaded_corpus_for(cfg)
+    assert getattr(info.value, "code", None) == "code_set_corpus_read_error"
+    _no_secret(str(info.value))
+    assert info.value.__context__ is None and info.value.__cause__ is None
+
+
+def describe_loaded_corpus_for(cfg: CodeSetConfig) -> Any:
+    from decoy_engine.transforms.code_set import describe_loaded_corpus
+
+    return describe_loaded_corpus(cfg)
+
+
+def test_invalid_mode_refused_with_no_live_row(tmp_path: pathlib.Path) -> None:
+    cfg: dict[str, Any] = {
+        "code_set": "ab",
+        "mode": "maks",
+        "chapter_preserve": True,
+        "corpus_source": _corpus(tmp_path),
+    }
+    for values in ([None, None], []):
+        df = pd.DataFrame({"c": pd.Series(values, dtype=object)})
+        with pytest.raises(ValueError, match="unsupported mode"):
+            CodeSetHandler().run(df, "c", make_seed(cfg), make_ctx())
+    with pytest.raises(ValueError, match="unsupported mode"):
+        CodeSetHandler().preflight(make_seed(cfg), make_ctx())
