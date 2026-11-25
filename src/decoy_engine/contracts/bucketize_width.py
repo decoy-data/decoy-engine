@@ -13,6 +13,7 @@ from typing import Any
 
 __all__ = [
     "BUCKETIZE_PRESETS",
+    "EXACT_INT_BOUND",
     "MAX_EXACT_DECIMAL_WIDTH",
     "resolve_bucketize_width",
     "unresolvable_width_field",
@@ -31,6 +32,11 @@ BUCKETIZE_PRESETS: Mapping[str, int] = {
 # With a decimal of at most 15 digits, a width up to 10**15 keeps the bucket bounds and midpoint
 # below 2 * 10**15, inside int64 and below 2**53.
 MAX_EXACT_DECIMAL_WIDTH = 10**15
+
+# float64 represents every integer up to 2**53 exactly; beyond it consecutive integers collapse.
+# One limit for the bucketize handler and kernel, the top_code handler and the top_code compile
+# check: a cap or floor at or past it, or a bucketed value at or past it, cannot be handled exactly.
+EXACT_INT_BOUND: int = 2**53
 
 
 def resolve_bucketize_width(provider_config: Mapping[str, Any]) -> int | float | None:
