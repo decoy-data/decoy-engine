@@ -53,6 +53,24 @@ Every line number in sections 2, 3, 8b, 9 and 10 was re-read at these bases. Cha
 - C-F1a: its swallowed-broad-except ratchet step needs the CLI baseline from C-G2, which is not
   merged. If C-F1a builds first, it skips that step and C-G2 writes the baseline without the A7
   and A9 sites.
+- Builder anchors (Codex rev 7 review, all low): A5 callees: only the configured validator and
+  quarantine branch is unreachable; an admitted run still calls the finalizer at
+  `E:execution/_unified_slice.py:325` (the boundary test injects there,
+  `ET:physical/test_unified_slice_exception_boundary.py:171-174`); the resident admission decline
+  is inside the `try` at `:227-236`; the faker reroute returns at `:265`; the activation flag is at
+  `:345-346`. A7's stale comment is `CT:e2e/test_init_command.py:121-122`. A8a schema locations
+  come through `C:cli/gate/_layers.py:150-158,204-205` (`:250` adds `.format`). D5 builds
+  `_report_kwargs` at `C:cli/run/_execute.py:445-457` and forwards it at `:476`. A8b output
+  guards: `C:cli/run/_execute.py:406-408`, `C:cli/demo.py:298-300` (`:301` is the write); A8b
+  callers: `C:api.py:653`, `C:cli/tokenize.py:375`, `C:cli/demo.py:293`. B7:
+  `stream_chunked_output` is on 21 lines in eight test-tree files, including a real `False`
+  override at `ET:test_e1a_stream.py:152-164` forwarded by `run_stream/_support.py:42-44`; E-S1b
+  updates that cell. E-S1c: the second capacity call passes `True, False` at
+  `E:execution/capacity.py:448-450`; of the 62 test files only public `run_pipeline` overrides
+  migrate (the JSON expectation at `r3_failure_trace_baseline.json:104` and the internal
+  arguments at `test_unified_slice_admission.py:476-477` stay).
+- D6 manifest half: planned separately in CLI `docs/plans/2026-11-25-prop-shims-d6-manifest.md`
+  (branch `docs/plans-prop-shims-d6-manifest`). It is the only C-S2 work left.
 
 Revision 6 (2026-11-17). Changes since revision 5, from the Codex rev 5 NO-GO (one DESIGN
 finding) and the cross-check of `plan/prop`, CLI #308 and Dennis's findings (2 V1, 6 DESIGN, 23
@@ -480,7 +498,8 @@ Mechanism, reusing the existing ratchet:
 - Placement in time: the engine baseline is written at the E-F1 head, after A2, A4 and A6 have
   deleted their catches, so those are never baselined. E-F2 (A5), E-S1b (emit helpers: five
   handlers in `context.py` become one in `_dispatch_sink`) and any later 24zi fix lower the
-  `max`. The CLI baseline is written at the C-G2 head; C-F1a (A7, A9) lowers it afterwards.
+  `max`. The CLI baseline is written at the C-G2 head. If C-F1a merges first it skips its ratchet
+  step and C-G2 writes the baseline without the A7 and A9 sites; otherwise C-F1a lowers it afterwards.
 
 A module split that moves a counted handler into a new file adds a key, which the ratchet
 refuses. The split narrows the handler or adds the `raise`; the baseline is never grown. The
@@ -929,7 +948,7 @@ row names.
 | C-G2 | CLI | comment-history guard (vendored module), CLI `swallowed-broad-except` (vendored predicate, sentry, baseline, registry row), K1, bot-commit sentry | 0 (workflow YAML, SVG deletions) | ~450 plus the baseline JSON; deletes the CLI equivalence snapshot; rewrites `_banned_text.py:8-12` | R2 | C-G1; E-G3 and E-F1 merged (vendored sources) |
 | C-S1a | CLI | D1 (both sites, plus `test_mask_api_native.py`), D3 (except `exit_codes.py`; dead `_native_gate.py` arms and their tests), D4 | 6 (`_native_gate.py`, `cli/run/_progress.py`, `cli/preflight.py`, `cli/info.py`, `distribution/selfcheck.py`, `cli/report.py`) | ~170 | R1 | none (0.27.0 ships every name); `cli/run/_progress.py` is a `cli/run/` hot file, so the orchestrator confirms no open writer holds it (LIB L5a, RUN-STREAM) or the hunk rides with the holder |
 | C-S1b | CLI | D2 (with `compile_explain.py`), D3 `exit_codes.py` site, engine-import-guard sentry with one seeded case per covered spelling | 10 (`_mask_secret.py`, `_mask_secret_guidance.py`, `api.py`, `cli/exit_codes.py`, `cli/run/_errors.py`, `cli/run/_prepare.py`, `cli/tokenize.py`, `cli/extras.py`, `ci/engine_logging.py`, `cli/compile_explain.py`); at the cap, so it splits into C-S1b1 (the eight non-`run/` files) and C-S1b2 (`run/` files and the sentry) if one more file appears | ~400 | R1 | C-S1a. `cli/run/_errors.py` and `cli/run/_prepare.py` are hot files: the orchestrator confirms no open writer holds them, or those hunks ride with the holder and the sentry baseline keeps the remaining `run/` sites, shrink-only |
-| C-S2 | CLI | D6b first (demo and `api.py` docstring write or name `scan-set/v1`; four fixtures move; AT-D6b), then D6 readers (AT-D6) | 4 (`cli/io/_scan_set.py`, `cli/io/_targets.py`, `cli/demo.py`, `api.py`) plus the reason registry module | ~300 | R1 | none; `demo.py` is shared with C-F1b, so whichever merges second rebases |
+| C-S2 | CLI | D6b and the saved-scan reader merged (#313). Left: the D6 manifest reader (AT-D6), per CLI plan `2026-11-25-prop-shims-d6-manifest.md` | 4 (`cli/io/_scan_set.py`, `cli/io/_targets.py`, `cli/demo.py`, `api.py`) plus the reason registry module | ~300 | R1 | none; `demo.py` is shared with C-F1b, so whichever merges second rebases |
 | C-F1a | CLI | A7, A8a acceptance and gate-location pin, A9, D5 | 4 (`cli/init.py`, `cli/gate/_layers.py` only if location rendering needs a fix, `cli/run/_render.py`, `cli/run/_execute.py`) | ~180 | R2 (exit code change on a config that exits 0 today) | Surface repin; the open row 63a RUN-STREAM CLI slices (C1l, C1a, C1b) that edit `_execute.py` and `_render.py` merge first |
 | C-F1b | CLI | A8b | 3 (`cli/io/_targets.py`, the module holding `seal_result`, CLI reason registry module) | ~200 | R2 (exit code change) | row 61 DELIV C2a and row 63a RUN-STREAM C1a merged; the section 2.4 amendments applied to both plans |
 
@@ -939,7 +958,8 @@ Ordering:
   the live leak ships ahead of the surface lane and later `execution/` slices stop editing the
   720-line allowlist.
 - After E-G1 the lanes run in parallel in separate worktrees: guard lane E-G2a, E-G2b, E-G3; fix
-  lane E-F1, E-F2; surface lane E-S1a, E-S2a1, E-S2a2, E-S2b, E-S1b, E-S1c in that order. The surface lane is
+  lane E-F1, E-F2; surface lane E-S1a, then E-S1b, E-S2a1, E-S2a2 and E-S2b in any order (whichever
+  merges second rebases), then E-S1c. The surface lane is
   serial because `context.py` (E-S1a, E-S1b), `_chunked_oracle.py` (E-S2a2, E-S1b) and
   `execution/_pipeline.py` and its routing modules (E-S2b, E-S1b) overlap.
 - CLI lanes do not wait for the engine except C-G2 (two vendored modules, from E-G3 and E-F1), E-F0 repin, Surface repin,
