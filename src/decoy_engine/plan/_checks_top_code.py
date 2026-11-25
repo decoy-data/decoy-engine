@@ -30,6 +30,7 @@ from typing import Any
 from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
 from decoy_engine.contracts.bucketize_width import EXACT_INT_BOUND
+from decoy_engine.contracts.label_text import is_utf8_text
 from decoy_engine.execution._strategies._top_code import _PRESETS
 from decoy_engine.plan._errors import PlanCompileError
 
@@ -225,14 +226,14 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                     where=where,
                 )
                 over_label = pc.get("over_label")
-                if not isinstance(over_label, str) or not over_label:
+                if not is_utf8_text(over_label) or not over_label:
                     raise PlanCompileError(
                         code=reasons.plan.TOP_CODE_MISSING_OVER_LABEL,
                         path=(f"tables.{table_name}.columns.{col_name}.provider_config.over_label"),
                         message=(
                             f"top_code column {col_name!r} in table "
                             f"{table_name!r} sets a numeric cap but has no "
-                            "non-empty 'over_label'. Set "
+                            "non-empty 'over_label' that encodes as UTF-8. Set "
                             "'over_label' to the aggregate label for values "
                             'above cap (e.g. "90+").'
                         ),
@@ -270,13 +271,13 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                 where=where,
             )
             under_label = pc.get("under_label")
-            if not isinstance(under_label, str) or not under_label:
+            if not is_utf8_text(under_label) or not under_label:
                 raise PlanCompileError(
                     code=reasons.plan.TOP_CODE_MISSING_UNDER_LABEL,
                     path=(f"tables.{table_name}.columns.{col_name}.provider_config.under_label"),
                     message=(
                         f"top_code column {col_name!r} in table {table_name!r} "
-                        "sets 'floor' but has no non-empty 'under_label'. "
+                        "sets 'floor' but has no non-empty 'under_label' that encodes as UTF-8. "
                         "Set 'under_label' to the "
                         "aggregate label for values below floor."
                     ),

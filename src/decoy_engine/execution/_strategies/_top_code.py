@@ -54,6 +54,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.contracts.bucketize_width import EXACT_INT_BOUND
+from decoy_engine.contracts.label_text import is_utf8_text
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
@@ -159,7 +160,7 @@ def resolve_top_code_settings(cfg: Mapping[str, Any], column: str) -> TopCodeSet
             strategy="top_code",
             message=(
                 f"column {column!r} uses top_code but neither a known preset nor a "
-                "resolvable numeric cap with a non-empty over_label is configured."
+                "resolvable numeric cap with a non-empty UTF-8 over_label is configured."
             ),
         )
     floor, under_label = TopCodeStrategyHandler._resolve_bottom_bound(dict(cfg))
@@ -464,7 +465,8 @@ class TopCodeStrategyHandler:
         if not _is_usable_bound(cap):
             return None
         over_label = cfg.get("over_label")
-        if not isinstance(over_label, str) or not over_label:
+        # A label with no UTF-8 form (a lone surrogate) cannot become an Arrow string.
+        if not is_utf8_text(over_label) or not over_label:
             return None
         return cap, over_label
 
@@ -501,13 +503,13 @@ class TopCodeStrategyHandler:
                 ),
             )
         under_label = cfg.get("under_label")
-        if not isinstance(under_label, str) or not under_label:
+        if not is_utf8_text(under_label) or not under_label:
             raise StrategyError(
                 code=reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE,
                 strategy="top_code",
                 message=(
-                    "top_code sets a floor but no non-empty under_label. Refusing to "
-                    "run rather than silently drop the bottom tail."
+                    "top_code sets a floor but no non-empty under_label that encodes as "
+                    "UTF-8. Refusing to run rather than silently drop the bottom tail."
                 ),
             )
         return floor, under_label

@@ -21,7 +21,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError
 from decoy_engine.contracts.bucketize_width import BUCKETIZE_FORMATS, EXACT_INT_BOUND
+from decoy_engine.contracts.label_text import is_utf8_text
 from decoy_engine.kernel._scalar import passthrough_array
 
 _BOUND = float(EXACT_INT_BOUND)  # 2**53 is exact in float64
@@ -282,6 +285,11 @@ def top_code_array(
     it: an integral value without ``.0``. Null and NaN rows are null unless ``exceptional``
     supplies a label. The counts are the over and under rows, for the warning.
     """
+    if not is_utf8_text(over_label) or (under_label is not None and not is_utf8_text(under_label)):
+        raise ExecutionError(
+            code=reasons.runtime.TOP_CODE_BOUNDS_UNRESOLVABLE,
+            message="top_code labels must be text that encodes as UTF-8.",
+        )
     array = passthrough_array(values)
     _require_numeric(array, "top_code")
     do_under = floor is not None and under_label is not None
