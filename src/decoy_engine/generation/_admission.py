@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine.config import categorical_arrow_type, is_self_reference, per_parent_bounds
+from decoy_engine.generation import stream as gen_stream
 from decoy_engine.generation._numeric_typing import numeric_plan
 from decoy_engine.generation.kinds import (
     constant_arrow_type,
@@ -222,7 +223,7 @@ def classify_plan(
             return decline(table, col, "windowed_date_anchor_via")
         cols = tables[table]["generate_columns"]
         names = [c["name"] for c in cols]
-        anchor_name = col.get("anchor")
+        anchor_name = gen_stream.sibling_input(col)
         if not isinstance(anchor_name, str) or anchor_name not in names:
             return decline(table, col, "windowed_date_anchor_not_in_table")
         if names.index(anchor_name) >= names.index(col["name"]):

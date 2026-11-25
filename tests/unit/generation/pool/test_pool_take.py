@@ -6,8 +6,9 @@ A2 take parity (unit half) and the no-other-gather inventory. The byte-level dig
 
 from __future__ import annotations
 
-import re
+import ast
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -89,21 +90,118 @@ def test_selector_take_matches_select_and_the_same_draw() -> None:
     assert by_take.take(10).to_pylist() == by_select.select(10)
 
 
-# `pool.values[...]` gathers that remain, by file. Each is a keyed or bundle read that is not a
-# REUSE pick: derived indices (`derive_pool_indices`), the MATCH/SCALE source map, and the bundle
-# pool's tuples. The one REUSE gather lives in `_value_pool.pool_pick`.
+def test_select_draws_the_same_indices_as_take_including_null_values() -> None:
+    """`select` and `take` share one draw; a None pool value comes back as None in both."""
+    words = [*_WORDS[:40], None, "x", None]
+    values = _freeze_array(np.array(words, dtype=object))
+    seed = b"\x0b" * 8
+    by_take = PooledSelector(values, seed)
+    by_select = PooledSelector(values, seed)
+    for size in (1, 999, 4096, 7):
+        taken = by_take.take(size).to_pylist()
+        assert taken == by_select.select(size)
+    assert None in by_select.select(2_000)
+
+
+def test_select_gathers_from_the_object_array_without_the_arrow_take(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """the list path is an object gather, so it never pays `take` plus `to_pylist`."""
+    from decoy_engine.generation import _faker_pool
+
+    def refuse(*_args: Any) -> pa.Array:
+        raise AssertionError("select must not call pool_take")
+
+    monkeypatch.setattr(_faker_pool, "pool_take", refuse)
+    values = _freeze_array(np.array(_WORDS, dtype=object))
+    seed = b"\x0c" * 8
+    rng = np.random.default_rng(seed_bytes_to_int(seed))
+    expected = values[rng.integers(0, len(values), size=500)].tolist()
+    assert PooledSelector(values, seed).select(500) == expected
+
+
+def test_a_pool_arrow_cannot_type_builds_and_selects_without_an_arrow_form() -> None:
+    """the selector builds its Arrow form through the guarded `_arrow_form`."""
+    values = _freeze_array(np.array([1, "a", 2.5], dtype=object))
+    selector = PooledSelector(values, b"\x0d" * 8)
+    assert selector.has_arrow is False
+    assert set(selector.select(50)) <= {1, "a", 2.5}
+    with pytest.raises(ValueError, match="no Arrow form"):
+        selector.take(3)
+
+
+# Pool-value gathers that remain, by file and function. A gather is a subscript on a `.values`
+# or `._values` attribute, or on a local name bound to one (`pool_values = pool.values`).
+# Each one outside `pool_pick` is not a REUSE pick: keyed indices (`derive_pool_indices`), the
+# MATCH/SCALE source map, bundle tuples, the selector's object-form `select`, or a numeric
+# shape's breakpoints. `pool_pick` keeps a dual Arrow/object gather because pools built without
+# an Arrow form (mixed-type values Arrow cannot type) must still sample.
 _REMAINING_GATHERS = {
-    "pool/_pool_adapter.py": 1,
-    "pool/_sampler.py": 3,
-    "pool/_value_pool.py": 1,
+    "_faker_pool.py::PooledSelector.select": 1,
+    "pool/_pool_adapter.py::PoolAdapter.generate": 1,
+    "pool/_sampler.py::PoolSampler._deterministic": 1,
+    "pool/_sampler.py::PoolSampler._match_source_cardinality": 1,
+    "pool/_sampler.py::PoolSampler.sample_bundle": 2,
+    "pool/_value_pool.py::pool_pick": 1,
+    "statistical/_sample.py::_sample_shape": 2,
 }
+_VALUE_ATTRS = frozenset({"values", "_values"})
+
+
+def _is_values_attr(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr in _VALUE_ATTRS
+
+
+def _gathers(source: str) -> dict[str, int]:
+    """Count value-array subscripts per enclosing function, following local aliases."""
+    found: dict[str, int] = {}
+
+    def visit(node: ast.AST, scope: tuple[str, ...], aliases: frozenset[str]) -> None:
+        if isinstance(node, ast.ClassDef):
+            scope = (*scope, node.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope = (*scope, node.name)
+            bound = {
+                target.id
+                for sub in ast.walk(node)
+                if isinstance(sub, (ast.Assign, ast.AnnAssign))
+                and sub.value is not None
+                and _is_values_attr(sub.value)
+                for target in (sub.targets if isinstance(sub, ast.Assign) else [sub.target])
+                if isinstance(target, ast.Name)
+            }
+            aliases = aliases | bound
+        if isinstance(node, ast.Subscript) and (
+            _is_values_attr(node.value)
+            or (isinstance(node.value, ast.Name) and node.value.id in aliases)
+        ):
+            key = ".".join(scope) or "<module>"
+            found[key] = found.get(key, 0) + 1
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope, aliases)
+
+    visit(ast.parse(source), (), frozenset())
+    return found
 
 
 def test_no_other_pool_values_gather_remains() -> None:
     root = Path(generation_pkg.__file__).parent
     found: dict[str, int] = {}
     for path in sorted(root.rglob("*.py")):
-        count = len(re.findall(r"\bpool\.values\[", path.read_text(encoding="utf-8")))
-        if count:
-            found[path.relative_to(root).as_posix()] = count
+        rel = path.relative_to(root).as_posix()
+        for where, count in _gathers(path.read_text(encoding="utf-8")).items():
+            found[f"{rel}::{where}"] = count
     assert found == _REMAINING_GATHERS
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        "def f(pool, ix):\n    v = pool.values\n    return v[ix]\n",
+        "def f(pool, ix):\n    v: object = pool.values\n    return [v[i] for i in ix]\n",
+        "class S:\n    def g(self, ix):\n        return self._values[ix]\n",
+        "def f(pool, ix):\n    return pool.values[ix]\n",
+    ],
+)
+def test_the_gather_scan_sees_direct_and_aliased_gathers(planted: str) -> None:
+    assert sum(_gathers(planted).values()) == 1

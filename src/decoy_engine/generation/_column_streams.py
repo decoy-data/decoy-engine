@@ -36,9 +36,10 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine.generation import _faker_pool
-from decoy_engine.generation._bounds import faker_pool_resident_bytes
+from decoy_engine.generation import stream as gen_stream
 from decoy_engine.generation._numeric_typing import sequence_affixes
 from decoy_engine.generation.kinds import ConstantStream, ParametricStream
+from decoy_engine.generation.pool._resident import faker_pool_resident_bytes
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.relational import check_reference_pool
 from decoy_engine.generators.derivation import (
@@ -74,7 +75,7 @@ class WindowedDateStream:
     def __init__(self, col: dict[str, Any], seed: int) -> None:
         from decoy_engine.transforms.windowed_date import WindowedDateConfig
 
-        cfg: dict[str, Any] = {"anchor": col.get("anchor", "")}
+        cfg: dict[str, Any] = {"anchor": gen_stream.sibling_input(col) or ""}
         for key in ("min_days", "max_days", "distribution"):
             if key in col:
                 cfg[key] = col[key]
@@ -199,10 +200,12 @@ class PerRowFakerStream:
 
 
 class PooledFakerStream:
-    supports_array = True
-
     def __init__(self, selector: _faker_pool.PooledSelector) -> None:
         self._selector = selector
+
+    @property
+    def supports_array(self) -> bool:
+        return self._selector.has_arrow
 
     def next_batch(self, offset: int, size: int) -> list[Any]:
         return self._selector.select(size)
@@ -261,10 +264,16 @@ class NullMaskedStream:
         return supports_array(self._inner)
 
     def next_array(self, offset: int, size: int) -> pa.Array:
-        """The inner array with the same mask positions nulled (`if_else` keeps the type)."""
+        """The inner array with the same mask positions nulled.
+
+        A take whose index is null gives a null slot with no value bytes, as `pa.array` does for
+        a `None` cell on the list path, so the written buffers match that path. `if_else` would
+        keep the generated value's bytes under each null.
+        """
         arr: pa.Array = self._inner.next_array(offset, size)  # type: ignore[attr-defined]
-        masked = pa.array(self._rng.random(size) < self._p)
-        return pc.if_else(masked, pa.scalar(None, type=arr.type), arr)  # type: ignore[attr-defined, unused-ignore]
+        masked = self._rng.random(size) < self._p
+        positions = pa.array(np.arange(size, dtype=np.int64), mask=masked)
+        return pc.take(arr, positions)  # type: ignore[no-untyped-call, unused-ignore]
 
     def next_batch(self, offset: int, size: int) -> list[Any]:
         return self.next_batch_from(offset, size, {})

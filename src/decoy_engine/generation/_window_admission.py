@@ -30,6 +30,7 @@ from decoy_engine.contracts.distribution_snapshot import (
     MIN_YEAR,
 )
 from decoy_engine.errors import DecoyError
+from decoy_engine.generation import stream as gen_stream
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -452,7 +453,8 @@ def _class_b_reason(
             )
         return "condition_parent_class_b" if verdicts.get(spec.condition_on) else None
     if kind == "windowed_date":
-        anchor = next((c for c in earlier if c["name"] == col.get("anchor")), None)
+        anchor_name = gen_stream.sibling_input(col)
+        anchor = next((c for c in earlier if c["name"] == anchor_name), None)
         if anchor is None:
             return "windowed_date_anchor_not_earlier"
         if verdicts.get(anchor["name"]):

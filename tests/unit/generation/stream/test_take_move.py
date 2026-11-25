@@ -1,54 +1,81 @@
 """GEN-STREAM-ALL S1a A2: the take path and the moved batch assembler change no output byte.
 
-The digests below were captured at engine `origin/main` `9f7bb1f4a`, before `pool_take` and
+The digests were captured at engine `origin/main` `9f7bb1f4a`, before `pool_take` and
 `generation/stream/_batches.py` existed, for each legacy pooled type at 120,000 rows with
-`null_probability: 0.1`.
+`null_probability: 0.1`: the Arrow IPC stream of the resident table (every buffer, including
+the bytes under null slots) and the Parquet file the bounded sink commits.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 import pytest
 
 from decoy_engine.generation import _faker_pool, _streamed
 from tests.parity import _f0_fixtures as fx
 from tests.parity._fr0_support import run_resident, run_streamed
-from tests.unit.generation.stream._support import LEGACY_TEN, faker_config, table_digest
+from tests.unit.generation.stream._support import LEGACY_TEN, faker_config, ipc_bytes
 
-MAIN_DIGESTS = {
-    "first_name": "d588c77fcaa5f125020b6d1ba9e0e7f79bf1af2f3616527f998d2f533519e81a",
-    "last_name": "97739c264eebf9146405e33cb58e3cf67c31cde8f500d1e4e887a7f7da0617c8",
-    "name": "9732663fc0edcc7985b028a8bb5fec75130d1ac6fef4689ea59340f11b7844f7",
-    "prefix": "298d37f761fce438dd5d53c3990da4425e5ea694c8f82473172a9ceeb67ad949",
-    "suffix": "a5cb83ba4abaf3805e9af89d2639cd30fa0efdecc3f43482d6d64e0d19c255c2",
-    "city": "d92cadef1014a5ee8561b885b3379f1720b6c6573866238401a1437075d751aa",
-    "state": "3b64d474a83250713f8bb4f9b7039780b375adcc70f55ac749601697dc7d3f6d",
-    "country": "4e3c25d343bb7434b46c2c506e614d3727c09a11efaee217052cfbcf2b4943d0",
-    "job": "8641d3499f4e10aad3fcb4a6edb8ffc5edbcb46386116540ae9ec19f3e397b75",
-    "company": "233d450472fbe0c0c3d279e10a0cf5d57f52ccf9fc59514a01e76d97b04747d3",
+MAIN_IPC_DIGESTS = {
+    "first_name": "a901f04459da4eadeb7fdf262cdf3df134667e59a2bf5fd1f72b06ff8a6765e9",
+    "last_name": "e544bda354662c917cffc372f0ed09225c2ad2c43347d8454511823df908f610",
+    "name": "1504f1879a28f676fd074a0854b8decfd169aac34f4b118fb07884431b22e33f",
+    "prefix": "ffd48aa3aa2eed3f2ea1ebe2d65826c7dd7924df71a955ca959ba8ad435e2c7e",
+    "suffix": "e4d110583f389bd253255b49a45d9157e4f88f8e079c8eb27399e057bb05667b",
+    "city": "15c5bcdd640af1303e3cdcc417ac21f58723f87ff005e03ec9ff48059b27e239",
+    "state": "d05764069002aafb56cc6e11403960729beebcae290a145e7abb03d93adb4516",
+    "country": "44e85b4bdf8ac97b6e85e2b6d68f00790ae484aacb8905aeb93453140209c1b5",
+    "job": "d201fc26f3cccc88883d2c3a78159f364226ce52e3a282c123051745ae8912a9",
+    "company": "16b6d1a12105e05334ce2b16ccacc153558f5db1cba6c8c737432be73e20e9e8",
+}
+MAIN_PARQUET_DIGESTS = {
+    "company": "4f769961da88437c828bc247d501840dc8eed7a4d32dc27152fe421afba6327d",
+    "first_name": "68b7617d1daf8fc3ddf4bc852e172aba259aefc3c124a53ca555bb6de94cedb4",
+    "state": "415d56c1427b30e60eedb5e53dc66d7ec326a3d9318f4150c687f0eec33b47f6",
 }
 _ROWS = 120_000
 
 
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def test_every_legacy_type_has_a_captured_digest() -> None:
-    assert set(MAIN_DIGESTS) == set(LEGACY_TEN)
+    assert set(MAIN_IPC_DIGESTS) == set(LEGACY_TEN)
 
 
 @pytest.mark.parametrize("faker_type", LEGACY_TEN)
-def test_resident_bytes_equal_the_pre_take_digest(faker_type: str) -> None:
+def test_resident_ipc_buffers_equal_the_pre_take_digest(faker_type: str) -> None:
     cfg = faker_config(faker_type, _ROWS, null_probability=0.1)
     table = run_resident(cfg, batch_rows=4096)["t"]
-    assert table_digest(table) == MAIN_DIGESTS[faker_type]
+    assert _sha(ipc_bytes(table)) == MAIN_IPC_DIGESTS[faker_type]
 
 
-@pytest.mark.parametrize("faker_type", ["first_name", "company", "state"])
-def test_sink_bytes_equal_the_pre_take_digest(faker_type: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("faker_type", sorted(MAIN_PARQUET_DIGESTS))
+def test_sink_parquet_and_ipc_bytes_equal_the_pre_take_digest(
+    faker_type: str, tmp_path: Path
+) -> None:
     cfg = faker_config(faker_type, _ROWS, null_probability=0.1)
     _, tables = run_streamed(cfg, tmp_path)
-    assert table_digest(tables["t"]) == MAIN_DIGESTS[faker_type]
+    assert _sha((tmp_path / "t.parquet").read_bytes()) == MAIN_PARQUET_DIGESTS[faker_type]
+    assert _sha(ipc_bytes(tables["t"])) == MAIN_IPC_DIGESTS[faker_type]
+
+
+@pytest.mark.parametrize("null_probability", [0.1, 0.5, 1.0])
+def test_a_null_slot_holds_no_value_bytes(null_probability: float) -> None:
+    """The masked Arrow column has the buffers of the same values built from a list."""
+    cfg = faker_config("city", _ROWS, null_probability=null_probability)
+    column = run_resident(cfg, batch_rows=4096)["t"].column("v")
+    rebuilt = pa.chunked_array(
+        [pa.array(chunk.to_pylist(), type=chunk.type) for chunk in column.chunks], type=column.type
+    )
+    as_table = pa.table({"v": column})
+    assert ipc_bytes(as_table) == ipc_bytes(pa.table({"v": rebuilt}))
 
 
 def test_the_assembler_lives_in_the_stream_package() -> None:

@@ -40,3 +40,12 @@ def table_digest(table: pa.Table) -> str:
             h.update(b"\xff" if value is None else str(value).encode())
             h.update(b"\x1f")
     return h.hexdigest()
+
+
+def ipc_bytes(table: pa.Table) -> bytes:
+    """The Arrow IPC stream of `table` as one chunk: every buffer, bytes under null slots too."""
+    combined = table.replace_schema_metadata(None).combine_chunks()
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, combined.schema) as writer:
+        writer.write_table(combined)
+    return bytes(sink.getvalue().to_pybytes())

@@ -40,7 +40,6 @@ from decoy_engine.generation._bounds import (
     batch_buffer_bytes,
     compute_payload_bounds,
     detected_memory_bytes,
-    faker_pool_resident_bytes,
     generation_floor_shortfall,
     key_pool_bytes,
     legacy_table_bytes,
@@ -57,6 +56,7 @@ from decoy_engine.generation._column_streams import (
     make_column_stream,
 )
 from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
+from decoy_engine.generation.pool._resident import faker_pool_resident_bytes
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.relational import reference_policies
 from decoy_engine.generation.stream._batches import check_width, table_batches

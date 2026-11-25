@@ -8,7 +8,8 @@ list when nothing needs the Python values:
 
 - a declared `output_type` casts Python values;
 - a key collector (`reference` parent) reads Python values;
-- a `windowed_date` anchor is read as a sibling list by a later column;
+- a later column reads it as a sibling list (`stream.sibling_input`: a `windowed_date`
+  anchor, a `condition_on` parent);
 - the array's type must equal the schema's, otherwise the list path parses and casts it, so a
   numeric column fed by text cells is converted exactly as before.
 
@@ -24,6 +25,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine.generation import stream as gen_stream
 from decoy_engine.generation._budget_ledger import GenerationBudgetExceeded
 from decoy_engine.generation._column_streams import draw_batch, supports_array
 from decoy_engine.generation._numeric_typing import restore_declared
@@ -46,6 +48,28 @@ def check_width(arr: pa.Array, bound: int, column: str) -> None:
         )
 
 
+def sibling_read_names(cols: Sequence[dict[str, Any]]) -> frozenset[str]:
+    """The columns a later column of the batch reads as a sibling list (`sibling_input`)."""
+    return frozenset(n for c in cols if (n := gen_stream.sibling_input(c)) is not None)
+
+
+def array_columns(
+    cols: Sequence[dict[str, Any]],
+    streams: Sequence[ColumnStream],
+    declared: Mapping[str, Any],
+    collectors: Mapping[str, KeyPool],
+) -> list[bool]:
+    """Per column, whether its batch may stay an Arrow array (no consumer needs Python values)."""
+    read = sibling_read_names(cols)
+    return [
+        supports_array(stream)
+        and c["name"] not in declared
+        and c["name"] not in collectors
+        and c["name"] not in read
+        for c, stream in zip(cols, streams, strict=True)
+    ]
+
+
 def table_batches(
     table: dict[str, Any],
     schema: pa.Schema,
@@ -59,14 +83,7 @@ def table_batches(
     cols = table["generate_columns"]
     names = [c["name"] for c in cols]
     declared = output_types(cols)
-    anchors = {c.get("anchor") for c in cols if c.get("type") == "windowed_date"}
-    array_ok = [
-        supports_array(stream)
-        and name not in declared
-        and name not in collectors
-        and name not in anchors
-        for name, stream in zip(names, streams, strict=True)
-    ]
+    array_ok = array_columns(cols, streams, declared, collectors)
     for size in sizes:
         arrays = []
         # Columns emitted so far in THIS batch, post-null-mask (legacy `generated`): date anchors.

@@ -459,20 +459,33 @@ class PooledSelector:
     def __init__(self, values: Any, selection_seed: bytes) -> None:
         try:
             self._values = values
-            self._arrow = pa.array(values.tolist())
+            self._arrow = _arrow_form(values.tolist())
             self._rng = np.random.default_rng(seed_bytes_to_int(selection_seed))
         except BaseException:
             del selection_seed
             raise
 
+    @property
+    def has_arrow(self) -> bool:
+        """True when the pool also has an Arrow form, so `take` can serve it."""
+        return self._arrow is not None
+
+    def _indices(self, size: int) -> np.ndarray[Any, Any]:
+        return self._rng.integers(0, len(self._values), size=size)
+
     def take(self, size: int) -> pa.Array[Any]:
         """The next `size` picks as one Arrow array, with no Python list in between."""
-        indices = self._rng.integers(0, len(self._values), size=size)
-        return pool_take(self._arrow, indices)
+        if self._arrow is None:
+            raise ValueError("this pool has no Arrow form; read it with select")
+        return pool_take(self._arrow, self._indices(size))
 
     def select(self, size: int) -> list[Any]:
-        """The same picks as Python values, for a batch that needs them as a list."""
-        return list(self.take(size).to_pylist())
+        """The same picks as Python values, gathered from the object array.
+
+        The draw is the one `take` makes. A list consumer gathers from the object array because
+        an Arrow take then `to_pylist` builds every str again (about 20x slower at 1M picks).
+        """
+        return list(self._values[self._indices(size)].tolist())
 
 
 def open_pooled_selector(
