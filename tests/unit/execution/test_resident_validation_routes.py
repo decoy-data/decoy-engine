@@ -347,3 +347,59 @@ def test_a_lazy_source_shorter_than_its_output_is_a_pairing_failure(tmp_path: Pa
     with pytest.raises(ValidatorStateError) as caught:
         dispatch.complete_resident_validation(ValidationSession(config), ctx, result)
     assert caught.value.code == "validator_source_pairing_mismatch"
+
+
+def test_a_resident_paired_source_gives_the_resident_verdict(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from decoy_engine.validators import validate
+
+    config, source, output, _ = _leak_case(tmp_path)
+    oracle = validate({"t": output}, config, sources={"t": source})
+    ctx = SimpleNamespace(caller_sources={"t": source}, config=config)
+    result = SimpleNamespace(outputs={"t": output}, quality_metrics={})
+    verdict = _report_or_error(
+        lambda: dispatch.complete_resident_validation(ValidationSession(config), ctx, result)
+    )
+    assert verdict == dataclasses.replace(oracle, elapsed_ms=0.0)
+
+
+def test_a_lazy_source_longer_than_its_output_is_a_pairing_failure(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from decoy_engine.errors import ValidatorStateError
+
+    config, _, output, lazy = _leak_case(tmp_path)
+    ctx = SimpleNamespace(caller_sources={"t": lazy}, config=config)
+    result = SimpleNamespace(outputs={"t": output.slice(0, 7)}, quality_metrics={})
+    with pytest.raises(ValidatorStateError) as caught:
+        dispatch.complete_resident_validation(ValidationSession(config), ctx, result)
+    assert caught.value.code == "validator_source_pairing_mismatch"
+
+
+def test_an_empty_lazy_source_and_output_pass(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from decoy_engine.profile import LazySource
+    from decoy_engine.validators import validate
+
+    config, source, output, _ = _leak_case(tmp_path)
+    path = tmp_path / "empty.parquet"
+    pq.write_table(source.slice(0, 0), path)
+    session = ValidationSession(config)
+    ctx = SimpleNamespace(caller_sources={"t": LazySource(path=path)}, config=config)
+    result = SimpleNamespace(outputs={"t": output.slice(0, 0)}, quality_metrics={})
+    dispatch.complete_resident_validation(session, ctx, result)
+    oracle = validate({"t": output.slice(0, 0)}, config, sources={"t": source.slice(0, 0)})
+    report = dataclasses.replace(session.finish(), elapsed_ms=0.0)
+    assert report == dataclasses.replace(oracle, elapsed_ms=0.0)
+    assert session.unobserved_tables({"t": output}) == []
+
+
+def test_source_batches_for_a_complete_table_add_nothing(tmp_path: Path) -> None:
+    config, source, output, lazy = _leak_case(tmp_path)
+    session = ValidationSession(config)
+    clean = pa.table({"col": [v.as_py() + "_m" for v in source.column("col")]})
+    session.observe_source_batches("t", clean, lazy.iter_batches(4), lazy.schema)
+    session.observe_source_batches("t", output, lazy.iter_batches(4), lazy.schema)
+    assert session.finish().passed is True
