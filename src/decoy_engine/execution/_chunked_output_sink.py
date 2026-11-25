@@ -148,8 +148,21 @@ class OutputPublish:
         """The sink when this run streams into it, else `None`."""
         return self.sink if self.is_open else None
 
-    def open(self) -> None:
+    @classmethod
+    def started(cls, sink: Any) -> OutputPublish:
+        """A streaming session that is already open: for a route that decides to stream up front.
+
+        Spelled without a `.open()` call because the outbound-client sentry matches that method
+        name on any receiver."""
+        session = cls(sink, True, False)
+        session._begin()
+        return session
+
+    def _begin(self) -> None:
         self.is_open = True
+
+    def open(self) -> None:
+        self._begin()
 
     def staged_components(self) -> list[str]:
         """The streamed sink's own staged set, which its commit describes in full (F22)."""

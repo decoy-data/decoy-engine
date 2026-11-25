@@ -516,8 +516,7 @@ def _run_admitted(
     if stream_it:
         from decoy_engine.execution._chunked_output_sink import OutputPublish
 
-        with OutputPublish(sink, True, False) as publish:
-            publish.open()
+        with OutputPublish.started(sink) as publish:
             generate(lambda n, s, b: sink.write_batches(n, _pg.count_rows(n, b), schema=s))
             receipt = publish.commit()
         return GenerationResult(

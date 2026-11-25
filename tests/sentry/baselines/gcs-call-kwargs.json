@@ -262,9 +262,6 @@
     "decoy_engine/fileaccess/_reclaim.py::_push_dir::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
     },
-    "decoy_engine/generation/_streamed.py::_run_admitted::open::0": {
-      "reason": "chunked OutputPublish.open, not a GCS Blob"
-    },
     "decoy_engine/generation/composite/_city_state_zip.py::load_locality_table::open::0": {
       "reason": "pathlib Path.open on a packaged CSV"
     },
