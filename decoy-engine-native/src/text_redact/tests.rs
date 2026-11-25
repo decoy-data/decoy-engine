@@ -41,6 +41,12 @@ fn validators_match_the_reference_vectors() {
     assert!(npi_valid("1234567893"));
     assert!(npi_valid("123-456-7893"));
     assert!(!npi_valid("1234567890"));
+    // The detector keeps the plain CMS check (no NPPES leading 1 or 2 rule), unlike FPE `npi`.
+    assert!(npi_valid("3234567899"));
+    assert!(!crate::checksum::validate(
+        crate::checksum::Scheme::Npi,
+        &"3234567899".chars().collect::<Vec<_>>()
+    ));
     assert!(ipv4_valid("001.002.003.004"));
     assert!(!ipv4_valid("256.1.1.1"));
     assert!(!ipv4_valid("1.2.3"));
