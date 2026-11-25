@@ -25,7 +25,11 @@ import pytest
 from decoy_engine import ConfigError
 from decoy_engine.execution import _faker_degenerate_pin as pin
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR, RUST_COMPANION
-from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
+from decoy_engine.execution.native._crypto_ext import (
+    CryptoExtensionUnavailableError,
+    load_compiled_crypto_kernel,
+)
+from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
 from decoy_engine.execution.native._provider_class import (
     computed_mask_spec,
     resolve_faker_variant,
@@ -43,7 +47,23 @@ from tests.unit.execution.strategies.test_faker_computed_routes import (
 )
 
 _DEFAULT = get_default_registry()
-needs_companion = pytest.mark.skipif(not COMPANION_PRESENT, reason="needs the native companion")
+
+
+def _companion_usable() -> bool:
+    """True when the installed companion loads: right ABI and both kernels pass their self-test."""
+    if not COMPANION_PRESENT:
+        return False
+    try:
+        load_compiled_crypto_kernel()
+        load_compiled_index_kernel()
+    except CryptoExtensionUnavailableError:
+        return False
+    return True
+
+
+needs_companion = pytest.mark.skipif(
+    not _companion_usable(), reason="needs a native companion with a compatible ABI"
+)
 OOC_POOL = "out_of_core_faker_pool_unsupported"
 
 
@@ -425,3 +445,28 @@ class TestOneDeterministicDraw:
             seq = helper.run(tmp_path, column, execution_mode="sequential")
             forced = helper.run(tmp_path, column, execution_mode="out_of_core")
             assert forced.outputs["t"].equals(seq.outputs["t"]), provider
+
+
+class TestMissingIndexKernelBinding:
+    """Both routes bind a missing index kernel through `BoundFakerKernel.bind`: same status."""
+
+    def test_both_routes_report_the_same_status_without_the_index_kernel(self) -> None:
+        from decoy_engine.execution.out_of_core import _hash_run
+        from decoy_engine.execution.sequential import _faker_admission
+
+        def missing(*_a: Any, **_k: Any) -> Any:
+            raise CryptoExtensionUnavailableError("index kernel absent")
+
+        with (
+            mock.patch.object(_faker_admission, "load_compiled_index_kernel", missing),
+            mock.patch.object(_hash_run, "load_compiled_index_kernel", missing),
+            mock.patch.object(_hash_run, "load_compiled_crypto_kernel", missing),
+            mock.patch.object(_faker_admission, "load_compiled_crypto_kernel", missing),
+        ):
+            seq = _faker_admission.load_faker_kernels(None)
+            ooc = _hash_run.OocHashRun()._faker_kernel()
+        assert seq.compiled is False and ooc.compiled is False
+        assert seq.hash_kernel is None and ooc.hash_kernel is None
+        assert type(seq.kernel) is type(ooc.kernel)
+        for spec in (None, computed_mask_spec("uuid", {})):
+            assert seq.backend(spec) == ooc.backend(spec) == PYTHON_SCALAR

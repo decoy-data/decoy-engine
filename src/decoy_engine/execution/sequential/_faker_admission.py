@@ -23,7 +23,6 @@ from decoy_engine.execution.native._crypto_ext import (
 from decoy_engine.execution.native._index_ext import (
     IndexDerivationKernel,
     load_compiled_index_kernel,
-    reference_index_derivation,
 )
 from decoy_engine.execution.native._provider_class import resolve_faker_variant
 from decoy_engine.execution.native._real_type_admission import (
@@ -48,15 +47,14 @@ def load_faker_kernels(native_threads: int | None) -> BoundFakerKernel:
     `BoundFakerKernel.ready` then declines the columns that variant cannot run natively, so a
     missing index kernel does not discard a healthy hash kernel or the reverse."""
     try:
-        index: IndexDerivationKernel = load_compiled_index_kernel()
-        compiled = True
+        index: IndexDerivationKernel | None = load_compiled_index_kernel()
     except CryptoExtensionUnavailableError:
-        index, compiled = reference_index_derivation(), False
+        index = None
     try:
         hash_kernel: KeyedDerivationKernel | None = load_compiled_crypto_kernel()
     except CryptoExtensionUnavailableError:
         hash_kernel = None
-    return BoundFakerKernel(index, native_threads, compiled, hash_kernel)
+    return BoundFakerKernel.bind(index, native_threads, hash_kernel)
 
 
 def faker_admit(

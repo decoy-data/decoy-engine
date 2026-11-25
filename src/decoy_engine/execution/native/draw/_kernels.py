@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR, RUST_COMPANION
+from decoy_engine.execution.native._index_ext import reference_index_derivation
 from decoy_engine.generation.pool import ComputedDrawSpec
 from decoy_engine.providers_v2 import FAMILY_UUID
 
@@ -37,6 +38,19 @@ class BoundFakerKernel:
     native_threads: int | None
     compiled: bool
     hash_kernel: KeyedDerivationKernel | None = None
+
+    @classmethod
+    def bind(
+        cls,
+        index_kernel: IndexDerivationKernel | None,
+        native_threads: int | None,
+        hash_kernel: KeyedDerivationKernel | None = None,
+    ) -> BoundFakerKernel:
+        """Bind the run's kernels. A missing index kernel (None) binds the byte-identical
+        reference and `compiled=False`, so the kernel and its status come from this one decision."""
+        if index_kernel is None:
+            return cls(reference_index_derivation(), native_threads, False, hash_kernel)
+        return cls(index_kernel, native_threads, True, hash_kernel)
 
     def ready(self, spec: ComputedDrawSpec | None) -> bool:
         """True when the compiled kernel `spec`'s variant runs is bound (None means a pool draw)."""
