@@ -147,7 +147,7 @@ def test_missing_weights_raises(tmp_path: Path) -> None:
 def test_corrupt_manifest_raises(tmp_path: Path) -> None:
     pack_dir = _write_minimal_pack(tmp_path)
     (pack_dir / "manifest.json").write_text("NOT JSON }{", encoding="utf-8")
-    with pytest.raises(ModelPackLoadError, match="Corrupt manifest"):
+    with pytest.raises(ModelPackLoadError, match="manifest.json: could not be parsed"):
         ModelPackLoader(pack_dir).load()
 
 
@@ -165,7 +165,7 @@ def test_wrong_feature_schema_version_raises(tmp_path: Path) -> None:
     raw = json.loads((pack_dir / "manifest.json").read_text())
     raw["feature_schema_version"] = "ml99-v99"
     (pack_dir / "manifest.json").write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ModelPackLoadError, match="Feature schema mismatch"):
+    with pytest.raises(ModelPackLoadError, match="feature_schema_version: does not match"):
         ModelPackLoader(pack_dir).load()
 
 
@@ -173,7 +173,9 @@ def test_sha256_mismatch_raises(tmp_path: Path) -> None:
     pack_dir = _write_minimal_pack(tmp_path)
     # Tamper with the weights file
     (pack_dir / "model.joblib").write_bytes(b"tampered bytes")
-    with pytest.raises(ModelPackLoadError, match="SHA-256 mismatch"):
+    with pytest.raises(
+        ModelPackLoadError, match="model.joblib: does not match; expected a sha256 digest"
+    ):
         ModelPackLoader(pack_dir).load()
 
 
@@ -182,7 +184,7 @@ def test_empty_sha256_in_manifest_raises(tmp_path: Path) -> None:
     raw = json.loads((pack_dir / "manifest.json").read_text())
     raw["sha256"] = ""
     (pack_dir / "manifest.json").write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ModelPackLoadError, match="sha256 field is empty"):
+    with pytest.raises(ModelPackLoadError, match="manifest.json.sha256: empty"):
         ModelPackLoader(pack_dir).load()
 
 

@@ -405,7 +405,9 @@ def test_name_hint_diagnostics_name_no_locator(xworld: XWorld) -> None:
     folder.mkdir()
     with pytest.raises(NameHintLoaderError) as control:
         load_name_hint_terms(folder)
-    assert LOCATOR_SENTINEL in str(control.value)
+    # The ambient CLI no longer prints the directory: the member is named under a fixed position.
+    assert LOCATOR_SENTINEL not in str(control.value)
+    assert "pre_scan.name_hints/manifest.yaml" in str(control.value)
     with fileaccess.scope(xworld.policy):
         # An absent manifest and a manifest that lists a missing file both surface as a preserved
         # denial under a strict policy (deny-by-default, no existence oracle): the loader no longer

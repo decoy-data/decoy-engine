@@ -47,7 +47,17 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from decoy_engine import fileaccess, reasons, safe_output
+from decoy_engine import fileaccess, reasons
+from decoy_engine._config_text import (
+    Expected,
+    Name,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+    read_config,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.contracts import distribution_snapshot as dsc
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileRole
@@ -59,14 +69,11 @@ from decoy_engine.generation.statistical._cell_format import (
 from decoy_engine.generation.statistical._numeric_shape import (
     decode_numeric_shape,
     numeric_shape_withheld,
-    redacted_fix_hint,
 )
 from decoy_engine.generation.statistical._snapshot_io import parse_snapshot_json
-from decoy_engine.profiling import (
-    POLICY_RAW,
-    REDACTED_COLUMNS_KEY,
-    REDACTED_POLICIES,
-    VALUE_POLICY_KEY,
+from decoy_engine.generation.statistical._spec_refusals import (
+    dp_carrier_refusal,
+    withheld_values_refusal,
 )
 
 _SUPPORTED_KINDS = ("numeric", "categorical", "datetime", "freetext")
@@ -86,6 +93,10 @@ class StatisticalSpecError(DecoyError):
         self.code = code
         self.message = message
         super().__init__(f"[{code}] {message}")
+
+
+def _refuse(code: str, refusal: Refusal) -> StatisticalSpecError:
+    return StatisticalSpecError(code=code, message=refusal.text)
 
 
 @dataclass(frozen=True)
@@ -178,117 +189,43 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
     """Read + parse a snapshot artifact. Returns `(content_sha256, parsed)`.
     No caching: every call is a fresh read + hash + parse."""
     key = fileaccess.position_key(field_key)
-    failure: str | None = None
-    try:
-        raw = fileaccess.read_all(FileRole.SNAPSHOT, path, key)
-    except OSError as exc:
-        if fileaccess.keeps_class(exc):
-            raise
-        failure = safe_output.safe_error_type(exc).value
-    if failure is not None:
-        # Strict: raised after the handler closes, so the library error is neither cause nor
-        # context (its text can name the file). The message holds the class label only.
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-            message=f"{key} could not be read: {failure}",
-        )
+    at_snapshot = config_position(Name(field_key))
+    # Reading and parsing run through `read_config`, so the refusal holds a position and no
+    # exception text, and has no cause or context.
+    raw = read_config(
+        lambda: fileaccess.read_all(FileRole.SNAPSHOT, path, key),
+        at_snapshot,
+        lambda r: _refuse(reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE, r),
+    )
     digest = hashlib.sha256(raw).hexdigest()
-    snap = parse_snapshot_json(raw, shown=key)
+    snap = parse_snapshot_json(raw, shown=field_key)
     if not isinstance(snap, dict):
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
-            message=f"{key} does not contain a JSON object at the top level.",
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
+                config_refusal(
+                    at_snapshot,
+                    Problem.WRONG_TYPE,
+                    expected=Expected.MAPPING,
+                    got=snap,
+                    hint="The snapshot must be a JSON object at the top level",
+                ),
+            )
         )
     version = snap.get("schema_version")
     if version not in dsc.ACCEPTED_SCHEMA_VERSIONS:
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
-            message=(
-                f"{key} declares an unsupported schema; this engine "
-                f"consumes {dsc.ACCEPTED_SCHEMA_VERSIONS!r}."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
+                config_refusal(
+                    config_position(Name(field_key), "schema_version"),
+                    Problem.MISMATCH,
+                    expected=Expected.SCHEMA_VERSION,
+                    hint="This engine consumes only the accepted schema versions",
+                ),
+            )
         )
     return digest, snap
-
-
-def _snapshot_declares_flag(
-    snap: Mapping[str, Any], col_entry: Mapping[str, Any], source_column: str
-) -> bool:
-    """Does a recognizable DP artifact declare this column a `flag` release --
-    in EITHER of the two places it records a carrier? The `columns` block entry
-    (`col_entry`) and the authoritative `dp.column_schema` entry must agree for a
-    genuine release, but the unverified-refusal below must fire if the column is
-    a flag by EITHER, so zeroing only the columns-block carrier (which
-    `verify_dp_snapshots` never gets to catch, because an undeclared-DP pipeline
-    early-returns) cannot slip a bool column onto the legacy `str()` path. Reading
-    the carrier to REFUSE is always safe; the non-inference rule forbids only
-    reading it to GRANT an exemption."""
-    if col_entry.get("carrier") == "flag":
-        return True
-    dp_block = snap.get("dp")
-    schema = dp_block.get("column_schema") if isinstance(dp_block, Mapping) else None
-    entry = schema.get(source_column) if isinstance(schema, Mapping) else None
-    return isinstance(entry, Mapping) and entry.get("carrier") == "flag"
-
-
-def _refuse_withheld_values(
-    name: Any,
-    snap: Mapping[str, Any],
-    *,
-    source_column: str,
-    kind: Any,
-    dp_verified: bool,
-    condition_on: Any,
-    holds_numeric_shape: bool = False,
-) -> None:
-    """Refuse a column that would sample categories a redacted fit snapshot withheld.
-
-    Only the marker is read, and only to refuse: `value_policy: "raw"` removes this refusal
-    and grants nothing, so the `allow_real_categories` opt-in still applies after it. A
-    snapshot with neither marker key is a legacy file and keeps its old behavior; the
-    placeholder string a profile uses for withheld text is never a signal, because a raw or
-    legacy snapshot can hold it as a real category. Numeric and datetime columns read
-    coarse bins and years that carry no cell value, so they reach it only through a restored
-    `quantile_grid` or `exact_values` block (`holds_numeric_shape`).
-    """
-    if VALUE_POLICY_KEY not in snap and REDACTED_COLUMNS_KEY not in snap:
-        return
-    samples_values = (
-        (kind == "categorical" and not dp_verified)
-        or condition_on is not None
-        or holds_numeric_shape
-    )
-    if not samples_values:
-        return
-    policy = snap.get(VALUE_POLICY_KEY)
-    listed = snap.get(REDACTED_COLUMNS_KEY)
-    well_formed = (
-        isinstance(policy, str) and (policy in REDACTED_POLICIES or policy == POLICY_RAW)
-    ) and (isinstance(listed, (list, tuple)) and all(isinstance(c, str) for c in listed))
-    if well_formed and policy == POLICY_RAW:
-        return
-    if not well_formed:
-        why = (
-            "the snapshot's value-policy marker (`value_policy`, `redacted_columns`) is missing "
-            "or malformed, so it cannot be shown that the values of source column "
-            f"{source_column!r} were kept"
-        )
-    else:
-        named = (source_column,) if condition_on is None else (source_column, str(condition_on))
-        redacted = [c for c in named if c in (listed or ())]
-        if not redacted:
-            return
-        why = (
-            f"the snapshot withheld the real values of source column {redacted[0]!r} "
-            "(a sensitive column, or one with too few rows to release values)"
-        )
-    raise StatisticalSpecError(
-        code=reasons.plan.STATISTICAL_SNAPSHOT_VALUES_REDACTED,
-        message=(
-            f"statistical column {name!r}: {why}, so there are no values to sample. "
-            + redacted_fix_hint(numeric=kind == "numeric" and condition_on is None)
-        ),
-    )
 
 
 def load_spec(
@@ -325,71 +262,38 @@ def load_spec(
     """
     name = col_cfg.get("name", "<unnamed>")
     snap = snapshot
-    source_column = str(col_cfg.get("source_column") or name)
-    col_entry = (snap.get("columns") or {}).get(source_column)
-    if col_entry is None:
-        available = sorted((snap.get("columns") or {}).keys())
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_COLUMN_NOT_IN_SNAPSHOT,
-            message=(
-                f"statistical column {name!r}: source column {source_column!r} is "
-                f"not in the snapshot (available: {available})."
-            ),
-        )
-    # DP-v3 carrier (phase 6, guide section 3.4/3.9): mandatory and strictly
-    # validated ONLY for a column the compiler has verified as a genuine DP
-    # release (`dp_verified` is the compiler's own verdict, threaded in --
-    # never derived by reading the snapshot's own `carrier` key, same
-    # non-inference rule as the `allow_real_categories` exemption below). An
-    # ordinary `distribution-snapshot/v1` column keeps `carrier=None` -- the
-    # legacy sampling path -- even if a stray `carrier` key is present,
-    # because `verify_dp_snapshots` never ran over it to make that key mean
-    # anything. `verify_dp_snapshots` already re-validated the carrier
-    # against kind for a genuine DP release before `dp_verified` was set, so
-    # the check here is defense-in-depth, not the primary gate.
-    carrier: str | None = None
-    if dp_verified:
-        carrier = col_entry.get("carrier")
-        if carrier not in ("number", "flag", "text"):
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_DP_CARRIER_INVALID,
-                message=(
-                    f"statistical column {name!r}: source column {source_column!r} is a "
-                    f"verified DP release but records a carrier that is not one of "
-                    "'number'/'flag'/'text'."
+    # The raw config object, never `str(...)` of it: converting a list or a mapping would turn
+    # its items into text that then looks like an approvable name.
+    source_column = col_cfg.get("source_column") or name
+    at_source = config_position("statistical", Name(name), "source_column")
+    if type(source_column) is not str:
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_COLUMN_NOT_IN_SNAPSHOT,
+                config_refusal(
+                    at_source, Problem.WRONG_TYPE, expected=Expected.STRING, got=source_column
                 ),
             )
-    elif isinstance(snap.get("dp"), Mapping) and _snapshot_declares_flag(
-        snap, col_entry, source_column
-    ):
-        # A recognizable DP artifact (it carries a `dp` block) whose column is a
-        # `flag` (bool-domain) release reached generation WITHOUT the compiler
-        # verifying it: this pipeline declares no `global_settings.dp`, so
-        # `verify_dp_snapshots` early-returned and `dp_verified` is False. The
-        # flag decoder never engages, so the legacy `str()` path would emit the
-        # STRINGS "true"/"false" against the artifact's `bool` dtype -- silent
-        # type corruption. Fail closed: reading the carrier key to REFUSE is
-        # always safe (the non-inference rule forbids only reading it to GRANT
-        # an exemption). Phase 5's now-lifted M-2 guard failed closed here
-        # unconditionally; this restores it for the flag case with a directive.
-        # The `flag` is recognized from EITHER carrier location (Codex
-        # whole-feature BLOCKER): keying only on the columns-block carrier let a
-        # split-declaration artifact -- columns carrier zeroed, dp.column_schema
-        # still `flag` -- bypass this on the undeclared-DP path where no verifier
-        # runs. An ordinary distribution-snapshot/v1 column with a stray
-        # `carrier` and NO `dp` block stays on the legacy path (guide section
-        # 3.9) -- hence the `snap["dp"]` presence condition.
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_FLAG_REQUIRES_DP_DECLARATION,
-            message=(
-                f"statistical column {name!r}: source column {source_column!r} is a DP "
-                "`flag` (bool-domain) release (the snapshot carries a `dp` block), but this "
-                "pipeline does not declare `global_settings.dp`, so the release is not "
-                "verified and the flag decoder does not engage -- the sampler would emit "
-                "'true'/'false' strings against the artifact's `bool` dtype. Declare "
-                "`global_settings.dp` so this column is verified and generated as bool."
-            ),
         )
+    col_entry = (snap.get("columns") or {}).get(source_column)
+    if col_entry is None:
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_COLUMN_NOT_IN_SNAPSHOT,
+                config_refusal(
+                    config_position(
+                        "statistical", Name(name), "source_column", Name(source_column)
+                    ),
+                    Problem.NOT_FOUND,
+                    hint="The source column is not in the snapshot",
+                ),
+            )
+        )
+    carrier, dp_refusal = dp_carrier_refusal(
+        snap, col_entry, source_column, at_source, dp_verified=dp_verified
+    )
+    if dp_refusal is not None:
+        raise_bare(_refuse(*dp_refusal))
 
     kind = col_entry.get("kind")
     cell_format = (
@@ -405,22 +309,30 @@ def load_spec(
         else None
     )
     if kind not in _SUPPORTED_KINDS and not (kind == _EMPTY_KIND and cell_format is not None):
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_KIND_UNSUPPORTED,
-            message=(
-                f"statistical column {name!r}: the snapshot kind has no sampler "
-                f"(supported: {', '.join(_SUPPORTED_KINDS)})."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_KIND_UNSUPPORTED,
+                config_refusal(
+                    at_source,
+                    Problem.NOT_ALLOWED,
+                    choices=_SUPPORTED_KINDS,
+                    hint="The snapshot kind has no sampler",
+                ),
+            )
         )
 
     high_cardinality = col_cfg.get("high_cardinality")
     if high_cardinality is not None and not isinstance(high_cardinality, bool):
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_HIGH_CARDINALITY_INVALID_TYPE,
-            message=(
-                f"statistical column {name!r}: high_cardinality must be a bool, got "
-                f"{type(high_cardinality).__name__}."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_HIGH_CARDINALITY_INVALID_TYPE,
+                config_refusal(
+                    config_position("statistical", Name(name), "high_cardinality"),
+                    Problem.WRONG_TYPE,
+                    expected=Expected.BOOLEAN,
+                    got=high_cardinality,
+                ),
+            )
         )
     high_cardinality = bool(high_cardinality)
 
@@ -430,16 +342,20 @@ def load_spec(
     # above) and gate on `is True` identity, never `bool(...)` coercion.
     allow_real = col_cfg.get("allow_real_categories")
     if allow_real is not None and not isinstance(allow_real, bool):
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_ALLOW_REAL_CATEGORIES_INVALID_TYPE,
-            message=(
-                f"statistical column {name!r}: allow_real_categories must be a "
-                f"bool, got {type(allow_real).__name__}."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_ALLOW_REAL_CATEGORIES_INVALID_TYPE,
+                config_refusal(
+                    config_position("statistical", Name(name), "allow_real_categories"),
+                    Problem.WRONG_TYPE,
+                    expected=Expected.BOOLEAN,
+                    got=allow_real,
+                ),
+            )
         )
 
     col_stats = col_entry.get("stats") if isinstance(col_entry.get("stats"), dict) else {}
-    _refuse_withheld_values(
+    withheld = withheld_values_refusal(
         name,
         snap,
         source_column=source_column,
@@ -450,16 +366,24 @@ def load_spec(
         and not dp_verified
         and numeric_shape_withheld(col_stats),
     )
+    if withheld is not None:
+        raise_bare(_refuse(reasons.plan.STATISTICAL_SNAPSHOT_VALUES_REDACTED, withheld))
 
     if high_cardinality and col_cfg.get("allow_real_categories") is not True:
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_HIGH_CARDINALITY_REQUIRES_REAL_CATEGORIES,
-            message=(
-                f"statistical column {name!r}: high_cardinality retains the FULL "
-                f"observed category vocabulary (no top-K collapse), a larger "
-                f"disclosure than the default; it requires `allow_real_categories: "
-                f"true` on the same column (explicit disclosure opt-in)."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_HIGH_CARDINALITY_REQUIRES_REAL_CATEGORIES,
+                config_refusal(
+                    config_position("statistical", Name(name), "high_cardinality"),
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "high_cardinality retains the FULL observed category vocabulary "
+                        "(no top-K collapse), a larger disclosure than the default; it "
+                        "requires `allow_real_categories: true` on the same column "
+                        "(explicit disclosure opt-in)"
+                    ),
+                ),
+            )
         )
 
     if (
@@ -467,25 +391,36 @@ def load_spec(
         and not dp_verified
         and col_cfg.get("allow_real_categories") is not True
     ):
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_REAL_CATEGORIES_NOT_ALLOWED,
-            message=(
-                f"statistical column {name!r}: the snapshot's top_values contain REAL "
-                f"source values; emitting them requires `allow_real_categories: true` "
-                f"on the column (explicit disclosure opt-in), unless the compiler has "
-                f"verified this snapshot as an OpenDP-certified DP release."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_REAL_CATEGORIES_NOT_ALLOWED,
+                config_refusal(
+                    config_position("statistical", Name(name), "allow_real_categories"),
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "The snapshot's top_values contain REAL source values; emitting "
+                        "them requires `allow_real_categories: true` on the column "
+                        "(explicit disclosure opt-in), unless the compiler has verified "
+                        "this snapshot as an OpenDP-certified DP release"
+                    ),
+                ),
+            )
         )
 
     if high_cardinality and kind != "categorical":
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_HIGH_CARDINALITY_KIND_INVALID,
-            message=(
-                f"statistical column {name!r}: high_cardinality requires a "
-                f"categorical snapshot kind (got {kind!r}). Re-fit the source "
-                f"column with high_cardinality set so the fit step forces it "
-                f"categorical."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_HIGH_CARDINALITY_KIND_INVALID,
+                config_refusal(
+                    config_position("statistical", Name(name), "high_cardinality"),
+                    Problem.MISMATCH,
+                    hint=(
+                        "high_cardinality requires a categorical snapshot kind. Re-fit the "
+                        "source column with high_cardinality set so the fit step forces it "
+                        "categorical"
+                    ),
+                ),
+            )
         )
 
     # HIGH-2 (gate remediation): `high_cardinality: true` on the generate
@@ -498,16 +433,21 @@ def load_spec(
     # permanently drop it. Provenance marker, not `other_count`, is the
     # source of truth (DP snapshots deep-copy the marker through noising).
     if high_cardinality and col_stats.get("high_cardinality") is not True:
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_HIGH_CARDINALITY_SNAPSHOT_MISMATCH,
-            message=(
-                f"statistical column {name!r}: high_cardinality is set but the "
-                f"snapshot column {source_column!r} was not fit with full-vocabulary "
-                f"retention (no `high_cardinality` marker on the column stats). "
-                f"Re-fit the source column with "
-                f"`compute_distribution_snapshot(..., high_cardinality_columns=[...])` "
-                f"before setting high_cardinality: true here."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_HIGH_CARDINALITY_SNAPSHOT_MISMATCH,
+                config_refusal(
+                    config_position("statistical", Name(name), "high_cardinality"),
+                    Problem.MISMATCH,
+                    hint=(
+                        "high_cardinality is set but the snapshot column was not fit with "
+                        "full-vocabulary retention (no `high_cardinality` marker on the "
+                        "column stats). Re-fit the source column with "
+                        "`compute_distribution_snapshot(..., high_cardinality_columns=[...])` "
+                        "before setting high_cardinality: true here"
+                    ),
+                ),
+            )
         )
 
     if kind == "numeric":
@@ -515,9 +455,15 @@ def load_spec(
 
     other_mode = str(col_cfg.get("other_mode") or "redistribute")
     if other_mode not in _OTHER_MODES:
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_OTHER_MODE_INVALID,
-            message=(f"statistical column {name!r}: other_mode is not one of {_OTHER_MODES}."),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_OTHER_MODE_INVALID,
+                config_refusal(
+                    config_position("statistical", Name(name), "other_mode"),
+                    Problem.NOT_ALLOWED,
+                    choices=_OTHER_MODES,
+                ),
+            )
         )
 
     # `emit` inserts OTHER_TOKEN ("__other__") as a sampled value, which is not
@@ -525,41 +471,72 @@ def load_spec(
     # placeholder to emit. Flag columns redistribute tail mass across
     # true/false instead (guide section 3.4).
     if carrier == "flag" and other_mode == "emit":
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_FLAG_OTHER_MODE_EMIT_INVALID,
-            message=(
-                f"statistical column {name!r}: other_mode='emit' is not valid for a "
-                f"`flag` carrier column ({OTHER_TOKEN!r} is not a bool value); use "
-                "other_mode='redistribute' (the default) for flag columns."
-            ),
+        raise_bare(
+            _refuse(
+                reasons.plan.STATISTICAL_FLAG_OTHER_MODE_EMIT_INVALID,
+                config_refusal(
+                    config_position("statistical", Name(name), "other_mode"),
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "other_mode='emit' is not valid for a `flag` carrier column "
+                        "('__other__' is not a bool value); use other_mode='redistribute' "
+                        "(the default) for flag columns"
+                    ),
+                ),
+            )
         )
 
     condition_on = col_cfg.get("condition_on")
     joint: dict[str, Any] | None = None
     parent_first = False
     if condition_on is not None:
-        condition_on = str(condition_on)
+        at_condition = config_position("statistical", Name(name), "condition_on")
         if kind != "categorical":
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_CONDITION_KIND_INVALID,
-                message=(
-                    f"statistical column {name!r}: condition_on is supported for "
-                    f"categorical columns only (snapshot kind here: {kind!r})."
-                ),
+            raise_bare(
+                _refuse(
+                    reasons.plan.STATISTICAL_CONDITION_KIND_INVALID,
+                    config_refusal(
+                        at_condition,
+                        Problem.NOT_ALLOWED,
+                        hint="condition_on is supported for categorical columns only",
+                    ),
+                )
             )
-        pair = sorted((condition_on, source_column))
-        for entry in snap.get("joints") or []:
-            if list(entry.get("columns") or []) == pair:
-                joint = entry
-                break
+        # Only a plain string names a column: the raw value is looked at as it is, never
+        # converted, so a list or a mapping cannot turn its items into a name.
+        if type(condition_on) is str:
+            pair = sorted((condition_on, source_column))
+            for entry in snap.get("joints") or []:
+                if list(entry.get("columns") or []) == pair:
+                    joint = entry
+                    break
+        if joint is None and type(condition_on) is not str:
+            raise_bare(
+                _refuse(
+                    reasons.plan.STATISTICAL_JOINT_MISSING,
+                    config_refusal(
+                        at_condition,
+                        Problem.WRONG_TYPE,
+                        expected=Expected.STRING,
+                        got=condition_on,
+                    ),
+                )
+            )
         if joint is None:
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_JOINT_MISSING,
-                message=(
-                    f"statistical column {name!r}: the snapshot has no joint "
-                    f"contingency for ({condition_on!r}, {source_column!r}). "
-                    f"Re-fit with `decoy fit --joint {condition_on},{source_column}`."
-                ),
+            raise_bare(
+                _refuse(
+                    reasons.plan.STATISTICAL_JOINT_MISSING,
+                    config_refusal(
+                        config_position(
+                            "statistical", Name(name), "condition_on", Name(condition_on)
+                        ),
+                        Problem.NOT_FOUND,
+                        hint=(
+                            "The snapshot has no joint contingency for this column pair. "
+                            "Re-fit with `decoy fit --joint <condition_on>,<source_column>`"
+                        ),
+                    ),
+                )
             )
         parent_first = joint["columns"][0] == condition_on
 
@@ -567,12 +544,18 @@ def load_spec(
     if kind == "datetime":
         buckets = dsc.decoded_or_none(snap.get("schema_version"), col_stats)
         if buckets is None:
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
-                message=(
-                    f"statistical column {name!r}: the snapshot schema_version or the "
-                    "datetime year_bins is not a supported shape."
-                ),
+            raise_bare(
+                _refuse(
+                    reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
+                    config_refusal(
+                        at_source,
+                        Problem.MISMATCH,
+                        hint=(
+                            "The snapshot schema_version or the datetime year_bins is not "
+                            "a supported shape"
+                        ),
+                    ),
+                )
             )
     return StatisticalSpec(
         column=str(name),

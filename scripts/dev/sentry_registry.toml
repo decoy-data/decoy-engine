@@ -288,6 +288,10 @@ id = "faker-native-allowlist-total"
 baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
 
 [[sentry]]
+id = "config-refusal-text"
+baseline = "tests/sentry/baselines/config-refusal-text.json"
+
+[[sentry]]
 id = "engine-exception-text-copies"
 baseline = "tests/sentry/baselines/engine-exception-text-copies.json"
 approved_growth = [

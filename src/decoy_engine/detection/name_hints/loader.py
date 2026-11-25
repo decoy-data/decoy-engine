@@ -31,16 +31,24 @@ require restarting the engine.
 from __future__ import annotations
 
 import stat
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
-import yaml
-
 from decoy_engine import fileaccess
+from decoy_engine._config_text import (
+    Expected,
+    Member,
+    Name,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+    read_config,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import DirHandle, FileAccess, FileAccessDenied, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import serial
-from decoy_engine.safe_output import yaml_error_text
 
 _V1_DIR = Path(__file__).parent / "v1"
 _MANIFEST_NAME = "manifest.yaml"
@@ -49,9 +57,10 @@ _MANIFEST_NAME = "manifest.yaml"
 class NameHintLoaderError(DecoyError):
     """Raised when the name-hint library cannot be loaded.
 
-    Names the offending file and a clear reason so the operator can fix the YAML without
-    grep-bisecting the directory: the real path under the ambient CLI policy, the capability
-    display under any other. A strict policy preserves a denial rather than translating it.
+    Names the offending file (its bare member name under `pre_scan.name_hints`), the field
+    and a closed reason, never the directory, a path or a supplied value, so the operator can
+    fix the YAML without grep-bisecting. A strict policy preserves a denial rather than
+    translating it.
     """
 
 
@@ -70,30 +79,19 @@ def load_name_hint_terms(
     handle: DirHandle
     if directory is None:
         handle = fileaccess.engine_dir_handle(_V1_DIR)
-        target = _V1_DIR
     else:
         policy = fileaccess.capture(file_access)
         handle = policy.open_dir(
             FileRequest(FileRole.MODEL_PACK_ROOT, "read_dir", str(directory), "pre_scan.name_hints")
         )
-        # Diagnostics name the directory by path under the ambient CLI policy and by config
-        # position under any other.
-        target = directory if fileaccess.is_ambient(policy) else Path("pre_scan.name_hints")
     try:
-        return _load_terms(handle, target)
+        return _load_terms(handle)
     finally:
         handle.close()
 
 
-def _child_display(target: Path, name: str) -> str:
-    """How a diagnostic names a file the manifest lists. Never `target / name`: an absolute or
-    `..` member name would replace or climb out of the directory display and surface a real
-    locator (``Path("pre_scan.name_hints") / "/etc/secret"`` is ``Path("/etc/secret")``). The
-    ambient CLI keeps the real path; any other policy names the capability display and the bare
-    member name only."""
-    if fileaccess.is_ambient():
-        return str(target / name)
-    return f"{target}/{PurePosixPath(name).name}"
+def _refuse(refusal: Refusal) -> NameHintLoaderError:
+    return NameHintLoaderError(refusal.text)
 
 
 def _is_file(handle: DirHandle, name: str) -> bool:
@@ -114,53 +112,84 @@ def _is_file(handle: DirHandle, name: str) -> bool:
         return False
 
 
-def _load_terms(handle: DirHandle, target: Path) -> dict[str, list[str]]:
-    manifest_display = _child_display(target, _MANIFEST_NAME)
+def _load_terms(handle: DirHandle) -> dict[str, list[str]]:
     if not _is_file(handle, _MANIFEST_NAME):
-        raise NameHintLoaderError(
-            f"name-hint manifest not found at {manifest_display}. "
-            "Every name-hint directory must contain a manifest.yaml that "
-            "lists the YAML files to load."
+        raise_bare(
+            _refuse(
+                config_refusal(
+                    config_position("pre_scan", "name_hints", Member(_MANIFEST_NAME)),
+                    Problem.NOT_FOUND,
+                    hint=(
+                        "Every name-hint directory must contain a manifest.yaml "
+                        "that lists the YAML files to load"
+                    ),
+                )
+            )
         )
 
     manifest = _read_yaml(handle, _MANIFEST_NAME)
     files = manifest.get("files") if isinstance(manifest, dict) else None
-    if not isinstance(files, list) or not files:
-        raise NameHintLoaderError(f"{manifest_display} must define a non-empty `files:` list.")
+    at_files = config_position("pre_scan", "name_hints", Member(_MANIFEST_NAME), "files")
+    if files is None:
+        raise_bare(
+            _refuse(config_refusal(at_files, Problem.MISSING, expected=Expected.NON_EMPTY_LIST))
+        )
+    if not isinstance(files, list):
+        raise_bare(
+            _refuse(
+                config_refusal(
+                    at_files, Problem.WRONG_TYPE, expected=Expected.NON_EMPTY_LIST, got=files
+                )
+            )
+        )
+    if not files:
+        raise_bare(
+            _refuse(config_refusal(at_files, Problem.EMPTY, expected=Expected.NON_EMPTY_LIST))
+        )
 
-    # Tracks which file declared each detector_id so a collision error
-    # can name both sides. Order of insertion mirrors manifest order
-    # so error messages point at the LATER file (the new one being
-    # added), not the first.
-    detector_origin: dict[str, str] = {}
+    # Tracks which detector_ids were declared so a collision error names the later file (the
+    # new one being added), not the first.
+    detector_ids: set[str] = set()
     merged: dict[str, list[str]] = {}
 
-    for fname in files:
+    for idx, fname in enumerate(files):
+        at_file = config_position("pre_scan", "name_hints", Member(_MANIFEST_NAME), "files", idx)
         if not isinstance(fname, str):
-            raise NameHintLoaderError(
-                f"{manifest_display} has a `files:` entry that is not a string "
-                f"({type(fname).__name__})."
+            raise_bare(
+                _refuse(
+                    config_refusal(at_file, Problem.WRONG_TYPE, expected=Expected.STRING, got=fname)
+                )
             )
-        file_display = _child_display(target, fname)
         if not _is_file(handle, fname):
-            raise NameHintLoaderError(
-                f"{manifest_display} lists a file ({file_display}) that does not exist."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position("pre_scan", "name_hints", Member(fname)),
+                        Problem.NOT_FOUND,
+                        expected=Expected.FILE,
+                    )
+                )
             )
-        for det_id, terms in _read_detector_file(handle, fname, file_display).items():
-            if det_id in merged:
-                first = detector_origin[det_id]
-                raise NameHintLoaderError(
-                    f"detector_id {det_id!r} is declared in both "
-                    f"{first} and {file_display}. Each detector_id may "
-                    "appear in exactly one file."
+        for det_id, terms in _read_detector_file(handle, fname).items():
+            if det_id in detector_ids:
+                raise_bare(
+                    _refuse(
+                        config_refusal(
+                            config_position(
+                                "pre_scan", "name_hints", Member(fname), "detectors", Name(det_id)
+                            ),
+                            Problem.DUPLICATE,
+                            hint="Each detector_id may appear in exactly one file",
+                        )
+                    )
                 )
             merged[det_id] = terms
-            detector_origin[det_id] = file_display
+            detector_ids.add(det_id)
 
     return merged
 
 
-def _read_detector_file(handle: DirHandle, name: str, display: str) -> dict[str, list[str]]:
+def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
     """Parse one YAML file's ``detectors:`` list into {detector_id: [terms]}.
 
     A file with no detectors (empty list or missing key) is permitted
@@ -171,59 +200,130 @@ def _read_detector_file(handle: DirHandle, name: str, display: str) -> dict[str,
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise NameHintLoaderError(
-            f"{display} must be a YAML mapping at the top level, got {type(data).__name__}."
+        raise_bare(
+            _refuse(
+                config_refusal(
+                    config_position("pre_scan", "name_hints", Member(name)),
+                    Problem.WRONG_TYPE,
+                    expected=Expected.MAPPING,
+                    got=data,
+                )
+            )
         )
     raw_entries = data.get("detectors")
     if raw_entries is None:
         return {}
     if not isinstance(raw_entries, list):
-        raise NameHintLoaderError(
-            f"{display} `detectors:` must be a list, got {type(raw_entries).__name__}."
+        raise_bare(
+            _refuse(
+                config_refusal(
+                    config_position("pre_scan", "name_hints", Member(name), "detectors"),
+                    Problem.WRONG_TYPE,
+                    expected=Expected.LIST,
+                    got=raw_entries,
+                )
+            )
         )
 
     out: dict[str, list[str]] = {}
     for idx, entry in enumerate(raw_entries):
+        at_entry = config_position("pre_scan", "name_hints", Member(name), "detectors", idx)
         if not isinstance(entry, dict):
-            raise NameHintLoaderError(
-                f"{display} entry #{idx} must be a mapping, got {type(entry).__name__}."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        at_entry, Problem.WRONG_TYPE, expected=Expected.MAPPING, got=entry
+                    )
+                )
             )
         det_id = entry.get("detector_id")
         patterns = entry.get("patterns")
         if not isinstance(det_id, str) or not det_id:
-            raise NameHintLoaderError(
-                f"{display} entry #{idx} is missing a non-empty `detector_id:` string."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position(
+                            "pre_scan", "name_hints", Member(name), "detectors", idx, "detector_id"
+                        ),
+                        (
+                            Problem.MISSING
+                            if det_id is None
+                            else Problem.EMPTY
+                            if det_id == ""
+                            else Problem.WRONG_TYPE
+                        ),
+                        expected=Expected.NON_EMPTY_STRING,
+                        got=det_id,
+                    )
+                )
             )
+        at_patterns = config_position(
+            "pre_scan", "name_hints", Member(name), "detectors", Name(det_id), "patterns"
+        )
         if not isinstance(patterns, list) or not patterns:
-            raise NameHintLoaderError(
-                f"{display} detector {det_id!r} must define a non-empty `patterns:` list."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        at_patterns,
+                        (
+                            Problem.MISSING
+                            if patterns is None
+                            else Problem.EMPTY
+                            if patterns == []
+                            else Problem.WRONG_TYPE
+                        ),
+                        expected=Expected.NON_EMPTY_LIST,
+                        got=patterns,
+                    )
+                )
             )
         cleaned_terms: list[str] = []
         for t_idx, term in enumerate(patterns):
             if not isinstance(term, str) or not term:
-                raise NameHintLoaderError(
-                    f"{display} detector {det_id!r} pattern #{t_idx} must be a "
-                    f"non-empty string, got {type(term).__name__}."
+                raise_bare(
+                    _refuse(
+                        config_refusal(
+                            config_position(
+                                "pre_scan",
+                                "name_hints",
+                                Member(name),
+                                "detectors",
+                                Name(det_id),
+                                "patterns",
+                                t_idx,
+                            ),
+                            Problem.EMPTY if term == "" else Problem.WRONG_TYPE,
+                            expected=Expected.NON_EMPTY_STRING,
+                            got=term,
+                        )
+                    )
                 )
             cleaned_terms.append(term)
         if det_id in out:
-            raise NameHintLoaderError(
-                f"{display} declares detector_id {det_id!r} twice. Each "
-                "detector_id may appear at most once per file."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position(
+                            "pre_scan", "name_hints", Member(name), "detectors", Name(det_id)
+                        ),
+                        Problem.DUPLICATE,
+                        hint="Each detector_id may appear at most once per file",
+                    )
+                )
             )
         out[det_id] = cleaned_terms
     return out
 
 
 def _read_yaml(handle: DirHandle, name: str) -> Any:
-    """yaml.safe_load with a clear error chain on parse failure."""
+    """yaml.safe_load, refusing any parse or read failure with a position and no exception text."""
     member = handle.open_file(name)
     try:
-        return serial.yaml_safe_load(member)
-    except yaml.YAMLError as exc:
-        # The bare member name only: the ambient display carries the directory.
-        raise NameHintLoaderError(
-            f"pre_scan.name_hints/{PurePosixPath(name).name}: {yaml_error_text(exc)}"
-        ) from exc
+        return read_config(
+            lambda: serial.yaml_safe_load(member),
+            config_position("pre_scan", "name_hints", Member(name)),
+            _refuse,
+            passes=(FileAccessDenied,),
+        )
     finally:
         member.close()

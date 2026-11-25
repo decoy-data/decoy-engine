@@ -289,20 +289,6 @@ def _decode_exact(
     return NumericShape((), tuple(raw_values), tuple(raw_counts))
 
 
-def redacted_fix_hint(*, numeric: bool) -> str:
-    """The advice appended to a redacted-snapshot refusal. Numeric shapes need no opt-in flag."""
-    if numeric:
-        return (
-            "Use a faker or pattern generator for this column, or re-fit with "
-            "`--include-values` (the snapshot then holds the number shape)."
-        )
-    return (
-        "Use a faker or pattern generator for this column, or re-fit with "
-        "`--include-values` and set `allow_real_categories: true` (the snapshot then "
-        "holds real values)."
-    )
-
-
 def numeric_shape_withheld(stats: Mapping[str, Any]) -> bool:
     """True when either block holds a non-null value (a redacted fit leaves both None)."""
     return stats.get(GRID_KEY) is not None or stats.get(EXACT_KEY) is not None

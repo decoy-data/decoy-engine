@@ -131,22 +131,22 @@ def test_r4_reference_table_errors() -> None:
     )
     missing = _raises(lambda: load_table("customer:nope.parquet"))
     assert isinstance(missing, ValueError)
-    assert _text(missing) == "failed to read the reference Parquet: FileNotFoundError"
+    assert _text(missing) == "reference_table: could not be read"
     Path("bad.parquet").write_text("x")
     bad = _raises(lambda: load_table("customer:bad.parquet"))
-    assert _text(bad) == "failed to read the reference Parquet: Exception"
+    assert _text(bad) == "reference_table: could not be parsed"
     pq.write_table(pa.table({"x": [1]}), "noid.parquet")
     noid = _raises(lambda: load_table("customer:noid.parquet"))
     assert _text(noid) == (
-        "the reference table is missing required 'id' column. "
-        "All reference tables must have a stable 'id' column."
+        "reference_table.id: missing; expected int64. "
+        "All reference tables must have a stable int64 'id' column"
     )
     pq.write_table(pa.table({"id": pa.array([1], pa.int32())}), "id32.parquet")
     id32 = _raises(lambda: load_table("customer:id32.parquet"))
     assert _text(id32) == (
-        "the reference table's 'id' column has kind integer; expected "
-        "int64. All reference tables must have a stable int64 'id' column (schema convention "
-        "-- see reference_tables/__init__.py)."
+        "reference_table.id: wrong type; expected int64, got integer. "
+        "All reference tables must have a stable int64 'id' column (schema convention "
+        "-- see reference_tables/__init__.py)"
     )
 
 
@@ -198,14 +198,11 @@ def test_r12_config_file_errors() -> None:
 def test_r3_snapshot_read_errors() -> None:
     missing = _raises(lambda: _load_snapshot("nope.json"))
     assert isinstance(missing, StatisticalSpecError)
-    assert _text(missing) == (
-        "[statistical_snapshot_unreadable] snapshot_file could not be read: FileNotFoundError"
-    )
+    assert _text(missing) == ("[statistical_snapshot_unreadable] snapshot_file: could not be read")
     Path("s.json").write_text("{")
     bad = _raises(lambda: _load_snapshot("s.json"))
     assert _text(bad) == (
-        "[statistical_snapshot_unreadable] snapshot_file could not be read: "
-        "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+        "[statistical_snapshot_unreadable] snapshot_file: could not be parsed at line 1, column 2"
     )
     digest = _raises(lambda: _snapshot_content_digest("nope.json"))
     assert isinstance(digest, RuntimeError)

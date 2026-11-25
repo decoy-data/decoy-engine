@@ -98,10 +98,6 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::generation/statistical/_snapshot_io.py::parse_snapshot_json::str(exc)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::internal/memory.py::MemoryMonitor.monitor_memory_usage::f{exc}::log": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
@@ -119,10 +115,6 @@
    "max": 1
   },
   "audit::plan/_checks_when.py::_when_refusal_error::exc.raw_message::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::plan/_generation.py::check_fitted_references::exc.message::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },

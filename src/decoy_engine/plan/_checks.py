@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._error_base import raise_bare
 from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
 from decoy_engine.plan._errors import PlanCompileError
@@ -335,7 +336,7 @@ def check_statistical_columns(
     """
     from decoy_engine.generation.statistical import check_degenerate, load_spec, spec_to_dict
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
-    from decoy_engine.plan._generation import resolve_pinned_snapshot, statistical_refusal_text
+    from decoy_engine.plan._generation import resolve_pinned_snapshot, statistical_refusal
 
     pinned = pinned or {}
     column_specs: list[tuple[str, str, str, dict[str, Any]]] = []
@@ -368,6 +369,7 @@ def check_statistical_columns(
                     )
                 snapshot_file = str(snapshot_file)
                 read = pinned.get(snapshot_file)
+                failure: PlanCompileError | None = None
                 try:
                     snap = resolve_pinned_snapshot(snapshot_file, pinned, failures)
                     dp_verified = (table_name, col_name) in dp_verified_columns
@@ -383,11 +385,12 @@ def check_statistical_columns(
                     )
                     check_degenerate(spec)
                 except StatisticalSpecError as exc:
-                    raise PlanCompileError(
-                        code=exc.code,
-                        path=f"tables.{table_name}.generate_columns.{col_name}",
-                        message=statistical_refusal_text(exc.code, snapshot_file),
-                    ) from exc
+                    refusal = statistical_refusal(exc.code, snapshot_file, table_name, col_name)
+                    failure = PlanCompileError(
+                        code=exc.code, path=refusal.key, message=refusal.detail
+                    )
+                if failure is not None:
+                    raise_bare(failure)
                 # condition_on ordering is checked by plan/checks/_generate_columns.py.
                 column_specs.append((table_name, col_name, snapshot_file, spec_to_dict(spec)))
     return column_specs

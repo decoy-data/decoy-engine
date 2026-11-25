@@ -152,6 +152,12 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("generation/_pinned_compile.py", "_reject_column"): _HELPER,
     ("generation/_window_admission.py", "_refuse"): _HELPER,
     ("plan/_checks_dp.py", "_raise"): _HELPER,
+    ("generation/statistical/_spec.py", "_refuse"): _HELPER,
+    ("plan/_generation.py", "statistical_refusal"): _HELPER,
+    ("quality/dp_provenance.py", "_refusal_error"): _HELPER,
+    ("transforms/_codeset_checks.py", "refusal_error"): _HELPER,
+    ("transforms/_codeset_config_checks.py", "_refusal_error"): _HELPER,
+    ("transforms/joint_mask.py", "_refusal_error"): _HELPER,
     ("plan/checks/_lookup_tables.py", "_lookup_refusal"): _HELPER,
     ("plan/checks/_required_settings.py", "check_required_strategy_settings"): (
         "forwards the registered plan symbol a frozen requirement descriptor holds; the descriptor "

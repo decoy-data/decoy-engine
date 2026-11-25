@@ -19,6 +19,17 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import fileaccess
+from decoy_engine._arrow_types import is_text
+from decoy_engine._config_text import (
+    Expected,
+    Kind,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+    read_config,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.fileaccess import (
     FileAccess,
     FileAccessDenied,
@@ -30,7 +41,6 @@ from decoy_engine.fileaccess import (
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.reference_tables._registry import SHIPPED_TABLES, shipped_path
 from decoy_engine.reference_tables._types import ReferenceTable
-from decoy_engine.safe_output import safe_error_type
 
 _LOG = logging.getLogger(__name__)
 
@@ -103,33 +113,46 @@ def load_table(
         )
 
     try:
-        try:
-            arrow_table = arrow_adapter.read_table(handle)
-        except (FileAccessDenied, FileAccessReadError):
-            raise
-        except Exception as exc:
-            if fileaccess.keeps_class(exc):
-                raise
-            raise ValueError(
-                f"failed to read the reference Parquet: {safe_error_type(exc).value}"
-            ) from exc
+        # The route's own typed file-access errors pass unchanged under either policy.
+        arrow_table = read_config(
+            lambda: arrow_adapter.read_table(handle),
+            config_position("reference_table"),
+            _refusal,
+            passes=(FileAccessDenied, FileAccessReadError),
+        )
     finally:
         handle.close()
 
+    at_id = config_position("reference_table", "id")
     if "id" not in arrow_table.schema.names:
-        raise ValueError(
-            "the reference table is missing required 'id' column. "
-            "All reference tables must have a stable 'id' column."
+        raise_bare(
+            _refusal(
+                config_refusal(
+                    at_id,
+                    Problem.MISSING,
+                    expected=Expected.INT64,
+                    hint="All reference tables must have a stable int64 'id' column",
+                )
+            )
         )
 
     id_type = arrow_table.schema.field("id").type
     if id_type != pa.int64():
         # The kind only: a rendered Arrow type carries file-authored text (a timestamp zone,
         # struct field names), so it never reaches the message.
-        raise ValueError(
-            f"the reference table's 'id' column has kind {_type_kind(id_type)}; "
-            "expected int64. All reference tables must have a stable int64 'id' column "
-            "(schema convention -- see reference_tables/__init__.py)."
+        raise_bare(
+            _refusal(
+                config_refusal(
+                    at_id,
+                    Problem.WRONG_TYPE,
+                    expected=Expected.INT64,
+                    got_kind=_type_kind(id_type),
+                    hint=(
+                        "All reference tables must have a stable int64 'id' column "
+                        "(schema convention -- see reference_tables/__init__.py)"
+                    ),
+                )
+            )
         )
 
     _check_version(name, arrow_table)
@@ -137,25 +160,29 @@ def load_table(
 
 
 # Checked in order; the first predicate that holds names the kind. Engine literals only.
-_TYPE_KINDS: tuple[tuple[str, Any], ...] = (
-    ("integer", pa.types.is_integer),
-    ("floating-point", pa.types.is_floating),
-    ("decimal", pa.types.is_decimal),
-    ("boolean", pa.types.is_boolean),
-    ("string", lambda t: pa.types.is_string(t) or pa.types.is_large_string(t)),
-    ("binary", lambda t: pa.types.is_binary(t) or pa.types.is_large_binary(t)),
-    ("timestamp", pa.types.is_timestamp),
-    ("date", pa.types.is_date),
-    ("time", pa.types.is_time),
-    ("duration", pa.types.is_duration),
-    ("dictionary", pa.types.is_dictionary),
-    ("nested", pa.types.is_nested),
+_TYPE_KINDS: tuple[tuple[Kind, Any], ...] = (
+    (Kind.INTEGER, pa.types.is_integer),
+    (Kind.FLOATING_POINT, pa.types.is_floating),
+    (Kind.DECIMAL, pa.types.is_decimal),
+    (Kind.BOOLEAN, pa.types.is_boolean),
+    (Kind.STRING, is_text),
+    (Kind.BINARY, lambda t: pa.types.is_binary(t) or pa.types.is_large_binary(t)),
+    (Kind.TIMESTAMP, pa.types.is_timestamp),
+    (Kind.DATE, pa.types.is_date),
+    (Kind.TIME, pa.types.is_time),
+    (Kind.DURATION, pa.types.is_duration),
+    (Kind.DICTIONARY, pa.types.is_dictionary),
+    (Kind.NESTED, pa.types.is_nested),
 )
 
 
-def _type_kind(arrow_type: pa.DataType) -> str:
-    """A value-free name for an Arrow type's kind."""
-    return next((kind for kind, test in _TYPE_KINDS if test(arrow_type)), "other")
+def _type_kind(arrow_type: pa.DataType) -> Kind:
+    """A value-free closed kind for an Arrow type."""
+    return next((kind for kind, test in _TYPE_KINDS if test(arrow_type)), Kind.OTHER)
+
+
+def _refusal(refusal: Refusal) -> ValueError:
+    return ValueError(refusal.text)
 
 
 def _check_version(name: str, table: Any) -> None:

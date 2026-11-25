@@ -65,5 +65,5 @@ def test_name_hint_yaml_error_drops_the_undefined_alias_name(tmp_path: Path) -> 
     (tmp_path / "manifest.yaml").write_text(f"files:\n  - *{CANARY}\n", encoding="utf-8")
     with pytest.raises(NameHintLoaderError) as info:
         load_name_hint_terms(tmp_path)
-    assert "could not parse" in str(info.value)
+    assert "could not be parsed" in str(info.value)
     _assert_value_free(info.value)

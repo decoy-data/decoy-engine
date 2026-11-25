@@ -30,6 +30,16 @@ from pathlib import Path
 from typing import Any
 
 from decoy_engine import fileaccess
+from decoy_engine._config_text import (
+    Expected,
+    Member,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+    read_config,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import (
@@ -77,6 +87,10 @@ class ModelPackLoadError(DecoyError, ValueError):
 
 def _rebuild_load_error(message: str, cause: str) -> ModelPackLoadError:
     return ModelPackLoadError(message, cause=cause)
+
+
+def _refuse(refusal: Refusal, *, cause: str = "pack") -> ModelPackLoadError:
+    return ModelPackLoadError(refusal.text, cause=cause)
 
 
 def _require_signature_enabled() -> bool:
@@ -197,9 +211,18 @@ class ModelPackLoader:
             outside the accepted flag set (the text never shows the value).
         """
         if self.is_ml_disabled:
-            raise ModelPackLoadError(
-                f"ML is disabled via {_ML_DISABLED_ENV}; engine uses deterministic fallback.",
-                cause="disabled",
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position("pre_scan", "model_pack"),
+                        Problem.NOT_ALLOWED,
+                        hint=(
+                            "ML is disabled via DECOY_ML_DISABLED; "
+                            "engine uses deterministic fallback"
+                        ),
+                    ),
+                    cause="disabled",
+                )
             )
 
         manifest = self._load_manifest()
@@ -242,60 +265,100 @@ class ModelPackLoader:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _load_manifest(self) -> ModelPackManifest:
+        at_manifest = config_position("pre_scan", "model_pack", Member("manifest.json"))
         data = self._read_member("manifest.json")
         if data is None:
-            raise ModelPackLoadError(
-                f"Missing manifest.json in {self._label}. "
-                "The pack directory must contain manifest.json and model.joblib."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        at_manifest,
+                        Problem.NOT_FOUND,
+                        expected=Expected.FILE,
+                        hint="The pack directory must contain manifest.json and model.joblib",
+                    )
+                )
             )
-        try:
-            raw = json.loads(data.decode("utf-8"))
-            return ModelPackManifest.from_dict(raw)
-        except (json.JSONDecodeError, TypeError, KeyError) as exc:
-            raise ModelPackLoadError(
-                f"Corrupt manifest.json in {self._label}: {safe_error_type(exc).value}"
-            ) from exc
+        return read_config(
+            lambda: ModelPackManifest.from_dict(json.loads(data.decode("utf-8"))),
+            at_manifest,
+            _refuse,
+        )
 
     def _check_format(self, manifest: ModelPackManifest) -> None:
         if manifest.format_version != PACK_FORMAT:
-            raise ModelPackLoadError(
-                f"Unsupported pack format: manifest field format_version is not {PACK_FORMAT!r}, "
-                "the format this engine reads."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position(
+                            "pre_scan", "model_pack", Member("manifest.json"), "format_version"
+                        ),
+                        Problem.MISMATCH,
+                        hint="The pack format is not the format this engine reads",
+                    )
+                )
             )
 
     def _check_feature_schema(self, manifest: ModelPackManifest) -> None:
         if manifest.feature_schema_version != FEATURE_SCHEMA_VERSION:
-            raise ModelPackLoadError(
-                "Feature schema mismatch: manifest field feature_schema_version is not "
-                f"{FEATURE_SCHEMA_VERSION!r}, the schema this engine produces. Re-train the pack "
-                "against the current feature schema before loading."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position(
+                            "pre_scan",
+                            "model_pack",
+                            Member("manifest.json"),
+                            "feature_schema_version",
+                        ),
+                        Problem.MISMATCH,
+                        hint=(
+                            "The feature schema is not the schema this engine produces. "
+                            "Re-train the pack against the current feature schema before loading"
+                        ),
+                    )
+                )
             )
 
     def _read_weights(self) -> bytes:
-        try:
-            weights = self._read_member("model.joblib")
-        except FileAccessDenied:
-            raise
-        except OSError as exc:
-            if fileaccess.keeps_class(exc):
-                raise
-            raise ModelPackLoadError(
-                f"Cannot read model.joblib in {self._label}: {safe_error_type(exc).value}"
-            ) from exc
+        at_weights = config_position("pre_scan", "model_pack", Member("model.joblib"))
+        weights = read_config(
+            lambda: self._read_member("model.joblib"),
+            at_weights,
+            _refuse,
+            passes=(FileAccessDenied,),
+        )
         if weights is None:
-            raise ModelPackLoadError(f"Missing model.joblib in {self._label}.")
+            raise_bare(
+                _refuse(config_refusal(at_weights, Problem.NOT_FOUND, expected=Expected.FILE))
+            )
         return weights
 
     def _check_sha256(self, model_bytes: bytes, manifest: ModelPackManifest) -> None:
         if not manifest.sha256:
-            raise ModelPackLoadError(
-                "Manifest sha256 field is empty; this pack was not properly signed."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position(
+                            "pre_scan", "model_pack", Member("manifest.json"), "sha256"
+                        ),
+                        Problem.EMPTY,
+                        hint="This pack was not properly signed",
+                    )
+                )
             )
         actual = hashlib.sha256(model_bytes).hexdigest()
         if actual != manifest.sha256:
-            raise ModelPackLoadError(
-                "model.joblib SHA-256 mismatch: the weights do not hash to the manifest field "
-                "sha256. The weights file may have been tampered with or corrupted."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position("pre_scan", "model_pack", Member("model.joblib")),
+                        Problem.MISMATCH,
+                        expected=Expected.SHA256,
+                        hint=(
+                            "The weights do not hash to the manifest sha256 field. "
+                            "The weights file may have been tampered with or corrupted"
+                        ),
+                    )
+                )
             )
 
     def _check_signature(self, manifest: ModelPackManifest) -> None:
@@ -347,10 +410,18 @@ class ModelPackLoader:
         # signed pack through on the trusted default). Mirrors the fail-closed
         # posture of _require_signature_enabled on an ambiguous flag.
         if key_box.open()[0] is None and os.environ.get(SIGNING_KEY_ENV, "").strip():
-            raise ModelPackLoadError(
-                f"{SIGNING_KEY_ENV} is set but could not be parsed as a valid "
-                "signing key; refusing to load (fail-closed). Fix the key value "
-                "(64 hex chars / 32 bytes) or unset it."
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position("pre_scan", "model_pack", "signing_key"),
+                        Problem.UNPARSEABLE,
+                        hint=(
+                            "DECOY_PACK_SIGNING_KEY is set but is not a valid signing key; "
+                            "refusing to load (fail-closed). Fix the key value "
+                            "(64 hex chars / 32 bytes) or unset it"
+                        ),
+                    )
+                )
             )
         signed = bool(manifest.manifest_hmac)
         # A signature is required for any untrusted pack, OR whenever the opt-in
@@ -360,28 +431,38 @@ class ModelPackLoader:
         if key_box.open()[0] is not None:
             # A key is configured: enforce the signature regardless of trust.
             if not signed:
-                raise ModelPackLoadError(
-                    f"Pack {self._label} is unsigned (manifest_hmac is empty) "
-                    "but DECOY_PACK_SIGNING_KEY is configured. "
-                    "Sign the pack with sign_manifest() before deploying."
+                raise_bare(
+                    _refuse(
+                        config_refusal(
+                            config_position("pre_scan", "model_pack", "signature"),
+                            Problem.MISSING,
+                            hint=(
+                                "The pack is unsigned (manifest_hmac is empty) but "
+                                "DECOY_PACK_SIGNING_KEY is configured. "
+                                "Sign the pack with sign_manifest() before deploying"
+                            ),
+                        )
+                    )
                 )
             if not verify_manifest(manifest, key_box.open()[0]):
-                raise ModelPackLoadError(
-                    f"Pack {self._label} signature verification FAILED. "
-                    "The manifest may have been tampered with. "
-                    "Re-sign with the current key or investigate the discrepancy."
+                raise_bare(
+                    _refuse(
+                        config_refusal(
+                            config_position("pre_scan", "model_pack", "signature"),
+                            Problem.MISMATCH,
+                            hint=(
+                                "The pack signature verification FAILED. The manifest may have been "
+                                "tampered with. Re-sign with the current key or investigate "
+                                "the discrepancy"
+                            ),
+                        )
+                    )
                 )
             _log.debug("Pack %s signature verified (ML3.2).", self._label)
             return
 
         # No key configured.
         if require_sig:
-            reason = (
-                "it crosses an untrusted boundary (not the first-party default "
-                "pack), so its provenance MUST be verified"
-                if not self._trusted
-                else "DECOY_PACK_REQUIRE_SIGNATURE is enabled"
-            )
             # A refusal across the untrusted boundary is a security event, not a
             # routine fallback: log it distinctly at ERROR even though
             # load_with_fallback will downgrade the raise to the regex baseline.
@@ -391,12 +472,38 @@ class ModelPackLoader:
                     "without a verified signature (DE-04).",
                     self._label,
                 )
-            raise ModelPackLoadError(
-                f"Refusing to load pack {self._label}: {reason}, but no "
-                "DECOY_PACK_SIGNING_KEY is configured to verify it (DE-04). "
-                "Sign the pack (sign_manifest / sign_pack) and set "
-                "DECOY_PACK_SIGNING_KEY to the key derived from the instance "
-                "master key (derive_pack_signing_key)."
+            at_signature = config_position("pre_scan", "model_pack", "signature")
+            if not self._trusted:
+                raise_bare(
+                    _refuse(
+                        config_refusal(
+                            at_signature,
+                            Problem.MISSING,
+                            hint=(
+                                "Refusing to load the pack: it crosses an untrusted boundary "
+                                "(not the first-party default pack), so its provenance MUST "
+                                "be verified, but no DECOY_PACK_SIGNING_KEY is configured "
+                                "(DE-04). Sign the pack (sign_manifest / sign_pack) and set "
+                                "DECOY_PACK_SIGNING_KEY to the key derived from the instance "
+                                "master key (derive_pack_signing_key)"
+                            ),
+                        )
+                    )
+                )
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        at_signature,
+                        Problem.MISSING,
+                        hint=(
+                            "Refusing to load the pack: DECOY_PACK_REQUIRE_SIGNATURE is "
+                            "enabled, but no DECOY_PACK_SIGNING_KEY is configured (DE-04). "
+                            "Sign the pack (sign_manifest / sign_pack) and set "
+                            "DECOY_PACK_SIGNING_KEY to the key derived from the instance "
+                            "master key (derive_pack_signing_key)"
+                        ),
+                    )
+                )
             )
 
         # Trusted default pack, hard-lockdown not enabled: accept but flag.
@@ -417,19 +524,44 @@ class ModelPackLoader:
     def _deserialise(self, model_bytes: bytes) -> dict[str, Any]:
         # SHA-256 verified above before reaching this point.
         # joblib.load of a trusted, locally generated, hash-verified artifact.
+        at_weights = config_position("pre_scan", "model_pack", Member("model.joblib"))
+        library_missing = False
         try:
             import io
 
             import joblib
-        except ImportError as exc:
-            raise ModelPackLoadError(
-                "joblib is a base dependency and failed to import. Reinstall decoy-engine.",
-                cause="import",
-            ) from exc
+        except ImportError:
+            library_missing = True
+        if library_missing:
+            raise_bare(
+                _refuse(
+                    config_refusal(
+                        config_position("pre_scan", "model_pack", "joblib"),
+                        Problem.NOT_FOUND,
+                        hint="joblib is a base dependency and failed to import. Reinstall decoy-engine",
+                    ),
+                    cause="import",
+                )
+            )
+        # An import failure while unpickling (a runtime library the pack needs) is its own
+        # cause; any other failure is the pack itself.
+        import_failed = False
         try:
-            return dict(joblib.load(io.BytesIO(model_bytes)))
-        except Exception as exc:
-            raise ModelPackLoadError(
-                f"Failed to deserialise model.joblib: {safe_error_type(exc).value}",
-                cause="import" if isinstance(exc, ImportError) else "pack",
-            ) from exc
+            return read_config(
+                lambda: dict(joblib.load(io.BytesIO(model_bytes))),
+                at_weights,
+                _refuse,
+                passes=(ImportError,),
+            )
+        except ImportError:
+            import_failed = True
+        raise_bare(
+            _refuse(
+                config_refusal(
+                    at_weights,
+                    Problem.UNREADABLE,
+                    hint="The weights could not be deserialised",
+                ),
+                cause="import" if import_failed else "pack",
+            )
+        )

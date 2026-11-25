@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Name, Problem, config_position, config_refusal
+from decoy_engine._error_base import raise_bare
 from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import (
@@ -57,13 +59,16 @@ def declared_casting_from_dict(data: dict[str, Any]) -> DeclaredCastingPlan:
         )
     columns: list[PlanDeclaredColumn] = []
     for raw in data.get("columns") or ():
-        path = f"<declared_casting {raw.get('table')!s}.{raw.get('column')!s}>"
+        table, column = raw.get("table"), raw.get("column")
+        at_column = config_position("declared_casting", Name(table), Name(column))
+        rejected: str | None = None
         try:
             contract = build_contract(dict(raw["contract"]))
         except DeclaredCastContractError as exc:
-            raise PlanCompileError(
-                code=exc.code, path=path, message=reasons.lookup(exc.code)[0].summary
-            ) from None
+            rejected = exc.code
+        if rejected is not None:
+            refusal = config_refusal(at_column, Problem.NOT_ALLOWED, code=rejected)
+            raise_bare(PlanCompileError(code=rejected, path=refusal.key, message=refusal.detail))
         columns.append(
             PlanDeclaredColumn(
                 table=raw["table"],

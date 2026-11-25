@@ -22,9 +22,23 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._config_text import (
+    Expected,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA
+from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA, SHIPPED_CORPUS_NAMES
 from decoy_engine.transforms._codeset_provenance import RESERVED_LICENSED_NAMES
+
+# The shipped corpus names a refusal lists. Engine-owned and constant, so it is safe text.
+
+
+def _refusal_error(code: str, refusal: Refusal) -> PlanCompileError:
+    return PlanCompileError(code=code, path=refusal.key, message=refusal.detail)
 
 
 def validate_code_set_config(cfg: dict[str, Any]) -> None:
@@ -42,26 +56,38 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
       - When ``corpus_source`` is not a ``customer:`` prefix (i.e. a shipped
         load), the name must be a known shipped corpus.
 
+    A refusal names the field and the problem, never the supplied value: the name can be a
+    URL or path.
+
     Args:
         cfg: Raw config dict.
 
     Raises:
         PlanCompileError: Any validation failure.
     """
+    at_name = config_position("provider_config", "code_set")
     name = cfg.get("code_set")
-    if not name or not isinstance(name, str):
-        # `not isinstance(name, str)` guards a free-form provider_config that
-        # supplies a non-string (e.g. `code_set: [icd10]`): the membership
-        # tests below would otherwise raise a raw `TypeError: unhashable type`
-        # instead of a coded compile error.
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_NAME_MISSING,
-            path="provider_config.code_set",
-            message=(
-                "'code_set' is required and must be a string naming a corpus "
-                "(e.g. 'icd10', 'hcpcs', 'ndc', 'mcc', or a customer corpus name "
-                "with corpus_source: customer:<path>)."
-            ),
+    # `not isinstance(name, str)` guards a free-form provider_config that supplies a non-string
+    # (e.g. `code_set: [icd10]`): the membership tests below would otherwise raise a raw
+    # `TypeError: unhashable type` instead of a coded compile error.
+    if not name:
+        raise_bare(
+            _refusal_error(
+                reasons.plan.CODE_SET_NAME_MISSING,
+                config_refusal(
+                    at_name,
+                    Problem.MISSING,
+                    expected=Expected.NAME,
+                    hint="Example: icd10, hcpcs, ndc, mcc, or a customer corpus name",
+                ),
+            )
+        )
+    if not isinstance(name, str):
+        raise_bare(
+            _refusal_error(
+                reasons.plan.CODE_SET_NAME_MISSING,
+                config_refusal(at_name, Problem.WRONG_TYPE, expected=Expected.STRING, got=name),
+            )
         )
 
     # A corpus_source_version pin must be a scalar release id (str, or an
@@ -72,14 +98,17 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
     # bool checked first: bool is a subclass of int, so `False` would otherwise
     # pass the `isinstance(..., (str, int))` allow-list.
     if isinstance(version, bool) or (version is not None and not isinstance(version, (str, int))):
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_SOURCE_VERSION_INVALID,
-            path="provider_config.corpus_source_version",
-            message=(
-                f"corpus_source_version must be a string or numeric release id "
-                f"(got {version!r} of type {type(version).__name__}). Quote the "
-                "release, e.g. corpus_source_version: '2024'."
-            ),
+        raise_bare(
+            _refusal_error(
+                reasons.plan.CODE_SET_CORPUS_SOURCE_VERSION_INVALID,
+                config_refusal(
+                    config_position("provider_config", "corpus_source_version"),
+                    Problem.WRONG_TYPE,
+                    expected=Expected.RELEASE_ID,
+                    got=version,
+                    hint="Quote the release, e.g. corpus_source_version: '2024'",
+                ),
+            )
         )
 
     source = str(cfg.get("corpus_source", "shipped"))
@@ -90,24 +119,31 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
     # apply time (Codex/Dennis MEDIUM). Kept in sync deliberately.
     is_shipped_source = not source.startswith("customer:")
 
-    if str(name).strip().lower() in RESERVED_LICENSED_NAMES and is_shipped_source:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_RESERVED_LICENSED_NAME,
-            path="provider_config.code_set",
-            message=(
-                f"{name!r} is a licensed code set the engine never ships "
-                "(AMA CPT license / proprietary grouper). It is upload-only: "
-                "set corpus_source: customer:<path> to your own licensed copy."
-            ),
+    if name.strip().lower() in RESERVED_LICENSED_NAMES and is_shipped_source:
+        raise_bare(
+            _refusal_error(
+                reasons.plan.CODE_SET_RESERVED_LICENSED_NAME,
+                config_refusal(
+                    at_name,
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "This is a licensed code set the engine never ships "
+                        "(AMA CPT license or proprietary grouper). It is upload-only: "
+                        "set corpus_source: customer:<path> to your own licensed copy"
+                    ),
+                ),
+            )
         )
 
     if is_shipped_source and name not in _SHIPPED_CORPORA:
-        raise PlanCompileError(
-            code=reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
-            path="provider_config.code_set",
-            message=(
-                f"corpus {name!r} not found in shipped corpora. "
-                f"Available: {sorted(_SHIPPED_CORPORA)}. "
-                f"To use a custom corpus, set corpus_source: customer:<path>."
-            ),
+        raise_bare(
+            _refusal_error(
+                reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
+                config_refusal(
+                    at_name,
+                    Problem.NOT_FOUND,
+                    choices=SHIPPED_CORPUS_NAMES,
+                    hint="To use a custom corpus, set corpus_source: customer:<path>",
+                ),
+            )
         )
