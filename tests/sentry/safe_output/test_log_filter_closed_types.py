@@ -28,7 +28,7 @@ _BANNED_CALLS = {
     "copy.copy",
     "copy.deepcopy",
 }
-_BASES = {"list", "tuple", "set", "frozenset"}
+_BASES = {"list", "tuple", "set", "frozenset", "deque", "_KEYS_VIEW", "_VALUES_VIEW", "_ITEMS_VIEW"}
 _BANNED_ATTRS = {"default_factory", "get", "keys", "values"}
 _HEAD = "def _safe_value(value: object, depth: int) -> object:\n"
 

@@ -7,26 +7,38 @@ record while it can still change what is printed. The closed type table follows 
 serializer (walk the types you know, send everything else through one fallback) with a fixed
 placeholder as the fallback, because `repr` is caller code.
 
-What the filter rewrites, in place on the record:
+What the filter rewrites, in place on the record. Every value it writes back comes from one
+function, `_safe_value`, which reads a value by `type(value)` and calls no method of a caller
+type (an unbound builtin iterator at most), in this order:
 
-- every value it writes back comes from one function, `_safe_value`, which decides by exact
-  type and runs no caller code. An exception becomes its closed type label
-  (`safe_error_type`). Any mapping that is not an exact `dict` (a `dict` subclass, `OrderedDict`,
-  `Counter`, `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap`, a `ConfigParser` section, a
-  caller `Mapping`) becomes the placeholder `<mapping>`, clean or not, so no lookup, factory or
-  order of a caller type can be reached. A `dict` with a key that is not an exact `str`, `int`,
-  `float`, `bool` or `None` is the placeholder too: keys are never rewritten. Plain containers
-  (`list`, `tuple`, `set`, `frozenset` and their subclasses, `dict`) are opened one level deep
-  in `msg` and two in `args`; a changed one is a new plain container, an unchanged one is
-  returned as is, and one at the depth limit becomes `<nested>`. A `str` subclass is copied to a
-  plain `str`, so its own `__str__` and `__repr__` never run;
-- one function, `_safe_pairs`, reads the items of a `dict` (`dict.items(store)` and nothing
-  else, so no stored key is compared or hashed by caller code). Row 6, the named values and the
-  display of a lone mapping all take its result, so their depth cannot differ;
+- an exception becomes its closed type label (`safe_error_type`);
+- any mapping that is not an exact `dict` (a `dict` subclass, `OrderedDict`, `Counter`,
+  `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap`, a `ConfigParser` section, a caller
+  `Mapping`) becomes `<mapping>`, clean or not, so no lookup, factory or order of a caller type
+  can be reached. A `dict` with a key that is not an exact `str`, `int`, `float`, `bool` or
+  `None` is `<mapping>` too: keys are never rewritten;
+- a dataclass or attrs instance becomes `<object>`: its repr would print every field;
+- scalars (`str`, `bytes`, numbers, `None`, `range`, `array`) pass. A `str` subclass is copied
+  to a plain `str`, so its own `__str__` and `__repr__` never run;
+- a `list`, `tuple`, `set`, `frozenset` (or subclass) is opened one level deep in `msg` and two
+  in `args`; a changed one becomes a new plain container, an unchanged one is returned as is. A
+  `deque`, a dict view or a `slice` is rebuilt as a plain list (a slice as a slice). A plain
+  container at the depth limit becomes `<nested>`;
+- any other iterable (a generator, a custom class with `__iter__`, an array library's object)
+  becomes `<nested>`: iterating it would run caller code and could drain it;
+- any other object (a `Path`, `Decimal`, enum member, `datetime`) passes and prints as usual.
+
+Also:
+
+- `_safe_pairs` is the only reader of dict items (`dict.items(store)`, so no stored key is
+  compared or hashed by caller code). The dict row, the named values and the display of a lone
+  mapping all take its result, so their depth cannot differ;
 - a lone mapping argument (`LogRecord` makes `args` the mapping itself) becomes a `_NamedArgs`:
   a new `dict` of the exact-`str` keys with their scanned values, a value-free default for a
   missing name, a truthy `bool`, and a display that is computed only when `%s`, `%r` or a
   brace `{args}` asks for it. A second filter pass keeps it unchanged;
+- attributes a caller adds with `extra=` go through `_safe_value` at the `msg` depth, because a
+  handler can print them with `%(name)s` or a JSON formatter;
 - live `exc_info` becomes a traceback of labels and `file:line, in function` frames, with no
   exception text, no source lines and no frame locals; `exc_info` is then cleared so the
   formatter cannot render the raw one;
@@ -37,20 +49,24 @@ What the filter rewrites, in place on the record:
 `stack_info` holds code locations and engine source lines (code, not data) and is kept.
 
 Gaps, each pinned by a strict xfail cell in `tests/unit/safe_output/test_log_filter.py`; the
-call-site guard `tests/sentry/test_log_interpolation.py` covers them instead:
+call-site guard `tests/sentry/test_log_interpolation.py` covers them instead (plan:
+`docs/plans/2026-11-25-f31-ae3-plan-amendment.md`):
 
 - text already formatted into `msg` (an f-string, or `str(exc)` passed as an argument), which
   cannot be told apart from any other text here;
 - `exc.args` (or any part of an exception) passed as an argument, since it is plain data;
-- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`.
+- an arbitrary non-iterable wrapper object whose `__str__` or `__repr__` calls `str(exc)`;
+- a caller metaclass that changes `issubclass` or class attribute reads.
 """
 
 from __future__ import annotations
 
+import array
 import logging
-from collections import Counter, UserDict, defaultdict
-from collections.abc import Mapping, Sequence
+from collections import Counter, UserDict, defaultdict, deque
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from types import TracebackType
+from typing import Any
 
 from decoy_engine.safe_output._exception import safe_error_type
 
@@ -62,13 +78,35 @@ _UNRENDERABLE = "log record could not be made safe"
 # `args` holds the arguments themselves, so it is scanned one container level deeper than `msg`.
 _ARGS_DEPTH = 2
 # Each base type with its unbound iterator, so a subclass `__iter__` never runs.
-_SEQUENCES = (
+_SEQUENCES: tuple[tuple[type, Callable[[Any], Iterator[Any]]], ...] = (
     (list, list.__iter__),
     (tuple, tuple.__iter__),
     (set, set.__iter__),
     (frozenset, frozenset.__iter__),
 )
-_PLAIN_VALUE_TYPES = (str, bytes, int, float, complex, bool, type(None))
+# Values that hold no nested object, so they print safely through their own repr.
+_PLAIN_VALUE_TYPES = (
+    str,
+    bytes,
+    bytearray,
+    int,
+    float,
+    complex,
+    bool,
+    range,
+    array.array,
+    type(None),
+)
+# Views and queues are read through their own unbound iterator and rebuilt as a plain list.
+_KEYS_VIEW: type = type({}.keys())
+_VALUES_VIEW: type = type({}.values())
+_ITEMS_VIEW: type = type({}.items())
+_ITERABLES: tuple[tuple[type, Callable[[Any], Iterator[Any]]], ...] = (
+    (deque, deque.__iter__),
+    (_KEYS_VIEW, _KEYS_VIEW.__iter__),  # type: ignore[attr-defined]
+    (_VALUES_VIEW, _VALUES_VIEW.__iter__),  # type: ignore[attr-defined]
+    (_ITEMS_VIEW, _ITEMS_VIEW.__iter__),  # type: ignore[attr-defined]
+)
 _PLAIN_KEY_TYPES = (str, int, float, bool, type(None))
 # Factories that build an empty builtin: a missing name on such a defaultdict has a safe default.
 _EMPTY_FACTORIES = (int, float, complex, bool, str, bytes, list, tuple, dict, set, frozenset)
@@ -86,6 +124,10 @@ class _Label(str):
 _MAPPING_PLACEHOLDER = _Label("<mapping>")
 # A plain container at the scan depth limit: its items are not inspected, so none is printed.
 _NESTED_PLACEHOLDER = _Label("<nested>")
+# A dataclass or attrs instance: its repr is caller code and prints every field.
+_OBJECT_PLACEHOLDER = _Label("<object>")
+# `LogRecord` attributes the filter leaves alone; any other attribute came from `extra=`.
+_STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 
 
 def _label(exc: BaseException) -> _Label:
@@ -120,38 +162,74 @@ def _safe_pairs(
     return pairs, plain, changed
 
 
+def _is_container(kind: type) -> bool:
+    """True for a type `_safe_value` opens one level at a time."""
+    return (
+        kind is dict
+        or kind is slice
+        or any(issubclass(kind, base) for base, _ in _SEQUENCES)
+        or any(issubclass(kind, base) for base, _ in _ITERABLES)
+    )
+
+
+def _is_record_class(kind: type) -> bool:
+    """A dataclass or attrs class, read from the class attribute each one sets."""
+    return (
+        getattr(kind, "__dataclass_fields__", None) is not None
+        or getattr(kind, "__attrs_attrs__", None) is not None
+    )
+
+
 def _safe_value(value: object, depth: int) -> object:
     """`value` as it may be written back: the one closed type table (module docstring).
 
-    Rows run in order and the first match wins. Rows 1 and 2 come before the depth check, so an
-    exception or a non-plain mapping is replaced at every position the scan reaches.
+    Rows run in order and the first match wins. Rows 1 to 3 come before the depth check, so an
+    exception, a non-plain mapping or a dataclass is replaced at every position the scan reaches.
+    An unknown iterable is never iterated (that would run caller code and could drain a
+    generator), so it is the placeholder.
     """
     kind = type(value)
     if issubclass(kind, BaseException):
         return _label(value)  # type: ignore[arg-type]
     if kind is not dict and (issubclass(kind, Mapping) or issubclass(kind, UserDict)):
         return _MAPPING_PLACEHOLDER
+    if _is_record_class(kind):
+        return _OBJECT_PLACEHOLDER
     if kind is _Label or _is_exact(value, _PLAIN_VALUE_TYPES):
         return value
     if issubclass(kind, str):
         # A plain copy, so the subclass's own `__str__` and `__repr__` never run.
         return str.__str__(value)
     if depth == 0:
-        nested = kind is dict or any(issubclass(kind, base) for base, _ in _SEQUENCES)
-        return _NESTED_PLACEHOLDER if nested else value
+        return _NESTED_PLACEHOLDER if _is_container(kind) else _scalar_or_iterable(value)
     for base, iterate in _SEQUENCES:
         if issubclass(kind, base):
-            items: list[object] = list(iterate(value))  # type: ignore[arg-type]
+            items: list[object] = list(iterate(value))
             new = [_safe_value(v, depth - 1) for v in items]
             if all(n is o for n, o in zip(new, items, strict=True)):
                 return value
             return base(new)
+    for base, iterate in _ITERABLES:
+        if issubclass(kind, base):
+            return [_safe_value(v, depth - 1) for v in iterate(value)]
+    if kind is slice:
+        parts = (value.start, value.stop, value.step)  # type: ignore[attr-defined]
+        new_parts = [_safe_value(v, depth - 1) for v in parts]
+        if all(n is o for n, o in zip(new_parts, parts, strict=True)):
+            return value
+        return slice(*new_parts)
     if kind is dict:
         pairs, plain, changed = _safe_pairs(value, depth)  # type: ignore[arg-type]
         if not plain:
             return _MAPPING_PLACEHOLDER
         return dict(pairs) if changed else value
-    return value
+    return _scalar_or_iterable(value)
+
+
+def _scalar_or_iterable(value: object) -> object:
+    """Any other object: an iterable is the placeholder, the rest (a `Path`, `Decimal`, enum
+    member, `datetime`) prints as it does today."""
+    return _NESTED_PLACEHOLDER if issubclass(type(value), Iterable) else value
 
 
 class _NamedArgs(dict[object, object]):
@@ -260,14 +338,17 @@ def _safe_traceback(exc: BaseException) -> str:
 def _scrub(record: logging.LogRecord) -> None:
     record.msg = _safe_value(record.msg, 1)
     args: object = record.args
-    if type(args) is _NamedArgs:
-        # A second filter pass: the keys and values already came from one pass.
-        pass
-    elif issubclass(type(args), Mapping) or issubclass(type(args), UserDict):
-        # `LogRecord.__init__` makes `args` the mapping itself for a lone non-empty mapping.
-        record.args = _named_args(args)  # type: ignore[assignment]
-    else:
-        record.args = _safe_value(args, _ARGS_DEPTH)  # type: ignore[assignment]
+    # A `_NamedArgs` is left as is: a second filter pass finds keys and values from one pass.
+    if type(args) is not _NamedArgs:
+        if issubclass(type(args), Mapping) or issubclass(type(args), UserDict):
+            # `LogRecord.__init__` makes `args` the mapping itself for a lone non-empty mapping.
+            record.args = _named_args(args)  # type: ignore[assignment]
+        else:
+            record.args = _safe_value(args, _ARGS_DEPTH)  # type: ignore[assignment]
+    # Attributes from `extra=` reach a handler that prints `%(name)s` or a JSON formatter.
+    for key in list(vars(record)):
+        if key not in _STANDARD_FIELDS and key != _SAFE_EXC_TEXT:
+            setattr(record, key, _safe_value(vars(record)[key], 1))
 
     exc = record.exc_info[1] if record.exc_info else None
     if exc is not None:

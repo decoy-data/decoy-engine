@@ -1,6 +1,7 @@
 """F31 AE3: `SafeRecordFilter` keeps exception text out of every engine log handler.
 
-Plan: docs/plans/2026-11-24-f31-audit.md, Behavior 4 and acceptance test 2. The canary is built
+Plan: docs/plans/2026-11-24-f31-audit.md, Behavior 4 and acceptance test 2, as amended by
+docs/plans/2026-11-25-f31-ae3-plan-amendment.md. The canary is built
 at run time in most cells, so a stock traceback's source lines cannot carry it by accident; the
 one cell that writes it as a literal checks that the filter prints no source lines either.
 """
@@ -17,7 +18,7 @@ import types
 import pytest
 
 from decoy_engine.internal import logging as engine_logging
-from decoy_engine.internal.logging import _configure_logger
+from decoy_engine.internal.logging import _configure_logger, _new_engine_handler
 from decoy_engine.safe_output import SafeRecordFilter, _log_filter
 from tests.unit.safe_output import log_filter_support
 from tests.unit.safe_output.log_filter_support import (  # noqa: F401
@@ -246,11 +247,9 @@ def test_dict_msg_with_exception_becomes_label() -> None:
     assert _CANARY not in buf.getvalue()
 
 
-def test_tuple_key_in_lone_mapping_arg_is_the_placeholder() -> None:
+def test_tuple_key_in_lone_mapping_arg_is_the_placeholder(isolated_logger) -> None:  # type: ignore[no-untyped-def]
     engine, buf = _engine_handler()
-    logger = logging.getLogger("f31_ae3_t_key")
-    logger.propagate = False
-    logger.handlers = [engine]
+    logger = isolated_logger("f31_ae3_t_key", engine)
     logger.error("failed: %s", {(ValueError(_CANARY),): 1})
     assert buf.getvalue().strip() == "ERROR failed: <mapping>"
     assert _CANARY not in buf.getvalue()
@@ -264,29 +263,24 @@ def test_non_dict_mapping_msg_and_arg_are_the_placeholder() -> None:
     assert _CANARY not in buf.getvalue()
 
 
-def test_valid_record_is_not_dropped_by_the_filter() -> None:
+def test_valid_record_is_not_dropped_by_the_filter(isolated_logger) -> None:  # type: ignore[no-untyped-def]
     engine, buf = _engine_handler()
-    logger = logging.getLogger("f31_ae3_t_counter")
-    logger.propagate = False
-    logger.handlers = [engine]
-    logger.setLevel(logging.INFO)
+    logger = isolated_logger("f31_ae3_t_counter", engine, logging.INFO)
     counter = collections.Counter(existing=2)
     logger.info("found %(missing)d", counter)
     assert buf.getvalue().strip() == "INFO found 0"
 
 
 def test_mapping_needing_replacement_keeps_missing_lookup(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, isolated_logger
+) -> None:  # type: ignore[no-untyped-def]
     engine, buf = _engine_handler()
     errors: list[logging.LogRecord] = []
     monkeypatch.setattr(engine, "handleError", errors.append)
     mapping: collections.defaultdict[str, object] = collections.defaultdict(
         lambda: 0, e=ValueError(_CANARY)
     )
-    logger = logging.getLogger("f31_ae3_t_missing")
-    logger.propagate = False
-    logger.handlers = [engine]
+    logger = isolated_logger("f31_ae3_t_missing", engine)
     # The caller factory is not called: a missing name is the placeholder.
     logger.warning("%(e)s %(missing)s", mapping)
     assert buf.getvalue().strip() == "WARNING ValueError <mapping>"
@@ -389,3 +383,28 @@ def test_documented_gap_uncatchable_shapes(shape: str) -> None:
         arg = _Wrapper(exc)
     engine.handle(_record("x %s", (arg,), exc=False))
     assert _CANARY not in buf.getvalue()
+
+
+class _ExtraFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return (
+            f"{record.getMessage()} | {record.__dict__.get('err')} | {record.__dict__.get('rows')}"
+        )
+
+
+def test_extra_attributes_are_scanned(isolated_logger) -> None:  # type: ignore[no-untyped-def]
+    buf = io.StringIO()
+    handler = _new_engine_handler(lambda: logging.StreamHandler(buf), _ExtraFormatter())
+    logger = isolated_logger("f31_ae3_t_extra", handler, logging.INFO)
+    exc = ValueError(_CANARY)
+    logger.info("x", extra={"err": exc, "rows": [collections.UserDict(a=exc), 1]})
+    assert buf.getvalue().strip() == "x | ValueError | [<mapping>, 1]"
+    assert _CANARY not in buf.getvalue()
+
+
+def test_standard_record_fields_are_not_rewritten() -> None:
+    record = _record("x", (), exc=False)
+    before = {k: v for k, v in vars(record).items() if k not in ("msg", "args", "exc_info")}
+    SafeRecordFilter().filter(record)
+    after = {k: v for k, v in vars(record).items() if k not in ("msg", "args", "exc_info")}
+    assert after == before | {k: v for k, v in after.items() if k.startswith("_decoy")}

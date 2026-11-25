@@ -1,5 +1,7 @@
 """F31 AE3: mapping, depth and named-argument behavior of `SafeRecordFilter`.
 
+Plan: docs/plans/2026-11-25-f31-ae3-plan-amendment.md.
+
 Plan: docs/plans/2026-11-24-f31-audit.md, Behavior 4 and acceptance test 2. The canary is built
 at run time in most cells, so a stock traceback's source lines cannot carry it by accident; the
 one cell that writes it as a literal checks that the filter prints no source lines either.
@@ -10,11 +12,16 @@ from __future__ import annotations
 import collections
 import collections.abc
 import configparser
+import dataclasses
+import datetime
+import decimal
+import enum
 import functools
 import io
 import logging
 import pathlib
 import types
+import uuid
 
 import pytest
 from hypothesis import given, settings
@@ -619,3 +626,125 @@ def test_unused_value_cannot_drop_a_named_record() -> None:
     engine.handle(_lone("x %s", mapping))
     assert buf.getvalue().splitlines() == ["ERROR 7", "ERROR x <mapping>"]
     assert "could not be made safe" not in buf.getvalue()
+
+
+# Dennis R2 V1: unknown iterables, views, dataclasses and slices.
+
+
+@dataclasses.dataclass
+class _Holder:
+    error: object
+
+
+class _AttrsLike:
+    """What `attrs.define` leaves on a class: `__attrs_attrs__` and a repr that prints fields."""
+
+    __attrs_attrs__ = ("error",)
+
+    def __init__(self, error: object) -> None:
+        self.error = error
+
+    def __repr__(self) -> str:
+        return f"AttrsLike(error={self.error!r})"
+
+
+class _CustomIterable:
+    def __init__(self, error: object) -> None:
+        self.error = error
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        _CALLS.append("iter")
+        yield self.error
+
+    def __repr__(self) -> str:
+        return f"CustomIterable({self.error!r})"
+
+
+def _protocol_cell(name: str, exc: BaseException) -> tuple[object, str]:
+    return {
+        "deque": (collections.deque([exc]), "[ValueError]"),
+        "dict_keys": ({exc: 1}.keys(), "[ValueError]"),
+        "dict_values": ({"k": exc}.values(), "[ValueError]"),
+        "dict_items": ({"k": exc}.items(), "[<nested>]"),
+        "custom_iterable": (_CustomIterable(exc), "<nested>"),
+        "generator": ((e for e in [exc]), "<nested>"),
+        "dataclass": (_Holder(exc), "<object>"),
+        "attrs_like": (_AttrsLike(exc), "<object>"),
+        "slice": (slice(exc, None), "slice(ValueError, None, None)"),
+    }[name]
+
+
+_PROTOCOL_CELLS = [
+    "deque",
+    "dict_keys",
+    "dict_values",
+    "dict_items",
+    "custom_iterable",
+    "generator",
+    "dataclass",
+    "attrs_like",
+    "slice",
+]
+
+
+@pytest.mark.parametrize("name", _PROTOCOL_CELLS)
+@pytest.mark.parametrize("where", ["positional", "lone_value"])
+def test_protocol_routed_objects_print_no_exception_text(
+    name: str, where: str, tmp_path: pathlib.Path
+) -> None:
+    exc = ValueError(_CANARY)
+    cell, expected = _protocol_cell(name, exc)
+    _CALLS.clear()
+    if where == "positional":
+        record = _record("x %s", (cell,), exc=False)
+        want = f"x {expected}\n"
+    else:
+        record = _lone("%(k)s", {"k": cell})
+        want = f"{expected}\n"
+    assert _both(record, tmp_path) == (want, want)
+    assert _CALLS == []
+    assert not any(o is exc for o in _reachable(record.args))
+
+
+@pytest.mark.parametrize("name", _PROTOCOL_CELLS)
+def test_protocol_routed_objects_at_the_depth_limit(name: str) -> None:
+    exc = ValueError(_CANARY)
+    cell, _ = _protocol_cell(name, exc)
+    record = _record("x %s", ([[cell]],), exc=False)
+    SafeRecordFilter().filter(record)
+    assert _CANARY not in record.getMessage()
+
+
+def test_scalars_and_plain_objects_still_print_as_before() -> None:
+    class Color(enum.Enum):
+        RED = 1
+
+    values = (
+        pathlib.PurePosixPath("/tmp/a"),
+        decimal.Decimal("1.50"),
+        Color.RED,
+        datetime.datetime(2026, 11, 25, 1, 2, 3),
+        datetime.date(2026, 11, 25),
+        uuid.UUID(int=7),
+        range(3),
+        b"ab",
+        None,
+        2.5,
+    )
+    msg = " ".join(["%s"] * len(values))
+    record = _record(msg, values, exc=False)
+    expected = msg % values
+    SafeRecordFilter().filter(record)
+    assert record.getMessage() == expected
+    # And the same values one level inside a list.
+    inside = _record("%s", (list(values),), exc=False)
+    expected_inside = f"{list(values)}"
+    SafeRecordFilter().filter(inside)
+    assert inside.getMessage() == expected_inside
+
+
+def test_removing_the_iterable_route_is_visible() -> None:
+    # Pins the route itself: an unknown iterable is the placeholder, never its own repr.
+    record = _record("%s", (_CustomIterable(ValueError(_CANARY)),), exc=False)
+    SafeRecordFilter().filter(record)
+    assert record.getMessage() == "<nested>"
