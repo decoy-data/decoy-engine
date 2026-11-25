@@ -138,19 +138,22 @@ def test_macos_uses_the_device_test_alone(
 
 
 def _other_device(monkeypatch: pytest.MonkeyPatch, path: str | Path) -> None:
-    """`fstat` of the directory at `path` reports a device one higher than the real one."""
-    ino = os.stat(path).st_ino
-    real = os.fstat
+    """`fstat` and `stat` of the directory at `path` report a device one higher than the real one.
 
-    def moved(fd: int) -> os.stat_result:
-        found = real(fd)
+    Both move, so the mount table still matches the held directory and only the parent device
+    comparison can refuse the removal."""
+    ino = os.stat(path).st_ino
+    real_fstat, real_stat = os.fstat, os.stat
+
+    def moved(found: os.stat_result) -> os.stat_result:
         if found.st_ino != ino:
             return found
         fields = list(found)
         fields[2] += 1  # st_dev
         return os.stat_result(fields)
 
-    monkeypatch.setattr(os, "fstat", moved)
+    monkeypatch.setattr(os, "fstat", lambda fd: moved(real_fstat(fd)))
+    monkeypatch.setattr(os, "stat", lambda *a, **kw: moved(real_stat(*a, **kw)))
 
 
 def test_arena_reclaim_compares_the_root_with_its_parent(monkeypatch: pytest.MonkeyPatch) -> None:
