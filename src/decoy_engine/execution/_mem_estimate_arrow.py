@@ -17,13 +17,13 @@ duration 8, decimal32/64/128/256 4/8/16/32.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine._pandas_meta import pandas_nullable_columns
 from decoy_engine.profile._readers import LazySource
 
 _PLAIN_STRING_TYPES = (pa.string(), pa.large_string(), pa.binary(), pa.large_binary())
@@ -208,38 +208,6 @@ def normalize_for_sampling(column: pa.Array | pa.ChunkedArray) -> pa.Array | pa.
         f"sample_average_string_bytes needs a plain string or binary column "
         f"(or one view cast or extension unwrap away), got {t}"
     )
-
-
-_PANDAS_NULLABLE_DTYPES = frozenset(
-    (
-        *(f"Int{w}" for w in (8, 16, 32, 64)),
-        *(f"UInt{w}" for w in (8, 16, 32, 64)),
-        *(f"Float{w}" for w in (32, 64)),
-        "boolean",
-        "string",
-    )
-)
-
-
-def pandas_nullable_columns(schema: pa.Schema) -> frozenset[str]:
-    """Field names the schema's `b"pandas"` metadata marks as pandas nullable dtypes.
-
-    A frame written from `Int8`, `boolean` and the like carries a validity mask even
-    when no value is null, and pandas reads it back as the nullable extension dtype.
-    Malformed metadata marks nothing.
-    """
-    raw = (schema.metadata or {}).get(b"pandas")
-    if raw is None:
-        return frozenset()
-    try:
-        columns = json.loads(raw)["columns"]
-        return frozenset(
-            str(c.get("field_name") or c["name"])
-            for c in columns
-            if c.get("numpy_type") in _PANDAS_NULLABLE_DTYPES
-        )
-    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
-        return frozenset()
 
 
 def source_nullable_columns(source: pa.Table | LazySource | None) -> frozenset[str]:

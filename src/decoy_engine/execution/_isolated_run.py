@@ -15,7 +15,7 @@ Isolation contract:
 
   1. `config` and `sources` (which can be large) are NEVER passed via argv --
      written to a temp payload file the worker reads (config as JSON,
-     sources as Parquet), matching the probe's own `--source-dir` convention
+     sources as Parquet or Arrow IPC), matching the probe's own `--source-dir` convention
      of pointing a worker at on-disk input rather than materializing it in
      command-line text.
   2. `_CAPPED_ENV` (MALLOC_ARENA_MAX / ARROW_DEFAULT_MEMORY_POOL and the BLAS
@@ -164,8 +164,8 @@ def run_pipeline_isolated(
             `PipelineConfig.model_validate(raw).model_dump()` dict. Must be
             JSON-serializable (it already is, by construction, for every
             caller in this codebase).
-        sources: same as `run_pipeline`'s `sources`. Serialized to Parquet
-            in a temp directory for the child to read back.
+        sources: same as `run_pipeline`'s `sources`. Staged in a private directory
+            as Parquet for exact types or Arrow IPC for the remaining types.
         mem_cap_bytes: if given, a hard `resource.setrlimit` ceiling applied
             IN THE CHILD before it loads sources or calls `run_pipeline`
             (see `_isolated_worker`). `None` (default) applies no cap.

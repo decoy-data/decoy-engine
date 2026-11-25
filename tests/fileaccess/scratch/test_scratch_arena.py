@@ -49,7 +49,7 @@ SENTINELS = ("/srv/secret-path", "patients_tbl", "ssn_col", "123-45-6789")
 
 
 @pytest.fixture(autouse=True)
-def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_env_clean: None) -> Path:
     assert os.geteuid() != 0, "root ignores modes, so these cells would prove nothing"
     root = tmp_path / "tmp"
     root.mkdir()

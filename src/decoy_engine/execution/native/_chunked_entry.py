@@ -29,6 +29,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts
 from decoy_engine.execution import _chunked, _chunked_oracle
 from decoy_engine.execution import _chunked_bucket_perturb as bucket_perturb_gate
@@ -46,7 +47,6 @@ from decoy_engine.execution._output_projection import (
     known_output_columns,
 )
 from decoy_engine.execution._row_error_summary import chunk_row_error_summary
-from decoy_engine.execution._transforms import stored_index_fields
 from decoy_engine.execution.native._categorical_prepared import PreparedCategorical
 from decoy_engine.execution.native._chunk_masking import _mask_chunk_native
 from decoy_engine.execution.native._chunk_schema import cast_null_columns
