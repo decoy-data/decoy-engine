@@ -3,8 +3,6 @@ directory carrying a sentinel, a spy on the locator handed to each library, and 
 
 from __future__ import annotations
 
-import logging
-import traceback
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -14,6 +12,7 @@ import pytest
 
 from decoy_engine.fileaccess import _rooted
 from tests.fileaccess.support import RootRelative
+from tests.security._surfaces import rendered  # noqa: F401 - re-exported for the X tests
 
 LOCATOR_SENTINEL = "LOCSENT" + uuid.uuid4().hex[:10]
 
@@ -50,31 +49,6 @@ def xworld(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[XWorld]:
         yield world
     finally:
         policy.close()
-
-
-def rendered(exc: BaseException, caplog: pytest.LogCaptureFixture | None = None) -> list[str]:
-    """Every form an error or a log line can reach a reader in."""
-    out = [str(exc), repr(exc), "".join(traceback.format_exception(exc)), repr(exc.args)]
-    link: BaseException | None = exc
-    seen: set[int] = set()
-    while link is not None and id(link) not in seen:
-        seen.add(id(link))
-        out.append(str(link))
-        link = link.__cause__ or link.__context__
-    log = logging.getLogger(f"x.{uuid.uuid4().hex}")
-    records: list[str] = []
-
-    class Capture(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(logging.Formatter().format(record))
-
-    log.addHandler(Capture())
-    log.propagate = False
-    log.error("failed", exc_info=exc)
-    out.extend(records)
-    if caplog is not None:
-        out.extend(logging.Formatter().format(r) for r in caplog.records)
-    return out
 
 
 def assert_no_locator(world: XWorld, texts: list[str]) -> None:

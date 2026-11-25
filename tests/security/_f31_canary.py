@@ -1,7 +1,8 @@
 """Shared harness for the F31 engine canary corpus (AE6).
 
 `observe(call)` runs one failure shape and returns every surface the engine can write text to:
-the exception (str, repr, args, formatted traceback with its cause and context chain), every
+the exception (every form in `tests/security/_surfaces.py`, including instance attributes and
+`records` along the cause and context chain), every
 log record on the `decoy_engine` logger through a stock formatter on a stream handler and on a
 DEBUG file handler, every `warnings.warn`, and the progress events. A cell asserts that its
 failure path ran (type and reason code) before it asserts the marker is absent, so a cell whose
@@ -15,12 +16,15 @@ from __future__ import annotations
 import importlib
 import io
 import logging
-import traceback
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import pytest
+
+from tests.security._surfaces import rendered_surfaces
 
 CANARY = "DECOY_CANARY_F31_7Q4Z"
 
@@ -41,25 +45,35 @@ class Observed:
         return getattr(self.exc, "code", None)
 
     def surfaces_with_canary(self) -> list[str]:
-        return sorted(name for name, text in self.surfaces.items() if CANARY in text)
+        return canary_surfaces(self.surfaces)
 
 
-def exception_surfaces(exc: BaseException) -> dict[str, str]:
-    """Every text form of one exception, including the cause and context chain."""
-    chain: list[BaseException] = []
-    seen: set[int] = set()
-    cursor: BaseException | None = exc
-    while cursor is not None and id(cursor) not in seen:
-        seen.add(id(cursor))
-        chain.append(cursor)
-        cursor = cursor.__cause__ or cursor.__context__
-    return {
-        "exc.str": str(exc),
-        "exc.repr": repr(exc),
-        "exc.args": repr(exc.args),
-        "exc.traceback": "".join(traceback.format_exception(exc)),
-        "exc.chain": "\n".join(f"{type(e).__name__}: {e!s}" for e in chain),
-    }
+def canary_surfaces(surfaces: dict[str, str]) -> list[str]:
+    """The names of the surfaces whose text carries the marker."""
+    return sorted(name for name, text in surfaces.items() if CANARY in text)
+
+
+def leak_xfail(reason: str) -> Any:
+    """A cell observed leaking. Strict, and only an AssertionError counts, so a path that never
+    ran (`pytest.fail`) or an error in the harness cannot hide behind the mark. `reason` cites
+    the V2-LOG entry or the slice that closes the leak."""
+    return pytest.mark.xfail(strict=True, raises=AssertionError, reason=reason)
+
+
+def assert_path_ran(seen: Observed, *, code: str | None, exc_name: str | None = None) -> None:
+    """Fail, not assert, when the intended failure path did not run: `leak_xfail` only absorbs
+    an AssertionError, so a cell that never reached its site cannot pass as a known leak."""
+    if seen.exc is None:
+        pytest.fail("the failure path did not run")
+    if exc_name is not None and type(seen.exc).__name__ != exc_name:
+        pytest.fail(f"expected {exc_name}, got {type(seen.exc).__name__}")
+    if code is not None and seen.code != code:
+        pytest.fail(f"expected code {code!r}, got {seen.code!r}")
+
+
+def assert_no_canary(surfaces: dict[str, str]) -> None:
+    leaked = canary_surfaces(surfaces)
+    assert not leaked, f"marker reached surfaces: {leaked}"
 
 
 def render_failure_surface(exc: BaseException) -> str | None:
@@ -113,7 +127,7 @@ def observe(
         file_handler.close()
 
     if out.exc is not None:
-        out.surfaces.update(exception_surfaces(out.exc))
+        out.surfaces.update(rendered_surfaces(out.exc))
         rendered = render_failure_surface(out.exc)
         if rendered is not None:
             out.surfaces["render_failure"] = rendered
