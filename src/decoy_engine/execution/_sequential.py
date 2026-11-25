@@ -441,10 +441,9 @@ def run_sequential(
                                 source_snapshots[(table, col)] = df[col].copy()
 
                 # HC-3a P1 #1: snapshot this table's source-read columns pre-mask (same-table life).
-                for snap_key, snap in take_source_snapshots(
-                    order, group_anchor_cols, table, df
-                ).items():
-                    ctx.group_anchor_snapshots[snap_key] = snap
+                # `|=` (not a loop variable) so no Series outlives its table's eviction below.
+                anchors = ctx.group_anchor_snapshots
+                anchors |= take_source_snapshots(order, group_anchor_cols, table, df)
 
                 table_records_list: list[RowErrorRecord] = []
                 for node in nodes_by_table.get(table, ()):

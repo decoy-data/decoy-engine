@@ -167,6 +167,63 @@ def test_w5_sequential_route_selects_by_the_original_value(tmp_path: Path) -> No
     assert changed_rows(out, child, "zz_note") == [k == "x" for k in child["kind"].to_pylist()]
 
 
+def test_w5_sequential_route_releases_a_snapshot_at_table_eviction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A table's pre-mask copy must not outlive that table's eviction (peak-memory contract)."""
+    import gc
+    import weakref
+
+    from decoy_engine.execution import _sequential
+
+    n = 40
+    parent = pa.table(
+        {
+            "pid": pa.array(range(1, n + 1), pa.int64()),
+            "kind": pa.array(["x" if i % 4 == 0 else "y" for i in range(n)], pa.string()),
+            "zz_note": pa.array([f"note{i}" for i in range(n)], pa.string()),
+        }
+    )
+    child = pa.table({"pid": pa.array(range(1, n + 1), pa.int64())})
+    config = make_config(
+        [{"name": "pid", "strategy": "passthrough"}],
+        extra_tables=[
+            {
+                "name": "parent",
+                "columns": [
+                    {"name": "pid", "strategy": "passthrough"},
+                    hash_col("kind", NS),
+                    {**redact("zz_note"), "when": "kind == 'x'"},
+                ],
+            }
+        ],
+        relationships=[
+            {
+                "parent": {"table": "parent", "columns": ["pid"]},
+                "children": [{"table": TABLE, "columns": ["pid"]}],
+                "orphan_policy": "remap",
+                "namespace": "ns_fk",
+            }
+        ],
+    )
+    real = _sequential.take_source_snapshots
+    refs: list[weakref.ref[pd.Series]] = []
+    alive_at_next_table: list[int] = []
+
+    def spy(order: Any, cols: Any, table: str, frame: Any) -> Any:
+        gc.collect()
+        alive_at_next_table.append(sum(r() is not None for r in refs))
+        out = real(order, cols, table, frame)
+        refs.extend(weakref.ref(s) for s in out.values())
+        return out
+
+    monkeypatch.setattr(_sequential, "take_source_snapshots", spy)
+    _run_sequential(config, {TABLE: child, "parent": parent}, tmp_path)
+    assert refs, "the gated table took no snapshot, so the test proves nothing"
+    assert alive_at_next_table[0] == 0
+    assert alive_at_next_table[-1] == 0, "a snapshot outlived its table's eviction"
+
+
 def _run_sequential(config: dict[str, Any], tables: dict[str, pa.Table], tmp: Path) -> Any:
     import copy
 
