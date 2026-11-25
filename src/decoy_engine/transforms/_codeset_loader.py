@@ -207,6 +207,23 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
     return path
 
 
+def _check_exists(path: Path, shown: str) -> None:
+    """The existence check for a customer corpus, before any cache lookup. Its stat failure goes
+    through the same classifier as the cache-key stat, raised after the handle closes."""
+    handle = _open_customer(path)
+    err: PlanCompileError | None = None
+    try:
+        handle.stat()
+    except OSError as exc:
+        if fileaccess.keeps_class(exc):
+            raise
+        err = corpus_stat_error(exc, shown)
+    finally:
+        handle.close()
+    if err is not None:
+        raise err
+
+
 def _get_corpus_record(
     name: str,
     path: Path | None,
@@ -237,6 +254,8 @@ def _get_corpus_record(
     # already collapsed a doubled separator and would hide a prefixed URL from the redactor.
     resolved = _resolve_read_path(name, path)
     shown = _where(locator if locator is not None else resolved)  # a shipped load has no `path`
+    if path is not None:
+        _check_exists(resolved, shown)
     if is_shipped:
         # A registry-resolved corpus keys on its name (no file-system call); an explicit path
         # (an internal caller's override) keeps the resolved-path key.
