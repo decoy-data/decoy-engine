@@ -49,8 +49,11 @@ Guarantee, on the S1b merge head:
    the ordered union, `_pipeline_auto_chunk.py:460-462,579-580`); on unified, one warning per
    column with counts summed over batches equals the full-frame warning.
 2. A column outside the numeric domain, a valid config the operator declines, a pandas-metadata
-   identity miss or a failed resident round trip runs the oracle and publishes one coded decline
-   record (parent section 4, "Published route evidence").
+   identity miss or a failed resident round trip runs the oracle. When the oracle succeeds, the
+   run publishes one coded decline record (parent section 4, "Published route evidence"). When
+   the oracle itself fails on that input (parent lines 179-180, 279: int64 values with Int32
+   metadata), the run fails with the oracle's public error and commits no output; S1b promises
+   no decline record for that case.
 3. On unified, a `top_code` node on the admitted post-cast snapshot goes to the per-node runner,
    declared or not (parent item 10a). Raw snapshots keep every `top_code` node as a wrapper
    trigger, as on main.
@@ -67,8 +70,8 @@ Rust kernels.
 - S1w: `BucketizeParams`, `TopCodeParams` (`native/_operator_params.py`); scalar entries in
   `native/_kernels_scalar.py`; typed step in `native/_operator_step.py`; physical bindings in
   `physical/_shadow_operators.py` and `_shadow_bindings.py`; the `chunk_degenerate_null` fact.
-- S1d: raw NaN rendering, per-column warning accumulation, the attributed row-error map and the
-  leaf `contracts/format_error_reasons.py`.
+- S1d: raw NaN rendering, per-column warning accumulation and the attributed row-error map.
+  The reason leaf `contracts/format_error_reasons.py:15-22` comes from S1a.
 - S1e: decline transport from requirements and resident gates; `SOURCE_TYPE_NOT_NUMERIC`.
 - S1g: shared F06 projection, shared top_code integer-column selection, the pandas-metadata
   identity predicate in `native/_real_type_admission.py`.
@@ -85,10 +88,12 @@ S1b is wiring. It adds no operator code and no new module.
 1. **Registry rows (parent item 8).** Add `native_bucketize` and `native_top_code` to
    `_operator_registry.py`: `shape="kernel"`, backend `arrow_python`, no required kernel, no
    compiled-kernel evidence, the numeric input domain (int8, int16, int32, int64, uint8, uint16,
-   uint32, float64) as one immutable type set. The #807 kernels already check the same types
-   (`kernel/_bucket.py:88-98,214,294`); both the registry rows and the kernel guard read that
-   one set, defined in the kernel package so the registry keeps its import isolation
-   (`tests/sentry/test_operator_registry_sentry.py:84-94`), `full_frame_assembly="null_on_empty"`, `chunk_degenerate_null=True`.
+   uint32, float64) as an immutable set written in the registry module itself, because the
+   registry may not import the kernel package (`tests/sentry/test_operator_registry_sentry.py:84-94`).
+   The #807 kernels keep their own type check (#807 `kernel/_bucket.py:88-98,214,294`). The two
+   sets are tied by a test, not by an import: P7 checks the registry domain and the direct
+   kernel boundary against one hand-written matrix. `full_frame_assembly="null_on_empty"`,
+   `chunk_degenerate_null=True`.
    Routed diagnostics: bucketize `reduce_row_error:format_error`; top_code that plus
    `reduce_warning:top_code_generalized`. Correct top_code's stale capability note in
    `native/_capabilities.py` (581 lines; stays at or below 600).
@@ -97,8 +102,8 @@ S1b is wiring. It adds no operator code and no new module.
    config rejection functions in `native/_operator_config_rejections.py` (parent item 12:
    integer width out of operator range, declared integer output) and calls them from both
    `native/_plan.py:_config_rejection` (`:305-311`) and `native/_requirements.py:_config_gate_rejection`
-   (`:622-625`). Without them a valid `2**53` width reaches a kernel that raises
-   (`kernel/_bucket.py:217-219` on #807). Registry rows, dispatch, bindings, config rejections
+   (defined at `:496`, called at `:622-625`). Without them a valid `2**53` width reaches a kernel that raises
+   (#807 `kernel/_bucket.py:217-219`). Registry rows, dispatch, bindings, config rejections
    and the S1g and S1r gates start acting in one commit so no head has a row without its gate.
 3. **Unified post-cast fact (parent item 10a).** `_unified_slice` passes an optional keyword to
    `ShadowCoordinator.run` that marks the snapshot as the admitted post-cast table. Default is
@@ -119,9 +124,11 @@ S1b is wiring. It adds no operator code and no new module.
 5. **Negative controls.** In `test_phase2_gate.py:438` replace the bucketize stand-in with a
    column that still declines (a `float32` bucketize column). In both planning controls of
    `test_native_plan_config_aware.py` (`:405`, `:564`) use a strategy that still has no kernel;
-   the old `INT_DECL` fixture at `:571-580` stays green either way because
-   `declared_integer_output` already gives `python_only` (`plan/_seed_envelope.py:229-234`).
-   Keep their route, kernel-call and parity assertions.
+   the old `INT_DECL` fixture at `:571-580` asserts only `python_only`, which
+   `declared_integer_output` already gives (`plan/_seed_envelope.py:229-234`), so it would pass
+   either way. It gains an assertion that the native config rejection
+   (`bucketize_declared_integer_output`) is the recorded reason. Keep their route, kernel-call
+   and parity assertions.
 6. **Docs.** CODEMAP rows, the route contract, `docs/strategies.md` route lines for both
    strategies, and `changelog.d/bucket-topcode-native.md`.
 
@@ -156,7 +163,10 @@ budget cannot be met, stop and report; do not raise a ceiling.
 | Nullable int64 top_code, no floor | unified | protected integer dtype; `-(2**53 + 1)` renders `"-9007199254740993"` |
 | Nullable int64 top_code | auto chunk | planner refusal, full frame (gates kept: `_planner.py:499-505`, `chunked/_source_dtype_gate.py:123-128`) |
 | Float32 or uint64 bucketize column | both | oracle, `source_type_not_numeric` record |
-| Valid NaN in a float64 chunk after normalization | chunked | NaN stays a present float label, not null (P2 literal) |
+| Ordinary float64 NaN (no pandas metadata) | both | null label, validity bit 0, no row error |
+| Float64 extension NaN (`Float64` metadata) | both | the oracle's literal label and validity, no `"nan"` from the native side |
+| Valid NaN in the second chunk (passthrough sibling, `native/_chunk_schema.py:145-156`) | chunked | same literal as the first chunk |
+| Int64 values with `Int32` metadata | both | metadata decline, oracle fails, public error, no committed output |
 | Partly-null int64 bucketize | unified | round-trip decline, oracle output, `resident_round_trip_mismatch:{column}` |
 | Float32 metadata on a double column | unified | table decline `pandas_metadata_not_identity:{column}` before the round trip |
 | Float32 metadata on chunk two only | chunked | chunk one native, chunk two oracle, decline on chunk two and in the fold |
@@ -182,9 +192,16 @@ Red-before means red on the S1r merge head, because the operators are not admitt
    then `"14"`.
 2. **P2 route cases (red-before).** Parent P2 on the activated routes: literal labels, validity
    bits and zero spurious row errors across int64 min/max, signed zeros, subnormals,
-   infinities, `±2**53` and valid NaN after chunk normalization (a rebuilt chunk loses schema
-   metadata, `native/_chunk_schema.py:140-156`); exact public declines for float32 and uint64.
-   Plus #790's typed-date parity and decline regressions (parent section 7, overlap note).
+   infinities and `±2**53`. NaN is split by metadata and format (`_top_code.py:204-214`):
+   ordinary float64 NaN, `Float64` extension NaN, and NaN in the second chunk through the
+   passthrough sibling (`native/_chunk_schema.py:145-156`); each asserts the literal label, the
+   validity bit and the row-error list (empty or the exact NaN error). Exact public declines for
+   float32 and uint64.
+2a. **Oracle failure on a metadata decline (red-before).** Int64 values with `Int32` metadata on
+   unified and chunked: the public error text, no committed output, no decline record.
+2b. **#790 date controls (pin).** `test_date_shift_typed_parity.py:93,112` and
+   `test_date_shift_typed_declines.py:132,148` stay green on the base and the head; they are not
+   red evidence.
 3. **P4b public case (red-before).** Through `_route_chunked`: chunk one `Float64` metadata
    native, chunk two `Float32` metadata oracle, labels `"1"`, `"16777216"`, `"16777216"`, no
    warning. `decline_records` is the same preflight list on both chunks; chunk two's refusal is
@@ -202,22 +219,27 @@ Red-before means red on the S1r merge head, because the operators are not admitt
    metadata and wrapper deps takes the wrapper and renders `"16777216"` with zero warnings. The
    public `Float32` unified control asserts the detail `pandas_metadata_not_identity:x` and zero
    coordinator calls, not only oracle output.
-6. **P5 publication (red-before for the native legs).** Unified fail mode with the first bad row
-   in a later batch: spy on the coordinator's returned output and records before
-   `_unified_slice` finalizes or falls back (`_unified_slice.py:325-330,370-372`); assert the
-   null cell and every ordered (table, column, row_index, trigger, reason) against literals;
-   then check the public `RowErrorsFailedError` separately. Chunked: prove which backend made
-   the failing chunk (native step spy or counting oracle delegate), inspect its result and
-   `str(exc)` for the bad value; summary chunk_index 1, offset L, row 2; chunk two never
-   yielded; nothing published through the transactional sink.
+6. **P5 publication (red-before for the native legs).** Each case runs twice: native and forced
+   oracle, with equal results. Unified fail mode with the first bad row in a later batch: spy on
+   the coordinator's returned output and records before `_unified_slice` finalizes or falls
+   back (`_unified_slice.py:325-330,370-372`); assert the failing cell is null and the complete
+   ordered list of (table, column, row_index, trigger, reason) records equals literals; then
+   check the public `RowErrorsFailedError` separately. Chunked: identify the backend of both
+   chunks (native step spy or counting oracle delegate); inspect the failing chunk's result (null
+   cell, complete ordered records) and `str(exc)` for the bad value; summary chunk_index 1,
+   offset L, row 2; chunk two never yielded; nothing published through the transactional sink.
+   Parent line 311: full-frame and sequential-FK quarantine runs keep their handler records,
+   asserted against literals.
 7. **P6 valid declines (red-before for route evidence).** Width `2**53` and declared integer
    output: exact detail in raw eligibility, compiled requirements, unified fallback leaf and
-   chunk evidence; flag-off and second-run controls publish nothing stale.
+   chunk evidence; flag-off and second-run controls publish nothing stale. The `INT_DECL`
+   control asserts the native rejection reason, not only `python_only`.
 8. **P7 registry delta (red-before).** Hand-written two-row delta on
    `tests/native/test_operator_tables_snapshot.py`; exact `chunk_degenerate_null` true set
-   {bucket_perturb, bucketize, top_code}; the three replaced negative controls; a guard that
-   the kernel's type check and the registry domain are the same set, checked against the
-   hand-written P7 matrix.
+   {bucket_perturb, bucketize, top_code}; the three replaced negative controls. The registry
+   domain and a direct kernel call (`bucketize_array`, `top_code_array`) are each checked
+   against the hand-written P7 type matrix: accepted types run, every other type raises the
+   kernel's type error.
 9. **P8 other lanes (pin).** Sequential FK non-key pair unchanged except B2/B3 on handler
    routes. Out-of-core: bucketize keeps its specific refusal and top_code its generic refusal
    (`out_of_core/_compat.py:78-82,356-361`).
@@ -239,7 +261,11 @@ Mutations (run on the final head):
 | A9 | Set `chunk_degenerate_null` on text_mask | P7 exact true set |
 | A10 | Yield the failing chunk before raising (`native/_chunked_entry.py:353-380`) | P5 chunked never-yielded assertion |
 | A11 | Drop the width rejection from `_requirements.py` only | P6 compiled and route checks |
-| A12 | Widen the kernel type set without the registry | P7 kernel-registry guard |
+| A12 | Kernel accepts float32 through a direct call | P7 direct kernel boundary |
+| A13 | Default the unified keyword to post-cast for every caller | P11 raw int64 control (`driver_invocation`) |
+| A14 | Drop the `INT_DECL` native rejection | P6 `INT_DECL` reason assertion |
+| A15 | Render extension NaN through `python_float_str` | P2 `Float64` extension NaN case |
+| A16 | Skip the passthrough sibling on the second chunk | P2 second-chunk NaN case |
 
 ## Enumerations
 
@@ -299,7 +325,7 @@ Mutations (run on the final head):
 | 7 | Check-then-use (toctou) | Per-chunk decision on the raw chunk before normalization (S1r) | P4b | A4, chunk one only |
 | 8 | Weak tests | Expected labels are literals, not computed from production specs | P7 hand-written delta | A9, text_mask degenerate |
 | 9 | Refactor drift | Negative controls keep route, kernel-call and parity asserts | three replaced controls | Leave bucketize stand-in: control red |
-| 10 | Frozen contract drift | Registry snapshot delta and fragment; no digest or seed change; one type set for kernel and registry | P7 snapshot test | A6, A12 |
+| 10 | Frozen contract drift | Registry snapshot delta and fragment; no digest or seed change; registry and kernel type sets tied to one hand-written matrix | P7 delta and kernel boundary | A6, A12 |
 
 ### Recurring defect catalog (11 classes)
 
@@ -313,7 +339,7 @@ Mutations (run on the final head):
 | 6 | Private modules | Strategy package interface and `decoy_engine.kernel` exports only |
 | 7 | No hidden CI failures | Read the exit status and failing IDs; no skip marks added |
 | 8 | One input, one trust class | Raw chunk and resident frame both pass the same identity predicate |
-| 9 | Mutations on the final head | A1 to A9 after the last edit |
+| 9 | Mutations on the final head | A1 to A16 after the last edit |
 | 10 | Allowlisted helpers still checked | Lossless-ingest and width caller sentries run unchanged |
 | 11 | No raised caps | No ceiling, census, baseline or pin change |
 
@@ -338,7 +364,9 @@ Commits inside it may be split for review, but registry rows, dispatch, bindings
 in one commit.
 
 Test depth: T0 per edit; T1 impact selection per commit; T2 on the exact head with P2 route
-cases, P4, P4b, P5, P6, P7, P8, P9, P11, #790's date regressions and A1 to A12. Escalation trigger: registry snapshot (frozen contract), so one
+cases, P4, P4b, P5, P6, P7, P8, P9, P11, #790's date controls, parent line 330's mutations and
+A1 to A16. Parent line 367: P4 and P5 run once with the native companion present and once
+without it. Escalation trigger: registry snapshot (frozen contract), so one
 full suite on the merge head against the stored main baseline.
 
 ## Pre-mortem
@@ -359,7 +387,8 @@ full suite on the merge head against the stored main baseline.
 
 ## Builder brief items
 
-- Do not start before S1g, S1d and S1r are merged; check merged PRs first.
+- Do not start before S1g, S1d and S1r are merged; check merged PRs first. The base is the
+  first main SHA that contains both S1d and S1r.
 - Commit messages: Conventional Commits subject, 72 characters or fewer, last line `cam`, no
   trailers, file lists or test counts.
 - Test depth as in "Slices"; `~/bin/pytest-one`; native companion tests need the lock-faithful

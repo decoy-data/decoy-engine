@@ -56,8 +56,9 @@ At the #801 head:
   when passed, and the print of the checker's report lines.
 - `tests/sentry/ratchet/test_reader_guard.py:27-56,84-100`: forbids `open`, `run` and
   `tarfile.open` in ratchet helpers outside their named owners.
-- `tests/sentry/test_ratchet_check.py:40-72` temp-repo fixtures; `tests/unit/scripts/_gates_harness.py:189`
-  runs the real gate shell and returns its exit and stderr.
+- `tests/sentry/test_ratchet_check.py:40-72` temp-repo fixtures; `tests/unit/scripts/_gates_harness.py:28-37`
+  `run()` runs the real gate shell and returns its exit and stderr (`gates()` at `:220-222`).
+  `gates.sh:517,578-597` skips the baseline step after a branch pass.
 - Historical parser: `cb06f318e:scripts/dev/ratchet_check.py:39-41` accepts only `--root` and
   `--base`; its `_ratchet.py:55-64` already tolerates extra row fields.
 
@@ -71,8 +72,9 @@ keeps passing.
    `check_tree(root, tree, waiver_input) -> CheckResult` (findings, report lines, the head and
    base registry rows already parsed at `:394-398,456-460`) and keep
    `check(root, base_ref, waiver_input)` as a thin wrapper with the same signature and output, so
-   every caller keeps working. Add `CHECKER_HELPERS`, the tuple of names `_helper` may load; a
-   guard test asserts every `_helper("...")` literal in `_ratchet.py` is in it.
+   every caller keeps working. `CheckResult` also returns `fresh_fields`, the fields named by
+   fresh `[checker_change]` rows (`:479-482`). Add `CHECKER_HELPERS`, the tuple of names `_helper`
+   may load; a guard test asserts the set of `_helper("...")` literals in `_ratchet.py` equals it.
 2. `tests/sentry/ratchet/_base_run.py` (new, about 90 lines, no I/O), loaded with
    `_ratchet._helper`:
    - `plan_base_run(tree) -> BasePlan | Skip | Fail`. Uses the `BaseTree` from `check_tree`. If
@@ -83,7 +85,10 @@ keeps passing.
      Empty unless HEAD adds a fresh `[checker_change]` row. For each fresh field F, all must
      hold, else `Fail` with a named reason:
      a. `changed_paths` includes `scripts/dev/ratchet_check.py`, `tests/sentry/_ratchet.py` or
-        `tests/sentry/ratchet/<name>.py` for a name in base `CHECKER_HELPERS`. An edit only to
+        `tests/sentry/ratchet/<name>.py` for a name the base checker loads. The base #801 tree has
+        no `CHECKER_HELPERS`, so the names come from `base_helper_names(base_source)`, which
+        collects the `_helper("...")` literals in the base `_ratchet.py` (`:55-75,526`) with
+        `ast`, not a regex. An edit only to
         `_limit_constants.py` (loaded by `_baseline_sources.py:82-91`, not by the checker) does
         not count;
      b. the same set of `[[sentry]]` ids in both registries;
@@ -97,22 +102,29 @@ keeps passing.
    resolve the sha once (`base commit not found: <ref>`, exit 1); build the one `BaseTree`; run
    `check_tree` for the head with no waiver input; then, only with `--with-base`:
    - `plan_base_run`; on `Skip` print the line; on `Fail` exit 1.
-   - compute changed paths with one `git diff --name-only <sha>` and the pairs.
+   - compute changed paths with `git -C <root> diff --name-status -z --find-renames <sha>` (both
+     endpoints of a rename count) plus `git -C <root> ls-files -z --others --exclude-standard`,
+     parsed on NUL so non-ASCII paths are exact; then the pairs.
    - extract: `git archive --format=tar <sha> scripts/dev tests/sentry` to a file inside one
      `tempfile.TemporaryDirectory`, check the exit code, then `tarfile` with `filter="data"`. A
      Python without `tarfile.data_filter` fails with "python lacks the tar data filter".
    - child: `[sys.executable, "-I", <dest>/scripts/dev/ratchet_check.py, "--root", root,
-     "--base", sha]`, env from `os.environ` minus `RATCHET_SCHEMA_WAIVER`. When pairs exist and
-     `accepts_waiver_flag(base source)` is true, set the env to the JSON pairs and add
-     `--schema-waiver-env`. When pairs exist and the base checker lacks the flag, exit 1 ("base
-     checker cannot take a schema waiver"): an older checker tolerates the extra field
-     unaided, so the plain run is tried first and only its failure is reported. With no pairs
-     the child gets the plain command.
-   - the child's stdout and stderr pass through once. The waiver-use line is the one the
-     checker itself prints at `_integrity.py:285-291`; the launcher prints no second format.
+     "--base", sha]`, env from `os.environ` minus `RATCHET_SCHEMA_WAIVER`. With no pairs, or when
+     the base checker lacks `--schema-waiver-env` (`cb06f318e`, parent lines 674-680), the child
+     runs once with the plain command and its exit status is the result: an older checker
+     tolerates an extra row field unaided. When pairs exist and the base accepts the flag, set
+     the env to the JSON pairs and add `--schema-waiver-env`. A missing decision is caught by
+     the head run before any child starts.
+   - the child's stdout passes through once. The waiver-use line is the one the checker itself
+     prints at `_integrity.py:285-291`; the launcher prints no second format. Child stderr is
+     filtered to lines starting `ratchet:` or `base commit not found`; a traceback becomes one
+     line naming the exception type, so no source line reaches the log
+     (`ratchet_check.py:26-35`).
    - exit 1 when the head fails, the plan fails, extraction fails or the child exits non-zero.
    `--schema-waiver-env` without `--with-base` keeps working unchanged, so a later branch that
-   extracts this file as its base can still pass waivers to it.
+   extracts this file as its base can still pass waivers to it. The test harness records each
+   child invocation (argv and the waiver env key) to a file named by `RATCHET_CHILD_LOG`, read
+   only when set.
 4. `scripts/dev/gates.sh` sentry step (`gates.sh:491`, about +15; the shell file is not in the
    Python module-size scan): pass `$label` (`gates.sh:474`) into the `bash -c` string:
    - checker present, label not `baseline`: `ratchet_check.py --with-base`;
@@ -129,9 +141,8 @@ keeps passing.
 
 Choke point: `ratchet_check.py --with-base` is the one place a base run starts. Guard test
 `test_gate_sentry_step_calls_with_base` reads `gates.sh` and asserts the branch-label command
-has `--with-base`. Mutation: drop the flag from `gates.sh`; the guard and test 15 (which runs
-the real gate through `_gates_harness.py:189`) fail. Test 2 calls `ratchet_check.py` directly,
-so it does not observe this mutation.
+has `--with-base`. Mutation: drop the flag from `gates.sh`; test 17 fails. Test 2 calls
+`ratchet_check.py` directly, so it does not observe this mutation.
 
 Design notes: one new helper, no new abstraction that will grow. Established pattern: `git
 archive` plus `tarfile` with the PEP 706 `data` filter. Each fact has one home: the base sha and
@@ -153,11 +164,11 @@ all I/O in `ratchet_check.py`, the waiver rule in `_base_run.py`, the loaded-hel
 | Change on the branch | Expected | Test |
 |---|---|---|
 | Deletes `ratchet_check.py` | Fail, "ratchet checker missing" | 1 |
-| Edits `_ratchet.py` so `check()` returns nothing, grows a baseline | Base copy fails the growth | 2 |
+| Weakens the scratch head's `growth()` (`_ratchet.py:286-298,513`) to return nothing, grows a baseline | Base copy fails the growth | 2 |
 | Head `_integrity.transfer_findings` returns nothing; one of two inventories and its baseline removed | Base copy names the removed id | 3 |
 | Adds field F, edits the checker, fresh `[checker_change]` F | Pass, the checker's own waiver line once | 4 |
 | Same, no `[checker_change]` row | Fail | 5 |
-| `[checker_change]` and a whitespace-only baseline edit | Fail | 6 |
+| `[checker_change]` and a whitespace-only edit to a non-ASCII-named baseline | Fail | 6 |
 | Base listing fails | Fail, never skip | 7 (pin) |
 | Listed checker blob unreadable | Fail | 8 |
 | `git archive` fails, or the base checker crashes, with a waiver | Fail | 9 |
@@ -173,13 +184,14 @@ all I/O in `ratchet_check.py`, the waiver rule in `_base_run.py`, the loaded-hel
 | Edit only to `_limit_constants.py` plus `[checker_change]` F | Fail, not a checker edit | 19 |
 | `[checker_change]` F, no row adds F | Fail | 20 |
 | Base checker accepts the field with no suppression | No waiver line | 21 |
-| Base predates RG-E1 (`cb06f318e`), no pairs | Plain child command, pass | 22 |
+| Base predates RG-E1 (`cb06f318e`), with or without pairs | Plain child command once; child status is the result (pass and fail cases) | 22 |
 | Standalone `--schema-waiver-env` without `--with-base` | Works as on #801 | 23 (pin) |
+| Renamed checker helper (rename endpoints) plus fresh F | Counts as a checker edit | 6r |
 | Baseline label, checker listed but file missing | Fail | 24 |
 | Baseline label, listing fails | Fail | 25 |
 | Baseline label with checker | No `--with-base` | 26 (pin) |
 | Baseline worktree with proven no checker | Skip, as today | 27 (pin) |
-| Live repo | Pass with `--with-base` against the real merge base | 28 (pin) |
+| Live repo | three runs, see below | 28 |
 
 ## Acceptance tests (red first)
 
@@ -187,20 +199,26 @@ File: `tests/sentry/ratchet/test_base_run.py` (new, about 300 lines; tests are o
 size scan). Each test builds a temp repo with the fixtures in `test_ratchet_check.py:40-72`
 (imported), seeds and commits the checker (`scripts/dev/ratchet_check.py`, `tests/sentry/_ratchet.py`,
 `tests/sentry/ratchet/_*.py`) into it, commits a base, edits the worktree, and launches the
-scratch repo's own `ratchet_check.py`. Each test first proves the edited head passes on its own
-(head check only), so the failure comes from the base run. Gate tests run the real gate through
-`_gates_harness.py:189`.
+scratch repo's own `ratchet_check.py`. Tests whose failure must come from the base run (2, 3, 10)
+first prove the edited head passes on its own. Tests 1, 7 and 13 fail before any base run and
+have no such precondition. Gate tests run the real gate through `_gates_harness.py:28-37`
+`run()`. Tests 24 to 27 force the branch sentry step to fail first, because `gates.sh:517,578-597`
+skips the baseline step after a branch pass. Tests 21 and 22 assert the child invocation record.
 
 Tags: `red-before` fails on its assertion on main; `pin` passes on main. For the red run only,
 the harness falls back to the plain command when `--with-base` is unknown, and the test asserts
 the missed finding. An argparse error is never red evidence.
 
-red-before: 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25.
+red-before: 1, 2, 3, 4, 5, 6, 6r, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 28b, 28c.
 
 pin: 7 and 13 (main already rejects a bad sha and a failed listing at `_ratchet.py:349-355`;
-test 13 matches `test_integrity.py:360-363`), 23, 26, 27, 28. Test 28 runs in CI and fails (does
-not skip) if `--with-base` or the merge base is missing; the skip at `test_integrity.py:399-405`
-stays for the plain test only. The #801 pin is checked separately from moving `origin/main`.
+test 13 matches `test_integrity.py:360-363`), 23, 26, 27.
+
+Test 28 is three separate runs: (a) pin on #801, the plain checker passes on the live repo;
+(b) on the final head, `--with-base --base f15adce3f` passes (the #801 parser rejects
+`--with-base`, so this cannot run on #801); (c) on the final head, `--with-base` against the
+live merge base, failing (not skipping) when the merge base is missing. The skip at
+`test_integrity.py:399-405` stays for the plain test only.
 
 Mutations (the builder runs each on the final head and records the result):
 
@@ -208,8 +226,9 @@ Mutations (the builder runs each on the final head and records the result):
 |---|---|---|
 | M1 | `--with-base` returns the head result and never runs the base | 2, 3 |
 | M2 | Restore the unconditional `[ -f ... ]` skip in `gates.sh` | 1 |
-| M3 | The shared listing-failure handler returns "absent" | 7, 25 |
-| M4 | Ignore the `git archive` exit code | 9 |
+| M3a | The Python listing-failure handler returns "absent" | 7 |
+| M3b | The shell `ls-tree` failure in the baseline branch skips | 25 |
+| M4 | `git archive` writes a valid tar but exits non-zero; exit code ignored | 9 |
 | M5 | Disable cleanup while keeping the child's syntax-error path; `TMPDIR` set to a test dir | 12 (directory not empty) |
 | M6 | Skip check (c) | 6 |
 | M7 | Skip check (d) | 11 |
@@ -217,10 +236,12 @@ Mutations (the builder runs each on the final head and records the result):
 | M9 | Load base helpers from the head root | 3 |
 | M10 | Do not copy decision lines on a pass | 15 (outer gate stderr) |
 | M11 | Drop the marker check in `--baseline` mode | 18 |
-| M12 | Treat any `_`-prefixed file as a checker edit | 19 |
-| M13 | Skip check (e) | 20 |
+| M12 | Treat any `_`-prefixed file as a checker edit (every other eligibility condition passes in the fixture) | 19 |
+| M13 | Skip check (e) (every other condition passes in the fixture) | 20 |
 | M14 | Launcher prints its own waiver line | 21 |
 | M15 | Always pass `--schema-waiver-env` | 22 |
+| M16 | Drop `--with-base` from the `gates.sh` branch command | 17 |
+| M17 | Use `--name-only` without rename endpoints | 6r |
 
 ## Enumerations
 
@@ -245,8 +266,8 @@ Mutations (the builder runs each on the final head and records the result):
 | Local gate, branch label | `scripts/dev/gates.sh:491` | `--with-base` |
 | Local gate, baseline label | same line, `label=baseline` | plain run, or skip on proven absence |
 | Self-hosted gate on branch pushes | `.github/workflows/gate-selfhosted.yml:84-85` | same as the local gate |
-| CI tests job | `.github/workflows/ci.yml:150` (fetch-depth 0); pytest at `:194,203` | test 28 runs `--with-base` against the merge base and fails if it cannot |
-| CI regression job | `.github/workflows/ci.yml:135` (skips PRs) | unchanged |
+| CI regression job | `.github/workflows/ci.yml:150,194,203` (job `regression-gate`, skips PRs at `:134-135`) | test 28 runs there on main pushes |
+| Self-hosted fast job on branch pushes | `.github/workflows/gate-selfhosted.yml:84-85` (condition `:68-72`, shards `:144-158`) | runs test 28 on branch heads |
 | Direct test harness | `tests/sentry/test_ratchet_check.py:61-72` | unchanged |
 
 ### FK shapes
@@ -299,9 +320,9 @@ N/A. This slice reads only repo files and git objects. No keyed data and no FK l
 | 6 | Private modules | Helpers load by path; no private engine import |
 | 7 | No hidden CI failures | The only skip is proven checker absence, printed; every other failure exits 1 |
 | 8 | One input, one trust class | N/A: one input class (repo files) |
-| 9 | Mutations on the final head | M1 to M10 rerun after the last code change, head recorded |
+| 9 | Mutations on the final head | M1 to M17 rerun after the last code change, head recorded |
 | 10 | Allowlisted helpers still checked | `_base_run.py` is scanned by the reader guard like every helper; the guard runs at T0 |
-| 11 | No raised caps | `_ratchet.py` 571 to about 586, `ratchet_check.py` about 115, `_integrity.py` unchanged; `_baseline_sources.py` (653 at #801) not touched; `test_module_size.py:72-75,157-158` needs no change |
+| 11 | No raised caps | `_ratchet.py` 571 to about 586, `ratchet_check.py` about 125, `_integrity.py` edited but not grown past its cap; `_baseline_sources.py` (653 at #801) not touched; `test_module_size.py:72-75,157-158` needs no change |
 
 ## Reuse inventory
 
@@ -323,7 +344,11 @@ work stays in RG-C1a (parent lines 656, 745-747). RG-C1a needs the archive path 
 parameter of the launcher, so `ratchet_check.py` takes the archive paths from one module
 constant `BASE_ARCHIVE_PATHS` and drops any path the base listing does not contain. The same PR
 narrows the `except` clauses at `_integrity.py:168,187,221` to named error types and splits the
-function at `:362`, so the CLI copy passes CLI lint debt (`BLE001`, `C901`) unchanged.
+function at `:362`, so the CLI copy passes CLI lint debt (`BLE001`, `C901`) unchanged. The CLI
+Ruff config does not enable S603/S607, so the `# noqa: S603,S607` at `_integrity.py:41,42,52,53`
+give RUF100 there. The shared form moves the two `subprocess.run` calls into one `_git(args)`
+function with a single per-file ignore entry in the engine `pyproject.toml`, so neither copy
+carries an inline `noqa`.
 
 Test depth: T0 `tests/sentry/ratchet/test_base_run.py`, `tests/sentry/ratchet/test_reader_guard.py`
 and `tests/sentry/test_bash32_compat.py` per edit; T1 impact selection per commit; the gate runs `gates.sh --keep-going --steps

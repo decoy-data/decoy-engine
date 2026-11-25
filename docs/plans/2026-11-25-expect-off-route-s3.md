@@ -35,13 +35,15 @@ After S2, validators run on the route chosen for the resident routes, but:
 
 ## Guarantee
 
-After S3a: on the out-of-core route the run's one `ValidationSession` folds every delivered batch,
-and `observed_commit` finishes the session after `gate.before_commit` and before `sink.commit()`.
-A validator failure commits nothing on any sink that has a commit step.
+After S3a: on the out-of-core route (with no sink or a `TransactionalSink`) the run's one
+`ValidationSession` folds every delivered batch and the no-sink table, and the runner calls the
+enforcing `verdict()` before it seals anything. `observed_commit` calls `verdict()` after
+`gate.before_commit` and before `sink.commit()`. A validator failure commits and seals nothing.
 
 After S3b: a validator-bearing job runs the same route, with the same route reason and per-column
-backends, as the same job without validators, on every route in parent section 4. `S3_PENDING` is
-deleted and the sentry allowlist holds only the four lifecycle identities.
+backends, as the same job without validators, on every route in parent section 4, except the
+plain-callable case of exception 1b. `S3_PENDING` is deleted and the sentry allowlist holds
+exactly the entries in the S3a and S3b allowlist table.
 
 Non-goals:
 
@@ -81,222 +83,279 @@ Non-goals:
 
 - One folding owner per table. The session gets `claim(table, owner)` before the first batch of
   that table. Only the owner's feed appends to the fold; any other observer calls
-  `check_count(table, n)`, which compares row counts and never appends
-  (`validators/_session.py:149-158,240-247` append unconditionally today).
-- Nested runs. `bind_validation_session` binds `None` for a validator-free run and resets its
-  token on exit (`_session.py:63-71` leaves the outer session visible today). A nested job
-  never sees, feeds or finishes its caller's session.
-- Expected tables. The session records the table list and the row count each driver reports it
-  wrote, from the driver's own write accounting, not from the observer. `finish` compares them:
-  a written table with no observation, or fewer observed rows than written, raises
-  `validator_table_not_observed`. A zero-row table with a schema (`_chunked_output_sink.py:588-592`)
-  counts as observed with zero rows.
-- Sink shape has one owner: the existing classification at `_sequential.py:207-224` and the
-  protocol check at `_chunked_output_sink.py:99-102` move into one `sink_capability(sink)` in
-  `execution/_sink_capability.py`; the proxy and the routing check both call it.
-- Whole-table validators. A registered whole-table validator (`validators/_registry.py:163-179,236-248`)
-  cannot take a second span. On a streamed route the session spills that validator's scoped
-  columns for the table to Arrow IPC in protected scratch, runs the function once at
-  `table_complete`, and removes the scratch on every exit. Memory stays bounded; disk use is
-  the scoped columns only.
+  `check_count(table, n, stage)`, which compares row counts and never appends
+  (`validators/_session.py:149-158,240-247` append unconditionally today). `stage` names what
+  was counted: the resident quarantine path validates unfiltered rows and returns filtered rows
+  (`_pipeline_finalize.py:398-415`), so a later count-check of a quarantine-filtered table
+  compares against the filtered count the finalizer records, not the validated count.
+- Enforcing verdict. `finish()` keeps its contract: it builds and returns the report, pass or
+  fail, because public `validate()` and resident quarantine use the failing report
+  (`validators/_session.py:258-269`, `validators/_registry.py:257-261,284-287`). A new
+  `session.verdict()` calls `finish()` and raises `ValidatorFailedError` when the report fails.
+  Every route-side check point calls `verdict()`, never `finish()`.
+- Run boundary. `bind_validation_session` binds `None` for a validator-free run and restores the
+  previous token on exit (`_session.py:63-71` leaves the outer session visible today). Internal
+  dispatch passes the owning session explicitly to the out-of-core runner and to its staged
+  recursion (`out_of_core/_runner.py:194-202`); the runner never reads an ambient session. A
+  public call to the runner opens and binds its own session.
+- Expected tables. The session records each table the driver reports writing, with the row
+  count from the driver's own write accounting. `verdict()` compares: a written table with no
+  observation, or fewer observed rows than written, raises `validator_table_not_observed`. A
+  zero-row table with a schema (`_chunked_output_sink.py:588-592`) is observed with zero rows.
+  This lands in S3a, the first PR where a driver can write a table the session did not see.
+- Sink shape has one owner. The classification at `_sequential.py:207-224`, the protocol check at
+  `_chunked_output_sink.py:99-102` and the stream check at `pipeline/_stream.py:89-101` become one
+  function, `sink_capability(sink)`, in the lowest layer that `.importlinter:21-25` lets all three
+  callers import. It is not a new `execution/` module (that directory is frozen at 103 modules,
+  `tests/sentry/layout/test_package_fanout.py:28-38,62-79`). The builder reads the layer
+  contract first and names the module in the PR body. The proxy in `validators/` never imports
+  it: `execute_route` computes the capability and passes it to `observe_sink(sink, session,
+  capability)`.
+- Whole-table validators. A registered whole-table validator receives every output table and may
+  read any source, in one call at run finish (`validators/_registry.py:143-147,175-191`). On a
+  route that writes in batches, the session spills each output table's batches, and the source
+  columns the job declares, to Arrow IPC in protected scratch, then calls the function once after
+  the last table, with complete mappings, and removes the scratch on every exit. Before it loads
+  the spill it compares the spilled bytes with the resident budget and raises
+  `validator_whole_table_over_budget` (new runtime code) when the call would not fit. This is a
+  refusal at verdict time, not a route change. The memory of the call itself is the size of the
+  tables, as it is on the resident route; the plan says so in the docs.
 
 ### S3a: out-of-core on the session
 
 1. Eligibility. `_sequential_eligible` (`_pipeline_routing.py:140-145`) mixes structural rules
-   with the temporary `VALIDATORS_PRESENT` veto, and the out-of-core selectors use it
-   (`:368-375,390-394,432-439,471-474`). Split it: `_structurally_sequential` (no validator
-   read) feeds the out-of-core selectors; the veto stays only on the sequential route choice
-   until S3b. The `validation_fail` quarantine exclusion from `_validate_batch.py:166-169` moves
-   into the quarantine rule in routing, so it still forces resident.
-2. Observation site. Both drivers observe the final payload at `_emit.py` after sink-schema
-   reconciliation (`_emit.py:104-109,122-128`), which is after rendering
-   (`_rewrite_pass.py:243-255`). The rewrite driver passes the scoped raw projection with the
-   batch. The reorder driver consumes raw rows in phase one and emits in phase three
-   (`_stream_driver.py:289-292,331-338,430-455`); it writes the scoped raw projection and row
-   positions to its existing protected scratch in phase one and reads them back beside each
-   emitted batch. Paired tables call `observe_pair`, others `observe_published`.
-3. Verdict point. The runner keeps its verdict before `seal_evidence` (`out_of_core/_runner.py:359-374`)
-   but asks the session (`session.verdict(tables)`, raising `ValidatorFailedError`) instead of
-   its own collector. This covers the sink exit and the no-sink return, keeps the abort owner
-   at `_runner.py:374-376`, and keeps the quarantine cleanup order: nothing is sealed after a
-   failure. `observed_commit` also calls `finish()` (idempotent) after `gate.before_commit` at
-   `:142` and before `evidence_of` (`:98-101`), so every commit has one check.
-4. Direct callers. The public runner (`out_of_core/__init__.py:65`, called by
-   `physical/drivers/_out_of_core.py:67-73`) opens and binds its own session from the job
-   config when no session is bound, and finishes it at the verdict point. The guard the deleted
-   module gave (`_validate_batch.py:330-342`) is kept this way.
+   with the `VALIDATORS_PRESENT` veto. The out-of-core selectors
+   (`:368-375,390-394,432-439,471-474`) and the bounded-admission prepass (`:203-212`, which feeds
+   `pipeline/_lazy_input.py:50-56,115-125,144-158` and is reached from CLI
+   `cli/run/_execute.py:459-469`) move to `_structurally_sequential`, which reads no validator. In
+   S3a the veto narrows: it still applies to the sequential route choice, and to out-of-core only
+   when `sink_capability` is not a `TransactionalSink` and not "no sink" (a callable or
+   three-method sink would fail at `_emit.py:106,128`). S3b deletes the veto. The
+   `validation_fail` quarantine exclusion from `_validate_batch.py:166-169` becomes one shared
+   guard, `quarantine_needs_resident(config)`, called by routing and by the runner before its
+   first read.
+2. Observation, sink exit. The final payload is observed in `_emit.py` before any rendering-side
+   change the sink does not see: after `maybe_render` and after sink-schema reconciliation
+   (`_emit.py:104-109,122-128`, after `_rewrite_pass.py:243-255`). The rewrite driver passes the
+   scoped raw projection with each batch. The reorder driver consumes raw rows in phase one and
+   emits in phase three (`_stream_driver.py:289-292,331-338,430-455`); it writes the scoped raw
+   projection and row positions to its existing protected scratch in phase one and reads them
+   back beside each emitted batch. Paired tables call `observe_pair`, others `observe_published`.
+3. Observation, no-sink exit. With no sink, `_rewrite_pass.py:250-280` assembles the final table
+   without `_emit`. The runner observes that assembled table, its aligned source projection and,
+   for an empty table, the schema-bearing empty table, before the verdict.
+4. Verdict point. The runner calls `session.verdict()` before `seal_evidence`
+   (`out_of_core/_runner.py:359-374`), on the sink exit and the no-sink return. Nothing is sealed
+   after a failure, the abort owner at `:374-376` is unchanged, and the quarantine cleanup order
+   holds. `observed_commit` calls `session.verdict()` after `gate.before_commit` (`:142`) and
+   before it reads evidence (`:98-101`) or enters `try: sink.commit()` (`:143`). On out-of-core
+   that second call returns the cached result.
 5. Delete `out_of_core/_validate_batch.py`. Remove the collector construction (`_runner.py:216`),
-   the keyword-map entry (`:322`) and the finish call (`:359`), and the `validators` parameters
-   at `_rewrite_pass.py:93` and `_stream_driver.py:154`. Lower the out-of-core fan-out pin from
-   44 to 43 (`tests/sentry/layout/test_package_fanout.py:28-38,62-79`). Move the imports of the
-   deleted module in `test_phase_d_d3a_validators_ooc.py:34`, `test_delivered_bytes_validation.py:22`
-   and `test_fold_review_round2.py:185` to the session, keeping their behavior assertions.
-6. Routing: `validators_ooc_safe` and `validators_ooc_ready` leave `decide_execution_route`
-   (`_pipeline_routing.py:300,339-340,432`) and `resolve_execution_route`.
-7. Tombstone `runtime.out_of_core_validators_not_admitted` (`reasons/runtime/_part2.py:214`).
-   `tests/unit/test_reason_tombstones.py:8-21` requires a live `replaced_by`, and no code takes
-   this one's place. S3a extends the tombstone record with `no_successor: str` (the reason the
-   code has no successor) as the only other allowed form, updates that test to accept exactly
-   these two forms, and imports the new runtime `_retired.py` in `reasons/runtime/__init__.py:5-9`.
-8. Sentry. `S3_PENDING` drops the out-of-core and `validators_ooc_*` rows. V9 gains caller
-   checks for the four lifecycle identities: each may be called only from its listed
-   `(path, function)`, aliases included. Docs keep the `TransactionalSink` guidance
-   (`docs/strategies.md:2389-2391`), since a plain sink's writes are visible before commit.
-   Changelog `Breaking:` line for the route change.
+   the keyword-map entry (`:322`) and the finish call (`:359`), and the `validators` parameters at
+   `_rewrite_pass.py:93` and `_stream_driver.py:154`. Lower the out-of-core fan-out pin from 44 to
+   43 (`test_package_fanout.py:28-38,62-79`). Move the imports of the deleted module in
+   `test_phase_d_d3a_validators_ooc.py:34`, `test_delivered_bytes_validation.py:22` and
+   `test_fold_review_round2.py:185` to the session, keeping their behavior assertions.
+6. Routing: `validators_ooc_safe` leaves `decide_execution_route` (`_pipeline_routing.py:300,432`)
+   and its forwarding in `_pipeline_routing_signals.py:547,598`; the local `validators_ooc_ready`
+   at `_pipeline_routing.py:339-340` goes.
+7. Tombstone `runtime.out_of_core_validators_not_admitted` (`reasons/runtime/_part2.py:214`) in a
+   new runtime `_retired.py`, imported at `reasons/runtime/__init__.py:5-9`, with no `replaced_by`
+   (parent line 165). Today a tombstone needs a live `replaced_by`
+   (`tests/unit/test_reason_tombstones.py:8-21`, `scripts/release/reason_manifest_policy.py:42-43,363-373`)
+   and the registry serializes two fields (`reasons/_registry.py:183-184`). S3a adds the
+   `no_successor: str` field as the only other allowed form: the record, its serialization (an old
+   manifest without the field reads as null), the release policy's pending-retirement check, the
+   tombstone test and the manifest pin all change in this PR. The parent's route tombstone in S3b
+   uses the same form.
+8. Sentry. `S3_PENDING` drops the out-of-core and `validators_ooc_*` rows. The allowlist and its
+   caller checks are exact per PR (below); a seeded aliased call from any other function fails.
+   Docs keep the `TransactionalSink` guidance (`docs/strategies.md:2389-2391`). Changelog
+   `Breaking:` line for the route change. V13 covers the two new codes.
+
+Sentry allowlist, `(path, function, public name)`:
+
+| PR | Entry |
+|---|---|
+| S3a | `execution/_pipeline_route_dispatch.py`, `execute_route`, `bind_validation_session` |
+| S3a | `execution/_publication_observer.py`, `observed_commit`, `active_validation_session` |
+| S3a | `execution/out_of_core/_runner.py`, the public runner entry, `bind_validation_session` |
+| S3a | `execution/_pipeline_routing.py`, `_sequential_eligible`, `quarantine_needs_resident` |
+| S3b | `execution/_pipeline_route_dispatch.py`, `execute_route`, `observe_sink` |
+| S3b | `execution/_sequential.py`, `execute_sequential_route`, `ValidationSession.tee_reader` |
+| S3b | `execution/_pipeline.py`, `run_pipeline`, `validators_need_resident` |
+
+The builder confirms each function name on the re-anchored base and keeps this table exact.
 
 ### S3b: the write proxy and the remaining declines
 
-1. Sink requirement before routing. `validators_need_resident(config, sink)` is a pure function
-   of the config and `sink_capability`, computed in `_pipeline.py` before the route is decided
-   and emitted (`:358-360`). It is carried into snapshot replay and the resident-fit check. It
-   runs in `decide_execution_route` before any route-specific early exit, since flat and
-   generate jobs leave `_sequential_eligible` at `:140-145`. A plain callable with validators on
-   a route that would stream takes resident with `route.validators_need_transactional_sink`
-   (new, beside `quarantine_enabled`). After `settle`, a passing run calls the callable once
-   per table.
-2. `validators/_sink.py` (new, about 150): `observe_sink(sink, session)` returns the shape
-   `sink_capability` names (callable; write, commit and abort; or the four-member
-   `TransactionalSink`). Only `write` and `write_batches` observe. `__getattr__` forwards only
-   names the inner sink has. A read-only `inner_sink` marker. `post_scan_sink_kind` follows
-   `inner_sink` with cycle protection.
-3. Owners. Before the first batch, `execute_route` claims each table for one observer: the
-   proxy on streamed routes, the out-of-core driver on out-of-core. On an out-of-core run with a
-   sink, the proxy only count-checks.
-4. Sources for the proxy. The bound session gets a `source_for(table)` from the route: the
-   resident source, or a bounded projected lazy reader that reads the paired columns one batch
-   at a time. `execute_sequential_route` composes the post-scan and validation tees so the
-   loader runs once per table. Batch boundaries of source and output need not match.
-5. Generation. The streamed generation entry is `generation/_plan_entry.py:290-319`, which calls
-   `run_generation`; `generation/_streamed.py:522-530` writes and commits. `_plan_entry` binds a
-   session from the job's `validators:` and wraps the sink, and the commit goes through
-   `observed_commit`. Pipeline generation (`_pipeline_generate_mask.py:128-139`) stays resident.
-6. Delete every remaining `S3_PENDING` site and the table. Refusals that do not involve
-   validators stay as they are, with the same reason with or without validators: mixed
-   streamed and resident output (`_pipeline_multi_table.py:343-350`), streamed auto-chunk with
-   declared formatting (`_chunked_output_sink.py:105-115`) and out-of-core self-reference
-   (`out_of_core/_compat.py:504-519`).
-7. Plan hash. `physical/_inputs.py:315-324` hashes the plan config digest and the full canonical
-   config; `inputs.validators` is already out of the tuple. The canonical config used for the
-   hash drops the `validators:` key only. Two configs that differ only in validators give the
-   same hash; every other config input and the resident-fit identity (`:367-370`) stay.
-8. Tombstone `route.validators_present` (`reasons/route/_part1.py:306`) with `replaced_by`
-   `route.validators_need_transactional_sink` (the one remaining validator-related route
-   reason); delete the alias `ROUTE_VALIDATORS_PRESENT` (`physical/_reasons.py:56,101,343`).
-9. New runtime code `validator_table_not_observed`. Docs, compatibility contract, changelog
-   `Breaking:` lines (route, plan hash).
+1. Sink requirement before routing. `validators_need_resident(config, capability)` is a pure
+   function, computed in `_pipeline.py` before the route is decided and emitted (`:358-360`) and
+   before any route-specific early exit. A plain callable with validators on a route that would
+   stream takes resident with `route.validators_need_transactional_sink`. After `settle`, a
+   passing run calls the callable once per table. The value is part of the plan identity (item 6).
+2. Proxy. `validators/_sink.py` (new, about 150): `observe_sink(sink, session, capability)` returns
+   the shape the capability names. Only `write` and `write_batches` observe. `__getattr__`
+   forwards only names the inner sink has. A read-only `inner_sink` marker;
+   `post_scan_sink_kind` follows it with cycle protection.
+3. Where the proxy goes. `_pipeline_context.py:267` captures the sink in `ctx.publish` before
+   dispatch, and full-frame dispatch and output-mode selection use that publisher
+   (`_pipeline_full_frame.py:194-195`, `_pipeline_generate_mask.py:183-196`). `execute_route`
+   swaps the proxy into the publisher that writes, `ctx.publish.sink`, so there is no second
+   reference to the raw sink. A unit test asserts every write on the auto-chunk route reaches the
+   proxy.
+4. Owners. Before the first batch, `execute_route` claims each table: the proxy on streamed
+   routes, the driver on out-of-core. With a sink on out-of-core, the proxy only count-checks.
+5. Sequential pairing. `_sequential.py:408-410,538-565` casts and filters rows after the loader
+   tee. The tee keeps the retained row positions with the scoped raw projection, and the session
+   pairs each output row with its typed source row by position, not by output offset. The
+   sequential verdict runs before evidence is sealed and before the quarantine sidecar is
+   published (`_sequential.py:608,639-654`, `pipeline/_post_scan.py:563-571`). The loader runs
+   once per table.
+6. Plan hash. The physical hash takes two config inputs (`physical/_inputs.py:315-324`): the
+   plan's `pipeline_config_hash` (which includes validators, `plan/_compile.py:434,633-654`) and
+   the canonical config. S3b computes a physical-only digest of each with `validators:` removed;
+   the public semantic digest `pipeline_config_hash` is unchanged. The physical hash adds the
+   value of `validators_need_resident`, because a callable sink with validators changes the route.
+   The resident-fit identity (`:367-370`) stays.
+7. Delete every remaining `S3_PENDING` site and the table. Refusals that do not involve
+   validators keep the same reason with or without validators: mixed streamed and resident
+   output (`_pipeline_multi_table.py:343-350`), streamed auto-chunk with declared formatting
+   (`_chunked_output_sink.py:105-115`), out-of-core self-reference (`out_of_core/_compat.py:504-519`).
+8. Tombstone `route.validators_present` (`reasons/route/_part1.py:306`) with `no_successor`, as
+   parent line 165 says; delete `ROUTE_VALIDATORS_PRESENT` (`physical/_reasons.py:56,101,343`).
+9. Docs, compatibility contract, changelog `Breaking:` lines (route, plan hash). V13 covers the
+   new route code.
+
+Generation: parent line 84 keeps `generate_tables_streamed` out of scope, and S3 does too. The
+supported generation case is pipeline generation with a sink (`_pipeline_generate_mask.py:128-139`),
+which is resident and stays covered by the S2 rows.
 
 Choke points:
 
-- Commit: `observed_commit`. Guard: V15. Mutation M18.
-- Observation: one claimed owner per table. Guard: V7 and the split-owner unit test. Mutations
-  M5, M13.
-- No routing on validators: the sentry with caller checks. Guard: V9. Mutations M6, M10, M20.
+- Commit: `observed_commit` calls `verdict()`. Guard: V15 on the streamed route (S3b), where the
+  first failing verdict is at the commit seam. Mutations M3, M18.
+- Observation: one claimed owner per table; one publisher. Guard: V7, the split row, the
+  publisher test. Mutations M5, M13, M15.
+- No routing on validators: the sentry with exact caller checks. Guard: V9. Mutations M6, M10, M20.
 
 Design notes: the proxy is the decorator shape the repo uses for publication evidence. Spilling
-whole-table input to Arrow IPC is the established way to keep a once-per-table function bounded.
+whole-table input to Arrow IPC is the established way to give a once-per-table function its
+input without holding batches in memory during the run.
 
 ### Placement
 
 | New or changed | Path | CODEMAP rule ("Job-level validator framework" row added by S1) | Sits beside |
 |---|---|---|---|
 | Write proxy | `src/decoy_engine/validators/_sink.py` | private modules in `src/decoy_engine/validators/` | `_session.py` |
-| Sink capability | `src/decoy_engine/execution/_sink_capability.py` | execution helpers | `_sequential.py` |
-| Commit finish | `src/decoy_engine/execution/_publication_observer.py` | existing module | |
+| Sink capability | existing module in the lowest layer all callers may import (builder names it) | no new `execution/` module | `_sequential.py` |
+| Commit verdict | `src/decoy_engine/execution/_publication_observer.py` | existing module | |
 | Route and driver edits | `src/decoy_engine/execution/` files above | existing modules | |
+| Tombstone form | `reasons/_registry.py`, `scripts/release/reason_manifest_policy.py` | existing | |
 | Unit tests | `tests/unit/validators/test_sink_proxy.py`, `tests/unit/execution/test_streamed_validation_routes.py`, `test_out_of_core_session_validation.py` | route tests in `tests/unit/execution/` | `test_resident_validation_routes.py` |
 | Sentry | `tests/sentry/test_validators_do_not_route.py` | `tests/sentry/` | |
 
 Module sizes: `_chunked_output_sink.py` is at 600 and only shrinks; `_stream_driver.py` (583)
-must stay under 600 after the scratch projection (budget +15, offset by the removed validator
-parameter); `_pipeline_routing.py` (566) shrinks; `_pipeline_routing_signals.py` is 613 under a
-633 ceiling (`test_module_size.py:98`); if it reaches 600 its census entry is removed
-(`:239-248`). `_session.py` gains `claim`, `check_count`, `verdict`, expected tables and the
-whole-table spill (about +70, to about 362).
+stays under 600 (budget +15, offset by the removed parameter); `_pipeline_routing.py` (566)
+shrinks; `_pipeline_routing_signals.py` is 613 under a 633 ceiling (`test_module_size.py:98`)
+and shrinks; if it reaches 600 its census entry goes (`:239-248`). `_session.py` gains `claim`,
+`check_count`, `verdict`, expected tables and the spill (about +80, to about 372).
 
 ## Behavior and failure modes
 
 | Case | Expected | Test |
 |---|---|---|
 | Out-of-core with a `TransactionalSink`, failing validator | Raise before seal and commit; staging empty; no COMMIT record | V4(c) |
-| Out-of-core, no sink, failing validator | Raise before seal; no sealed or staged quarantine artifact | V4(c) no-sink row |
-| Direct call to the public runner, failing validator, recording sink | Raise; no commit | V18 |
-| Out-of-core by forced, row-threshold and byte-estimate selectors, with validators | Out-of-core, as without | V17 |
-| Forced out-of-core on an inadmissible job | Refused before any read | V17 |
+| Out-of-core, no sink, pass and fail | Assembled table observed; fail raises before seal, no quarantine artifact | V4(c) no-sink rows |
+| Out-of-core with a callable or three-method sink, validators (S3a) | Route as on #812 (veto still applies); no `AttributeError` | V22 |
+| Lazy FK job over the resident budget, `resident_fallback=True` | Out-of-core, nothing loaded whole | V23 |
+| Public runner called directly, failing validator | Own session; raise; no commit | V18 |
+| Public runner with `validation_fail` quarantine | Refused before any read | V18 |
+| Out-of-core by forced, row-threshold and byte-estimate selectors | Out-of-core, as without validators | V17 |
 | Quarantine `validation_fail` with validators | Resident, as on #812 | V17 control |
-| Out-of-core, both drivers, declared formatting, several batches | Verdict on rendered, reconciled bytes; pairing correct | V16 |
-| Nested validator-free job inside a sink callback | Outer session unaffected; outer job finishes | V19 |
+| Nested validator-free job inside a sink callback | Outer session untouched and restored | V19 |
+| Whole-table validator, two tables, several batches, undeclared source column read | One call with complete mappings; scratch removed; over budget raises | V20 |
 | Streamed sink run, plain callable | Resident with `validators_need_transactional_sink`; 0 calls on fail, 1 per table on pass | V4 callable |
-| Table written with no observation; one batch skipped; zero-row table; resident return without completion | `validator_table_not_observed` for the first two; zero-row passes; resident case raises | V7 |
-| Registered whole-table validator, several batches | Runs once on the whole table; scratch removed | V20 |
-| Paired lazy source shorter or longer than output, unequal batch sizes | `validator_source_pairing_mismatch` for short or long; correct verdict otherwise; loader once per table | V5 |
-| Key state over budget | `validator_key_state_over_budget` before the first scoped write | V6 keyed cell |
-| Out-of-core with a sink in S3b | One fold per table; proxy count-checks | split-owner unit test |
+| Write bypasses the proxy; one batch skipped | `validator_table_not_observed` | V7 |
+| Sequential, a middle row removed by the cast filter | Correct pairing by position | V5 sequential row |
+| Sequential, no sink, later validator failure | Raise before seal and before the sidecar is published | V4 sequential no-sink row |
+| Auto-chunk route writes | Every write reaches the proxy | publisher test |
 | Mixed output, streamed auto-chunk with formatting, out-of-core self-reference | Same refusal with and without validators | refusal parity rows |
-| Two configs differing only in validators | Same plan hash on capture and replay | V21 |
+| Two configs differing only in validators, transactional sink | Same physical hash; different semantic digest | V21 |
 
 ## Acceptance tests (red first)
 
-Each PR has its own list. The builder keeps a per-row ledger: red-before (fails on its assertion
-on the base), pin (passes on the base), or new API (no red claim).
+Each PR has its own list. Each row is marked red-before (a behavior assertion fails on the base),
+pin (passes on the base and must keep passing) or new API (no red claim).
 
 S3a:
 
-- **V4(c) out-of-core rows.** Pins on #812 for admitted failure and abort
-  (`test_phase_d_d3a_validators_ooc.py:1215-1229`); the no-sink quarantine-artifact row is
-  red-before.
-- **V8 out-of-core rows** (single, composite, nullable, two-parent, child-first, orphan policy),
-  red-before for validators the D3a list refuses.
-- **V15 finish inside the commit step (guard).** A recording sink: `write`, `write`, `abort`, no
-  `commit`; no COMMIT record (`_publication_observer.py:144-150`). Already holds on #812; the
-  raise location changes. Proof is M18.
-- **V16 rendered bytes (red-before).** Out-of-core, both drivers, declared formatting, a
-  format-sensitive `regex_match`, several batches, distinct data per batch.
-- **V17 eligibility (red-before).** `leak_check` and `parent_window_respected`, which
-  `admitted_validators` (`_validate_batch.py:81,173`) refuses, through the three selectors; the
-  forced refusal and quarantine controls are pins.
-- **V18 direct runner (red-before for the session path).**
-- **V19 nested run (red-before).**
-- **V14 runtime tombstone.** Both forms accepted by the updated tombstone test; the runtime
-  identity resolves.
-- **V9 S3a.** Out-of-core rows gone; caller checks for the four identities; a seeded aliased
-  unauthorized call fails.
+| Test | Mark | Assertion |
+|---|---|---|
+| V4(c) sink rows | pin (`test_phase_d_d3a_validators_ooc.py:1215-1229`) | raise before seal, no commit |
+| V4(c) no-sink rows | red-before for validators D3a refuses; pin otherwise | assembled table judged |
+| V8 out-of-core rows (single, composite, nullable, two-parent, child-first, orphan policy) | red-before for `leak_check` and `parent_window_respected` | report equals full frame |
+| V16 rendered bytes | pin (`test_delivered_bytes_validation.py:104-120`), extended to both drivers and asserting the observed Arrow schema | verdict on reconciled payload |
+| V17 eligibility (three selectors) | red-before | route label equals the no-validator run |
+| V18 direct runner | pin for enforcement (`_validate_batch.py:330-342`); new API for the own-session path | raise, no commit; quarantine refusal before read |
+| V19 nested run | red-before | outer session object identical after the nested run |
+| V20 whole-table validator | red-before (out-of-core declines today) | one call, complete mappings, scratch removed, over-budget raise |
+| V22 sink shapes on S3a | pin | callable and three-method sinks behave as on #812 |
+| V23 lazy prepass | red-before | no whole-table load (counter on `_lazy_input` materialize) |
+| V7 expected tables | red-before for bypass and skipped batch; pin for zero-row | `validator_table_not_observed` |
+| V13 | extended to `validator_table_not_observed`, `validator_whole_table_over_budget` | no value in any message |
+| V14 runtime tombstone | new API | both tombstone forms load; old manifest without the field reads |
+| V9 | red-before for caller checks | allowlist exact; seeded alias fails |
 
 S3b:
 
-- **V4 rest** (streamed, sequential, generation through `_plan_entry`, callable). Resident
-  unified and mixed rows are pins (`test_resident_validation_routes.py:108,171`).
-  Readability rows are a mutation control (parent line 273).
-- **V5** paired sources (red-before on the streamed routes).
-- **V6** performance on the Dell node with `vm-run`, including the `retained_bytes()`
-  measurement (parent line 275). The keyed budget cell is a pin (`test_fold_state.py:54`).
-- **V7** expected-table cases (red-before).
-- **V8 sequential rows**, including self-reference (red-before).
-- **V9** `S3_PENDING` deleted; caller checks stay.
-- **V14 route tombstone.**
-- **V20** whole-table validator (red-before).
-- **V21** plan hash capture and replay (red-before).
-- Split-owner unit test at a controlled seam; refusal parity rows (pins).
+| Test | Mark | Assertion |
+|---|---|---|
+| V4 streamed, sequential and callable rows | red-before (route declines) | route equals no-validator run; raise before commit |
+| V4 resident unified and mixed rows | pin (`test_resident_validation_routes.py:108,171`) | unchanged |
+| V4 readability rows | mutation control (parent line 273) | wrapped sinks readable |
+| V15 commit seam | red-before on the streamed route | recording sink: `write`, `write`, `abort`, no `commit`, no COMMIT record |
+| V5 pairing | red-before | loader once per table; middle-row removal pairs correctly; short and long sources raise |
+| V6 performance | measured on the Dell node with `vm-run`, with `retained_bytes()` (parent line 275) | within the parent's budget |
+| V6 keyed cell | new assertion: refusal before the first scoped write (the existing `test_fold_state.py:54-66` proves only refusal after some rows) | |
+| V8 sequential rows, including self-reference | red-before | report equals full frame |
+| V9 | `S3_PENDING` deleted; S3b entries exact | |
+| V13 | extended to `route.validators_need_transactional_sink` | |
+| V14 route tombstone | new API | |
+| V21 plan hash | red-before | two independently compiled plans |
+| Publisher test | red-before | every auto-chunk write passes the proxy |
+| Split-owner test | new API | one fold per table |
+| Refusal parity rows | pin | same reason with and without validators |
 
-Mutations. Parent section 10 IDs keep their meaning (M3 to M16). New IDs start at M18.
+Mutations. M1 to M16 keep the meaning given in parent section 10; the ones this slice must kill
+are listed with their PR. New IDs start at M18.
 
 | ID | PR | Mutation | Test that must fail |
 |---|---|---|---|
-| M3 | S3a | Commit before the verdict | V4(c) |
-| M4 | S3b | Slice the source from offset 0 each batch (distinct data per batch) | V5 |
-| M5 | S3b | Proxy `write` does not observe | V7 |
-| M6 | S3b | Read validators in `_sequential_eligible` | V4 sequential, V9 |
-| M9 | both | Keep one pending child per key | V8 keyed rows |
-| M10 | S3b | Restore one `S3_PENDING` site | V9 |
-| M12 | S3b | Streamed driver skips the failing-report raise | V4 streamed rows (not the physical rows, which `physical/_shadow_coordinator.py:221-227` enforce) |
-| M13 | S3b | Two owners append for one table | split-owner unit test |
-| M18 | S3a | `observed_commit` finishes after `evidence_of` and inside the `try` | V15 (COMMIT record present) |
-| M19 | S3a | Observe before reconciliation in `_emit.py` | V16 |
+| M3 | S3b | `observed_commit` commits before `verdict()` | V15 |
+| M4 | S3b | Source reader slices from offset 0 each batch (distinct data per batch) | V5 |
+| M5 | S3b | `write_batches` forwards without observing | V7, V4 streamed rows |
+| M6 | S3b | `config.get("validators")` re-added to `cheap_admission` | V4 unified row, V9 |
+| M8 | S3b | Source reader reads the whole lazy source before the first batch | V5 counter |
+| M9 | S3a | One pending child per parent key | V8 child-first duplicate-key cell |
+| M10 | S3b | `if validators: return False` in `_sequential_eligible` | V9, V4 sequential row |
+| M12 | S3b | Remove resident completion from `execute_route` | V4 sequential no-sink, V7 |
+| M13 | S3b | `write_batches` on the three-member proxy | V7 protocol cell |
+| M14 | S3b | `post_scan_sink_kind` returns the proxy class | V4 readability rows |
+| M15 | S3b | A second observer adds to a table's folds | split V4 row |
+| M16 | S3a | Drop `raw_is_null` from pending `parent_window_respected` | V8 null and malformed cell |
+| M18 | S3b | `observed_commit` calls `finish()` instead of `verdict()` | V15 (commit runs on a failing report) |
+| M19 | S3a | Observe before `maybe_render` in `_emit.py` | V16 |
 | M20 | S3a | Allow an aliased caller of a lifecycle identity | V9 seeded call |
 | M21 | S3a | Keep one stale out-of-core `S3_PENDING` row | V9 stale-pin check (`test_validators_do_not_route.py:201-203`) |
-| M22 | S3a | Do not reset the binding for a validator-free run | V19 |
+| M22a | S3a | Do not bind `None` for a validator-free run | V19 (nested run feeds the outer session) |
+| M22b | S3a | Do not restore the outer token | V19 (outer session gone after the nested run) |
 | M23 | S3a | Runner without a bound session skips validation | V18 |
-| M24 | S3b | Count expected tables from the observer | V7 bypass case |
-| M25 | S3b | Keep `validators:` in the hashed canonical config | V21 |
+| M24 | S3a | Count expected tables from the observer | V7 bypass case |
+| M25 | S3b | Keep `validators:` in the physical digests | V21 |
+| M26 | S3a | No-sink exit skips the assembled-table observation | V4(c) no-sink fail row |
+| M27 | S3a | Prepass keeps the validator veto | V23 |
+| M28 | S3b | Proxy not swapped into `ctx.publish` | publisher test |
 
 ## Enumerations
 
@@ -304,8 +363,10 @@ Mutations. Parent section 10 IDs keep their meaning (M3 to M16). New IDs start a
 
 - `observed_commit` (`_publication_observer.py:132`): gate refusal; `ValidatorFailedError` from
   `finish` (new); `validator_table_not_observed` (new); commit exception (recorded as COMMIT).
-- Out-of-core runner (`out_of_core/_runner.py:359-374`): the verdict before seal now asks the
-  session; it raises on the sink and no-sink exits before anything is sealed.
+- Out-of-core runner (`out_of_core/_runner.py:359-374`): `session.verdict()` before seal, on
+  the sink and no-sink exits.
+- Sequential executor: verdict before seal and before the quarantine sidecar.
+- Whole-table call: `validator_whole_table_over_budget` before loading the spill.
 - `execute_route` (`_pipeline_route_dispatch.py:109`, resident completion at `:149`): raises
   for resident routes with no sink.
 - Whole-table spill: scratch removed on success and failure.
@@ -324,13 +385,14 @@ From parent section 4. S3a touches only the out-of-core rows; S3b the rest.
   selectors (`_pipeline_routing.py:339-340,368-375,390-394,432-439`): S3a.
 - Public out-of-core runner called directly (`physical/drivers/_out_of_core.py:67-73`): S3a.
 - Multi-table split (`_pipeline_multi_table.py:151`): S3b; the mixed-output refusal stays.
-- Streamed generation through `generation/_plan_entry.py:290-319`: S3b.
+- Standalone `generate_tables_streamed`: out of scope (parent line 84).
 - Plain callable sink on a streamed route: S3b, resident with `validators_need_transactional_sink`.
 - Quarantine `validation_fail`: stays resident (exception 1a).
 
 ### FK shapes
 
-As in V8, on the sequential and out-of-core routes:
+As in V8, on the sequential and out-of-core routes (self-reference on sequential only; out-of-core
+refuses it at `out_of_core/_compat.py:504-519`):
 
 - Single-column FK.
 - Composite FK.
@@ -347,8 +409,9 @@ As in V8, on the sequential and out-of-core routes:
   unchanged from S1.
 - `quality_metrics["validation"]`: now written by the session on every route; out-of-core no
   longer writes its own (`out_of_core/_validate_batch.py:379`).
-- Physical plan hash: the canonical config drops `validators:` (`physical/_inputs.py:315-324`).
-- Tombstone record: new `no_successor` form.
+- Physical plan hash: physical-only digests of the plan config hash and canonical config without
+  `validators:`, plus `validators_need_resident` (`physical/_inputs.py:315-324`).
+- Tombstone record: new `no_successor` field.
 
 ### Output surfaces
 
@@ -400,11 +463,12 @@ As in V8, on the sequential and out-of-core routes:
 ## Frozen contracts
 
 - Physical plan hash: validator list removed (named `Breaking:` line, compatibility contract).
-- Reason codes: `route.validators_present` tombstoned with `replaced_by`
-  `route.validators_need_transactional_sink`; `runtime.out_of_core_validators_not_admitted`
-  tombstoned with `no_successor`; `runtime.validator_table_not_observed` added.
-- Tombstone record: the `no_successor` form (S3a), with the tombstone test changed to accept
-  exactly the two forms.
+- Reason codes: `route.validators_present` (S3b) and
+  `runtime.out_of_core_validators_not_admitted` (S3a) tombstoned with `no_successor`;
+  `runtime.validator_table_not_observed` and `runtime.validator_whole_table_over_budget` (S3a)
+  and `route.validators_need_transactional_sink` (S3b) added.
+- Tombstone record and reason manifest: the `no_successor` field (S3a), with the release policy,
+  serialization, manifest pin and tombstone test changed together.
 - `ValidationReport` and `ValidatorFinding`: no change in S3.
 
 ## Slices

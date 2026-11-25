@@ -54,7 +54,7 @@ Non-goals:
   `sentry_file_findings`, the manifest walk at `:437-453`), `tests/sentry/ratchet/_base_run.py`
   (pure rules, no I/O), the launcher in `scripts/dev/ratchet_check.py` with
   `BASE_ARCHIVE_PATHS`, and the RG-E1, RG-E3 tests, including `test_baseline_types.py:32-68` and
-  `test_reader_guard.py:99-103`.
+  `test_reader_guard.py:99-103` (the type and reader-guard suites come from RG-E1).
 - CLI: `tests/sentry/_ratchet.py:52-61` loads the decision check by path; `:130-139` the lenient
   baseline parser (coerces ids, accepts missing `entries`); `:175` `max_raised`; `:202`
   `move_findings`; `:248` `check(root, base, slice_name)`; `:265-269` opens a path with no
@@ -66,6 +66,13 @@ Non-goals:
   vendored-file set and the five-mirror count); `tests/sentry/layout/_ratchet_cases.py:10-17`
   (only `MAX_VALUE_CASES`), exported from `tests/sentry/layout/__init__.py:19-24`.
 - CLI lint debt: `scripts/dev/lintdebt.py:34-48,98-107` rejects each new file and rule pair.
+  The engine `test_reader_guard.py:63` scanner has complexity 13 (C901 limit 10), so a verbatim
+  port is rejected. CLI `load_allowlist` (`tests/sentry/_ratchet.py:95-100`) opens files itself.
+- CLI `max_raised` (`:175`) is the bound comparison; the engine inventory split calls
+  `r.bound_loosened` (`_integrity.py:389-396`), which the CLI does not have.
+- CLI vendoring census: `test_ci_lock_installs.py:507` counts rows (6 today);
+  `test_vendored_files.py:36-45,48-67` keys pins on bare names.
+- Pre-`kind` CLI base `91380fdf`: populated registry rows with no `kind` (registry `:5-15`).
 
 ## Design
 
@@ -78,19 +85,35 @@ Non-goals:
    - `_base_run.py`: vendored byte for byte, pinned in `ci/vendored.toml`. The pin check uses
      the existing digest checker in `test_vendored_files.py` (add a `PINS` row), not a new one.
    - `_integrity.py`: a `[[mirror]]`. Header differences: the decision check is passed in (the
-     CLI loads `is_dated_owner_decision`), the row schema is passed in. `MANIFEST` already
-     matches (`_integrity.py:28`). No other difference.
+     CLI loads `is_dated_owner_decision`), the row schema is passed in, and the bound comparison
+     is passed in: the CLI binds the inventory-split transfer check to `max_raised` and passes
+     no per-site handler (the CLI has no `sites` bounds). Control:
+     `test_ratchet_check.py:148-155` keeps passing. `MANIFEST` already matches
+     (`_integrity.py:28`). No other difference.
+   - `test_reader_guard.py`: ported with its scanner split into two functions so each is under
+     C901 10; the ported file passes `lintdebt.py` with no new file and rule pair. CLI
+     `load_allowlist` reads through the shared `open_input` reader, so the guard has no CLI
+     exception.
    - `layout/_ratchet_cases.py`: re-vendored from the engine so it carries
      `REGISTRY_PATH_CASES`; update its digest and source commit; export the new table from
      `layout/__init__.py`.
-   - `test_ci_lock_installs.py:501-508`: add the new vendored path and raise the expected
-     mirror count from 5 to 6.
+   - `test_ci_lock_installs.py:501-508`: add the new vendored path; the row count at `:507`
+     becomes 7 and the mirror count goes from 5 to 6.
+   - `test_vendored_files.py:36-45,48-67`: the pin checker keys on repo-relative paths, checks
+     that the ledger source commit equals the pin's, and its fixture creates parent directories.
+   - Exports and fixtures: `tests/sentry/ratchet/__init__.py:3-5` and `ratchet/conftest.py:3-5`
+     are added from the engine; the `test_gate_pins` import (line 630) and the glob guard
+     (`607-613`, against `_ci_lanes.py:105-110`) are adapted to the new group.
 3. `tests/sentry/_ratchet.py` (+30, to about 372): `_helper(name)` loads by path; `check()`
    builds `BaseTree` once, reads both sides through `Side` (regular-file check before open, so
    a FIFO is a finding, not a hang), and calls `closed_keys` with the CLI row schema: `id`,
    `baseline`, `kind` required; `kind` in `KINDS`; `consumer` required on `json` and refused
    otherwise; `approved_growth` optional. The strict read from the engine replaces the lenient
-   parser: ids must be strings, `entries` must be present. `safe_path` replaces `startswith`.
+   parser on both sides: ids must be strings, `entries` must be present, `count` and `sites` are
+   non-bool ints, and the `moved_from` map is kept. `safe_path` replaces `startswith`.
+   Older base schema: a base registry whose rows have no `kind` key at all (CLI `91380fdf`) is
+   read with the pre-`kind` schema; that is recognized only when no row on that side has `kind`.
+   HEAD is always validated strictly.
    `max_raised`, `move_findings`, `created_in` and `--slice` stay. The new signature takes
    `slice_name` and `waiver_input` as keywords only, so a positional call cannot swap them.
 4. One owner per check:
@@ -107,6 +130,7 @@ Non-goals:
    Paths absent from the base listing are dropped, so a base that predates
    `release_identity.py` (CLI `7860d26b`) still archives. The child-only `--schema-waiver-env`
    parser is added, and the head check passes `slice_name=` and `waiver_input=` by keyword.
+   `--slice NAME` is forwarded to both the head check and the child.
 7. `scripts/dev/gates.sh:269` and `.github/workflows/ci.yml:285`: both run
    `ratchet_check.py --with-base --base <sha>`. The gate passes `label` with the RG-E3 four
    cases, the RG-E3 failure marker, and replays decision and waiver lines from the step log to
@@ -148,8 +172,10 @@ grammar in `release_identity.py`, the archive list in `ratchet_check.BASE_ARCHIV
 | Head edit to `release_identity.py` | Base decision check unchanged | 3 |
 | Base `7860d26b`, before `release_identity.py` | Archive succeeds, plain child, pass | 8 |
 | Approved schema change with a `[checker_change]` row | Pass; waiver reaches the child as a keyword | 9 |
-| Wrong first-inventory `--slice` with the head check disabled | Base copy fails with the slice finding | 10 |
-| Baseline id not a string, `entries` missing, bool in an int field | Fail, head and base | port of `test_baseline_types.py` |
+| Wrong first-inventory `--slice` with the head check disabled | Base copy fails with the slice finding; `--slice` forwarded to the child | 10 |
+| Base `91380fdf`, pre-`kind` populated rows | Base read with the old schema; HEAD strict | 12 |
+| Inventory split that raises a CLI `max` | Fail through `max_raised` | 13 |
+| Baseline id not a string, `entries` missing (`test_malformed_registry.py:242`), bool in `count` or `sites` | Fail, head and base | port of `test_baseline_types.py` |
 | Registry path is a FIFO | Fail within the test timeout | port, bounded |
 | New baseline with no `created_in` | Fail, as today | 7 (pin) |
 | PR CI runs the base checker | `--with-base`, step-level `if:` kept | 4 |
@@ -174,16 +200,28 @@ CLI-only:
 2. `test_checker_path_is_a_directory_in_base_fails` (red-before).
 3. `test_base_run_loads_release_identity` (red-before): a head edit to `release_identity.py`
    that accepts any reason cannot change the base decision check. Asserts the base decision
-   diagnostic text, and a control run with the file unchanged passes.
+   diagnostic text. The passing control uses a valid decision with the file unchanged.
 4. `test_ci_runs_base_checker_on_pull_requests` (red-before): parse `ci.yml`.
 5. `test_vendored_ratchet_helpers_match_their_pins` (red-before): asserts the file exists before
    hashing it, then the digest equals the pin and the ledger row.
 6. `test_live_cli_registry_kinds_and_consumers_pass` (pin).
 7. `test_new_baseline_without_created_in_fails` (pin, `_ratchet.py:274-275`).
-8. `test_base_before_release_identity_runs` (red-before): base `7860d26b`.
-9. `test_schema_waiver_reaches_the_child_by_keyword` (red-before).
-10. `test_wrong_slice_caught_by_base_with_head_disabled` (red-before).
+8. `test_base_before_release_identity_runs` (red-before): base `7860d26b`; asserts the child ran
+   (invocation record) and its exit.
+9. `test_schema_waiver_reaches_the_child_by_keyword` (red-before): asserts the child ran and
+   printed its exact waiver line.
+10. `test_wrong_slice_caught_by_base_with_head_disabled` (red-before): asserts the slice
+    diagnostic text from the child.
 11. `test_decision_lines_shown_on_a_passing_cli_gate` (red-before, through the gate harness).
+12. `test_pre_kind_base_registry_reads` (red-before): base `91380fdf`; HEAD with a missing
+    `kind` still fails.
+13. `test_shared_bound_uses_max_raised` (red-before): an inventory split that raises a CLI
+    `max` is caught through `max_raised`.
+
+Adapted existing tests: `test_integrity.py:376-379` and `test_baseline_types.py:35,51-57` assert
+the CLI refusal text from `test_ratchet_check.py:217-220`. The engine `test_integrity.py` (686
+lines) is split in the port into `test_integrity.py` and `test_integrity_base.py`, each under
+600 lines.
 
 Fixture updates (not new tests): the row writers at `tests/sentry/test_ratchet_check.py:46-47,180,483,561`
 emit a valid kind; `tests/sentry/cli_text/test_error_emitter_ratchet.py:22` gets
@@ -195,7 +233,7 @@ Mutations (run on the final head, results recorded):
 
 | ID | Mutation | Test that must fail |
 |---|---|---|
-| C1 | Drop the `kind` rule from the CLI row schema | 1 and the registry test |
+| C1 | Drop the `kind` rule from the CLI row schema | negative case of 1 and the registry test |
 | C2 | Restore `startswith` for baseline paths | ported path test |
 | C3 | Leave `release_identity.py` out of the archive list | 3 (base decision diagnostic, control passes) |
 | C4 | Remove `--with-base` from `ci.yml` | 4 |
@@ -206,6 +244,10 @@ Mutations (run on the final head, results recorded):
 | C9 | Pass the waiver positionally | 9 |
 | C10 | Restore the lenient baseline parser | ported `test_baseline_types.py` cases |
 | C11 | Drop the pass-time replay in `gates.sh` | 11 |
+| C12 | Do not forward `--slice` to the child | 10 |
+| C13 | Apply the pre-`kind` schema to HEAD too | 12 |
+| C14 | Use a plain `>` in place of `max_raised` in the split check | 13 |
+| C15 | Key vendored pins on bare file names | 5 |
 
 ## Enumerations
 
@@ -275,14 +317,14 @@ N/A. Only repo files and git objects; no keyed data.
 | 1 | Anchored validation | Decision rows use the shipped `is_dated_owner_decision`; `kind` compared by set membership |
 | 2 | Strict wire types | `kind` and `consumer` strings; baseline ids strings and `entries` present (C10); bool refused in int fields |
 | 3 | No exception context | No re-raise; read errors become finding lines |
-| 4 | Versioned read models | New tables are optional at base; the base checker runs with flags it knows |
+| 4 | Versioned read models | New tables are optional at base; a pre-`kind` base reads with the old schema (C13); the base checker runs with flags it knows |
 | 5 | Normalized guard scanners | Registry and baselines parsed as TOML and JSON; `ci.yml` parsed as YAML in test 4 |
 | 6 | Private modules | Helpers load by path; no private engine import |
 | 7 | No hidden CI failures | The CI step keeps its PR condition and gains no `continue-on-error`; the only skip is proven absence |
 | 8 | One input, one trust class | N/A: repo files only |
-| 9 | Mutations on the final head | C1 to C11 rerun after the last code change |
+| 9 | Mutations on the final head | C1 to C15 rerun after the last code change |
 | 10 | Allowlisted helpers still checked | `_base_run.py` is pinned by digest, so an edit fails, not passes |
-| 11 | No raised caps | No ceiling raised; `_ratchet.py` about 372; the CLI 800-line cap excludes tests (`layout/test_module_size.py:19-30`), so ported tests follow the parent's 600-line rule per file; `test_ratchet_check.py` (565) takes no new tests; `lintdebt` baseline not raised |
+| 11 | No raised caps | No ceiling raised; `_ratchet.py` about 372; the CLI 800-line cap excludes tests (`layout/test_module_size.py:19-30`), so ported tests follow the parent's 600-line rule per file; `test_ratchet_check.py` (565) takes no new tests; `lintdebt` baseline not raised; CLI CHANGELOG (876 lines) net-zero |
 
 ## Reuse inventory
 
@@ -312,7 +354,7 @@ selection per commit. Triggers: CI config and test tooling, so one full CLI suit
 - An existing CLI registry row lacks a valid `kind` or `consumer` and the live check goes red.
   Test 6 runs on the live registry first; a bad row is fixed in the registry, not by loosening
   the schema.
-- RG-E3 merges without the lint fixes or `BASE_ARCHIVE_PATHS`. Then a small engine follow-up
+- RG-E3 merges without the lint fixes (BLE001, C901, RUF100) or `BASE_ARCHIVE_PATHS`. Then a small engine follow-up
   lands first; the CLI never forks `_base_run.py`.
 - `test_lint_debt.py` scratch tree misses a helper and fails for the wrong reason. The fixture
   update copies the whole `tests/sentry/ratchet/` group.
@@ -331,5 +373,5 @@ selection per commit. Triggers: CI config and test tooling, so one full CLI suit
 - Builders never write owner decision rows; empty tables only.
 - Run each red-before test on CLI main first and record the failure; pins are not red evidence.
 - Lint own edits: `ruff check`, `ruff format --check`, `mypy` before each commit.
-- CHANGELOG entry before merge.
+- CHANGELOG entry before merge, net-zero in length.
 - Stop and report if the same defect class comes back after a fix.

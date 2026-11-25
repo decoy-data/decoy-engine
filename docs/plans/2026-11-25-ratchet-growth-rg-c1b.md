@@ -44,16 +44,21 @@ Non-goals:
 
 - Engine RG-E2 (#801): `tests/sentry/ratchet/_limit_constants.py` (261 lines, `LIMITS`,
   `NOT_A_BOUND`, `direction_problems`), `_bindings.py` (31), `_bounds.py` (186, file-free:
-  `loosened_fields`, guard successor and retirement rules at `:110-133`), `live_bounds` in
-  `tests/sentry/_baseline_sources.py:95-107` (the one source reader), and in
+  `loosened_fields`, the successor exception and `[retired_growth]` rules at `:114-133`),
+  `live_bounds` in `tests/sentry/_baseline_sources.py:95-108` (the one source reader, used by the
+  registry mirror; the checker does not call it, `_ratchet.py:544-546`), and in
   `tests/sentry/_ratchet.py` `GUARD_KEYS` (line 51), the strict baseline read (`:232-238`),
-  `parse_retired_growth` (177), the floor comparison through `loosened_findings` (`:544-546`) and
+  `parse_retired_growth` (177), the added-field rule (`:184-193`), the floor comparison through `loosened_findings` (`:544-546`) and
   the guard handling in `_check` (463-557). Tests in `tests/sentry/ratchet/test_bounds.py`
   (512 lines), `test_baseline_types.py` and `test_reader_guard.py` (which forbids file reads in
   `_bounds.py`, `:32-36`).
 - CLI after RG-C1a: `tests/sentry/ratchet/` with `_integrity.py` (mirror) and `_base_run.py`
   (vendored), the `[retired]` tables, `--with-base`.
-- CLI `_baseline_sources.py:99-105` `READERS` and `KINDS` (`:31`).
+- CLI `_baseline_sources.py:99-105` `READERS` and `KINDS` (`:31`). CLI `test_baseline_registry.py`
+  `CREATED_IN` is at `:43`; the mirror reader returns a set of keys (`:123-125`).
+- Engine `test_baseline_registry.py:248-253,267-274` rejects tuple unpacking at module level
+  (`SURFACE, SOURCE, OWNER, TEST = range(4)`, CLI `release/test_frozen_surface_map.py:25`).
+  Engine `_limit_constants.py:12` imports `_bindings`.
 
 ## Design
 
@@ -61,13 +66,20 @@ Non-goals:
    - `_bindings.py`: vendored byte for byte if the diff shows no engine path; else a mirror.
    - `_bounds.py`: a declared `[[mirror]]` in `ci/vendored.toml`, not a byte copy. The one CLI
      change: `CEILING_FIELDS = ("max", "count", "sites")`, so one comparison
-     (`loosened_fields`) covers the existing CLI ceilings and the new floor. The header names
-     that difference. It stays file-free, as in the engine.
+     (`loosened_fields`) covers the existing CLI ceilings and the new floor. The port keeps the
+     engine added-field rule (`_ratchet.py:184-193`): a field present on one side only is read
+     with `.get`, never by index, so a `count` raise gives a finding, not a KeyError, and a
+     `count` drop next to an added `max` is still compared. The CLI diagnostic text at
+     `test_ratchet_check.py:413,442,464` is kept. Every ceiling and floor field is a non-bool
+     int on both sides (`count: true`, `"3"` and `3.0` are findings). The header names the
+     differences. It stays file-free, as in the engine.
    - `_limit_constants.py`: a mirror. Same `AnnAssign` and bool rules, same `DIRECTIONS`,
      CLI `LIMITS` and `NOT_A_BOUND` tables, and the engine's exception for vendored fixtures
      (engine `tests/sentry/test_baseline_registry.py:211-238`).
    - Update the ledger pins in CLI `tests/sentry/test_ci_lock_installs.py:501-507` (vendored
      paths and the mirror count) on the RG-C1a base.
+   - Add `_bounds`, `_bindings` and `_limit_constants` to `CHECKER_HELPERS` in CLI `_ratchet.py`,
+     so the RG-E3 base run treats an edit to them as a checker edit (on the C1a merge base).
 2. CLI `LIMITS` (each row names the comparison line, checked by the builder on CLI main):
 
    | File | Constant | Direction |
@@ -78,7 +90,7 @@ Non-goals:
    | `_ratchet.py` | `MIN_REASON` | min |
    | `release/test_retired_name_residual.py` | `MANIFEST_FLOOR` | min |
    | `release/test_tag_census.py` | `FLOOR` | min |
-   | `cli_text/test_exit_code_docs.py` | `MIN_CODES` | min |
+   | `cli_text/test_exit_code_docs.py` | `MIN_CODES` (uses `:54,79`) | min |
 
    `NOT_A_BOUND`, each with a reason: `ci_scan/_identity.py` `TRIES`,
    `cli_text/_error_sites.py` `FINGERPRINT_CHARS`, `test_mask_secret_ref_shape.py`
@@ -87,8 +99,10 @@ Non-goals:
    `release/test_qa_checklist_shape.py` `EXPECTED_CHECKS`, `EXPECTED_GROUPS` (exact-equality
    pins), `io_policy/test_private_files.py` `LAUNCHER_MODE` (`0o755`, an equality pin at
    `:115,541`). Tuple bindings the reader refuses (`ci_scan/test_identity.py:20`,
-   `release/test_frozen_surface_map.py:25`, column indices) are listed by name with a reason;
-   the census must pass on CLI main with them, not only report them. If the builder finds a constant compared with `<`, `<=`, `>` or `>=` that this
+   `release/test_frozen_surface_map.py:25`, column indices) are rewritten as plain assignments
+   (`SURFACE = 0` and so on), so the engine rule stays unchanged and the census reads them as
+   `NOT_A_BOUND` rows with a reason. A test asserts a later rebind of such a name still fails.
+   The census must pass on CLI main with them, not only report them. If the builder finds a constant compared with `<`, `<=`, `>` or `>=` that this
    table calls not a bound, it moves to `LIMITS`; the census decides, not this list.
 3. `tests/sentry/_ratchet.py` (+30): replace the CLI `max_raised` ceiling check
    (`:170-194`) with the one `_bounds.loosened_fields` comparison for surviving and successor
@@ -102,15 +116,18 @@ Non-goals:
    approval does not excuse a raise (`:312-317`, kept).
 4. `sentry-limits` baseline `tests/sentry/baselines/sentry-limits.json` with `created_in`,
    one entry per `LIMITS` row holding `max` or `min`, each with a substantive `reason`
-   (`_ratchet.py:143-151`). Registry row with `kind = "from_scan"`, placed before `lint-debt`
+   (`_ratchet.py:143-151`). The exact field check of parent lines 799-802: each entry has exactly
+   `max` or exactly `min` plus `reason`; a missing field, an extra field, the wrong direction
+   for its `LIMITS` row, a non-integer and `800.0` are findings. It reuses
+   `test_baseline_registry.py:336-357`. Registry row with `kind = "from_scan"`, placed before `lint-debt`
    (`tests/sentry/test_lint_debt.py:53-57` copies the registry tail). Reader
    `live_bounds` in CLI `_baseline_sources.py` (+20), the one source reader, as in #801.
 5. `tests/sentry/test_baseline_registry.py`: add `sentry-limits` to `CREATED_IN`
-   (`:103-107`) and extend `test_recomputed_keys_match_the_registered_baseline` (`:121-125`).
+   (`:43`, used at `:103-107`) and extend `test_recomputed_keys_match_the_registered_baseline` (`:121-125`).
    For the numeric reader it also compares each live key's value to the recorded `max` or
    `min`; a source-only change in either direction fails. Lowering a recorded floor in JSON
    still needs an approval in the checker.
-6. CHANGELOG entry. CODEMAP "Sentry test" row: name `sentry-limits` and the helpers.
+6. CHANGELOG entry, net-zero in length (CLI CHANGELOG is 876 lines). CODEMAP "Sentry test" row: name `sentry-limits` and the helpers.
 
 Choke points: `_baseline_sources.live_bounds` is the one reader of source values (used by the
 mirror); `_bounds.loosened_fields` is the one comparison of base and head JSON (used by the
@@ -148,6 +165,10 @@ one guard baseline); the CLI takes the same files through the vendoring ledger.
 | A key added to `sentry-limits` | Pass (a new guard tightens) |
 | Whole `sentry-limits` id retired | Fail unless a fresh `[retired]` decision and a fresh `[retired_growth]` row per lost key |
 | JSON `max: true`, `"800"` or `800.0`, on head or on base | Fail, non-integer |
+| JSON `count: true`, `"3"` or `3.0` on an existing baseline | Fail, non-integer |
+| `count` raised on one side with `max` added | Finding, no KeyError |
+| `sentry-limits` entry with an extra field or the wrong direction | Fail |
+| Rebind of a former tuple index name | Census fails |
 | `FLOOR - 1` used at the comparison site, declaration untouched | Consumer boundary test fails |
 | A new module-level int under `tests/sentry` in neither table | Census test fails |
 
@@ -171,22 +192,33 @@ CLI-only:
 
 1. `test_cli_mirror_rejects_constant_only_loosening` (red-before): call the existing mirror
    function directly (`test_baseline_registry.py:121-125`) with a seeded numeric reader and a
-   matching baseline, so it runs on main. Raise only `layout/test_module_size.py` `LIMIT`;
+   matching baseline, so it runs on main; the main reader returns a set of keys
+   (`:123-125`), so the seeded reader returns a set too. Raise only `layout/test_module_size.py` `LIMIT`;
    then lower only `release/test_tag_census.py` `FLOOR`; then raise only that `FLOOR`. Keys and
    JSON stay byte-identical. Assert the exact diagnostic names the key. Main's key-only mirror
    accepts all three.
-2. `test_every_cli_module_int_is_a_bound_or_named` (red-before): census of module-level ints
-   under `tests/sentry`; each is in `LIMITS` or `NOT_A_BOUND`.
-3. `test_live_sentry_limits_match_the_constants` (red-before): the live reader equals the
-   baseline for every row.
+2. `test_every_cli_module_int_is_a_bound_or_named` (post-change: it imports `_limit_constants`,
+   which main lacks): census of module-level ints under `tests/sentry`; each is in `LIMITS` or
+   `NOT_A_BOUND`.
+3. `test_live_sentry_limits_match_the_constants` (post-change: needs the new baseline): the
+   live reader equals the baseline for every row.
 4. `test_module_size_ceiling_raise_needs_approval` (pin): `baselines/module-size.json:4-8`
    records the max and the checker rejects the raise (`tests/sentry/_ratchet.py:312-317`).
 5. `test_reworded_base_approval_does_not_exempt_a_raise` (pin).
-6. `test_tag_census_floor_is_enforced_at_its_use` (red-before): a scratch copy of
-   `release/test_tag_census.py` with the comparison at `:22` changed to `FLOOR - 1` must fail
+6. `test_tag_census_floor_is_enforced_at_its_use` (post-change): a scratch copy of
+   `release/test_tag_census.py` with the consumer at `:19-22` changed to `FLOOR - 1` must fail
    the consumer check. Use sites are recorded per `LIMITS` row, including the delegation at
-   `layout/test_module_size.py:42` and `layout/test_package_fanout.py:54-55`. Engine
-   `_limit_constants.py:238-247` ignores same-file uses; the CLI mirror adds this case.
+   `layout/test_module_size.py:42`, `layout/test_package_fanout.py:54-55` and `MIN_CODES` at
+   `cli_text/test_exit_code_docs.py:54,79`. The interpolation in an f-string at
+   `layout/test_run_package_shape.py:105-108,157-158` is not a use site (a fixture case asserts
+   that). Engine `_limit_constants.py:238-247` ignores same-file uses; the CLI mirror adds this
+   case.
+8. `test_count_field_strict_and_added_field_rule` (red-before on its assertion: main accepts
+   `count: true`): bool, string and float `count` and `sites` on head and base; a `count` raise
+   with `max` added gives a finding.
+9. `test_sentry_limits_entry_fields_are_exact` (post-change): missing, extra, wrong direction,
+   non-integer, `800.0`.
+10. `test_former_tuple_index_rebind_fails` (post-change).
 7. `test_ceiling_and_floor_share_one_comparison` (post-change): `count`, `sites` and a new
    ceiling beside an old one stay refused (CLI `tests/sentry/test_ratchet_check.py:402,432,454`
    kept unchanged and green).
@@ -204,6 +236,11 @@ Mutations (final head):
 | B6 | Accept a base approval for a fresh raise | ported base-approval pin goes red |
 | B7 | Drop `count` from CLI `CEILING_FIELDS` | `test_ratchet_check.py:402` |
 | B8 | Ignore use sites in the census | 6 |
+| B9 | Index the base field directly (`base[f]`) | 8 (KeyError, not a finding) |
+| B10 | Accept bool in `count` | 8 |
+| B11 | Drop the exact field check | 9 |
+| B12 | Allow tuple unpacking at module level | 10 |
+| B13 | Leave `_bounds` out of `CHECKER_HELPERS` | ported RG-E3 eligibility test with a `_bounds.py` edit |
 
 ## Enumerations
 
@@ -273,7 +310,7 @@ N/A. Repo files only; no keyed data.
 | 6 | Private modules | Helpers load by path |
 | 7 | No hidden CI failures | No skip added; census fails on unknown ints |
 | 8 | One input, one trust class | N/A: repo files only |
-| 9 | Mutations on the final head | B1 to B6 after the last change |
+| 9 | Mutations on the final head | B1 to B13 after the last change |
 | 10 | Allowlisted helpers still checked | `NOT_A_BOUND` rows need a reason and are re-read by the census |
 | 11 | No raised caps | Recorded values equal today's; this slice is the guard against raised caps |
 
@@ -314,4 +351,5 @@ baseline change: CLI `layout/test_module_size.py:3-6,19-20` excludes tests.
 - New tests go in `tests/sentry/ratchet/`; `test_baseline_registry.py` gets only the
   `CREATED_IN` row and the extended mirror assertion.
 - Red-before tests run red on CLI main first; pins are not red evidence.
-- `ruff check`, `ruff format --check`, `mypy` before each commit. CHANGELOG entry before merge.
+- `ruff check`, `ruff format --check`, `mypy` before each commit. CHANGELOG entry before merge,
+  net-zero in length.
