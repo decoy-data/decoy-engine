@@ -43,7 +43,7 @@ INSTALL = (
 # other. Edit it in the same diff as the config.
 LAYERS: tuple[str, ...] = (
     "unmask : delivery : walks : identifiers : providers : records : support",
-    "execution : kernel : quarantine : publication : validation : verification : vault",
+    "execution : kernel : anonymize : quarantine : publication : validation : verification : vault",
     "plan : generation : generators : transforms : declared_casting : secret_providers"
     " : keyprovider : relationships : providers_v2 : reference_tables : quality : subset",
     "profile : profiling : detection : internal : progress : context : config : determinism"
