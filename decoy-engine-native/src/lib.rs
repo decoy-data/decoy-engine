@@ -33,6 +33,7 @@ use pyo3::prelude::*;
 mod arrow_ffi;
 pub mod batch;
 pub mod canonicalize;
+pub mod checksum;
 pub mod derive;
 pub mod ffi_import;
 // C6a: the NIST SP 800-38G FF1 format-preserving-encryption kernel. Its pure core (the deployable
