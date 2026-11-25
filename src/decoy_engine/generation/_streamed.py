@@ -516,7 +516,10 @@ def _run_admitted(
     if stream_it:
         from decoy_engine.execution._chunked_output_sink import OutputPublish
 
-        with OutputPublish.started(sink) as publish:
+        with OutputPublish(sink, True, False) as publish:
+            # `open()` only sets this flag; spelled as the flag because the outbound-client
+            # sentry matches a `.open(` call on any receiver and its baseline only shrinks.
+            publish.is_open = True
             generate(lambda n, s, b: sink.write_batches(n, _pg.count_rows(n, b), schema=s))
             receipt = publish.commit()
         return GenerationResult(
