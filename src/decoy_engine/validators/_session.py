@@ -233,11 +233,13 @@ class ValidationSession:
     def _check_pairing(self) -> None:
         """A paired check needs as many source rows as published rows, table by table."""
         held: dict[str, int] = {
-            name: tbl.num_rows
-            for name, tbl in (self._sources or {}).items()
-            if isinstance(tbl, pa.Table)
+            **{
+                name: tbl.num_rows
+                for name, tbl in (self._sources or {}).items()
+                if isinstance(tbl, pa.Table)
+            },
+            **self._explicit_source_rows,
         }
-        held.update(self._explicit_source_rows)
         for fold in self._folds:
             for table in fold.paired_tables():
                 source_rows = held.get(table)

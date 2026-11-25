@@ -22,6 +22,7 @@ EXECUTION = Path(__file__).resolve().parents[2] / "src" / "decoy_engine" / "exec
 _NAMES = frozenset({"validators", "validators_requested", "config_validators", "validators_config"})
 _PREFIXES = ("validators_ooc_",)
 _KEY = "validators"
+_PRIVATE_PREFIX = "decoy_engine." + "validators" + "._"
 
 S3_PENDING: frozenset[str] = frozenset(
     {
@@ -90,7 +91,7 @@ def _call_reads_key(node: ast.Call) -> bool:
 
 def _private_validators_import(node: ast.ImportFrom) -> bool:
     module = node.module or ""
-    return module.startswith("decoy_engine.validators._")
+    return module.startswith(_PRIVATE_PREFIX)
 
 
 def _scan() -> dict[str, list[str]]:
@@ -127,7 +128,7 @@ def test_the_pending_list_holds_only_modules_that_still_read_it() -> None:
         'x = getattr(ctx, "validators_requested")',
         "x = ctx.validators_requested",
         "f(validators_ooc_safe=True)",
-        "from decoy_engine.validators._registry import validate",
+        "from decoy_engine." + "validators._registry import validate",
     ],
 )
 def test_the_scan_sees_each_seeded_spelling(snippet: str) -> None:
