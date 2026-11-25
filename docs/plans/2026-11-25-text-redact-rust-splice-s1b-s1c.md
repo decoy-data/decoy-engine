@@ -1,4 +1,4 @@
-Status: plan (revision 5, 2026-11-25, Dennis rounds 1-2 and Codex rounds 1-2 folded; slice plan for S1b and S1c; anchored to PR #806 head `1a13d250b`, branch `feat/trs-s1a`)
+Status: plan (revision 6, 2026-11-25, Dennis rounds 1-2 and Codex rounds 1-3 folded, Codex round 3 GO; slice plan for S1b and S1c; anchored to PR #806 head `1a13d250b`, branch `feat/trs-s1a`)
 
 # TEXT-REDACT-RUST-SPLICE slices S1b and S1c: the text_redact Arrow splice helper, then its routes
 
@@ -15,6 +15,10 @@ Anchors: paths starting with `execution/` or `reasons/` are under `src/decoy_eng
 - HIGH: today sequential and out-of-core already report `rust_companion` for an admitted text_redact column that ran nothing in Rust. S1c moves those idle columns to `arrow_python` and writes the label in the two `entry()` methods (sections 5.5, 7, 10).
 - MEDIUM: splice translation uses an F29-visible table lookup (5.3); one extracted label helper (5.1, M2); a CI conversion guard for M7 (AT-9b); combined `_crypto_ext.py` budget with FPE S2b (7).
 - LOW: unresolvable explicit detector lists, `__all__` line, reason release checks, `MemoryError` passthrough, reason block comment.
+
+## Changes after Codex round 3 (GO, two V2-LOG notes folded)
+
+- AT-3 adds a single-call case where repair pushes one output past the limit; section 5.2 points to the same conditional wheel rule as AT-3.
 
 ## Changes in revision 5 (Codex round 2)
 
@@ -169,7 +173,7 @@ The helper never calls `to_pylist` on eligible input or output (AT-9 guard). Rep
 
 ### 5.2 Python offset guard (S1b)
 
-S0 made both legacy Rust detectors decline a cell past the detector offset limit. Older wheels still narrow offsets to u32. On the E1b path, before calling `text_redact_candidates`, set aside every non-null row whose UTF-8 byte length exceeds `_DETECTOR_OFFSET_LIMIT = 2**32 - 1` and run those rows through full Python. The guard is one function, `partition_detector_rows(texts, *, limit=_DETECTOR_OFFSET_LIMIT)`, in `_text_mask_native_splice.py`, so S2a reuses it for `text_mask_detect_splice`. AT-3 detector offsets injects a 64-byte limit through the keyword and runs on a pre-S0 wheel.
+S0 made both legacy Rust detectors decline a cell past the detector offset limit. Older wheels still narrow offsets to u32. On the E1b path, before calling `text_redact_candidates`, set aside every non-null row whose UTF-8 byte length exceeds `_DETECTOR_OFFSET_LIMIT = 2**32 - 1` and run those rows through full Python. The guard is one function, `partition_detector_rows(texts, *, limit=_DETECTOR_OFFSET_LIMIT)`, in `_text_mask_native_splice.py`, so S2a reuses it for `text_mask_detect_splice`. AT-3 detector offsets injects a 64-byte limit through the keyword and runs on the candidates-only wheel that section 9 AT-3 names (pre-S0 while abi-3 is current, the matching-ABI legacy fixture after FPE abi-4).
 
 ### 5.3 Error translation (S1b)
 
@@ -276,7 +280,7 @@ Each fails on its slice base unless marked already-green. IDs match the parent.
 - **AT-1b (S1b).** Wrap the bound entry after its probe. Uniquely identifiable rows across at least two batches. Record each slice and mask. In an instrumented second run, mark each eligible output and require each mark at the same output position. Every eligible row appears once in Rust output and every ineligible non-null row once in Python repair. Include nulls, empty strings, 0x1c to 0x1f and non-ASCII.
 - **AT-2 wrapper (S1b).** Bytes and validity at batch sizes 1, 7, 65,536 and whole input, thread budgets 1 and 4.
 - **AT-3 wrapper (S1b).** `string`, `large_string`, offset slices, uneven chunks, zero chunks, empty and all-null input. Integer, float and Boolean inputs keep Python stringification. A surrogate token: a no-match cell returns plain text. Label mode with the same token and a known email gives the detector label from Rust.
-- **AT-3 capacity, helper half (S1b).** The Python entry fixes the Rust ceiling at `PIECE_BYTE_CEILING` (`text_splice.rs:355`), and the reduced ceiling is reachable only from pure Rust tests. So the helper half runs in two places: a Rust test drives the builder with a reduced ceiling and asserts it emitted more than one piece; the Python test forces several kernel calls with the existing row limit, then patches `_arrow_types._OFFSET_LIMIT` low so that outputs which each fit the limit exceed it combined. Assert those outputs stay separate chunks of a `ChunkedArray`, each chunk under the patched limit, with complete ordered bytes and nulls. Include an expanding declined row and many short matches expanded by a long token.
+- **AT-3 capacity, helper half (S1b).** The Python entry fixes the Rust ceiling at `PIECE_BYTE_CEILING` (`text_splice.rs:355`), and the reduced ceiling is reachable only from pure Rust tests. So the helper half runs in two places: a Rust test drives the builder with a reduced ceiling and asserts it emitted more than one piece; the Python test forces several kernel calls with the existing row limit, then patches `_arrow_types._OFFSET_LIMIT` low so that outputs which each fit the limit exceed it combined. Assert those outputs stay separate chunks of a `ChunkedArray`, each chunk under the patched limit, with complete ordered bytes and nulls. Include an expanding declined row and many short matches expanded by a long token. Add a single-call case: one kernel output that fits the patched limit before repair and exceeds it after repair, with every row fitting on its own. Assert repair splits it (through `split_narrow_text`) into several ordered chunks.
 - **AT-3 detector offsets (S1b).** E1b on a candidates-only wheel at the current ABI (a pre-S0 wheel while abi-3 is current; the matching-ABI legacy fixture from AT-9 once FPE abi-4 has merged) with the Python guard limit injected at 64 bytes. A spy on both legacy detectors proves the oversized row never reaches them. Expect one short token per email in order, with a null and a short email beside it.
 - **AT-3 invalid output (S1b).** One injected case per rule in section 5.1 step 5, plus a forced bad null after scatter. Each raises `text_splice_output_invalid`.
 - **AT-6 (S1b translation and fallback; S1c route outcomes).** Wrapper: a post-probe raise of each known code gives its registered error, an unknown code or a `TypeError` gives `text_splice_output_invalid`, and no Python retry happens (zero candidates calls after the raise). The FPE family returns an unknown FPE code unchanged and maps the two determinism codes as today. S1c: the unified coordinator reroutes the fault to the full-frame oracle; chunked, sequential and out-of-core propagate it.

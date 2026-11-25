@@ -1,4 +1,4 @@
-Status: plan (revision 5, 2026-11-25, Dennis rounds 1-2 and Codex rounds 1-2 folded; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
+Status: plan (revision 5, 2026-11-25, Dennis rounds 1-2 and Codex rounds 1-2 folded, Codex round 3 GO; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
 
 # FPE-CHECKSUM-NATIVE slices S2a, S2b-core and S2b: check digits, the Rust batch path, then the keyword and ABI
 
