@@ -208,28 +208,60 @@ def test_the_scan_reaches_sentry_subfolders() -> None:
     assert "layout/test_package_fanout.py" in names
 
 
-# Sentry files the discovery scan skips, each with the reason. A skipped file must be pinned by
-# another check, so its constants cannot change unseen.
-UNSCANNED: dict[str, str] = {
-    "ci_scan/test_identity.py": (
-        "byte-identical copy shared with the CLI repo and pinned by the ci-lock ledger; its "
-        "REPO, COMMIT, PATH tuple is a fixture, not a bound"
-    ),
-}
+# The one tuple assignment in a scanned file that is a fixture, not a bound. The file is shared
+# byte for byte with the CLI repo and pinned by the ci-lock ledger, so the exception names the
+# file, the three names and the statement form. A new constant in the same file is still found.
+FIXTURE_FILE = "ci_scan/test_identity.py"
+FIXTURE_NAMES = ("REPO", "COMMIT", "PATH")
 UPPER = re.compile(r"_*[A-Z][A-Z0-9_]*")
 
 
-REFUSED = "must be one module-level NAME = <int> statement"
+def _is_text(node: ast.expr) -> bool:
+    """A string literal, or a string literal repeated by an int literal (``"a" * 40``)."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _is_text(node.left) and isinstance(node.right, ast.Constant)
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _is_fixture_statement(tree: ast.Module) -> bool:
+    """True when the module has exactly one ``REPO, COMMIT, PATH = <str>, <str>, <str>`` line."""
+    hits = [
+        stmt
+        for stmt in tree.body
+        if isinstance(stmt, ast.Assign)
+        and len(stmt.targets) == 1
+        and isinstance(stmt.targets[0], ast.Tuple)
+        and tuple(getattr(e, "id", None) for e in stmt.targets[0].elts) == FIXTURE_NAMES
+        and isinstance(stmt.value, ast.Tuple)
+        and len(stmt.value.elts) == len(FIXTURE_NAMES)
+        and all(_is_text(e) for e in stmt.value.elts)
+    ]
+    return len(hits) == 1 and _binding_count(tree, FIXTURE_NAMES) == len(FIXTURE_NAMES)
+
+
+def _binding_count(tree: ast.Module, names: tuple[str, ...]) -> int:
+    """How many places bind any of ``names``: a stored name, import, ``def`` or ``class``."""
+    count = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            count += node.id in names
+        elif isinstance(node, ast.alias):
+            count += (node.asname or node.name) in names
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count += node.name in names
+    return count
 
 
 def _upper_candidates(sources: dict[str, str]) -> dict[tuple[str, str], int | None]:
     parse = bs._limits().int_constants
-    return {
-        (rel, name): value
-        for rel, text in sources.items()
-        for name, value in parse(ast.parse(text)).items()
-        if UPPER.fullmatch(name)
-    }
+    out: dict[tuple[str, str], int | None] = {}
+    for rel, text in sources.items():
+        tree = ast.parse(text)
+        fixture = rel == FIXTURE_FILE and _is_fixture_statement(tree)
+        for name, value in parse(tree).items():
+            if UPPER.fullmatch(name) and not (fixture and name in FIXTURE_NAMES):
+                out[(rel, name)] = value
+    return out
 
 
 def module_int_constants(sources: dict[str, str]) -> set[tuple[str, str]]:
@@ -241,7 +273,7 @@ def module_int_constants(sources: dict[str, str]) -> set[tuple[str, str]]:
 def refused_constants(sources: dict[str, str]) -> list[str]:
     """One fixed, value-free message per UPPER_CASE candidate the reader refuses, sorted."""
     return sorted(
-        f"{rel}::{name} {REFUSED}"
+        f"{rel}::{name} {bs._limits().REFUSED}"
         for (rel, name), value in _upper_candidates(sources).items()
         if value is None
     )
@@ -251,7 +283,6 @@ def _sentry_sources() -> dict[str, str]:
     return {
         p.relative_to(bs.SENTRY).as_posix(): p.read_text(encoding="utf-8")
         for p in bs.SENTRY.rglob("*.py")
-        if p.relative_to(bs.SENTRY).as_posix() not in UNSCANNED
     }
 
 
@@ -266,7 +297,6 @@ def test_every_module_int_is_a_bound_or_named() -> None:
     assert sorted(known - found) == [], "a LIMITS or NOT_A_BOUND row names no constant"
     assert not set(lc.LIMITS) & set(lc.NOT_A_BOUND)
     assert all(len(r) >= 20 for r in lc.NOT_A_BOUND.values()), "a NOT_A_BOUND row needs a reason"
-    assert all(len(r) >= 20 for r in UNSCANNED.values()), "an UNSCANNED file needs a reason"
 
 
 @pytest.mark.parametrize(
@@ -284,9 +314,26 @@ def test_the_discovery_scan_sees_each_spelling(path: str, text: str) -> None:
 
 def test_the_discovery_scan_reads_every_sentry_file() -> None:
     assert "test_baseline_registry.py" in _sentry_sources()
-    assert set(UNSCANNED) == {"ci_scan/test_identity.py"}
-    assert all((bs.SENTRY / rel).is_file() for rel in UNSCANNED)
-    assert not set(UNSCANNED) & set(_sentry_sources())
+    assert FIXTURE_FILE in _sentry_sources()
+    assert (bs.SENTRY / FIXTURE_FILE).is_file()
+
+
+def test_the_fixture_file_is_scanned_and_only_its_fixture_is_excused() -> None:
+    """Keeping the file in the scan means a new constant there is found; only the existing
+    ``REPO, COMMIT, PATH`` line is excused."""
+    text = (bs.SENTRY / FIXTURE_FILE).read_text(encoding="utf-8")
+    assert module_int_constants({FIXTURE_FILE: text}) == set()
+    assert refused_constants({FIXTURE_FILE: text}) == []
+    assert module_int_constants({FIXTURE_FILE: text + "\nNEW_FLOOR = 7\n"}) == {
+        (FIXTURE_FILE, "NEW_FLOOR")
+    }
+    # a name from the fixture line bound a second time withdraws the excuse for the whole line
+    assert len(refused_constants({FIXTURE_FILE: text + "\nREPO = 1\n"})) == len(FIXTURE_NAMES)
+    # the same line in another file, or in another form, is not excused
+    assert module_int_constants({"test_other.py": text})
+    assert refused_constants({FIXTURE_FILE: text + "\ndef PATH() -> None: ...\n"})
+    assert refused_constants({FIXTURE_FILE: text + "\nfrom os import PATH\n"})
+    assert module_int_constants({FIXTURE_FILE: "REPO, COMMIT, PATH = 1, 2, 3\n"})
 
 
 def limit_problems(
