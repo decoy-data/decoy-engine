@@ -14,7 +14,7 @@
   "fk_columns_for_table::execution/_fk_keys.py::lossless_int_columns": {
    "reason": "existing entry of defects/test_lossless_int_columns.py, registered when the baseline scan found it unregistered; may only shrink"
   },
-  "fk_columns_for_table::execution/_pipeline_full_frame.py::_unrepresentable_source_column": {
+  "fk_columns_for_table::execution/_pipeline_full_frame.py::_raise_if_source_value_unrepresentable": {
    "reason": "existing entry of defects/test_lossless_int_columns.py, registered when the baseline scan found it unregistered; may only shrink"
   },
   "lossless_int_columns::execution/_chunked_carry.py::adapter_fk_safe_columns": {
@@ -38,7 +38,7 @@
   "to_pandas_fk_safe::execution/_pandas_adapter.py::PandasExecutionAdapter.run": {
    "reason": "existing entry of defects/test_lossless_int_columns.py, registered when the baseline scan found it unregistered; may only shrink"
   },
-  "to_pandas_fk_safe::execution/_pipeline_full_frame.py::_unrepresentable_source_column": {
+  "to_pandas_fk_safe::execution/_pipeline_full_frame.py::_raise_if_source_value_unrepresentable": {
    "reason": "existing entry of defects/test_lossless_int_columns.py, registered when the baseline scan found it unregistered; may only shrink"
   },
   "to_pandas_fk_safe::execution/_sequential.py::run_sequential": {

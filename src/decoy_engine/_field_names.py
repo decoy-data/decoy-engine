@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from decoy_engine._error_base import DecoyError
 
-class DuplicateFieldNamesError(ValueError):
+
+class DuplicateFieldNamesError(DecoyError, ValueError):
     """A profiled source repeats a field name. Its text is `duplicate_names_message`; the type
     is how a boundary that strips other failures to a label tells this one apart by identity,
     not by its words."""

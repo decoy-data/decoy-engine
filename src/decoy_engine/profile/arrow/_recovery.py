@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine.profile.arrow._walk_arrow import arrow_column_profile
+from decoy_engine.profile.arrow._walk_arrow import arrow_column_profile, holds_date32
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -36,7 +36,7 @@ _MAX_DAY = date.max.toordinal() - _EPOCH_ORDINAL
 
 
 def _is_temporal(t: pa.DataType) -> bool:
-    return pa.types.is_date32(t) or (pa.types.is_time64(t) and t.unit == "ns")
+    return holds_date32(t) or (pa.types.is_time64(t) and t.unit == "ns")
 
 
 def _eligible(schema: pa.Schema) -> bool:
@@ -57,7 +57,7 @@ def _explains_failure(column: pa.ChunkedArray) -> bool:
     """Whether the physical values show why pandas refused this temporal column: a time of day
     with a sub-microsecond part (all valid times inside the civil day), or a date outside the
     years Python can hold. Nulls are ignored; an all-null column explains nothing."""
-    if pa.types.is_date32(column.type):
+    if holds_date32(column.type):
         days = column.cast(pa.int32())
         bounds = pc.min_max(days).as_py()
         low, high = bounds["min"], bounds["max"]

@@ -53,7 +53,7 @@ def _ingest_conversion_errors() -> tuple[type[BaseException], ...]:
     return (*_INGEST_CONVERSION_ERRORS, ValueError, OverflowError, OutOfBoundsDatetime)
 
 
-def _unrepresentable_source_column(
+def _raise_if_source_value_unrepresentable(
     resident_sources: Mapping[str, Any], graph: Any, exc: BaseException
 ) -> tuple[str, str] | None:
     """The full-frame pandas oracle converts every source column to pandas up
@@ -64,7 +64,7 @@ def _unrepresentable_source_column(
     was not the ingest conversion -- return None and let the caller re-raise the
     original exception unchanged. The caller raises the coded error after its
     handler ends: the pandas/Arrow error quotes the cell, and `from None` alone
-    would keep it as `__context__`."""
+    would keep it as `__context__`. The name is kept: sentry baselines key on it."""
     from decoy_engine.execution._fk_keys import fk_columns_for_table, to_pandas_fk_safe
 
     edges = getattr(graph, "edges", ())
@@ -220,7 +220,9 @@ def _run_full_frame(
                 stream=decision.stream,
             )
         except _ingest_conversion_errors() as exc:
-            unrepresentable = _unrepresentable_source_column(resident_sources, ctx.graph, exc)
+            unrepresentable = _raise_if_source_value_unrepresentable(
+                resident_sources, ctx.graph, exc
+            )
             if unrepresentable is None:
                 raise
         if unrepresentable is not None:

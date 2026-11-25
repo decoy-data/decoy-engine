@@ -24,6 +24,15 @@ from decoy_engine.internal.pandas_compat import (
 pc: Any = importlib.import_module("pyarrow.compute")
 
 
+def holds_date32(t: pa.DataType) -> bool:
+    """A 32-bit date. The date decision goes through the shared classifier (the column-shape
+    sentry forbids a second one); the width tells date32 from date64."""
+    from decoy_engine.contracts.column_shape import ColumnShape
+    from decoy_engine.profile._walk import observed_shape
+
+    return observed_shape(t, None) is ColumnShape.DATE and t.bit_width == 32
+
+
 def arrow_column_profile(
     name: str, column: pa.Array | pa.ChunkedArray, *, source_format: str | None = None
 ) -> Any:
