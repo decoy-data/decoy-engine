@@ -1,0 +1,78 @@
+{
+ "sentry_id": "locator-grammar",
+ "created_in": "E-S1",
+ "entries": {
+  "_canonical/_json.py::<module>::regex": {
+   "reason": "matches the JSON escape of a lone surrogate (backslash-u); not a locator"
+  },
+  "config/_sources.py::S3Source._endpoint_is_a_host::marker-literal": {
+   "reason": "S3 endpoint validator, stricter than scan_locator by design; AT-7 pins that relation"
+  },
+  "config/_sources.py::S3Source._endpoint_is_a_host::url-attr": {
+   "reason": "S3 endpoint validator reads the parsed hostname; stricter than scan_locator, AT-7 pins it"
+  },
+  "config/_sources.py::S3Source._endpoint_is_a_host::url-call": {
+   "reason": "S3 endpoint validator parses with urlsplit; stricter than scan_locator, AT-7 pins it"
+  },
+  "config/_targets.py::_endpoint_identity::marker-call": {
+   "reason": "builds an endpoint identity key with rpartition on the netloc; never displayed"
+  },
+  "config/_targets.py::_endpoint_identity::url-attr": {
+   "reason": "builds an endpoint identity key from the netloc; never displayed"
+  },
+  "config/_targets.py::_endpoint_identity::url-call": {
+   "reason": "builds an endpoint identity key with urlsplit; never displayed"
+  },
+  "connectors/_postgres_session.py::with_connect_timeout::marker-literal": {
+   "reason": "checks the scheme of a Postgres DSN to append connect_timeout; the DSN text is never shown"
+  },
+  "connectors/sftp.py::SFTPConfig._require_at_least_one_auth::url-attr": {
+   "reason": "reads the typed username field of SFTP config; no locator is parsed"
+  },
+  "connectors/sftp.py::_open_sftp::url-attr": {
+   "reason": "passes typed hostname and username config fields to paramiko; no locator is parsed"
+  },
+  "detection/_patterns.py::<module>::regex": {
+   "reason": "email and http URL value detectors for profiling cells; they classify data, not a configured locator"
+  },
+  "providers_v2/identifiers/_cusip.py::_char_value::marker-compare": {
+   "reason": "compares a CUSIP character with the at sign to assign check value 37; not a locator"
+  },
+  "providers_v2/identifiers/_cusip.py::_is_valid_cusip::marker-compare": {
+   "reason": "tests a CUSIP character against an alphabet that includes the at sign; not a locator"
+  },
+  "reasons/_record.py::<module>::regex": {
+   "reason": "refuses slashes, backslashes, at sign and scheme marks in a reason name; a closed-name check, not a locator parse"
+  },
+  "records/_export_rules.py::<module>::regex": {
+   "reason": "splits a record path on slash or backslash for export rules; the record is not a file locator"
+  },
+  "records/_grammar.py::<module>::regex": {
+   "reason": "record tag grammar with a slash-v family separator; not a locator"
+  },
+  "secret_providers/_types.py::_parse_vault::marker-compare": {
+   "reason": "refuses a vault mount URL that holds userinfo or a port; validation, never displayed"
+  },
+  "secret_providers/_types.py::_parse_vault::url-attr": {
+   "reason": "refuses a vault mount URL that holds userinfo or a port; validation, never displayed"
+  },
+  "secret_providers/_types.py::_parse_vault::url-call": {
+   "reason": "parses a vault mount URL with urlsplit to refuse userinfo; validation, never displayed"
+  },
+  "support/_probe.py::<module>::marker-literal": {
+   "reason": "a tuple of sample cell strings (one is an email) for a support probe; not a locator"
+  },
+  "validation/post/_checks/_composite_coherence.py::_audit_name_email::marker-call": {
+   "reason": "splits an email address at the at sign to compare its local part with a name; not a locator"
+  },
+  "validation/post/_checks/_composite_coherence.py::_audit_name_email::regex": {
+   "reason": "splits an email address at the at sign to compare its local part with a name; not a locator"
+  },
+  "validation/post/_checks/_composite_coherence.py::_audit_person::marker-call": {
+   "reason": "splits an email address at the at sign to compare its local part with a name; not a locator"
+  },
+  "validation/post/_checks/_composite_coherence.py::_audit_person::regex": {
+   "reason": "splits an email address at the at sign to compare its local part with a name; not a locator"
+  }
+ }
+}

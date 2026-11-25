@@ -156,8 +156,22 @@ class Source:
     maxes: Callable[[], dict[str, int]] | None = None
 
 
+def locator_grammar_sites() -> set[str]:
+    """Live sites that parse locator text outside `decoy_engine/_locator.py`."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tests.sentry.safe_output._locator_scan import scan_tree
+
+    return scan_tree(ROOT / "src" / "decoy_engine")
+
+
 F29 = "tests/fixtures/f29"
 SOURCES: tuple[Source, ...] = (
+    Source(
+        "locator-grammar",
+        "safe_output/test_locator_grammar_single_copy.py",
+        locator_grammar_sites,
+    ),
     Source(
         "engine-exception-text-copies",
         "safe_output/test_exception_text_copy.py",

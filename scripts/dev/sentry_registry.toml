@@ -288,6 +288,10 @@ id = "faker-native-allowlist-total"
 baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
 
 [[sentry]]
+id = "locator-grammar"
+baseline = "tests/sentry/baselines/locator-grammar.json"
+
+[[sentry]]
 id = "engine-exception-text-copies"
 baseline = "tests/sentry/baselines/engine-exception-text-copies.json"
 approved_growth = [
