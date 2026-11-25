@@ -11,10 +11,9 @@ catalogs/recurring-defects (classes 5, 6, 10, 11). Memories: value-free class re
 practice becomes a sentry, root cause not patch, engine repin checklist, engine release bump freely
 pre-release.
 
-Base: engine `origin/main` `393f0d47c`; CLI `origin/main` (pins engine 0.28.3).
+Base: engine `origin/main` `393f0d47c`; CLI `origin/main` `3df9c13a` (pins engine 0.28.3).
 Inputs: engine PR #808 at `b05773146` (`feat/code-set-native-s1`), CLI PR #412 at `c6f8d66d`
-(`refactor/cli-split-preflight`), their Codex reviews, and Dennis R1 on this plan
-(PASS-WITH-FIXES: 4 HIGH, 6 MEDIUM, 5 LOW, all addressed in this revision).
+(`refactor/cli-split-preflight`), their Codex reviews, and both rounds of Dennis's plan review.
 
 Owner decisions (2026-11-25, recommended defaults taken):
 - O1: persisted evidence keeps the configured path, shown through the recognizer (D6).
@@ -74,7 +73,7 @@ sentry helpers (`tests/sentry/_ratchet.py`, `_call_resolution.py`, the CLI `_def
 |---|---|---|---|
 | RFC 3986 section 3.2, 3.2.1, 3.2.3, 7.5 | `authority = [ userinfo "@" ] host [ ":" port ]`; authority ends at the next `/`, `?` or `#`; `port = *DIGIT`. `user:password` is deprecated. | 7.5: do not render the text after the first `:` in userinfo as clear text. | Authority ends at `/ ? #`. Userinfo is a credential. A non-digit port means the authority is not a host. |
 | WHATWG URL Standard | Strips leading and trailing C0 control or space, removes tab and newline. For special schemes `\` is a path separator like `/`. Userinfo ends at the last `@` in the authority. | n/a | Strip leading C0/space before classifying. Treat `\` as `/` after a scheme. Last `@` ends userinfo. |
-| CPython `urllib.parse` | `urlsplit` netloc runs to the first `/?#` and does not stop at `\`; `_userinfo` is `netloc.rpartition('@')`. Strips leading C0/space (`_WHATWG_C0_CONTROL_OR_SPACE`) and removes `\t\r\n` (`_UNSAFE_URL_BYTES_TO_REMOVE`), verified locally. | n/a | Same split. Because urllib and WHATWG disagree on `\`, D3 computes both and redacts the longer userinfo. |
+| CPython `urllib.parse` | `urlsplit` netloc runs to the first `/?#` and does not stop at `\`; `_userinfo` is `netloc.rpartition('@')`. Strips leading C0/space (`_WHATWG_C0_CONTROL_OR_SPACE`) and removes `\t\r\n` (`_UNSAFE_URL_BYTES_TO_REMOVE`), verified locally. | n/a | Same split. Because urllib and WHATWG disagree on `\`, D3 compares both readings only after a literal `//`. |
 | pip `redact_auth_from_url` / `redact_netloc` | urllib split. | Password becomes `****`. A username with no password is masked too, because tokens are often sent as the username. | Mask the whole userinfo by default, user included. Visible mask. |
 | SQLAlchemy `URL.render_as_string(hide_password=True)`, `URL.__repr__` | Own DSN parser. | Password becomes `***`; host, port and database kept. | `+driver` schemes are URLs; keep host and path. |
 | git `transport_anonymize_url()`, `transfer.credentialsInUrl` (2.41) | Userinfo only when the `@` sits after `://` and before the first `/`. | Strips `user:pass@`. `credentialsInUrl=die` refuses a configured URL with a plaintext password. | `@` after a valid authority is path text. Refusing at config time has precedent. |
@@ -136,8 +135,6 @@ class LocatorScan:
     kind: LocatorKind
     shown: str                 # display text; credential spans replaced by "<redacted>"
     carries_credentials: bool  # True exactly when shown != text
-    origin: str | None         # "scheme://host[:port]" or "//host" of the leading URL/NETWORK span;
-                               # None for other kinds and when the authority is not a valid host
     published: str | None      # third-party publish form (D6); None means withhold the value
 
 def scan_locator(text: str) -> LocatorScan: ...
@@ -165,14 +162,18 @@ first:
   `az`, `wasb(s)`, `ftp(s)`, `sftp`, `hdfs`, `webhdfs`, `smb`, `r2`, `oss`) is held once in
   `_locator.py`.
 
-Each URL start opens a span. The span's authority runs as in D3. After the authority the path ends
-at whitespace or the next URL start; a query or fragment runs to the end of the value (fail closed).
+Each URL start opens a span. The span's authority runs as in D3. After the authority, scan the path up to the next URL start or the end of the value.
+Spaces stay in the path. If the scan reaches `?` or `#` first, apply D5 through the end of the value.
+Otherwise scan the next URL separately. In `published`, keep the whitespace immediately before a
+second URL as the separator between origins (see `two-urls`).
 
 D3. Authority and userinfo. The authority runs from after the separators to the first `/`, `?`, `#`
 or `\` (WHATWG reading). Quotes and spaces do not end it. Userinfo is everything before the last `@`
-in the authority. The scanner also computes the urllib reading, where `\` does not end the
-authority, and redacts the longer of the two userinfo spans: `https://h\u:CANARY@x/a` shows
-`https://<redacted>@x/a`. The cost is over-redaction of a URL with `\` and `@` in its path, which
+in the authority. Compute the urllib reading only for a literal `//` after the scheme or at the start after
+D1. In that reading, `\` does not end the authority. Use the reading with the longer userinfo for
+both redaction and host extraction. On a tie use the WHATWG reading. After `\\`, `scheme:\\` or a
+single separator, use only the WHATWG reading. For example, `https://h\u:CANARY@x/a` shows
+`https://<redacted>@x/a`. The cost is over-redaction of a double-forward-slash URL with `\` and `@` in its path, which
 the plan check then refuses; that is the safe direction.
 
 Userinfo is replaced whole, user included (pip), with two exceptions where a userinfo without `:` is
@@ -184,8 +185,9 @@ because tokens are sent as the username (`https://TOKEN@github.example`).
 
 D4. Invalid authority, unconditional. After userinfo is removed, the rest of the authority must be a
 host: a bracketed IP literal or a reg-name (`[A-Za-z0-9._~%!$&'()*+,;=-]*`), then optionally `:` and
-digits only. If it is not, everything after the separators is replaced (`https://<redacted>` or
-`//<redacted>`), and `origin` and `published` are None. The rule does not need a later `@`. It
+zero or more ASCII digits. RFC 3986 section 3.2.3 permits an empty port. Keep the colon in
+`https://h:/a`. If the authority fails this check, everything after the separators is replaced (`https://<redacted>` or
+`//<redacted>`), and `published` is None. The rule does not need a later `@`. It
 closes a password that holds `/`, `?`, `#` or `\` (`https://u:pa#CANARY@h/a`,
 `https://u:pa?CANARY@h/a`, `https://u:pa/CANARY@h/a`), a password with no `@` at all
 (`https://u:CANARY`), and the NETWORK form (`//svc:CANARY/key`).
@@ -206,21 +208,25 @@ D6. Bearer in path and the publish form.
     the value withheld.
   - Withheld (`None`) when: any span has an invalid authority (D4); an authority contains `%`
     (percent-encoded userinfo, D13); the value is LOCAL or DRIVE and holds a URL span or redacted
-    userinfo; or the value holds an `x:y@` userinfo shape anywhere (scp style
-    `svc:CANARY@host:/data`, `/tmp/a:b@c/f`).
+    userinfo; or a LOCAL, DRIVE or DEVICE value contains a match for
+    `re.search(r"[^\s/\\:]+:[^\s/\\@]*@", text)`. This finds `svc:CANARY@host:/data` and
+    `/tmp/a:b@c/f` within one segment. The drive prefix cannot match across a separator.
+    For URL and NETWORK values, the origin rule already removes userinfo.
   - LOCAL, DRIVE or DEVICE text with none of these: `published == shown`.
 
 D7. Drive letters and one-letter schemes. One letter, `:`, then a separator is DRIVE (fsspec).
 Nothing is rewritten: `C://foo@bar/data.csv` and `C:\foo@bar\data.csv` are unchanged. Refinement:
 when the first segment after the separators contains `:` before an `@`, it is userinfo, because `:`
-is not legal in a Windows directory name. `x://svc:CANARY@host/key` shows `x://<redacted>@host/key`.
+is not legal in a Windows directory name. If a delimiter cuts off that first segment after the
+colon and the closing `@` appears later, redact everything after the drive separators and withhold
+the value from provenance. `x://svc:CANARY@host/key` shows `x://<redacted>@host/key`.
 
 D8. DEVICE paths. `\\?\`, `\\.\`, `//?/` and `//./` prefixes are recognised first. Their `?` and `.`
 belong to the prefix. The rest is a DRIVE or UNC path: no query, no fragment, no userinfo. Always
 unchanged.
 
 D9. NETWORK paths (`//` or `\\` with no scheme). The first segment is an authority under D3, D4 and
-D5. `\\server\share\x.parquet` is unchanged.
+D5. After a UNC backslash prefix, D3 stops at the first path separator. An `@` in a later directory stays visible.
 
 D10. Embedded URLs. Covered by D2: every URL start in a value opens a span, so
 `dsn=https://u:foo'CANARY@h/a` (LOCAL) shows `dsn=https://<redacted>@h/a`, and a value with two URLs
@@ -244,7 +250,7 @@ row (Codex rated it V2-LOG). `published` withholds it (D6).
 
 `cases.json` is a list of rows `{id, input, kind, shown, carries, origin_shown, note}`.
 `origin_shown` is the expected `published` value; `null` means withheld. Inputs use the synthetic
-secret `CANARY`. The table has 47 rows at plan time; this is the only place the count is stated.
+secret `CANARY`. The table has 53 rows.
 
 Invariants checked over every row: `CANARY` never appears in `origin_shown`; when `carries` is true,
 `CANARY` does not appear in `shown`.
@@ -259,8 +265,11 @@ Invariants checked over every row: `CANARY` never appears in `origin_shown`; whe
 | embedded-dsn | `dsn=https://u:foo'CANARY@h/a` | local | `dsn=https://<redacted>@h/a` | yes | null |
 | embedded-space | `see https://u:CANARY@h/a` | local | `see https://<redacted>@h/a` | yes | null |
 | two-urls | `https://u:CANARY@h/a s3://k:CANARY@b/c` | url | `https://<redacted>@h/a s3://<redacted>@b/c` | yes | `https://h/<redacted> s3://b/<redacted>` |
+| space-in-path-query | `https://h/My Report.csv?sig=CANARY` | url | `https://h/My Report.csv?<redacted>` | yes | `https://h/<redacted>` |
+| embedded-trailing-query | `see https://h/My Report.csv?sig=CANARY` | local | `see https://h/My Report.csv?<redacted>` | yes | null |
 | backslash-url | `https:\\u:CANARY@host\file` | url | `https:\\<redacted>@host\file` | yes | `https://host/<redacted>` |
 | backslash-dual | `https://h\u:CANARY@x/a` | url | `https://<redacted>@x/a` | yes | `https://x/<redacted>` |
+| backslash-url-at-path | `https:\\host\dir\a@b.csv` | url | unchanged | no | `https://host/<redacted>` |
 | folded-url | `https:/u:CANARY@host/file` | url | `https:/<redacted>@host/file` | yes | `https://host/<redacted>` |
 | folded-any-scheme | `myfs:/u:CANARY@host/file` | url | `myfs:/<redacted>@host/file` | yes | `myfs://host/<redacted>` |
 | folded-under-cwd | `/home/x/https:/u:CANARY@h/a` | local | `/home/x/https:/<redacted>@h/a` | yes | null |
@@ -274,11 +283,13 @@ Invariants checked over every row: `CANARY` never appears in `origin_shown`; whe
 | one-letter-creds | `x://svc:CANARY@host/key` | drive | `x://<redacted>@host/key` | yes | null |
 | drive-at-dir | `C://foo@bar/data.csv` | drive | unchanged | no | unchanged |
 | drive-backslash-at | `C:\foo@bar\data.csv` | drive | unchanged | no | unchanged |
+| drive-later-colon-at | `C:\data\a:CANARY@b.csv` | drive | unchanged | no | null |
 | drive-plain | `C:/data/x.csv` | drive | unchanged | no | unchanged |
 | posix-colon-at | `/tmp/a:b@c/f?x=1` | local | unchanged | no | null |
 | net-empty-query | `//host/key?` | network | unchanged | no | `//host/<redacted>` |
 | net-empty-fragment | `//host/key#` | network | unchanged | no | `//host/<redacted>` |
 | unc | `\\server\share\x.parquet` | network | unchanged | no | `//server/<redacted>` |
+| unc-at-dir | `\\fs01\users\jane.doe@corp.com\data.csv` | network | unchanged | no | `//fs01/<redacted>` |
 | ext-unc | `\\?\UNC\server\share\corpus.parquet` | device | unchanged | no | unchanged |
 | ext-drive | `\\?\C:\data\x.csv` | device | unchanged | no | unchanged |
 | query-token | `https://h/a?token=CANARY` | url | `https://h/a?<redacted>` | yes | `https://h/<redacted>` |
@@ -288,6 +299,7 @@ Invariants checked over every row: `CANARY` never appears in `origin_shown`; whe
 | at-in-path | `s3://bucket/user@example.com/f.csv` | url | unchanged | no | `s3://bucket/<redacted>` |
 | bearer-path | `https://files.example/s/CANARY` | url | unchanged (D6 residual) | no | `https://files.example/<redacted>` |
 | ipv6 | `https://u:CANARY@[::1]:8080/a` | url | `https://<redacted>@[::1]:8080/a` | yes | `https://[::1]:8080/<redacted>` |
+| empty-port | `https://h:/a` | url | unchanged | no | `https://h:/<redacted>` |
 | dsn-driver | `postgresql+psycopg://u:CANARY@db:5432/x` | url | `postgresql+psycopg://<redacted>@db:5432/x` | yes | `postgresql+psycopg://db:5432/<redacted>` |
 | abfs-container | `abfss://container@acct.dfs.core.windows.net/p` | url | unchanged | no | `abfss://acct.dfs.core.windows.net/<redacted>` |
 | abfs-key | `abfss://container:CANARY@acct.dfs.core.windows.net/p` | url | `abfss://<redacted>@acct.dfs.core.windows.net/p` | yes | `abfss://acct.dfs.core.windows.net/<redacted>` |
@@ -309,9 +321,13 @@ failing examples pinned as rows):
 - P4 secret composition: draw a secret `s` from text over an alphabet that includes
   `? # / \ ' @ :` and letters, prefixed by a fixed marker `CANARY`. Compose it into each credential
   template (`{scheme}://u:{s}@h/a`, `{scheme}://{s}@h/a`, `//svc:{s}@host/key`,
-  `x://svc:{s}@host/key`, `dsn={scheme}://u:{s}@h/a`, `{scheme}://h/a?t={s}`, `{scheme}://h/a#{s}`)
+  `x://svc:{s}@host/key`, `dsn={scheme}://u:{s}@h/a`, `{scheme}://h/a?t={s}`,
+  `{scheme}://h/My Report.csv?sig={s}`, `{scheme}://h/a#{s}`)
   for schemes drawn from the known set and from random 2+ character schemes, excluding the D3
-  identifier schemes for the user-only template. Assert `CANARY` is absent from `shown` and from
+  identifier schemes for the user-only template. In that template percent-encode any raw
+  `/`, `?`, `#` or backslash in the token. Otherwise a token such as `CANARY/x` would place
+  `CANARY` in the host and the closing `@` in the path, outside the promised userinfo grammar.
+  Keep raw delimiters in the password, query and fragment templates. Assert `CANARY` is absent from `shown` and from
   `published`, and `carries_credentials` is True.
 
 Sharing with the CLI: the CLI vendors a byte-identical copy and pins its SHA-256 in
@@ -364,6 +380,9 @@ Deleted in the engine: #808 `_locator.py` grammar functions `without_url_credent
 - `secret_providers/_types.py:180`: refuses a mount URL with `@` or `:`; validation, never displayed.
 - `connectors/sftp.py:146-148` (`config.username` read, `"hostname"` and `"username"` dict keys):
   passes typed config fields to paramiko; no parsing of a locator.
+- `providers_v2/identifiers/_cusip.py:68` compares `ch == "@"` to assign the CUSIP character value 37.
+- `validation/post/_checks/_composite_coherence.py:90,140` splits email addresses at `@` to compare their local parts with names. Include both functions.
+- `expressions/_lark_parser.py:452` mentions `"//"` in a comment. Line 453 performs floor division. A text search finds it, but neither line matches the AST rules. Leave it out of the baseline.
 - any other site the E-S1 walk finds, each with a reason. The first baseline is created in E-S1, so
   these entries are its starting content; any later addition needs an owner-dated `approved_growth`
   entry.
@@ -383,24 +402,29 @@ parametrizes over. Sites known now:
 | preflight source findings (`preflight/_checks.py:51` on #412; inline on main) | source path, human and `--json` |
 | `preflight.py:253` (main numbering) | `{exc}` from opening the source, which repeats the path |
 | `evidence.py:287-300` `build_manifest` | `input_fingerprints[...]["path"]` |
-| `evidence.py:759` `report show` | `info["path"]` |
+| `evidence.py:759` and `report/_show.py` | fingerprint paths in the card, full manifest in JSON, and manifest passed to HTML and Markdown renderers |
+| `evidence.py` `verify_manifest_issues` | stored paths in missing-file and changed-fingerprint messages |
 | `report/_integrity.py:164` | `--source {source_str} does not match pipeline input.path {declared_path}` |
 | `fit/_command.py:405` | source path in a fit message |
 | `gen/_fit.py:108` | source path in a generation-fit message |
 | `report/_fidelity.py:294` | source path in the fidelity report |
-| `project/_scaffold.py:94` | source path written into a scaffolded file |
+| `project/_scaffold.py:94` | source path in a missing-file error |
 
 Route: one CLI helper, `decoy.cli.io.shown_locator(value: object) -> str`, which returns
-`scan_locator(str(value)).shown`. It is the only CLI caller of `scan_locator` for display and holds no
-grammar. Every inventory site calls it. At `{exc}` sites C1 removes the exception text and prints the
+`scan_locator(str(value)).shown`. It holds no grammar. A caller that already scans for classification can use the same result for display. Every inventory site uses one of these two routes. At `{exc}` sites C1 removes the exception text and prints the
 exception type plus the shown locator, because exception text from fsspec, pyarrow or the OS can
 repeat the raw locator in any spelling.
 
-`build_manifest`: classify the original spelling before `Path()` folds it:
-`scan = scan_locator(str(src_path_str))`. URL or NETWORK: record `scan.shown`, no hash. Otherwise the
-current file branch, with `_recorded(...)` also passed through `shown_locator` (catches
+`build_manifest`: classify the declared path from `config_dict["sources"]` before
+`resolved_source_config` calls `resolve_path` and folds it (`cli/_sources.py:44`):
+`scan = scan_locator(str(src_path_str))`. URL or NETWORK: record `scan.shown`, no hash. Otherwise keep the
+existing resolution and hashing rules, using the resolved path for I/O. Pass every
+recorded spelling, including the relative no-hash branch and `_recorded(...)`, through `shown_locator` (catches
 `folded-under-cwd`). `report show` passes every stored path through `shown_locator`, so manifests
-written before C1 are shown safely; D2 treats a value-start `scheme:/` as a URL for every scheme, so
+written before C1 are shown safely. Use a display copy for JSON and file renderers. Compute
+integrity against the original manifest, keep its recorded hash and leave the file intact.
+Use original paths for file access and hash checks. Apply the helper to the displayed path in
+verification issues. For old manifests, D2 treats a value-start `scheme:/` as a URL for every scheme, so
 folded spellings of any scheme in old manifests are covered.
 
 Deleted in the CLI: #412 `io/_display.py` (`_URL`, `_redact_text`, `redact_url`, `redact_urls`) and
@@ -465,7 +489,8 @@ turn the sentry red:
 Runtime half (guarantee 3): one parametrized canary test per repo runs every `carries=true` row
 through every surface in section 4 and asserts `CANARY` is absent from the output (text, JSON, YAML,
 report dict, manifest file, log records captured with `caplog`). In the engine, provenance is also
-run over every row and must never contain `CANARY`.
+run over every row and must never contain `CANARY`. For a row with no canary, assert the exact
+display or publication value, or the expected refusal at a validation boundary.
 
 ## 6. Slices
 
@@ -517,6 +542,9 @@ Required mutations (core redaction logic), each turns a named row red:
 - end the authority at `'` (`url-quote-in-pass`);
 - use the first `@` instead of the last (`url-at-in-pass`);
 - make D4 conditional on a later `@` (`invalid-port-no-at`, `net-invalid-port`);
+- end a path at whitespace (`space-in-path-query`, `embedded-trailing-query`);
+- apply the urllib reading after `\\` (`unc-at-dir`) or `scheme:\\` (`backslash-url-at-path`);
+- require at least one port digit (`empty-port`);
 - drop the urllib reading in D3 (`backslash-dual`);
 - stop after the first URL start (`two-urls`);
 - flag an empty query (`net-empty-query`);
@@ -529,6 +557,8 @@ Required mutations (core redaction logic), each turns a named row red:
 - drop the value-start single-separator rule for unknown schemes (`folded-any-scheme`);
 - drop a D6 withhold rule (`prov-embedded-bearer`, `prov-scp-userinfo`, `pct-encoded`).
 
+Run each slice's required mutations again on its final head and record the commit.
+
 Tests: T0 per edit through `~/bin/vm-run engine`; T1 per commit. Escalation trigger: new public names
 on a frozen-contract package, so the gate runs the full engine suite once on the slice head against
 the saved main baseline.
@@ -538,14 +568,14 @@ After merge: cut an engine patch release so the CLI can pin it.
 ### E-S2 (engine): #808 rebased onto E-S1 (R2, already in flight)
 
 #808 rebases onto main after E-S1. Changes on #808:
-- delete its `_locator.py` grammar and the `fileaccess` export of `without_url_credentials`; import
+- keep the merged E-S1 `_locator.py` when rebasing. Drop the #808 grammar and the `fileaccess` export of `without_url_credentials`; import
   `scan_locator` from `decoy_engine._locator`;
 - plan check: `_config_json` traversal (tuples), `scan_locator(...).carries_credentials`, import via
   `plan.checks` public names;
 - D12 label grammar in `validate_code_set_config`;
 - `_publishable` returns `scan_locator(text).published`; delete the `@?#` tuple;
-- the existing `test_corpus_label_single_formatter.py` sentry also checks that `_publishable` and
-  `_corpus_label` call `scan_locator`.
+- the existing `test_corpus_label_single_formatter.py` sentry keeps label formatting in `_corpus_label`.
+  Check that provenance uses `scan_locator(text).published`. Labels use D12.
 
 Label cases (D12, separate from the locator table): accepted `ICD@2026`, `ICD:10`, `icd10cm_2026`,
 `ICD-10 CM`; refused `study?token=CANARY`, `a/b`, `a\b`, `x#y`, `https://h/a`, a 129-character name,
@@ -577,7 +607,7 @@ Branch `fix/cli-locator-scan` off CLI main after #412 merges. Steps:
 2. Inventory (section 4, CLI). Put the inventory table in the PR body before routing.
 3. Add `shown_locator` and route every inventory site through it. Remove exception text at `{exc}`
    sites.
-4. Delete `io/_display.py` and its exports.
+4. Verify that the #412 split removed `io/_display.py` and its exports as agreed in section 7.
 5. Add the CLI sentry, baseline and registry row, with the allowlist entries listed in section 4.
 
 Failure modes and acceptance tests (one red-first test per Codex finding at `c6f8d66d`):
@@ -588,10 +618,10 @@ Failure modes and acceptance tests (one red-first test per Codex finding at `c6f
 - AT-C1-3: `build_manifest` with a source `https://u:CANARY@h/a.csv` (and its `Path`-folded spelling):
   `input_fingerprints[...]["path"]` has no `CANARY`; `decoy report show` on that manifest has none.
 - AT-C1-4: `decoy report show` on a manifest written before C1 that holds a credential URL, in both
-  `https://` and folded `myfs:/` spellings, prints it redacted.
+  `https://` and folded `myfs:/` spellings, shows safe paths in the card, JSON, HTML and Markdown. Check integrity against the original manifest.
 - AT-C1-5: the canary surface test over every carries-true row from the vendored table, through every
   site in the C1 inventory (parametrized over the inventory list, not a hand subset), including a
-  source whose open raises an exception that quotes the path.
+  source whose open raises an exception that quotes the path. Exercise stored-path verification errors too.
 - AT-C1-6: the vendored `cases.json` matches its SHA-256 pin.
 - AT-C1-7: the CLI sentry passes and fails on each seeded mutation in section 5.
 Mutations: record `str(src_path_str)` again in the URL branch (AT-C1-3 red); render `info["path"]` raw
@@ -613,8 +643,8 @@ by C1. Codex scope for #412's next round names this split of responsibility.
 
 ## 8. Risks
 
-- D7 depends on `:` being illegal in Windows directory names. An NTFS alternate data stream
-  (`file:stream`) is only legal in the last component, after the authority, so it cannot trigger D7.
+- D7 depends on `:` being illegal in Windows directory names. A stream name in the first component can resemble userinfo.
+  D7 treats that ambiguous spelling as sensitive. Later components follow D6 for publication.
 - D3's urllib reading and D4 over-redact some legal but unusual locators. The cost is a less readable
   message, or a plan check refusal the user fixes by moving the value into config; never a leak.
 - D5 refuses `?versionId=` and similar harmless queries at plan time. Deliberate (section 3).
