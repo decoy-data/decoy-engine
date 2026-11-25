@@ -146,7 +146,7 @@ def test_the_cache_limit_counts_the_retained_arrow_buffers() -> None:
     objects = np.array(words, dtype=object)
     arrow = pa.array(words)
 
-    def pool(tag: str) -> ValuePool:
+    def pool(tag: str, *, retained: bool = True) -> ValuePool:
         return ValuePool(
             values=objects,
             provider=tag,
@@ -158,11 +158,12 @@ def test_the_cache_limit_counts_the_retained_arrow_buffers() -> None:
             backend_type="faker",
             backend_version="x",
             distinct_count=len(words),
-            arrow=arrow,
+            arrow=arrow if retained else None,
         )
 
     one = measured_pool_bytes(pool("a"))
-    object_only = one - arrow.nbytes
+    object_only = measured_pool_bytes(pool("a", retained=False))
+    assert one == object_only + arrow.nbytes
     # Room for two pools if the Arrow form were free, but not once it is counted.
     cache = PoolCache(max_bytes=2 * object_only + arrow.nbytes)
     cache.put(pool("a"))
