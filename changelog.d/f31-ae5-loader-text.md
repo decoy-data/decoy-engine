@@ -9,3 +9,5 @@ Config loader errors now name the field and the expected type, not the supplied 
 - `verify_corpus` returns `ok=False` for a corpus whose cells cannot be converted. `load_corpus` raises `CODE_SET_CORPUS_READ_ERROR`.
 - The joint-mask missing `reference` path now carries the table and column bound by `at_position`, like its two sibling refusals.
 - New sentry `tests/sentry/defects/test_config_refusal_text.py` fails on a runtime value in a loader refusal. The remaining sites outside the nine modules sit in a shrink-only baseline, migrated in AE5b.
+- A file-system failure on a loader's first probe or read (an unreadable parent directory) is a value-free refusal too, for corpora, name hints and model packs.
+- `verify_corpus` shows a report path with any credential removed (the config position under a strict policy).

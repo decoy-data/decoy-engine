@@ -15,6 +15,7 @@ its ``ModelPackManifest``-imitating shape).
 from __future__ import annotations
 
 import logging
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,16 +33,10 @@ from decoy_engine._config_text import (
 from decoy_engine._error_base import raise_bare
 from decoy_engine.fileaccess import FileAccess, FileAccessDenied, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
-from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_checks import (
-    _check_corpus_schema,
-    _validate_provenance,
-)
-from decoy_engine.transforms._codeset_checks import (
-    refusal_error as _refusal_error,
-)
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.transforms._codeset_index import SelectionIndexes, build_selection_indexes
 from decoy_engine.transforms._codeset_provenance import CODESET_REGISTRY, CodeSetProvenance
+from decoy_engine.transforms.corpus._checks import _check_corpus_schema, _validate_provenance
 
 _LOG = logging.getLogger(__name__)
 
@@ -60,13 +55,13 @@ _SHIPPED_PATHS: dict[str, Path] = {n: _CODESETS_DIR / f"{n}.parquet" for n in _S
 
 
 def _read_error(refusal: Refusal) -> PlanCompileError:
-    return _refusal_error(reasons.plan.CODE_SET_CORPUS_READ_ERROR, refusal)
+    return refusal_error(reasons.plan.CODE_SET_CORPUS_READ_ERROR, refusal)
 
 
 def _unknown_shipped_corpus() -> PlanCompileError:
     """The one refusal for a name that is not a registry key; it echoes neither the name nor a
     path."""
-    return _refusal_error(
+    return refusal_error(
         reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
         config_refusal(
             config_position("provider_config", "code_set"),
@@ -143,11 +138,23 @@ _customer_cache: OrderedDict[tuple[str, int, int, int], _CorpusRecord] = Ordered
 
 
 def _open_customer(path: Path) -> FileHandle:
-    """The policy's handle for a customer corpus; the config position is named, never the path."""
-    return fileaccess.current().open_read(
-        FileRequest(
-            FileRole.CORPUS, "read", str(path), fileaccess.position_key("code_set.corpus_source")
-        )
+    """The policy's handle for a customer corpus; the config position is named, never the path.
+
+    The open runs inside `read_config`: an OS failure here (an unreadable parent directory) carries
+    the full locator in its text, and a URL-shaped locator can hold a credential.
+    """
+    return read_config(
+        lambda: fileaccess.current().open_read(
+            FileRequest(
+                FileRole.CORPUS,
+                "read",
+                str(path),
+                fileaccess.position_key("code_set.corpus_source"),
+            )
+        ),
+        config_position("provider_config", "corpus_source"),
+        _read_error,
+        passes=(FileAccessDenied, PlanCompileError),
     )
 
 
@@ -223,7 +230,7 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
         shipped = _SHIPPED_PATHS[name]
         if not shipped.exists():
             raise_bare(
-                _refusal_error(
+                refusal_error(
                     reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
                     config_refusal(
                         config_position("provider_config", "code_set"),
@@ -235,17 +242,27 @@ def _resolve_read_path(name: str, path: Path | None) -> Path:
             )
         return shipped
 
-    absent = False
-    handle = _open_customer(path)
-    try:
-        handle.stat()
-    except (FileNotFoundError, NotADirectoryError):
-        absent = True
-    finally:
-        handle.close()
+    def _probe() -> bool:
+        handle = _open_customer(path)
+        try:
+            handle.stat()
+        except (FileNotFoundError, NotADirectoryError):
+            return True
+        finally:
+            handle.close()
+        return False
+
+    # The stat fails with the locator in its text when a parent directory is unreadable, so the
+    # probe is a protected read like every other corpus read.
+    absent = read_config(
+        _probe,
+        config_position("provider_config", "corpus_source"),
+        _read_error,
+        passes=(FileAccessDenied, PlanCompileError),
+    )
     if absent:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
                 config_refusal(
                     config_position("provider_config", "corpus_source"),
@@ -318,7 +335,7 @@ def _get_corpus_record(
             gone = True
         if gone:
             raise_bare(
-                _refusal_error(
+                refusal_error(
                     reasons.plan.CODE_SET_CORPUS_PATH_NOT_FOUND,
                     config_refusal(
                         config_position("provider_config", "corpus_source"),
@@ -371,7 +388,7 @@ def _check_source_version_pin(
     actual = record.provenance.source_version if record.provenance else ""
     if actual != expected_source_version:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.CODE_SET_CORPUS_VERSION_MISMATCH,
                 config_refusal(
                     config_position("provider_config", "corpus_source_version"),
@@ -449,7 +466,8 @@ class CorpusVerifyReport:
 
     Attributes:
         ok: True when the corpus passed every check.
-        path: The verified file's path, as given (for display; not resolved).
+        path: The verified file's path for display, not resolved: as given with any credential
+            removed, or the config position under a strict policy.
         row_count: Row count on success. Always 0 on failure (``ok=False``):
             validation raises at the first failed check, before a row count is
             returned, so a partially-read corpus reports 0 rather than a
@@ -467,6 +485,23 @@ class CorpusVerifyReport:
     row_count: int
     provenance: dict[str, Any] | None
     problems: tuple[str, ...] = ()
+
+
+_USERINFO = re.compile(r"[^/\\@]+@")
+
+
+def _display_path(path: Path) -> str:
+    """The path a report may show: the ambient CLI path with any credential removed, or, under a
+    strict policy, the config position (a locator never crosses).
+
+    A URL-shaped locator can hold `user:secret@host` or a `?token=...` query; an ordinary
+    directory and file name stay as given.
+    """
+    shown = fileaccess.shown(str(path), "code_set.corpus_source")
+    if not fileaccess.is_ambient():
+        return shown
+    base, *tail = re.split(r"[?#]", shown, maxsplit=1)
+    return _USERINFO.sub("<redacted>@", base) + ("?<redacted>" if tail else "")
 
 
 @fileaccess.entry_point
@@ -506,7 +541,7 @@ def verify_corpus(path: Path, *, file_access: FileAccess | None = None) -> Corpu
     except PlanCompileError as exc:
         return CorpusVerifyReport(
             ok=False,
-            path=str(path),
+            path=_display_path(path),
             row_count=0,
             provenance=None,
             problems=(f"{exc.code}: {exc.message}",),
@@ -526,7 +561,7 @@ def verify_corpus(path: Path, *, file_access: FileAccess | None = None) -> Corpu
     )
     return CorpusVerifyReport(
         ok=True,
-        path=str(path),
+        path=_display_path(path),
         row_count=len(record.rows),
         provenance=summary,
         problems=(),

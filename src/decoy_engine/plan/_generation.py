@@ -38,6 +38,7 @@ from decoy_engine._config_text import (
     Refusal,
     config_position,
     config_refusal,
+    passthrough,
 )
 from decoy_engine._error_base import raise_bare
 from decoy_engine.contracts.distribution_snapshot import ACCEPTED_SCHEMA_VERSIONS
@@ -147,14 +148,24 @@ def statistical_refusal(code: str, declared: str, table_name: object, col_name: 
     value, the fixed rule hint; the declared value and the resolved path are config-derived and
     stay out. The key is the column's position."""
     at_column = config_position("tables", Name(table_name), "generate_columns", Name(col_name))
+    if code == reasons.plan.REFERENCE_FANOUT_MISSING:
+        return config_refusal(
+            at_column,
+            Problem.NOT_ALLOWED,
+            code=code,
+            hint="Run `decoy fit <source> --fanout <column>` to add the per-parent counts",
+        )
     if code != reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE:
         return config_refusal(at_column, Problem.NOT_ALLOWED, code=code)
     if os.path.isabs(declared):
-        return config_refusal(at_column, Problem.UNREADABLE, expected=Expected.SNAPSHOT_FILE)
+        return config_refusal(
+            at_column,
+            Problem.SNAPSHOT_UNREADABLE,
+            hint="Check that the file exists and that the process can read it",
+        )
     return config_refusal(
         at_column,
-        Problem.UNREADABLE,
-        expected=Expected.SNAPSHOT_FILE,
+        Problem.SNAPSHOT_UNREADABLE,
         hint="Relative snapshot_file paths resolve against the config file's folder",
     )
 
@@ -193,17 +204,15 @@ def read_pinned_artifact(
     fresh: BaseException | None = None
     try:
         raw = fileaccess.read_all(role, locator, field_key)
-    except OSError as exc:
-        # A strict policy keeps the class of a disk or quota failure but rebuilds it without the
-        # filename the library put there.
-        classified = None if fileaccess.is_ambient() else fileaccess.classified_failure(exc)
-        if classified is not None:
-            fresh = classified.fresh
-            if fresh is None and classified.kind != "resource":
-                fresh = MemoryError(fileaccess.MEMORY_TEXT)
-        elif fileaccess.keeps_class(exc):
+    except Exception as exc:
+        # The same rule `read_config` applies: a strict policy keeps the class of a disk, quota or
+        # memory failure but rebuilds it without the text the library put there.
+        outcome = passthrough(exc)
+        if outcome is exc:
             raise
-        failure_type = safe_output.safe_error_type(exc).value
+        fresh = outcome
+        if fresh is None:
+            failure_type = safe_output.safe_error_type(exc).value
     if fresh is not None:
         raise_bare(fresh)
     if failure_type is not None:
@@ -469,7 +478,6 @@ def check_fitted_references(
             if col.get("distribution") != "fitted":
                 continue
             name = col.get("name", "?")
-            at_column = config_position("tables", Name(table_name), "generate_columns", Name(name))
             snapshot_file = col.get("snapshot_file")
             if not snapshot_file:
                 missing = config_refusal(
@@ -524,7 +532,8 @@ def check_fitted_references(
             except StatisticalSpecError as exc:
                 spec_code = exc.code
             if spec_code is not None:
-                failed = config_refusal(at_column, Problem.NOT_ALLOWED, code=spec_code)
+                # The statistical column's refusal rule: an unreadable snapshot keeps its own text.
+                failed = statistical_refusal(spec_code, snapshot_file, table_name, name)
                 raise_bare(PlanCompileError(code=spec_code, path=failed.key, message=failed.detail))
 
 

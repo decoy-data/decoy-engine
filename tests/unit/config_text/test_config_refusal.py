@@ -348,3 +348,9 @@ def test_recognized_memory_failure_whose_constructor_rejects_the_text(tmp_path: 
     assert fileaccess.is_memory_failure(info.value)
     assert "PRIVATE_CELL" not in "".join(map(str, [info.value, info.value.args]))
     assert info.value.__cause__ is None and info.value.__context__ is None
+
+
+def test_yaml_error_text_has_one_owner_and_safe_output_re_exports_it() -> None:
+    from decoy_engine import _config_text, safe_output
+
+    assert safe_output.yaml_error_text is _config_text.yaml_error_text

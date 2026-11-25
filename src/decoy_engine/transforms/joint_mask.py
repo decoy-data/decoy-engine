@@ -60,7 +60,6 @@ from decoy_engine._config_text import (
     Expected,
     Name,
     Problem,
-    Refusal,
     config_position,
     config_refusal,
 )
@@ -68,7 +67,7 @@ from decoy_engine._error_base import raise_bare
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.determinism import derive, seed_bytes_to_int
 from decoy_engine.fileaccess import FileAccess, entry_point
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import refusal_error
 from decoy_engine.reference_tables import ReferenceTable, load_table
 from decoy_engine.reference_tables._registry import JOINT_MASK_TABLES
 
@@ -147,10 +146,6 @@ class JointMaskConfig:
         return self._table
 
 
-def _refusal_error(code: str, refusal: Refusal) -> PlanCompileError:
-    return PlanCompileError(code=code, path=refusal.key, message=refusal.detail)
-
-
 @entry_point
 def validate_joint_mask_config(
     cfg: dict[str, Any], *, file_access: FileAccess | None = None
@@ -174,7 +169,7 @@ def validate_joint_mask_config(
     """
     if "columns" not in cfg or not cfg["columns"]:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.JOINT_MASK_COLUMNS_MISSING,
                 config_refusal(
                     config_position("joint_masks", "columns"),
@@ -187,7 +182,7 @@ def validate_joint_mask_config(
 
     if "key_by" not in cfg:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.JOINT_MASK_KEY_BY_MISSING,
                 config_refusal(
                     config_position("joint_masks", "key_by"),
@@ -205,7 +200,7 @@ def validate_joint_mask_config(
     ref_name = cfg.get("reference")
     if not ref_name:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.JOINT_MASK_REFERENCE_MISSING,
                 config_refusal(at_reference, Problem.MISSING, expected=Expected.REFERENCE_TABLE),
             )
@@ -226,7 +221,7 @@ def validate_joint_mask_config(
         invalid = True
     if not_found:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.JOINT_MASK_REFERENCE_NOT_FOUND,
                 config_refusal(
                     at_reference,
@@ -242,12 +237,13 @@ def validate_joint_mask_config(
     if invalid:
         # The loader's text describes the file, so a fixed rule stands in.
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.JOINT_MASK_REFERENCE_INVALID,
                 config_refusal(
                     at_reference,
                     Problem.UNREADABLE,
                     expected=Expected.PARQUET_TABLE,
+                    code=reasons.plan.JOINT_MASK_REFERENCE_INVALID,
                     hint="The reference must have an int64 'id' column",
                 ),
             )
@@ -257,7 +253,7 @@ def validate_joint_mask_config(
     for col in cfg["columns"]:
         if col not in ref_cols:
             raise_bare(
-                _refusal_error(
+                refusal_error(
                     reasons.plan.JOINT_MASK_COLUMN_NOT_IN_REFERENCE,
                     config_refusal(
                         config_position("joint_masks", "columns", Name(col)),

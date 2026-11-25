@@ -266,7 +266,14 @@ class ModelPackLoader:
 
     def _load_manifest(self) -> ModelPackManifest:
         at_manifest = config_position("pre_scan", "model_pack", Member("manifest.json"))
-        data = self._read_member("manifest.json")
+        # Read inside `read_config` like the weights: an OS failure on the first read (an
+        # unreadable directory) carries the locator in its text.
+        data = read_config(
+            lambda: self._read_member("manifest.json"),
+            at_manifest,
+            _refuse,
+            passes=(FileAccessDenied,),
+        )
         if data is None:
             raise_bare(
                 _refuse(

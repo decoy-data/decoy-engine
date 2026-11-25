@@ -66,6 +66,7 @@ from decoy_engine.generation.statistical._cell_format import (
     cell_format_from_dict,
     decode_cell_format,
 )
+from decoy_engine.generation.statistical._degenerate import column_label
 from decoy_engine.generation.statistical._numeric_shape import (
     decode_numeric_shape,
     numeric_shape_withheld,
@@ -174,7 +175,7 @@ def spec_from_dict(data: Mapping[str, Any]) -> StatisticalSpec:
         snapshot_digest=data.get("snapshot_digest"),
         carrier=data.get("carrier"),
         cell_format=cell_format_from_dict(
-            data["column"], str(data["kind"]), data.get("cell_format")
+            column_label(data["column"]), str(data["kind"]), data.get("cell_format")
         ),
         datetime_buckets=dsc.pinned_buckets(
             str(data["kind"]), dict(data["stats"]), data.get("datetime_buckets")
@@ -265,6 +266,7 @@ def load_spec(
     # The raw config object, never `str(...)` of it: converting a list or a mapping would turn
     # its items into text that then looks like an approvable name.
     source_column = col_cfg.get("source_column") or name
+    column_text = column_label(name)
     at_source = config_position("statistical", Name(name), "source_column")
     if type(source_column) is not str:
         raise_bare(
@@ -298,7 +300,7 @@ def load_spec(
     kind = col_entry.get("kind")
     cell_format = (
         decode_cell_format(
-            name,
+            column_text,
             str(kind),
             col_entry,
             snapshot=snap,
@@ -354,6 +356,36 @@ def load_spec(
             )
         )
 
+    # A conditioning request is validated before anything reads it: the withheld-values check
+    # below compares it to the snapshot's column lists, and a mistyped one must be refused as
+    # mistyped, not as a withheld column, whatever else is wrong with the snapshot.
+    condition_on = col_cfg.get("condition_on")
+    if condition_on is not None:
+        at_condition = config_position("statistical", Name(name), "condition_on")
+        if kind != "categorical":
+            raise_bare(
+                _refuse(
+                    reasons.plan.STATISTICAL_CONDITION_KIND_INVALID,
+                    config_refusal(
+                        at_condition,
+                        Problem.NOT_ALLOWED,
+                        hint="condition_on is supported for categorical columns only",
+                    ),
+                )
+            )
+        if type(condition_on) is not str:
+            raise_bare(
+                _refuse(
+                    reasons.plan.STATISTICAL_JOINT_MISSING,
+                    config_refusal(
+                        at_condition,
+                        Problem.WRONG_TYPE,
+                        expected=Expected.STRING,
+                        got=condition_on,
+                    ),
+                )
+            )
+
     col_stats = col_entry.get("stats") if isinstance(col_entry.get("stats"), dict) else {}
     withheld = withheld_values_refusal(
         name,
@@ -361,7 +393,7 @@ def load_spec(
         source_column=source_column,
         kind=kind,
         dp_verified=dp_verified,
-        condition_on=col_cfg.get("condition_on"),
+        condition_on=condition_on,
         holds_numeric_shape=kind == "numeric"
         and not dp_verified
         and numeric_shape_withheld(col_stats),
@@ -451,7 +483,7 @@ def load_spec(
         )
 
     if kind == "numeric":
-        decode_numeric_shape(name, col_stats, carrier)  # refuse a malformed block at load
+        decode_numeric_shape(column_text, col_stats, carrier)  # refuse a malformed block at load
 
     other_mode = str(col_cfg.get("other_mode") or "redistribute")
     if other_mode not in _OTHER_MODES:
@@ -486,42 +518,17 @@ def load_spec(
             )
         )
 
-    condition_on = col_cfg.get("condition_on")
     joint: dict[str, Any] | None = None
     parent_first = False
     if condition_on is not None:
-        at_condition = config_position("statistical", Name(name), "condition_on")
-        if kind != "categorical":
-            raise_bare(
-                _refuse(
-                    reasons.plan.STATISTICAL_CONDITION_KIND_INVALID,
-                    config_refusal(
-                        at_condition,
-                        Problem.NOT_ALLOWED,
-                        hint="condition_on is supported for categorical columns only",
-                    ),
-                )
-            )
         # Only a plain string names a column: the raw value is looked at as it is, never
         # converted, so a list or a mapping cannot turn its items into a name.
-        if type(condition_on) is str:
-            pair = sorted((condition_on, source_column))
-            for entry in snap.get("joints") or []:
-                if list(entry.get("columns") or []) == pair:
-                    joint = entry
-                    break
-        if joint is None and type(condition_on) is not str:
-            raise_bare(
-                _refuse(
-                    reasons.plan.STATISTICAL_JOINT_MISSING,
-                    config_refusal(
-                        at_condition,
-                        Problem.WRONG_TYPE,
-                        expected=Expected.STRING,
-                        got=condition_on,
-                    ),
-                )
-            )
+        assert isinstance(condition_on, str)  # noqa: S101 - refused above
+        pair = sorted((condition_on, source_column))
+        for entry in snap.get("joints") or []:
+            if list(entry.get("columns") or []) == pair:
+                joint = entry
+                break
         if joint is None:
             raise_bare(
                 _refuse(

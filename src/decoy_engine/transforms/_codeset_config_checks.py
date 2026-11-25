@@ -25,20 +25,15 @@ from decoy_engine import reasons
 from decoy_engine._config_text import (
     Expected,
     Problem,
-    Refusal,
     config_position,
     config_refusal,
 )
 from decoy_engine._error_base import raise_bare
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import refusal_error
 from decoy_engine.transforms._codeset_loader import _SHIPPED_CORPORA, SHIPPED_CORPUS_NAMES
 from decoy_engine.transforms._codeset_provenance import RESERVED_LICENSED_NAMES
 
 # The shipped corpus names a refusal lists. Engine-owned and constant, so it is safe text.
-
-
-def _refusal_error(code: str, refusal: Refusal) -> PlanCompileError:
-    return PlanCompileError(code=code, path=refusal.key, message=refusal.detail)
 
 
 def validate_code_set_config(cfg: dict[str, Any]) -> None:
@@ -72,7 +67,7 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
     # `TypeError: unhashable type` instead of a coded compile error.
     if not name:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.CODE_SET_NAME_MISSING,
                 config_refusal(
                     at_name,
@@ -84,7 +79,7 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
         )
     if not isinstance(name, str):
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.CODE_SET_NAME_MISSING,
                 config_refusal(at_name, Problem.WRONG_TYPE, expected=Expected.STRING, got=name),
             )
@@ -99,7 +94,7 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
     # pass the `isinstance(..., (str, int))` allow-list.
     if isinstance(version, bool) or (version is not None and not isinstance(version, (str, int))):
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.CODE_SET_CORPUS_SOURCE_VERSION_INVALID,
                 config_refusal(
                     config_position("provider_config", "corpus_source_version"),
@@ -121,7 +116,7 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
 
     if name.strip().lower() in RESERVED_LICENSED_NAMES and is_shipped_source:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.CODE_SET_RESERVED_LICENSED_NAME,
                 config_refusal(
                     at_name,
@@ -137,7 +132,7 @@ def validate_code_set_config(cfg: dict[str, Any]) -> None:
 
     if is_shipped_source and name not in _SHIPPED_CORPORA:
         raise_bare(
-            _refusal_error(
+            refusal_error(
                 reasons.plan.CODE_SET_CORPUS_NOT_FOUND,
                 config_refusal(
                     at_name,

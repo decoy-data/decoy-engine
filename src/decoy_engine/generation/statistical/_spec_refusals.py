@@ -14,6 +14,7 @@ from decoy_engine._config_text import (
     ConfigPosition,
     Name,
     Problem,
+    QuotedName,
     Refusal,
     config_position,
     config_refusal,
@@ -82,15 +83,22 @@ def withheld_values_refusal(
     ) and (isinstance(listed, (list, tuple)) and all(isinstance(c, str) for c in listed))
     if well_formed and policy == POLICY_RAW:
         return None
+    withheld_column = source_column
     if well_formed:
         named = (source_column,) if condition_on is None else (source_column, condition_on)
-        if not [c for c in named if c in (listed or ())]:
+        hit = [c for c in named if c in (listed or ())]
+        if not hit:
             return None
+        withheld_column = hit[0]
     at_column = config_position("statistical", Name(name))
+    # The output column and the one whose values were withheld, each once: they differ when the
+    # output column is renamed or the withheld side is the `condition_on` column.
+    shown = [name] if withheld_column == name else [name, withheld_column]
     if kind == "numeric" and condition_on is None:
         return config_refusal(
             at_column,
             Problem.NOT_ALLOWED,
+            names=tuple(QuotedName(n) for n in shown),
             hint=(
                 "The snapshot withheld the real values this column needs, so there "
                 "are no values to sample. Use a faker or pattern generator for this "
@@ -101,6 +109,7 @@ def withheld_values_refusal(
     return config_refusal(
         at_column,
         Problem.NOT_ALLOWED,
+        names=tuple(QuotedName(n) for n in shown),
         hint=(
             "The snapshot withheld the real values this column needs (a sensitive "
             "column, one with too few rows to release values, or a value-policy "

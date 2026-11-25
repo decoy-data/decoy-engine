@@ -342,6 +342,23 @@ def test_a_runtime_hint_is_s2_outside_the_zero_set_for_both_s1_valid_forms() -> 
     assert scan.scan_source("x/other.py", IMPORTS + fixed, zero=False) == []
 
 
+def test_a_hint_name_must_be_bound_to_a_literal() -> None:
+    template = (
+        "HINT = {value}\n"
+        "def f(runtime_text):\n"
+        "    r = config_refusal(config_position('a'), Problem.MISSING, hint=HINT)\n"
+        "    return ConfigError(r.text)\n"
+    )
+    literal = template.format(value="'fixed text'")
+    assert scan.scan_source("x/other.py", IMPORTS + literal, zero=False) == []
+    for value in ("runtime_text", "f'{runtime_text}'", "str(runtime_text)"):
+        found = scan.scan_source("x/other.py", IMPORTS + template.format(value=value), zero=False)
+        assert {f.rule for f in found} == {"S2"}, value
+    # A name this module does not bind is another module's constant.
+    imported = template.replace("HINT = {value}\n", "")
+    assert scan.scan_source("x/other.py", IMPORTS + imported, zero=False) == []
+
+
 def test_a_builtin_fstring_is_flagged_only_in_the_zero_set() -> None:
     body = "def f(v):\n    raise ValueError(f'{v}')\n"
     assert "S1" in _rules(body, zero=True)
@@ -462,6 +479,10 @@ def test_s4_allows_the_failure_map_store_and_the_code_forward() -> None:
     assert any(f.rule == "S4" for f in scan.scan_source(GEN, IMPORTS + broad, zero=True))
     msg = store.replace("failures[path] = exc", "failures[path] = exc.message")
     assert any(f.rule == "S4" for f in scan.scan_source(GEN, IMPORTS + msg, zero=True))
+    # The stored expression is the caught object itself: a copy of its text is a finding.
+    for copied in ("str(exc)", "repr(exc)", "f'{exc}'", "(exc,)"):
+        body = store.replace("failures[path] = exc", f"failures[path] = {copied}")
+        assert any(f.rule == "S4" for f in scan.scan_source(GEN, IMPORTS + body, zero=True)), copied
     fwd = (
         "def check_fitted_references():\n    try:\n        pass\n"
         "    except StatisticalSpecError as exc:\n        spec_code = exc.code\n"
@@ -469,6 +490,21 @@ def test_s4_allows_the_failure_map_store_and_the_code_forward() -> None:
     assert [f for f in scan.scan_source(GEN, IMPORTS + fwd, zero=True) if f.rule == "S4"] == []
     text = fwd.replace("exc.code", "exc.message")
     assert any(f.rule == "S4" for f in scan.scan_source(GEN, IMPORTS + text, zero=True))
+    wrapped = fwd.replace("exc.code", "str(exc.code)")
+    assert any(f.rule == "S4" for f in scan.scan_source(GEN, IMPORTS + wrapped, zero=True))
+
+
+def test_s4_allows_passthrough_and_an_identity_test_but_not_an_equality_test() -> None:
+    body = (
+        "def read_pinned_artifact(f):\n    try:\n        pass\n"
+        "    except Exception as exc:\n        out = passthrough(exc)\n"
+        "        if out is exc:\n            raise\n"
+    )
+    assert [f for f in scan.scan_source(GEN, IMPORTS + body, zero=True) if f.rule == "S4"] == []
+    equal = body.replace("out is exc", "out == exc")
+    assert any(f.rule == "S4" for f in scan.scan_source(GEN, IMPORTS + equal, zero=True))
+    stored = body.replace("out = passthrough(exc)", "out = exc")
+    assert any(f.rule == "S4" for f in scan.scan_source(GEN, IMPORTS + stored, zero=True))
 
 
 def test_s6_protected_checker_passes_and_an_extra_unprotected_call_fails() -> None:

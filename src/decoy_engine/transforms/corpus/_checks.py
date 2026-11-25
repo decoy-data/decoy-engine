@@ -17,20 +17,14 @@ from decoy_engine._config_text import (
     Expected,
     Name,
     Problem,
-    Refusal,
     config_position,
     config_refusal,
 )
 from decoy_engine._error_base import raise_bare
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import refusal_error
 from decoy_engine.transforms._codeset_provenance import CodeSetProvenance
 
 _LOG = logging.getLogger(__name__)
-
-
-def refusal_error(code: str, refusal: Refusal) -> PlanCompileError:
-    """The compile error for `refusal`: its key as the path, its detail as the message."""
-    return PlanCompileError(code=code, path=refusal.key, message=refusal.detail)
 
 
 def _check_corpus_schema(tbl: pa.Table) -> None:
@@ -227,8 +221,8 @@ def _validate_provenance(
                             names=(Name(name),),
                             hint=(
                                 "The shipped corpus has a malformed provenance stamp. A "
-                                "shipped corpus is a build artifact: is_seed and the "
-                                "metadata format version must be explicit and current "
+                                "shipped corpus is a build artifact: its is_seed and "
+                                "corpus_version metadata keys must be explicit and current "
                                 "so evidence cannot misreport a seed as a full corpus"
                             ),
                         ),

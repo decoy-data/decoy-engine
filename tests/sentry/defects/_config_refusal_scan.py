@@ -36,7 +36,7 @@ ZERO_SET = frozenset(
         "plan/_generation.py",
         "transforms/joint_mask.py",
         "transforms/_codeset_config_checks.py",
-        "transforms/_codeset_checks.py",
+        "transforms/corpus/_checks.py",
         "transforms/_codeset_loader.py",
         "generation/statistical/_spec.py",
         "generation/statistical/_snapshot_io.py",
@@ -95,6 +95,7 @@ CLASSIFY_CALLS = frozenset(
         "type",
         "safe_error_type",
         "keeps_class",
+        "passthrough",
         "classified_failure",
         "is_memory_failure",
         "typed_memory_member",
@@ -299,7 +300,7 @@ def _plain_chain(node: ast.expr) -> bool:
 def _segment_ok(node: ast.expr, scope: Scope) -> bool:
     if isinstance(node, ast.Constant):
         return isinstance(node.value, (str, int)) and not isinstance(node.value, bool)
-    if isinstance(node, ast.Call) and _name_of(node.func) in {"Name", "Member"}:
+    if isinstance(node, ast.Call) and _name_of(node.func) in {"Name", "Member", "QuotedName"}:
         if len(node.args) != 1 or node.keywords:
             return False
         arg = node.args[0]
@@ -334,6 +335,15 @@ def _enum_attr(node: ast.expr, enum: str) -> bool:
 
 def _upper_name(node: ast.expr) -> bool:
     return isinstance(node, ast.Name) and bool(_UPPER.match(node.id))
+
+
+def _constant_name(node: ast.expr, scope: Scope) -> bool:
+    """An UPPER name that is bound, where this module binds it, only to string literals. A name
+    this module does not bind is an import of another module's constant."""
+    if not _upper_name(node):
+        return False
+    found = scope.lookup(node.id) if isinstance(node, ast.Name) else None
+    return found is None or all(_is_str_const(v) for v in found[1])
 
 
 def _names_ok(node: ast.expr, scope: Scope) -> bool:
@@ -371,9 +381,7 @@ def s2_findings(call: ast.Call, scope: Scope) -> list[str]:
         elif name == "names":
             ok = _names_ok(value, scope)
         elif name == "hint":
-            ok = (isinstance(value, ast.Constant) and isinstance(value.value, str)) or _upper_name(
-                value
-            )
+            ok = _is_str_const(value) or _constant_name(value, scope)
         elif name == "code":
             ok = True  # the builder reads only the registered summary of a code
         else:  # `line`, `column` and anything unknown belong to `read_config` alone
@@ -614,6 +622,10 @@ class _Scanner:
         if isinstance(parent, ast.Call) and name in parent.args:
             if _name_of(parent.func) in CLASSIFY_CALLS:
                 return
+        # An identity test reads no text: `passthrough` returns the caught object itself when
+        # the caller must re-raise it unchanged.
+        if isinstance(parent, ast.Compare) and all(isinstance(o, ast.Is) for o in parent.ops):
+            return
         exc_class = _name_of(handler.type)
         func_name = scope.qualname.split(".")[0]
         field_name = (
@@ -626,18 +638,27 @@ class _Scanner:
         self.add("S4", scope, name, handler.type, ast.Constant(value=field_name))
 
     def _dest_ok(self, name: ast.Name, dest: str) -> bool:
+        """True when the allowed use of the caught error ends in its destination.
+
+        `failures` and `code` store the caught object or its field itself: an expression around
+        it (`str(exc)`, `repr(exc)`, a format) is a copy of the text and fails. `problems` is a
+        report line, so the typed fields are formatted into it."""
+        parent = self.parents.get(id(name))
+        used: ast.AST = (
+            parent if isinstance(parent, ast.Attribute) and parent.value is name else name
+        )
         node: ast.AST = name
         while id(node) in self.parents:
             node = self.parents[id(node)]
             if dest == "problems" and isinstance(node, ast.keyword) and node.arg == "problems":
                 return True
             if dest == "failures" and isinstance(node, ast.Assign):
-                return any(
+                return node.value is used and any(
                     isinstance(t, ast.Subscript) and _name_of(t.value) == "failures"
                     for t in node.targets
                 )
             if dest == "code" and isinstance(node, (ast.Assign, ast.keyword)):
-                return True
+                return node.value is used
             if isinstance(node, (ast.FunctionDef, ast.Lambda)):
                 return False
         return False

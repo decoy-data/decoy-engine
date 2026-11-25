@@ -155,9 +155,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("generation/statistical/_spec.py", "_refuse"): _HELPER,
     ("plan/_generation.py", "statistical_refusal"): _HELPER,
     ("quality/dp_record/_record.py", "refusal_error"): _HELPER,
-    ("transforms/_codeset_checks.py", "refusal_error"): _HELPER,
-    ("transforms/_codeset_config_checks.py", "_refusal_error"): _HELPER,
-    ("transforms/joint_mask.py", "_refusal_error"): _HELPER,
+    ("plan/_errors.py", "refusal_error"): _HELPER,
     ("plan/checks/_lookup_tables.py", "_lookup_refusal"): _HELPER,
     ("plan/checks/_required_settings.py", "check_required_strategy_settings"): (
         "forwards the registered plan symbol a frozen requirement descriptor holds; the descriptor "

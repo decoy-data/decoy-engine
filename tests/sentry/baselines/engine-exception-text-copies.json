@@ -34,10 +34,6 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 2
   },
-  "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::execution/_mixed_static.py::admit_mixed_static::exc.detail::return": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
@@ -87,6 +83,10 @@
    "max": 1
   },
   "audit::execution/pipeline/_stream.py::_compat_failure::exc.message::return": {
+   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
+   "max": 1
+  },
+  "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
@@ -142,6 +142,14 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
+  "extra::_config_text/_read.py::_yaml_mark::getattr(exc.context_mark)::return": {
+   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
+   "max": 1
+  },
+  "extra::_config_text/_read.py::_yaml_mark::getattr(exc.problem_mark)::return": {
+   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
+   "max": 1
+  },
   "extra::connectors/sftp.py::_parse_private_key::f{exc}::raise": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
@@ -151,14 +159,6 @@
    "max": 1
   },
   "extra::plan/_checks.py::_check_ner_available_for_strategy::exc.message::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "extra::safe_output/_validation.py::yaml_error_text::getattr(exc.context_mark)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "extra::safe_output/_validation.py::yaml_error_text::getattr(exc.problem_mark)::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },

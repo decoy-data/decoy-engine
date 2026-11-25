@@ -33,6 +33,7 @@ class Problem(Enum):
     WRONG_TYPE = "wrong type"
     NOT_FOUND = "not found"
     UNREADABLE = "could not be read"
+    SNAPSHOT_UNREADABLE = "snapshot_file could not be read"
     UNPARSEABLE = "could not be parsed"
     DUPLICATE = "declared more than once"
     MISMATCH = "does not match"
@@ -139,6 +140,16 @@ class Name:
             if approved is not None:
                 return approved
         return _NAME_SHOWN
+
+
+@dataclass(frozen=True, slots=True)
+class QuotedName(Name):
+    """A `Name` shown in single quotes, for a message that names a column in a sentence (the
+    withheld-values refusal). The quotes are added only around an approved name."""
+
+    def shown(self) -> str:
+        text = Name.shown(self)
+        return text if text == _NAME_SHOWN else f"'{text}'"
 
 
 @dataclass(frozen=True, slots=True)

@@ -81,8 +81,16 @@ def load_name_hint_terms(
         handle = fileaccess.engine_dir_handle(_V1_DIR)
     else:
         policy = fileaccess.capture(file_access)
-        handle = policy.open_dir(
-            FileRequest(FileRole.MODEL_PACK_ROOT, "read_dir", str(directory), "pre_scan.name_hints")
+        # The open fails with the locator in its text when a parent directory is unreadable.
+        handle = read_config(
+            lambda: policy.open_dir(
+                FileRequest(
+                    FileRole.MODEL_PACK_ROOT, "read_dir", str(directory), "pre_scan.name_hints"
+                )
+            ),
+            config_position("pre_scan", "name_hints"),
+            _refuse,
+            passes=(FileAccessDenied,),
         )
     try:
         return _load_terms(handle)
@@ -95,21 +103,32 @@ def _refuse(refusal: Refusal) -> NameHintLoaderError:
 
 
 def _is_file(handle: DirHandle, name: str) -> bool:
-    try:
-        member = handle.open_file(name)
+    def probe() -> bool:
         try:
-            return stat.S_ISREG(member.stat().st_mode)
-        finally:
-            member.close()
-    except FileAccessDenied:
-        # A strict policy's denial is a real refusal: an outside-root member, or (deny-by-default,
-        # no existence oracle) an absent one. Preserve it instead of laundering it into an "absent"
-        # result and a "does not exist" message built from a locator; it is already locator-free.
-        if not fileaccess.is_ambient():
-            raise
-        return False
-    except (FileNotFoundError, NotADirectoryError):
-        return False
+            member = handle.open_file(name)
+            try:
+                return stat.S_ISREG(member.stat().st_mode)
+            finally:
+                member.close()
+        except FileAccessDenied:
+            # A strict policy's denial is a real refusal: an outside-root member, or
+            # (deny-by-default, no existence oracle) an absent one. Preserve it instead of
+            # laundering it into an "absent" result and a "does not exist" message built from a
+            # locator; it is already locator-free.
+            if not fileaccess.is_ambient():
+                raise
+            return False
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
+    # Any other OS failure (an unreadable directory) carries the locator in its text, so the
+    # probe is a protected read: it becomes a value-free refusal.
+    return read_config(
+        probe,
+        config_position("pre_scan", "name_hints", Member(name)),
+        _refuse,
+        passes=(FileAccessDenied,),
+    )
 
 
 def _load_terms(handle: DirHandle) -> dict[str, list[str]]:
@@ -317,13 +336,13 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
 
 def _read_yaml(handle: DirHandle, name: str) -> Any:
     """yaml.safe_load, refusing any parse or read failure with a position and no exception text."""
-    member = handle.open_file(name)
+    at_member = config_position("pre_scan", "name_hints", Member(name))
+    member = read_config(
+        lambda: handle.open_file(name), at_member, _refuse, passes=(FileAccessDenied,)
+    )
     try:
         return read_config(
-            lambda: serial.yaml_safe_load(member),
-            config_position("pre_scan", "name_hints", Member(name)),
-            _refuse,
-            passes=(FileAccessDenied,),
+            lambda: serial.yaml_safe_load(member), at_member, _refuse, passes=(FileAccessDenied,)
         )
     finally:
         member.close()

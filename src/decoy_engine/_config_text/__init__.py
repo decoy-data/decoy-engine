@@ -7,7 +7,7 @@ and its established pattern (Pydantic's location-plus-type error report).
 
 from __future__ import annotations
 
-from decoy_engine._config_text._read import read_config
+from decoy_engine._config_text._read import passthrough, read_config, yaml_error_text
 from decoy_engine._config_text._refusal import (
     ConfigPosition,
     Expected,
@@ -15,6 +15,7 @@ from decoy_engine._config_text._refusal import (
     Member,
     Name,
     Problem,
+    QuotedName,
     Refusal,
     config_position,
     config_refusal,
@@ -28,9 +29,12 @@ __all__ = [
     "Member",
     "Name",
     "Problem",
+    "QuotedName",
     "Refusal",
     "config_position",
     "config_refusal",
     "kind_of",
+    "passthrough",
     "read_config",
+    "yaml_error_text",
 ]
