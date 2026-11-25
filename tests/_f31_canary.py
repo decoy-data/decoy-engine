@@ -63,6 +63,24 @@ def leak_xfail(reason: str) -> Any:
     return pytest.mark.xfail(strict=True, raises=AssertionError, reason=reason)
 
 
+def assert_known_leak(
+    surfaces: dict[str, str], expected: tuple[str, ...], reason: str, marker: str = CANARY
+) -> None:
+    """A cell with a recorded leak: xfail only when exactly the recorded surfaces carry the
+    marker. A surface beyond the record is a new leak and fails hard; an empty result means the
+    known leak closed, which also fails so the record gets removed (the strict-XPASS rule).
+    `reason` cites the V2-LOG entry or the slice that closes the leak."""
+    leaked = tuple(canary_surfaces(surfaces, marker))
+    if leaked == tuple(sorted(expected)):
+        pytest.xfail(reason)
+    if not leaked:
+        pytest.fail(f"the known leak on {list(expected)} is gone: remove its record")
+    extra = sorted(set(leaked) - set(expected))
+    if extra:
+        raise AssertionError(f"marker reached surfaces beyond the known leak: {extra}")
+    raise AssertionError(f"known leak changed shape: expected {list(expected)}, got {list(leaked)}")
+
+
 def assert_path_ran(seen: Observed, *, code: str | None, exc_name: str | None = None) -> None:
     """Fail, not assert, when the intended failure path did not run: `leak_xfail` only absorbs
     an AssertionError, so a cell that never reached its site cannot pass as a known leak."""

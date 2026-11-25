@@ -98,16 +98,18 @@ _NAME = "formats the config id into the error"
 _TYPE = "formats the Arrow type, struct field names included"
 _TYPE_META = "formats the Arrow type, child field metadata values included"
 
-# (id, callable, exception type, the site's message prefix, leak mark or None). The prefix is the
-# `code: ` the site writes, or its whole fixed text where the site has no code. A cell that
-# reaches another site with the same exception class fails on the prefix.
-_RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
+# (id, callable, exception type, the site's message prefix, leak mark or None, whether the case
+# plants ROW_CANARY). The prefix is the `code: ` the site writes, or its whole fixed text where
+# the site has no code. A cell that reaches another site with the same exception class fails on
+# the prefix.
+_RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any, bool]] = [
     (
         "derive_unadmitted_type",
         lambda k: _derive(k, _struct_with_canary_field()),
         ValueError,
         "mixed_object_not_native: ",
         _leak(_F2, "batch/string.rs:53", _TYPE),
+        False,
     ),
     (
         "derive_unadmitted_type_metadata_value",
@@ -115,6 +117,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "mixed_object_not_native: ",
         _leak(_F2, "batch/string.rs:53", _TYPE_META),
+        False,
     ),
     (
         "derive_empty_namespace",
@@ -122,6 +125,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "namespace_empty: ",
         None,
+        False,
     ),
     (
         "derive_bad_truncate",
@@ -129,6 +133,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         TypeError,
         "truncate must be an int or None",
         None,
+        False,
     ),
     (
         "derive_bad_threads",
@@ -136,6 +141,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "native_threads_negative: ",
         None,
+        False,
     ),
     (
         "index_unadmitted_type",
@@ -143,6 +149,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "mixed_object_not_native: ",
         _leak(_F2, "batch/index.rs:93", _TYPE),
+        False,
     ),
     (
         "index_unadmitted_type_metadata_value",
@@ -150,6 +157,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "mixed_object_not_native: ",
         _leak(_F2, "batch/index.rs:93", _TYPE_META),
+        False,
     ),
     (
         "index_pool_size_text",
@@ -157,6 +165,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         TypeError,
         "pool_size must be an int",
         None,
+        False,
     ),
     (
         "hex_unadmitted_type",
@@ -164,6 +173,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "group_key_input_not_string: ",
         None,
+        False,
     ),
     (
         "hex_odd_chars",
@@ -171,6 +181,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "group_key_hex_chars_invalid: ",
         None,
+        False,
     ),
     (
         "fpe_unadmitted_type",
@@ -178,6 +189,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "fpe_input_not_string: ",
         None,
+        False,
     ),
     (
         "fpe_empty_namespace",
@@ -185,6 +197,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "namespace_empty: ",
         None,
+        False,
     ),
     (
         "fpe_bad_threads",
@@ -192,6 +205,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "native_threads_negative: ",
         None,
+        False,
     ),
     (
         "redact_unknown_detector",
@@ -199,6 +213,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "unknown_detector_id: ",
         _leak(_F1, "pyboundary.rs:48", _NAME),
+        True,
     ),
     (
         "redact_catalog_mismatch",
@@ -206,6 +221,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "catalog_version_mismatch: ",
         None,
+        False,
     ),
     (
         "redact_unknown_validator",
@@ -213,6 +229,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "unknown validator ",
         _leak(_F1, "pyboundary.rs:151", _NAME),
+        True,
     ),
     (
         "redact_unknown_class",
@@ -220,6 +237,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "unknown class ",
         _leak(_F1, "pyboundary.rs:174", _NAME),
+        False,
     ),
     (
         "mask_unknown_detector",
@@ -229,6 +247,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "unknown_detector_id: ",
         _leak(_F1, "text_mask.rs:219", _NAME),
+        True,
     ),
     (
         "mask_verbatim_mismatch",
@@ -238,6 +257,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "verbatim_length_mismatch",
         None,
+        False,
     ),
     (
         "mask_catalog_mismatch",
@@ -245,6 +265,7 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "catalog_version_mismatch: ",
         None,
+        False,
     ),
     (
         "mask_spans_short",
@@ -252,17 +273,20 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any]] = [
         ValueError,
         "spans_shorter_than_values",
         None,
+        False,
     ),
 ]
 
 _PARAMS = [
     pytest.param(raiser, exc, prefix, id=name, marks=[mark] if mark is not None else [])
-    for name, raiser, exc, prefix, mark in _RAISERS
+    for name, raiser, exc, prefix, mark, _ in _RAISERS
 ]
 
 
-_UNMARKED = [
-    pytest.param(raiser, exc, prefix, id=name) for name, raiser, exc, prefix, _ in _RAISERS
+_ROW_PLANTED = [
+    pytest.param(raiser, exc, prefix, id=name)
+    for name, raiser, exc, prefix, _, plants_row in _RAISERS
+    if plants_row
 ]
 
 
@@ -286,7 +310,7 @@ def test_native_error_carries_no_input_text(
     assert_no_canary(rendered_surfaces(_raised(raiser, exc_type, prefix)))
 
 
-@pytest.mark.parametrize(("raiser", "exc_type", "prefix"), _UNMARKED)
+@pytest.mark.parametrize(("raiser", "exc_type", "prefix"), _ROW_PLANTED)
 def test_native_error_carries_no_row_text(
     raiser: Callable[[Any], Any], exc_type: type[Exception], prefix: str
 ) -> None:

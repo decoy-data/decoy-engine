@@ -6,10 +6,11 @@ the marker is absent from every surface `observe` collects: the exception in all
 cause chain, DEBUG log records on a stream and a file handler, warnings, progress events, the
 run-result quality fields and, once it exists, `render_failure(exc)`.
 
-Cells marked `leak_xfail` were run on main first and observed to leak. The reason names the slice
-that closes the leak or the V2-LOG entry that records it; the mark is strict, so the fixing slice's
+Cells listed in `_KNOWN_LEAKS` were run on main first and observed to leak on the recorded
+surfaces. The reason names the slice that closes the leak or the V2-LOG entry that records it; the
+cell xfails only on exactly those surfaces and fails once the leak closes, so the fixing slice's
 own merge flips it. A cell that never reached its site fails (`assert_path_ran` uses `pytest.fail`),
-because the mark absorbs only an AssertionError.
+because a leak xfail absorbs only an AssertionError.
 
 A cell that stops at a boundary before the site is listed in the PR body, not given a cell here.
 """
@@ -37,9 +38,9 @@ from decoy_engine.unmask import unmask_pipeline
 from tests._f31_canary import (
     CANARY,
     Observed,
+    assert_known_leak,
     assert_no_canary,
     assert_path_ran,
-    leak_xfail,
     observe,
 )
 from tests.connectors.conftest import (
@@ -364,6 +365,22 @@ def _cell_connector_auth(tmp_path: Path, ext: Path, port: int) -> Observed:
 _LARK_LEAK = "AE5 (#810) rewrites _lark_parser.py:241 to a value-free message"
 
 # (id, builder, expected exception code, expected exception class name, extra path check, marks)
+# Surfaces observed carrying the marker on main, per cell. The cell xfails only when exactly these
+# surfaces leak; a further surface fails hard (`assert_known_leak`).
+_EXC_SURFACES = (
+    "exc.args",
+    "exc.attrs",
+    "exc.chain",
+    "exc.logged",
+    "exc.repr",
+    "exc.str",
+    "exc.traceback",
+)
+_KNOWN_LEAKS: dict[str, tuple[str, ...]] = {
+    "expression_bad_string_escape": _EXC_SURFACES,
+    "expression_bad_string_escape_run": _EXC_SURFACES,
+}
+
 _CELLS: list[Any] = [
     ("chunked_cast_out_of_range", _cell_chunked_cast, "chunked_schema_mismatch", None, None, []),
     (
@@ -396,7 +413,7 @@ _CELLS: list[Any] = [
         None,
         "ValidationError",
         None,
-        [leak_xfail(_LARK_LEAK)],
+        [],
     ),
     (
         "expression_bad_string_escape_run",
@@ -404,7 +421,7 @@ _CELLS: list[Any] = [
         None,
         "ValidationError",
         None,
-        [leak_xfail(_LARK_LEAK)],
+        [],
     ),
     ("numeric_cast_failure", _cell_numeric_cast, "declared_integer_invalid", None, None, []),
     (
@@ -446,13 +463,14 @@ _CELLS: list[Any] = [
 ]
 
 _CELL_PARAMS = [
-    pytest.param(build, code, exc_name, check, id=cell_id, marks=marks)
+    pytest.param(cell_id, build, code, exc_name, check, id=cell_id, marks=marks)
     for cell_id, build, code, exc_name, check, marks in _CELLS
 ]
 
 
-@pytest.mark.parametrize(("build", "code", "exc_name", "check"), _CELL_PARAMS)
+@pytest.mark.parametrize(("cell_id", "build", "code", "exc_name", "check"), _CELL_PARAMS)
 def test_corpus_cell(
+    cell_id: str,
     build: Callable[[Path], Observed],
     code: str | None,
     exc_name: str | None,
@@ -463,7 +481,25 @@ def test_corpus_cell(
     assert_path_ran(seen, code=code, exc_name=exc_name)
     if check is not None:
         check(seen)
-    assert_no_canary(seen.surfaces)
+    known = _KNOWN_LEAKS.get(cell_id)
+    if known is None:
+        assert_no_canary(seen.surfaces)
+    else:
+        assert_known_leak(seen.surfaces, known, _LARK_LEAK)
+
+
+def test_extra_surface_leak_fails_a_known_leak_cell() -> None:
+    """A known-leak cell must not hide a new leak: the marker on a surface beyond the record fails."""
+    surfaces = {name: CANARY for name in _EXC_SURFACES}
+    surfaces["log.file"] = CANARY
+    try:
+        assert_known_leak(surfaces, _EXC_SURFACES, _LARK_LEAK)
+    except pytest.xfail.Exception:
+        pytest.fail("the cell xfailed although the marker reached a surface beyond the record")
+    except AssertionError as err:
+        assert "beyond the known leak" in str(err)
+    else:
+        pytest.fail("the cell passed although the marker reached a surface beyond the record")
 
 
 def test_expression_validate_ran_and_wrote_nothing(
