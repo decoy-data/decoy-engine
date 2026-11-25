@@ -23,7 +23,7 @@ re-anchors both first.
 - A passing check is not reported. Neither the run card nor `decoy run --json` reads
   `quality_metrics["validation"]` (CLI `src/decoy/cli/run/_render.py:106-216`).
 - The engine builds a `leak_check_column_not_checked` warning for a column that `columns:` names
-  and the check skipped (engine `execution/_pipeline_finalize.py:361-378` on main), but it only
+  and the check skipped (engine `execution/_pipeline_finalize.py:361-376` on main), but it only
   lands in `quality_metrics["validation"]["warnings"]`. The run's `warnings` list, which the CLI
   counts and renders (CLI `src/decoy/cli/run/_execute.py:514`, `_render.py:112-115`), never sees
   it.
@@ -33,29 +33,29 @@ re-anchors both first.
 
 ## Guarantee
 
-1. Every configured `validators:` entry appears on the run card and in `decoy run --json` with
+1. On single-pipeline runs, every configured validator appears on the card and in JSON with
    its entry index, name, status (`passed`, `failed` or `skipped`) and its value-free targets:
    checked, skipped and failed tables and columns.
    This holds on success, on a validator failure (exit 3), on a quarantine-covered failure that
-   returns success, and in preview.
+   returns success, and in preview. For `run --all`, human output summarizes pipeline, exit and
+   run folder. Child reports appear at `pipelines[i].validation` in aggregate JSON.
 2. A failed entry names its own failed tables and columns, never another entry's, also when two
    entries share a validator name.
-3. Each column that a `columns:` list names and the check did not check produces one
-   `QualityWarning` in `ExecutionResult.warnings`, including when the whole table was not
-   produced. The run still exits 0.
+3. Each distinct explicitly named skip per entry produces a run warning, including a skip
+   because the table was absent. A skip alone allows exit 0.
 4. `decoy validate` and `decoy validate config` both warn, from the config alone, about each
    named column that `plan_scope` rules out. Exit 0, or 2 with `--fail-on-warning`.
 5. Nothing new carries a data value: names, codes, counts, indices and statuses only.
 6. When validators are configured and the engine returns no readable or complete block, the card
    and JSON say so with a fixed line. They never show a silent pass.
-7. `decoy run --chunked` with validators is refused before the first read or write, because that
+7. `decoy run --chunked` with validators is refused before any source read or output write, because that
    route returns no report (parent lines 77-81: checks judge published bytes and a failure
    publishes nothing). The target keeps its old bytes.
 
 Non-goals:
 
-- No change to any verdict or route. A validator failure stays exit 3. The only new exit is the
-  `--chunked` refusal, which uses the existing pre-run refusal path and its exit code.
+- Existing validator verdicts and CI/pre-commit exits stand. The validate commands apply their
+  existing warning policy to the new advisory. Explicit `--chunked` uses the pre-run refusal exit.
 - No change to `--post-validate-enforce` or the `post_validation` check.
 - No new `CheckId` in the engine `RunResult` document in this slice (open item below).
 
@@ -81,11 +81,11 @@ Non-goals:
   list `exempt` (`_scope.py:154-156`) and on a generate-table scope (`:165-169`). `ValidatorFailedError.report`
   is a dataclass and predates S1 (`v0.28.3 errors.py:396`).
 - Engine tests: `tests/unit/validators/test_leak_check_skips.py:169-187`,
-  `tests/unit/validators/test_validator_value_free.py:81-87`.
+  `tests/unit/validators/test_validator_value_free.py:81-88`.
 - CLI: the ordinary run keeps the engine result in `_execution` (`run/_execute.py:480`); the
   report flags alone fill `_report_quality_metrics` (`:510-511`), so S4 reads `_execution`.
   The card (`run/_render.py:161-188`); the JSON branch (`:116-153`); preview calls
-  `run_pipeline` with validators kept (`cli/gen/_preview.py:38-56`, `run/_execute.py:525-540`);
+  `run_pipeline` with validators kept (`cli/gen/_preview.py:38-56`, `run/_execute.py:525-537`);
   explicit `--chunked` calls `run_mask_chunked` and gets no report (`run/_execute.py:76-78,223,420-437`).
   The error path: `run/_errors.py:172` `fail`, the context at `:312-349`, the hint at
   `:293-296` (quiet mode still prints it, `ui/output.py:228-231,251-254`), rendered by
@@ -110,17 +110,26 @@ Non-goals:
    empty; `checked` already exists), where `Target` is a named tuple `(table, column)` with `column` optional. The fold
    (`_fold.py:100-109`) already walks each entry's findings before combining them; it records
    that entry's distinct `(table, column)` pairs there. No finding detail is copied.
-2. Whole-table skips. `unchecked_named_columns` expands a `column=None` skip against the
-   entry's explicit `columns:` list for that table, so each named column gets its warning. The
-   table-level `SkippedColumn` stays in the report. Default scope adds no warning.
-3. Warnings channel. The warning identity is defined once, in the function that builds the
-   validation warnings: `(code, entry_index, table, column, reason)`. Two entries that skip the
-   same column for different reasons give two warnings. Both channels project from that one
-   list: the stamped `quality_metrics["validation"]` copy (in the evidence manifest) and
-   `ExecutionResult.warnings`. `merge_validation_warnings(result) -> ExecutionResult` runs once at
-   the shared return of `run_pipeline` (`execution/_pipeline.py:360-361`) and returns
-   `dataclasses.replace(result, warnings=existing + new)`, adding only identities not already in
-   `existing` and keeping every unrelated warning.
+2. Keep the public `unchecked_named_columns(config, report) -> tuple[SkippedColumn, ...]`
+   contract, including order, repeated skips and omission of whole-table skips. Factor its
+   explicit-scope selection in `validators/_scope.py:215-223` into one indexed traversal.
+   Expose the indexed warning input through the validators package API. For the writer, expand
+   each table-level skip in the traversal against that entry's explicit columns for that table.
+   Keep the original table skip in the report. Default scope yields no warning candidates.
+3. Change the existing `_unchecked_column_warnings` writer (#812
+   `execution/_pipeline_finalize.py:361-387`) to consume the indexed input. Build one ordered
+   list of QualityWarning records, keeping the first occurrence of each
+   `(code, entry_index, table, column, reason)` before stamping. Preserve provider and code.
+   Each record has `detail={"table": table, "reason": skip.code, "entry_index": entry_index}`.
+   **OWNER CALL (recommended default chosen)**. Keep the accepted empty column name in the
+   config. For that occurrence use `column=None` in the warning, including during whole-table
+   expansion. This satisfies the QualityWarning constructor. Other named columns retain their
+   exact spelling. The report keeps its original targets.
+   Stamp the canonical list with the existing asdict writer. At the shared run_pipeline return
+   (`execution/_pipeline.py:360-361`), `merge_validation_warnings` appends QualityWarning
+   records reconstructed from those stamps to the frozen result via dataclasses.replace.
+   Keep the existing warnings and their order. This merge runs once and neither enumerates
+   skips nor defines another identity rule.
 4. Docs: rows in `docs/qa/14-casting-validators-quarantine.md` and
    `docs/qa/15-execution-routes-native.md`; the `leak_check` paragraph at
    `docs/strategies.md:2338-2348`; compatibility contract entries for the new warning on
@@ -141,8 +150,14 @@ Non-goals:
      `code`). `Absent` means no block. `Malformed` means a block that fails any rule: a missing,
      duplicate or extra `entry_index`, a name that does not match `configured` at that index, a
      missing status or one outside the three values, a code not in the engine warning registry,
-     a bool or numeric string where an int is needed, a non-null non-string column. Accepted:
-     unknown extra keys (parent line 237) and empty `skipped` or `checked` lists.
+     a bool or numeric string where an int is needed, a negative count, a non-string table, or
+     a column other than a string or null. Read target pairs and skip triples in the producer's
+     tuple/list form and emit named JSON fields. Require an actual bool for `passed` and require
+     it to equal `all(entry.status != "failed" for entry in results)` after exact entry coverage.
+     Check status against the per-entry evidence: failed entries have failed targets, passed
+     entries have checked targets and no failed targets, skipped entries have neither. A
+     nonfailed entry has count zero. Null checked columns are valid for relationship checks.
+     Ignore unknown extra fields and accept empty lists consistent with the entry status.
    - `validation_member(result, configured)`: `Checks` gives the member; `Absent` with nothing
      configured gives `None`; `Absent` with validators configured or `Malformed` gives
      `{"reported": false}` and the fixed warning line `checks: engine did not report validator
@@ -153,20 +168,26 @@ Non-goals:
 2. `_render.py` `finish`: read `_execution`, add `payload["validation"]`, the fact after
    `Warnings`, and the lines after `render_warnings` (about +12). `finish_preview` (`:218`) does
    the same.
-2a. Explicit `--chunked` with validators: a new pre-run refusal beside the existing ones at
-   `run/_execute.py:247-270`, before any read or write, with a value-free message naming the
+2a. Explicit `--chunked` with validators: extend the existing validated-config refusal shared by the early probe and execution at
+   `run/_execute.py:247-270`, before any source read or output write, with a value-free message naming the
    flag and the `validators:` block. When `run_mask_chunked` returns a report this refusal goes.
 3. Error path: `_errors.fail` adds the member to the existing context (`:312-349`) when the error
-   is `ValidatorFailedError`; `_result.py:419-440` prints the check lines on the human branch,
-   before the `finally` cleanup at `_flow.py:227-232` runs. One JSON document on stdout, exit 3;
-   `--quiet` prints the existing error and hint lines and no check lines.
-4. Validate: one advisory `GateFinding` per named skipped column, built once in
-   `cli/gate/_layers.py:245-248`, so `validate` (through `_emit_gate`) and `validate config`
-   (through `_emit_result`) both show it and `gate_exit_code` applies `--fail-on-warning`.
-   Errors keep precedence, including the generate-table refusal. A `plan_scope` failure (a list
-   `exempt`, a generate-table scope) becomes one value-free config error finding, never an
-   uncaught exception; `run` gets the same finding through `cli/gate/_run.py:160-169`, with its
-   exit code pinned.
+   is `ValidatorFailedError`. Pass the same projection to the human branch at
+   `_result.py:437-438`. Print the Checks fact (including the failed count) and every entry on
+   normal stderr before cleanup. A ValidatorFailedError carrying a coherent passing report also counts as malformed.
+   A malformed failure report gets the fixed fallback on stderr
+   and in JSON (`reported: false`), still exit 3. JSON emits one document. Quiet keeps the
+   existing error and hint only.
+4. **OWNER CALL (recommended default chosen)**. Make the skipped-column advisory command-local.
+   Thread an explicit opt-in (default false) from only the two validate entry points through
+   their gate calls to the config layer. Plan each leak_check scope once there. Convert a
+   malformed scope (e.g. list-valued `params.exempt` or a generate table in entry-level
+   `columns`) to one fixed config error, without interpolating the exception. This error
+   applies to run as well. Only on opt-in, use the plan's explicit config skips to append
+   advisory GateFindings before rendering and exit calculation. Deduplicate repeated names
+   per entry. The passthrough message names the column and says the config keeps it.
+   Errors keep precedence. Leave both CI adapters, pre-commit and run on the default path
+   for advisories (`ci/adapters.py:119,138-151`, `ci/contracts.py:515`, `ci/runner.py:81-87`).
 5. Freeze: `write_shapes.py` types optional subtrees for `validation`; the success, exit-3 and
    `reported: false` variants nest under the one existing `run` entry (`test_json_shapes.py:132-136`);
    `json-shapes.json` and the optional-key list change in the same commit.
@@ -188,9 +209,9 @@ pattern.
 |---|---|---|---|
 | Validation reader and card lines | CLI `src/decoy/cli/run/_checks.py` | `decoy run` modules in `src/decoy/cli/run/`; package census entry | `_render.py`, `_result.py` |
 | Run card, JSON and error | CLI `run/_render.py`, `run/_errors.py`, `run/_result.py` | existing | |
-| Validate advisory | CLI `cli/gate/_layers.py` | existing | |
-| CLI tests | CLI `tests/unit/cli/run/test_run_checks.py`, `tests/unit/cli/test_validate_leak_scope.py` | new `tests/unit/cli/` tree per CLI `CODEMAP.md:50-52` | |
-| Engine targets and warnings | engine `validators/_types.py`, `validators/_fold.py`, `validators/_scope.py`, `execution/_pipeline.py` | existing | |
+| Validate advisory | CLI `cli/validate.py` and existing gate entry points and config layer in `cli/gate/` | existing command and shared gate | |
+| CLI tests | `tests/unit/test_run_checks.py`, `tests/unit/test_gate_leak_scope.py`; extend command, CI and project fan-out suites | CLI `CODEMAP.md:50-54` permits command units under `tests/unit/` and assigns gate units to `tests/unit/test_gate_*.py` | `tests/e2e/test_validate_gate.py`, `tests/e2e/project_layout/test_run_all.py` |
+| Engine targets and warnings | engine `validators/_types.py`, `validators/_fold.py`, `validators/_scope.py`, `validators/__init__.py`, `execution/_pipeline_finalize.py`, `execution/_pipeline.py` | existing | |
 | Engine tests | engine `tests/unit/validators/test_leak_check_skips.py` (extended), `test_validator_targets.py` (new) | `tests/unit/validators/` per engine `CODEMAP.md:286` | |
 
 ## Behavior and failure modes
@@ -199,52 +220,78 @@ pattern.
 |---|---|---|---|
 | Two passing checks, no report flags | `Checks  2 passed`, two entry lines | `validation.passed = true`, two results | 0 |
 | One entry checks `email`, skips `phone` | one line with both | `checked` and `skipped` | 0 |
-| Two `leak_check` entries, one fails on `customers.email` | error card names `#1 ... customers.email` only | error payload `validation`, targets on entry 1 only | 3 |
+| Two leak checks, #1 fails on customers.email | stderr includes `Checks  1 failed` and both entries, only #1 names email as failed | error payload validation, failed target on #1 only | 3 |
 | `fk_intact` with an orphan child | `#0 fk_intact failed orders` | target `{table: orders, column: null}` | 3 |
 | Quarantine-covered failure | `Checks  1 failed` on a success card | `passed = false` | 0 |
 | Passthrough column named in `columns:` | skip line, `Warnings 1` | `skipped`, warning `leak_check_column_not_checked` | 0 |
-| Named column in a table the run did not produce | one warning per named column | same | 0 |
+| Missing table with an explicit empty name and a nonempty name | table skip, two warnings | warning columns null and the nonempty name | 0 |
 | Default scope, a passthrough column | skip recorded, no warning | skip in `results[].skipped` | 0 |
 | No validators | no fact | no `validation` key | 0 |
-| Validators configured, explicit `--chunked` | refusal before any read or write; target bytes unchanged | refusal payload | existing refusal exit |
+| Validators configured, explicit `--chunked` | refusal before any source read or output write; target bytes unchanged | refusal payload | existing refusal exit |
 | Malformed, partial or mismatched block | `checks: engine did not report validator results` | `validation.reported = false` | 0 |
 | Two entries skip one column for different reasons | two warnings | two warnings, same in both channels | 0 |
 | Preview, passing and failing | as the full run | as the full run | 0 / 3 |
 | Forced out-of-core | as the default route | same | 0 |
-| `validate` and `validate config`, named passthrough column | advisory naming `customers.email` | finding in the JSON result | 0, or 2 with `--fail-on-warning` |
+| Both validate commands, named passthrough column | warning says the config keeps customers.email | finding in JSON | 0, or 2 with `--fail-on-warning` |
 | Same plus a config error | the error wins | error | as today |
-| List `exempt` or generate-table scope in `params` | config error finding | finding | as other config errors |
+| List in params.exempt or generate table in entry-level columns | fixed config error finding | finding | as other config errors |
+| CI validation (both modes) and pre-commit, otherwise clean kept-column fixture | existing success | no new advisory | 0 |
+| Run --all with one passing and one validator-failed child | aggregate summary | reports under pipelines[i].validation | existing aggregate exit 3 |
 
 ## Acceptance tests (red first)
 
-Engine reds run on the post-S3b main head. CLI reds run on the repinned pre-S4c head, not on CLI
-main (which pins 0.28.3, `pyproject.toml:153`). Each row is red-before or a pin.
+The post-S3b engine and repinned pre-S4c CLI heads are future dependencies. Red-before, pin
+and mutation expectations below are source judgments. Record actual base SHAs and outcomes
+when those heads exist. CLI main currently pins 0.28.3 (`pyproject.toml:153`).
 
-1. **V10e (engine, red-before).** Two named passthrough columns, one named column in an
-   unproduced table, and two entries skipping one column for different reasons: the warning
-   list in `ExecutionResult.warnings` equals the stamped list, each identity once, unrelated
-   warnings kept, on resident and forced out-of-core. Extends `test_leak_check_skips.py:169-187`.
-   Default-scope control (pin): none added.
+1. **V10e (engine, red-before except the stated pins).** Run real pipelines on resident and forced out-of-core routes. Use two
+   entries with identical passthrough skips, a repeated name within one entry, another named
+   column and a scope with `columns: {absent_table: ["", email]}`. Include the empty-only form
+   `columns: {absent_table: [""]}` as a separate run that produces exactly one null-column
+   warning. For the mixed case assert a passing run,
+   the table-level skip and separate warnings for null and email on the absent table.
+   Assert exact ordered identities: repeats within an entry collapse, matching skips across
+   entries survive. Compare serialized run warnings filtered by `leak_check_column_not_checked`
+   with the stamped validation warnings. Independently assert a seeded unrelated warning retains
+   its contents and order. Update the exact detail assertion at
+   `test_leak_check_skips.py:179` to include integer `entry_index: 0`. Pin the public helper's
+   original return shape and multiplicity, and absence of a default-scope warning.
 2. **V10t (engine, red-before).** Two `leak_check` entries (one fails on `email`) and one
    `fk_intact` entry with an orphan child: each result's `failed_targets` holds only its own
    targets; `fk_intact` has `{orders, None}`.
 3. **V11 card and JSON (CLI, red-before).** Each row of the table above, human and JSON, no report
-   flags. Error case: human stderr, one JSON document, exit 3; `--quiet` shows error and hint,
-   no check lines. Forced out-of-core asserts the route. Reader cases through both real forms
-   (the #812 `validation["validators"]` mapping and the dataclass), split: refused (fixed line)
-   for missing status, status `"ok"`, unknown code, bool and `"3"` counts, bool index, int
-   column, missing entry, duplicate index, name mismatch; accepted for an extra key and empty
-   lists. Controls that pass on the base (no validators, default scope) are pins.
+   flags where applicable. A real failed run prints `Checks  1 failed` and the per-entry lines
+   on normal stderr. JSON is one document, exit 3. Quiet shows only the error and hint.
+   Assert the forced out-of-core route. Through both a #812 stamped mapping and a dataclass,
+   exercise missing or invalid status, unknown code, bool and numeric-string (`"3"`) counts, bool index, int column,
+   missing/duplicate index and a same-length wrong name with all indices present. Reject
+   `passed=true` with a failed entry and `passed=false` with only passed/skipped entries.
+   Each rejection yields the fixed fallback with no pass summary and JSON `reported: false`.
+   On the error path also refuse an internally consistent passing report.
+   Accept a real FK checked pair (child table, null), extra keys and consistent empty lists.
+   No validators is a pin. For default scope the visible skip line and JSON skip are red-before,
+   and absence of a warning is a pin. Exercise `run --all` with pass and failure children:
+   assert each child's own `pipelines[i].validation` against its single-pipeline JSON, no
+   aggregate validation member, existing human table and summary exit.
 4. **V11x `--chunked` refusal (CLI, red-before).** A failing validator with an existing target:
    refusal exit, target bytes unchanged, no engine call.
-5. **V11k cleanup (CLI, pin).** A real validator failure abandons the layout; a sample refusal
-   deletes sample scratch.
-6. **V12 validate (CLI, red-before).** Both commands, human and JSON, exit 0 and 2 with
-   `--fail-on-warning`; a list `exempt` and a generate-table scope give a config finding on
-   `validate`, `validate config` and `run`. Pins: error precedence, default-scope no advisory.
-7. **V13c value-free (CLI, control).** A marker in every validated column and in a synthetic
-   `finding.detail` passed through the real emitter (`test_validator_value_free.py:81-87`). The
-   marker is in no card line, JSON member, warning or error payload.
+5. **V11k cleanup (CLI, pin).** Drive a real validator failure in normal human mode and
+   assert the pending layout was abandoned by the flow's finally. A sample refusal deletes
+   sample scratch.
+6. **V12 validate (CLI, red-before except the stated pins).** For each validate command assert the normal human warning names
+   customers.email and says it is kept, the JSON finding carries that explanation, and exits
+   are 0 by default and 2 with `--fail-on-warning`. Pin error precedence and default scope.
+   On the same otherwise-green config pin both CI validation modes with their default
+   fail-on-warning policy, pre-commit success and absence of the advisory from their findings.
+   Pin run's gate acceptance. Exercise malformed `params.exempt: [email]` and entry-level
+   `columns: {generated_table: [email]}` through validate, validate config and run; require
+   a fixed config finding and the existing config-error exit, including on JSON paths.
+7. **V13c value-free (CLI, marker absence is a pin).** Seed data columns with a marker. The engine test
+   `test_validator_value_free.py:81-88` covers report representation and logs. Separately
+   inject a ValidatorFailedError carrying a report with a marked finding.detail into the CLI
+   run error path, through `_errors.py:340-349` and the real stderr/JSON emitters. Assert exit
+   3, the expected structural check output and absence of the marker from the entire output,
+   including warnings and error text.
 8. **Shape freeze (CLI).** The snapshot types `/validation` under the `run` entry for the success,
    exit-3 and `reported: false` variants.
 
@@ -263,9 +310,9 @@ Mutations (all on the final head of their PR):
 | R9 | S4e | Drop the whole-table expansion | V10e unproduced-table case |
 | R10 | S4c | Read `_report_quality_metrics` instead of `_execution` | V11 no-report-flag case |
 | R11 | S4c | Drop the `--chunked` refusal | V11x |
-| R12 | S4c | Skip the configured-names match | V11 missing-entry case |
-| R13 | S4e | Warning identity without `reason` | V10e two-reasons case |
-| R14 | S4c | Remove the layout abandon call in the failure path | V11k |
+| R12 | S4c | Skip the configured-name comparison | V11 same-length wrong name with valid index coverage |
+| R13 | S4e | Drop entry_index from the identity | V10e identical skips in two entries, repeated name inside one |
+| R14 | S4c | Remove layout abandon in `run/_flow.py:227-230` finally | V11k normal human failure (JSON abandons earlier) |
 | R15 | S4c | Remove the sample scratch delete | V11k |
 | R16 | S4c | Let a `plan_scope` exception escape | V12 `exempt` case |
 
@@ -283,17 +330,20 @@ Mutations (all on the final head of their PR):
   `_flow.py:224-226`: no validation member.
 - `decoy validate` and `decoy validate config`: exit 0 with the advisory, 2 with
   `--fail-on-warning`; errors unchanged.
+- Fan-out uses existing child exit precedence. Child validation adds no parent exit path.
 
 ### Routes
 
 - Every `run_pipeline` route stamps one report after S3b. The CLI reads the block, not the
   route; V11 runs on the default route and on a forced out-of-core run.
-- Preview runs validators (`cli/gen/_preview.py:38-56`): same member.
+- Preview retains validators and calls the engine at CLI `run/_execute.py:525-537`.
+- Fan-out delegates from `run/_flow.py:131-132`; `cli/project/_run_all.py:125-129,170-174,221-236`
+  retains child JSON at `pipelines[i]` and renders a human summary table.
 - Explicit `--chunked` (`run_mask_chunked`, `run/_execute.py:420-437`): refused with validators.
 
 ### FK shapes
 
-N/A. The keyed validators' results show like any other entry; keys are not printed.
+Relationship checks carry a child table with a null column in checked or failed targets. Render the table name alone.
 
 ### Fields
 
@@ -305,13 +355,13 @@ N/A. The keyed validators' results show like any other entry; keys are not print
 | `results[].entry_index` | `ValidatorResult.entry_index` | int, not bool |
 | `results[].status` | `result_status` | one of three |
 | `results[].failing_row_count` | `ValidatorResult.failing_row_count` | int, not bool |
-| `results[].checked[]` | `ValidatorResult.checked` | table, column |
+| `results[].checked[]` | `ValidatorResult.checked` | table, column or null |
 | `results[].failed_targets[]` | `ValidatorResult.failed_targets` (new) | table, column or null |
 | `results[].skipped[]` | `SkippedColumn` | table, column or null, registered code |
 
 ### Output surfaces
 
-- Run card fact `Checks` and the lines under the card.
+- Single-pipeline run card fact `Checks` and the lines under the card. Fan-out reports stay in child JSON records.
 - `decoy run --json` member `validation` (success and error payloads).
 - Run `warnings` (engine `ExecutionResult.warnings`, CLI `warnings` array).
 - Human error card on stderr.
@@ -329,7 +379,7 @@ N/A. The keyed validators' results show like any other entry; keys are not print
 | 5 | Referential integrity | Skip codes are registered warning codes; the reader checks them against the engine registry | V11 skip case | Accept any string code: V11 red |
 | 6 | Untrusted producer | The engine block is parsed strictly (engine and CLI may run different pins) | V11 reader cases | R1, `int()` reader |
 | 7 | Check-then-use (toctou) | N/A: the metrics dict is read once after the run returns | none needed | N/A |
-| 8 | Weak tests | Each row marked red-before or pin; reds shown on the stated heads | builder report | R3, skip lines dropped |
+| 8 | Weak tests | Record observed reds and passing controls on the designated implementation bases | builder report | R3, skip lines dropped |
 | 9 | Refactor drift | `_render.py` keeps its facts and order; snapshot diff shows only the new paths | shape snapshot test | R10, wrong source |
 | 10 | Frozen contract drift | Generator, snapshot and optional-key list change together; contract names the warning and field with `Breaking:` lines | release-freeze shape test, typed on exit 0 and exit 3 | Remove the snapshot update: shape test red |
 
@@ -347,7 +397,7 @@ N/A. The keyed validators' results show like any other entry; keys are not print
 | 8 | One input, one trust class | The metrics block is engine output, treated as untrusted shape (cross-version) |
 | 9 | Mutations on the final head | R1 to R16, each on its PR's final head |
 | 10 | Allowlisted helpers still checked | N/A: no allowlist added |
-| 11 | No raised caps | No ceiling raised; CLI `_render.py` 239 to about 251 (package cap 600); engine `_pipeline_finalize.py` untouched by S4e (527 on #812) |
+| 11 | No raised caps | Register the CLI reader in the package census. Edit the existing engine warning writer (527 lines on #812) within its existing cap |
 
 ## Reuse inventory
 
@@ -357,6 +407,8 @@ N/A. The keyed validators' results show like any other entry; keys are not print
   payload in `_errors.fail`, the shape snapshot.
 
 ## Frozen contracts
+
+- Stamped validation warnings gain integer `detail.entry_index`. Document the additive detail key, the null warning column for an empty name, and the per-entry warning multiplicity.
 
 - CLI `decoy run --json`: new optional `validation` member (success and error). Additive.
 - CLI `decoy run --chunked` with validators: now refused (it ran with no checks before).
@@ -373,9 +425,9 @@ N/A. The keyed validators' results show like any other entry; keys are not print
   V11x, V11k, V12, V13c, shape freeze; the other R mutations. After the engine release and the CLI repin (repin checklist: compat, fences, frozen
   files, docs, pin prefix, Dockerfile ARG, catalog).
 
-Test depth: T0 per edit; T1 impact selection. Both PRs touch a frozen surface (`dev-rules/testing.md:84-87`):
-S4c the `--json` shape, S4e `ExecutionResult.warnings` and `ValidatorResult`. Each gets one full
-suite at merge, diffed against the stored main baseline (CLI `gates.sh --full --baseline-file`).
+Test depth: T0 per edit and T1 impact selection. Both PRs touch frozen surfaces. Run each
+full suite **before the merge gate** and compare with its stored main baseline (CLI
+`gates.sh --full --baseline-file`, `dev-rules/testing.md:84-88`).
 
 ## Pre-mortem
 
@@ -399,27 +451,14 @@ suite at merge, diffed against the stored main baseline (CLI `gates.sh --full --
 - Do not edit the CLI half before the repin lands on CLI main.
 - `ruff check`, `ruff format --check`, `mypy` before each commit. CHANGELOG entries in both repos.
 
-## Round 3 review: open findings
+## Round 4 resolution
 
-Codex round 3 (the last review round) gave GO-WITH-FIXES. The findings below are quoted from that
-review and are not yet folded into the plan above, except where a note says so. The builder
-or the next planner resolves each one, checked against the cited lines on the re-anchored
-base, before code starts.
-
-1. P1 V1: The validate advisory changes CI and pre-commit exits. S4:57-58,163-169 promises only one new refusal. Both CI validation modes consume the shared gate, and `fail_on_warning` defaults to true. A previously green pipeline that names a kept column can now fail CI and pre-commit. Keep the advisory in the two validate commands, or explicitly document and test the CI change. CLI `ci/adapters.py:119,138-151`, `ci/contracts.py:515`, `ci/runner.py:81-87`.
-
-2. P1 DESIGN: The warning writer still loses entry identity. S4:116-123 requires `entry_index` for deduplication, but S4:350 leaves the writer untouched. Engine `validators/_scope.py:215-223` drops the index, and PR #812 `execution/_pipeline_finalize.py:370-387` serializes only table and reason in `detail`. Preserve the public skip helper’s return contract, carry the index into the warning builder, and deduplicate there before either channel consumes the records. Update the exact detail assertion at `tests/unit/validators/test_leak_check_skips.py:179`. The writer is 527 lines on #812, so this needs no size-pin increase.
-
-3. P1 V1: Whole-table expansion can turn a passing run into an exception. S4:113-115 expands every explicit column. Engine `config/_validators.py:75-77` accepts `columns: {absent_table: [""]}`, and `validators/_scope.py:161-171` retains it. The current table skip at `validators/_leak_check.py:187-192` succeeds, but constructing the new `QualityWarning(column="")` raises at `generation/pool/_events.py:75-76`. Define the representation for this input or reject it during config validation with a fixed error. Test the real run boundary.
-
-4. P1 V1: A malformed report can still display a pass. S4:135-149 checks names, indices and individual field types, but permits `passed=true` alongside a failed entry. It also leaves `checked.column` ambiguous at S4:308, although a valid FK check emits `(child_table, None)`. Reject contradictory aggregate and entry verdicts through both producer forms, and explicitly accept null checked columns. Engine `validators/_fold.py:103-117`, `validators/_types.py:85-90`, `validators/_fk_validators.py:343-353`.
-
-5. P1 V1: Two required human outputs lack acceptance assertions. Parent:283 requires the `Checks 1 failed` summary, and parent:284 requires validate to explain that the column is kept. S4:159-165,202,214,231-244 can pass with an entry line and a bare column name. Assert the failed count on normal stderr and the readable skip reason in both validate commands. CLI `run/_result.py:437-438`, `cli/validate.py:244-249`.
-
-6. P2 V2-LOG: Three mutations can survive their named tests. At S4:266, R12 needs the same-length name-mismatch fixture at S4:236, since index coverage independently rejects a missing entry. At S4:267, R13 leaves `entry_index` in the key, so two entries still produce two warnings. Mutate away the index and use identical skips across entries, with a repeated column inside one entry as the dedup control. Engine `validators/_fold.py:100-109`, `validators/_leak_check.py:104-108`. At S4:268, run R14 in human mode against the `finally` call because JSON also abandons the layout at CLI `run/_errors.py:315-316` before `run/_flow.py:227-230`.
-
-7. P2 V2-LOG: Tighten the red-before claims. S4:223-227 compares the entire warnings tuple with the stamped validation-only list while requiring unrelated warnings to survive. Compare serialized validation warnings and assert unrelated warnings separately. At S4:231-237, only the *absence of a default-scope warning* is a pin. The card line and JSON skip at S4:207 are red-before. Engine `execution/_adapter.py:71-72`, PR #812 `execution/_pipeline_finalize.py:384-387`, CLI `run/_render.py:117-153`. The post-S3b and repinned pre-S4c heads are future dependencies, so the reds and mutation outcomes here are source judgments, not observed runs.
-
-8. P2 V2-LOG: Correct the remaining citations and fixture instructions. S4:26’s main warning helper ends at `execution/_pipeline_finalize.py:376`. S4:192’s CLI `CODEMAP.md:50-54` permits `tests/unit/` and assigns gate tests separately. S4:216’s generate scope belongs in top-level `columns`, per `validators/_scope.py:161-166`. S4:246’s engine test checks report representation and logs, not a CLI emitter (`test_validator_value_free.py:81-88`), so inject the marked report through CLI `run/_errors.py:340-349`. S4:291’s preview engine call is at CLI `run/_execute.py:525-537`. At S4:376-378, schedule the full suite before the gate, as `dev-rules/testing.md:84-88` requires.
-
-9. P2 V2-LOG: Qualify the `run --all` guarantee. S4:36-40,274-292 omits fan-out. Child JSON carries the new member, but aggregate human output shows only pipeline, exit and folder. Specify that the card guarantee covers single-pipeline invocations and pin the nested JSON location. CLI `run/_flow.py:131-132`, `cli/project/_run_all.py:125-129,170-174,221-236`.
+1. **V1** — Only the two validate commands opt into advisories. V12 pins CI and pre-commit exits.
+2. **DESIGN** — Indexed scope traversal feeds one deduplicating warning writer. V10e checks its exact detail and both channels.
+3. **V1** — Empty explicit names project to null warning columns. V10e exercises an absent table through run_pipeline.
+4. **V1** — Both report forms must agree with their entry verdicts. V11 covers both contradictions and a valid null FK column.
+5. **V1** — V11 requires the failed count on stderr. V12 requires both commands to explain that the column is kept.
+6. **V2-LOG** — R12 targets name matching, R13 targets index loss and R14 targets human-mode cleanup.
+7. **V2-LOG** — V10e compares validation warnings separately. V11 distinguishes new default-scope output from the warning pin. Base and mutation outcomes await the implementation heads.
+8. **V2-LOG** — Corrected writer, CODEMAP, fixture, emitter and preview references. Full suites precede the merge gate.
+9. **V2-LOG** — The card guarantee covers single pipelines. V11 pins fan-out child JSON and the human summary.

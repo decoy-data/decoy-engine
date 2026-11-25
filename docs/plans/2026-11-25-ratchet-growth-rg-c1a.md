@@ -70,7 +70,7 @@ Non-goals:
   port is rejected. CLI `load_allowlist` (`tests/sentry/_ratchet.py:95-100`) opens files itself.
 - CLI `max_raised` (`:175`) is the bound comparison; the engine inventory split calls
   `r.bound_loosened` (`_integrity.py:389-396`), which the CLI does not have.
-- CLI vendoring census: `test_ci_lock_installs.py:507` counts rows (6 today);
+- CLI vendoring census: `test_ci_lock_installs.py:507` counts five mirrors; the preceding assertion checks vendored paths separately;
   `test_vendored_files.py:36-45,48-67` keys pins on bare names.
 - Pre-`kind` CLI base `91380fdf`: populated registry rows with no `kind` (registry `:5-15`).
 
@@ -87,32 +87,50 @@ Non-goals:
    - `_integrity.py`: a `[[mirror]]`. Header differences: the decision check is passed in (the
      CLI loads `is_dated_owner_decision`), the row schema is passed in, and the bound comparison
      is passed in: the CLI binds the inventory-split transfer check to `max_raised` and passes
-     no per-site handler (the CLI has no `sites` bounds). Control:
+     no engine per-site re-key handler. CLI `max_raised` compares numeric `sites` ceilings. Control:
      `test_ratchet_check.py:148-155` keeps passing. `MANIFEST` already matches
-     (`_integrity.py:28`). No other difference.
+     (`_integrity.py:28`). Extend the existing AST manifest reader with a base-side
+     selector. Read the current literal `OUTSIDE_SENTRIES` first. Only when that binding is
+     absent on BASE, accept the historical top-level `SENTRIES = (...)` tuple of string
+     literals. Use the same literal decoder and union the outside entries with the tracked
+     files selected by `is_sentry_glob`. Keep the existing presence, rename and retirement
+     checks. Reject a malformed binding, including a malformed current binding alongside
+     a valid old tuple. HEAD always requires the current form when a manifest is present.
    - `test_reader_guard.py`: ported with its scanner split into two functions so each is under
      C901 10; the ported file passes `lintdebt.py` with no new file and rule pair. CLI
      `load_allowlist` reads through the shared `open_input` reader, so the guard has no CLI
      exception.
+     At the public `load_allowlist` boundary, translate `InputReadError` from either read to
+     a fixed `ValueError` raised after the handler. Map proven absence to `FileNotFoundError`.
+     This preserves the handled exit in `lintdebt.py:150-155` and leaves the checker’s
+     side-specific read findings intact.
    - `layout/_ratchet_cases.py`: re-vendored from the engine so it carries
      `REGISTRY_PATH_CASES`; update its digest and source commit; export the new table from
      `layout/__init__.py`.
-   - `test_ci_lock_installs.py:501-508`: add the new vendored path; the row count at `:507`
-     becomes 7 and the mirror count goes from 5 to 6.
+   - `test_ci_lock_installs.py:501-508`: add `tests/sentry/ratchet/_base_run.py` to
+     the exact vendored-path set. Register both `tests/sentry/ratchet/_integrity.py` and
+     `scripts/dev/ratchet_check.py` under `[[mirror]]`, increasing the mirror count from
+     five to seven. Record upstream paths, commit and engine blob digests. Within the first
+     1,500 characters of each mirror include the engine path and a “Differences” header
+     documenting its CLI adaptations (including the legacy manifest or archive and slice flags).
    - `test_vendored_files.py:36-45,48-67`: the pin checker keys on repo-relative paths, checks
      that the ledger source commit equals the pin's, and its fixture creates parent directories.
    - Exports and fixtures: `tests/sentry/ratchet/__init__.py:3-5` and `ratchet/conftest.py:3-5`
-     are added from the engine; the `test_gate_pins` import (line 630) and the glob guard
-     (`607-613`, against `_ci_lanes.py:105-110`) are adapted to the new group.
+     are added from the engine; the line 630 gate-pins test targets the CLI’s `tooling/_ci_lanes.py:105-110`
+     directory scan. Replace its duplicate filename glob and the manifest glob
+     (`test_sentry_manifest.py:35-40`) with the ratchet package’s public predicates.
+     Keep the lane search recursive and require a real file. The guard at 607–613 scans both sites.
 3. `tests/sentry/_ratchet.py` (+30, to about 372): `_helper(name)` loads by path; `check()`
    builds `BaseTree` once, reads both sides through `Side` (regular-file check before open, so
    a FIFO is a finding, not a hang), and calls `closed_keys` with the CLI row schema: `id`,
-   `baseline`, `kind` required; `kind` in `KINDS`; `consumer` required on `json` and refused
+   `baseline`, `kind` required; `kind` a string in `KINDS`; `consumer` a nonblank string on `json` and refused
    otherwise; `approved_growth` optional. The strict read from the engine replaces the lenient
    parser on both sides: ids must be strings, `entries` must be present, `count` and `sites` are
    non-bool ints, and the `moved_from` map is kept. `safe_path` replaces `startswith`.
    Older base schema: a base registry whose rows have no `kind` key at all (CLI `91380fdf`) is
-   read with the pre-`kind` schema; that is recognized only when no row on that side has `kind`.
+   read with the pre-`kind` schema; that is recognized only when no row on that side has `kind`. A mixed base fails on its missing kind.
+   Preserve the historical comment-only bootstrap registry with no inventories at `7860d26b`;
+   an empty or whitespace-only tracked registry still fails.
    HEAD is always validated strictly.
    `max_raised`, `move_findings`, `created_in` and `--slice` stay. The new signature takes
    `slice_name` and `waiver_input` as keywords only, so a positional call cannot swap them.
@@ -135,14 +153,15 @@ Non-goals:
    `ratchet_check.py --with-base --base <sha>`. The gate passes `label` with the RG-E3 four
    cases, the RG-E3 failure marker, and replays decision and waiver lines from the step log to
    gate stderr on a pass (today `gates.sh:291-296` prints the tail only on failure). `ci.yml`
-   keeps its step-level `if: github.event_name == 'pull_request'`.
+   keeps its step-level `if: github.event_name == 'pull_request'`. The same full-history
+   job owns the historical and live controls described in Pre-mortem.
 8. `CODEMAP.md` row "Sentry test" (`CODEMAP.md:73`): add the `tests/sentry/ratchet/` group.
    CHANGELOG entry.
 
 Choke point: `_ratchet.check()` is the one reader of the registry and baselines on both sides;
 `closed_keys` is the one row-schema check, also used by the registry test. Guard:
 `test_cli_integrity_rejects_invalid_kind_or_consumer` runs the checker. Mutation: drop the
-`kind` rule from the schema; the guard and the registry test both fail.
+`kind` rule from the schema; the missing-kind case in test 1 must fail when the mutant accepts that row.
 
 Design notes: no new abstraction. The established pattern is the repo's own vendoring ledger.
 Each fact has one home: the row schema in CLI `_ratchet.py`, the kinds in `KINDS`, the decision
@@ -153,7 +172,8 @@ grammar in `release_identity.py`, the archive list in `ratchet_check.BASE_ARCHIV
 | New or changed | Path | CODEMAP rule (`CODEMAP.md:73`) | Sits beside |
 |---|---|---|---|
 | Ratchet helpers | `tests/sentry/ratchet/_integrity.py`, `_base_run.py` | `tests/sentry/<group>/`, helper `_<name>.py`; pinned in `ci/vendored.toml` | `tests/sentry/layout/_ratchet_cases.py` |
-| Tests | `tests/sentry/ratchet/test_integrity.py`, `test_malformed_registry.py`, `test_base_run.py`, `test_baseline_types.py`, `test_reader_guard.py` | `tests/sentry/<group>/test_<rule>.py`, each under 600 lines (parent lines 985-986) | |
+| Package exports and fixtures | `tests/sentry/ratchet/__init__.py`, `tests/sentry/ratchet/conftest.py` | sentry group public API and group-scoped fixtures | ratchet helpers |
+| Tests | `tests/sentry/ratchet/test_integrity.py`, `test_integrity_base.py`, `test_malformed_registry.py`, `test_base_run.py`, `test_baseline_types.py`, `test_reader_guard.py` | `tests/sentry/<group>/test_<rule>.py`, each under 600 lines (parent lines 985-986) | |
 | Checker, gate, CI | `tests/sentry/_ratchet.py`, `scripts/dev/ratchet_check.py`, `scripts/dev/gates.sh`, `.github/workflows/ci.yml` | existing files (`CODEMAP.md:76`) | |
 
 ## Behavior and failure modes
@@ -186,56 +206,111 @@ grammar in `release_identity.py`, the archive list in `ratchet_check.BASE_ARCHIV
 
 Tags: `red-before` fails on CLI main on its assertion; `pin` passes on main. The red run uses
 the RG-E3 plain-command fallback, since main's parser refuses `--with-base`; an argparse error
-is not red evidence. The FIFO probe opens with a 5-second test timeout.
+is not red evidence. Run each FIFO probe in a subprocess with a five-second deadline. Catch timeout in the driver and fail the bounded-completion assertion.
 
-Ported from the engine (RG-E1, RG-E2's type and reader-guard suites, RG-E3), on CLI temp repos
-with valid CLI rows (`kind = "from_scan"`, or `kind = "json"` plus a `consumer`). Each ported test
-is listed with its class on CLI main: red-before, pin, or CLI-specific pin (an engine case whose
-CLI answer differs by the CLI decision grammar; the CLI answer is asserted). The case table is
-the re-vendored `layout/_ratchet_cases.py`.
+Ported from the engine (RG-E1 including its type and reader-guard suites, and RG-E3), on CLI temp repos
+with valid CLI rows (`kind = "from_scan"`, or `kind = "json"` plus a `consumer`). Use the following classification on
+CLI main. Line numbers identify the original test definitions in the #801 snapshot. A class
+covers all parameters of that definition unless the row gives exceptions. “Pin” includes
+a test-only scanner checking seeded source. Its passing result proves no product change.
+
+| Source | Expected pins on CLI main | CLI-specific expectations | Red-before |
+|---|---|---|---|
+| RG-E1 `test_integrity.py` | 102, 108, 141, 176, 181, 222, 265, 284, 326, 369, 391, 399, 418, 434, 521, 616, 621, 658 | 168: dated `short text` passes, `todo` requires a retirement diagnostic (red-before). 376: missing `created_in` refused even on an existing inventory. 541 and 652: grammar pins below. | All remaining definitions, including the live duplicate-glob guard at 607. For 629 exercise the CLI lane directory scan with a directory named `test_y.py`. For 533 assert the manifest actually calls the shared predicate as well as comparing membership. |
+| RG-E1 path table (308) | Plain and nested files, absolute, sibling, outside, directory itself, empty path | Run the public registry parser against each path and assert the path-specific result, independently of file existence. | Both dotdot cases, backslash, trailing slash, dot segment, doubled slash |
+| RG-E1 `test_malformed_registry.py` | 327, 427. In 168 pin duplicate id, shared path, approval item int, approval key list, missing decision and stale approval key (the overwritten first path in the duplicate-row fixture is red-before). In 255 pin wrong string id and one-character reason. | 84: both padded dated decisions pass. In 168/181 isolate the ten-character and padded decision cases with an existing key and otherwise valid registry on both sides. Pin acceptance. | All other definitions and parameters. At 73 require the field-specific finding as well as one line, including for missing/empty ids and non-list approvals. |
+| RG-E1 `test_baseline_types.py` | Valid fields at 71 | In 52 pin the existing CLI diagnostic for numeric `created_in`. | Remaining wrong-type HEAD cells at 52 and every repaired-HEAD/bad-BASE cell at 61. Include bool, quoted integer and float for CLI `count` and `sites`. |
+| RG-E1 `test_reader_guard.py` | 103 and every seeded spelling, ownership and module-discovery case (144–202) | Use the same scanner on CLI sources. | 99, which sees the current independent baseline and registry reads. |
+| RG-E3 `test_base_run.py` (RG-E3 numbered cases) | 26, 27, 28a | For 19 edit an unloaded CLI test helper. For 22 seed the old CLI plain parser locally. For 23 prove the standalone child-only option actually applies a valid waiver. | 1–25 including 6r and 23. CLI main, unlike #801, lacks the base listing, SHA validation and waiver flag for 7, 13 and 23. Use child invocation evidence for the clean 28b/c runs in the full-history job. |
+
+At 541 test baseline reasons and dated decisions independently. For `"x" * 14` require
+the CLI baseline reason finding and acceptance of the decision with the same reason.
+At 15 characters and for the long reviewed reason both pass. For `todo` and `n/a` both
+fail. At 652 all three dated strings pass the CLI growth check. Keep coverage of a
+calendar-invalid date and a trailing newline through the shipped decision function.
+Preserve both existing contracts.
+
+For the red run overlay only tests, fixture writers, and the pinned case data on CLI main.
+Import fixtures from the CLI harness. Stage the data-only layout export before collection.
+Keep the new ratchet package initializer empty in this tests-only overlay; move imports of
+new checker exports out of module scope. Exercise new rules through the existing script or
+parser. For structural ownership tests, inspect source or compare the callable via a guarded
+lookup with an explicit assertion, then test its behavior on the final head. For the injected
+error at malformed-registry line 346, inject at a parser boundary present on both revisions.
+Keep collection independent of new checker helpers. Do not copy the implementation into the
+old checker or substitute a passing implementation. First run pytest collection for every
+ported node on CLI main. Use a test-driver-only plain invocation when either new flag is
+unsupported. For cases that require a patched base helper or waiver-aware base, seed a
+self-contained capable base in the scratch history independently of the old launcher under
+test. Collect the actual child argv/status at the invocation boundary. Success alone cannot
+distinguish the plain fallback. For FIFO cases bound the subprocess and assert a specific
+regular-file finding on the final head. Treat the full-history 28b/c success controls as final-head verification unless their tests-only fallback demonstrably misses the required child. Record each node id, parameters, actual assertion and
+result. Correct any predicted class that differs on the re-anchored main; collection errors,
+unavailable fixtures, parser usage errors and skips supply no red evidence.
 
 CLI-only:
 
-1. `test_cli_integrity_rejects_invalid_kind_or_consumer` (red-before).
+1. `test_cli_integrity_rejects_invalid_kind_or_consumer` (red-before). Vary one field in
+   an otherwise valid HEAD row: omit kind, use an unknown or non-string kind, omit or mistype
+   a JSON consumer, or add a consumer to a scan row. Assert its schema diagnostic.
 2. `test_checker_path_is_a_directory_in_base_fails` (red-before).
 3. `test_base_run_loads_release_identity` (red-before): a head edit to `release_identity.py`
    that accepts any reason cannot change the base decision check. Asserts the base decision
-   diagnostic text. The passing control uses a valid decision with the file unchanged.
+   diagnostic text for an invalid date on an otherwise valid growth approval. Prove the edited
+   HEAD alone passes. Before mutation the same archive with a valid decision passes.
 4. `test_ci_runs_base_checker_on_pull_requests` (red-before): parse `ci.yml`.
 5. `test_vendored_ratchet_helpers_match_their_pins` (red-before): asserts the file exists before
    hashing it, then the digest equals the pin and the ledger row.
 6. `test_live_cli_registry_kinds_and_consumers_pass` (pin).
 7. `test_new_baseline_without_created_in_fails` (pin, `_ratchet.py:274-275`).
-8. `test_base_before_release_identity_runs` (red-before): base `7860d26b`; asserts the child ran
-   (invocation record) and its exit.
+8. `test_base_before_release_identity_runs` (red-before): seed the `7860d26b` layout
+   locally, including its comment-only registry, literal manifest and all three `tests/unit/` files: `test_cli_surface.py`, `test_surface_docs_consistency.py` and
+   `test_no_dead_command_strings.py`.
+   Commit a plain-only checker without a release-identity import and omit that dependency.
+   Commit a current-form HEAD with the same sentries and a valid first inventory. Assert a
+   single plain child invocation, status 0 and no base-read finding. With either historical
+   fixture, parameterize the three outside paths. Remove one entry from the committed HEAD list while keeping its file.
+   Require the removal finding naming that path.
 9. `test_schema_waiver_reaches_the_child_by_keyword` (red-before): asserts the child ran and
    printed its exact waiver line.
 10. `test_wrong_slice_caught_by_base_with_head_disabled` (red-before): asserts the slice
     diagnostic text from the child.
 11. `test_decision_lines_shown_on_a_passing_cli_gate` (red-before, through the gate harness).
-12. `test_pre_kind_base_registry_reads` (red-before): base `91380fdf`; HEAD with a missing
-    `kind` still fails.
-13. `test_shared_bound_uses_max_raised` (red-before): an inventory split that raises a CLI
-    `max` is caught through `max_raised`.
+12. `test_pre_kind_base_registry_reads` (red-before): seed the populated pre-kind rows, matching baselines and
+    original `91380fdf` literal manifest (including its additional internal sentry). Commit a
+    current-schema HEAD over that base. Require a successful plain child. Removing HEAD
+    `kind` fails the row check. A committed literal-only HEAD manifest fails, and a dynamic
+    legacy base tuple or malformed modern base binding fails before child invocation.
+13. `test_shared_bound_uses_max_raised` (pins). Keep the raised numeric control at
+    `test_ratchet_check.py:383-397`. Also transfer one key from one removed donor
+    (`max=5`) to its sole successor (`max=4, sites=1`). Require the split's
+    “raised or dropped max” finding naming the key. The same transfer with only `max=4` passes.
+14. In the existing lint-debt scratch project run normal mode with a working Ruff. Pin a
+    successful baseline read, then independently corrupt the registry and the registered
+    baseline with invalid UTF-8. Each command exits 2 with the handled “could not read”
+    diagnostic and no traceback or input contents. Keep the successful `--init` setup.
 
-Adapted existing tests: `test_integrity.py:376-379` and `test_baseline_types.py:35,51-57` assert
+Adapted existing tests: the missing/non-string `created_in` cells in `test_integrity.py:376-379`
+and `test_baseline_types.py:35,51-57` assert
 the CLI refusal text from `test_ratchet_check.py:217-220`. The engine `test_integrity.py` (686
 lines) is split in the port into `test_integrity.py` and `test_integrity_base.py`, each under
-600 lines.
+600 lines. The split requires no module-size baseline change. Drop the engine-only S603/S607 suppressions at `test_integrity.py:59,400,476`
+and `test_malformed_registry.py:489-490` in the CLI ports. Run CLI Ruff (including RUF100),
+format and lintdebt on the final split files with the existing configuration.
 
 Fixture updates (not new tests): the row writers at `tests/sentry/test_ratchet_check.py:46-47,180,483,561`
 emit a valid kind; `tests/sentry/cli_text/test_error_emitter_ratchet.py:22` gets
 `kind = "from_scan"`; `tests/sentry/test_lint_debt.py:50-52` copies `_ratchet.py`, the
 `tests/sentry/ratchet/` group and `tests/sentry/_baseline_sources.py` (the `KINDS` source) into
-its scratch tree, and the fixture's `--init` run reaches its success assertion.
+its scratch tree, and test 14 exercises the loader after the fixture's successful initialization.
 
 Mutations (run on the final head, results recorded):
 
 | ID | Mutation | Test that must fail |
 |---|---|---|
-| C1 | Drop the `kind` rule from the CLI row schema | negative case of 1 and the registry test |
+| C1 | Admit an absent `kind` in the CLI HEAD row validator | missing-kind negative in 1 |
 | C2 | Restore `startswith` for baseline paths | ported path test |
-| C3 | Leave `release_identity.py` out of the archive list | 3 (base decision diagnostic, control passes) |
+| C3 | Leave `release_identity.py` out of the archive list | 3 loses the child’s decision diagnostic because its import fails; the valid control must pass on the unmutated head |
 | C4 | Remove `--with-base` from `ci.yml` | 4 |
 | C5 | Restore the unconditional `[ -f ... ]` skip in `gates.sh` | ported missing-checker test |
 | C6 | Edit one byte of `_base_run.py` | 5 |
@@ -246,8 +321,10 @@ Mutations (run on the final head, results recorded):
 | C11 | Drop the pass-time replay in `gates.sh` | 11 |
 | C12 | Do not forward `--slice` to the child | 10 |
 | C13 | Apply the pre-`kind` schema to HEAD too | 12 |
-| C14 | Use a plain `>` in place of `max_raised` in the split check | 13 |
-| C15 | Key vendored pins on bare file names | 5 |
+| C14 | Compare only numeric `head.max > base.max` in the split transfer | 13 loses its split finding for 5 → 4 plus new `sites` |
+| C15 | Key vendored pins on bare file names | 5 (require the full repo-relative keys) |
+| C16 | Discard outside entries in the legacy BASE branch, then independently enable that branch on HEAD | 8/12 lose the named removal or accept the literal-only HEAD |
+| C17 | Let the reader exception escape `load_allowlist` | 14 loses the handled exit 2 |
 
 ## Enumerations
 
@@ -322,7 +399,7 @@ N/A. Only repo files and git objects; no keyed data.
 | 6 | Private modules | Helpers load by path; no private engine import |
 | 7 | No hidden CI failures | The CI step keeps its PR condition and gains no `continue-on-error`; the only skip is proven absence |
 | 8 | One input, one trust class | N/A: repo files only |
-| 9 | Mutations on the final head | C1 to C15 rerun after the last code change |
+| 9 | Mutations on the final head | C1 to C17 rerun after the last code change |
 | 10 | Allowlisted helpers still checked | `_base_run.py` is pinned by digest, so an edit fails, not passes |
 | 11 | No raised caps | No ceiling raised; `_ratchet.py` about 372; the CLI 800-line cap excludes tests (`layout/test_module_size.py:19-30`), so ported tests follow the parent's 600-line rule per file; `test_ratchet_check.py` (565) takes no new tests; `lintdebt` baseline not raised; CLI CHANGELOG (876 lines) net-zero |
 
@@ -338,7 +415,7 @@ N/A. Only repo files and git objects; no keyed data.
 ## Frozen contracts
 
 None. The CLI command surface, `--json` documents and release freeze files do not change.
-`ci.yml` changes one command line in an existing step.
+`ci.yml` updates the PR checker and runs the history-dependent acceptance controls in the same full-history job.
 
 ## Slices
 
@@ -358,8 +435,19 @@ selection per commit. Triggers: CI config and test tooling, so one full CLI suit
   lands first; the CLI never forks `_base_run.py`.
 - `test_lint_debt.py` scratch tree misses a helper and fails for the wrong reason. The fixture
   update copies the whole `tests/sentry/ratchet/` group.
-- The CI checkout lacks the PR base commit. `ci.yml` already fetches what `--base` needs today;
-  the builder confirms `fetch-depth` on the job before review.
+- The unit/sentry matrix uses a shallow checkout (`ci.yml:112-122`). Tests 8 and 12
+  embed the original literal declarations as test data, seed all named files, and pass SHAs
+  returned by commits in their own fixture. They never resolve an upstream SHA or fetch.
+  In the separate `shape-changelog` job (`:270-285`, `fetch-depth: 0`), exercise the two
+  literal CLI bases against controlled descendants: use a temporary checkout of each original
+  tree, retain its files and inventories, update its manifest and rows to current form, and
+  add a valid first inventory for the comment-only base. Commit the descendant before
+  invoking the port launcher with `--root <that checkout> --with-base --base <original sha>`.
+  The membership reader compares the two committed manifests. Run RG-E3 case 28a plain on the live tree, 28b once on the port PR against its fixed CLI base, and 28c with the actual PR merge base. Require
+  exit 0 on the clean controls and fail on a missing ref or merge base. Keep tests 8 and 12 as the permanent fixed-history
+  coverage and 28c as the recurring live check. Do not compare future PRs cumulatively to
+  the port anchor. Invoke these as explicit full-history
+  steps with step-level PR guards, outside ordinary pytest discovery.
 - A long-open CLI branch merges after this slice and fails the base run because of a new key.
   That is the intended result; the branch rebases.
 
@@ -368,35 +456,22 @@ selection per commit. Triggers: CI config and test tooling, so one full CLI suit
 - Commit messages: Conventional Commits subject, 72 characters or fewer, no body unless it says
   why, last line `cam`. No trailers, file lists or test counts.
 - Test depth as in "Slices"; use `~/bin/pytest-one`.
-- Never raise a module-size ceiling or the fan-out cap. New tests go in `tests/sentry/ratchet/`,
-  not in `test_ratchet_check.py`.
+- Never raise a module-size ceiling or the fan-out cap. Put new ratchet suites in
+  `tests/sentry/ratchet/`. Extend the existing lint-debt and vendoring suites for their own contracts.
 - Builders never write owner decision rows; empty tables only.
 - Run each red-before test on CLI main first and record the failure; pins are not red evidence.
 - Lint own edits: `ruff check`, `ruff format --check`, `mypy` before each commit.
 - CHANGELOG entry before merge, net-zero in length.
 - Stop and report if the same defect class comes back after a fix.
 
-## Round 3 review: open findings
+## Round 4 resolution
 
-Codex round 3 (the last review round) gave NO-GO. The findings below are quoted from that
-review and are not yet folded into the plan above, except where a note says so. The builder
-or the next planner resolves each one, checked against the cited lines on the re-anchored
-base, before code starts.
-
-1. P0 V1: Both historical bases fail before the child runs. Plan lines 91-92, 173-176 and 209-217 account for the old registry and archive layouts, but both commits declare `SENTRIES` in `tests/sentry/test_sentry_manifest.py:24-45`. I ran #801’s `outside_sentries` on both blobs. It returned `None` each time, which raises `BaseReadError` at `tests/sentry/ratchet/_integrity.py:423-434,470-472`. Teach the base-side manifest reader the historical literal `SENTRIES` format, preserving its outside paths and strict HEAD validation. Exercise both original manifest shapes.
-
-2. P1 V1: The test job lacks the history required by tests 8 and 12. Plan lines 209-217 and 361-362 rely on named commits. CLI `.github/workflows/ci.yml:112-122` runs the sentries in a shallow checkout. The full-history checkout at lines 270-273 belongs to a different job, and `tests/sentry/test_ratchet_check.py:56-63` creates a separate repository. Seed representative commits in that scratch repository. Run any literal-SHA and live-merge-base checks in the full-history job, including the port of RG-E3 lines 217-221.
-
-3. P1 V1: The vendoring census still gives conflicting instructions. Plan lines 73 and 100-101 say six mirrors today and five becoming six. CLI `tests/sentry/test_ci_lock_installs.py:501-508` asserts exactly five mirrors. `_integrity.py` and the launcher at plan lines 87 and 128 bring that to seven. Register both mirrors with their required headers, set line 507 to seven, and add `_base_run.py` to the separate vendored-path set.
-
-4. P1 V1: The shared reader changes `lintdebt`’s failure exit. Plan lines 93-96 route `load_allowlist` through `open_input`. Invalid UTF-8 now raises `InputReadError`, outside the exceptions caught by CLI `scripts/dev/lintdebt.py:150-155`, so the command produces a traceback and exits 1 instead of its handled exit 2. The `--init` check at plan line 230 returns before the loader runs. Preserve the handled error at the loader boundary and test invalid UTF-8 in normal mode. See #801 `tests/sentry/ratchet/_integrity.py:106-111,172-188`.
-
-5. P1 V1: One engine assertion contradicts the preserved CLI decision grammar. Plan lines 43-46 identify the weak-decision examples, but #801 `tests/sentry/ratchet/test_integrity.py:540-546` separately requires baseline reasons and decisions to agree for a 14-character reason. CLI `tests/sentry/_ratchet.py:143-151` rejects that baseline reason, while `src/decoy/distribution/release_identity.py:38-41,58-69` accepts the dated decision. Replace the equality assertion with a CLI pin for both outcomes.
-
-6. P1 V1: Five suppressions in the test ports fail CLI Ruff. Plan lines 79-96 and 221-224 cover helper lint and the reader scanner. CLI Ruff also reproduced `RUF100` at #801 `tests/sentry/ratchet/test_integrity.py:59,400,476` and `test_malformed_registry.py:489-490`. Remove those engine-only `S603` and `S607` suppressions in the adapted tests. CLI enables `RUF` at `pyproject.toml:313-317`.
-
-7. P2 V2-LOG: Test 13 is already green, and C14 survives its input. Plan lines 218-219 and 249 use a raised numeric `max`. CLI `tests/sentry/_ratchet.py:318-324,337-340` already rejects it, and `tests/sentry/test_ratchet_check.py:383-397` pins the diagnostic. Mark it as a pin. To kill a numeric-`>` mutation, transfer a key that drops its ceiling or lowers `max` while adding `sites`.
-
-8. P2 V2-LOG: C1 and C3 still name incorrect outcomes. At plan lines 145 and 236, removing the `kind` requirement leaves every valid live row passing (`tests/sentry/test_baseline_registry.py:82-84,96-103`). Name negative test 1 alone or seed an invalid row. At plan line 238, omitting `release_identity.py` also breaks the valid control because CLI `tests/sentry/_ratchet.py:52-63` imports it unconditionally. Require that control to pass before mutation and assert that the mutant loses the child’s decision diagnostic.
-
-9. P2 V2-LOG: Port classifications and placement are incomplete. Plan lines 191-195 attribute both suites to RG-E2 despite line 57 and the RG-E1 headers in `test_baseline_types.py:1` and `test_reader_guard.py:1`. The promised per-case classification is absent. Also, #801 `test_integrity.py:19-22` imports exports unavailable on CLI main, so the plain-command fallback alone cannot produce assertion-level red evidence. Specify how the red tests collect, list their CLI classifications, and add `__init__.py`, `conftest.py`, and `test_integrity_base.py` from plan lines 104-106 and 221-224 to Placement. The split requires no module-size baseline increase under CLI `tests/sentry/layout/test_module_size.py:19-31`.
+1. **V1** — The base manifest reader recognizes both historical tuples. Tests 8 and 12 preserve outside paths and reject the old form on HEAD.
+2. **V1** — Shallow jobs use fixture commits. Literal-SHA controls and RG-E3 live comparisons run in the full-history job.
+3. **V1** — The ledger adds two documented mirrors (five to seven) and one separately pinned vendored file.
+4. **V1** — The loader translates read failures at its boundary. Test 14 pins the normal lintdebt exit for both invalid UTF-8 inputs.
+5. **V1** — The grammar cases assert baseline and decision outcomes independently, including the 14-character split.
+6. **V1** — The test port drops all five engine-only suppressions and runs CLI Ruff on the split files.
+7. **V2-LOG** — Test 13 pins numeric growth. C14 uses a lower max plus a new sites ceiling.
+8. **V2-LOG** — C1 targets the missing-kind negative. C3 requires the child's decision diagnostic and checks the valid control before mutation.
+9. **V2-LOG** — The acceptance matrix identifies suites, parameters, and CLI outcomes. The tests-only overlay collects on main. Placement includes the exports, fixture and split suite.

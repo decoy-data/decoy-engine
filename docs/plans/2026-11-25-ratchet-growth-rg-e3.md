@@ -36,7 +36,7 @@ Non-goals:
 - No defence against a hostile branch that rewrites `gates.sh` or `ratchet_check.py --with-base`
   on purpose (the V1 threat model covers accidental leaks and accidental loosening only).
 - No CLI change (RG-C1a). No new baseline, no new bound (RG-E2 did those).
-- No workflow edit: `gate-selfhosted.yml:84-85` and the CI tests job already run the sentry step.
+- No workflow edit. The hosted fast job and self-hosted shard 1 run the sentry gate. Scheduled or dispatched regression pytest collects its tests.
 
 ## What exists (reuse, do not rebuild)
 
@@ -73,38 +73,50 @@ keeps passing.
    base registry rows already parsed at `:394-398,456-460`) and keep
    `check(root, base_ref, waiver_input)` as a thin wrapper with the same signature and output, so
    every caller keeps working. `CheckResult` also returns `fresh_fields`, the fields named by
-   fresh `[checker_change]` rows (`:479-482`). Add `CHECKER_HELPERS`, the tuple of names `_helper`
-   may load; a guard test asserts the set of `_helper("...")` literals in `_ratchet.py` equals it.
+   fresh `[checker_change]` rows (`:479-482`), and the established keys from the initial schema, base rows and validated base decisions. Use the literal loader calls as the single list of helper names. Guard that each checker call to `_helper` has one literal string argument.
 2. `tests/sentry/ratchet/_base_run.py` (new, about 90 lines, no I/O), loaded with
    `_ratchet._helper`:
    - `plan_base_run(tree) -> BasePlan | Skip | Fail`. Uses the `BaseTree` from `check_tree`. If
      the listing omits `scripts/dev/ratchet_check.py`, `Skip("ratchet: base has no checker, base
      run skipped")`. A listed path that is not a regular blob (`100644` or `100755`) is `Fail`.
      A failed listing is `Fail` through the same handler `check_tree` uses, never `Skip`.
-   - `schema_waiver_pairs(changed_paths, head_rows, base_rows, fresh_fields) -> pairs | Fail`.
-     Empty unless HEAD adds a fresh `[checker_change]` row. For each fresh field F, all must
-     hold, else `Fail` with a named reason:
+   - `schema_waiver_pairs(diff, check_result) -> pairs | Fail`.
+     Before testing freshness, derive added (id, key) pairs by subtracting each base row’s keys from the matching head row’s keys. Use an empty base row for a new id.
+     OWNER CALL (recommended default chosen): preserve ordinary first use of an existing
+     optional field such as `approved_growth` and subsequent use of a previously approved F.
+     For the no-decision check, the established schema consists of the original row keys
+     (factor the #801 `ROW_KEYS` into the immutable initial schema used to build the head's
+     supported keys), keys already present in base rows, and keys in validated base
+     `checker_change` decisions. Head recognition alone never establishes a new field.
+     Reject each addition outside that schema without a matching fresh decision, before the
+     empty-pairs return. With no fresh decision and no missing approval, return no pairs
+     and run the ordinary child. With a fresh decision require exactly one field F and all
+     conditions below. Name the failed condition in the finding.
      a. `changed_paths` includes `scripts/dev/ratchet_check.py`, `tests/sentry/_ratchet.py` or
-        `tests/sentry/ratchet/<name>.py` for a name the base checker loads. The base #801 tree has
-        no `CHECKER_HELPERS`, so the names come from `base_helper_names(base_source)`, which
+        `tests/sentry/ratchet/<name>.py` for a name the base checker loads. The names come from `base_helper_names(base_source)`, which
         collects the `_helper("...")` literals in the base `_ratchet.py` (`:55-75,526`) with
         `ast`, not a regex. An edit only to
         `_limit_constants.py` (loaded by `_baseline_sources.py:82-91`, not by the checker) does
         not count;
      b. the same set of `[[sentry]]` ids in both registries;
      c. no file under `tests/sentry/baselines/` differs from the base sha;
-     d. every changed row differs from its base row only by the added key F;
+     d. every changed row differs from its base row only by the added key F (compare retained TOML values recursively by type and value, so `true` cannot equal `1`);
      e. at least one row adds F (a decision for a field no row adds is a finding).
      Output: the exact (id, F) pairs, sorted.
    - `accepts_waiver_flag(base_source: str) -> bool`: true when the base `ratchet_check.py`
      argparse source declares `--schema-waiver-env`.
-3. `scripts/dev/ratchet_check.py` (+45, about 70 to about 115): add `--with-base`. Order:
+3. `scripts/dev/ratchet_check.py` (72 to about 125 lines): add `--with-base`. Order:
    resolve the sha once (`base commit not found: <ref>`, exit 1); build the one `BaseTree`; run
    `check_tree` for the head with no waiver input; then, only with `--with-base`:
    - `plan_base_run`; on `Skip` print the line; on `Fail` exit 1.
    - compute changed paths with `git -C <root> diff --name-status -z --find-renames <sha>` (both
-     endpoints of a rename count) plus `git -C <root> ls-files -z --others --exclude-standard`,
-     parsed on NUL so non-ASCII paths are exact; then the pairs.
+     endpoints of a rename count) plus `git -C <root> ls-files -z --others --exclude-standard`.
+     Feed the diff bytes to one pure status-record decoder factored from
+     `_integrity._renames` (:502-517). It consumes a status and its path(s), decodes each
+     path with UTF-8/surrogateescape, and rejects incomplete records. Flatten the endpoints
+     for waiver eligibility and add the untracked paths from the separate NUL path list.
+     Keep retirement on its existing `diff -M --name-status -z <sha> HEAD` query and select
+     only rename records for its old-to-new map. Any failed Git query fails the check.
    - extract: `git archive --format=tar <sha> scripts/dev tests/sentry` to a file inside one
      `tempfile.TemporaryDirectory`, check the exit code, then `tarfile` with `filter="data"`. A
      Python without `tarfile.data_filter` fails with "python lacks the tar data filter".
@@ -113,8 +125,7 @@ keeps passing.
      the base checker lacks `--schema-waiver-env` (`cb06f318e`, parent lines 674-680), the child
      runs once with the plain command and its exit status is the result: an older checker
      tolerates an extra row field unaided. When pairs exist and the base accepts the flag, set
-     the env to the JSON pairs and add `--schema-waiver-env`. A missing decision is caught by
-     the head run before any child starts.
+     the env to the JSON pairs and add `--schema-waiver-env`. The row-diff check rejects a missing decision before launch even if both checkers recognize F.
    - the child's stdout passes through once. The waiver-use line is the one the checker itself
      prints at `_integrity.py:285-291`; the launcher prints no second format. Child stderr is
      filtered to lines starting `ratchet:` or `base commit not found`; a traceback becomes one
@@ -122,19 +133,16 @@ keeps passing.
      (`ratchet_check.py:26-35`).
    - exit 1 when the head fails, the plan fails, extraction fails or the child exits non-zero.
    `--schema-waiver-env` without `--with-base` keeps working unchanged, so a later branch that
-   extracts this file as its base can still pass waivers to it. The test harness records each
-   child invocation (argv and the waiver env key) to a file named by `RATCHET_CHILD_LOG`, read
-   only when set.
+   extracts this file as its base can still pass waivers to it. Instrument only the scratch base entry point to record its argv and waiver env key outside the repo. For fixtures with different launchers, install the real head launcher after committing the base. For eligibility tests 6r and 19, keep the same launcher on both sides and collect observations outside the checked files. Count invocations of the extracted copy by its script path.
 4. `scripts/dev/gates.sh` sentry step (`gates.sh:491`, about +15; the shell file is not in the
    Python module-size scan): pass `$label` (`gates.sh:474`) into the `bash -c` string:
    - checker present, label not `baseline`: `ratchet_check.py --with-base`;
    - checker present, label `baseline`: plain `ratchet_check.py`;
    - checker missing, label `baseline`: skip only when `git ls-tree HEAD --
-     scripts/dev/ratchet_check.py` succeeds and prints nothing; a listed-but-missing file or a
-     failed listing fails;
+     scripts/dev/ratchet_check.py` succeeds and prints nothing. Emit “listed checker missing” for a listed path and “checker listing failed” for a failed query. Both fail the baseline step.
    - checker missing, other label: "ratchet checker missing", exit 1.
-   A checker failure writes a marker file in the step dir. In `--baseline` mode
-   (`gates.sh:531-539,666-672`) the final exit checks that marker after
+   On checker or listing failure write a label-specific marker under this run’s output directory. In `--baseline` mode
+   (`gates.sh:531-539,666-672`) the final exit checks either label’s marker after
    `_gates_report.py` (`:300-313`) and fails the gate even when every JUnit failure is classed
    as shared. After the step, copy `ratchet: decision ` and waiver lines from the step log to
    gate stderr, also on a pass.
@@ -146,8 +154,7 @@ has `--with-base`. Mutation: drop the flag from `gates.sh`; test 17 fails. Test 
 
 Design notes: one new helper, no new abstraction that will grow. Established pattern: `git
 archive` plus `tarfile` with the PEP 706 `data` filter. Each fact has one home: the base sha and
-all I/O in `ratchet_check.py`, the waiver rule in `_base_run.py`, the loaded-helper list in
-`_ratchet.CHECKER_HELPERS`, the decision grammar in `_ratchet.DECISION`.
+archive and child process handling in `ratchet_check.py`, the waiver rule in `_base_run.py`, helper names in the base checker’s literal loader calls, the decision grammar in `_ratchet.DECISION`.
 
 ### Placement
 
@@ -155,6 +162,9 @@ all I/O in `ratchet_check.py`, the waiver rule in `_base_run.py`, the loaded-hel
 |---|---|---|---|
 | Base-run rules | `tests/sentry/ratchet/_base_run.py` | ratchet helpers live in `tests/sentry/ratchet/_<concern>.py`, loaded by path, no I/O | `_integrity.py` |
 | Split of `check` | `tests/sentry/_ratchet.py` | the checker | |
+| Git execution and status-record decoder | `tests/sentry/ratchet/_integrity.py` | existing checked reader and retirement diff | `_bounds.py` |
+| Exact Git caller grants and guard seeds | `tests/sentry/ratchet/test_reader_guard.py` | ratchet guard tests | `test_integrity.py` |
+| Scoped Ruff ignores | `pyproject.toml` | existing root lint configuration | existing per-file ignores |
 | Flag and I/O | `scripts/dev/ratchet_check.py` | gate tooling in `scripts/dev/` | `gates.sh` |
 | Gate step | `scripts/dev/gates.sh` | same | |
 | Tests | `tests/sentry/ratchet/test_base_run.py` | ratchet tests beside the helpers | `test_integrity.py` |
@@ -167,7 +177,7 @@ all I/O in `ratchet_check.py`, the waiver rule in `_base_run.py`, the loaded-hel
 | Weakens the scratch head's `growth()` (`_ratchet.py:286-298,513`) to return nothing, grows a baseline | Base copy fails the growth | 2 |
 | Head `_integrity.transfer_findings` returns nothing; one of two inventories and its baseline removed | Base copy names the removed id | 3 |
 | Adds field F, edits the checker, fresh `[checker_change]` F | Pass, the checker's own waiver line once | 4 |
-| Same, no `[checker_change]` row | Fail | 5 |
+| Head recognizes F, historical child accepts it, no fresh decision | Fail on missing decision before launch | 5 |
 | `[checker_change]` and a whitespace-only edit to a non-ASCII-named baseline | Fail | 6 |
 | Base listing fails | Fail, never skip | 7 (pin) |
 | Listed checker blob unreadable | Fail | 8 |
@@ -186,12 +196,12 @@ all I/O in `ratchet_check.py`, the waiver rule in `_base_run.py`, the loaded-hel
 | Base checker accepts the field with no suppression | No waiver line | 21 |
 | Base predates RG-E1 (`cb06f318e`), with or without pairs | Plain child command once; child status is the result (pass and fail cases) | 22 |
 | Standalone `--schema-waiver-env` without `--with-base` | Works as on #801 | 23 (pin) |
-| Renamed checker helper (rename endpoints) plus fresh F | Counts as a checker edit | 6r |
+| Renamed checker helper (rename endpoints) plus fresh F | Old path qualifies, extracted child reports the exact waiver once | 6r |
 | Baseline label, checker listed but file missing | Fail | 24 |
 | Baseline label, listing fails | Fail | 25 |
 | Baseline label with checker | No `--with-base` | 26 (pin) |
-| Baseline worktree with proven no checker | Skip, as today | 27 (pin) |
-| Live repo | three runs, see below | 28 |
+| Baseline worktree with proven no checker | Skip after a successful empty listing | 27 |
+| Live repo | Plain pin (28a), one-time #801 builder evidence (28b), recurring merge-base check (28c) | 28 |
 
 ## Acceptance tests (red first)
 
@@ -203,22 +213,55 @@ scratch repo's own `ratchet_check.py`. Tests whose failure must come from the ba
 first prove the edited head passes on its own. Tests 1, 7 and 13 fail before any base run and
 have no such precondition. Gate tests run the real gate through `_gates_harness.py:28-37`
 `run()`. Tests 24 to 27 force the branch sentry step to fail first, because `gates.sh:517,578-597`
-skips the baseline step after a branch pass. Tests 21 and 22 assert the child invocation record.
+skips the baseline step after a branch pass. Tests 21 and 22 assert the extracted child's invocation record. Test 22 seeds a fixed
+plain-arguments-only, extra-key-tolerant scratch checker matching `cb06f318e`. Test both
+empty and approved pairs with successful and failing child outcomes. Assert one plain
+invocation, no waiver env key and the corresponding gate status in each case. No recurring
+fixture resolves a historical object by SHA. Test 5 uses the same permissive base, proves
+the plain head recognizes F and the plain base accepts it, clears the probe record, and
+requires the missing-decision diagnostic and zero extracted invocations. Pin normal first
+use of `approved_growth` and reuse of an already approved F without a fresh waiver.
+
+For test 19 use the same schema fixture as 6r with the unrelated helper edit in place of the rename.
+Tests 6r and 19 use the same fixture schema switch. In 19 edit only the non-qualifying
+helper alongside the fixture data and registry, and require the checker-edit diagnostic.
+In 6r seed the launcher under test and loader before the base commit. Have the fixture checker
+read its supported extra keys from a fixture data file beside its own code, empty on base
+and containing F on head. Stage `git mv` of the unchanged `_rehome.py` to a non-ASCII name
+absent from the base helper set. Leave the launcher and `_ratchet.py` byte-identical.
+Use an ordinary inventory that never takes the rehome branch. Verify one R100 record,
+both exact endpoints, no other qualifying checker edit, a passing head and exactly one
+extracted-child “waived by checker_change” line naming the expected id and F. The plain
+fallback emits no such line. Also verify the retirement map omits the staged rename until
+commit and contains the exact old/new names after commit.
+
+For 18 set `GATES_WORKERS=2` and commit `tests/_xdist_safe_reports.py` and the same failing
+serial-marked sentry test in both trees. Fail the branch checker only. Inspect the two
+serial JUnit files for the same failing node and count, then run the real reporter
+`--verdict "$OUT"`: require success and empty stdout. Require the branch checker marker
+and nonzero outer gate status. Removing the final marker check alone must turn the gate green.
+For 24–27 trigger the baseline rerun with a branch pytest failure. Inject file removal (24)
+or failure of the exact shell ls-tree query (25) only in the baseline worktree. Require a
+“listed checker missing” in the baseline log for 24 and “checker listing failed” there for
+25. Require the baseline failure marker in each case. For 25 leave the checker absent on disk so the shell actually probes the tree. For 26 record one baseline plain checker
+invocation and a passing baseline sentry step. For 27 record the shell query and require a successful empty listing, zero baseline checker invocations
+and a passing baseline sentry step. Overall gate status alone cannot establish these cases.
 
 Tags: `red-before` fails on its assertion on main; `pin` passes on main. For the red run only,
 the harness falls back to the plain command when `--with-base` is unknown, and the test asserts
 the missed finding. An argparse error is never red evidence.
 
-red-before: 1, 2, 3, 4, 5, 6, 6r, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 28b, 28c.
+red-before: 1, 2, 3, 4, 5, 6, 6r, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 27.
 
 pin: 7 and 13 (main already rejects a bad sha and a failed listing at `_ratchet.py:349-355`;
-test 13 matches `test_integrity.py:360-363`), 23, 26, 27.
+test 13 matches `test_integrity.py:360-363`), 23, 26.
 
-Test 28 is three separate runs: (a) pin on #801, the plain checker passes on the live repo;
-(b) on the final head, `--with-base --base f15adce3f` passes (the #801 parser rejects
-`--with-base`, so this cannot run on #801); (c) on the final head, `--with-base` against the
-live merge base, failing (not skipping) when the merge base is missing. The skip at
-`test_integrity.py:399-405` stays for the plain test only.
+28a pins the existing plain live check. For 28b the builder runs the final head with
+`--with-base --base f15adce3f` once, records both SHAs, command and status, and retains
+the #801 object locally for this evidence. Recurring waiver-aware compatibility cases
+(4, 16, 21) use a fixed scratch base with the #801 flag and closed-key behavior.
+28c runs the final launcher with the default live merge base and requires exit zero. An unavailable merge base fails this test with the launcher diagnostic. Keep the existing skip only on the plain test. 28b and 28c are
+final-head verification, outside the red-before count.
 
 Mutations (the builder runs each on the final head and records the result):
 
@@ -241,7 +284,8 @@ Mutations (the builder runs each on the final head and records the result):
 | M14 | Launcher prints its own waiver line | 21 |
 | M15 | Always pass `--schema-waiver-env` | 22 |
 | M16 | Drop `--with-base` from the `gates.sh` branch command | 17 |
-| M17 | Use `--name-only` without rename endpoints | 6r |
+| M17 | Discard the old endpoint when collecting working-tree rename paths | 6r loses its waiver-use line |
+| M18 | Return empty pairs on no fresh decision before examining added fields | 5 passes the unapproved field |
 
 ## Enumerations
 
@@ -265,9 +309,9 @@ Mutations (the builder runs each on the final head and records the result):
 |---|---|---|
 | Local gate, branch label | `scripts/dev/gates.sh:491` | `--with-base` |
 | Local gate, baseline label | same line, `label=baseline` | plain run, or skip on proven absence |
-| Self-hosted gate on branch pushes | `.github/workflows/gate-selfhosted.yml:84-85` | same as the local gate |
-| CI regression job | `.github/workflows/ci.yml:150,194,203` (job `regression-gate`, skips PRs at `:134-135`) | test 28 runs there on main pushes |
-| Self-hosted fast job on branch pushes | `.github/workflows/gate-selfhosted.yml:84-85` (condition `:68-72`, shards `:144-158`) | runs test 28 on branch heads |
+| Hosted fast job on eligible pushes | `.github/workflows/gate-selfhosted.yml:68-85`, `fast` on ubuntu-latest | local sentry step with branch label |
+| Self-hosted gate on eligible main pushes or dispatch | same workflow, `:110-118,144-158`, subject to owner and tree-proof conditions | shard 1 runs sentry |
+| Hosted regression pytest on schedule or dispatch | `.github/workflows/ci.yml:22-28,134-135,194-205` | collects 28c in the regression suite |
 | Direct test harness | `tests/sentry/test_ratchet_check.py:61-72` | unchanged |
 
 ### FK shapes
@@ -282,7 +326,6 @@ N/A. This slice reads only repo files and git objects. No keyed data and no FK l
 | `RATCHET_SCHEMA_WAIVER` | child env only | JSON list of `[id, field]`; set only for the extracted run |
 | `--with-base` | `ratchet_check.py` argv | new flag |
 | Gate step label | `run_steps` local `label` (`scripts/dev/gates.sh:474`) | passed into the step string |
-| `CHECKER_HELPERS` | `tests/sentry/_ratchet.py` | new tuple, guarded against `_helper` literals |
 
 ### Output surfaces
 
@@ -320,7 +363,7 @@ N/A. This slice reads only repo files and git objects. No keyed data and no FK l
 | 6 | Private modules | Helpers load by path; no private engine import |
 | 7 | No hidden CI failures | The only skip is proven checker absence, printed; every other failure exits 1 |
 | 8 | One input, one trust class | N/A: one input class (repo files) |
-| 9 | Mutations on the final head | M1 to M17 rerun after the last code change, head recorded |
+| 9 | Mutations on the final head | M1 to M18 rerun after the last code change, head recorded |
 | 10 | Allowlisted helpers still checked | `_base_run.py` is scanned by the reader guard like every helper; the guard runs at T0 |
 | 11 | No raised caps | `_ratchet.py` 571 to about 586, `ratchet_check.py` about 125, `_integrity.py` edited but not grown past its cap; `_baseline_sources.py` (653 at #801) not touched; `test_module_size.py:72-75,157-158` needs no change |
 
@@ -346,9 +389,15 @@ constant `BASE_ARCHIVE_PATHS` and drops any path the base listing does not conta
 narrows the `except` clauses at `_integrity.py:168,187,221` to named error types and splits the
 function at `:362`, so the CLI copy passes CLI lint debt (`BLE001`, `C901`) unchanged. The CLI
 Ruff config does not enable S603/S607, so the `# noqa: S603,S607` at `_integrity.py:41,42,52,53`
-give RUF100 there. The shared form moves the two `subprocess.run` calls into one `_git(args)`
-function with a single per-file ignore entry in the engine `pyproject.toml`, so neither copy
-carries an inline `noqa`.
+give RUF100 there. The shared form moves the two `subprocess.run` calls into the existing checked `_git(root, what, *args, side=...)`
+at `_integrity.py:40-48`. Keep one scoped S603/S607 per-file entry in the engine config.
+`resolve_commit` alone translates a failed verification (`BaseReadError`) or empty stdout
+to None, and decodes a successful SHA. Listing, blob and rename failures still propagate.
+In `test_reader_guard.py:41-45` add precisely `(INTEGRITY, "resolve_commit")` to
+`HOMES["_git"]`, remove that pair from `HOMES["run"]` and preserve every other grant.
+Seed direct run inside resolve_commit and a sibling calling _git and require violations.
+Run the live guard, valid/invalid ref cases and failed listing/rename cases. Reverting the
+caller grant trips the live guard, restoring the raw-run grant trips the seeded case.
 
 Test depth: T0 `tests/sentry/ratchet/test_base_run.py`, `tests/sentry/ratchet/test_reader_guard.py`
 and `tests/sentry/test_bash32_compat.py` per edit; T1 impact selection per commit; the gate runs `gates.sh --keep-going --steps
@@ -358,7 +407,7 @@ diffed against the saved main baseline.
 ## Pre-mortem
 
 - RG-E3's own head fails the #801 base checker. It adds no registry field, so it should pass;
-  test 20 runs it before review.
+  the builder records 28b before review.
 - The base tree imports something outside `scripts/dev` and `tests/sentry`. The base run then
   fails loudly (exit 1), not silently. The builder runs `--with-base` against a real main sha
   before review. If it fails, widen the archive path list, never the skip rule.
@@ -381,28 +430,14 @@ diffed against the saved main baseline.
 - CHANGELOG fragment before merge.
 - Stop and report if the same defect class comes back after a fix.
 
-## Round 3 review: open findings
+## Round 4 resolution
 
-Codex round 3 (the last review round) gave NO-GO. Finding 1 is folded (the exit-path list now
-matches Design part 3: a base without the flag gets one plain child run). The other findings below are quoted from that
-review and are not yet folded into the plan above, except where a note says so. The builder
-or the next planner resolves each one, checked against the cited lines on the re-anchored
-base, before code starts.
-
-1. P0 V1: The historical checker still has two prescribed outcomes. Plan:112-117,187 says to propagate the plain child’s status. Plan:250-254 says nonempty pairs must exit 1 if the base lacks the flag. `cb06f318e:scripts/dev/ratchet_check.py:38-41` accepts only the plain arguments, and its `tests/sentry/_ratchet.py:55-64` permits extra fields. Follow parent:674-680 throughout. Test 22 should assert one plain invocation for approved pairs on both success and failure.
-
-2. P1 V1: A missing decision can still pass against that historical base. Plan:84-86 returns no pairs when there is no fresh decision, and plan:116-117 assumes the head already rejected the addition. Once the head recognizes F, `tests/sentry/_ratchet.py:403-410` and `tests/sentry/ratchet/_integrity.py:285-300` have no such check. The historical child then accepts F too. Derive added fields from the row diff before the empty-pairs return. Run test 5 with F recognized by the head, no decision, and the permissive historical child.
-
-3. P1 DESIGN: The Git helper consolidation breaks the reader guard. Plan:348-351 routes `resolve_commit` through `_git`. At #801, `tests/sentry/ratchet/test_reader_guard.py:41-44,84-86` forbids that caller, and `_integrity.py:40-57` gives the two calls different failure semantics. Update the exact caller allowlist, remove `resolve_commit`’s obsolete direct-`run` grant, and preserve its missing-ref result. Add the guard, `_integrity.py`, and `pyproject.toml` to the placement table at plan:154-160.
-
-4. P1 DESIGN: The plan adds a second Git rename parser. Plan:105-107 decodes NUL-delimited status records and both rename endpoints. `tests/sentry/ratchet/_integrity.py:502-517` already decodes that format. Share the record decoder and test a non-ASCII rename. Keep the existing retirement comparison against committed `HEAD` and the waiver comparison against the working tree.
-
-5. P1 V1: Test 28b makes a transient PR head a permanent gate dependency. Plan:198,212-221,269-270 puts a live-tree comparison to `f15adce3f` in the recurring suite. A squash merge need not retain that object in fresh checkouts. Even when reachable, a later approved field addition followed by a legitimate baseline edit would fail plan:94-97 when compared cumulatively to #801. Run 28b once as builder evidence and use a fixed scratch tree for lasting compatibility coverage. Keep 28c as the live check. Neither success-only case is red-before under the plain fallback at plan:208-210 without evidence of a child invocation (`scripts/dev/ratchet_check.py:59-68`).
-
-6. P2 V2-LOG: Test 6r can pass before implementation and survive M17. Plan:189,201-212,244 leaves staging and the assertion unspecified. An unstaged move exposes the old path as deleted. Updating the loader also qualifies independently under plan:87-90. Stage a rename of the conditionally loaded `_rehome.py`, leave `_ratchet.py` untouched, and assert the extracted child actually used the waiver (`tests/sentry/_ratchet.py:524-532`, `ratchet/_integrity.py:285-291`).
-
-7. P2 V2-LOG: The gate fixtures do not isolate M11 or M3b. Test 18 at plan:183,204-206,238 needs two workers and `tests/_xdist_safe_reports.py` in both trees. The harness defaults to one worker, which produces no separate serial JUnit (`tests/unit/scripts/_gates_harness.py:31-34`, `scripts/dev/gates.sh:449-459`). Assert a shared serial failure and an empty reporter verdict before checking the marker. For tests 24-27, assert the baseline-specific diagnostic or recorded invocation. A forced branch failure alone can keep the gate red after M3b (`scripts/dev/_gates_report.py:300-313`).
-
-8. P2 V2-LOG: The CI route citations still count one job twice. Plan:39,268-270 cites the same hosted `fast` job twice. `.github/workflows/gate-selfhosted.yml:68-85` runs it on `ubuntu-latest`. The self-hosted gate runs on eligible main pushes or dispatch, with the sentry step on shard 1 (`:110-118,144-158`). `.github/workflows/ci.yml:22-28,134-135,194-205` runs regression pytest on schedule or dispatch. Correct the three route descriptions.
-
-9. P2 V2-LOG: Remaining references and counts. Plan:360-361 assigns the #801 compatibility run to test 20, which is the unused-decision case at plan:185. Point it to 28b. Plan:101,325 gives two launcher projections, 115 and 125 lines, from a 72-line base (`scripts/dev/ratchet_check.py:71-72`). Reconcile the estimate. Neither projection requires a size census or baseline change (`tests/sentry/test_module_size.py:72-75,157-158`).
+1. V1 — Test 22 covers the plain historical command once on child success and failure.
+2. V1 — Added row keys are checked before the no-decision return. Test 5 and M18 exercise the permissive base.
+3. DESIGN — The checked Git wrapper preserves ref lookup semantics. Exact caller grants, negative guard seeds and placement are specified.
+4. DESIGN — Retirement and waiver checks share the NUL status decoder and keep their distinct Git endpoints.
+5. V1 — 28b is one-time builder evidence. Fixed compatibility fixtures and the live 28c check run in CI.
+6. V2-LOG — 6r stages the conditional helper rename and requires a waiver-use line from the child.
+7. V2-LOG — Test 18 isolates the marker after a shared serial failure. Tests 24–27 check baseline-specific evidence.
+8. V2-LOG — The route table identifies the hosted fast job, self-hosted shard and regression schedule/dispatch separately.
+9. V2-LOG — The pre-mortem cites 28b. Both size estimates project 72 to about 125 launcher lines.
