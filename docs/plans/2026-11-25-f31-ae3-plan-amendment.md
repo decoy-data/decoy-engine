@@ -221,8 +221,9 @@ included.
 |---|---|---|
 | 1 | any `BaseException` subclass | its closed type label (`_label`, as today) |
 | 2 | any mapping that is not an exact `dict`: `issubclass(type(value), collections.abc.Mapping)` or a `UserDict` subclass. This covers dict subclasses, `OrderedDict`, `Counter`, `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap`, `ConfigParser` sections and caller mapping classes | the placeholder |
-| 3 | any value at `depth == 0` | the value itself (the documented depth gap) |
+| 3 | at `depth == 0`: a `list`, `tuple`, `set`, `frozenset`, `dict` or a subclass of one of the first four (Codex R1 V1) | the placeholder `<nested>`; any other value at depth 0 is the value itself |
 | 4 | `str`, `bytes`, `int`, `float`, `complex`, `bool`, `None` | the value itself |
+| 4a | a `str` subclass other than `_Label` (Codex R1 V1) | `str.__str__(value)`, a plain copy, so its own `__str__` and `__repr__` never run |
 | 5 | `list`, `tuple`, `set`, `frozenset`, and any subclass of one of them (`namedtuple` included; Codex R2 V1-2) | items read with the unbound base iterator (`list.__iter__(value)` and so on, as `cade66080` does), each through `_safe_value(item, depth - 1)`. When any item changes, the result is a new plain base type (`list`, `tuple`, `set` or `frozenset`), never the subclass, so no subclass `repr` runs on a changed value: `Result(issue=ValueError(c))` prints `(ValueError,)`. When no item changes, the value itself |
 | 6 | `dict` whose keys all have an exact type of `str`, `int`, `float`, `bool` or `None` | consume the reader’s `changed` flag. Return `dict(pairs)` if true, otherwise return the original dict. Row 6 never reads the store again |
 | 7 | `dict` with any other key type (an exception key or a `str` subclass included) | the placeholder |
@@ -357,7 +358,7 @@ error with the filtered args, which is the same outcome as a missing key in stoc
 | lone `UserDict`, `%(missing)s` | `KeyError`, a stock logging error | `<mapping>` |
 | lone mapping, `"x %s"` or `"x %r"` | the mapping's own `str` or `repr` | an exact dict with admitted keys prints the repr of its scanned pair copy. Other mappings and rejected keys print `x <mapping>` |
 | lone `{b"status": 7}`, `"x %r"` | `x {b'status': 7}` | `x <mapping>` (row 7 rejects bytes keys) |
-| lone `d = {}; d["self"] = d`, `"x %r"` | `x {'self': {...}}` | `x {'self': {'self': {...}}}` (the display copy contains the original recursive value) |
+| lone `d = {}; d["self"] = d`, `"x %r"` | `x {'self': {...}}` | `x {'self': {'self': <nested>}}` (the value at the depth limit is the nested placeholder) |
 | host `{args[0]:d}`, msg `"done"`, lone `{0: 7}` | `7` | integer lookup returns the placeholder. Decimal formatting fails and the handler emits no line |
 | lone dict with an exception or tuple key, `"failed: %s"` | the key relabelled | `failed: <mapping>` |
 
@@ -499,7 +500,7 @@ New guards:
     - `"x %s"` and `"x %r"` of a clean plain dict `{"k": 1}`: prints `x {'k': 1}`, the same as
       stock;
     - Pin the three deliberate compatibility changes. With `"x %r"`, require exactly
-      `x <mapping>` for `{b"status": 7}` and `x {'self': {'self': {...}}}` for
+      `x <mapping>` for `{b"status": 7}` and `x {'self': {'self': <nested>}}` for
       `d = {}; d["self"] = d`. With msg `"done"` and lone `{0: 7}`, use a host stream
       handler with a brace-style `{args[0]:d}` formatter. Assert the filtered index lookup
       returns the placeholder, direct formatting raises for the decimal conversion, and the

@@ -18,7 +18,8 @@ What the filter rewrites, in place on the record:
   `float`, `bool` or `None` is the placeholder too: keys are never rewritten. Plain containers
   (`list`, `tuple`, `set`, `frozenset` and their subclasses, `dict`) are opened one level deep
   in `msg` and two in `args`; a changed one is a new plain container, an unchanged one is
-  returned as is;
+  returned as is, and one at the depth limit becomes `<nested>`. A `str` subclass is copied to a
+  plain `str`, so its own `__str__` and `__repr__` never run;
 - one function, `_safe_pairs`, reads the items of a `dict` (`dict.items(store)` and nothing
   else, so no stored key is compared or hashed by caller code). Row 6, the named values and the
   display of a lone mapping all take its result, so their depth cannot differ;
@@ -41,8 +42,7 @@ call-site guard `tests/sentry/test_log_interpolation.py` covers them instead:
 - text already formatted into `msg` (an f-string, or `str(exc)` passed as an argument), which
   cannot be told apart from any other text here;
 - `exc.args` (or any part of an exception) passed as an argument, since it is plain data;
-- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`;
-- an exception nested deeper than the scan depth.
+- an arbitrary wrapper object whose `__str__` or `__repr__` calls `str(exc)`.
 """
 
 from __future__ import annotations
@@ -84,6 +84,8 @@ class _Label(str):
 
 
 _MAPPING_PLACEHOLDER = _Label("<mapping>")
+# A plain container at the scan depth limit: its items are not inspected, so none is printed.
+_NESTED_PLACEHOLDER = _Label("<nested>")
 
 
 def _label(exc: BaseException) -> _Label:
@@ -129,8 +131,14 @@ def _safe_value(value: object, depth: int) -> object:
         return _label(value)  # type: ignore[arg-type]
     if kind is not dict and (issubclass(kind, Mapping) or issubclass(kind, UserDict)):
         return _MAPPING_PLACEHOLDER
-    if depth == 0 or _is_exact(value, _PLAIN_VALUE_TYPES):
+    if kind is _Label or _is_exact(value, _PLAIN_VALUE_TYPES):
         return value
+    if issubclass(kind, str):
+        # A plain copy, so the subclass's own `__str__` and `__repr__` never run.
+        return str.__str__(value)
+    if depth == 0:
+        nested = kind is dict or any(issubclass(kind, base) for base, _ in _SEQUENCES)
+        return _NESTED_PLACEHOLDER if nested else value
     for base, iterate in _SEQUENCES:
         if issubclass(kind, base):
             items: list[object] = list(iterate(value))  # type: ignore[arg-type]

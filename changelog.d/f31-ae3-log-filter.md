@@ -5,3 +5,5 @@ Every log handler the engine builds now carries `decoy_engine.safe_output.SafeRe
 Host log handlers that run after the engine handler (for example Sentry integrations) no longer see the exception object, because the filter clears `exc_info` on the record.
 
 A mapping argument that is not a plain `dict` (a `Counter`, `OrderedDict`, `defaultdict`, `UserDict`, `mappingproxy`, `ChainMap` or a caller `Mapping`) prints as `<mapping>` in engine logs, and so does a `dict` with a key that is not a `str`, `int`, `float`, `bool` or `None`. Pass `dict(counter)` at the call site to print its items.
+
+A list, tuple, set, frozenset or dict that sits deeper than the filter scans prints as `<nested>`, and a `str` subclass prints as a plain `str`, so an exception inside a deeply nested argument cannot print its text.
