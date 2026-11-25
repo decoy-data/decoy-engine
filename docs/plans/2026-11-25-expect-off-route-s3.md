@@ -80,7 +80,11 @@ New `validators/_sink.py` (about 150 lines). `observe_sink(sink, session)` retur
 
 Each class carries a read-only `inner_sink`. `__getattr__` forwards an attribute only when the inner sink has it, so helpers such as `staged_components`, staged openers and publication evidence still work, and no protocol member is invented. `_ObservedStaged` has no `write_batches`, so `isinstance(proxy, TransactionalSink)` stays false for it.
 
-`execute_route` wraps `ctx.sink` once, after the session binds and before any executor runs, only when a session is bound. Routing has already decided on the unwrapped sink.
+`execute_route` wraps the sink once, after the session binds and before any executor runs, only when a session is bound. Most streamed writes do not use `ctx.sink`: they use `ctx.publish.active_sink`, and `OutputPublish` is built with the raw sink at `execution/_pipeline_context.py:267` (writers at `_pipeline_generate_mask.py:251`, `:286`, `_pipeline_mixed_route.py:224`, `:241`, `_pipeline_full_frame.py:303`; commit at `_chunked_output_sink.py:161`). So `execute_route` rebuilds the context once with `dataclasses.replace(ctx, sink=proxy, publish=replace(ctx.publish, sink=proxy))`, and both handles point at the proxy. The sequential route's `_CallableSinkAdapter` (`_sequential.py:382-390`) wraps whatever sink it is given, so it wraps the proxy. The edit lives in `_pipeline_route_dispatch.py`; `_pipeline_context.py` (599) and `_chunked_output_sink.py` (600) do not grow. Routing has already decided on the unwrapped sink.
+
+While a session is bound, `observed_commit` refuses a sink that is not a proxy (it has no `inner_sink`) with `validator_table_not_observed` and a fixed message, before any commit. A future write handle that bypasses the proxy therefore fails closed, whatever the sink type.
+
+A table with no rows is written as `write_batches(table, iter(()), schema=...)` (`_chunked_output_sink.py:591`). When no batch arrives, `_ObservedTransactional.write_batches` feeds `schema.empty_table()` once, so the table is fed and complete.
 
 `post_scan_sink_kind` (`config/_post_scan.py:211`) follows `inner_sink` (with a seen-set against cycles) before it returns the class token. Every consumer that names a sink kind already calls it: `post_scan_sink_refusal` (`config/_post_scan.py:237`), the two readability calls in `pipeline/_post_scan.py`, and `physical/_snapshot.py`.
 
@@ -98,7 +102,7 @@ After the executor returns, `complete_resident_validation` sees `close_attempted
 
 A paired check (for example `leak_check`) compares an output batch with the source rows at the same positions. On a streamed route the session gets those rows from one of two places:
 
-- New `validators/_source_cursor.py` (about 90 lines): `SourceCursor(open_batches, columns)` where `open_batches` is a `Callable[[], Iterator[pa.RecordBatch]]`. `take(n)` returns the next `n` source rows, holding at most one source batch and its unread remainder. The session calls it from `_source_rows` for a paired table that has no resident source. `execute_route` passes one opener per paired table that has a `LazySource` in `ctx.caller_sources`; the opener reads only the paired columns. The cursor opens lazily on the first `take`, so an unpaired run never reads a source twice. The validators package does not import `LazySource`; it receives callables (dependency points inward).
+- New `validators/_source_cursor.py` (about 100 lines): `SourceCursor(open_batches, columns)` where `open_batches` is a `Callable[[], Iterator[pa.RecordBatch]]`. `take(n)` returns the next `n` source rows, holding at most one source batch and its unread remainder. `exhausted()` reads ahead and reports whether any source row is left. The session calls `take` from `_source_rows` for every paired table on a streamed route. `execute_route` passes one opener per paired table in `ctx.caller_sources`: for a `LazySource` it is the source's `open_batches` (which runs the identity check against the routing snapshot at exhaustion, where the reader has one; Parquet `iter_batches` at `profile/_readers.py:233` has none), and for a resident `pa.Table` it is `table.select(columns).to_batches`. Today a resident source with a streamed output reaches `leak_check.add` with no source and raises a bare `ValueError` (`validators/_leak_check.py:141`); the cursor closes that gap. At `finish`, a cursor with rows left raises `validator_source_pairing_mismatch`, so a source longer than the output is caught as well as a shorter one. The cursor opens lazily on the first `take`, so an unpaired run never reads a source twice. The validators package does not import `LazySource`; it receives callables (dependency points inward).
 - `ValidationSession.tee_reader()` returns a `Callable[[str, pa.Table], None]` for the sequential loader. It keeps a projection of the paired columns for a paired table and drops it when the published rows reach the source's row count. `execute_sequential_route` (`execution/_pipeline_route_dispatch.py:160`) composes it with the post-scan tee at `:167` through a small `compose_tees` helper in the same module. `_sequential.py` (680 lines) is not edited.
 
 A count mismatch between source rows and published rows keeps today's refusal, `validator_source_pairing_mismatch` (`validators/_session.py:348`).
@@ -107,7 +111,7 @@ A count mismatch between source rows and published rows keeps today's refusal, `
 
 A plain callable sink delivers on every call and has no commit, so rows would leave before the verdict. New public helper `validation_needs_resident(config, sink) -> bool` in `validators/_sink.py`: true when the config has validators and the sink is callable without `commit`. Only `_sequential_eligible` (`execution/_pipeline_routing.py:97`) admits a non-transactional sink; there it replaces the validator decline at `:144` and declines with the new route code `validators_need_transactional_sink`. The chunked lane already sends any non-`TransactionalSink` resident (`execution/_chunked_output_sink.py:101`). The builder confirms in step 1 that the out-of-core runner accepts only `TransactionalSink`; if it accepts more, the same helper guards it.
 
-With the resident route, S2 already calls the callable once per table after validation and post-scan settle.
+S2 adds no callable delivery in `execute_route` (`_pipeline_route_dispatch.py:106-157`). Step 1 traces where the resident route calls a callable sink today. The rule S3 enforces: the callable is called only after `close` has returned. If the resident path calls it earlier, S3 moves that call after `complete_resident_validation` in `execute_route`. The out-of-core runner types its sink as `TransactionalSink | None` (`out_of_core/_runner.py:117`); an admission test pins that a callable sink never reaches it.
 
 ### 5.6 Delete every routing read
 
@@ -118,7 +122,7 @@ Every entry in `S3_PENDING` is deleted at its source:
 - Physical plan replay: `physical/_compiler.layer1_route` and `out_of_core_not_ready_reason`, `physical/_inputs.PhysicalPlanInputs.validators`, `physical/_live_inputs.build_live_physical_plan_inputs`, and `physical/_snapshot.capture_physical_plan_inputs` (`:141-196`, `:272`). The validator list leaves the physical plan inputs, so the plan hash no longer covers it.
 - Out-of-core: section 5.1.
 
-`S3_PENDING` is then empty and is deleted. The sentry keeps an allowlist of exact `(module, function, public name)` identities for lifecycle wiring only: `bind_validation_session`, `observe_sink` and `complete_resident_validation` in `execute_route`; `active_validation_session` in `observed_commit` and `execute_sequential_route`; `validation_needs_resident` in `_sequential_eligible`. Any other read of the `validators` key or a `validators*` name under `execution/` fails.
+`S3_PENDING` is then empty and is deleted. The sentry keeps an allowlist of exact `(module, function, public name)` identities for lifecycle wiring only: `bind_validation_session`, `observe_sink` and `complete_resident_validation` in `execute_route`; `active_validation_session` in `observed_commit` and `execute_sequential_route`; `validation_needs_resident` in `_sequential_eligible`; and the S2 callers that remain: `_pipeline_finalize.py:417`, `:421`, `:432`, `_pipeline_mixed_route.py:65`, `:294`, and `physical/_shadow_generation.py:269`, `:276`, `:285`, `:292`. S3 adds caller tracking for the public helpers to the scan, so this list is enforced, not decorative. The stale comment at `_pipeline_mixed_route.py:294-296` ("streamed output declines validators") is corrected. Any other read of the `validators` key or a `validators*` name under `execution/` fails.
 
 ### 5.7 Reason codes
 
@@ -157,6 +161,10 @@ No module over 600 lines grows: `_sequential.py` (680), `_chunked_output_sink.py
 | Paired check, lazy source | Source cursor reads the paired columns once, one batch at a time. |
 | Source rows differ from published rows | `validator_source_pairing_mismatch`, nothing committed. |
 | Rows fed after the verdict | `validator_rows_after_verdict`, fixed message. |
+| A write handle holds the raw sink | `observed_commit` refuses a non-proxy sink while a session is bound. |
+| Zero-row table on a streamed route | The proxy feeds an empty table once; the table is judged. |
+| Resident `pa.Table` source, streamed output, paired check | The cursor reads the table's batches; same report as full frame. |
+| Source longer than the output | `validator_source_pairing_mismatch` at `finish`. |
 | A sink route writes through a seam that skips the proxy | `observed_commit` marks every table in the sink's staged set complete, so `close` refuses the unfed table with `validator_table_not_observed`. |
 | Keyed state passes the ceiling | `validator_key_state_over_budget` before the next scoped write; nothing committed. |
 | Nested run with no validators inside a bound run | The inner commit sees no session (S2 end state) and does not close the outer session. |
@@ -165,8 +173,8 @@ No module over 600 lines grows: `_sequential.py` (680), `_chunked_output_sink.py
 
 Master plan numbers in brackets. Each uses a reject-all `regex_match` (`pattern: "^$"`) where it needs a failure. Each fails before S3 unless marked as a control.
 
-- AT-1 [V4 streamed rows]. For auto-chunk streamed with `ParquetTransactionalSink` (120k rows), sequential FK with a transactional sink and with no sink, out-of-core FK with and without a sink, multi-table split with a sink, and generation with a sink: (a) the route label, route reason and per-column backends equal the same config without validators; (b) a passing validator gives `passed` results; (c) a failing validator raises `ValidatorFailedError`, the inner `commit` is never called, staging is empty, and the failure record does not say COMMIT. Fails before: (a) fails on every row.
-- AT-2 [V4 callable row]. Sequential FK with a plain callable: a failure takes the resident route with `validators_need_transactional_sink`, calls the callable zero times and raises; a pass calls it exactly once per table.
+- AT-1 [V4 streamed rows]. For auto-chunk streamed with `ParquetTransactionalSink` (120k rows), sequential FK with a transactional sink and with no sink, out-of-core FK with and without a sink, multi-table split with a sink, and generation with a sink (the mixed route's streamed generate writes, `_pipeline_mixed_route.py:224`; `run_generation` is reached only from `generation/_plan_entry.py` and is out of scope): (a) the route label, route reason and per-column backends equal the same config without validators; (b) a passing validator gives `passed` results; (c) a failing validator raises `ValidatorFailedError`, the inner `commit` is never called, staging is empty, and the failure record does not say COMMIT. Fails before: (a) fails on every row.
+- AT-2 [V4 callable row]. Sequential FK with a plain callable: the route is resident with `validators_need_transactional_sink`; a failure calls the callable zero times and raises; a pass calls it exactly once per table, after `close`. An admission cell pins that the out-of-core runner never receives a callable sink.
 - AT-3 [V4 readability rows]. `ParquetTransactionalSink` and an isolated `StagingSink`, each wrapped, with `post_scan.integrity`: no `POST_SCAN_INTEGRITY_SINK_UNREADABLE`; the integrity report shows the gate ran; the physical snapshot holds the inner sink kind. The isolated row runs pass and fail and proves `StagingSink.commit()` and `.abort()` stay no-ops.
 - AT-4 [V5]. 120k rows with a sink, `email: truncate(length: 100)` (a no-op) and `leak_check(min_rows: 50)`: fails on the streamed route with the full-frame report, from a resident `pa.Table` source and from a lazy Parquet source; with `hash` it passes. An instrumented counter shows the cursor never holds more than one source batch per table. A sequential run with empty `caller_sources` and a counting `source_loader` loads each table once and gives the same report.
 - AT-5 [V6, perf, Dell vm-run]. 2M rows streamed, `leak_check` and `regex_match`, every row failing: `retained_bytes()` under `2 * FINDING_INDEX_CAP * 8` plus 64 KiB plus one source batch projection; peak RSS within 64 MiB of the same run without validators; wall time recorded.
@@ -176,7 +184,11 @@ Master plan numbers in brackets. Each uses a reject-all `regex_match` (`pattern:
 - AT-9 [V14]. `route.validators_present` and `runtime.out_of_core_validators_not_admitted` resolve as retired; nothing in `src/` emits them (registry sentry).
 - AT-10. A run with no validators nested inside a bound run commits without closing or feeding the outer session. Control after the S2 fix.
 - AT-11 [V15f]. Out-of-core through `run_pipeline` with a failing validator raises `ValidatorFailedError`; the session holds no external verdict (the attribute no longer exists); every delivered table was fed and judged.
-- AT-12. The physical plan hash for a config with validators equals the hash for the same config without them.
+- AT-12. The physical plan for a config with validators records the same route decision as the same config without them, and `PhysicalPlanInputs` has no `validators` field. The hash still differs, because `compute_plan_hash` hashes the whole config (`execution/physical/_inputs.py:87-95`, `:324`); that is intended.
+- AT-13. Every streamed writer reaches the proxy: on the auto-chunk, split and mixed routes, a spy shows each batch fed, and a test seam that writes through the unwrapped `publish.active_sink` makes `observed_commit` refuse with `validator_table_not_observed` before commit.
+- AT-14. A zero-row table passes and a zero-row table under a reject-all check on a non-empty sibling still fails, on the streamed, sequential and out-of-core routes.
+- AT-15 [V5 extension]. A resident `pa.Table` source with streamed output and paired `leak_check` gives the full-frame report; a source one row longer than the output refuses with `validator_source_pairing_mismatch`.
+- AT-16. Out-of-core with declared casting and a failing validator: the verdict now runs at commit, after `seal_evidence` (`out_of_core/_runner.py:360`); the run raises, nothing is published, and the sealed evidence is not reported as a publication.
 
 ## 8. Named mutations
 
@@ -195,6 +207,10 @@ Master plan numbers in brackets. Each must turn the named test red on the final 
 - M-11 [M9]. One pending child per parent key instead of a list: AT-7 duplicate-key cell red.
 - M-12. `validation_needs_resident` returns false for a callable: AT-2 red.
 - M-13. `_feed` after the verdict returns silently: AT-6 red.
+- M-14. `execute_route` replaces `ctx.sink` but not `ctx.publish`: AT-13 red.
+- M-15. The proxy's `write_batches` feeds nothing for an empty iterator: AT-14 red.
+- M-16. The cursor skips the exhaustion check: AT-15 long-source cell red.
+- M-17. The opener for a resident `pa.Table` source is left out: AT-15 red.
 
 ## 9. Frozen contracts
 
@@ -236,7 +252,8 @@ Master plan numbers in brackets. Each must turn the named test red on the final 
 ### 11.1 Exit paths
 
 - Pass: `close` at commit returns; `sink.commit()` runs (`execution/_publication_observer.py:145`).
-- Fail: `ValidatorFailedError` from `close` at `execution/_publication_observer.py:142`; route unwind aborts.
+- Fail: `ValidatorFailedError` from `close` at `execution/_publication_observer.py:142`; route unwind aborts. On out-of-core this is now after `seal_evidence` (`out_of_core/_runner.py:360`) instead of before it (`finish_validation` at `:359` today); AT-16 covers it.
+- Refusal at commit: a non-proxy sink while a session is bound.
 - Refusal: `validator_table_not_observed`, `validator_source_pairing_mismatch`, `validator_key_state_over_budget`, `validator_rows_after_verdict`.
 - No sink: resident choke `close` (`execution/_pipeline_route_dispatch.py:99`).
 - Exception inside the run: bind scope exits without `close`; the sink aborts.
@@ -275,23 +292,23 @@ Master plan numbers in brackets. Each must turn the named test red on the final 
 
 Steps, in order (tests first, red before code):
 
-1. Confirm the S2 end state of section 1 on the merged #812 head; confirm the out-of-core runner sink type (5.5).
-2. Write AT-1 to AT-12 and confirm the fail-before rows fail.
+1. Confirm the S2 end state of section 1 on the merged #812 head; confirm the out-of-core runner sink type and trace where the resident route calls a callable sink (5.5).
+2. Write AT-1 to AT-16 and confirm the fail-before rows fail.
 3. Add `validators/_sink.py` and `validators/_source_cursor.py`; `post_scan_sink_kind` unwraps; `execute_route` wraps and passes source openers.
 4. `observed_commit` closes; `complete_resident_validation` honors `close_attempted`; `_feed` refuses after the verdict.
 5. `tee_reader` on the session and `compose_tees` in `execute_sequential_route`.
 6. Delete every routing read (5.6) and the out-of-core collector (5.1); add `validation_needs_resident` and the route code; delete `S3_PENDING` and set the allowlist.
 7. Retire the two codes; changelog and compatibility contract.
-8. Run M-1 to M-13; run AT-5 on the Dell.
+8. Run M-1 to M-17; run AT-5 on the Dell.
 
 Files and budgets (cap about 800 changed lines of source; current counts at `029f1b378`):
 
 | File | Now | After |
 |---|---|---|
 | `validators/_sink.py` | new | about 150 |
-| `validators/_source_cursor.py` | new | about 90 |
+| `validators/_source_cursor.py` | new | about 100 |
 | `validators/_session.py` | 387 | about 380 (external verdict out; tee and cursor hook in) |
-| `execution/_pipeline_route_dispatch.py` | 278 | about 305 |
+| `execution/_pipeline_route_dispatch.py` | 278 | about 320 |
 | `execution/_publication_observer.py` | 202 | about 208 |
 | `config/_post_scan.py` | 249 | about 260 |
 | `execution/_pipeline_routing.py` | 566 | about 530 |
