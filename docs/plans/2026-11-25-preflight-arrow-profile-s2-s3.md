@@ -25,10 +25,10 @@ V1 bar: a valid Parquet file with these values cannot be masked through `decoy r
 S2a guarantees:
 
 1. The wheel metadata requires `pandas>=2.0.3,<3`. `uv.lock` changes only in the pandas specifier line (`uv.lock:668`). The resolved pandas stays 2.3.3.
-2. The floor is proven for the environment it names, not only claimed. A floor environment (Python 3.10 and 3.11, pandas 2.0.3, numpy 1.26.4, pyarrow 16.1.0) passes the #805 profile and capacity tests and the S1b duration cells. An evidence file records the versions, commands, pass counts and every failure with its base reproduction, as `docs/plans/evidence/2026-10-30-f06-r2-evidence.md:85` did for F06.
+2. The floor is proven for the environment it names, not only claimed. A floor environment (Python 3.10 and 3.11, pandas 2.0.3, numpy 1.26.4, pyarrow 16.1.0) passes the #805 profile and capacity tests, including its eligible recovery fixtures, as floor characterization. (#805's selection has no second-unit duration cell, and its recovery excludes duration companions, so the pandas 1.5 duration finding is the reason for the floor, not a before cell this run can show; Codex R1.) An evidence file records the versions, commands, pass counts and every failure with its base reproduction, as `docs/plans/evidence/2026-10-30-f06-r2-evidence.md:85` did for F06.
 3. Every engine doc or source comment that states a pandas lower bound states the pyproject floor, and a sentry keeps it so.
 
-S2b guarantees: engine 0.28.5 is stamped by the normal process (`scripts/release/stamp_release.py:559`), tagged, and built. Its changelog lists #805 and S2a, with a `Breaking:` line for the floor.
+S2b guarantees: engine 0.28.5 is stamped by the normal process (`scripts/release/stamp_release.py:559`), with the version bump the stamp does not do (Codex R1 P1-7; release #782 did the same): `pyproject.toml:10`, `src/decoy_engine/release.py:50` `__version__`, and the engine entry in `uv.lock`. Before the tag, the built wheel's metadata version, the installed `decoy_engine.__version__` and the stamped registry agree. Then it is tagged and built. Its changelog lists #805 and S2a, with a `Breaking:` line for the floor.
 
 S3 guarantees, through real CLI commands on the repinned CLI:
 
@@ -44,7 +44,7 @@ Non-goals: the CI floor job (follow-up row, owner default A); the pyarrow floor 
 Size:
 
 - S2a: about 15 changed lines (pyproject, lock specifier, two comments, one doc sentence, a changelog fragment), two new test functions in an existing sentry file (about 40 lines), and one evidence file. No new public names.
-- S2b: the stamp output only.
+- S2b: the stamp output plus the three version lines.
 - S3: about 30 changed pin and config lines along #408's file set, about 150 changed test lines, and about 20 doc and changelog lines. No new public names.
 
 ## 3. Established solutions
@@ -57,9 +57,9 @@ Search run on 2026-11-25:
 Findings:
 
 - pandas 2.0 keeps non-nanosecond resolutions for datetime and timedelta. pandas 1.5 coerces them to nanoseconds, which is the Dennis finding. 2.0.3 is the last 2.0 patch release.
-- pandas 2.0.3 has wheels for CPython 3.8 to 3.11 only. The engine supports 3.10 to 3.12 (`pyproject.toml:13`). On 3.12 the resolver picks pandas 2.1 or newer, so the floor can be exercised only on 3.10 and 3.11. This is stated, not a gap.
-- pandas 2.0.3 needs numpy below 2, but its PyPI metadata declares only `numpy>=1.21.0` / `>=1.23.2` with no upper bound (Dennis R1 P1-2). So `pip install decoy-engine pandas==2.0.3` into a clean venv can pull numpy 2.x, and pandas then fails to import. The engine declares no direct numpy pin (`pyproject.toml:61` area). This is a pandas packaging gap that any floor below 2.2.2 inherits. The floor environment pins numpy 1.26.4, as the F06 floor run did, and the `Breaking:` line and quickstart state the numpy limit (section 14 OWNER CALL).
-- PyPA guidance: declare the lowest version you test. SPEC 0 drops dependency versions older than two years; pandas 2.0.3 (mid 2023) is inside that window.
+- pandas 2.0.3 has wheels for CPython 3.8 to 3.11 only. The engine supports 3.10 to 3.12 (`pyproject.toml:13`). On 3.12 a resolver that prefers wheels picks pandas 2.1.1 or newer; pandas 2.0.3 on 3.12 would need an sdist build, which the floor does not promise. So the floor is exercised on 3.10 and 3.11 only, and the docs say the 3.12 floor is in practice the first pandas with a 3.12 wheel.
+- pandas 2.0.3 needs numpy below 2, but its PyPI metadata declares only `numpy>=1.21.0` / `>=1.23.2` with no upper bound (Dennis R1 P1-2). So `pip install decoy-engine pandas==2.0.3` into a clean venv can pull numpy 2.x, and pandas then fails to import. The engine declares no direct numpy pin (`pyproject.toml:61` area). This is a pandas packaging gap that any floor below 2.2.2 inherits: `pip install pandas==2.0.3` alone fails the same way with no engine present, so the engine floor does not create the break, but it does advertise a version where the user must add `numpy<2`. The floor environment pins numpy 1.26.4, as the F06 floor run did, and the `Breaking:` line and quickstart state the numpy limit (section 14 OWNER CALL).
+- PyPA guidance: declare the lowest version you test. SPEC 0 says projects may drop dependency versions older than two years; pandas 2.0.3 (June 2023) is outside that window by November 2026, so SPEC 0 would also support the 2.2.2 option (section 14). It does not require dropping 2.0.3.
 - The engine already has a floor sentry, `tests/sentry/dependencies/test_dependency_floors.py`. It reads the floor with `packaging.requirements` and checks the lock against it (the `uv lock --check` idea as a test). S2a adds pandas cells to it.
 
 The design follows PyPA (declare the tested floor), the F06 evidence pattern and the existing floor sentry. The only new check is "docs state the same floor", because no tool compares prose with package metadata.
@@ -87,9 +87,9 @@ House style applies to the touched tests only.
 The cross-cutting fact in S2a is "the pandas floor". Its one owner is `[project].dependencies` in `pyproject.toml`. The guard is two new cells in `tests/sentry/dependencies/test_dependency_floors.py`:
 
 - `test_pandas_floor_keeps_unit_resolution`: `_floor("pandas") >= Version("2.0.3")`, with a comment that names the Dennis finding. Fail-before on `2b8a47fbe` (floor 1.5.0).
-- `test_pandas_floor_statements_match`: walks `docs/**/*.md` (minus `docs/plans/`, `docs/records/`, `docs/quality/` and `docs/evidence/`, which hold history and measured versions), `README.md` and `src/**/*.py` for a pandas lower-bound statement and asserts each matched version equals `_floor("pandas")`, or is listed in an allowlist with a reason. A statement needs a bound marker, so plain version mentions ("pandas 2.3.3 used", "pandas 2.53 s") do not match. The regex is `pandas\s*>=\s*(\d+\.\d+(?:\.\d+)?)` or `pandas\s+(\d+\.\d+(?:\.\d+)?)\s+(?:or newer|or later|minimum)` (Dennis R1 P1-1: an optional marker matched 15 files on main). `CHANGELOG.md` is excluded by path. Allowlist rows, each with a reason: `src/decoy_engine/quality/snapshot.py:349` ("only exists from pandas 1.5", a feature note, not a floor) and the quickstart parenthetical "on Python 3.12, pandas 2.1 or newer" (a wheel fact, section 3).
+- `test_pandas_floor_statements_match`: walks `docs/**/*.md` (minus `docs/plans/`, `docs/records/`, `docs/quality/` and `docs/evidence/`, which hold history and measured versions), `README.md` and `src/**/*.py` for a pandas lower-bound statement and asserts each matched version equals `_floor("pandas")`, or is listed in an allowlist with a reason. A statement needs a bound marker, so plain version mentions ("pandas 2.3.3 used", "pandas 2.53 s") do not match. The patterns, each prefixed by `(?<![\w-])` so `geopandas>=` and `dask-pandas` do not match, are `pandas\s*>=\s*(\d+\.\d+(?:\.\d+)?)`, `pandas\s+(\d+\.\d+(?:\.\d+)?)\s+(?:or newer|or later|minimum)`, and the range spelling `pandas\s+(\d+\.\d+)\s*-\s*\d` (as in `internal/pandas_compat.py:6`, "pandas 1.5-2.x"), where the first number is the floor (Dennis R1 P1-1: an optional marker matched 15 files on main; Codex R1 added the range and prefix cases). `CHANGELOG.md` is excluded by path. Allowlist rows, each with a reason: `src/decoy_engine/quality/snapshot.py:349` ("only exists from pandas 1.5", a feature note, not a floor) and the quickstart parenthetical "on Python 3.12, pandas 2.1 or newer" (a wheel fact, section 3).
 
-The walk is checked the way `cross-cutting-concerns.md` asks: the builder seeds "pandas 1.5 or newer" into a scratch copy of `docs/quickstart.md` and shows the cell fails, then removes the sentence and shows it passes. A committed false-positive cell runs the matcher on "pandas 2.3.3 used" and "pandas 2.53 s" and asserts no match.
+The walk is checked the way `cross-cutting-concerns.md` asks: the builder seeds "pandas 1.5 or newer" into a scratch copy of `docs/quickstart.md` and shows the cell fails, then removes the sentence and shows it passes. A committed matcher cell checks seeded cases: positives "pandas>=1.5", "pandas 1.5 or newer", "pandas 1.5-2.x"; negatives "pandas 2.3.3 used", "pandas 2.53 s", "geopandas>=0.14".
 
 Mutation M-1: change the new `docs/quickstart.md` sentence back to 1.5. The statements cell turns red.
 
@@ -100,7 +100,7 @@ S3 adds no rule with more than one site. The CLI keeps its one preflight-to-chec
 | New file | Directory | CODEMAP "Where Things Go" row | Beside |
 |---|---|---|---|
 | `2026-11-2x-pandas-floor-evidence.md` | `docs/plans/evidence/` | "Plans, decisions, records": `docs/plans/` | `docs/plans/evidence/2026-10-30-f06-r2-evidence.md` |
-| `pandas-floor.md` | `changelog.d/` | not in the map; existing practice for every engine change (`changelog.d/fixed-list-null.md`), compiled by the release stamp | `changelog.d/preflight-arrow-profile.md` (from #805) |
+| `pandas-floor.md` | `changelog.d/` | "Changelog fragments" (`CODEMAP.md:302`): `changelog.d/<slice-slug>.md` | `changelog.d/preflight-arrow-profile.md` (from #805) |
 
 The sentry cells go in an existing file, `tests/sentry/dependencies/`, which the "Sentry test" row names for "dependency floor rules". S2b and S3 add no file.
 
@@ -123,7 +123,7 @@ Failure modes the plan checks for:
 - F1: a floor-environment failure in a test #805 did not touch. The builder runs the same test on the S2a base in the same environment. If it fails on base, it is recorded in the evidence file as pre-existing (as F06 did for `test_phase_f_f2_mixed_admission.py`) and not fixed in S2a. If it is new with the floor, S2a stops and reports.
 - F2: `uv lock` rewrites more than the specifier line. The builder uses the uv version of the last lock change, and AT-S2-2 fails on any other changed line.
 - F3: the release stamp picks up a fragment from a PR that is not on main. The stamp runs on a fresh `origin/main` worktree only.
-- F4: the CLI default route is not native on a CI leg without the companion. The exit-0 cells keep the existing marker rules that `TestLateRefusedValue` uses for the companion. The `--no-native` and plain-run cells run on every leg.
+- F4: the CLI default route on a CI leg without the companion. The chunked carry is chosen by the stock adapter (`execution/_chunked_carry.py:274-287`), not by the companion, so the exit-0 cells run on every leg, companion-free legs included, with no companion marker (Codex R1). The `--no-native` and plain-run cells also run on every leg.
 - F5: a value leaks through a CLI output surface. The S3 cells check stdout and stderr under `--json` and `--verbose`.
 - F6: a user pins pandas below 2.0.3 for another package. They get a resolver conflict at install, not a wrong answer at run time. This is the intended behavior and the `Breaking:` line says so.
 
@@ -133,11 +133,11 @@ Fail-before is recorded on the parent commit of each slice.
 
 | ID | Slice | Test | Fail-before |
 |---|---|---|---|
-| AT-S2-1 | S2a | `uv pip install --dry-run` of the built wheel into a venv with pandas 2.0.2 reports an upgrade or a conflict; with 2.0.3 and numpy 1.26.4 it reports neither. A recorded probe (evidence file, not a committed test) installs pandas 2.0.3 with numpy 2.x and records the import failure, so the documented numpy limit is shown, not assumed | 2.0.2 accepted |
+| AT-S2-1 | S2a | `uv pip install --dry-run` of the built wheel into a venv with pandas 2.0.2 reports an upgrade or a conflict. A clean resolver install of the built wheel with `pandas==<floor>` plus the documented companion constraint (`numpy<2` for 2.0.3) on each Python that has a floor wheel, then `python -c "import pandas, decoy_engine"`, passes. A recorded probe (evidence file) installs pandas 2.0.3 with no numpy constraint and records whether numpy 2 is resolved and the import fails, so the documented limit is shown, not assumed | 2.0.2 accepted (metadata says 1.5.0) |
 | AT-S2-2 | S2a | `git diff` of `uv.lock` against the parent changes only the pandas specifier line | guards F2 |
-| AT-S2-3 | S2a | floor run on Python 3.10 and 3.11 with pandas 2.0.3, numpy 1.26.4, pyarrow 16.1.0: `tests/unit/profile/`, `tests/unit/execution/test_capacity_arrow_profile.py`, `tests/unit/execution/test_full_frame_value_unrepresentable.py` (all from #805), and T1 on the S2a diff; pass counts and every failure with its base reproduction in the evidence file | the S1b duration cells disagree on pandas 1.5.3; recorded as the before cell |
+| AT-S2-3 | S2a | floor run on Python 3.10 and 3.11 with pandas 2.0.3, numpy 1.26.4, pyarrow 16.1.0: `tests/unit/profile/`, `tests/unit/execution/test_capacity_arrow_profile.py`, `tests/unit/execution/test_full_frame_value_unrepresentable.py` (all from #805), and T1 on the S2a diff; pass counts and every failure with its base reproduction in the evidence file | characterization only: the before cell is AT-S2-1's metadata acceptance of 2.0.2 |
 | AT-S2-4 | S2a | the two sentry cells in section 6 pass, and M-1 turns the statements cell red | floor cell fails on 1.5.0 |
-| AT-S2-5 | S2b | the 0.28.5 wheel metadata has `Requires-Dist: pandas<3,>=2.0.3`; `CHANGELOG.md` has the `Breaking:` floor line and the #805 entry | 0.28.4 metadata says 1.5.0 |
+| AT-S2-5 | S2b | before tagging: the 0.28.5 wheel metadata has `Version: 0.28.5` and `Requires-Dist: pandas<3,>=2.0.3`; installed `decoy_engine.__version__` is `0.28.5`; `CHANGELOG.md` has the `Breaking:` floor line and the #805 entry | 0.28.4 metadata says 1.5.0 |
 | AT-S3-1 | S3 | `decoy validate preflight` on the three fixtures: no `capacity.source_unreadable` in text or `--json`; a truncated Parquet still has it, exit 1 | exit 1 on the three fixtures |
 | AT-S3-2 | S3 | `decoy run --chunked`, default route, bad row at 0, 9,999 and 10,000, each fixture: exit 0, `t` equals the source column | rows 0 and 9,999 exit 1 |
 | AT-S3-3 | S3 | `decoy run --chunked --no-native`, with `--json` and with `--verbose`: exit 3, code `chunked_passthrough_value_unrepresentable`, none of the fixture markers (the raw cell digits, `out of range`, `nanosecond`, `year`), no output file | row 0 exits 1 at preflight |
@@ -155,8 +155,8 @@ The S3 edits to `TestValuesPandasRefuses` replace a characterization of a known 
 | M-1 | the `docs/quickstart.md` floor sentence says 1.5 | AT-S2-4 statements cell |
 | M-2 | `pyproject.toml:61` stays at 1.5.0 | AT-S2-1, AT-S2-4 floor cell |
 | M-3 | S3 pins the CLI to 0.28.4 (no #805) | AT-S3-1, AT-S3-2 |
-| M-4 | in a scratch engine build, #805's recovery predicate drops the date32 range check | AT-S3-2 cells for the two date32 fixtures |
-| M-5 | the CLI `--verbose` path prints the engine exception's `__context__` | AT-S3-3, AT-S3-4 |
+| M-4 | in a scratch engine build, #805's recovery rejects every date32 recovery | AT-S3-1 and the in-sample AT-S3-2 cells (bad row 0 and 9,999) for the two date32 fixtures |
+| M-5 | the CLI error renderer appends a known sentinel built from the source cell (the engine exception's `__context__` is already empty at `#805:execution/_pipeline_full_frame.py:222-236`, so printing it shows nothing) | AT-S3-3, AT-S3-4 |
 
 M-4 runs against a local editable engine in the CLI venv. It is a gate probe, not a committed test.
 
@@ -252,7 +252,7 @@ Install: resolves pandas 2.0.3 or newer, or reports a resolver conflict. No run-
 | Slice | Repo | Content | Depends on | Risk | Test depth |
 |---|---|---|---|---|---|
 | S2a | engine | floor in `pyproject.toml:61`, `uv lock`, the two `pandas_compat.py` comments, the quickstart sentence, the two sentry cells, `changelog.d/pandas-floor.md` with a `Breaking:` line, the evidence file; AT-S2-1 to AT-S2-4 | #805 merged (the floor run covers its tests) | R2 | T1, then the full engine suite (dependency floor and lock trigger) diffed against the saved main baseline; gate Codex then Dennis |
-| S2b | engine | `chore(release): 0.28.5` from `stamp_release.py` on fresh main, tag `v0.28.5`, the release workflow; AT-S2-5 | #805 and S2a merged | R2 (release path) | the release workflow's own checks; gate Codex. Engine releases are pre-authorized before GA |
+| S2b | engine | `chore(release): 0.28.5` from `stamp_release.py` on fresh main, plus the version in `pyproject.toml:10`, `release.py:50` and `uv.lock`; the AT-S2-5 agreement check before the tag; tag `v0.28.5`, the release workflow | #805 and S2a merged | R2 (release path) | the release workflow's own checks; gate Codex. Engine releases are pre-authorized before GA |
 | S3 | CLI | repin to 0.28.5 along #408's file set; flip `TestValuesPandasRefuses`, delete `_direct`, add a `date32_late` fixture (+3,000,000 days), parametrize the bad row over 0, 9,999 and 10,000, add the plain-run and validate-preflight cells, docs and changelog; AT-S3-1 to AT-S3-7 | S2b tagged and CLI #408 merged | R2 (version pin, exit codes) | T1, then the CLI full suite with `gates.sh --full` (version pin trigger); gate Codex then Dennis |
 
 OWNER CALL (recommended non-breaking option taken): S3 waits for CLI #408 to merge to main and rebases on it. It does not stack on #408's branch, because a PR merged into a non-main base does not ship, and #408 already moves every repin file.
@@ -261,7 +261,7 @@ OWNER CALL (recommended non-breaking option taken): S2a and S2b are separate PRs
 
 Order: #805, S2a, S2b, S3. The S2a branch may be prepared on top of #805's head while #805 is in gate, but the S2a PR targets `main` and is opened only after #805 merges, rebased on that main. A PR merged into a non-main base never ships. Its floor run is repeated on the merged #805.
 
-OWNER CALL (recommended non-breaking option taken; open for the owner): the floor stays at 2.0.3, the owner default A for Q-PAP-D7. It drops the fewest existing installs. Its cost is the numpy limit in section 3: pandas 2.0.x and 2.1.x import only with numpy below 2, and pandas metadata does not enforce that. S2a states it in the `Breaking:` line ("pandas 2.0.3 or newer; pandas 2.0.x and 2.1.x need numpy below 2") and in the quickstart sentence. The alternative is a 2.2.2 floor: it supports numpy 2, has wheels for CPython 3.10 to 3.12 (so the floor is testable on every supported Python), and drops the 3.12 parenthetical. It removes more installs. If the owner picks 2.2.2, S2a changes only the floor value, the evidence environment and the doc sentence.
+OWNER CALL (recommended non-breaking option taken; open for the owner): the floor stays at 2.0.3, the owner default A for Q-PAP-D7. It drops the fewest existing installs. Its cost is the numpy limit in section 3: pandas releases below 2.2.2 (2.0.x, 2.1.x, 2.2.0 and 2.2.1) import only with numpy below 2, and pandas metadata does not enforce that. S2a states it in the `Breaking:` line ("pandas 2.0.3 or newer; pandas below 2.2.2 needs numpy below 2") and in the quickstart sentence. The alternative is a 2.2.2 floor: it supports numpy 2, has wheels for CPython 3.10 to 3.12 (so the floor is testable on every supported Python), and drops the 3.12 parenthetical. It removes more installs. If the owner picks 2.2.2, S2a changes only the floor value, the evidence environment and the doc sentence. Codex R1 asked that this choice be settled before a release: S2a may be built on the default, but the S2b tag waits for the owner to confirm 2.0.3-with-note or 2.2.2. The orchestrator relays this as an open item.
 
 Rollback (`release-and-rollback.md`):
 
@@ -274,7 +274,7 @@ Post-release check for S2b: install 0.28.5 from the built wheel in a clean venv 
 ## 15. Pre-mortem
 
 - The floor run fails on something unrelated to #805, as F06 did. F1 covers it: reproduce on base, record it, do not fix it in S2a.
-- A reader on Python 3.12 expects 2.0.3 to be tested there. It cannot be, with no wheel. The quickstart sentence says "pandas 2.0.3 or newer (on Python 3.12, pandas 2.1 or newer; pandas 2.0.x and 2.1.x need numpy below 2)".
+- A reader on Python 3.12 expects 2.0.3 to be tested there. It cannot be, with no wheel. The quickstart sentence says "pandas 2.0.3 or newer (on Python 3.12, pandas 2.1 or newer; pandas below 2.2.2 needs numpy below 2)".
 - A user installs pandas 2.0.3 and numpy 2 together and the import fails. The `Breaking:` line and quickstart state the limit; the owner can move the floor to 2.2.2 (section 14).
 - #805 changes again in gate. S2a only cites its test paths, and the floor run is repeated on the merged head.
 - #408 is replaced by a 0.28.5 pin PR before S3 starts. S3 then edits only the flipped tests, docs and changelog. AT-S3-7 checks the pin wherever it came from.
