@@ -130,18 +130,6 @@ def snapshot_schema_failure(parsed: Any, shown: str) -> Any:
     )
 
 
-def _unreadable_message(shown: str, locator: str, declared: str, cause_type: str) -> str:
-    """The unreadable-snapshot text: the shown name and the exception class, never its text.
-
-    A relative value (`locator` differs from `declared`) also gets the fixed rule hint; the
-    resolved path stays out because it is config-derived.
-    """
-    text = f"snapshot_file {shown!r} could not be read: {cause_type}"
-    if locator != declared:
-        text += " (relative snapshot_file paths resolve against the config file's folder)"
-    return text
-
-
 def statistical_refusal_text(code: str, declared: str) -> str:
     """The text a compile refusal of a statistical column carries: the registry summary, so no
     exception text reaches it. An unreadable snapshot gets fixed text and, for a relative value,
@@ -270,7 +258,6 @@ def read_and_pin_snapshots(
     failures: dict[str, Any] = {}
     for path, field_key in _snapshot_field_keys(config).items():
         shown = fileaccess.shown(path, field_key)
-        locator = fileaccess.config_relative(path, base_dir)
         read = read_pinned_artifact(
             FileRole.SNAPSHOT,
             path,
@@ -289,7 +276,9 @@ def read_and_pin_snapshots(
         if read.raw is None:
             failures[path] = StatisticalSpecError(
                 code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=_unreadable_message(shown, locator, path, read.cause_type),
+                message=statistical_refusal_text(
+                    reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE, path
+                ),
             )
             continue
         raw = read.raw

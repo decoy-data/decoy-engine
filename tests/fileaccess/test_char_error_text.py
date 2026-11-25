@@ -131,20 +131,20 @@ def test_r4_reference_table_errors() -> None:
     )
     missing = _raises(lambda: load_table("customer:nope.parquet"))
     assert isinstance(missing, ValueError)
-    assert _text(missing) == "failed to read Parquet at nope.parquet: FileNotFoundError"
+    assert _text(missing) == "failed to read the reference Parquet: FileNotFoundError"
     Path("bad.parquet").write_text("x")
     bad = _raises(lambda: load_table("customer:bad.parquet"))
-    assert _text(bad) == "failed to read Parquet at bad.parquet: Exception"
+    assert _text(bad) == "failed to read the reference Parquet: Exception"
     pq.write_table(pa.table({"x": [1]}), "noid.parquet")
     noid = _raises(lambda: load_table("customer:noid.parquet"))
     assert _text(noid) == (
-        "reference table at noid.parquet is missing required 'id' column. "
+        "the reference table is missing required 'id' column. "
         "All reference tables must have a stable 'id' column."
     )
     pq.write_table(pa.table({"id": pa.array([1], pa.int32())}), "id32.parquet")
     id32 = _raises(lambda: load_table("customer:id32.parquet"))
     assert _text(id32) == (
-        "reference table at id32.parquet has 'id' column of type DataType(int32); expected "
+        "the reference table has 'id' column of type DataType(int32); expected "
         "int64. All reference tables must have a stable int64 'id' column (schema convention "
         "-- see reference_tables/__init__.py)."
     )
@@ -211,8 +211,7 @@ def test_r3_snapshot_read_errors() -> None:
     digest = _raises(lambda: _snapshot_content_digest("nope.json"))
     assert isinstance(digest, RuntimeError)
     assert _text(digest).startswith(
-        "strategy_config_fingerprint: snapshot_file 'nope.json' is missing or unreadable "
-        "(FileNotFoundError); "
+        "strategy_config_fingerprint: snapshot_file is missing or unreadable (FileNotFoundError); "
     )
 
 

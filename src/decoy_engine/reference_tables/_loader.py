@@ -117,7 +117,7 @@ def load_table(
             if fileaccess.keeps_class(exc):
                 raise
             raise ValueError(
-                f"failed to read Parquet at {handle.display}: {safe_error_type(exc).value}"
+                f"failed to read the reference Parquet: {safe_error_type(exc).value}"
             ) from exc
     finally:
         handle.close()
@@ -125,14 +125,14 @@ def load_table(
 
     if "id" not in arrow_table.schema.names:
         raise ValueError(
-            f"reference table at {shown} is missing required 'id' column. "
-            f"All reference tables must have a stable 'id' column."
+            "the reference table is missing required 'id' column. "
+            "All reference tables must have a stable 'id' column."
         )
 
     id_type = arrow_table.schema.field("id").type
     if id_type != pa.int64():
         raise ValueError(
-            f"reference table at {shown} has 'id' column of type {id_type!r}; "
+            f"the reference table has 'id' column of type {id_type!r}; "
             f"expected int64. All reference tables must have a stable int64 'id' column "
             f"(schema convention -- see reference_tables/__init__.py)."
         )

@@ -55,7 +55,7 @@ from typing import Any, NoReturn
 import numpy as np
 import pandas as pd
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import reasons
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.determinism import derive, seed_bytes_to_int
 from decoy_engine.fileaccess import FileAccess, entry_point
@@ -205,7 +205,6 @@ def validate_joint_mask_config(
             ),
         )
 
-    shown_ref = fileaccess.shown(ref_name, fileaccess.position_key("joint_mask.reference"))
     try:
         tbl = load_table(ref_name)
     except FileNotFoundError:
@@ -218,7 +217,7 @@ def validate_joint_mask_config(
                 code=reasons.plan.JOINT_MASK_REFERENCE_NOT_FOUND,
                 path="joint_masks.reference",
                 message=(
-                    f"reference table {shown_ref!r} not found. "
+                    "the joint-mask reference table was not found. "
                     f"Known shipped tables: {sorted(_KNOWN_TABLES)}. "
                     "To use a customer-provided table, set reference: "
                     "customer:/path/to/file.parquet."
@@ -230,7 +229,7 @@ def validate_joint_mask_config(
             PlanCompileError(
                 code=reasons.plan.JOINT_MASK_REFERENCE_INVALID,
                 path="joint_masks.reference",
-                message=f"reference table {shown_ref!r} failed to load: {exc}",
+                message=f"the joint-mask reference table failed to load: {exc}",
             )
         )
 
@@ -241,7 +240,7 @@ def validate_joint_mask_config(
                 code=reasons.plan.JOINT_MASK_COLUMN_NOT_IN_REFERENCE,
                 path=f"joint_masks.columns.{col}",
                 message=(
-                    f"column {col!r} is not in reference table {ref_name!r}. "
+                    f"column {col!r} is not in the joint-mask reference table. "
                     f"Available columns: {sorted(ref_cols)}"
                 ),
             )

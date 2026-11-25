@@ -319,6 +319,33 @@ def _fitted_config() -> dict[str, Any]:
     return config
 
 
+def test_a_fitted_reference_with_credentials_in_the_locator_keeps_them_out() -> None:
+    """The fitted-reference route shares the unreadable-snapshot text: no locator in it."""
+    canary = "DECOY_CANARY_F31_PW"
+    config = _fitted_config()
+    config["tables"][2]["generate_columns"][1]["snapshot_file"] = (
+        f"https://user:{canary}@host/snap.json"
+    )
+    for run in (_compile, run_config_only_checks):
+        with pytest.raises(PlanCompileError) as info:
+            run(config)
+        assert info.value.code == UNREADABLE
+        assert canary not in str(info.value)
+        assert all(canary not in repr(a) for a in info.value.args)
+        assert "snapshot_file could not be read." in str(info.value)
+
+
+def test_the_fingerprint_digest_error_drops_the_locator() -> None:
+    from decoy_engine.generators.derivation import _snapshot_content_digest
+
+    canary = "DECOY_CANARY_F31_PW"
+    with pytest.raises(RuntimeError) as info:
+        _snapshot_content_digest(f"https://user:{canary}@host/snap.json")
+    assert canary not in str(info.value)
+    assert all(canary not in repr(a) for a in info.value.args)
+    assert "snapshot_file is missing or unreadable" in str(info.value)
+
+
 @pytest.mark.parametrize("kind", ["missing", "schema", "unknown-column", "fitted-no-fanout"])
 def test_the_folded_pass_keeps_both_validations_on_both_compile_routes(
     folders: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, kind: str

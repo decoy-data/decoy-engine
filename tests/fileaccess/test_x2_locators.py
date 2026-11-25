@@ -129,7 +129,8 @@ def test_a_read_failure_text_that_names_the_file_is_redacted(
     assert LOCATOR_SENTINEL in str(c1.value)
     with pytest.raises(RuntimeError) as c2:
         _snapshot_content_digest(str(path))
-    assert LOCATOR_SENTINEL in str(c2.value)
+    # The digest error is value-free under every policy (F31): no locator even when ambient.
+    assert LOCATOR_SENTINEL not in str(c2.value)
     with fileaccess.scope(xworld.policy):
         with pytest.raises(StatisticalSpecError) as e1:
             _load_snapshot(str(path))
@@ -502,7 +503,8 @@ def test_reference_table_diagnostics_use_the_position(xworld: XWorld) -> None:
     pq.write_table(pa.table({"x": [1]}), path)
     with pytest.raises(ValueError) as control:
         load_table("ref", path)
-    assert LOCATOR_SENTINEL in str(control.value)
+    # The loader error carries no locator under any policy (F31), ambient included.
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(ValueError) as info:
         load_table("ref", path)
     assert_no_locator(xworld, rendered(info.value))
@@ -519,7 +521,8 @@ def test_joint_mask_unknown_reference_names_no_locator(xworld: XWorld) -> None:
     }
     with pytest.raises(PlanCompileError) as control:
         validate_joint_mask_config(cfg)
-    assert LOCATOR_SENTINEL in str(control.value)
+    # The validator text is locator-free under every policy (F31), ambient included.
+    assert LOCATOR_SENTINEL not in str(control.value)
     with (
         fileaccess.scope(xworld.policy),
         pytest.raises((PlanCompileError, fileaccess.FileAccessDenied)) as info,
@@ -556,7 +559,7 @@ def test_joint_mask_bare_path_reference_chain_names_no_locator(xworld: XWorld) -
     cfg = {"columns": ["a"], "reference": str(xworld.sub / "bare_ref.parquet"), "key_by": "a"}
     with pytest.raises(PlanCompileError) as control:
         validate_joint_mask_config(cfg)
-    assert LOCATOR_SENTINEL in str(control.value)  # positive control (ambient)
+    assert LOCATOR_SENTINEL not in str(control.value)  # locator-free under every policy (F31)
     with fileaccess.scope(xworld.policy), pytest.raises(PlanCompileError) as info:
         validate_joint_mask_config(cfg)
     assert_no_locator(xworld, rendered(info.value))
