@@ -403,8 +403,12 @@ def test_ceiling_sweep_never_allocates_past_a_reservation(monkeypatch: pytest.Mo
     peak = GenerationBudgetLedger(None)
     run_generation(config, ledger=peak)
     refused_stages: set[str] = set()
-    for step in range(0, 41):
-        ceiling = peak.peak_bytes * step // 40
+    # The pool reservation includes Faker's provider init, a fixed 16 MiB that dwarfs the key
+    # pool and batch buffers, so the early stages' refusals sit in the first 1/40 step of the
+    # peak: sweep the low range in fine steps as well.
+    top = peak.peak_bytes
+    ceilings = [top * step // 40 for step in range(0, 41)] + list(range(0, 64 * 1024, 1024))
+    for ceiling in ceilings:
         ledger = GenerationBudgetLedger(ceiling)
         held_at_batch: list[int] = []
         real = _column_streams.SequenceStream.next_batch

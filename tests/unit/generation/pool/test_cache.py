@@ -137,3 +137,35 @@ class TestLruOrdering:
         # a accessed-most-recently might survive depending on byte
         # accounting; sanity-check that evictions happened.
         assert cache.stats().evictions >= 1
+
+
+def test_the_cache_limit_counts_the_retained_arrow_buffers() -> None:
+    import pyarrow as pa
+
+    words = [f"w{i:05d}" for i in range(1_000)]
+    objects = np.array(words, dtype=object)
+    arrow = pa.array(words)
+
+    def pool(tag: str) -> ValuePool:
+        return ValuePool(
+            values=objects,
+            provider=tag,
+            locale="en_US",
+            config_hash="",
+            seed=b"\x01" * 8,
+            size=len(words),
+            build_time_ms=0.0,
+            backend_type="faker",
+            backend_version="x",
+            distinct_count=len(words),
+            arrow=arrow,
+        )
+
+    one = measured_pool_bytes(pool("a"))
+    object_only = one - arrow.nbytes
+    # Room for two pools if the Arrow form were free, but not once it is counted.
+    cache = PoolCache(max_bytes=2 * object_only + arrow.nbytes)
+    cache.put(pool("a"))
+    cache.put(pool("b"))
+    assert cache.get(pool("a").identity) is None
+    assert cache.stats().bytes_used == one

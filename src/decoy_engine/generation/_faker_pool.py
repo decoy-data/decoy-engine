@@ -41,8 +41,8 @@ from faker import VERSION as _FAKER_VERSION
 from faker import Faker
 
 from decoy_engine.determinism import seed_bytes_to_int
+from decoy_engine.generation.pool import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._cardinality import CardinalityMode
-from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generation.pool._value_pool import ValuePool, _freeze_array, pool_take
 from decoy_engine.generators.derivation import (  # noqa: F401  (the families are re-exported)

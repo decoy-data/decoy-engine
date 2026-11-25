@@ -205,3 +205,86 @@ def test_no_other_pool_values_gather_remains() -> None:
 )
 def test_the_gather_scan_sees_direct_and_aliased_gathers(planted: str) -> None:
     assert sum(_gathers(planted).values()) == 1
+
+
+# Review R1b: the Arrow gather is used only where it gives back the pool's own values and nulls.
+
+
+def _typed_pool(values: list[Any], arrow: pa.Array) -> ValuePool:
+    objects = np.empty(len(values), dtype=object)
+    for i, v in enumerate(values):
+        objects[i] = v
+    return ValuePool(
+        values=_freeze_array(objects),
+        provider="p",
+        locale="en_US",
+        config_hash="",
+        seed=b"\x01" * 8,
+        size=len(values),
+        build_time_ms=0.0,
+        backend_type="faker",
+        backend_version="x",
+        distinct_count=len(set(values)),
+        arrow=arrow,
+    )
+
+
+@pytest.mark.parametrize(
+    ("values", "arrow_type"),
+    [
+        ([2**60 + 1, None, 7], pa.int64()),
+        ([1.5, None, 2.5], pa.float64()),
+        ([True, None, False], pa.bool_()),
+    ],
+)
+def test_reuse_pick_keeps_values_and_nulls_for_types_numpy_would_change(
+    values: list[Any], arrow_type: pa.DataType
+) -> None:
+    pool = _typed_pool(values, pa.array(values, type=arrow_type))
+    indices = np.array([0, 1, 2, 1, 0, 2, 1])
+    picked = _value_pool.pool_pick(pool, indices)
+    assert picked.tolist() == [values[i] for i in indices]
+    assert [type(x) for x in picked.tolist()] == [type(values[i]) for i in indices]
+
+
+def test_reuse_pick_of_a_string_pool_with_a_null_still_uses_the_arrow_gather(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+    real = _value_pool.pool_take
+
+    def spy(pool: pa.Array, indices: np.ndarray) -> pa.Array:
+        calls.append(len(indices))
+        return real(pool, indices)
+
+    monkeypatch.setattr(_value_pool, "pool_take", spy)
+    pool = _typed_pool(["a", None, "c"], pa.array(["a", None, "c"]))
+    assert _value_pool.pool_pick(pool, np.array([1, 0, 2])).tolist() == [None, "a", "c"]
+    assert calls == [3]
+
+
+def test_a_bundle_pool_takes_output_columns_as_its_last_positional_argument() -> None:
+    from decoy_engine.generation.composite._bundle_pool import BundlePool
+
+    arr = np.empty(1, dtype=object)
+    arr[0] = ("x", "y")
+    pool = BundlePool(arr, "c", "en_US", "h", b"\x01" * 8, 1, 0.0, "faker", "x", 1, ("a", "b"))
+    assert pool.output_columns == ("a", "b")
+    assert pool.arrow is None
+
+
+def test_arrow_is_keyword_only() -> None:
+    with pytest.raises(TypeError):
+        ValuePool(  # type: ignore[call-arg]
+            np.empty(0, dtype=object), "p", "en_US", "h", b"\x01", 0, 0.0, "f", "x", 0, pa.array([])
+        )
+
+
+def test_measured_pool_bytes_counts_the_retained_arrow_buffers() -> None:
+    words = [f"w{i:05d}" for i in range(2_000)]
+    with_arrow = _typed_pool(words, pa.array(words))
+    without = _typed_pool(words, None)
+    assert with_arrow.arrow is not None
+    assert _value_pool.measured_pool_bytes(with_arrow) == (
+        _value_pool.measured_pool_bytes(without) + with_arrow.arrow.nbytes
+    )

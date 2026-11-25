@@ -9,14 +9,17 @@ that costs most per byte (one astral char in ASCII text widens every char to 4 b
 from __future__ import annotations
 
 import gc
+import os
 import tracemalloc
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
 import pytest
 
+import decoy_engine
 from decoy_engine.generation import _bounds, _column_streams, _faker_pool, _streamed
 from decoy_engine.generation._budget_ledger import (
     GenerationBudgetExceeded,
@@ -196,4 +199,76 @@ def test_a_ceiling_of_exactly_the_reservations_completes_and_one_byte_less_refus
     monkeypatch.setattr(_faker_pool, "build_pool_values", counting)
     with pytest.raises(GenerationBudgetExceeded):
         _city_run(GenerationBudgetLedger(exact - 1))
+    assert builds == []
+
+
+# Review R1b V1-1: Faker builds its locale providers when the pool opens, and that cost was not
+# charged. These run the real build in a fresh worker (no stubbed build, no warm provider cache).
+_FRESH_WORKER = """
+import os, sys, tracemalloc
+import pyarrow as pa
+from decoy_engine.generation import _faker_pool
+locale, faker_type, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+proxy = pa.proxy_memory_pool(pa.default_memory_pool())
+pa.set_memory_pool(proxy)
+tracemalloc.start()
+selector = _faker_pool.open_pooled_selector(
+    faker_type=faker_type, faker_kwargs={}, gen_ctx=None,
+    effective_locale=locale, pool_size=n,
+)
+python_peak = tracemalloc.get_traced_memory()[1]
+assert selector is not None
+print(python_peak + proxy.max_memory(), flush=True)
+# Arrays built under the proxy pool must not outlive it: skip interpreter teardown.
+os._exit(0)
+"""
+
+
+def _fresh_worker_peak(locale: str, faker_type: str, n: int) -> int:
+    import subprocess
+    import sys
+
+    # Seeds come from the gen context, so the worker stubs only that, not the build.
+    script = _FRESH_WORKER.replace(
+        "selector = _faker_pool",
+        "_faker_pool._pool_seeds = lambda ctx: (b'\\x01' * 8, b'\\x02' * 8)\nselector = _faker_pool",
+        1,
+    )
+    out = subprocess.run(  # noqa: S603 -- fixed argv, test-only
+        [sys.executable, "-c", script, locale, faker_type, str(n)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(decoy_engine.__file__).parents[1])},
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    return int(out.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.serial
+@pytest.mark.parametrize("locale", ["it_IT", "de_AT", "el_GR", "en_US"])
+def test_the_reservation_covers_a_fresh_worker_build_with_the_real_provider(locale: str) -> None:
+    peak = _fresh_worker_peak(locale, "prefix", _POOL)
+    payload = _bounds.FAKER_VALUE_CAPS["prefix"]
+    assert faker_pool_resident_bytes(_POOL, payload) >= peak
+
+
+@pytest.mark.serial
+def test_a_six_mib_ceiling_refuses_the_it_it_prefix_job_before_it_builds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reviewer's repro: the pool charged 3.6 MB but the build peaked at 10.7 MB."""
+    builds: list[int] = []
+    real_open = _faker_pool.open_pooled_selector
+
+    def counting(**kwargs: Any) -> Any:
+        builds.append(1)
+        return real_open(**kwargs)
+
+    monkeypatch.setattr(_faker_pool, "open_pooled_selector", counting)
+    config = prepared_config(faker_config("prefix", _ROWS, locale="it_IT"))
+    with pytest.raises(GenerationBudgetExceeded):
+        _streamed.run_generation(
+            config, ledger=GenerationBudgetLedger(6 * 1024 * 1024), batch_rows=128
+        )
     assert builds == []

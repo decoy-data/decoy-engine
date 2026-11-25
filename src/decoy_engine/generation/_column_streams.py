@@ -39,8 +39,7 @@ from decoy_engine.generation import _faker_pool
 from decoy_engine.generation import stream as gen_stream
 from decoy_engine.generation._numeric_typing import sequence_affixes
 from decoy_engine.generation.kinds import ConstantStream, ParametricStream
-from decoy_engine.generation.pool._resident import faker_pool_resident_bytes
-from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
+from decoy_engine.generation.pool import DEFAULT_POOL_SIZE, faker_pool_resident_bytes
 from decoy_engine.generation.relational import check_reference_pool
 from decoy_engine.generators.derivation import (
     TABLE_KEY,

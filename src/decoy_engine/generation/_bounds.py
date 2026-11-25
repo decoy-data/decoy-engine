@@ -32,6 +32,7 @@ from decoy_engine.generation.kinds import (
     output_type_of,
     parametric_payload_bound,
 )
+from decoy_engine.generation.pool import STR_OBJECT_OVERHEAD_BYTES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -40,8 +41,6 @@ if TYPE_CHECKING:
 
     from decoy_engine.generation._admission import ColumnAdmission, PlanAdmission
 
-# CPython str object header + list pointer (execution._mem_estimate_dtypes).
-STR_OBJECT_OVERHEAD_BYTES = 57
 # Python list + Arrow buffer + null/cast copy live together while a batch is converted.
 _BATCH_COPIES = 3
 # Whole-table legacy generation also holds the finished pa.table plus pandas intermediates.

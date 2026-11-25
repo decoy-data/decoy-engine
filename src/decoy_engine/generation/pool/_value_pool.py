@@ -48,7 +48,8 @@ class ValuePool:
     # The same values as one Arrow array, for the vectorized take (`pool_take`). Set only by
     # generation's faker pool, which holds both forms on purpose: the frozen object array stays
     # for the keyed and bundle paths that gather one value at a time.
-    arrow: pa.Array[Any] | None = field(default=None, repr=False, compare=False)
+    # Keyword-only so a subclass's positional field (`BundlePool.output_columns`) keeps its place.
+    arrow: pa.Array[Any] | None = field(default=None, repr=False, compare=False, kw_only=True)
 
     @property
     def identity(self) -> tuple[str, str, str, bytes, int]:
@@ -94,11 +95,12 @@ def measured_pool_bytes(pool: ValuePool) -> int:
     The one pool-byte function: `PoolCache` budgets with it and the out-of-core run reserves
     with it, so a pool that fits one ledger fits the other. A character-count estimate measured
     from 0.5x to 2.6x off the real size depending on string length, which let the two ledgers
-    disagree."""
+    disagree. A pool that retains its Arrow form counts those buffers too."""
     values = pool.values
+    arrow_bytes = 0 if pool.arrow is None else int(pool.arrow.nbytes)
     if values.dtype != object:
-        return int(values.nbytes)
-    return sum(sys.getsizeof(v) for v in values) + 8 * len(values)
+        return int(values.nbytes) + arrow_bytes
+    return sum(sys.getsizeof(v) for v in values) + 8 * len(values) + arrow_bytes
 
 
 def construction_floor(size: int, *, strings: bool) -> int:
@@ -122,13 +124,24 @@ def pool_take(pool: pa.Array[Any], indices: np.ndarray[Any, Any]) -> pa.Array[An
     return pc.take(pool, indices)  # type: ignore[no-untyped-call, unused-ignore]
 
 
+def _arrow_gather_is_exact(arrow: pa.Array[Any]) -> bool:
+    """True when `to_numpy` returns the pool's values and nulls unchanged.
+
+    Only string arrays qualify: they convert to `str` objects with `None` for a null. An integer
+    array with a null converts to float64 (rounding values past 2**53, null becomes NaN), and
+    temporal types convert to numpy datetimes, so those gather from the object array instead.
+    """
+    return bool(pa.types.is_string(arrow.type) or pa.types.is_large_string(arrow.type))
+
+
 def pool_pick(pool: ValuePool, indices: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     """The REUSE gather of a built pool as a numpy object array.
 
-    A pool that carries its Arrow form picks through `pool_take`; one without it (every pool
-    built by `PoolBuilder`) gathers from the frozen object array. Both give the same values.
+    A string pool that carries its Arrow form picks through `pool_take`; any other pool (every
+    pool built by `PoolBuilder`, and non-string Arrow forms whose numpy conversion would change
+    values or nulls) gathers from the frozen object array. Both give the same values.
     """
-    if pool.arrow is not None:
+    if pool.arrow is not None and _arrow_gather_is_exact(pool.arrow):
         picked: np.ndarray[Any, Any] = pool_take(pool.arrow, indices).to_numpy(zero_copy_only=False)
         return picked
     gathered: np.ndarray[Any, Any] = pool.values[indices]

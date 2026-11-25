@@ -56,10 +56,9 @@ from decoy_engine.generation._column_streams import (
     make_column_stream,
 )
 from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
-from decoy_engine.generation.pool._resident import faker_pool_resident_bytes
-from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
+from decoy_engine.generation.pool import DEFAULT_POOL_SIZE, faker_pool_resident_bytes
 from decoy_engine.generation.relational import reference_policies
-from decoy_engine.generation.stream._batches import check_width, table_batches
+from decoy_engine.generation.stream import check_width, table_batches
 from decoy_engine.progress import get_active_channel
 
 if TYPE_CHECKING:

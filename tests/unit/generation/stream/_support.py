@@ -23,8 +23,12 @@ LEGACY_TEN = (
 )
 
 
-def faker_config(faker_type: str, rows: int, *, null_probability: float = 0.0) -> dict[str, Any]:
+def faker_config(
+    faker_type: str, rows: int, *, null_probability: float = 0.0, locale: str | None = None
+) -> dict[str, Any]:
     col: dict[str, Any] = {"name": "v", "type": "faker", "faker_type": faker_type}
+    if locale:
+        col["locale"] = locale
     if null_probability:
         col["null_probability"] = null_probability
     return fx.config([fx.table("t", rows, [col])])

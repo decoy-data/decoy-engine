@@ -73,6 +73,12 @@ from decoy_engine.generation.pool._events import (
 )
 from decoy_engine.generation.pool._identity import effective_pool_size
 from decoy_engine.generation.pool._pool_adapter import PoolAdapter
+from decoy_engine.generation.pool._resident import (
+    STR_OBJECT_OVERHEAD_BYTES,
+    PoolResidentParts,
+    faker_pool_resident_bytes,
+    faker_pool_resident_parts,
+)
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import (
     PoolSampler,
@@ -87,6 +93,7 @@ __all__ = [
     "DEFAULT_POOL_SIZE",
     "INT64_MAX",
     "INT64_MIN",
+    "STR_OBJECT_OVERHEAD_BYTES",
     "CacheStats",
     "CardinalityMode",
     "ComputedDrawSpec",
@@ -97,6 +104,7 @@ __all__ = [
     "PoolBuilder",
     "PoolCache",
     "PoolCapacityError",
+    "PoolResidentParts",
     "PoolSampler",
     "QualityWarning",
     "ValuePool",
@@ -109,6 +117,8 @@ __all__ = [
     "draw_kwargs",
     "effective_pool_size",
     "emit_generation_warning",
+    "faker_pool_resident_bytes",
+    "faker_pool_resident_parts",
     "get_default_pool_cache",
     "int_from_index",
     "parse_computed_draw",
