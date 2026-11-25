@@ -108,15 +108,35 @@ def _is_arrow_binary(dtype: object) -> bool:
     return binary_dtype is not None and isinstance(dtype, binary_dtype)
 
 
+def _decimal_text(sign: int, digits: tuple[int, ...], exponent: int) -> str:
+    """A finite Decimal with a negative exponent as plain decimal text, built from its digits so
+    no context precision rounds it and no int-to-str digit limit applies. Trailing zeros are
+    dropped, so equal values read alike."""
+    text = "".join(map(str, digits))
+    stripped = text.rstrip("0") or "0"
+    exponent += len(text) - len(stripped)
+    text = stripped
+    if exponent >= 0:
+        text += "0" * exponent
+    elif len(text) > -exponent:
+        text = f"{text[:exponent]}.{text[exponent:]}"
+    else:
+        text = f"0.{'0' * (-exponent - len(text))}{text}"
+    return f"-{text}" if sign else text
+
+
 def _wide_float_key(value: np.floating) -> str:
-    """The key of a finite float that a double cannot hold (longdouble). It comes from the exact
-    integer ratio, so two distinct values never share a key. It reads no process setting: not the
-    decimal context precision, and not the int-to-str digit limit, which `Decimal(int)` and hex
-    formatting both skip. A whole value gets its decimal digits, so it matches an int cell."""
+    """The key of a finite float that a double cannot hold (longdouble): its exact decimal text,
+    the text an equal Decimal cell or a decimal string of the value keys as. A fraction n/2**k is
+    n * 5**k / 10**k, so the text is finite and exact. It reads no process setting: not the decimal
+    context precision, and not the int-to-str digit limit, which `Decimal(int)` skips."""
     numerator, denominator = value.as_integer_ratio()
     if denominator == 1:
         return str(Decimal(numerator))
-    return f"{numerator:x}/{denominator:x}"
+    scale = denominator.bit_length() - 1
+    exact = Decimal(numerator * 5**scale)
+    sign, digits, _ = exact.as_tuple()
+    return _decimal_text(sign, digits, -scale)
 
 
 def _number_key(value: object) -> str:
@@ -135,7 +155,8 @@ def _number_key(value: object) -> str:
             return str(value)
         if value == value.to_integral_value():
             return str(int(value))
-        return format(value.normalize(), "f")
+        sign, digits, exponent = value.as_tuple()
+        return _decimal_text(sign, digits, int(exponent))
     return cell_text(value)
 
 

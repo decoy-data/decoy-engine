@@ -305,15 +305,28 @@ def _masked_wide_run(values: list[Any], replacement: list[Any]) -> dict[str, Any
     return run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker"), ("n", "hash")))
 
 
+HUGE_FINITE = np.isfinite(np.longdouble("1e4500"))  # false where the exponent range is a double's
+
+
+@pytest.mark.skipif(not HUGE_FINITE, reason="longdouble cannot hold 1e4500 here")
 @needs_wide_longdouble
 def test_huge_finite_longdouble_keys_do_not_hit_the_int_string_limit() -> None:
+    """Run in a child interpreter with the default digit limit, so the result does not depend on
+    the limit the test process runs with."""
+    import subprocess
     import sys
 
-    assert sys.get_int_max_str_digits() in (0, 4300)  # the default limit, not a raised one
-    values = [np.longdouble("1e4500"), np.longdouble("2e4500")]
-    report = _masked_wide_run(values, [1, 2])
-    assert not _table_errors(report)
-    assert not post_scan_verdict(report).blocking
+    script = (
+        "import sys\n"
+        "sys.set_int_max_str_digits(4300)\n"
+        "import numpy as np, pandas as pd\n"
+        "from decoy_engine.internal.cell_text import key_text\n"
+        "values = [np.longdouble('1e4500'), np.longdouble('2e4500')]\n"
+        "keys = key_text(pd.Series(values, dtype=object))\n"
+        "assert keys[0] != keys[1] and len(keys[0]) > 4300\n"
+    )
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, check=False)  # noqa: S603
+    assert done.returncode == 0, done.stderr.decode()[-300:]
 
 
 @needs_wide_longdouble
@@ -335,3 +348,19 @@ def test_wide_fractional_keys_do_not_depend_on_the_decimal_context() -> None:
 def test_a_whole_wide_float_keys_as_the_equal_int() -> None:
     whole = np.longdouble(2**53 + 1)
     assert key_text(pd.Series([whole, 2**53 + 1], dtype=object)) == [str(2**53 + 1)] * 2
+
+
+@needs_wide_longdouble
+@pytest.mark.parametrize("form", ["decimal_cells", "decimal_text"])
+def test_an_unchanged_wide_fraction_is_not_counted_as_masked(form: str) -> None:
+    """Output equal to the source reads as the same key whatever form it is emitted in."""
+    values = [np.longdouble("9007199254740992.5"), np.longdouble("9007199254740994.5")]
+    assert values[0] != float(values[0])
+    same = (
+        [Decimal(str(v)) for v in values] if form == "decimal_cells" else [str(v) for v in values]
+    )
+    assert key_text(pd.Series(values, dtype=object)) == key_text(pd.Series(same, dtype=object))
+    report = _masked_wide_run(values, same)
+    (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
+    assert finding["severity"] == "fail"
+    assert post_scan_verdict(report).blocking
