@@ -164,7 +164,7 @@ class ShadowCoordinator:
             plan, snapshot, admitted_edges=admitted_edges, when_masks=when_masks
         )
         if validate_result:
-            self._validated(snapshot, result)
+            self._validated(plan, snapshot, result)
         return result
 
     def _dispatch(
@@ -218,12 +218,16 @@ class ShadowCoordinator:
             self, plan, snapshot, admitted_edges=admitted_edges, when_masks=when_masks
         )
 
-    def _validated(self, snapshot: ShadowSnapshot, result: ShadowRunResult) -> ShadowRunResult:
+    def _validated(
+        self, plan: PhysicalPlan, snapshot: ShadowSnapshot, result: ShadowRunResult
+    ) -> ShadowRunResult:
         """Every branch returns finished output, so the configured validators judge it here, at
         the one result boundary, before it leaves `run`."""
         from decoy_engine.execution.physical._shadow_generation import enforce_validators
 
-        enforce_validators(self.ctx, result.outputs, dict(snapshot.tables))
+        enforce_validators(
+            self.ctx, result.outputs, dict(snapshot.tables), plan_validators=plan.validators
+        )
         return result
 
     def _dispatch_synthesis(

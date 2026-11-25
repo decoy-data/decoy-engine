@@ -52,6 +52,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine import reasons
 from decoy_engine.config import post_scan_integrity_requested
 from decoy_engine.execution._pipeline import classify_table_kinds
 from decoy_engine.execution.physical._shadow_diff_codes import (
@@ -62,7 +63,7 @@ from decoy_engine.generation._faker_pool import POOL_ELIGIBLE_FAKER_TYPES
 from decoy_engine.internal.faker_setup import has_custom_faker_override
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     import pyarrow as pa
     from faker import Faker
@@ -244,23 +245,41 @@ def enforce_validators(
     ctx: ShadowContext,
     outputs: Mapping[str, pa.Table],
     sources: Mapping[str, pa.Table],
+    *,
+    plan_validators: Sequence[Any] = (),
 ) -> None:
     """Judge a standalone shadow result, feed the run's session with it, or defer it by name.
+
+    The run's configured checks are the physical plan's own `validators` (`plan_validators`),
+    else the config the caller handed the context, else the generation payload the plan embeds.
+    A bound session must hold exactly those checks; one that holds others would judge the rows
+    against a different configuration, so the run is refused.
 
     A context whose `validation_owner` is set belongs to a caller that validates the result
     itself (the unified slice, on the rendered bytes): it defers the tables to that owner, and
     the session's `close` refuses them if the owner never feeds them. Otherwise a bound session
-    is fed and judges at `close`, whatever the context carries. With no session the config the
-    caller handed the context (`ctx.validation_config`), else the generation payload the plan
-    embeds, judges here.
+    is fed and judges at `close`. With no session the configured checks judge here.
 
     Raises:
         ValidatorFailedError: A configured validator found a failing row in `outputs`.
+        ValidatorStateError: The bound session does not hold the run's configured validators
+            (`validator_config_not_owned`).
     """
-    from decoy_engine.errors import ValidatorFailedError
+    from decoy_engine.errors import ValidatorFailedError, ValidatorStateError
     from decoy_engine.validators import active_validation_session, run_resident_validation
 
+    config: dict[str, Any] | None = dict(ctx.validation_config) if ctx.validation_config else None
+    if config is None and ctx.plan is not None and ctx.plan.generation is not None:
+        config = _decode_generation_config_shallow(ctx.plan.generation.config_json)
+    if plan_validators:
+        config = {**(config or {}), "validators": list(plan_validators)}
     session = active_validation_session()
+    configured = config.get("validators") if config else None
+    if session is not None and configured and not session.owns(configured):
+        raise ValidatorStateError(
+            code=reasons.runtime.VALIDATOR_CONFIG_NOT_OWNED,
+            message="the bound validation session does not hold this run's validators.",
+        )
     if ctx.validation_owner is not None:
         if session is not None:
             session.defer(outputs, owner=ctx.validation_owner)
@@ -268,12 +287,9 @@ def enforce_validators(
     if session is not None:
         session.observe_unobserved(outputs, sources)
         return
-    config = ctx.validation_config
-    if config is None and ctx.plan is not None and ctx.plan.generation is not None:
-        config = _decode_generation_config_shallow(ctx.plan.generation.config_json)
     if config is None:
         return
-    report = run_resident_validation(outputs, dict(config), sources)
+    report = run_resident_validation(outputs, config, sources)
     if report is not None and not report.passed:
         raise ValidatorFailedError(report)
 

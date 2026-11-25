@@ -89,22 +89,22 @@ def test_bound_session_is_fed_by_a_generation_result_and_fails(tmp_path: Path) -
         {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
-    with bind_validation_session(config, key_state_budget=lambda: None) as session:
-        assert session is not None
-        result = ShadowCoordinator(ctx=ctx).run(plan, snapshot)
-        assert "people" in result.outputs
-        assert session.unobserved_tables(("people",)) == []
-        report = session.finish()
-    assert report.passed is False
+    with pytest.raises(ValidatorFailedError):
+        with bind_validation_session(config, key_state_budget=lambda: None) as session:
+            assert session is not None
+            result = ShadowCoordinator(ctx=ctx).run(plan, snapshot)
+            assert "people" in result.outputs
+            assert session.unobserved_tables(("people",)) == []
+            assert session.finish().passed is False
 
 
 def test_bound_session_is_fed_by_a_mixed_result_and_fails(tmp_path: Path) -> None:
     config, inputs, plan, ctx, snapshot = _mixed_reject_all(tmp_path)
-    with bind_validation_session(config, key_state_budget=lambda: None) as session:
-        assert session is not None
-        ShadowCoordinator(ctx=ctx, registry=inputs.registry).run(plan, snapshot)
-        report = session.finish()
-    assert report.passed is False
+    with pytest.raises(ValidatorFailedError):
+        with bind_validation_session(config, key_state_budget=lambda: None) as session:
+            assert session is not None
+            ShadowCoordinator(ctx=ctx, registry=inputs.registry).run(plan, snapshot)
+            assert session.finish().passed is False
 
 
 def test_full_frame_branch_refuses_output_a_validator_rejects(tmp_path: Path) -> None:
@@ -189,3 +189,63 @@ def test_v15g_an_owned_context_defers_and_close_refuses_when_the_owner_never_fee
         with pytest.raises(ValidatorStateError) as caught:
             session.close()
     assert caught.value.code == reasons.runtime.VALIDATOR_TABLE_NOT_OBSERVED
+
+
+# --- Codex round 2: standalone and ambient-session holes -------------------------------------------
+
+
+def test_r2_standalone_full_frame_with_a_default_context_refuses_rejected_rows(
+    tmp_path: Path,
+) -> None:
+    """No session and no `validation_config`: the plan's own validators still judge the result."""
+    _, inputs, plan, ctx, snapshot = _full_frame_reject_all(tmp_path)
+    assert ctx.validation_config is None
+    with pytest.raises(ValidatorFailedError):
+        _coordinator(inputs, ctx).run(plan, snapshot)
+
+
+def test_r2_a_bound_generation_run_cannot_leave_its_scope_with_rejected_rows() -> None:
+    config = _generate_config()
+    config["validators"] = [
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+    ]
+    plan, ctx, snapshot = _admitted_dispatch(config)
+    returned: list[Any] = []
+    with pytest.raises(ValidatorFailedError):
+        with bind_validation_session(config, key_state_budget=lambda: None):
+            returned.append(ShadowCoordinator(ctx=ctx).run(plan, snapshot))
+    assert returned, "the run itself returned; the scope exit is what refuses"
+
+
+def test_r2_close_raises_the_same_verdict_every_time() -> None:
+    config = _generate_config()
+    config["validators"] = [
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+    ]
+    plan, ctx, snapshot = _admitted_dispatch(config)
+    with bind_validation_session(config, key_state_budget=lambda: None) as session:
+        assert session is not None
+        ShadowCoordinator(ctx=ctx).run(plan, snapshot)
+        for _ in range(3):
+            with pytest.raises(ValidatorFailedError):
+                session.close()
+
+
+def test_r2_an_ambient_session_holding_other_validators_is_refused() -> None:
+    """An accept-all session must not judge a run configured with reject-all."""
+    config = _generate_config()
+    config["validators"] = [
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+    ]
+    plan, ctx, snapshot = _admitted_dispatch(config)
+    ambient = {
+        "validators": [
+            {"name": "regex_match", "columns": {"people": ["tier"]}, "params": {"pattern": "."}}
+        ]
+    }
+    with bind_validation_session(ambient, key_state_budget=lambda: None) as session:
+        assert session is not None
+        with pytest.raises(ValidatorStateError) as caught:
+            ShadowCoordinator(ctx=ctx).run(plan, snapshot)
+        assert caught.value.code == reasons.runtime.VALIDATOR_CONFIG_NOT_OWNED
+        session.close()  # the refused run fed it nothing, so the scope still closes cleanly

@@ -95,6 +95,7 @@ __all__ = [
     "UNIFIED_SLICE_INVARIANT_VIOLATION",
     "UNKNOWN_TRANSFORM_OP",
     "VALIDATOR_COLUMN_MISSING",
+    "VALIDATOR_CONFIG_NOT_OWNED",
     "VALIDATOR_KEY_STATE_OVER_BUDGET",
     "VALIDATOR_SOURCE_PAIRING_MISMATCH",
     "VALIDATOR_SPAN_REPEATED",
@@ -550,6 +551,11 @@ VALIDATOR_TABLE_NOT_OBSERVED = _d(
 VALIDATOR_COLUMN_MISSING = _d(
     "validator_column_missing",
     "A validator needs a parent key or window column that the parent table does not have.",
+    since=UNRELEASED,
+)
+VALIDATOR_CONFIG_NOT_OWNED = _d(
+    "validator_config_not_owned",
+    "The validation session bound to a run does not hold the validators the run is configured with.",
     since=UNRELEASED,
 )
 VALIDATOR_SPAN_REPEATED = _d(

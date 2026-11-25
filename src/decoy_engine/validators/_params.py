@@ -11,11 +11,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from decoy_engine.errors import ConfigRuleError
+
 __all__ = ["ParamError", "compile_pattern", "numeric_param"]
 
 
-class ParamError(ValueError):
-    """A validator parameter is unusable. The message names the parameter, never its value."""
+class ParamError(ConfigRuleError):
+    """A validator parameter is unusable. The message names the parameter, never its value.
+
+    A ``ConfigRuleError``, so the reason adapter classifies it as a config failure."""
 
 
 def numeric_param(

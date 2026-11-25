@@ -51,6 +51,8 @@ def test_v15a_resident_full_frame_quarantines_when_configured(tmp_path: Path) ->
     cfg, tables = ooc.standard(tmp_path, _reject_parent_code(), quarantine=quarantine)
     result = ooc.run(cfg, tables, full=True)
     assert result.quality_metrics["validation"]["validators"]["passed"] is False
+    # Quarantine took the rejected rows out of what the run delivers.
+    assert result.outputs["parent"].num_rows == 0
 
 
 # --- V15c: full frame under a bound session -----------------------------------------------------
@@ -141,6 +143,17 @@ def test_v15g_complete_without_a_feed_or_verdict_refuses_at_close() -> None:
     assert caught.value.code == reasons.runtime.VALIDATOR_TABLE_NOT_OBSERVED
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+def test_v15g_table_complete_after_a_failing_batch_is_still_judged_at_close() -> None:
+    """M18: completing a fed table is not a judgement of it."""
+    session = ValidationSession(_ONE_TABLE)
+    session.observe_published("t", _TABLE.to_batches()[0])
+    session.table_complete("t")
+    with pytest.raises(ValidatorFailedError):
+        session.close()
+    with pytest.raises(ValidatorFailedError):
+        session.close()
 
 
 def test_v15g_a_deferred_table_the_owner_never_fed_refuses_at_close() -> None:

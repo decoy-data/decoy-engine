@@ -436,6 +436,7 @@ def compile_physical_plan(inputs: PhysicalPlanInputs) -> PhysicalPlan:
         plan_hash=inputs.plan_hash(),
         synthesis=synthesis,
         tables=tuple(tables),
+        validators=tuple(inputs.validators),
     )
 
 

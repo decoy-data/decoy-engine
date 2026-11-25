@@ -67,6 +67,11 @@ def bind_validation_session(
     token = _ACTIVE.set(session)
     try:
         yield session
+        # A clean exit enforces the verdict: a caller that never judged the run's tables cannot
+        # leave the scope with rejected rows in hand. A caller that already called `close` has
+        # had its verdict (it raised, or returned the report), so it is not asked twice.
+        if not session.close_attempted:
+            session.close()
     finally:
         _ACTIVE.reset(token)
 
@@ -136,6 +141,18 @@ class ValidationSession:
         self._explicit_source_rows: dict[str, int] = {}
         self._elapsed = 0.0
         self._report: ValidationReport | None = None
+        self._configured = _plain_entries(entries)
+        self._close_attempted = False
+        self._refused = False
+
+    @property
+    def close_attempted(self) -> bool:
+        """True once ``close`` has run, whether it returned or raised."""
+        return self._close_attempted
+
+    def owns(self, validators: Iterable[Any]) -> bool:
+        """True when this session was opened with exactly these ``validators:`` entries."""
+        return _plain_entries(validators) == self._configured
 
     def observe(self, table: str, output: pa.Table, source: pa.Table | None = None) -> None:
         """Feed one complete resident table, then mark it complete.
@@ -259,6 +276,7 @@ class ValidationSession:
                 (``validator_table_not_observed``).
             ValidatorFailedError: A finding falls on a table no caller judged or vouched for.
         """
+        self._close_attempted = True
         report = self.finish()
         unseen = sorted((self._complete | self._deferred) - self._rows.keys() - self._external)
         if unseen:
@@ -266,9 +284,13 @@ class ValidationSession:
                 code=reasons.runtime.VALIDATOR_TABLE_NOT_OBSERVED,
                 message=f"no validator saw the rows of table {unseen[0]!r}.",
             )
+        if self._refused:
+            raise ValidatorFailedError(report)
         settled = self._judged | self._external
         self._judged.update(self._rows)
         if not report.passed and any(f.table not in settled for f in report.findings):
+            # Remembered, so a second `close` raises the same verdict instead of reporting it.
+            self._refused = True
             raise ValidatorFailedError(report)
         return report
 
@@ -345,6 +367,19 @@ class ValidationSession:
                                 "published rows."
                             ),
                         )
+
+
+def _plain_entries(entries: Iterable[Any] | None) -> list[Any]:
+    """The ``validators:`` entries as plain dicts and lists, so a frozen copy compares equal."""
+
+    def plain(value: Any) -> Any:
+        if isinstance(value, dict) or hasattr(value, "keys"):
+            return {k: plain(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(v) for v in value]
+        return value
+
+    return [plain(entry) for entry in entries or []]
 
 
 def _require_owner(owner: str) -> None:

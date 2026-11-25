@@ -24,8 +24,7 @@ out-of-core, multi-table split) still keep a validator-bearing job resident unti
 A validator parameter error or finding never carries the parameter text: a bad regex, a non-numeric
 `max_identical_ratio`, `min_rows` or `tolerance` is reported by validator and parameter name through one
 parser (`validators/_params.py`), and a failing `regex_match` finding no longer quotes its pattern.
-A standalone shadow run with a validation session bound feeds that session instead of skipping it, and a
-standalone full-frame run judges its result when the context carries `validation_config`.
+A standalone shadow run judges its result with the validators its physical plan carries (`PhysicalPlan.validators`), whatever route it takes. With a validation session bound, it feeds that session instead, and refuses the run (`validator_config_not_owned`) when the session holds other validators than the run's. Leaving a `bind_validation_session` scope cleanly closes the session, so rejected rows cannot leave it unjudged. `close()` raises the same verdict each time it is called. `ParamError` is a config rule error.
 
 Every table a run delivers is judged exactly once. Marking a table complete no longer counts as
 judging it: `ValidationSession.close()` finishes the session, then raises `ValidatorFailedError` for a

@@ -978,16 +978,19 @@ def test_failures_spanning_batches_merge_to_whole_table_positions(
 def test_duplicate_entries_with_different_parameters_stay_separate(tmp_path: Path) -> None:
     vs = [
         _v("regex_match", {"parent": ["code"]}, pattern="^[a-z]+$"),
-        _v("regex_match", {"parent": ["code"]}, pattern="^ab.$"),
+        _v("regex_match", {"parent": ["code"]}, pattern="^zz$"),
         _v("regex_match", {"parent": ["code"]}, pattern="^[a-z]+$"),
     ]
     cfg, tables = standard(tmp_path, vs)
     kind, report = _assert_parity(cfg, tables)
     assert [f.validator for f in report.findings] == ["regex_match"] * 3
     assert report.validators_run == ("regex_match",)  # names dedup, findings do not
-    assert report.findings[0].failing_row_indices == report.findings[2].failing_row_indices
-    # A finding never quotes its pattern (value-free), so the entries differ only in their slot.
-    assert all("^ab.$" not in f.detail and "[a-z]" not in f.detail for f in report.findings)
+    first, middle, last = (f.failing_row_indices for f in report.findings)
+    assert first == last
+    # A finding never quotes its pattern (value-free), so the middle entry proves it used its own
+    # pattern by failing different rows: `^zz$` matches nothing, the others fail only a few.
+    assert middle != first and len(middle) > len(first)
+    assert all("^zz$" not in f.detail and "[a-z]" not in f.detail for f in report.findings)
 
 
 def test_a_repeated_column_in_one_entry_is_two_findings(tmp_path: Path) -> None:
