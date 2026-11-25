@@ -269,3 +269,6 @@ CODESET_REGISTRY: dict[str, CodeSetSpec] = {
         description="ISO 18245 Merchant Category Codes. Public reference enumeration.",
     ),
 }
+
+#: The shipped corpus names, defined once beside the registry (loader and checks share it).
+SHIPPED_CORPUS_NAMES: frozenset[str] = frozenset(CODESET_REGISTRY)

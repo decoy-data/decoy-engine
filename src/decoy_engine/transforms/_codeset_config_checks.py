@@ -23,8 +23,9 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_checks import _SHIPPED_CORPORA, _unknown_shipped_corpus
+from decoy_engine.transforms._codeset._checks import _unknown_shipped_corpus
 from decoy_engine.transforms._codeset_provenance import RESERVED_LICENSED_NAMES
+from decoy_engine.transforms._codeset_provenance import SHIPPED_CORPUS_NAMES as _SHIPPED_CORPORA
 
 
 def validate_code_set_config(cfg: dict[str, Any]) -> None:

@@ -341,7 +341,7 @@ def test_no_provenance_warning_hides_a_credential_label(
 
 
 def test_file_supplied_provenance_never_enters_error_text() -> None:
-    from decoy_engine.transforms._codeset_checks import _validate_provenance
+    from decoy_engine.transforms._codeset._checks import _validate_provenance
     from decoy_engine.transforms._codeset_provenance import CodeSetProvenance
 
     def stamp(corpus: str, version: str, is_seed: str) -> CodeSetProvenance:
@@ -389,10 +389,60 @@ def test_success_path_provenance_is_stripped_of_url_credentials(tmp_path: pathli
 
 
 def test_both_stat_sites_classify_not_a_directory_the_same_way() -> None:
-    from decoy_engine.transforms._codeset_checks import corpus_stat_error
+    from decoy_engine.transforms._codeset._checks import corpus_stat_error
 
     for exc in (NotADirectoryError(20, "x"), FileNotFoundError(2, "x")):
         first = corpus_stat_error(exc, "p")
         second = corpus_stat_error(exc, "p")
         assert first.code == second.code == "code_set_corpus_path_not_found"
     assert corpus_stat_error(OSError(5, _PW), "p").code == ("code_set_corpus_read_error")
+
+
+def test_verify_corpus_given_a_path_object_hides_the_prefixed_url() -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    # `Path` collapses `https://` to `https:/`; the redactor still recognises a remote scheme.
+    report = verify_corpus(pathlib.Path(_PREFIXED))
+    assert not report.ok
+    _no_secret(report.path)
+    _no_secret(" ".join(report.problems))
+
+
+def test_schema_error_never_lists_column_names(tmp_path: pathlib.Path) -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    path = tmp_path / "nocode.parquet"
+    pq.write_table(pa.table({f"https://svc:{_PW}@host": pa.array(["a"])}), str(path))
+    report = verify_corpus(path)
+    assert not report.ok
+    _no_secret(" ".join(report.problems))
+
+
+def test_provenance_text_with_a_url_marker_is_withheld(tmp_path: pathlib.Path) -> None:
+    from decoy_engine.transforms._codeset_loader import verify_corpus
+
+    path = tmp_path / "p2.parquet"
+    pq.write_table(
+        pa.table(
+            {"code": pa.array(["Z01", "Z02"], type=pa.string())},
+            metadata={
+                b"decoy_corpus": b"x",
+                b"source": f"//archive:{_PW}@repo.invalid/data".encode(),
+                b"source_version": b"1",
+                b"effective_date": b"2026-01-01",
+                b"license": b"Internal",
+            },
+        ),
+        str(path),
+    )
+    prov = verify_corpus(path).provenance
+    assert prov is not None
+    assert prov["source"] == "<redacted>"
+    assert prov["license"] == "Internal"
+
+
+def test_a_shipped_load_diagnostic_does_not_print_none() -> None:
+    from decoy_engine.transforms import _codeset_loader
+
+    shown = _codeset_loader._where(None)
+    assert shown != "None"

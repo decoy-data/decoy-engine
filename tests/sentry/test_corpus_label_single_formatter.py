@@ -27,17 +27,29 @@ import pytest
 from tests.sentry.safe_output import _tagger
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "decoy_engine" / "transforms"
-FILES = ("_codeset_loader.py", "_codeset_checks.py", "_codeset_config_checks.py", "code_set.py")
+FILES = ("_codeset_loader.py", "_codeset/_checks.py", "_codeset_config_checks.py", "code_set.py")
 # Locals that hold a corpus locator, label, file-supplied provenance, or an exception.
 CORPUS_RISKY = _tagger.SINK_RISKY | frozenset(
-    {"name", "path", "resolved", "source", "stem", "handle", "config", "cfg", "prov", "provenance"}
+    {
+        "name",
+        "path",
+        "resolved",
+        "source",
+        "stem",
+        "handle",
+        "config",
+        "cfg",
+        "prov",
+        "provenance",
+        "locator",
+    }
 )
 # The formatters themselves are the reviewed boundary; they are not scanned.
 FORMATTERS = frozenset({"_where", "_corpus_label", "provenance_summary", "corpus_stat_error"})
 # Only these functions return text that leaves the engine (evidence and report values).
 OUTWARD_RETURNS = frozenset({"describe_loaded_corpus", "verify_corpus"})
 # Locals that hold field names or a registry member, never file or config text.
-SAFE_LOCALS = frozenset({"missing", "stamp_defects", "reserved", "record", "embedded", "other"})
+SAFE_LOCALS = frozenset({"missing", "stamp_defects", "reserved", "embedded", "other"})
 _LOG_LEVELS = frozenset({"debug", "info", "warning", "error", "critical", "exception", "log"})
 
 
@@ -88,6 +100,8 @@ def test_no_corpus_value_reaches_an_outward_sink_outside_the_formatters(filename
         'def h(name):\n    raise E(message=f"corpus {name!r}")\n',
         'def i(provenance):\n    raise E(message=f"for {provenance.corpus!r}")\n',
         "def j(path):\n    return CorpusVerifyReport(path=str(path))\n",
+        "def l(locator):\n    raise ValueError(str(locator))\n",
+        'def describe_loaded_corpus(record):\n    return {"s": record.provenance.source}\n',
         'def k(handle):\n    raise E(message=f"at {handle.display}")\n',
     ],
 )

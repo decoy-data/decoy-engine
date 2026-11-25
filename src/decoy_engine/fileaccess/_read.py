@@ -76,9 +76,16 @@ def read_checked(
 # URL. Two or more scheme characters, so not a drive letter.
 _HEAD = r"(?<![\w+.\-/\\])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]+):(?P<slashes>[/\\]{1,2})"
 _LOCATOR_URL_RE = re.compile(_HEAD + r"(?P<rest>.*)", re.DOTALL)  # a locator: nothing ends it
-# `scheme://` after a path separator (`a/https://u:p@h`): a URL the lookbehind above skips so a
-# local path like `/tmp/a:/b@c` stays readable. Two slashes make it a URL, not a path.
-_EMBEDDED_URL_RE = re.compile(r"[/\\][A-Za-z][A-Za-z0-9+.-]+:(?:/{2}|\\{2})(?P<rest>.*)", re.DOTALL)
+# A URL after a path separator (`a/https://u:p@h`) is skipped by the lookbehind above so a local
+# path like `/tmp/a:/b@c` stays readable. It is a URL when it has two slashes, or when the scheme
+# is a known remote one: `Path` collapses `https://` to `https:/`, and the API takes a `Path`.
+_REMOTE_SCHEMES = r"(?:https?|s3a?|gs|gcs|abfss?|az|wasbs?|ftps?|sftp|hdfs|webhdfs|smb|r2|oss)"
+_EMBEDDED_URL_RE = re.compile(
+    r"[/\\](?:[A-Za-z][A-Za-z0-9+.-]+:(?:/{2}|\\{2})|(?i:"
+    + _REMOTE_SCHEMES
+    + r"):[/\\])(?P<rest>.*)",
+    re.DOTALL,
+)
 _DELIMS_RE = re.compile(r"[/?#]")
 _MARKS_RE = re.compile(r"[?#]")
 _SENSITIVE_RE = re.compile(r"[@?#]")

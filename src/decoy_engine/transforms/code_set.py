@@ -111,7 +111,7 @@ from decoy_engine import reasons
 from decoy_engine.determinism import derive, derive_index
 from decoy_engine.internal.crypto import hmac_hex
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_checks import (
+from decoy_engine.transforms._codeset._checks import (
     _check_source_version_pin,
     _corpus_label,
     _where,

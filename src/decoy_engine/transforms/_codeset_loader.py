@@ -23,7 +23,7 @@ from decoy_engine import fileaccess, reasons
 from decoy_engine.fileaccess import FileAccess, FileAccessDenied, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_checks import (
+from decoy_engine.transforms._codeset._checks import (
     _check_corpus_schema,
     _check_source_version_pin,
     _unknown_shipped_corpus,
@@ -33,14 +33,16 @@ from decoy_engine.transforms._codeset_checks import (
     provenance_summary,
 )
 from decoy_engine.transforms._codeset_index import SelectionIndexes, build_selection_indexes
-from decoy_engine.transforms._codeset_provenance import CODESET_REGISTRY, CodeSetProvenance
+from decoy_engine.transforms._codeset_provenance import (
+    SHIPPED_CORPUS_NAMES as _SHIPPED_CORPORA,
+)
+from decoy_engine.transforms._codeset_provenance import CodeSetProvenance
 
 # Shipped corpora live in this directory.
 _CODESETS_DIR = Path(__file__).parent.parent / "codesets"
 
 # Recognised shipped corpus names, derived from the single-source-of-truth
 # registry (HC-1 slice 1 item 5; transforms/_codeset_provenance.py).
-_SHIPPED_CORPORA = frozenset(CODESET_REGISTRY)
 
 # A shipped name resolves ONLY through this table, to a constant path: membership is checked
 # before any file-system call, so a name like "../x" or an absolute stem never reaches one.
@@ -233,8 +235,8 @@ def _get_corpus_record(
     """
     # The outward label is built once, from the locator exactly as configured: a `Path` has
     # already collapsed a doubled separator and would hide a prefixed URL from the redactor.
-    shown = _where(locator if locator is not None else path)
     resolved = _resolve_read_path(name, path)
+    shown = _where(locator if locator is not None else resolved)  # a shipped load has no `path`
     if is_shipped:
         # A registry-resolved corpus keys on its name (no file-system call); an explicit path
         # (an internal caller's override) keeps the resolved-path key.

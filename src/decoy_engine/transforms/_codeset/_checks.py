@@ -15,16 +15,21 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
-from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms._codeset_provenance import CODESET_REGISTRY, CodeSetProvenance
+from decoy_engine.plan._errors import (
+    PlanCompileError,  # `decoy_engine.plan` itself imports this module chain
+)
+from decoy_engine.transforms._codeset_provenance import (
+    SHIPPED_CORPUS_NAMES as _SHIPPED_CORPORA,
+)
+from decoy_engine.transforms._codeset_provenance import CodeSetProvenance
 
 _LOG = logging.getLogger("decoy_engine.transforms._codeset_loader")
-_SHIPPED_CORPORA = frozenset(CODESET_REGISTRY)
 
 
 def _where(locator: object) -> str:
     """How a diagnostic names a corpus file: the redacted path (CLI) or the config position."""
-    return fileaccess.shown(str(locator), "code_set.corpus_source")
+    text = "<no path>" if locator is None else str(locator)
+    return fileaccess.shown(text, "code_set.corpus_source")
 
 
 def _corpus_label(name: str) -> str:
@@ -102,7 +107,7 @@ def _check_corpus_schema(tbl: pa.Table, where: str) -> None:
             message=(
                 f"corpus at {where} is missing required 'code' column. "
                 f"Customer corpora must have a 'code' (string) column. "
-                f"Available columns: {tbl.schema.names}"
+                f"The file has {len(tbl.schema.names)} column(s); their names are not listed."
             ),
         )
 
@@ -270,17 +275,22 @@ def _validate_provenance(
     )
 
 
+def _publishable(text: str) -> str:
+    """A provenance text field is published only when it carries no URL or credential marker
+    (`@`, `?`, `#`, `:/`); otherwise it is withheld whole, since the stamp is file-supplied."""
+    return "<redacted>" if any(mark in text for mark in ("@", "?", "#", ":/")) else text
+
+
 def provenance_summary(prov: CodeSetProvenance | None) -> dict[str, Any] | None:
-    """Counts and identifiers of a provenance stamp for evidence and the verify report, with
-    URL credentials removed from every text field (the stamp is file-supplied text)."""
+    """Identifiers of a provenance stamp for evidence and the verify report. Each text field
+    passes `_publishable`."""
     if prov is None:
         return None
-    clean = fileaccess.without_url_credentials
     return {
-        "source": clean(prov.source),
-        "source_version": clean(prov.source_version),
-        "effective_date": clean(prov.effective_date),
-        "license": clean(prov.license),
+        "source": _publishable(prov.source),
+        "source_version": _publishable(prov.source_version),
+        "effective_date": _publishable(prov.effective_date),
+        "license": _publishable(prov.license),
         "is_seed": prov.is_seed,
     }
 
