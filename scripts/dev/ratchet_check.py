@@ -1,6 +1,6 @@
 """Fail when a registered sentry baseline grows, is re-homed, or carries a weak reason.
 
-Usage: ratchet_check.py [--root DIR] [--base REF]
+Usage: ratchet_check.py [--root DIR] [--base REF] [--schema-waiver-env]
   --base   default: merge-base of origin/main and HEAD
 A key may not be added, except a key the registry lists under that baseline's `approved_growth`
 (an exact key plus a dated `owner YYYY-MM-DD ...` decision; stale or malformed rows fail), and that for sentries in REKEY_PER_SITE the
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     ap.add_argument("--base")
+    ap.add_argument(
+        "--schema-waiver-env",
+        action="store_true",
+        help="read RATCHET_SCHEMA_WAIVER (the extracted base checker only; the head run omits it)",
+    )
     args = ap.parse_args(argv)
     base = args.base
     if not base:
@@ -50,7 +56,11 @@ def main(argv: list[str] | None = None) -> int:
             print("ratchet: no merge base; run: git fetch origin main", file=sys.stderr)
             return 2
         base = res.stdout.strip()
-    findings, report = _load().check(args.root, base)
+    findings, report = _load().check(
+        args.root,
+        base,
+        os.environ.get("RATCHET_SCHEMA_WAIVER") if args.schema_waiver_env else None,
+    )
     for line in report:
         print(f"ratchet: {line}")
     for line in findings:

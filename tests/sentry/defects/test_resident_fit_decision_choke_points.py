@@ -2,8 +2,13 @@
 
 G-4: the physical compiler only reads the stored verdict. Nothing under `execution/physical/`
 imports the fact gatherer, the probe module or the host-memory detector.
+G-5 (S4c): `store_resident_fit` has exactly two production callers, `decide_route` and the mixed
+decline `_fall_back`, so every no-FK full-frame decision is priced and a bypass is a failure.
+G-6 (S4c): `prepare_resident_transforms` has one production caller, `prepare_transform_sources`,
+and that function calls `check_pre_transform` first.
 G-8: one place builds the capacity refusal (`_errors.nonfk_full_frame_capacity_error`) and one
-function compares the ceilings (`resident_fit_verdict`).
+function compares the ceilings (`resident_fit_verdict`). The pre-read and pre-transform checks
+compare nothing themselves: both go through the verdict function and the shared requirement.
 
 The scans cover the spellings a contributor would write by habit: plain, aliased, module and
 attribute imports. Deliberate evasion is out of scope.
@@ -15,6 +20,8 @@ import ast
 from pathlib import Path
 
 import pytest
+
+from tests.sentry._call_resolution import resolved_call_scopes
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src" / "decoy_engine"
@@ -145,3 +152,81 @@ def _calls(source: str, function: str) -> set[str]:
                 if isinstance(c, ast.Call)
             }
     return set()
+
+
+def _enclosing_calls(source: str, name: str) -> list[str]:
+    """The immediate function holding each call to `name`; spellings come from the shared
+    resolver (`tests/sentry/_call_resolution.py`): plain, import alias, re-binding, attribute."""
+    return resolved_call_scopes(ast.parse(source), name)
+
+
+def _production_callers(name: str, *, defined_in: Path) -> dict[str, list[str]]:
+    callers: dict[str, list[str]] = {}
+    for path in SRC.rglob("*.py"):
+        if path == defined_in:
+            continue
+        found = _enclosing_calls(path.read_text(encoding="utf-8"), name)
+        if found:
+            callers[path.relative_to(SRC).as_posix()] = sorted(set(found))
+    return callers
+
+
+def test_g5_store_resident_fit_has_exactly_the_two_pricing_callers() -> None:
+    assert _production_callers("store_resident_fit", defined_in=VERDICT_FILE) == {
+        "execution/_pipeline_context.py": ["decide_route"],
+        "execution/_pipeline_mixed_route.py": ["_fall_back"],
+    }
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f():\n    store_resident_fit(a, b)\n",
+        "from x import store_resident_fit as price\ndef f():\n    price(a, b)\n",
+        "def f():\n    rf.store_resident_fit(a, b)\n",
+        "def f():\n    price = rf.store_resident_fit\n    price(a, b)\n",
+        "price = store_resident_fit\ndef f():\n    price(a, b)\n",
+    ],
+)
+def test_g5_seeded_spellings_are_seen(source: str) -> None:
+    assert _enclosing_calls(source, "store_resident_fit") == ["f"]
+
+
+def test_g5_a_call_in_a_nested_function_belongs_to_the_nested_function_only() -> None:
+    source = "def outer():\n    def inner():\n        store_resident_fit(a, b)\n"
+    assert _enclosing_calls(source, "store_resident_fit") == ["inner"]
+
+
+def test_g6_one_transform_preparation_caller_and_the_check_comes_first() -> None:
+    prepare = SRC / "execution" / "_transforms_prepare.py"
+    callers = _production_callers("prepare_resident_transforms", defined_in=prepare)
+    assert callers == {}
+    source = prepare.read_text(encoding="utf-8")
+    assert _enclosing_calls(source, "prepare_resident_transforms") == ["prepare_transform_sources"]
+    fn = next(
+        n
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.FunctionDef) and n.name == "prepare_transform_sources"
+    )
+    first = {}
+    for call in ast.walk(fn):
+        if isinstance(call, ast.Call):
+            name = (
+                call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
+            )
+            first[name] = min(first.get(name, call.lineno), call.lineno)
+    assert first["check_pre_transform"] < first["prepare_resident_transforms"]
+
+
+def test_g6_seeded_second_caller_is_seen() -> None:
+    assert _enclosing_calls(
+        "def g():\n    t.prepare_resident_transforms(c, s)\n", "prepare_resident_transforms"
+    ) == ["g"]
+
+
+def test_g8_the_early_phases_use_the_verdict_function_and_the_shared_requirement() -> None:
+    source = VERDICT_FILE.read_text(encoding="utf-8")
+    required = {"_lower_bound_verdict", "require_resident_fit"}
+    for phase in ("check_pre_read", "check_pre_transform"):
+        assert required - _calls(source, phase) == set(), phase
+    assert "resident_fit_verdict" in _calls(source, "_lower_bound_verdict")

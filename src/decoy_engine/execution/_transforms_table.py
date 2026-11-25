@@ -33,6 +33,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.config import SOURCE_ORIGIN, TableConfig, TransformOp, final_bindings
 from decoy_engine.execution import _transforms
 from decoy_engine.execution._fk_keys import to_pandas_fk_safe
@@ -44,21 +45,31 @@ from decoy_engine.safe_output import attach_output_metadata
 __all__ = [
     "apply_resident_table",
     "apply_table_transforms",
+    "null_bearing_int_columns",
     "to_transform_frame",
     "transform_resolved_source",
 ]
 
 
-def to_transform_frame(table: pa.Table) -> pd.DataFrame:
-    """The pandas frame the ops run on, indexed by source row ordinal."""
-    stored_index = _transforms.stored_index_fields(table.schema)
-    null_bearing_ints = [
+def null_bearing_int_columns(table: pa.Table) -> list[str]:
+    """Integer columns with nulls that the transform frame maps to a nullable pandas dtype.
+
+    The one conversion decision: `to_transform_frame` applies it and the resident-fit bound
+    prices it, so the two cannot drift. A stored index field is left alone.
+    """
+    stored_index = stored_index_fields(table.schema)
+    return [
         field.name
         for field in table.schema
         if field.name not in stored_index
         and pa.types.is_integer(field.type)
         and table.column(field.name).null_count > 0
     ]
+
+
+def to_transform_frame(table: pa.Table) -> pd.DataFrame:
+    """The pandas frame the ops run on, indexed by source row ordinal."""
+    null_bearing_ints = null_bearing_int_columns(table)
     frame = to_pandas_fk_safe(table, null_bearing_ints)
     frame.index = pd.RangeIndex(table.num_rows)
     return frame

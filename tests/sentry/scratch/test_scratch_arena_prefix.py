@@ -3,8 +3,8 @@
 The arena prefix, its pending prefix and its marker name are spelled only in
 `fileaccess/_scratch.py`, and `open` names a root the sweep's exact pattern matches.
 `[create_choke_point]`, on `tests.sentry.fa.scan` and its resolver (aliases, `getattr`,
-re-exports): the arena modules create nothing themselves, `_output.py` creates only inside its
-named raw functions, each named raw function still creates, and its two private entry points
+re-exports): the arena modules and `_rooted_dir.py` create nothing themselves, `_output.py` creates only
+inside its named raw functions, each named raw function still creates, and its two private entry points
 each pass their one fixed restorer.
 """
 
@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.fa import sinks
 from tests.sentry.fa.resolve import ProjectIndex, Scope, resolve
 from tests.sentry.fa.rules import indexed_modules, scoped_nodes, source_modules
 from tests.sentry.fa.scan import scan_tree
@@ -26,11 +27,14 @@ SRC = ROOT / "src"
 ARENA = "decoy_engine/fileaccess/_scratch.py"
 ARENA_MODULES = frozenset({ARENA, "decoy_engine/fileaccess/_scratch_sweep.py"})
 OUTPUT = "decoy_engine/fileaccess/_output.py"
+# Split from `_output.py`: it opens and begins stages through the creators and creates nothing.
+ROOTED_DIR = "decoy_engine/fileaccess/_rooted_dir.py"
+NO_CREATE_MODULES = ARENA_MODULES | {ROOTED_DIR}
 OWNED_NAMES = frozenset({"ARENA_PREFIX", "_PENDING_PREFIX", "_MARKER", "_MAGIC"})
 # The sweep's step 1 test (plan 4.4), used with `re.fullmatch`.
 SWEEP_NAME = re.compile(r"decoy-arena-v1-[0-9a-f]{16}")
-ARENA_BANNED = frozenset(
-    {"os.mkdir", "os.makedirs", "tempfile.mkdtemp", "Path.mkdir", "os.chmod", "os.fchmod"}
+ARENA_BANNED = frozenset({"os.mkdir", "os.makedirs", "Path.mkdir", "os.chmod", "os.fchmod"}) | (
+    sinks.TEMP_CREATORS
 )
 CREATE_FLAGS = frozenset(
     {
@@ -84,7 +88,7 @@ def choke_point_findings(src: Path) -> list[str]:
     out = [
         f"{s.module}:{s.line} {s.function}: {s.sink}"
         for s in sinks
-        if (s.module in ARENA_MODULES and s.sink in ARENA_BANNED)
+        if (s.module in NO_CREATE_MODULES and s.sink in ARENA_BANNED)
         or (s.module == OUTPUT and s.sink == "os.mkdir" and s.function not in OUTPUT_RAW)
     ]
     # A name stays in `OUTPUT_RAW` only while its own body holds a raw creation.
@@ -97,7 +101,7 @@ def choke_point_findings(src: Path) -> list[str]:
             if _is_create_flag(rel, node, scope, index) and id(node) not in definition:
                 if rel == OUTPUT:
                     holders.add(qual)
-                if rel in ARENA_MODULES or (rel == OUTPUT and qual not in OUTPUT_RAW):
+                if rel in NO_CREATE_MODULES or (rel == OUTPUT and qual not in OUTPUT_RAW):
                     out.append(f"{where}: a creation flag outside the named creators")
             if isinstance(node, ast.Call) and _names_core(node.func):
                 restorer = node.args[2] if len(node.args) == 3 else None
@@ -141,6 +145,7 @@ def _flag_definition(tree: ast.Module) -> set[int]:
     return {id(n) for n in ast.walk(defs[0])}
 
 
+@pytest.mark.usefixtures("scratch_env_clean")
 @pytest.mark.parametrize("cell", ["names", "open_name", "create_choke_point"])
 def test_arena_prefix_used_only_by_open(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cell: str
@@ -195,6 +200,12 @@ def create_output_file_at(dir_fd, name, mode):
     {output_file}
 
 
+def probe(fd):
+    {probe}
+"""
+_ROOTED_DIR = """import os
+
+
 class RootedOutputDir:
     def begin(self, fd):
         {begin}
@@ -202,7 +213,7 @@ class RootedOutputDir:
 _CLEAN = {
     "always": "_restore_always",
     "child": "_restore_missing_owner_bits",
-    "begin": "pass",
+    "probe": "pass",
     "output_file": "return os.open(name, _FILE_CREATE, mode, dir_fd=dir_fd)",
 }
 _SEEDS = {
@@ -220,14 +231,19 @@ _SEEDS = {
     ),
 }
 _OUTPUT_SEEDS = {
-    "output_bare_mkdir": {"begin": "os.mkdir('x', 0o700, dir_fd=fd)"},
-    "output_second_create": {"begin": "return os.open('x', _FILE_CREATE, 0o600, dir_fd=fd)"},
+    "output_bare_mkdir": {"probe": "os.mkdir('x', 0o700, dir_fd=fd)"},
+    "output_second_create": {"probe": "return os.open('x', _FILE_CREATE, 0o600, dir_fd=fd)"},
     "output_swapped_restorers": {
         "always": "_restore_missing_owner_bits",
         "child": "_restore_always",
     },
-    "output_core_as_value": {"begin": "return _create_private_core"},
+    "output_core_as_value": {"probe": "return _create_private_core"},
     "output_stale_raw_name": {"output_file": "return _make_dir_core(dir_fd, name, mode)"},
+}
+# The class `RootedOutputDir` moved to `_rooted_dir.py`: its mkdir and creation seeds moved too.
+_ROOTED_SEEDS = {
+    "rooted_bare_mkdir": "os.mkdir('x', 0o700, dir_fd=fd)",
+    "rooted_second_create": "return os.open('x', os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=fd)",
 }
 
 
@@ -241,9 +257,14 @@ def _seed(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
-@pytest.mark.parametrize("cell", sorted([*_SEEDS, *_OUTPUT_SEEDS, "prefix_literal"]))
+@pytest.mark.parametrize(
+    "cell", sorted([*_SEEDS, *_OUTPUT_SEEDS, *_ROOTED_SEEDS, "prefix_literal"])
+)
 def test_a_seeded_bypass_is_seen(tmp_path: Path, cell: str) -> None:
-    clean = {"fileaccess/_output.py": _OUTPUT.format(**_CLEAN)}
+    clean = {
+        "fileaccess/_output.py": _OUTPUT.format(**_CLEAN),
+        "fileaccess/_rooted_dir.py": _ROOTED_DIR.format(begin="pass"),
+    }
     assert choke_point_findings(_seed(tmp_path / "clean", clean)) == []  # non-vacuity
     files = dict(clean)
     if cell == "prefix_literal":
@@ -254,6 +275,8 @@ def test_a_seeded_bypass_is_seen(tmp_path: Path, cell: str) -> None:
         return
     if cell in _SEEDS:
         files["fileaccess/_scratch.py"] = _SEEDS[cell]
+    elif cell in _ROOTED_SEEDS:
+        files["fileaccess/_rooted_dir.py"] = _ROOTED_DIR.format(begin=_ROOTED_SEEDS[cell])
     else:
         files["fileaccess/_output.py"] = _OUTPUT.format(**{**_CLEAN, **_OUTPUT_SEEDS[cell]})
     assert choke_point_findings(_seed(tmp_path / "seeded", files)), f"{cell} went unseen"

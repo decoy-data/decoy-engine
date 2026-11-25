@@ -725,7 +725,7 @@ def _pandas_source(kind: str, origin: str, tmp_path: Any) -> list[pa.Table]:
 def test_stored_pandas_index_field_is_dropped_on_the_native_route(
     kind: str, origin: str, tmp_path: Any
 ) -> None:
-    from decoy_engine.execution._transforms import stored_index_fields
+    from decoy_engine._pandas_meta import stored_index_fields
 
     chunks = _pandas_source(kind, origin, tmp_path)
     stored = stored_index_fields(chunks[0].schema)

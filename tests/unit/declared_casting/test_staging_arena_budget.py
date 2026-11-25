@@ -9,6 +9,7 @@ The route's spill is a fixed-size file written into the route's scratch root at 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -36,7 +37,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Windows cells a
 
 
 @pytest.fixture(autouse=True)
-def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_env_clean: None) -> Path:
     root = tmp_path / "tmp"
     root.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(root))
@@ -49,7 +50,7 @@ def _job(
     seen: dict[str, Any],
     *,
     spill: int,
-    budget: int,
+    budget: int | None,
     sink: bool = True,
     **extra: Any,
 ) -> Any:
@@ -137,3 +138,24 @@ def test_declared_ooc_one_arena_one_budget(
     assert {p.parent for p in seen["staged"]} == {root}, seen  # the copy is in the route's root
     assert not root.exists(), "the arena is reclaimed"
     assert not [p for p in parent.iterdir() if p.name.startswith("decoy-arena")]
+
+
+def test_direct_declared_run_derives_its_cap_before_staging(
+    tmp_path: Path, temp_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections import namedtuple
+
+    usage = namedtuple("usage", "total used free")
+    measured: list[Path] = []
+
+    def tiny_disk(path: object) -> Any:
+        measured.append(Path(str(path)))
+        return usage(1000, 0, 1000)  # a 900 byte cap
+
+    monkeypatch.setattr(shutil, "disk_usage", tiny_disk)
+    seen: dict[str, Any] = {}
+    with pytest.raises(ExecutionError) as info:
+        _job(tmp_path, monkeypatch, seen, spill=0, budget=None)
+    assert str(info.value.code) == "out_of_core_temp_disk_exceeded"
+    assert "root" not in seen, "refused while staging, before the route's first table"
+    assert measured and measured[0].name.startswith(ARENA_PREFIX), measured

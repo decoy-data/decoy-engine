@@ -16,7 +16,7 @@ label                      where it happens
 =========================  ================================================================
 numpy_selection            `PoolSampler.sample` non-deterministic REUSE: `np.random.default_rng`
                            (`pool/_sampler.py`), reached by pooled `faker` columns
-compiled_index_selection   `_sampler._derive_pool_indices` -> compiled `derive_index_batch`
+compiled_index_selection   `_sampler.derive_pool_indices` -> compiled `derive_index_batch`
                            (`pool/_sampler.py:49` loader), deterministic sampler calls only
 python_index_reference     the same function when the compiled kernel is absent or declines the
                            value class (`_sampler.py:135-157` reference fallback)
@@ -829,13 +829,13 @@ class CompositeWitness:
         names = ("first", "last", "dob")[: len(self.SLICES)]
         arrays = tuple(marked(n) for n in names)
         mp.setattr(cls, pools_method, lambda self, spec: arrays)
-        real_indices = _sampler._derive_pool_indices
+        real_indices = _sampler.derive_pool_indices
 
         def spy_indices(*a: Any, **kw: Any) -> Any:
             outer.index_kernel_calls += 1
             return real_indices(*a, **kw)
 
-        mp.setattr(_sampler, "_derive_pool_indices", spy_indices)
+        mp.setattr(_sampler, "derive_pool_indices", spy_indices)
 
     def classify(
         self,

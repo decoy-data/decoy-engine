@@ -83,6 +83,8 @@ declared integers, `date_shift` anchors, `top_code` columns and `group_key` sibl
 `NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
 that passes through is written as `int64` instead of `double`.
 
+**Pre-GA additive name with VALIDATE-SUBSET-EDGES E1 (2026-11-24).** `decoy_engine.subset.drop_subset_block(config) -> dict` returns the run config with its `subset` block set to `None`, or the input dict itself when it has no block. `split_subset_config` now also refuses a bad `subset.edge_directions` entry (`subset_unknown_edge`, `subset_dangling_not_acknowledged`) before any read; no reason code, schema or config key changes, and a config that passed before passes now.
+
 **Pre-GA additive name with GEN-CATALOG GC3-E (2026-11-17).** `decoy_engine.code_set_catalog() -> dict[str, str]` returns each shipped code set name with its one-line description, in name order, read from the engine registry. It returns a new dict per call and reads no corpus file. No reason code, schema, config key or exit code changes.
 
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
@@ -311,7 +313,7 @@ date columns keep their text output. Both new codes are registered unreleased. N
 
 **Pre-GA correction (COLUMN-SHAPE E2, 2026-11-22).** `bucket_perturb` no longer detects a date format from
 its cells. A text column (CSV, fixed width, a string column, a `nested` child) with no `provider_config.date_format`
-is refused at plan compile with `plan/column_shape_required` (new, registered unreleased); the config-only pass
+is refused at plan compile with `plan/column_shape_required` (new, ships in 0.28.4, registry 1.34.0); the config-only pass
 refuses it for CSV and fixed-width sources and defers a Parquet, database or Arrow column to compile, as for
 `date_shift`. A source column that is natively a date runs with no format, keeps its Arrow type, and shifts as a
 calendar date with no pandas date range limit; the digest input is its ISO text, so one namespace gives one
@@ -336,13 +338,21 @@ therefore stops compiling, and their per-row `format_error` can no longer come f
 `top_code` on an integer and `bucketize` on a decimal, and a preset on a declared integer is admitted. The plan
 hash and the physical plan hash move for any pipeline that uses `bucketize`, `top_code` or `fpe`. Adding the
 recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
-`column_shape_required` (plan and runtime) is registered unreleased.
+`column_shape_required` (plan and runtime) ships in 0.28.4 (registry 1.34.0).
+
+**Pre-GA correction (BUCKET-TOPCODE-NATIVE S1a, 2026-11-24).** Three byte changes in the `bucketize` handler, on every route that runs it. With an integer width, a finite value of magnitude 2**53 or more (B2) and either infinity (B3) now give one `format_error` row error with the reason `value is out of range under bucketize` and a null cell; before, the label was rounded or the cast failed with no code. A valid NaN stays ordinary missing. With quarantine on the row leaves the main output; with the fail policy the job fails before it publishes. With a float width, an integer source of any pandas dtype is converted to float64 with round-to-nearest before the division (B4), so `int64[pyarrow]` gives the labels NumPy `int64` and nullable `Int64` already gave and no longer raises with the value in the message: 9007199254740993 at width 2.5 gives lower `9007199254740992.0`. Values below 2**53 and float sources are unchanged. No plan hash, seed protocol, route or reason code moves.
 
 **Pre-GA correction (COMPANION-REDS, 2026-11-23).** The physical `plan_hash` and `activation_hash` of an auto-routed
-no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, unreleased), and its byte
+no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, ships in 0.28.4), and its byte
 figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
 hash still covers `facts.budget_bytes`, so it can differ between hosts when no explicit budget is set.
 `pipeline_config_hash` does not move. No schema version moves.
+
+**Pre-GA correction (GEN-NONFAKER-DRAWS S1a, 2026-11-23).** The physical `plan_hash` and `activation_hash` move once
+for every unified-slice job, because `CapabilityMatrix` gains a `draw` field (`pool` or `computed`) and
+`registry_fingerprint()` hashes the dump of every provider's matrix. Both hashes are written to output evidence. No
+other input to the fingerprint changes: with `draw` removed the fingerprint equals the one on the previous main, and a test
+pins that. `pipeline_config_hash` does not move. No schema version moves.
 
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key

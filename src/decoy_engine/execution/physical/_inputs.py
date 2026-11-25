@@ -254,10 +254,12 @@ class PhysicalPlanInputs:
         `PhysicalNode.provider_class`, so two same-name registries whose
         matrices differ (e.g. one `poolable=True`, the other `False`) route
         to different node shapes but, pre-fix, hashed identically. Every
-        `CapabilityMatrix` field is a frozen, required Pydantic field
+        `CapabilityMatrix` field is a frozen Pydantic field
         (`providers_v2/_adapter.py`), so `model_dump()` is a complete,
         stable-keyed serialization of exactly what `_build_nodes` /
-        `classify_provider` can observe -- no field selection needed.
+        `classify_provider` can observe -- no field selection needed. Every
+        field is frozen; `draw` has a default (`"pool"`) but is still dumped,
+        so a registry that adds a field moves this fingerprint once.
         """
         parts = tuple(
             (name, tuple(sorted(self.registry.get_capabilities(name).model_dump().items())))

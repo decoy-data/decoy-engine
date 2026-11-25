@@ -3,7 +3,7 @@
 The native routes key a deterministic Faker column from the SOURCE value, canonicalized by
 `generation.pool._canonicalize._canonicalize_source` and run through the compiled (or
 reference) `derive_index` kernel. The oracle keys the SAME kernel from the pandas-materialized
-value (`PoolSampler._deterministic` -> `_derive_pool_indices`, which feeds the kernel a
+value (`PoolSampler._deterministic` -> `derive_pool_indices`, which feeds the kernel a
 `pa.Array.from_pandas(series)`). So the two routes agree on a column's draw key iff the
 pandas conversion reconstructs the SAME physical value the resident Arrow array holds.
 

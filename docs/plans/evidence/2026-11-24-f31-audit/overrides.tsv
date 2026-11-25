@@ -1,0 +1,32 @@
+repo	site	class	returns	mark
+engine	_opaque.py:31	OpaqueBox	constant	safe
+engine	errors.py:73	EnvFlagError	env variable name	safe (identifier)
+engine	keyprovider.py:159	SecretKeyProvider	length and key_version	safe
+engine	keyprovider.py:184	SeedKeyProvider	length and key_version	safe
+engine	fileaccess/_entry.py:58	_Arguments	constant	safe
+engine	secret_providers/vault.py:191	VaultKV2Provider	constant	safe
+engine	secret_providers/_requirements.py:52	SecretRequirement	requirement id	safe (identifier)
+engine	secret_providers/_types.py:66	SecretRef	scheme	safe
+engine	secret_providers/_types.py:253	ResolveContext	scheme	safe
+engine	secret_providers/_types.py:362	ResolvedSecret	constant	safe
+engine	secret_providers/_types.py:420	PreparedSecret	constant	safe
+engine	secret_providers/_types.py:446	PreparedKeyProvider	key_version	safe
+engine	secret_providers/_buffer.py:71	SecretBuffer	constant	safe
+engine	declared_casting/_types.py:21	CastOutcome	ok and reason code	safe
+engine	declared_casting/_quarantine_protocol.py:58	OpaqueRetrievalToken	constant	safe
+engine	delivery/resume/_plan.py:49	ResumeRefusedError	code and location	safe (code, path)
+engine	signed_evidence/_errors.py:41	SignedEvidenceError.__str__	code	safe
+engine	signed_evidence/_errors.py:44	SignedEvidenceError.__repr__	code	safe
+engine	plan/checks/_generate_columns.py:56	_Deferred	constant	safe
+engine	secret_providers/_errors.py:62	SecretProviderError	class and code	safe
+engine	secret_providers/_errors.py:205	KeptFileFailure	kind	safe
+engine	_nested_json/_target.py:56	MatchPath	config path keys	safe (identifier)
+engine	_nested_json/_target.py:119	TargetRefusal	form and position	safe
+engine	_canonical/_json.py:87	CanonicalJsonError	self.message (free text)	fix in AE1: registry sentry walks it; message must be value-free or render by type
+engine	execution/native/_chunk_schema.py:41	NativeChunkSchemaDriftError	self.message (free text)	fix in AE1: same
+engine	subset/_scope.py:85	MaterializationCheck	constant	safe
+cli	_source_positions.py:126	YamlPositionIndex	count	safe
+cli	_private_file.py:88	PrivateFileError	code	safe
+cli	cli/io/_pipelines.py:67	PipelineToken	raw CLI argument (a path or name the user typed)	safe (locator, Q7)
+cli	ci/_git.py:50	GitFailure	constant	safe
+cli	ci/manifest.py:43	ManifestError	reason code	safe

@@ -44,6 +44,7 @@ from typing import Any, Literal
 
 import pyarrow as pa
 
+from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.config._subset_run import refuse_unapplied_subset
 from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts, table_source_facts
 from decoy_engine.execution._guards import prepare_declared_execution_sources
@@ -468,7 +469,6 @@ def plan_native_route(
     if first_schema is not None:
         if decision.native_admitted:
             covered = {n.column for n in decision.node_routes}
-            from decoy_engine.execution._transforms import stored_index_fields
 
             # A stored pandas index field is consumed as the index on the oracle route and
             # never yielded, so it is neither covered nor unconfigured.

@@ -173,6 +173,7 @@ from decoy_engine.execution._guards import (  # re-exported: the core's declarat
 )
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.providers_v2 import faker_draw_contract
 from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
 
 from . import _chunked_bucket_perturb as bucket_perturb_gate
@@ -240,6 +241,14 @@ def _conditional_admission_failures(col_entry: dict[str, Any]) -> list[str]:
     if not col_entry.get("namespace"):
         failures.append("requires a namespace (the value-keyed mapping derives from it)")
     if strategy == "faker":
+        if faker_draw_contract(str(col_entry.get("provider"))) is not None:
+            # A computed draw has no pool, so the chunked pool pre-warm cannot build one. The
+            # position-keyed path already refuses it through the provider allowlist; this is
+            # the same refusal for the deterministic path.
+            failures.append(
+                f"provider {col_entry.get('provider')!r} is a computed draw "
+                "(uuid, random_int_range, random_choice); it runs whole-frame, not chunked"
+            )
         if col_entry.get("cardinality_mode") not in (None, "reuse"):
             failures.append(
                 "requires cardinality_mode absent or 'reuse' (source-cardinality "

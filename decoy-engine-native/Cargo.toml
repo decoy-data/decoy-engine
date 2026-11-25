@@ -25,6 +25,11 @@ crate-type = ["cdylib", "rlib"]
 # need it.
 default = ["extension-module"]
 extension-module = ["dep:pyo3"]
+# TEST WHEELS ONLY. Lowers the text_redact detector offset limit to 64 bytes (and makes
+# `narrow_offset` wrap at that width) so a short fixture reproduces the u32 offset overflow
+# that needs a 4 GiB cell in production. Never enabled by default or in a release build:
+# `scripts/parity_smoke.py` fails any wheel built with it.
+test-detector-offset-limit = []
 
 [dependencies]
 # "ffi"/"force_validate" are unconditional (not folded into the "extension-module" feature):
