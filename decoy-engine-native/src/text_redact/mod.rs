@@ -47,6 +47,6 @@ mod validators;
 mod tests;
 
 pub use catalog::{CATALOG_LEN, CATALOG_VERSION, SUPPORTED_IDS};
-pub use detect::{candidates_for_cell, is_eligible};
+pub use detect::{candidates_for_cell, is_eligible, DETECTOR_OFFSET_LIMIT};
 #[cfg(feature = "extension-module")]
 pub(crate) use pyboundary::register;
