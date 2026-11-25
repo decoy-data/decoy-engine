@@ -37,6 +37,8 @@ from decoy_engine.verification.postmask._blocked import severity_counts
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
     column_facts,
+    identity_counts,
+    source_distinct,
     standalone_writes,
 )
 from decoy_engine.verification.postmask._keys import KeyResult
@@ -175,10 +177,19 @@ def _megabytes(limit: str) -> int:
     return limit_mb
 
 
+class ComparisonNotPreservedError(Exception):
+    """A column's text keys lost the equality its cells have. The text is fixed, so no cell
+    reaches the report; the table fails with this class name."""
+
+    def __init__(self) -> None:
+        super().__init__("a column's text keys do not keep its cells' equality")
+
+
 def _native(series: pd.Series) -> pa.Array | None:
     try:
         return pa.array(numpy_bytes_as_objects(series), from_pandas=True)
-    except Exception as exc:
+    # Only Arrow refusing the column selects the text keys; any other error fails the table.
+    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         if passes_through(exc):
             raise
         return None
@@ -188,23 +199,59 @@ def _text(series: pd.Series) -> pa.Array:
     return pa.array(key_text(series), type=pa.string())
 
 
-def _frame_table(name: str, frame: pd.DataFrame, other: pd.DataFrame | None) -> TableBatches:
-    """`frame` as Arrow, column by column. A column Arrow will not take (mixed int and str,
-    Decimal with float, a set) is carried as the text of each value, which is all the detectors
-    read. The choice is made for the column on both sides at once: if either side needs the text,
-    both get it, so a source int and an output "1" still compare equal as they do in pandas."""
-    names = [str(c) for c in frame.columns]
-    other_at = (
-        {} if other is None else {str(c): n for n, c in reversed(list(enumerate(other.columns)))}
-    )
+def _column_names(frame: pd.DataFrame) -> list[str]:
+    return [str(c) for c in frame.columns]
+
+
+def _first_positions(frame: pd.DataFrame) -> dict[str, int]:
+    """Each column name's first position, as a repeated name is matched by its first column."""
+    return {c: n for n, c in reversed(list(enumerate(_column_names(frame))))}
+
+
+def _frame_table(
+    name: str, frame: pd.DataFrame, other: pd.DataFrame | None
+) -> tuple[TableBatches, list[int]]:
+    """`frame` as Arrow, column by column, and the positions of the columns carried as text. A
+    column Arrow will not take (mixed int and str, Decimal with float, a set) is carried as the
+    text of each value, which is all the detectors read. The choice is made for the column on both
+    sides at once: if either side needs the text, both get it, so a source int and an output "1"
+    still compare equal as they do in pandas."""
+    names = _column_names(frame)
+    other_at = {} if other is None else _first_positions(other)
     arrays = []
+    texted = []
     for n, series in enumerate(frame.iloc[:, i] for i in range(len(names))):
         paired = names[n] in other_at and other is not None
         native = _native(series)
         if paired and other is not None:
             native = native if _native(other.iloc[:, other_at[names[n]]]) is not None else None
+        if native is None:
+            texted.append(n)
         arrays.append(native if native is not None else _text(series))
-    return from_table(name, pa.Table.from_arrays(arrays, names))
+    return from_table(name, pa.Table.from_arrays(arrays, names)), texted
+
+
+def _require_preserved(src: pd.DataFrame, out: pd.DataFrame, texted: list[int]) -> None:
+    """Raise when a text-keyed column compares differently than its cells do: fewer identical or
+    other comparable rows, or a source that turns constant or varied. Extra key matches with
+    the same counts are allowed. Equal lengths only, as the column check compares no others."""
+    if len(src) != len(out):
+        return
+    src_at, out_names = _first_positions(src), _column_names(out)
+    for n in texted:
+        name = out_names[n]
+        if name not in src_at:
+            continue
+        cells = (
+            src.iloc[:, src_at[name]].reset_index(drop=True),
+            out.iloc[:, n].reset_index(drop=True),
+        )
+        keys = tuple(pd.Series(key_text(c), dtype=object) for c in cells)
+        by_cells, by_keys = identity_counts(*cells), identity_counts(*keys)
+        lost = by_keys[0] != by_cells[0] or by_keys[1] < by_cells[1]
+        constant = ColumnFacts.constant(source_distinct(cells[0]))
+        if lost or (by_cells[0] and constant != ColumnFacts.constant(source_distinct(keys[0]))):
+            raise ComparisonNotPreservedError
 
 
 def _frame_tables(
@@ -218,9 +265,10 @@ def _frame_tables(
     for name, out_frame in output_frames.items():
         try:
             src_frame = source_frames.get(name)
-            out_table = _frame_table(name, out_frame, src_frame)
+            out_table, texted = _frame_table(name, out_frame, src_frame)
             if src_frame is not None:
-                src[name] = _frame_table(name, src_frame, out_frame)
+                src[name] = _frame_table(name, src_frame, out_frame)[0]
+                _require_preserved(src_frame, out_frame, texted)
             out[name] = out_table
         except Exception as exc:
             if passes_through(exc):

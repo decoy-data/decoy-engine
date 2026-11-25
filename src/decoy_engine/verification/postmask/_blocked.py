@@ -333,11 +333,14 @@ def blocked_error(
 
 def raise_if_ner_blocked(report: Mapping[str, Any], *, ner_findings: str) -> None:
     """The NER enforcement (SCAN-ML Q1) of a report-only check (a deferred gate): raise
-    `PostScanBlockedError`, with an empty exception chain, when the NER predicate blocks. Any
-    other blocking code rides along in `codes` (and leads by `_ORDER`) but alone stays
-    report-only there."""
+    `PostScanBlockedError`, with an empty exception chain, when the NER predicate blocks, or under
+    `fail` when a check could not run (`check_error`): the NER findings it would have judged are
+    then unknown. Any other blocking code rides along in `codes` (and leads by `_ORDER`) but
+    alone stays report-only there."""
     verdict = post_scan_verdict(report, ner_findings=ner_findings)
-    error = blocked_error(report, verdict) if _NER_BLOCKED in verdict.codes else None
+    unknown = ner_findings == "fail" and _CHECK_ERROR in verdict.codes
+    enforced = _NER_BLOCKED in verdict.codes or unknown
+    error = blocked_error(report, verdict) if enforced else None
     if error is None:
         return
     # Lazy: the helper sits in the secret-provider package, which this module need not load.

@@ -28,6 +28,7 @@ from typing import Any
 
 import pandas as pd
 
+from decoy_engine.profiling import passes_through
 from decoy_engine.verification.postmask._column_facts import ColumnFacts
 from decoy_engine.verification.postmask._stream_input import TableBatches
 from decoy_engine.verification.postmask.types import PolicyValidationFinding
@@ -132,6 +133,8 @@ def _check_one_column(
             len(src_col) == len(out_col) and src_col.astype(object).equals(out_col.astype(object))
         )
     except Exception as exc:
+        if passes_through(exc):
+            raise
         return _compare_failed(
             table, column, strategy, type(exc).__name__, src_distinct, out_distinct
         )
@@ -236,7 +239,7 @@ def _decide(
     # Constant-source case: if every non-null value is the same, some
     # strategies (e.g. a deterministic mask of constant input) will
     # produce constant output, and bytes_identical can be a coincidence.
-    if src_distinct <= 1:
+    if ColumnFacts.constant(src_distinct):
         return PolicyValidationFinding(
             table=table,
             column=column,

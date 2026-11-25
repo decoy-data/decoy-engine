@@ -56,8 +56,8 @@ from decoy_engine.profiling import passes_through
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
     DetectorRate,
-    canonical_cells,
     identity_counts,
+    source_distinct,
     standalone_writes,
 )
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
@@ -169,7 +169,7 @@ def _frame_column_facts(
             # Counted on the cells the comparison saw; a failed count leaves the identity counts
             # standing, as a failed DuckDB count does on the batch path.
             try:
-                distinct = int(canonical_cells(src).nunique(dropna=True))
+                distinct = source_distinct(src)
             except Exception as exc:
                 if passes_through(exc):
                     raise
@@ -278,7 +278,7 @@ def _escalate(
     verbatim-preserved ID columns on a medium-confidence guess).
     Constant-source columns never escalate.
     """
-    if src_distinct <= 1:
+    if ColumnFacts.constant(src_distinct):
         return None
 
     full_identity = identity_rate == 1.0

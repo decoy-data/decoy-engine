@@ -109,8 +109,10 @@ def _is_arrow_binary(dtype: object) -> bool:
 
 
 def _number_key(value: object) -> str:
+    value = _python_scalar(value)
     if isinstance(value, bool):
-        return str(value)
+        # pandas `==` holds True equal to 1 and 1.0, so a bool keys as the number it equals.
+        return "1" if value else "0"
     if isinstance(value, int):
         return str(int(value))
     if isinstance(value, float):
@@ -122,3 +124,19 @@ def _number_key(value: object) -> str:
             return str(int(value))
         return format(value.normalize(), "f")
     return cell_text(value)
+
+
+def _python_scalar(value: object) -> object:
+    """A NumPy scalar as the Python or pandas value it equals, so both share one key. Checked
+    before the Python types: `np.float64` is a `float`, but its `repr` names NumPy."""
+    if isinstance(value, np.timedelta64):
+        return pd.Timedelta(value)
+    if isinstance(value, np.datetime64):
+        return pd.Timestamp(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    return value

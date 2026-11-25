@@ -196,7 +196,13 @@ class ColumnFacts:
 
     @property
     def source_constant(self) -> bool:
-        return self.source_distinct <= 1
+        return self.constant(self.source_distinct)
+
+    @staticmethod
+    def constant(distinct: int) -> bool:
+        """The one constant-source rule: with at most one distinct source value, an unchanged
+        cell says nothing about whether the mask ran."""
+        return distinct <= 1
 
 
 @dataclass
@@ -259,6 +265,11 @@ def canonical_cells(series: pd.Series) -> pd.Series:
     cells = series.astype(object)
     # Only an object column can hold a container; a typed one is passed as it is.
     return cells.map(_frozen) if series.dtype == object else cells
+
+
+def source_distinct(series: pd.Series) -> int:
+    """The non-null distinct cells of `series`, counted on the cells `identity_counts` compares."""
+    return int(canonical_cells(series).nunique(dropna=True))
 
 
 def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:

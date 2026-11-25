@@ -16,7 +16,7 @@ result.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
@@ -44,6 +44,7 @@ from decoy_engine.execution.pipeline._post_scan_distribution import (
     refuse_transformed_integrity,
     refuse_unchecked_distribution,
 )
+from decoy_engine.execution.pipeline._post_scan_suite import exact_frames, suite_tables
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.internal.memory_limit import require_megabytes
 from decoy_engine.profile import LazySource
@@ -222,12 +223,7 @@ class PostScanGate:
         no read is repeated. `None` when no check will use it."""
         if not self.required or self.deferred:
             return None
-        try:
-            wanted = key_columns(self._relationships())
-        except Exception as exc:
-            if passes_through(exc):
-                raise
-            return None  # an unreadable relationship is the check's to report
+        wanted = key_columns(self._relationships())
 
         def tee(name: str, table: pa.Table) -> None:
             if name in wanted and name not in self._teed:
@@ -271,36 +267,40 @@ class PostScanGate:
     ) -> None:
         """The check a deferred route gets: the column suite over the mask tables the run still
         holds, reported and blocking only through the NER predicate (`ner_findings: fail`, which
-        is never report-only). Declared keys alone get no check yet."""
-        self.ran = True
-        if not post_scan_integrity_requested(self._config):
+        is never report-only). Declared keys alone get no check yet. A suite that cannot run is
+        reported by class name with a blocking verdict, never as a clean pass."""
+        wanted = post_scan_integrity_requested(self._config)
+        masked = suite_tables(outputs, sources, table_kinds) if wanted else []
+        if not masked:
+            self.ran = True
             return
-        masked = _suite_tables(outputs, sources, table_kinds)
-        if masked:
-            self.report = run_post_mask(
-                {n: materialize_source(sources[n]).to_pandas() for n in masked},
-                {n: outputs[n].to_pandas() for n in masked},
+        try:
+            report = run_post_mask(
+                exact_frames({n: materialize_source(sources[n]) for n in masked}),
+                exact_frames({n: outputs[n] for n in masked}),
                 config=dict(self._config),
                 detectors=self._detectors,
                 writes=self._writes,
             )
-            raise_if_ner_blocked(self.report, ner_findings=post_scan_ner_findings(self._config))
+        except Exception as exc:
+            if passes_through(exc):
+                raise
+            failed = safe_error_class(type(exc).__name__)
+            report = {"schema_version": SCHEMA_VERSION, "pass_failed_with": failed}
+        ner_findings = post_scan_ner_findings(self._config)
+        verdict = post_scan_verdict(report, ner_findings=ner_findings)
+        report["verdict"] = verdict.as_dict()
+        self.report, self.verdict, self.ran = report, verdict, True
+        raise_if_ner_blocked(report, ner_findings=ner_findings)
 
     def note_quarantined(self, table: str, rows: pa.Table, removed: Collection[int]) -> None:
         """Record the declared parent keys of `rows` (a table before quarantine filtered it) at
-        the `removed` row indices. A relationship that cannot be read is left for the check to
-        report."""
+        the `removed` row indices."""
         if self._distribution is not None and not self.deferred:
             self._distribution.note_quarantined(table, removed)
         if not self.required or self.deferred or not removed:
             return
-        try:
-            relationships = self._relationships()
-        except Exception as exc:
-            if passes_through(exc):
-                raise
-            return
-        for rel in relationships:
+        for rel in self._relationships():
             columns = tuple(rel.parent.columns)
             if rel.parent.table == table and set(columns) <= set(rows.column_names):
                 taken = rows.select(list(columns)).take(sorted(removed))
@@ -351,7 +351,7 @@ class PostScanGate:
     ) -> Callable[[tuple[KeyResult, ...]], dict[str, Any]]:
         """The column suite over staged output, in batches. A table the route transformed has no
         raw baseline to compare against, so `before_commit` refuses that case before it gets here."""
-        masked = _suite_tables(staged, self._sources)
+        masked = suite_tables(staged, self._sources)
 
         def suite(keys: tuple[KeyResult, ...]) -> dict[str, Any]:
             with fileaccess.protected_scratch_dir(prefix="decoy-post-scan-columns-") as scratch:
@@ -428,10 +428,10 @@ class PostScanGate:
         raw_sources: bool,
     ) -> dict[str, Any]:
         # Generated tables have no source to compare against, as in the report-only suite.
-        masked = _suite_tables(outputs, sources, table_kinds)
+        masked = suite_tables(outputs, sources, table_kinds)
         return run_post_mask(
-            {n: materialize_source(sources[n]).to_pandas() for n in masked},
-            {n: outputs[n].to_pandas() for n in masked},
+            exact_frames({n: materialize_source(sources[n]) for n in masked}),
+            exact_frames({n: outputs[n] for n in masked}),
             config=dict(self._config),
             detectors=self._detectors,
             keys=keys,
@@ -452,20 +452,6 @@ class PostScanGate:
             lambda n: self._source(n, sources[n], raw),
             cast_run=self._cast_run,
         )
-
-
-def _suite_tables(
-    names: Iterable[str],
-    sources: Mapping[str, Any],
-    table_kinds: Mapping[str, str] | None = None,
-) -> list[str]:
-    """The tables the column suite compares: those the run masked that also have a source. A
-    generated table has no source to compare against."""
-    return [
-        n
-        for n in names
-        if n in sources and (table_kinds is None or table_kinds.get(n, "mask") == "mask")
-    ]
 
 
 _ACTIVE: ContextVar[PostScanGate | None] = ContextVar("decoy_post_scan_gate", default=None)

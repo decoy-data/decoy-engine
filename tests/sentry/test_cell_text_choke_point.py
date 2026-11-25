@@ -37,11 +37,8 @@ ALLOWLIST: dict[str, str] = {
     f"{_RUNNER}::run_post_mask_tables::str(name) for name in output_tables": (
         "a table name for tables_checked, not a cell"
     ),
-    f"{_RUNNER}::_frame_table::str(c) for c in frame.columns": (
+    f"{_RUNNER}::_column_names::str(c) for c in frame.columns": (
         "a column name of the frame, not a cell"
-    ),
-    f"{_RUNNER}::_frame_table::str(c) for (n, c) in reversed(list(enumerate(other.columns)))": (
-        "a column name of the other frame, matched to the frame's, not a cell"
     ),
 }
 
