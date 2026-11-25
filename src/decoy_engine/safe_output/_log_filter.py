@@ -17,7 +17,6 @@ type (an unbound builtin iterator at most), in this order:
   `Mapping`) becomes `<mapping>`, clean or not, so no lookup, factory or order of a caller type
   can be reached. A `dict` with a key that is not an exact `str`, `int`, `float`, `bool` or
   `None` is `<mapping>` too: keys are never rewritten;
-- a dataclass or attrs instance becomes `<object>`: its repr would print every field;
 - scalars (`str`, `bytes`, numbers, `None`, `range`, `array`) pass. A `str` subclass is copied
   to a plain `str`, so its own `__str__` and `__repr__` never run;
 - a `list`, `tuple`, `set`, `frozenset` (or subclass) is opened one level deep in `msg` and two
@@ -153,7 +152,7 @@ class _Label(str):
 _MAPPING_PLACEHOLDER = _Label("<mapping>")
 # A plain container at the scan depth limit: its items are not inspected, so none is printed.
 _NESTED_PLACEHOLDER = _Label("<nested>")
-# A dataclass or attrs instance: its repr is caller code and prints every field.
+# Any object without a row in the table: its repr is caller code (a dataclass prints every field).
 _OBJECT_PLACEHOLDER = _Label("<object>")
 # `LogRecord` attributes the filter leaves alone; any other attribute came from `extra=`.
 _STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
@@ -201,19 +200,11 @@ def _is_container(kind: type) -> bool:
     )
 
 
-def _is_record_class(kind: type) -> bool:
-    """A dataclass or attrs class, read from the class attribute each one sets."""
-    return (
-        getattr(kind, "__dataclass_fields__", None) is not None
-        or getattr(kind, "__attrs_attrs__", None) is not None
-    )
-
-
 def _safe_value(value: object, depth: int) -> object:
     """`value` as it may be written back: the one closed type table (module docstring).
 
-    Rows run in order and the first match wins. Rows 1 to 3 come before the depth check, so an
-    exception, a non-plain mapping or a dataclass is replaced at every position the scan reaches.
+    Rows run in order and the first match wins. Rows 1 and 2 come before the depth check, so an
+    exception or a non-plain mapping is replaced at every position the scan reaches.
     An unknown iterable is never iterated (that would run caller code and could drain a
     generator), so it is the placeholder.
     """
@@ -222,8 +213,6 @@ def _safe_value(value: object, depth: int) -> object:
         return _label(value)  # type: ignore[arg-type]
     if kind is not dict and (issubclass(kind, Mapping) or issubclass(kind, UserDict)):
         return _MAPPING_PLACEHOLDER
-    if _is_record_class(kind):
-        return _OBJECT_PLACEHOLDER
     if kind is _Label or _is_exact(value, _PLAIN_VALUE_TYPES):
         return value
     if issubclass(kind, str):
