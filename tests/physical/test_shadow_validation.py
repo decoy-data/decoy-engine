@@ -249,3 +249,54 @@ def test_r2_an_ambient_session_holding_other_validators_is_refused() -> None:
             ShadowCoordinator(ctx=ctx).run(plan, snapshot)
         assert caught.value.code == reasons.runtime.VALIDATOR_CONFIG_NOT_OWNED
         session.close()  # the refused run fed it nothing, so the scope still closes cleanly
+
+
+# --- Codex round 3: what the plan carries, what a session owns, who may defer ------------------
+
+
+def _leak_check_config(tmp_path: Path) -> tuple[Any, Any, Any, Any, Any]:
+    config, source = _admitted_table_config(tmp_path)
+    config["validators"] = [{"name": "leak_check"}]
+    sources = {_TABLE: source}
+    inputs, plan = _capture(config, sources)
+    return config, inputs, plan, _build_ctx(inputs, config), capture_shadow_snapshot(sources)
+
+
+def test_r3_a_plan_carries_the_tables_a_leak_check_scope_reads(tmp_path: Path) -> None:
+    config, inputs, plan, ctx, snapshot = _leak_check_config(tmp_path)
+    full = dataclasses.replace(ctx, validation_config=config)
+    with pytest.raises(ValidatorFailedError):
+        _coordinator(inputs, full).run(plan, snapshot)
+    assert ctx.validation_config is None
+    with pytest.raises(ValidatorFailedError):
+        _coordinator(inputs, ctx).run(plan, snapshot)
+
+
+def test_r3_a_session_missing_the_tables_does_not_own_the_run(tmp_path: Path) -> None:
+    config, inputs, plan, ctx, snapshot = _leak_check_config(tmp_path)
+    ambient = {"validators": config["validators"]}
+    with pytest.raises(ValidatorStateError) as caught:
+        with bind_validation_session(ambient, key_state_budget=lambda: None):
+            _coordinator(inputs, ctx).run(plan, snapshot)
+    assert caught.value.code == reasons.runtime.VALIDATOR_CONFIG_NOT_OWNED
+
+
+def test_r3_a_caller_edit_after_compile_cannot_change_the_verdict(tmp_path: Path) -> None:
+    config, inputs, plan, ctx, snapshot = _full_frame_reject_all(tmp_path)
+    config["validators"][0]["params"]["pattern"] = "."
+    with pytest.raises(ValidatorFailedError):
+        _coordinator(inputs, ctx).run(plan, snapshot)
+
+
+def test_r3_deferral_needs_an_open_session(tmp_path: Path) -> None:
+    config, inputs, plan, ctx, snapshot = _full_frame_reject_all(tmp_path)
+    owned = dataclasses.replace(ctx, validation_owner="unified_slice")
+    with pytest.raises(ValidatorStateError) as no_session:
+        _coordinator(inputs, owned).run(plan, snapshot)
+    assert no_session.value.code == reasons.runtime.VALIDATOR_SESSION_UNAVAILABLE
+    with bind_validation_session(config, key_state_budget=lambda: None) as session:
+        assert session is not None
+        session.close()
+        with pytest.raises(ValidatorStateError) as closed:
+            _coordinator(inputs, owned).run(plan, snapshot)
+    assert closed.value.code == reasons.runtime.VALIDATOR_SESSION_UNAVAILABLE

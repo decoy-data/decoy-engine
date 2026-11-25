@@ -50,7 +50,7 @@ from decoy_engine.execution.physical._plan import (
 from decoy_engine.execution.physical._shadow_bindings import execution_binding_for_slice_node
 from decoy_engine.execution.physical._types import DriverId
 from decoy_engine.execution.pipeline import require_resident_fit
-from decoy_engine.validators import carried_entries
+from decoy_engine.validators import judging_config
 
 if TYPE_CHECKING:
     from decoy_engine.execution._planner import ExecutionPlan
@@ -437,7 +437,7 @@ def compile_physical_plan(inputs: PhysicalPlanInputs) -> PhysicalPlan:
         plan_hash=inputs.plan_hash(),
         synthesis=synthesis,
         tables=tuple(tables),
-        validation_entries=carried_entries(inputs),
+        validation_config=judging_config(inputs.config),
     )
 
 

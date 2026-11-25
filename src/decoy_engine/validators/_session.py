@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -141,7 +142,7 @@ class ValidationSession:
         self._explicit_source_rows: dict[str, int] = {}
         self._elapsed = 0.0
         self._report: ValidationReport | None = None
-        self._configured = _plain_entries(entries)
+        self._fingerprint = _fingerprint(config)
         self._close_attempted = False
         self._refused = False
 
@@ -151,12 +152,16 @@ class ValidationSession:
         return self._close_attempted
 
     def owns(self, config: Mapping[str, Any]) -> bool:
-        """True when this session was opened with exactly the checks ``config`` configures.
+        """True when this session judges exactly what ``config`` configures.
 
-        A config that configures none is owned by any session: there is nothing to judge twice.
+        Compares the entries and every key they read (tables, relationships, quarantine), with
+        types preserved. A config that configures no check is owned by any session. ``config``
+        must hold plain dicts and lists.
         """
-        entries = _plain_entries(config.get("validators"))
-        return not entries or entries == self._configured
+        if judging_config(config) is None:
+            return True
+        theirs = _fingerprint(config)
+        return theirs is not None and theirs == self._fingerprint
 
     def observe(self, table: str, output: pa.Table, source: pa.Table | None = None) -> None:
         """Feed one complete resident table, then mark it complete.
@@ -250,11 +255,13 @@ class ValidationSession:
     def defer(self, tables: Iterable[str], *, owner: str) -> None:
         """Leave ``tables`` to ``owner``, which commits to feeding them before ``close``."""
         _require_owner(owner)
+        self._require_open()
         self._deferred.update(tables)
 
     def record_external_verdict(self, tables: Iterable[str], *, owner: str) -> None:
         """``owner`` judged ``tables`` itself and fails the run on any finding; they are complete."""
         _require_owner(owner)
+        self._require_open()
         for table in tables:
             self._external.add(table)
             self._complete_table(table)
@@ -297,6 +304,14 @@ class ValidationSession:
             self._refused = True
             raise ValidatorFailedError(report)
         return report
+
+    def _require_open(self) -> None:
+        """A table cannot be left to an owner once the session has given its verdict."""
+        if self._close_attempted or self._report is not None:
+            raise ValidatorStateError(
+                code=reasons.runtime.VALIDATOR_SESSION_UNAVAILABLE,
+                message="the validation session is closed; it cannot take a table from an owner.",
+            )
 
     def _source_rows(
         self,
@@ -373,35 +388,34 @@ class ValidationSession:
                         )
 
 
-def carried_entries(carrier: Any) -> tuple[Any, ...]:
-    """The ``validators:`` entries a captured-inputs object carries, for a plan to judge by."""
-    return tuple(getattr(carrier, "validators", ()) or ())
+# The config keys that decide what a run's checks judge: the entries, the table list a default
+# leak scope reads, the relationships the FK checks read, and the quarantine setting that lifts the
+# finding cap. A plan carries exactly these, and a session owns a run only when they match.
+_JUDGEMENT_KEYS = ("validators", "tables", "relationships", "quarantine")
 
 
-def judging_config(
-    config: Mapping[str, Any] | None, entries: Iterable[Any] = ()
-) -> dict[str, Any] | None:
-    """The config that judges a run: ``entries`` (a plan's own checks) over ``config``, else it.
+def judging_config(config: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """The part of ``config`` that decides what its validators judge, or None when it has none.
 
-    None when neither configures a check.
+    The values are shared, not copied: pass an already-frozen config (a plan's captured inputs) to
+    get a snapshot no caller can edit.
     """
-    chosen = list(entries)
-    if chosen:
-        return {**(config or {}), "validators": chosen}
-    return dict(config) if config and config.get("validators") else None
+    if not config or not config.get("validators"):
+        return None
+    return MappingProxyType({k: config[k] for k in _JUDGEMENT_KEYS if config.get(k)})
 
 
-def _plain_entries(entries: Iterable[Any] | None) -> list[Any]:
-    """The ``validators:`` entries as plain dicts and lists, so a frozen copy compares equal."""
+def _fingerprint(config: Mapping[str, Any]) -> bytes | None:
+    """The type-preserving canonical bytes of the judgement keys (``[1]`` and ``[1.0]`` differ)."""
+    from decoy_engine._canonical import CanonicalJsonError, canonical_json_bytes
 
-    def plain(value: Any) -> Any:
-        if isinstance(value, dict) or hasattr(value, "keys"):
-            return {k: plain(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [plain(v) for v in value]
-        return value
-
-    return [plain(entry) for entry in entries or []]
+    projected = judging_config(config)
+    if projected is None:
+        return None
+    try:
+        return canonical_json_bytes(dict(projected))
+    except CanonicalJsonError:
+        return None
 
 
 def _require_owner(owner: str) -> None:

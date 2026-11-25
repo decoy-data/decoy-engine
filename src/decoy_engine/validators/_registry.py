@@ -243,7 +243,7 @@ def build_fold(
             locator = str(exc)
         if fold is None:
             # Raised outside the handler so the error carries no exception context.
-            raise ValueError(f"validators entry {index}: {locator}")
+            raise ParamError(f"validators entry {index}: {locator}")
         return name, fold
     return name, _WholeTableFold(fn, entry, config, sources)
 

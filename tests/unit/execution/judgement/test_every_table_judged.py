@@ -176,3 +176,30 @@ def test_v15g_deferral_needs_an_owner_token() -> None:
     session = ValidationSession(_ONE_TABLE)
     with pytest.raises(ValueError, match="owner"):
         session.defer(["t"], owner="")
+
+
+def _regex_config(allowed: list[Any], **extra: Any) -> dict[str, Any]:
+    entry = {
+        "name": "column_in_set",
+        "columns": {"t": ["v"]},
+        "params": {"allowed_values": allowed},
+    }
+    return {"validators": [entry], **extra}
+
+
+def test_v15h_ownership_keeps_types_and_every_key_a_check_reads() -> None:
+    session = ValidationSession(_regex_config([1]))
+    assert session.owns(_regex_config([1]))
+    assert not session.owns(_regex_config([1.0]))
+    assert not session.owns(_regex_config([1], tables=[{"name": "t"}]))
+    assert session.owns({})  # nothing configured: nothing to judge twice
+
+
+def test_v15h_a_closed_session_takes_no_deferral_and_no_external_verdict() -> None:
+    session = ValidationSession(_ONE_TABLE)
+    session.close()
+    with pytest.raises(ValidatorStateError) as late:
+        session.defer(["t"], owner="unified_slice")
+    assert late.value.code == reasons.runtime.VALIDATOR_SESSION_UNAVAILABLE
+    with pytest.raises(ValidatorStateError):
+        session.record_external_verdict(["t"], owner="out_of_core_collector")

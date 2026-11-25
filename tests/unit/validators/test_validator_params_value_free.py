@@ -108,3 +108,15 @@ def test_numeric_parameter_errors_are_value_free_on_every_entry_point(
     with pytest.raises(ValueError, match="params") as folded:
         build_fold(entry, config, cap=None, budget=KeyStateBudget(None), sources=None)
     _assert_value_free(folded.value)
+
+
+def test_session_construction_reports_a_bad_parameter_as_a_config_error() -> None:
+    from decoy_engine.errors import ConfigRuleError
+    from decoy_engine.reason_adapter import reason_from_exception
+
+    config = {
+        "validators": [{"name": "regex_match", "columns": {"t": ["c"]}, "params": {"pattern": "("}}]
+    }
+    with pytest.raises(ConfigRuleError) as caught:
+        ValidationSession(config)
+    assert reason_from_exception(caught.value).code != "unexpected_error"

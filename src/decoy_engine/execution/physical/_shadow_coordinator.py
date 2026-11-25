@@ -226,7 +226,7 @@ class ShadowCoordinator:
         from decoy_engine.execution.physical._shadow_generation import enforce_validators
 
         enforce_validators(
-            self.ctx, result.outputs, dict(snapshot.tables), plan_entries=plan.validation_entries
+            self.ctx, result.outputs, dict(snapshot.tables), plan_config=plan.validation_config
         )
         return result
 

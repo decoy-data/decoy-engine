@@ -100,6 +100,28 @@ S3_PENDING: dict[tuple[str, str, str], int] = {
 }
 
 
+# What a plan carries to judge its result, and the sites allowed to touch it. Carriage and
+# judgement only: a read of the carried config in a route decision is a route off validators, so a
+# new site anywhere fails, exactly as in `S3_PENDING`. The context fields are the caller's own
+# config; the plan field and its compile site carry it; `enforce_validators` judges with it.
+_JUDGEMENT_NAMES = frozenset({"validation_config", "plan_config", "judging_config"})
+JUDGEMENT_SITES: dict[tuple[str, str, str], int] = {
+    ("physical/_compiler.py", "keyword validation_config", "compile_physical_plan"): 1,
+    ("physical/_compiler.py", "name judging_config", "compile_physical_plan"): 1,
+    ("physical/_plan.py", "name validation_config", "PhysicalPlan"): 1,
+    ("physical/_shadow_context.py", "keyword validation_config", "from_key_provider"): 1,
+    ("physical/_shadow_context.py", "name validation_config", "ShadowContext"): 1,
+    ("physical/_shadow_context.py", "name validation_config", "from_key_provider"): 1,
+    ("physical/_shadow_context.py", "parameter validation_config", "from_key_provider"): 1,
+    ("physical/_shadow_coordinator.py", "attribute validation_config", "_validated"): 1,
+    ("physical/_shadow_coordinator.py", "keyword plan_config", "_validated"): 1,
+    ("physical/_shadow_generation.py", "attribute validation_config", "enforce_validators"): 2,
+    ("physical/_shadow_generation.py", "name judging_config", "enforce_validators"): 1,
+    ("physical/_shadow_generation.py", "name plan_config", "enforce_validators"): 2,
+    ("physical/_shadow_generation.py", "parameter plan_config", "enforce_validators"): 1,
+}
+
+
 def _is_validator_name(name: str) -> bool:
     return name in _NAMES or name.startswith(_PREFIXES)
 
@@ -241,3 +263,59 @@ def test_the_scan_sees_each_seeded_spelling(snippet: str) -> None:
 
 def test_the_scan_passes_the_public_import() -> None:
     assert violations("from decoy_engine.validators import ValidationSession") == []
+
+
+# --- the carried judgement config is never a route input -----------------------------------------
+
+
+def judgement_sites(source: str) -> Counter[tuple[str, str]]:
+    """Each use of a judgement-config name in `source` as (kind, enclosing function)."""
+    tree = ast.parse(source)
+    scopes = [
+        (node.lineno, node.end_lineno or node.lineno, node.name)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
+    found: Counter[tuple[str, str]] = Counter()
+    for node in ast.walk(tree):
+        kind = None
+        if isinstance(node, ast.Name) and node.id in _JUDGEMENT_NAMES:
+            kind = f"name {node.id}"
+        elif isinstance(node, ast.arg) and node.arg in _JUDGEMENT_NAMES:
+            kind = f"parameter {node.arg}"
+        elif isinstance(node, ast.Attribute) and node.attr in _JUDGEMENT_NAMES:
+            kind = f"attribute {node.attr}"
+        elif isinstance(node, ast.keyword) and node.arg in _JUDGEMENT_NAMES:
+            kind = f"keyword {node.arg}"
+        if kind is not None:
+            enclosing = [s for s in scopes if s[0] <= node.lineno <= s[1]]
+            name = min(enclosing, key=lambda s: s[1] - s[0])[2] if enclosing else "<module>"
+            found[(kind, name)] += 1
+    return found
+
+
+def _judgement_scan() -> Counter[tuple[str, str, str]]:
+    hits: Counter[tuple[str, str, str]] = Counter()
+    for path in sorted(EXECUTION.rglob("*.py")):
+        rel = str(path.relative_to(EXECUTION))
+        for (kind, name), count in judgement_sites(path.read_text()).items():
+            hits[(rel, kind, name)] += count
+    return hits
+
+
+def test_the_carried_judgement_config_is_read_only_at_the_pinned_sites() -> None:
+    assert dict(_judgement_scan() - Counter(JUDGEMENT_SITES)) == {}
+    assert dict(Counter(JUDGEMENT_SITES) - _judgement_scan()) == {}
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "if plan.validation_config:\n    return 'sequential'",
+        "route = pick(plan_config=plan.validation_config)",
+        "def decide(plan_config): pass",
+        "x = judging_config(inputs.config)\nif x:\n    pass",
+    ],
+)
+def test_a_seeded_route_branch_on_the_carried_config_is_seen(snippet: str) -> None:
+    assert judgement_sites(snippet), snippet

@@ -97,6 +97,7 @@ __all__ = [
     "VALIDATOR_COLUMN_MISSING",
     "VALIDATOR_CONFIG_NOT_OWNED",
     "VALIDATOR_KEY_STATE_OVER_BUDGET",
+    "VALIDATOR_SESSION_UNAVAILABLE",
     "VALIDATOR_SOURCE_PAIRING_MISMATCH",
     "VALIDATOR_SPAN_REPEATED",
     "VALIDATOR_TABLE_NOT_OBSERVED",
@@ -556,6 +557,11 @@ VALIDATOR_COLUMN_MISSING = _d(
 VALIDATOR_CONFIG_NOT_OWNED = _d(
     "validator_config_not_owned",
     "The validation session bound to a run does not hold the validators the run is configured with.",
+    since=UNRELEASED,
+)
+VALIDATOR_SESSION_UNAVAILABLE = _d(
+    "validator_session_unavailable",
+    "A table was left to an owner, but no open validation session exists to judge it.",
     since=UNRELEASED,
 )
 VALIDATOR_SPAN_REPEATED = _d(
