@@ -369,3 +369,47 @@ def test_public_index_derivation_error_carries_no_metadata_value() -> None:
         assert_no_canary(rendered_surfaces(raised))
         return
     pytest.fail("derive_validated_indices did not raise GenerationError")
+
+
+_ADMISSION_MESSAGE = (
+    "[native_type_not_admitted] the native kernel does not admit the input column type"
+)
+
+
+def _crypto_wrapper_call() -> None:
+    from decoy_engine.execution.native._crypto_ext import load_compiled_crypto_kernel
+
+    load_compiled_crypto_kernel().derive_batch(
+        _struct_with_canary_metadata(), mask_key=_KEY, namespace="ns", truncate=None
+    )
+
+
+def _index_wrapper_call() -> None:
+    from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
+
+    load_compiled_index_kernel().derive_index_batch(
+        _struct_with_canary_metadata(), mask_key=_KEY, namespace="ns", pool_size=10
+    )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(_crypto_wrapper_call, id="crypto"),
+        pytest.param(_index_wrapper_call, id="index"),
+    ],
+)
+def test_compiled_wrapper_raises_fixed_admission_error_with_no_native_chain(
+    call: Callable[[], None],
+) -> None:
+    """The real wrapper, fed a struct whose only marker is a child-field metadata value, raises
+    the fixed error and chains nothing: the native error formats the Arrow type, so it must be
+    neither the cause nor the context."""
+    from decoy_engine.generation.pool import GenerationError
+
+    with pytest.raises(GenerationError) as info:
+        call()
+    assert str(info.value) == _ADMISSION_MESSAGE
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+    assert_no_canary(rendered_surfaces(info.value))

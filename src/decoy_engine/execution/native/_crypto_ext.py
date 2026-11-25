@@ -56,7 +56,7 @@ from decoy_engine.errors import (
     DecoyError,
     MaskKeyRequiredError,
 )
-from decoy_engine.generation.pool._errors import GenerationError
+from decoy_engine.generation.pool._errors import native_type_not_admitted_error
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.transforms.fpe import _CHARSETS
 
@@ -376,12 +376,7 @@ def _translate_compiled_kernel_error(exc: ValueError) -> Exception:
         # kernel folds all of these into one coded rejection at the array's Arrow
         # type, so the exception TYPE is what a caller can rely on matching, not a
         # specific one of the reference's finer-grained codes.
-        # The native detail formats the Arrow type, and that text carries field names and
-        # metadata values from the caller's data. A fixed message keeps the error value-free.
-        return GenerationError(
-            code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED,
-            message="the native kernel does not admit the input column type",
-        )
+        return native_type_not_admitted_error()
     # An unrecognized code means the compiled kernel raised something this wrapper
     # was not built to translate; surface it as-is rather than guess at a mapping.
     return exc

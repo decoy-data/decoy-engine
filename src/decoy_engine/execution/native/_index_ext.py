@@ -27,11 +27,10 @@ from typing import Protocol
 
 import pyarrow as pa
 
-from decoy_engine import reasons
 from decoy_engine.determinism import DeterminismError, derive_index
 from decoy_engine.determinism._derive import DeriveContext
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
-from decoy_engine.generation.pool._errors import GenerationError
+from decoy_engine.generation.pool._errors import native_type_not_admitted_error
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 
 from ._crypto_ext import (
@@ -108,12 +107,7 @@ def _translate_compiled_index_kernel_error(exc: ValueError) -> Exception:
         # Arrow type with one coded ValueError, where the reference's canonicalizer
         # raises a finer-grained GenerationError code per value type. The exception
         # TYPE is the drop-in guarantee, not the specific code.
-        # The native detail formats the Arrow type, and that text carries field names and
-        # metadata values from the caller's data. A fixed message keeps the error value-free.
-        return GenerationError(
-            code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED,
-            message="the native kernel does not admit the input column type",
-        )
+        return native_type_not_admitted_error()
     return exc
 
 

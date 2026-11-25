@@ -134,7 +134,8 @@ def test_translated_error_forwards_only_code_and_detail(
     assert_no_canary(rendered_surfaces(translated))
 
 
-# One leak cell per translator: every code of a translator copies its detail the same way.
+# One leak cell per translator: every code of a translator that still copies its detail does so
+# the same way (the two mixed_object_not_native mappings drop it, see _DETAIL_DROPPED).
 _FIRST_PER_TRANSLATOR = list({row[0]: row for row in reversed(_MAPPED)}.values())
 
 
