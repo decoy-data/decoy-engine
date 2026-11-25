@@ -19,6 +19,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._opaque import OpaqueBox
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._positional_keys import positional_key_array
 from decoy_engine.execution._sequential_native_ops import FAKER
@@ -81,7 +82,7 @@ def computed_faker_array(
             values,
             spec,
             column_namespace=str(plan.namespace),
-            mask_key=ctx.mask_key,
+            mask_key=OpaqueBox(ctx.mask_key),
             index_kernel=bound.kernel,
             hash_kernel=bound.hash_kernel,
             native_threads=bound.native_threads,
@@ -108,7 +109,7 @@ def computed_faker_array(
     )
     drawn = keyed_uuid_array(
         keys,
-        key=ctx.job_seed,
+        key=OpaqueBox(ctx.job_seed),
         namespace=namespace,
         hash_kernel=bound.hash_kernel,
         native_threads=bound.native_threads,

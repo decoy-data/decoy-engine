@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
+from decoy_engine._opaque import OpaqueBox
 from decoy_engine.execution.native._operator_step import sample_faker_array
 from decoy_engine.generation.pool import (
     ComputedDrawSpec,
@@ -39,27 +40,28 @@ UUID_HEX_DIGITS = 32
 def keyed_uuid_array(
     values: pa.Array | pa.ChunkedArray,
     *,
-    key: bytes,
+    key: OpaqueBox,
     namespace: str,
     hash_kernel: KeyedDerivationKernel | None,
     native_threads: int | None,
 ) -> pa.Array:
-    """UUID strings from `values` keyed under `key` and the selection `namespace`; null stays null."""
-    try:
-        if hash_kernel is None:
-            digits = hash_array(values, seed=key, namespace=namespace, truncate=UUID_HEX_DIGITS)
-        else:
-            digits = hash_kernel.derive_batch(
-                values,
-                mask_key=key,
-                namespace=namespace,
-                truncate=UUID_HEX_DIGITS,
-                native_threads=native_threads,
-            )
-        return uuid_from_hex(digits)
-    except BaseException:
-        del key
-        raise
+    """UUID strings from `values` keyed under the boxed `key` and the selection `namespace`.
+
+    The key arrives in an `OpaqueBox` and is unpacked only inside the call that consumes it, so
+    no frame of this function holds the bytes. A null value stays null."""
+    if hash_kernel is None:
+        digits = hash_array(
+            values, seed=key.open()[0], namespace=namespace, truncate=UUID_HEX_DIGITS
+        )
+    else:
+        digits = hash_kernel.derive_batch(
+            values,
+            mask_key=key.open()[0],
+            namespace=namespace,
+            truncate=UUID_HEX_DIGITS,
+            native_threads=native_threads,
+        )
+    return uuid_from_hex(digits)
 
 
 def deterministic_computed_array(
@@ -67,30 +69,26 @@ def deterministic_computed_array(
     spec: ComputedDrawSpec,
     *,
     column_namespace: str,
-    mask_key: bytes,
+    mask_key: OpaqueBox,
     index_kernel: IndexDerivationKernel,
     hash_kernel: KeyedDerivationKernel | None,
     native_threads: int | None,
 ) -> pa.Array:
-    """The exact-string computed values of one batch, each source value keyed under the mask key."""
-    try:
-        namespace = computed_selection_namespace(column_namespace, spec.provider)
-        if spec.family == FAMILY_UUID:
-            return keyed_uuid_array(
-                values,
-                key=mask_key,
-                namespace=namespace,
-                hash_kernel=hash_kernel,
-                native_threads=native_threads,
-            )
-        return sample_faker_array(
+    """The exact-string computed values of one batch, each source value keyed under the boxed key."""
+    namespace = computed_selection_namespace(column_namespace, spec.provider)
+    if spec.family == FAMILY_UUID:
+        return keyed_uuid_array(
             values,
-            pool=spec,
+            key=mask_key,
             namespace=namespace,
-            mask_key=mask_key,
-            index_kernel=index_kernel,
+            hash_kernel=hash_kernel,
             native_threads=native_threads,
         )
-    except BaseException:
-        del mask_key
-        raise
+    return sample_faker_array(
+        values,
+        pool=spec,
+        namespace=namespace,
+        mask_key=mask_key.open()[0],
+        index_kernel=index_kernel,
+        native_threads=native_threads,
+    )

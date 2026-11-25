@@ -18,12 +18,8 @@ from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution.native._crypto_ext import (
     CryptoExtensionUnavailableError,
     KeyedDerivationKernel,
-    load_compiled_crypto_kernel,
 )
-from decoy_engine.execution.native._index_ext import (
-    IndexDerivationKernel,
-    load_compiled_index_kernel,
-)
+from decoy_engine.execution.native._index_ext import IndexDerivationKernel
 from decoy_engine.execution.native._provider_class import resolve_faker_variant
 from decoy_engine.execution.native._real_type_admission import (
     faker_provider_decline,
@@ -40,18 +36,25 @@ if TYPE_CHECKING:
 __all__ = ["bound_decline", "faker_admit", "load_faker_kernels"]
 
 
-def load_faker_kernels(native_threads: int | None) -> BoundFakerKernel:
+def load_faker_kernels(
+    native_threads: int | None,
+    *,
+    load_index: Callable[[], IndexDerivationKernel],
+    load_hash: Callable[[], KeyedDerivationKernel],
+) -> BoundFakerKernel:
     """Bind the index kernel and the hash kernel, each on its own.
 
-    A kernel that is unavailable binds the byte-identical reference (index) or None (hash), and
+    The caller passes the two loaders so they resolve through its module globals at call time,
+    which is how a test swaps the companion load (`_sequential_native._load_faker`). A kernel
+    that is unavailable binds the byte-identical reference (index) or None (hash), and
     `BoundFakerKernel.ready` then declines the columns that variant cannot run natively, so a
     missing index kernel does not discard a healthy hash kernel or the reverse."""
     try:
-        index: IndexDerivationKernel | None = load_compiled_index_kernel()
+        index: IndexDerivationKernel | None = load_index()
     except CryptoExtensionUnavailableError:
         index = None
     try:
-        hash_kernel: KeyedDerivationKernel | None = load_compiled_crypto_kernel()
+        hash_kernel: KeyedDerivationKernel | None = load_hash()
     except CryptoExtensionUnavailableError:
         hash_kernel = None
     return BoundFakerKernel.bind(index, native_threads, hash_kernel)

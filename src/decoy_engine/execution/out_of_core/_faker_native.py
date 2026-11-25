@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._opaque import OpaqueBox
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import (
@@ -308,7 +309,7 @@ def native_faker_array(
                 values,
                 spec,
                 column_namespace=namespace,
-                mask_key=mask_key,
+                mask_key=OpaqueBox(mask_key),
                 index_kernel=native.bound.kernel,
                 hash_kernel=native.bound.hash_kernel,
                 native_threads=native.bound.native_threads,

@@ -110,6 +110,7 @@ from decoy_engine.execution.native._date_shift_ext import native_date_shift
 from decoy_engine.execution.native._fpe_ext import load_compiled_fpe_kernel
 from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
 from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
+from decoy_engine.execution.native.draw import BoundFakerKernel
 from decoy_engine.execution.out_of_core._categorical_native import BoundIndexKernel
 from decoy_engine.execution.out_of_core._hash_native import BoundHashKernel
 from decoy_engine.execution.sequential._faker_admission import bound_decline, load_faker_kernels
@@ -142,6 +143,12 @@ def _load_fpe(native_threads: int | None) -> BoundFpeKernel:
     return BoundFpeKernel(load_compiled_fpe_kernel(), native_threads)
 
 
+def _load_faker(native_threads: int | None) -> BoundFakerKernel:
+    return load_faker_kernels(
+        native_threads, load_index=load_compiled_index_kernel, load_hash=load_compiled_crypto_kernel
+    )
+
+
 def _load_index(native_threads: int | None) -> BoundIndexKernel:
     return BoundIndexKernel(load_compiled_index_kernel(), native_threads)
 
@@ -152,7 +159,7 @@ _OPS: dict[str, NativeOp] = {
     CATEGORICAL: categorical_op(_load_index),
     BUCKET_PERTURB: bucket_perturb_op(_load_index),
     DATE_SHIFT: date_shift_op(_load_index),
-    FAKER: faker_op(load_faker_kernels),
+    FAKER: faker_op(_load_faker),
     TEXT_REDACT: text_redact_op(_load_text_redact),
     TEXT_MASK: text_mask_op(_load_text_redact),
     GROUP_KEY: group_key_op(load_raw_hex),
