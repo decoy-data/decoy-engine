@@ -88,6 +88,8 @@ class JobResult:
     elapsed_s: float = 0.0
     invariant_results: list[InvariantResult] = field(default_factory=list)
     error: str | None = None
+    # Exception class name for `error`; safe to log, unlike the message text.
+    error_type: str | None = None
     fingerprint: str = ""
 
 
@@ -305,6 +307,7 @@ def run_job(manifest_path: Path) -> JobResult:
             passed=False,
             elapsed_s=elapsed,
             error=str(exc),
+            error_type=type(exc).__name__,
         )
 
     elapsed = time.monotonic() - t0

@@ -21,8 +21,12 @@ Invoke explicitly via:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from testflight._runner import JobResult
 
 from testflight._spec import (
     ColumnDistributionSpec,
@@ -294,6 +298,38 @@ class TestManifestLoader:
 # ---------------------------------------------------------------------------
 
 
+def _failure_message(result: JobResult, n_failed: int) -> str:
+    """Assertion text for a failed job.
+
+    A job that errors before any invariant runs has no invariant_results, so
+    name the exception type. The raw error text can quote a cell value and
+    must not reach the CI log.
+    """
+    error_line = ""
+    if result.error is not None:
+        error_line = f"\n  job error type: {result.error_type or 'unclassified'}"
+    return (
+        f"Job '{result.job_name}' failed {n_failed} invariant(s):\n"
+        + "\n".join(f"  [{r.family}] {r.detail}" for r in result.invariant_results if not r.passed)
+        + error_line
+    )
+
+
+def test_failure_message_hides_raw_error_text() -> None:
+    from testflight._runner import JobResult
+
+    sentinel = "SENTINEL-cell-value-0042"
+    typed = JobResult(job_name="j", error=f"bad date {sentinel}", error_type="ValueError")
+    msg = _failure_message(typed, 0)
+    assert "ValueError" in msg
+    assert sentinel not in msg
+
+    untyped = JobResult(job_name="j", error=f"bad date {sentinel}")
+    msg = _failure_message(untyped, 0)
+    assert "unclassified" in msg
+    assert sentinel not in msg
+
+
 @pytest.mark.parametrize(
     "manifest_path",
     sorted((Path(__file__).parent / "jobs").glob("*/manifest.yaml")),
@@ -317,14 +353,7 @@ def test_job_passes_all_invariants(manifest_path: Path) -> None:
 
     result = run_job(manifest_path)
     n_failed = sum(1 for r in result.invariant_results if not r.passed)
-    # A job that errors before any invariant runs has no invariant_results; show
-    # its error so the message does not read "failed 0 invariant(s)" with no cause.
-    error_line = f"\n  job error: {result.error}" if result.error else ""
-    assert result.passed, (
-        f"Job '{result.job_name}' failed {n_failed} invariant(s):\n"
-        + "\n".join(f"  [{r.family}] {r.detail}" for r in result.invariant_results if not r.passed)
-        + error_line
-    )
+    assert result.passed, _failure_message(result, n_failed)
 
     # LOW-5: assert expected family set actually ran for known jobs.
     # This prevents a silent test that passes only because no invariants were
