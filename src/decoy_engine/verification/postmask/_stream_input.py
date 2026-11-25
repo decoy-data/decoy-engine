@@ -7,8 +7,8 @@ bounded batches and never needs the whole table.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -19,6 +19,17 @@ from decoy_engine.profiling import KEY_BATCH_ROWS, KeyBatches
 if TYPE_CHECKING:
     # Imported for typing only: decoy_engine.profile imports the profiling package.
     from decoy_engine.profile import LazySource
+
+
+@dataclass(frozen=True)
+class CellView:
+    """What the cells of a column carried as text keys say where the key would mislead: the text
+    the detectors read, and the distinct count of the cells themselves. The key array serves the
+    comparison only."""
+
+    detector_text: pa.Array
+    distinct: int
+    distinct_error: str | None
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,8 @@ class TableBatches:
     # True when a read may return fewer rows than `num_rows` declares: a declared cast drops
     # quarantined rows, and the footer count is the count before the drop.
     drops_rows: bool = False
+    # Per column carried as text keys on the resident frame path; empty on every other table.
+    cell_views: Mapping[str, CellView] = field(default_factory=dict)
 
 
 def _require_columns(columns: Sequence[str]) -> None:

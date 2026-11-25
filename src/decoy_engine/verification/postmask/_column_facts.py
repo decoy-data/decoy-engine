@@ -252,6 +252,9 @@ def _frozen(cell: Any) -> Any:
         return tuple((k, _frozen(v)) for k, v in cell.items())
     if isinstance(cell, set | frozenset):
         return frozenset(_frozen(v) for v in cell)
+    if isinstance(cell, bytearray | memoryview):
+        # Equal to the same bytes under `==`, and hashable for a distinct count.
+        return bytes(cell)
     return cell
 
 
@@ -340,20 +343,38 @@ def _counted(table: TableBatches) -> tuple[TableBatches, Callable[[], None]]:
     return replace(table, read=read), verify
 
 
-def _distinct_or_error(
-    table: TableBatches, column: str, scratch: Path, limit: str
-) -> tuple[int, str | None]:
-    """The count and no error, or zero and the class name of an uncoded failure counting this one
-    column. A short or long stream is not such a failure: `verify` refuses it for every column."""
-    counted, verify = _counted(table)
+def _count_or_error(count: Callable[[], int]) -> tuple[int, str | None]:
+    """`count()` and no error, or zero and the class name of an uncoded failure of that count."""
     try:
-        count = column_distinct(key_batches(counted, [column]), scratch=scratch, memory_limit=limit)
+        return count(), None
     except Exception as exc:
         if passes_through(exc):
             raise
         return 0, type(exc).__name__
-    verify()
-    return count, None
+
+
+def cells_distinct_or_error(series: pd.Series) -> tuple[int, str | None]:
+    """The distinct count of the cells of a frame column, or zero and the class name of the
+    failure. The one count a frame column's facts and the table view read."""
+    return _count_or_error(lambda: source_distinct(series))
+
+
+def _distinct_or_error(
+    table: TableBatches, column: str, scratch: Path, limit: str
+) -> tuple[int, str | None]:
+    """The count and no error, or zero and the class name of an uncoded failure counting this one
+    column. A column with a cell view counts its cells, not its text keys. A short or long stream
+    is not such a failure: `verify` refuses it for every column."""
+    view = table.cell_views.get(column)
+    if view is not None:
+        return view.distinct, view.distinct_error
+    counted, verify = _counted(table)
+    count, error = _count_or_error(
+        lambda: column_distinct(key_batches(counted, [column]), scratch=scratch, memory_limit=limit)
+    )
+    if error is None:
+        verify()
+    return count, error
 
 
 def column_facts(
@@ -390,6 +411,7 @@ def column_facts(
     else:
         compared = []
         pairs = ((None, b) for b in out_read.read(wanted, batch_rows))
+    offset = 0
     for src_batch, out_batch in pairs:
         for c in wanted:
             out_s = _series(out_batch, c)
@@ -402,10 +424,16 @@ def column_facts(
                     if passes_through(exc):
                         raise
                     tallies[c].error = type(exc).__name__
-            _add_detectors(tallies[c], out_s, c)
+            view = output.cell_views.get(c)
+            if view is None:
+                _add_detectors(tallies[c], out_s, c)
+            else:
+                text = view.detector_text.slice(offset, out_batch.num_rows).to_pandas()
+                _add_detectors(tallies[c], text, c)
             values = tallies[c].values
             if values is not None:
                 values.add(out_batch.column(out_batch.schema.get_field_index(c)))
+        offset += out_batch.num_rows
     for check in checks:
         check()
     facts = {}

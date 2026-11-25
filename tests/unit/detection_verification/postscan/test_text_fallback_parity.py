@@ -213,7 +213,7 @@ def test_extra_key_matches_with_unchanged_counts_and_diversity_are_allowed() -> 
 PAN = 4111111111111111  # a synthetic, Luhn-valid test number
 
 
-def test_a_source_that_only_looks_constant_through_its_keys_fails_the_table() -> None:
+def test_a_source_that_only_looks_constant_through_its_keys_blocks_through_a_finding() -> None:
     pans = pd.Series([PAN if i % 2 else str(PAN) for i in range(64)], dtype=object)
     src = pd.DataFrame({"email": EMAILS, "pan": pans})
     out = pd.DataFrame({"email": FAKE, "pan": pans.copy()})
@@ -221,14 +221,15 @@ def test_a_source_that_only_looks_constant_through_its_keys_fails_the_table() ->
     frame = [asdict(f) for f in check_residual_pii({"t": out}, config, source_frames={"t": src})]
     (pan,) = [f for f in frame if f["column"] == "pan"]
     assert pan["severity"] == "fail" and pan["source_identity_rate"] == 1.0
-    # The fallback keeps every row comparable and identical, but sees one value where the
-    # cells hold two, so the grader would call the source constant.
     assert identity_counts(src["pan"], out["pan"]) == (64, 64)
     assert identity_counts(_keys(src["pan"]), _keys(out["pan"])) == (64, 64)
     assert canonical_cells(src["pan"]).nunique(dropna=True) == 2
     assert _keys(src["pan"]).nunique(dropna=True) == 1
     report = run_post_mask({"t": src}, {"t": out}, config=config)
-    _assert_backstop_blocks(report)
+    assert not _table_errors(report)
+    (finding,) = [f for f in report["residual_pii"] if f["column"] == "pan"]
+    assert finding["severity"] == "fail"
+    assert post_scan_verdict(report).blocking
     assert str(PAN) not in repr(report)
 
 
@@ -280,15 +281,27 @@ def test_a_source_that_cannot_be_counted_is_not_counted_when_no_row_is_comparabl
 
 
 def test_the_backstop_checks_the_keys_the_emitter_produced(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An emitter that gives one key to a varied column is caught: the backstop reads the emitted
-    arrays, not keys it computes again from the frames."""
+    """An emitter that changes one output key of an unchanged, varied column is caught: the
+    backstop reads the emitted arrays, not keys it computes again from the frames."""
     import pyarrow as pa
 
-    src = pd.DataFrame({"email": EMAILS, "code": pd.Series([1, "a"] * 32, dtype=object)})
-    out = pd.DataFrame({"email": FAKE, "code": pd.Series([2, "b"] * 32, dtype=object)})
-    monkeypatch.setattr(
-        runner_module, "_text", lambda series: pa.array(["k"] * len(series), type=pa.string())
-    )
+    cells = pd.Series([1, "a"] * 32, dtype=object)
+    src = pd.DataFrame({"email": EMAILS, "code": cells})
+    out = pd.DataFrame({"email": FAKE, "code": cells.copy()})
+    real = runner_module._text
+    calls = [0]
+
+    def text(series: pd.Series) -> Any:
+        calls[0] += 1
+        array = real(series)
+        # The output's keys come first in `_frame_tables`: break its first key only.
+        if str(series.name) == "code" and calls[0] == 1:
+            keys = array.to_pylist()
+            keys[0] = "broken"
+            return pa.array(keys, type=pa.string())
+        return array
+
+    monkeypatch.setattr(runner_module, "_text", text)
     report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
     _assert_backstop_blocks(report)
 
@@ -634,3 +647,139 @@ def test_a3d_keys_do_not_depend_on_the_decimal_context() -> None:
         ctx.traps[FloatOperation] = ctx.traps[Inexact] = ctx.traps[Rounded] = True
         trapped = key_text(pd.Series(cells, dtype=object))
     assert trapped == plain
+
+
+# ----- round 5 runs: keys compare, cells count --------------------------------------------------
+
+
+def _run_n(source: list[Any], output: list[Any], column: str = "n") -> dict[str, Any]:
+    src = pd.DataFrame({"email": EMAILS[: len(source)], column: pd.Series(source, dtype=object)})
+    out = pd.DataFrame({"email": FAKE[: len(source)], column: pd.Series(output, dtype=object)})
+    return run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker"), (column, "hash")))
+
+
+def _graded(report: dict[str, Any], column: str = "n") -> list[str]:
+    return [f["severity"] for f in report["policy_validation"] if f["column"] == column]
+
+
+@pytest.mark.parametrize(
+    ("source", "output"),
+    [
+        ([0.1, 0.2, "mixed"], ["0.1", "0.2", "mixed"]),
+        ([0.1, 0.2, "mixed"], [f"{0.1:.17e}", f"{0.2:.17e}", "mixed"]),
+        ([1e23, "mixed"], ["1e+23", "mixed"]),
+    ],
+    ids=["short_text", "dot17e", "exponent_text"],
+)
+def test_a2a_an_unchanged_float_written_as_text_blocks(
+    source: list[Any], output: list[Any]
+) -> None:
+    report = _run_n(source * 20, output * 20)
+    assert _graded(report) == ["fail"]
+    assert post_scan_verdict(report).blocking
+
+
+@needs_wide_longdouble
+def test_a2a_a_wide_float_and_its_str_export_block() -> None:
+    wide = np.longdouble("35.001417")
+    report = _run_n([wide, "unknown"] * 20, [str(wide), "unknown"] * 20, column="lat")
+    assert "fail" in _graded(report, "lat")
+    assert post_scan_verdict(report).blocking
+
+
+def test_a3a_a_padded_exponent_blocks_under_every_digit_limit() -> None:
+    padded = "1e" + "0" * 640 + "1"
+    verdicts = []
+    for limit in (640, 4300, 0):
+        with _limit(limit):
+            report = _run_n([10, "x"] * 20, [padded, "x"] * 20)
+        verdicts.append((_graded(report), post_scan_verdict(report).blocking))
+    assert verdicts[0] == verdicts[1] == verdicts[2] == (["fail"], True)
+
+
+def test_a4a_spellings_of_one_source_value_do_not_fail_the_table() -> None:
+    src = pd.DataFrame({"email": EMAILS[:2], "n": ["1.0", "1.00"]})
+    out = pd.DataFrame({"email": FAKE[:2], "n": pd.Series([8, "masked"], dtype=object)})
+    report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
+    assert not _table_errors(report)
+    assert any(f["column"] == "email" for f in report["residual_pii"])
+
+
+def _facts_of(src: pd.DataFrame, out: pd.DataFrame, column: str, tmp_path: Any) -> Any:
+    from decoy_engine.verification.postmask._column_facts import column_facts
+
+    source, _ = runner_module._frame_table("t", src, out)
+    output, _ = runner_module._frame_table("t", out, src)
+    return column_facts(source, output, [column], scratch=tmp_path, memory_limit="256MB")[column]
+
+
+def test_a4b_source_distinct_counts_the_cells_not_the_keys(tmp_path: Any) -> None:
+    src = pd.DataFrame({"v": pd.Series(["1.0", "1.00", "x"], dtype=object)})
+    out = pd.DataFrame({"v": pd.Series([1, "b", "c"], dtype=object)})
+    fact = _facts_of(src, out, "v", tmp_path)
+    assert fact.source_distinct == 3
+    assert fact.output_distinct == 3
+
+
+def test_a4d_a_bytearray_output_cell_counts_without_error(tmp_path: Any) -> None:
+    src = pd.DataFrame({"v": pd.Series([1, "x"], dtype=object)})
+    out = pd.DataFrame({"v": pd.Series([bytearray(b"ab"), 2], dtype=object)})
+    fact = _facts_of(src, out, "v", tmp_path)
+    assert fact.distinct_error is None
+    assert fact.output_distinct == 2
+    report = run_post_mask(
+        {"t": src.assign(email=EMAILS[:2])},
+        {"t": out.assign(email=FAKE[:2])},
+        config=_cfg(("email", "faker"), ("v", "hash")),
+    )
+    assert not _table_errors(report)
+
+
+def test_a4e_equal_instants_keyed_apart_still_fail_the_table() -> None:
+    a = pd.Timestamp("2020-01-01", tz="UTC")
+    b = a.tz_convert("America/New_York")
+    assert a == b
+    src = pd.DataFrame({"email": EMAILS[:4], "t": pd.Series([a, b, a, b], dtype=object)})
+    out = pd.DataFrame({"email": FAKE[:4], "t": pd.Series([str(a), b, str(a), b], dtype=object)})
+    report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker"), ("t", "hash")))
+    _assert_backstop_blocks(report)
+
+
+def test_a4g_distinct_counts_reads_the_view_of_a_frame_table(tmp_path: Any) -> None:
+    from decoy_engine.verification.postmask._column_facts import distinct_counts
+
+    src = pd.DataFrame({"v": pd.Series(["1.0", "1.00", "x"], dtype=object)})
+    out = pd.DataFrame({"v": pd.Series([1, "b", "c"], dtype=object)})
+    table, _ = runner_module._frame_table("t", src, out)
+    assert distinct_counts(table, ["v"], scratch=tmp_path, memory_limit="256MB") == {"v": 3}
+
+
+def test_a4h_a_source_count_error_is_recorded_and_graded_unknown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    from decoy_engine.verification.postmask import _column_facts as facts_module
+    from decoy_engine.verification.postmask._column_facts import distinct_counts
+
+    real = facts_module.source_distinct
+
+    def count(series: pd.Series) -> int:
+        if 1 in list(series):  # the source frame only: its marker is 1, the output's 2
+            raise RuntimeError
+        return real(series)
+
+    phones = ["212555.0100"] * 30
+    src = pd.DataFrame({"phone": pd.Series([*phones, 1], dtype=object)})
+    out = pd.DataFrame({"phone": pd.Series([*phones, 2], dtype=object)})
+    monkeypatch.setattr(facts_module, "source_distinct", count)
+    fact = _facts_of(src, out, "phone", tmp_path)
+    assert fact.distinct_error == "RuntimeError"
+    assert fact.source_distinct_failed
+    table, _ = runner_module._frame_table("t", src, out)
+    assert distinct_counts(table, ["phone"], scratch=tmp_path, memory_limit="256MB") == {
+        "phone": None
+    }
+    # The frame check reads the same count, so it grades the same way.
+    from decoy_engine.verification.postmask.residual_pii import _frame_column_facts
+
+    frame = _frame_column_facts("t", out, "phone", {"t": src})
+    assert frame.distinct_error == "RuntimeError" and frame.source_distinct_failed

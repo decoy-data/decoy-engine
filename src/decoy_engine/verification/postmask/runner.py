@@ -19,7 +19,7 @@ hook catches that + writes a JobPostScanIntegrityReport with
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,7 +28,7 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
-from decoy_engine.internal.cell_text import key_text, numpy_bytes_as_objects
+from decoy_engine.internal.cell_text import detector_text, key_text, numpy_bytes_as_objects
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.plan.column_access import TableWrites
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
@@ -36,13 +36,14 @@ from decoy_engine.verification.postmask import _model_findings
 from decoy_engine.verification.postmask._blocked import severity_counts
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
+    cells_distinct_or_error,
     column_facts,
     identity_counts,
     source_distinct,
     standalone_writes,
 )
 from decoy_engine.verification.postmask._keys import KeyResult
-from decoy_engine.verification.postmask._stream_input import TableBatches, from_table
+from decoy_engine.verification.postmask._stream_input import CellView, TableBatches, from_table
 from decoy_engine.verification.postmask.distribution import (
     DistributionInput,
     check_distribution,
@@ -220,6 +221,8 @@ def _frame_table(
     other_at = {} if other is None else _first_positions(other)
     arrays = []
     texted: dict[int, pa.Array] = {}
+    first = _first_positions(frame)
+    views: dict[str, CellView] = {}
     for n, series in enumerate(frame.iloc[:, i] for i in range(len(names))):
         paired = names[n] in other_at and other is not None
         native = _native(series)
@@ -227,8 +230,17 @@ def _frame_table(
             native = native if _native(other.iloc[:, other_at[names[n]]]) is not None else None
         if native is None:
             texted[n] = _text(series)
+            if first[names[n]] == n:
+                views[names[n]] = _cell_view(series)
         arrays.append(native if native is not None else texted[n])
-    return from_table(name, pa.Table.from_arrays(arrays, names)), texted
+    table = from_table(name, pa.Table.from_arrays(arrays, names))
+    return replace(table, cell_views=views), texted
+
+
+def _cell_view(series: pd.Series) -> CellView:
+    """The key array serves the comparison; the detectors and the distinct count read the cells."""
+    distinct, error = cells_distinct_or_error(series)
+    return CellView(pa.array(detector_text(series), type=pa.string()), distinct, error)
 
 
 def _require_preserved(
@@ -238,8 +250,9 @@ def _require_preserved(
     out_keys: Mapping[int, pa.Array],
 ) -> None:
     """Raise when a text-keyed column compares differently than its cells do: fewer identical or
-    other comparable rows, or a source that turns constant or varied. Extra key matches with
-    the same counts are allowed. The keys are the arrays `_frame_table` emitted, the ones the
+    other comparable rows, or a constant source that the keys make varied. Extra key matches
+    with the same counts are allowed, and so is a varied source the keys make constant: the
+    facts count the cells, so that cannot grade wrong. The keys are the arrays `_frame_table` emitted, the ones the
     graders read. Equal lengths only, as the column check compares no others."""
     if len(src) != len(out):
         return
@@ -259,9 +272,10 @@ def _require_preserved(
         by_cells, by_keys = identity_counts(*cells), identity_counts(*keys)
         lost = by_keys[0] != by_cells[0] or by_keys[1] < by_cells[1]
         # Diversity only matters where a row is comparable; an uncountable source is not counted.
-        changed = bool(by_cells[0]) and (
-            ColumnFacts.constant(source_distinct(cells[0]))
-            != ColumnFacts.constant(source_distinct(keys[0]))
+        changed = (
+            bool(by_cells[0])
+            and ColumnFacts.constant(source_distinct(cells[0]))
+            and not ColumnFacts.constant(source_distinct(keys[0]))
         )
         if lost or changed:
             raise ComparisonNotPreservedError

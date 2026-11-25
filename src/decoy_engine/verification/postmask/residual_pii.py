@@ -56,8 +56,8 @@ from decoy_engine.profiling import passes_through
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
     DetectorRate,
+    cells_distinct_or_error,
     identity_counts,
-    source_distinct,
     standalone_writes,
 )
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
@@ -168,12 +168,7 @@ def _frame_column_facts(
         if comparable:
             # Counted on the cells the comparison saw; a failed count leaves the identity counts
             # standing, as a failed DuckDB count does on the batch path.
-            try:
-                distinct = source_distinct(src)
-            except Exception as exc:
-                if passes_through(exc):
-                    raise
-                distinct_error = type(exc).__name__
+            distinct, distinct_error = cells_distinct_or_error(src)
     return ColumnFacts(
         table=table_name,
         column=col_name,

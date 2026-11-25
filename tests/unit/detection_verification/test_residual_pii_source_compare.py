@@ -405,3 +405,118 @@ class TestFrameAndBatchAgree:
         assert frame == batch
         finding = _one(frame)
         assert (finding.column, finding.severity) == ("zip", "error")
+
+
+# ----- round 5: detectors read the cells as written, not the comparison keys -----------------
+
+from decimal import Decimal  # noqa: E402
+
+from decoy_engine.verification.postmask import post_scan_verdict  # noqa: E402
+from decoy_engine.verification.postmask import runner as _runner  # noqa: E402
+
+
+def _mixed_run(column: str, cells: list, marker: tuple, strategy: str = "hash") -> dict:
+    """60 unchanged `cells`, then one changed marker. The marker is a different type, so Arrow
+    refuses the column and the runner carries it as text keys."""
+    src = pd.DataFrame({column: pd.Series([*cells, marker[0]], dtype=object)})
+    out = pd.DataFrame({column: pd.Series([*cells, marker[1]], dtype=object)})
+    return run_post_mask({"t": src}, {"t": out}, config=_cfg(strategy, column))
+
+
+def _residual(report: dict, column: str) -> dict[str, str]:
+    return {
+        f["detector_id"]: f["severity"] for f in report["residual_pii"] if f["column"] == column
+    }
+
+
+def _blocks(report: dict) -> None:
+    assert post_scan_verdict(report).blocking
+
+
+class TestRound5DetectorText:
+    def test_a1a_dotted_phone_text_still_hits_us_phone(self):
+        report = _mixed_run("phone", ["212555.0100"] * 60, (1, 2))
+        assert _residual(report, "phone").get("us_phone") == "fail"
+        _blocks(report)
+
+    def test_a1e_a_luhn_valid_int_above_2_53_keeps_its_digits(self):
+        report = _mixed_run("v", [411111111111111936] * 60, ("old", "new"))
+        assert _residual(report, "v").get("pan") == "fail"
+        _blocks(report)
+
+    def test_a1g_decimals_keep_their_digits(self):
+        report = _mixed_run("device_id", [Decimal("12.0000000000000001")] * 60, ("x", "z"))
+        assert _residual(report, "device_id").get("device_id") == "fail"
+        _blocks(report)
+        report = _mixed_run("phone", [Decimal("212555.0100")] * 60, ("x", "z"))
+        assert _residual(report, "phone").get("us_phone") == "fail"
+
+    def test_a1h_an_integral_decimal_reads_without_its_zero_fraction(self):
+        report = _mixed_run("v", [Decimal("4111111111111111.00")] * 60, ("old", "new"))
+        assert _residual(report, "v").get("pan") == "fail"
+        _blocks(report)
+
+    def test_a1c_whole_float_phones_still_hit(self):
+        report = _mixed_run("phone", [2125550100.0] * 60, ("x", "z"))
+        assert _residual(report, "phone").get("us_phone") == "fail"
+
+
+def _tables(src: pd.DataFrame, out: pd.DataFrame):
+    return _runner._frame_table("t", src, out)[0], _runner._frame_table("t", out, src)[0]
+
+
+def _hits(facts, column: str) -> dict[str, tuple[float, str]]:
+    return {d.detector_id: (d.match_rate, d.confidence) for d in facts[column].detectors}
+
+
+class TestRound5BatchEdges:
+    def test_a1i_one_run_per_batch_gives_the_same_hits_at_every_batch_size(self, tmp_path):
+        cells = ["212555.0100"] * 30 + ["2125550100.0"] * 30
+        src = pd.DataFrame({"phone": pd.Series([*cells, 1], dtype=object)})
+        out = pd.DataFrame({"phone": pd.Series([*cells, 2], dtype=object)})
+        tables = {}
+        for rows in (1, 7, 1000):
+            source, output = (
+                _runner._frame_table("t", src, out)[0],
+                _runner._frame_table("t", out, src)[0],
+            )
+            facts = facts_module.column_facts(
+                source, output, ["phone"], batch_rows=rows, scratch=tmp_path, memory_limit="256MB"
+            )
+            tables[rows] = _hits(facts, "phone")
+        assert tables[1] == tables[7] == tables[1000]
+        assert tables[1]["us_phone"][0] == pytest.approx(30 / 61, abs=1e-4)
+
+    def test_a1f_the_output_offset_is_per_batch_not_per_column(self, tmp_path):
+        phones = ["212555.0100"] * 8
+        emails = [f"user{i}@realmail.com" for i in range(8)]
+        late = [None, None, None, None, *phones[:4]]
+        src = pd.DataFrame(
+            {
+                "phone": pd.Series([*late[:-1], 1], dtype=object),
+                "email": pd.Series([None, None, None, None, *emails[:3], 1], dtype=object),
+            }
+        )
+        out = pd.DataFrame(
+            {
+                "phone": pd.Series([*late[:-1], 2], dtype=object),
+                "email": pd.Series([None, None, None, None, *emails[:3], 2], dtype=object),
+            }
+        )
+        seen = {}
+        for rows in (2, 100):
+            source, output = (
+                _runner._frame_table("t", src, out)[0],
+                _runner._frame_table("t", out, src)[0],
+            )
+            facts = facts_module.column_facts(
+                source,
+                output,
+                ["phone", "email"],
+                batch_rows=rows,
+                scratch=tmp_path,
+                memory_limit="256MB",
+            )
+            seen[rows] = {c: _hits(facts, c) for c in ("phone", "email")}
+        assert seen[2] == seen[100]
+        assert "us_phone" in seen[2]["phone"] and "email" in seen[2]["email"]
