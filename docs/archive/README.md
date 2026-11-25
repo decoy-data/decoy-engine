@@ -13,10 +13,12 @@ Where the durable decision from one of these lives on:
   in `../compatibility-contract.md`.
 - `review-notes/`, `adversarial-architecture-review-2026-07-12.md`,
   `engine-consultant-findings-2026-07-09.md` — review snapshots; actionable
-  findings that remained open were folded into `../remediation-source.md`.
+  findings that remained open were folded into `../remediation-source.md`, a
+  historical June 2026 record. Current remediation status is in
+  `../records/2026-11-25-thermo-nuclear-remediation.md`.
 - `job-performance-sprints.md`, `relationships-out-of-core-sprints.md`,
   `relationships-memory-scaling.md` — sprint/design plans whose work has
   largely shipped; current engine plans live in `../plans/`.
 
 Nothing here should be cited as current behavior. Check the reference docs,
-`../decisions/`, or `../remediation-source.md` instead.
+`../decisions/`, or `../records/2026-11-25-thermo-nuclear-remediation.md` instead.

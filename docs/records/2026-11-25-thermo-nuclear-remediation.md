@@ -1,6 +1,6 @@
 # Thermo-Nuclear Remediation Register
 
-Status: plan. All efforts are 1.x work, tracked as rows in the roadmap health group (`docs/ROADMAP.md` in the CLI repo). Effort 0 is done.
+Status: plan. All efforts are 1.x work, tracked as rows in the roadmap health group (`docs/ROADMAP.md` in the CLI repo). The rows are pending in CLI PR #415 and are not on CLI main yet. Effort 0 is done.
 
 Source review: [Thermo-Nuclear Code Quality Review](2026-11-25-thermo-nuclear-code-quality-review.md)
 
@@ -100,7 +100,8 @@ Acceptance evidence:
 Required outcome:
 
 - One descriptor owns detector IDs, pattern data, validator tags, and vocabularies.
-- Python, Rust, and parity fixtures come from the descriptor.
+- Python and Rust catalog code come from the descriptor.
+- The parity expectation stays independent: a versioned, hand-reviewed snapshot that is not generated from the descriptor under test.
 - Specialized Rust scanners stay handwritten only where semantics require them.
 
 Acceptance evidence:
@@ -109,7 +110,8 @@ Acceptance evidence:
 - Existing pattern-body, vocabulary, and behavioral differential checks stay green.
 - Deterministic regeneration produces no repository diff.
 - Generated Python and Rust fields agree with the source descriptor.
-- Catalog changes require one source edit.
+- Catalog changes require one source edit plus a catalog version bump.
+- A test fails when a pattern or flag changes without a version bump and a matching update to the independent snapshot (the existing guard in `tests/native/test_c6c_ii_text_redact_rust.py` is the model).
 
 ## Effort 5: Split lifecycle workflows
 
@@ -168,7 +170,7 @@ Required outcome:
 
 - One versioned manifest records the public surface and stability tier.
 - Compatibility tests compare the package against that manifest.
-- The root facade contains only common entry points before GA.
+- The root facade contains only common entry points before GA. The pre-1.0 trim of the 230 root names is CLI row 24zj PROP-SURFACE. It keeps any export that has a CLI or platform consumer. The 1.x row TNR-API-MANIFEST covers the manifest only and removes no export.
 
 Acceptance evidence:
 

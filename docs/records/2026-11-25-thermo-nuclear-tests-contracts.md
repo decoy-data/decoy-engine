@@ -16,7 +16,7 @@ The source size sentry scans `src/decoy_engine` and `scripts`. It does not scan 
 
 - 39 Python test modules exceed 1,000 lines.
 - Those modules contain 50,469 lines.
-- 129 Python test modules exceed 700 lines.
+- 129 Python test modules exceed 700 lines, including those 39.
 - Those modules contain 123,977 lines.
 - `tests/unit/transforms/test_code_set.py` has 2,498 lines.
 - `tests/parity/test_out_of_core_fk_parity.py` has 1,933 lines.

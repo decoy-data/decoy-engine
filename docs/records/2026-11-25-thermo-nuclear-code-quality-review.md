@@ -20,7 +20,7 @@ Continue the H-1 code-organization program before new route or operator expansio
 
 The review covered the Python engine, the Rust companion, tests, sentries, public contracts, and current remediation records.
 
-The frozen tree contains 995 tracked production Python and Rust files with 224,693 lines. It also contains 2,071 tracked Python test files with 535,519 lines.
+The frozen tree contains 1,003 tracked production Python and Rust files with 228,484 lines. It also contains 2,083 tracked Python test files with 536,139 lines. An earlier pathspec census missed eight Rust files directly under `decoy-engine-native/src` and twelve Python files directly under `tests`.
 
 The review used four concern lanes:
 
@@ -47,7 +47,7 @@ The detailed lane records are:
 | TNR-05 | MEDIUM | High-branch workflows still concentrate several lifecycle phases | Typed phase boundaries that remove later conditions |
 | TNR-06 | MEDIUM | Text-redaction policy is copied across Python, Rust, and tests | One language-neutral catalog that generates both surfaces |
 | TNR-07 | MEDIUM | Test modules have no size ratchet | A test-size policy and contract-based splits |
-| TNR-08 | MEDIUM | `tests/sentry` is a 100-module flat package outside the fan-out guard | Recursive test fan-out checks and concern packages |
+| TNR-08 | MEDIUM | `tests/sentry` is a package with 100 direct modules outside the fan-out guard | Recursive test fan-out checks and concern packages |
 | TNR-09 | MEDIUM | The 230-name root API uses a copied source-code table as its contract | One versioned public-surface manifest and a smaller facade |
 | TNR-10 | MEDIUM | Two remediation documents claim ownership, and one is materially stale | One current register with explicit pointers from old records |
 | TNR-11 | LOW | The plan relationship builder retains an unused second parser | Require the canonical lookup and delete the fallback |
@@ -118,7 +118,7 @@ The required outcome is one language-neutral detector descriptor. It contains ID
 
 The production size sentry scans `src/decoy_engine` and `scripts`, but not tests. See `tests/sentry/test_module_size.py:156-157`.
 
-Thirty-nine Python test modules exceed 1,000 lines. They contain 50,469 lines. Another 129 modules exceed 700 lines and contain 123,977 lines.
+Thirty-nine Python test modules exceed 1,000 lines. They contain 50,469 lines. In all, 129 modules exceed 700 lines (these 39 included) and contain 123,977 lines.
 
 Examples include `test_code_set.py` at 2,498 lines and `test_out_of_core_fk_parity.py` at 1,933 lines. These files combine several contracts and large shared harnesses.
 
@@ -182,7 +182,7 @@ TNR-03, TNR-05, TNR-07, and TNR-08 extend the active H-1 module-size audit with 
 | Module-size and package-fan-out sentries | 1,254 passed, one pytest configuration warning | Existing production and script ratchets |
 | Ruff 0.15.22, C901 over `src/decoy_engine` | 194 findings | Branch complexity indicator only |
 | AST parameter and field counts | 47, 46, and 52 | `run_pipeline`, context builder, context record |
-| Tracked-file census | 995 production files, 2,071 Python test files | Python and Rust production source, Python tests |
+| Tracked-file census | 1,003 production files, 2,083 Python test files | Python and Rust production source, Python tests |
 | Graphify query | Returned only plan-risk nodes | Too weak for findings. Source and CODEMAP evidence replaced it |
 | Three independent audit lanes | Complete | Python, native, tests and contracts |
 
