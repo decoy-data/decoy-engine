@@ -90,6 +90,7 @@ def _open(kind: str, payload: int, n: int, monkeypatch: pytest.MonkeyPatch) -> d
     return peaks
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("n", [_POOL, 8_193])
 @pytest.mark.parametrize("payload", [8, 32, 128, _PAYLOAD])
 @pytest.mark.parametrize("kind", ["ascii", "astral", "mixed"])
@@ -102,6 +103,7 @@ def test_each_part_covers_its_measured_peak(
     assert parts.object_form + parts.lists >= peaks["python"]
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("payload", [0, 1, 8, 32, 128, _PAYLOAD])
 def test_the_charge_sums_every_part(payload: int) -> None:
     """Leaving any part out of the sum is red at every payload size."""
@@ -123,6 +125,7 @@ def _city_run(ledger: GenerationBudgetLedger, **kwargs: Any) -> Any:
     return _streamed.run_generation(config, ledger=ledger, batch_rows=4096, **kwargs)
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize(("kind", "cap"), [("mixed", _PAYLOAD), ("astral", _PAYLOAD), ("mixed", 8)])
 def test_the_live_reservation_covers_the_measured_build_peak(
     kind: str, cap: int, monkeypatch: pytest.MonkeyPatch

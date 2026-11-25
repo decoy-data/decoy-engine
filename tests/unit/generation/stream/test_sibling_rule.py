@@ -53,8 +53,9 @@ def test_the_three_readers_agree_with_the_declared_anchor() -> None:
 def test_the_three_readers_follow_a_changed_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     real = gen_stream.sibling_input
 
-    def elsewhere(col: dict[str, Any]) -> str | None:
-        return "absent" if col.get("type") == "windowed_date" else real(col)
+    def elsewhere(col: dict[str, Any], type_: str | None = None) -> str | None:
+        kind = type_ if type_ is not None else col.get("type")
+        return "absent" if kind == "windowed_date" else real(col, type_)
 
     config = _config()
     monkeypatch.setattr(gen_stream, "sibling_input", elsewhere)
@@ -93,3 +94,9 @@ def test_a_column_read_as_a_sibling_stays_off_the_arrow_path() -> None:
 )
 def test_sibling_input_names_the_read_column(col: dict[str, Any], expected: str | None) -> None:
     assert gen_stream.sibling_input(col) == expected
+
+
+def test_a_named_type_stands_in_for_a_column_without_one() -> None:
+    """A windowed-date stream is built from a column whose type the caller already knows."""
+    assert gen_stream.sibling_input({"anchor": "a"}, "windowed_date") == "a"
+    assert gen_stream.sibling_input({"anchor": "a"}) is None

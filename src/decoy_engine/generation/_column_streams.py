@@ -75,7 +75,7 @@ class WindowedDateStream:
     def __init__(self, col: dict[str, Any], seed: int) -> None:
         from decoy_engine.transforms.windowed_date import WindowedDateConfig
 
-        cfg: dict[str, Any] = {"anchor": gen_stream.sibling_input(col) or ""}
+        cfg: dict[str, Any] = {"anchor": gen_stream.sibling_input(col, "windowed_date") or ""}
         for key in ("min_days", "max_days", "distribution"):
             if key in col:
                 cfg[key] = col[key]
