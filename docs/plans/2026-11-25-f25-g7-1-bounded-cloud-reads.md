@@ -28,7 +28,7 @@ sample window caps; a `to_frame` working set below `main`'s (the bound is "no wo
 | `row_count`, `schema` | CSV | one request for the first window | at most 1 MiB | `_CSV_SAMPLE_WINDOW_BYTES` (`_cloud_readers.py:48`) |
 | `sample_frame` | CSV | pieces of at most 8 MiB | window starts at 1 MiB, doubles, stops at 64 MiB, then `sample_window_exceeded` | `_CSV_SAMPLE_WINDOW_BYTES`, `_RANGE_PIECE_BYTES` (`:55`), `_CSV_SAMPLE_MAX_BYTES` (`:53`) |
 | `to_frame` | CSV | pieces of at most 1 MiB, streamed | the whole object, never held as one buffer | `_CSV_STREAM_PIECE_BYTES` (`:57`) |
-| `row_count`, `schema` | Parquet | pieces of at most 8 MiB | the footer bytes pyarrow asks for; no request overlaps a column chunk | `_RANGE_PIECE_BYTES` |
+| `row_count`, `schema` | Parquet | pieces of at most 8 MiB | pyarrow reads the last `min(size, 64 KiB)` bytes and, only if the footer plus its 8-byte trailer exceeds that tail, makes one more read of exactly `footer_len` bytes. It requests nothing else | `_RANGE_PIECE_BYTES` |
 | `sample_frame` | Parquet | pieces of at most 8 MiB | footer plus the column chunks of the row groups that hold the sample | `_RANGE_PIECE_BYTES` |
 | `to_frame` | Parquet | pieces of at most 8 MiB | the whole object as column chunks, never one unsized body | `_RANGE_PIECE_BYTES` |
 
@@ -38,11 +38,11 @@ No read issues an unsized body read, and every response body is closed. Case 1 a
 
 | Choke point | Where | Callers | Guard mutation (test that must go red) |
 |---|---|---|---|
-| Ranged response check: status 206, `Content-Range` exactly `bytes <start>-<end>/<size>`, `Content-Length` (when sent) equal to the asked length, all before the body is read; refused as `_classified(provider, "unexpected")` | new `_clients.check_ranged_response` in `connectors/_clients.py` | `_clients._ranged_body` (GCS; today's inline check at `_clients.py:283-286` moves here) and `_cloud_readers._s3_range` (`_cloud_readers.py:330`) | M1 remove the status test: case 2b red on S3 and GCS. M2 drop the call in `_s3_range`: case 2b red on S3 |
+| Ranged response check: status 206, `Content-Range` exactly `bytes <start>-<end>/<size>`, `Content-Length` (when sent) equal to the asked length, all before the body is read; refused as `_classified(provider, "unexpected")` | new `_clients.check_ranged_response` in `connectors/_clients.py` | `_clients._ranged_body` (GCS; today's inline check at `_clients.py:283-286` moves here) and `_cloud_readers._s3_range` (`_cloud_readers.py:330`). Follow-up caller outside this slice: `connectors/s3.py:233-247`, `_Resumable._resume`, for `offset` through `size - 1` | M1 remove the status test: case 2b(e) red on S3 and GCS. M2 drop the call in `_s3_range`: case 2b red on S3 |
 | Exact body read: read at most the asked length; a short read is `source_changed` | `_exact` (`_cloud_readers.py:75`), `_ranged_body` (`_clients.py:287-296`) | every ranged fetch | M3 return the short body: case 2 red |
 | Version pin: S3 `IfMatch=<ETag>`, GCS `ifGenerationMatch` | `_s3_range`, `gcs_download` (`_clients.py:254`) | every ranged fetch | M4 remove `IfMatch` or `ifGenerationMatch`: case 2 red |
 | GCS size and generation from one metadata view: always one `gcs_reload` (as `gcs.py:171` does today; the profile copy's skip when both are set goes, and a fresh `bucket().blob()` never has them, so no extra call); a missing value is `source_changed` | new `_clients.gcs_pinned_version(blob) -> (size, generation)` | `connectors/gcs.py:_stream_blob` (`gcs.py:171`) and `_cloud_readers._gcs_version` (`:431`), both replaced | M5 drop the `None` test: case 12 red for both callers |
-| Library failures under a strict handle | `fileaccess._errors.guarded`, reached from `profile/` only through `fileaccess.adapters.arrow` (new `table_from_pandas(display, frame)`); `profile/` no longer imports `fileaccess._errors` | `_csv_schema_from_window` (`:232`), `collect_batches` | M6 restore `from decoy_engine.fileaccess._errors import guarded` in `_cloud_readers.py`: case 13 red |
+| Library failures under a strict handle | `fileaccess._errors.guarded`, reached from `profile/` only through `fileaccess.adapters.arrow` (new `table_from_pandas(display, frame)`); `profile/` no longer imports `fileaccess._errors` | `_csv_schema_from_window` (`:232`), `collect_batches` | Case 13 uses the `profile/` entry in `CONSUMER_FACADES` (`tests/sentry/defects/_defect_scan.py:420-457`). M6 restore `from decoy_engine.fileaccess._errors import guarded` in `_cloud_readers.py`: the repository scan in `tests/sentry/defects/test_exception_context.py` must turn red |
 | Memory-failure text predicate: one `_memory_text(message) -> bool` | `fileaccess/_errors.py` | `is_memory_failure` (`_errors.py:171`) and `resurface_scrubbed` (`_errors.py:196`) | M7 change the marker test in one caller only: case 8b red |
 | Fixed-text rebuild: a recognised memory failure is rebuilt around `MEMORY_TEXT` only, never the library's text (it can carry a cell next to an OpenSSL marker) | `_fixed_text_rebuild` (`_errors.py`) | `resurface_scrubbed` | M8 rebuild around `str(exc)`: cases 5 and 8 red |
 | CSV window parse: one function shared by both providers, with `main`'s parser settings (no `low_memory=False`); drops a torn last line on a prefix | `_csv_sample_from_window` (`:205`) | `sample_frame`, the proof read, `schema` | M9 remove the `rsplit` of the last line: case 9 red. M11 set `low_memory=False`: case 10 red |
@@ -112,14 +112,19 @@ canary is present in the input).
 1. Transport bounds: each row of the caps table holds, asserted from the fake's ledger: no unsized
    body read, no CSV `to_frame` piece over 1 MiB, no other piece over 8 MiB, CSV `row_count` and
    `schema` read at most 1 MiB, total CSV sample bytes at most 64 MiB (`sample_window_exceeded`
-   past it), every body closed, including refused ones.
+   past it), every body closed, including refused ones. For Parquet `row_count` and `schema`, check
+   the tail and conditional footer reads against the fixture's footer length. Every transport
+   request starts at or after `size - max(64 KiB, footer_len + 8)`, including each piece when
+   the footer read exceeds 8 MiB.
 2. Version pin: ETag `IfMatch` and generation `ifGenerationMatch` on every ranged read; a replaced
    object is `source_changed`; a short body is `source_changed`; GCS refuses a stored-gzip object
    before reading the body.
 2b. Range response contract, both providers, for `to_frame`, `sample_frame` and `schema` (CSV and
    Parquet): the fake answers (a) 200 with the whole object, (b) 206 with a `Content-Range` that
    names other bytes, (c) 206 with a `Content-Range` total that differs from the size at open,
-   (d) 206 with a `Content-Length` other than the asked length. Each is refused with kind
+   (d) 206 with a `Content-Length` other than the asked length, or (e) 200 with the requested
+   bytes and exactly matching `Content-Range` and `Content-Length`. Only the status violates
+   the 206 contract in (e) (RFC 9110 §15.3.7). Each is refused with kind
    `unexpected`, and the fake's ledger shows zero body bytes read from that response. The S3 fake
    shapes its response as botocore does (`ResponseMetadata.HTTPStatusCode`, `ContentRange`,
    `ContentLength`).
@@ -161,14 +166,18 @@ canary is present in the input).
 12. Pinned version helper: a blob with `size` or `generation` missing after reload is
    `source_changed` from both `gcs.py` `_stream_blob` and the profile reader; both reach
    `gcs_pinned_version` (call-recording fake).
-13. Import guard: an AST walk of `profile/_cloud_readers.py` (resolving `import` and
-   `from ... import` forms) finds no private `fileaccess._*` module, only `fileaccess.adapters.*`.
-   Seeded bypass: a scratch copy with the old import makes it fail.
+13. Register `"profile/"` in `CONSUMER_FACADES`. Map `decoy_engine.fileaccess._errors` and each
+   other reachable private `fileaccess._*` module by exact name to `decoy_engine.fileaccess.adapters.arrow`.
+   The existing `consumer_facade_findings` scan must return no findings across the source tree.
+   In `tests/sentry/defects/test_exception_context.py`, parameterize the existing seeded test's
+   consumer path and add one case restoring the old import in a scratch `profile/_cloud_readers.py`.
+   The scan must report the private import.
 14. Working set: `scripts/audit/cloud_to_frame_rss.sh` measures, in fresh processes on the same
    256 MiB object, head's S3 Parquet `to_frame` and `main`'s route (whole-object download plus
    `pd.read_parquet`, origin/main `_cloud_readers.py:268-270`). It prints both peaks and exits 1
    when head's peak growth exceeds `main`'s by more than 10%. The `object/2` target is removed.
    The gate runs it on the final head and records both numbers; head worse than `main` is V1.
+   Beside those peaks, the gate records case 10 passing on a Linux node on the same final head.
 
 GCS acceptance framing (`tests/acceptance/test_f06_csv_framing.py:135`) drops its
 `importorskip("google.cloud.storage")` and runs on the fakes, as it did before this slice.
@@ -231,9 +240,9 @@ N/A: these readers profile one object; no relational data crosses them.
 | R2 strict wire and stored types | n/a: no persisted model |
 | R3 no exception context | cases 4 to 7 assert `__cause__` and `__context__` are `None` |
 | R4 versioned read models | n/a: no persisted format read |
-| R5 normalized guard scanners | case 13 walks the AST and resolves both import forms; seeded bypass |
+| R5 normalized guard scanners | case 13 reuses the central scanner for `import` and `from ... import`, with a seeded profile bypass |
 | R6 no reaching into private modules | closed by case 13, M6 |
-| R7 no hidden CI failures | case 14 exits 1 on breach; case 10 skips only on macOS with its reason |
+| R7 no hidden CI failures | case 14 exits 1 on breach; the gate records a final-head Linux pass for case 10, which skips on macOS |
 | R8 one input, one trust class per entry point | n/a: one trust class (store responses) |
 | R9 mutations on the final head | M1 to M14 rerun on the final head; the gate records each |
 | R10 allowlisted helpers are still checked | arrow forwarding helpers stay in the file-access registry and sentry |
@@ -275,7 +284,8 @@ replaces a copy or a private import; none is speculative.
 | `tests/unit/profile/test_cloud_wide_sample.py` (new) | case 10 | `CODEMAP.md:307` | profile unit tests | 0 | about 80 |
 | `tests/unit/fileaccess/test_memory_text.py` (new) | case 8b | `CODEMAP.md:307` | fileaccess unit tests | 0 | about 50 |
 | `tests/connectors/test_gcs_pinned_version.py` (new) | case 12 | `CODEMAP.md:283` | `test_gcs.py` | 0 | about 60 |
-| `tests/sentry/profiling/test_cloud_reads_bounded.py` | case 13 | `CODEMAP.md:295` | profiling sentries | 126 | about 150 |
+| `tests/sentry/defects/_defect_scan.py` | case 13 profile entry in `CONSUMER_FACADES` | `CODEMAP.md:295` | recurring-defect sentries | 457 | about 470 |
+| `tests/sentry/defects/test_exception_context.py` | case 13 seeded private import | `CODEMAP.md:295` | `_defect_scan.py` | 209 | about 218 |
 | `tests/acceptance/test_f06_csv_framing.py` | drop the GCS `importorskip` | acceptance suite | `_f06_support.py` | 188 | about 187 |
 
 Every module stays under 600 lines, so no census entry. `profile/` gets no new source module.
@@ -296,6 +306,10 @@ tests). Order: red tests for 2b, 6, 9, 10, 11, 12, 13 and 8b first, then the cod
 
 ## V2-LOG
 
+- Route `connectors/s3.py:233-247` (`_Resumable._resume`) through `check_ranged_response` for
+  `offset` through `size - 1` before attaching the body. A 200 could replay bytes already yielded.
+- Give `profile/` a public `connectors` API for range checks and version pinning, then register
+  that API in `CONSUMER_FACADES` for the existing `connectors._clients` import.
 - Stream the Parquet Arrow-to-pandas conversion per row group, so the decoded table leaves the
   `to_frame` working set.
 - Measure `ParquetFile(pre_buffer=True)` request coalescing against the 8 MiB piece cap.
