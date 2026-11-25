@@ -14,7 +14,7 @@ from types import MappingProxyType
 from typing import Any
 
 from decoy_engine.config import generate_columns_of
-from decoy_engine.internal.faker_setup import (
+from decoy_engine.internal.faker_locale import (
     DEFAULT_GENERATE_LOCALE,
     effective_locale,
     locale_entries,

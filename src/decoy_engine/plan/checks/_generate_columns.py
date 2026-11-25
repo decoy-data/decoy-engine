@@ -23,7 +23,7 @@ from decoy_engine import reasons
 from decoy_engine.config import is_exact_sequence_key
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import formula_is_evaluable
-from decoy_engine.internal.faker_setup import effective_locale, locale_entries
+from decoy_engine.internal.faker_locale import effective_locale, locale_entries
 from decoy_engine.plan._checks import check_derived_column_refs
 from decoy_engine.plan._checks_derived_aggregate import check_derived_aggregate_refs
 from decoy_engine.plan._checks_group_key import check_group_key_refs

@@ -137,7 +137,7 @@ class TestEmptyRunDefaultStaysPerRow:
     draws per row. Reading it as "no locale" would pool it and change the seeded output."""
 
     def test_the_requested_locale_keeps_the_raw_run_default(self) -> None:
-        from decoy_engine.internal.faker_setup import requested_locale
+        from decoy_engine.internal.faker_locale import requested_locale
 
         assert requested_locale(None, "") == ""
         assert requested_locale("", None) is None

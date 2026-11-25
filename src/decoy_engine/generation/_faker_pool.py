@@ -51,7 +51,8 @@ from decoy_engine.generators.derivation import (  # noqa: F401  (the families ar
     GenDeriveContext,
 )
 from decoy_engine.generators.derivation import pool_seeds as _pool_seeds
-from decoy_engine.internal.faker_setup import make_faker, requested_locale, resolve_pool_provider
+from decoy_engine.internal.faker_locale import requested_locale
+from decoy_engine.internal.faker_setup import make_faker, resolve_pool_provider
 
 # Codex round-2 spec C, ROUND-3 confirmed: an IMMUTABLE closed allowlist, not
 # "reflection exists => poolable". Exact-semantic, non-key, non-structured

@@ -31,7 +31,7 @@ from decoy_engine.generation.pool import (
     provider_init_bytes,
     run_faker_footprint,
 )
-from decoy_engine.internal.faker_setup import locale_entries
+from decoy_engine.internal.faker_locale import locale_entries
 from tests.parity._fr0_support import prepared_config
 from tests.unit.generation.stream._support import faker_config
 

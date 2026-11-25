@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.internal.faker_setup import requested_locale
+from decoy_engine.internal.faker_locale import requested_locale
 
 __all__ = ["check_provider_column", "registry_provider_names"]
 

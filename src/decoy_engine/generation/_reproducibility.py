@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
 from decoy_engine._canonical import canonical_json_bytes
-from decoy_engine.internal.faker_setup import requested_locale
+from decoy_engine.internal.faker_locale import requested_locale
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping

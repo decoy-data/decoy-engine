@@ -142,6 +142,7 @@ Shared Python data engine for Decoy masking, generation, plan-compile execution,
 | `src/decoy_engine/validation_result.py` | `ValidationResult`, `ValidationMessage`, `CODES` |
 | `src/decoy_engine/sdk.py` | Public Connector SDK (file-shaped) |
 | `src/decoy_engine/connectors/` | In-tree file connectors (`s3.py`, `gcs.py`, `sftp.py`), the cloud object store (`object_store.py`), the one connector retry executor (`_retry.py`), and the Postgres snapshot primitive (`postgres_snapshot.py`, with `postgres_catalog.py` and the shared `_postgres_session.py`) |
+| `src/decoy_engine/internal/faker_locale.py` | The one locale rule for generate columns: `requested_locale`, `effective_locale`, `locale_entries` (the locales Faker opens, by resolved name), `open_column_faker`, `DEFAULT_GENERATE_LOCALE`. Depends on `make_faker` in `faker_setup.py`, never the reverse |
 | `src/decoy_engine/internal/` | Private helpers (crypto, faker setup, validators, vault entry collection in `vault_entries.py`, re-exported by `vault/`) |
 | `src/decoy_engine/vault/` | Token vault (`decoy_engine.vault` re-exports the public names): `_format.py` (file layout, header declaration, key floor, the secretstream crypto, `VaultError`; the only module that imports `nacl`), `_writer.py` (`VaultWriter`, `VaultCommit`, `issue_commit`, `vault_writer_for_config`), `_reader.py` (`_open_vault`, `load_vault`, `open_vault`, `OpenedVault`, `VaultHeader`) |
 | `src/decoy_engine/disguises/` | Disguise registry (post-FORECAST replacement) |

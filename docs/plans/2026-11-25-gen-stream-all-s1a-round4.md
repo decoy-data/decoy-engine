@@ -19,7 +19,7 @@ counted by the root buffers it keeps alive. Non-goals are listed under "Out of s
 
 ## The rule
 
-1. **One locale rule.** `internal/faker_setup.py` (the Faker choke point, and the lowest layer
+1. **One locale rule.** `internal/faker_locale.py` (split from `internal/faker_setup.py`, the Faker choke point, and the lowest layer
    that validation, budgeting and generation all import) owns:
    - `DEFAULT_GENERATE_LOCALE` (moved from `generators/derivation.py`; every user imports it
      from `faker_setup`, no re-export);
@@ -97,7 +97,7 @@ counted by the root buffers it keeps alive. Non-goals are listed under "Out of s
 | Rule | Choke point | Guard test | Mutation that turns it red |
 |---|---|---|---|
 | locales a run opens | `pool/_resident.run_faker_footprint` walk over `locale_entries(effective_locale(...))` | spy on `Faker.__init__` during `run_generation`: every opened locale is in the reserved set, and the reservation precedes the first open | restore the pool-eligibility filter in the walk |
-| locale resolution | `faker_setup.effective_locale` / `locale_entries` | stream Faker `.locales` equals the rule for each case | drop the `-` normalization or the default fallback |
+| locale resolution | `faker_locale.effective_locale` / `locale_entries` | stream Faker `.locales` equals the rule for each case | drop the `-` normalization or the default fallback |
 | provider-init bound | `_resident.provider_init_bytes` table | cold sweep of every locale | set the `it_IT` T bound to 16 MiB |
 | Arrow retained bytes | `_value_pool.measured_pool_bytes` | IPC-backed pool test | go back to `get_total_buffer_size` |
 
@@ -133,7 +133,7 @@ Red evidence is assertion failures: new names are first stubbed with round-3 beh
 
 ## Size and placement
 
-Source: `internal/faker_setup.py` (+3 names), `generators/derivation.py`,
+Source: `internal/faker_locale.py` (new; locale rule), `generators/derivation.py`,
 `plan/checks/_generate_columns.py`, `generation/kinds/_provider.py`, `generation/_streamed.py`,
 `generation/pool/_resident.py` (`provider_init_bytes` signature changes, `pool_locales` goes),
 `generation/pool/_value_pool.py`. No new source file. New tests go beside the existing ones in
@@ -144,7 +144,7 @@ stronger assertions. No ceiling in an existing test is raised. The run walk goes
 
 ## Design notes
 
-No new structure. One place per fact: locale rule in `faker_setup`, bound table in
+No new structure. One place per fact: locale rule in `faker_locale`, bound table in
 `_resident`, retained Arrow bytes in `_value_pool`.
 
 ## Established solutions
@@ -171,7 +171,7 @@ From the plan contract's class list (classes 1 to 10, checked by `~/bin/plan-lin
 | 6 | Untrusted producer | N/A for V1 (accidental-leak threat model): config is the user's own, and malformed locale values are refused by the plan check | | N/A |
 | 7 | Check then use on a path | The reservation is taken in the same scope, before the first open, for the same column list the run then uses | Spy test checks reserve-before-open order | Move the reserve after the default check: the order check fails |
 | 8 | Weak tests and overclaimed evidence | Each acceptance test is shown red on `752ce7a65` with stubbed names; the import-cycle test is shown red with the eager import restored; the bound is measured, not guessed | Builder report lists each red result | Return the old values from the stubs: the tests stay red |
-| 9 | Refactor drift | Locale rule moves to `faker_setup`; every caller updated in this slice; no re-export | DESIGN guard test; existing validator tests pass unchanged | Leave the copy in `_resident`: grep for `pool_locales` finds it |
+| 9 | Refactor drift | Locale rule moves to `faker_locale`; every caller updated in this slice; no re-export | DESIGN guard test; existing validator tests pass unchanged | Leave the copy in `_resident`: grep for `pool_locales` finds it |
 | 10 | Frozen contract drift | N/A: `pool_locales` and `provider_init_bytes` are internal to `generation.pool`; no public name changes | Public import boundary sentry stays green | N/A |
 
 ## Enumerations
@@ -215,7 +215,7 @@ N/A: the change touches locale budgeting and pool sizing, not keys or references
 ## Frozen contracts
 
 N/A: every name touched is internal (`generation.pool`, `internal.faker_setup`);
-`DEFAULT_GENERATE_LOCALE` moves to `internal.faker_setup`; it had no public import path.
+`DEFAULT_GENERATE_LOCALE` moves to `internal.faker_locale`; it had no public import path.
 
 ## Slices
 

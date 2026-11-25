@@ -47,11 +47,8 @@ from decoy_engine.generators.derivation import (
     column_identity,
     with_table,
 )
-from decoy_engine.internal.faker_setup import (
-    get_faker_providers,
-    open_column_faker,
-    requested_locale,
-)
+from decoy_engine.internal.faker_locale import open_column_faker, requested_locale
+from decoy_engine.internal.faker_setup import get_faker_providers
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping

@@ -29,7 +29,7 @@ from decoy_engine.generators.derivation import (
     GenDeriveContext,
     pool_seeds,
 )
-from decoy_engine.internal.faker_setup import effective_locale
+from decoy_engine.internal.faker_locale import effective_locale
 
 if TYPE_CHECKING:
     from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry

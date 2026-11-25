@@ -31,7 +31,7 @@ from decoy_engine.contracts.distribution_snapshot import (
 )
 from decoy_engine.errors import DecoyError
 from decoy_engine.generation import stream as gen_stream
-from decoy_engine.internal.faker_setup import requested_locale
+from decoy_engine.internal.faker_locale import requested_locale
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping

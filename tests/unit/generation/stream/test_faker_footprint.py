@@ -21,7 +21,7 @@ from decoy_engine.generation._budget_ledger import (
 )
 from decoy_engine.generation._column_streams import PerRowFakerStream
 from decoy_engine.generation.pool import run_faker_footprint
-from decoy_engine.internal.faker_setup import effective_locale, locale_entries
+from decoy_engine.internal.faker_locale import effective_locale, locale_entries
 from decoy_engine.plan.checks import _generate_columns
 from tests.parity import _f0_fixtures as fx
 from tests.parity._fr0_support import prepared_config

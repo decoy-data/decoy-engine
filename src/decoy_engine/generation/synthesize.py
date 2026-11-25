@@ -66,7 +66,8 @@ from decoy_engine.generation.relational._aggregate import aggregate_values, with
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec, select_table
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
-from decoy_engine.internal.faker_setup import get_faker_providers, open_column_faker
+from decoy_engine.internal.faker_locale import open_column_faker
+from decoy_engine.internal.faker_setup import get_faker_providers
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
 
