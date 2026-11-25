@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
-from decoy_engine.generation.kinds._provider import as_text, guarded_values
+from decoy_engine.generation.kinds._provider import as_text, guarded_values, keyed_draw
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext
 
 if TYPE_CHECKING:
@@ -30,14 +30,12 @@ __all__ = ["BundleCache", "group_of", "provider_group_values"]
 # One table's finished bundles: (provider, group) -> output column -> its values, in row order.
 BundleCache = dict[tuple[str, str], dict[str, list[Any]]]
 
-# A group draws from the same family a scalar provider column does.
-_VALUE_FAMILY = "faker"
 
-
-def group_of(col: dict[str, Any]) -> str:
-    """The group label of a composite column: its `group`, else the provider name."""
+def group_of(col: dict[str, Any]) -> tuple[str, str]:
+    """The (provider, group) key of a composite column; the group is its `group`, else the provider."""
+    provider = str(col["provider"])
     group = col.get("group")
-    return str(col["provider"]) if group is None else str(group)
+    return provider, provider if group is None else str(group)
 
 
 def provider_group_values(
@@ -54,7 +52,7 @@ def provider_group_values(
         # Without the table's cache each member would draw its own bundle, and a fresh group
         # (an OS-entropy root per draw) would be silently incoherent.
         raise RuntimeError("a composite provider column needs its table's bundle cache")
-    key = (str(col["provider"]), group_of(col))
+    key = group_of(col)
     cached = bundle_cache.get(key)
     if cached is None:
         cached = guarded_values(
@@ -100,15 +98,12 @@ def _draw_bundle(
         derive_key=derive_key, column_config=group_cfg, fallback_seed=seed
     )
     namespace = f"gen-provider/{col.get(TABLE_KEY)}/{group}"
-    value_seed = group_ctx.family_bytes(_VALUE_FAMILY)
-    try:
-        generator = COMPOSITES[provider].factory(namespace, registry, {})
-        spec = ProviderSpec(locale=locale, deterministic=True, namespace=namespace, seed=value_seed)
-        # The row ordinal is the source value, as in the scalar identifier path.
-        source = pd.Series(range(n), dtype="int64")
+    generator = COMPOSITES[provider].factory(namespace, registry, {})
+    # The row ordinal is the source value, as in the scalar identifier path.
+    source = pd.Series(range(n), dtype="int64")
+
+    def draw(spec: ProviderSpec) -> dict[str, list[Any]]:
         bundle = generator.generate_bundle(spec, n, source=source, deterministic=True)
         return {name: [as_text(v) for v in series] for name, series in bundle.items()}
-    except BaseException:
-        # The family key is a 32-byte derived key; drop it before the traceback keeps this frame.
-        del value_seed
-        raise
+
+    return keyed_draw(group_ctx, locale, namespace, draw)

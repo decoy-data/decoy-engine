@@ -29,7 +29,7 @@ from decoy_engine.determinism import DeterminismError
 from decoy_engine.generation import synthesize
 from decoy_engine.generation._admission import classify_plan
 from decoy_engine.generation.composite import COMPOSITES, CompositeError, load_locality_table
-from decoy_engine.generation.kinds._provider import provider_column_values
+from decoy_engine.generation.kinds._provider import provider_table_values
 from decoy_engine.generation.kinds._provider_group import provider_group_values
 from decoy_engine.generation.pool._errors import GenerationError, PoolCapacityError
 from decoy_engine.generators.derivation import with_table
@@ -410,20 +410,20 @@ def test_a_missing_field_in_the_bundle_is_the_same_fixed_error(
 ) -> None:
     col = with_table(member("composite_person", "no_such_field", "x"), "t")
     with pytest.raises(GenerationError) as info:
-        provider_column_values(col, 5, SEED, None, None, {})
+        provider_table_values(col, 5, SEED, None, None, {})
     assert info.value.__cause__ is None and info.value.__context__ is None
 
 
 def test_the_bundle_cache_is_filled_once_per_group() -> None:
     cache: dict[Any, Any] = {}
     col = with_table(member("composite_person", "first_name", "a"), "t")
-    first = provider_column_values(col, 30, SEED, None, None, cache)
+    first = provider_table_values(col, 30, SEED, None, None, cache)
     assert list(cache) == [("composite_person", "composite_person")]
     cached = cache[("composite_person", "composite_person")]
     other = with_table(member("composite_person", "last_name", "b"), "t")
-    provider_column_values(other, 30, SEED, None, None, cache)
+    provider_table_values(other, 30, SEED, None, None, cache)
     assert cache[("composite_person", "composite_person")] is cached
-    assert provider_column_values(col, 30, SEED, None, None, cache) == first
+    assert provider_table_values(col, 30, SEED, None, None, cache) == first
 
 
 def test_generate_column_reads_the_table_cache_it_is_given() -> None:
@@ -438,6 +438,6 @@ def test_a_group_member_drawn_without_a_table_cache_is_a_programming_error() -> 
     its own person without any error."""
     col = with_table(member("composite_person", "first_name", "a", determinism="fresh"), "t")
     with pytest.raises(RuntimeError):
-        provider_column_values(col, 5, SEED, None, None, None)
+        provider_table_values(col, 5, SEED, None, None, None)
     with pytest.raises(RuntimeError):
         synthesize._generate_column(col, 5, SEED, table_name="t")

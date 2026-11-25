@@ -61,7 +61,7 @@ from decoy_engine.generation.kinds import (
     parametric_values,
 )
 from decoy_engine.generation.kinds._lookup import lookup_column_values
-from decoy_engine.generation.kinds._provider import provider_column_values
+from decoy_engine.generation.kinds._provider import provider_table_values
 from decoy_engine.generation.relational import reference_draw_extras, reference_policies
 from decoy_engine.generation.relational._aggregate import aggregate_values, with_aggregates
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
@@ -386,7 +386,7 @@ def _generate_column(
             col, n, seed, generated or {}, pools, siblings, reference_date=reference_date
         )
     elif kind == "provider":
-        values = provider_column_values(col, n, seed, derive_key, instance_default_locale, bundles)
+        values = provider_table_values(col, n, seed, derive_key, instance_default_locale, bundles)
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set
         # at validation; this branch is the defensive fallback for callers that

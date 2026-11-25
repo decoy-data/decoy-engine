@@ -46,6 +46,7 @@ from decoy_engine.generation.kinds._parametric import (
 )
 from decoy_engine.generation.kinds._provider import (
     draw_path,
+    provider_column_values,
     provider_generate,
 )
 from decoy_engine.generation.kinds._provider_group import BundleCache, group_of
@@ -79,6 +80,7 @@ __all__ = [
     "parametric_payload_bound",
     "parametric_values",
     "parse_lookup_bytes",
+    "provider_column_values",
     "provider_generate",
     "to_lexeme",
 ]

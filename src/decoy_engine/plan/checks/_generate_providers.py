@@ -74,7 +74,7 @@ def check_provider_groups(table: str, columns: list[dict[str, Any]]) -> None:
     for col in columns:
         if col.get("type") != "provider" or col.get("field") is None:
             continue
-        key = (str(col["provider"]), group_of(col))
+        key = group_of(col)
         head = first.setdefault(key, col)
         fields = taken.setdefault(key, set())
         if col.get("locale") != head.get("locale"):
