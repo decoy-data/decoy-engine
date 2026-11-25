@@ -48,7 +48,7 @@ ALLOWED = {
     # config_json of a serialized generation plan
     ("plan/_serialize.py", "_generation_plan_from_dict"): 1,
     # tomllib/tomli load of the dependency lock file (a TOML reader, not JSON)
-    ("quality/dp_provenance.py", "assert_lock_matches_installed"): 1,
+    ("quality/dp_provenance.py", "_parse"): 1,
 }
 
 
