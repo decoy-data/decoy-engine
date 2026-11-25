@@ -1,4 +1,4 @@
-Status: plan (revision 3, 2026-11-25, Dennis rounds 1-2 folded; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
+Status: plan (revision 4, 2026-11-25, Dennis rounds 1-2 and Codex round 1 folded; slice plan for S2a, S2b-core and S2b; anchored to PR #803 head `4819de8b2`, branch `feat/fpe-checksum-native-s1`)
 
 # FPE-CHECKSUM-NATIVE slices S2a, S2b-core and S2b: check digits, the Rust batch path, then the keyword and ABI
 
@@ -15,6 +15,13 @@ Anchors: a Python path with no prefix is under `src/decoy_engine/`. Rust paths a
 - HIGH: the new Rust modules and items are `pub`, as `fpe` and `text_redact` are (`lib.rs:34-48`). `pub(crate)` items cannot be reached from `tests/kat_checksum.rs` or `tests/kat_fpe.rs`, and a `pub fn` that takes a crate-private `Scheme` trips `private_interfaces`, which clippy `-D warnings` fails (`native-companion.yml:294`).
 - MEDIUM: the full list of `fpe.rs` visibility changes is in section 5.2 and counted against the 700-line cap. `FPE_CHECKSUM_KAT` moves to `_fpe_ext.py` so `_crypto_ext.py` stays under 600 with TEXT-REDACT-RUST-SPLICE S1b.
 - LOW: 13 test calls; translator line `_fpe_ext.py:52`; CI test commands; `arrow_ffi.rs` size; restated chunked mutation; per-scheme fixed prefixes; K6 carrier net +1.
+
+## Changes in revision 4 (Codex round 1)
+
+- V1: the moved Luhn helper accumulates modulo 10, so a huge body cannot overflow `u32` before the FF1 length check (5.1, K1).
+- DESIGN: the outer row transform in `fpe.rs` (outer charset, separators, empty selection, length check, reinsertion) is shared by both entries; checksum passes its own body function (5.2).
+- DESIGN: K6 checks that the resolved scheme reaches `_fpe_fn(checksum=...)`, not only a read count (5.4).
+- V2-LOG: K2 inverse-error fixture for the `0IO` VIN case; lowercase-body mutation moved to a core vector; S1 empty-registry tests and an integer orphan for K7; anchors.
 
 ## Changes in revision 3 (Dennis round 2)
 
@@ -135,7 +142,7 @@ New `decoy-engine-native/src/checksum.rs`, pure, no PyO3, declared `pub mod chec
 - `pub fn length_ok(scheme, n) -> bool`: npi 10, isbn13 13, ean13 13, vin 17, gtin 8/12/13/14, luhn at least 2.
 - `pub fn validate(scheme, &[char]) -> bool`: the whole value, exact length and every character. vin compares on an ASCII-uppercased copy.
 - `pub fn check_digit(scheme, &[char]) -> char`.
-- `pub fn luhn_check_digit(body: &str) -> char` (moved from `fpe.rs:137`), `npi_check_digit`, `gs1_check_digit` (shared by ean13, gtin and isbn13), `vin_check_char`.
+- `pub fn luhn_check_digit(body: &str) -> char` (moved from `fpe.rs:137`). Today it sums in `u32`, which was safe behind the FF1 length bound. The forward validator now runs before that bound and luhn has no upper length, so a body of about 477 million nines would overflow (panic in a checked build, wrong `fpe_checksum_invalid_source` in release, where the oracle gives `fpe_unencryptable_length`). The moved helper reduces modulo 10 at each step, and so do the npi and gs1 sums. A unit test feeds the digit fold an iterator of nines long enough to pass `u32::MAX` without allocating the string. Then `npi_check_digit`, `gs1_check_digit` (shared by ean13, gtin and isbn13), `vin_check_char`.
 - Doc comments cite the standard per function: python-stdnum `luhn`, GS1 General Specifications 7.9, ISO 2108, CMS NPI check digit, 49 CFR 565.15.
 
 `fpe.rs` imports `luhn_check_digit` from `checksum` (net about -12 lines). `validators.rs` keeps its strip and length rules and replaces the mod-10 loop in `luhn_valid` and the `80840` prefix loop in `npi_valid` with calls into `checksum`. `text_redact/tests.rs` keeps its assertions unchanged, and adds `3234567899` (detector accepts it; FPE NPI `validate` rejects it).
@@ -150,24 +157,25 @@ New `decoy-engine-native/src/fpe_checksum.rs`, `pub mod fpe_checksum;` in `lib.r
 
 - `pub fn fpe_checksum_transform_array(array, mask_key, namespace, tweak, charset, preserve_separators, scheme: Scheme, forward, threads) -> Result<FpeArrayResult, FpeKernelError>`.
 - Per batch: prepare the permutation alphabet once (canonical digits for numeric schemes; configured-order VIN filtering with the oracle's digits fallback when fewer than two symbols remain). Build the symbol map, `ResolvedConfig` and FF1 with that alphabet and radix (33 for VIN under `ALPHANUM`). Derive the key once and build the cipher once.
-- Per row: `checksum_one` runs the section 4.1 order and calls `fpe::permute` on the original body characters. The body split follows the parent's per-scheme rules: npi keeps `s[0]` fixed and permutes the rest of the body, isbn13 keeps the `978`/`979` prefix `s[:3]` fixed, and vin keeps position 8 (the check character) out of the permuted body and recomputes it there. The oracle split is at `_fpe_checksum.py:198-230` (npi :198, isbn13 :206, vin :213).
+- Per row: the outer row transform from `fpe.rs` (section 5.2 table) owns outer-charset membership, separator extraction, the empty-selection error, the output-length check and reinsertion, as `fpe_one` does today (`fpe.rs:269-307`). The checksum entry passes it a body function `checksum_body` that runs the scheme steps of section 4.1 and calls `fpe::permute` on the original body characters. The outer alphabet is the configured charset; for VIN the permutation alphabet is the filtered one, so the two are passed separately. The body split follows the parent's per-scheme rules: npi keeps `s[0]` fixed and permutes the rest of the body, isbn13 keeps the `978`/`979` prefix `s[:3]` fixed, and vin keeps position 8 (the check character) out of the permuted body and recomputes it there. The oracle split is at `_fpe_checksum.py:198-230` (npi :198, isbn13 :206, vin :213).
 
 Visibility changes in `fpe.rs`, all `pub(crate)` because only `fpe_checksum.rs` in the same crate calls them (no `pub` signature exposes them):
 
 | Item | Line | Change |
 |---|---|---|
-| `ResolvedConfig` | :154 | `pub(crate)` struct; extract `pub(crate) fn ResolvedConfig::new(...)` from the struct literal at :400-411, about +10 lines |
+| `ResolvedConfig` | :154 | `pub(crate)` struct; extract `pub(crate) fn ResolvedConfig::new(...)` from the struct literal at :407-418, about +10 lines |
+| outer row transform | `fpe_one` :269-307 | split into `pub(crate) fn outer_row<B>(value, outer, body: B)` plus the FF1 body closure; `fpe_one` becomes a call to it, about +6 lines |
 | `permute` | :174 | `pub(crate)` |
 | key derivation and FF1 construction helper | inside `fpe_transform_array` today | extract to `pub(crate) fn build_cipher(...)`, about +8 lines |
 | `row_ranges` | :313 | unchanged, private (it takes no row function) |
 | `fill_range` | :331 | private, generic over a row function `F: Fn(&str) -> Result<String, &'static str> + Sync` |
-| batch driver | inline at :437-462 | extract `pub(crate) fn run_rows<F>(array, threads, f: F)` that owns `row_ranges`, the pool install and the per-range concatenation, about +12 lines |
+| batch driver | inline from :432 | extract `pub(crate) fn run_rows<F>(array, threads, f: F)` that owns `row_ranges`, the pool install and the per-range concatenation, about +12 lines |
 
-`fpe_transform_array` keeps its nine-argument signature and passes its existing `fpe_one` closure. Line budget: 682, minus about 15 for the moved Luhn helper (S2a), plus about 8 for `build_cipher`, about 10 for `ResolvedConfig::new` and about 12 for `run_rows` and the generic bounds, gives about 697 before the extracted code replaces its inline copies, and about 690 after. This is close to the 700 cap, so S2b-core records the measured count in its PR body. If it is over 700, move `run_rows` and `fill_range` to a new `fpe_batch.rs`; the cap is not raised.
+`fpe_transform_array` keeps its nine-argument signature and passes its existing `fpe_one` closure. Line budget: 682, minus about 15 for the moved Luhn helper (S2a), plus about 8 for `build_cipher`, about 10 for `ResolvedConfig::new`, about 12 for `run_rows` and the generic bounds and about 6 for `outer_row`, gives about 703 before the extracted code replaces its inline copies, and about 695 after. This is close to the 700 cap, so S2b-core records the measured count in its PR body. If it is over 700, move `run_rows` and `fill_range` to a new `fpe_batch.rs`; the cap is not raised.
 
 `arrow_ffi.rs` does not change in S2b-core. No Python caller reaches the new entry; it is proved only by Rust tests.
 
-Vectors: the same generator writes `fpe_checksum_kat.json` (`format_version: 1`, provenance) with 50 valid identifiers per scheme, with and without separators, canonical and reversed digit charsets, VIN under `ALPHANUM` and `ZYXWVUTSRPNMLKJHGFEDCBA9876543210`, the lowercase check-slot case and the `0IO` VIN fallback case. `kat_fpe.rs` gains a checksum section that rejects an unknown `format_version` for the new file and runs the full corpus through `fpe_checksum_transform_array` in both directions. The existing `fpe_ff1_kat.json` reader is left as it is.
+Vectors: the same generator writes `fpe_checksum_kat.json` (`format_version: 1`, provenance) with 50 valid identifiers per scheme, with and without separators, canonical and reversed digit charsets, VIN under `ALPHANUM` and `ZYXWVUTSRPNMLKJHGFEDCBA9876543210`, the lowercase check-slot case, a lowercase VIN body case (so the "uppercase VIN body before `permute`" mutation fails in S2b-core) and the `0IO` VIN fallback case. The `0IO` case is forward-only: the oracle's decrypt of its output (`03088129469621430` under the fixed synthetic key and tweak) raises `fpe.checksum_unsupported`, and the JSON row records that inverse error, which the Rust inverse must match. `kat_fpe.rs` gains a checksum section that rejects an unknown `format_version` for the new file and runs the full corpus through `fpe_checksum_transform_array` in both directions. The existing `fpe_ff1_kat.json` reader is left as it is.
 
 ### 5.3 S2b: FFI keyword and ABI
 
@@ -177,7 +185,7 @@ Vectors: the same generator writes `fpe_checksum_kat.json` (`format_version: 1`,
 ### 5.4 S2b: Python wiring
 
 1. Registry: the fpe spec (`_operator_registry.py:282`) sets `checksum_schemes=frozenset({"luhn", "npi", "ean13", "gtin", "isbn13", "vin"})`. This is the only admission change. All four routes and the wrapper read it through the S1 decision.
-2. Wrapper: the FFI call at `_fpe_ext.py:145` forwards `checksum=checksum` (the already resolved scheme). K6's carrier set for `_CompiledFpeKernel.run` gains this forwarding use and nothing else. With the probe change in item 4 (one read removed, one forward added), the carrier allowlist is net +1. This is a deliberate allowlist change and the S2b PR body records it.
+2. Wrapper: the FFI call at `_fpe_ext.py:145` forwards `checksum=checksum` (the already resolved scheme). K6's carrier set for `_CompiledFpeKernel.run` gains this forwarding use and nothing else. With the probe change in item 4 (one read removed, one forward added), the carrier read count is net +1. A count alone cannot prove the extra read is the forward: `test_fpe_checksum_one_rule.py:53` counts reads and `DELIVERIES` (:107) checks only delivery to the admission decision. So K6 gains an exact delivery check that the resolved scheme reaches `_fpe_fn(checksum=<resolved name>)`, keeps the decision check, and seeds a substitution (`checksum=None` at the FFI call with a branch on the read elsewhere) that must fail. The S2b PR body records the +1.
 3. Translator: unchanged. `fpe_checksum_unknown_scheme` is not one of the two determinism codes, so `_translate_compiled_fpe_error` returns the `ValueError` unchanged. This holds both before and after TEXT-REDACT-RUST-SPLICE S1b turns it into a delegate.
 4. One probe: extract `fpe_load_probe(kernel) -> ProbeResult` in `_fpe_ext.py`. It guards symbol lookup, vector setup, the call, unpacking and result inspection including `len(errors)`. It probes `FPE_KAT[0]` plus six checksum vectors (one per scheme) from a new `FPE_CHECKSUM_KAT` in `_fpe_ext.py` (not beside `FPE_KAT` at `_crypto_ext.py:270`: that file is 536 lines and TEXT-REDACT-RUST-SPLICE S1b adds about 20, so 45-50 more lines would pass 600). Success returns the tested callable. An exception gives `load-error` with the original exception. A completed mismatch gives `kat-corrupt`. `load_compiled_fpe_kernel` (:165) raises `CryptoExtensionUnavailableError` on either and chains the original exception when present. `_probe_fpe_kat` (`_companion_status.py:224`) becomes an adapter that keeps its `NativeCompanionCheckError` fields. The `checksum is None` read at :219 is replaced by forwarding the vector's scheme.
 5. `FPE_CHECKSUM_KAT` entries are pinned to their rows in `fpe_checksum_kat.json` by a unit test, so the runtime probe and the Rust KAT cannot drift.
@@ -201,7 +209,7 @@ Each slice is R2, merges separately and starts from the merged previous slice. W
 
 **Activation boundary.** No job can reach the Rust checksum path before S2b: S2b-core has no FFI keyword and S1's registry set is empty. ABI exposure and admission land in the same S2b commit range and are gated together.
 
-S2b updates the eligible payload expectations in `tests/native/test_c6a_fpe_chunked.py`, `tests/native/test_obs2_decline_records.py`, `tests/parity/test_phase_d_d2c_fpe_seq.py`, `tests/parity/test_ooc_fpe_native_routing.py` and `tests/physical/test_shadow_fpe.py:439`. Keep a wide-charset decline, unknown and IBAN refusals and both checksum-key decline tests. It updates the success fake at `tests/unit/execution/test_native_companion_status.py:103`.
+S2b updates the eligible payload expectations in `tests/native/test_c6a_fpe_chunked.py`, `tests/native/test_obs2_decline_records.py`, `tests/parity/test_phase_d_d2c_fpe_seq.py`, `tests/parity/test_ooc_fpe_native_routing.py` and `tests/physical/test_shadow_fpe.py:439`. Keep a wide-charset decline, unknown and IBAN refusals and both checksum-key decline tests. It updates the success fake at `tests/unit/execution/test_native_companion_status.py:103`. S1 tests that rely on an empty production registry (`test_fpe_checksum_decision.py:53, :57, :125, :150`) move to an explicit empty-registry fixture, and a new test pins the six production schemes. For K7 on integer keys, `test_phase_d_fpe_int_key_seq.py:531` supplies only a matched child; add an unmatched valid integer and compare its REMAP output and disposition with the oracle before counting it as an already-green guard.
 
 Performance (S2b PR body): the audit probe (`fpe(checksum: npi)` at 120,000 rows) and a 1,000,000-row run, three runs each on the Dell through `vm-run`, before and after, wall time and peak RSS. Expected near the non-checksum 0.8 s per 120,000 rows.
 
@@ -235,7 +243,7 @@ No new Python module in `execution/native/`, so the package fan-out stays at 55 
 | 9 | Refactor drift | Luhn helper move, validators, generic driver, probe extraction | existing `fpe.rs` unit tests and `text_redact/tests.rs` pass unchanged; both probe contracts pinned | slice test runs, K5 | make `luhn_valid` use FPE `validate` (detector test red) |
 | 10 | Frozen contract drift | ABI tag, contract fpe paragraph, vector schemas | abi-4 with the pin set from section 10; fragment Breaking line; `format_version` checked by each new reader | K5, docs review | keep abi-3 with the new keyword (K5 red); drop the version check (seeded old-version fixture passes, red) |
 
-Recurring-defect catalog checks: anchored validation (whole value and every charset symbol, never a prefix; K3 cells with a dash charset); strict wire types (`Option<String>` matched against a closed enum); versioned read models (both new JSON files); no hidden CI failures (`cargo test` with and without default features, arm64 build recorded); no raised caps (`fpe.rs` at or below 700).
+Recurring-defect catalog checks: anchored validation (whole value and every charset symbol, never a prefix; K3 cells with a dash charset); strict wire types (`Option<String>` matched against a closed enum); versioned read models (both new JSON files); no hidden CI failures (clippy `--all-targets -D warnings` and `cargo test --no-default-features` as CI runs them, arm64 build recorded); no raised caps (`fpe.rs` at or below 700).
 
 ## 9. Acceptance tests
 
