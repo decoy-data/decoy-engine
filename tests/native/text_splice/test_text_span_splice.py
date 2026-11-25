@@ -233,6 +233,28 @@ def test_at8_the_legacy_detect_splice_export_keeps_its_last_assignment_rule() ->
 
 
 @NEEDS_SPLICE
+@pytest.mark.parametrize("passthrough", [True, False])
+@pytest.mark.parametrize("verbatim", [True, False])
+@pytest.mark.parametrize("pos", [0, 1, 2])
+def test_legacy_splice_spans_a_zero_length_span_matches_the_oracle(
+    pos: int, verbatim: bool, passthrough: bool
+) -> None:
+    from decoy_engine.detection.detectors import Span
+    from decoy_engine.transforms._text_mask_splice import splice_spans
+
+    span = Span(detector_id="x", start=pos, end=pos, matched_text="")
+    want = splice_spans(
+        "ab",
+        [span],
+        mask_span=lambda s: "ab"[s.start : s.end] if verbatim else "[X]",
+        unmatched_span_policy="passthrough" if passthrough else "redact",
+        token="[X]",
+    )
+    got = _REAL.text_mask_splice_spans(["ab"], [[(pos, pos, verbatim)]], "[X]", passthrough)
+    assert got == [want]
+
+
+@NEEDS_SPLICE
 def test_at8_the_unequal_length_overlap_keeps_the_longer_email_in_both_orders() -> None:
     for ids in (["email", "ipv4"], ["ipv4", "email"]):
         values, _ = _flat(

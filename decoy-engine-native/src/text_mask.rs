@@ -129,20 +129,38 @@ pub enum SpanOut<'a> {
     Replace(&'a str),
 }
 
-/// Hand `emit` the text one non-empty piece resolves to under its outcome; an empty piece emits
-/// nothing (an empty replacement literal on a span is a removal and also emits nothing).
-fn emit_piece<'t>(piece: &'t str, outcome: SpanOut<'t>, emit: &mut impl FnMut(&'t str)) {
-    if piece.is_empty() {
+/// Hand `emit` the text one gap piece resolves to under `gap_out`. An empty gap emits nothing:
+/// there is no text to keep or to replace.
+fn emit_gap<'t>(gap: &'t str, gap_out: SpanOut<'t>, emit: &mut impl FnMut(&'t str)) {
+    if gap.is_empty() {
         return;
     }
-    match outcome {
-        SpanOut::Verbatim => emit(piece),
+    match gap_out {
+        SpanOut::Verbatim => emit(gap),
         SpanOut::Replace(literal) => emit(literal),
     }
 }
 
+/// Hand `emit` the text one span resolves to under its outcome. A zero-length span still writes
+/// its replacement literal, as the Python oracle does; a verbatim span keeps its (possibly
+/// empty) text, and an empty literal is a removal that emits nothing.
+fn emit_span<'t>(span: &'t str, outcome: SpanOut<'t>, emit: &mut impl FnMut(&'t str)) {
+    match outcome {
+        SpanOut::Verbatim => {
+            if !span.is_empty() {
+                emit(span);
+            }
+        }
+        SpanOut::Replace(literal) => {
+            if !literal.is_empty() {
+                emit(literal);
+            }
+        }
+    }
+}
+
 /// The one walker behind every splice entry. Visit, in order, each non-empty gap piece (under
-/// `gap_out`) and each span piece (under its outcome), handing the text each one resolves to
+/// `gap_out`) and each span (zero-length ones included) (under its outcome), handing the text each one resolves to
 /// to `emit`. Returns false when a span is out of order, out of range or not on a character
 /// boundary, so the caller declines instead of emitting a guess.
 fn walk_splice<'t>(
@@ -159,13 +177,13 @@ fn walk_splice<'t>(
         let (Some(gap), Some(span)) = (text.get(cursor..start), text.get(start..end)) else {
             return false;
         };
-        emit_piece(gap, gap_out, &mut emit);
-        emit_piece(span, outcome, &mut emit);
+        emit_gap(gap, gap_out, &mut emit);
+        emit_span(span, outcome, &mut emit);
         cursor = end;
     }
     match text.get(cursor..) {
         Some(tail) => {
-            emit_piece(tail, gap_out, &mut emit);
+            emit_gap(tail, gap_out, &mut emit);
             true
         }
         None => false,
@@ -399,6 +417,22 @@ mod tests {
     fn empty_gap_emits_nothing_between_adjacent_spans() {
         let got = splice_cell("abcd", &[sp(0, 2, false), sp(2, 4, false)], "[X]", false);
         assert_eq!(got.as_deref(), Some("[X][X]"));
+    }
+
+    #[test]
+    fn a_zero_length_span_still_writes_its_replacement() {
+        // Oracle parity: "ab" with an empty replaced span at 1 is "a[X]b", also at both ends.
+        let at = |i: usize, verbatim: bool| splice_cell("ab", &[sp(i, i, verbatim)], "[X]", true);
+        assert_eq!(at(0, false).as_deref(), Some("[X]ab"));
+        assert_eq!(at(1, false).as_deref(), Some("a[X]b"));
+        assert_eq!(at(2, false).as_deref(), Some("ab[X]"));
+        assert_eq!(at(1, true).as_deref(), Some("ab"));
+        // The length pass counts the same bytes the write pass emits.
+        let spans = [(1usize, 1usize, SpanOut::Replace("[X]"))];
+        let mut written = String::new();
+        assert!(splice_out("ab", &spans, SpanOut::Verbatim, &mut written));
+        assert_eq!(written, "a[X]b");
+        assert_eq!(splice_len("ab", &spans, SpanOut::Verbatim), Ok(Some(5)));
     }
 
     #[test]
