@@ -1,4 +1,4 @@
-Breaking: `TelemetryClient`, `ExecutionEvent`, `event_to_legacy_dict` and `ExecutionContext` (parameter `telemetry`, so its later positional parameters move up one) are removed from the public surface
+Breaking: `TelemetryClient`, `ExecutionEvent` and `event_to_legacy_dict` are removed from the public surface; `ExecutionContext` loses its `telemetry` parameter, so its positional parameters `resolve_connector`, `derive_key`, `pipeline_derive_key`, `captured_outputs`, `pool_resolver`, `column_relationships` and `instance_default_locale` move up one (pass them by keyword)
 
 ### Removed (unused root names, PROP-SURFACE E-S1a, 2026-11-25)
 
