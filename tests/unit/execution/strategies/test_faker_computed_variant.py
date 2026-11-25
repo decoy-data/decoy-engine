@@ -453,7 +453,6 @@ class TestMissingIndexKernelBinding:
     def test_both_routes_report_the_same_status_without_the_index_kernel(self) -> None:
         from decoy_engine.execution import _sequential_native
         from decoy_engine.execution.out_of_core import _hash_run
-        from decoy_engine.execution.sequential import _faker_admission
 
         def missing(*_a: Any, **_k: Any) -> Any:
             raise CryptoExtensionUnavailableError("index kernel absent")
@@ -464,7 +463,7 @@ class TestMissingIndexKernelBinding:
             mock.patch.object(_hash_run, "load_compiled_crypto_kernel", missing),
             mock.patch.object(_sequential_native, "load_compiled_crypto_kernel", missing),
         ):
-            seq = _faker_admission.load_faker_kernels(None)
+            seq = _sequential_native._OPS[_sequential_native.FAKER].load_kernel(None)
             ooc = _hash_run.OocHashRun()._faker_kernel()
         assert seq.compiled is False and ooc.compiled is False
         assert seq.hash_kernel is None and ooc.hash_kernel is None
