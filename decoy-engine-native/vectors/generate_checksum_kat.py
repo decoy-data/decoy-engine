@@ -22,6 +22,7 @@ from typing import Any
 import stdnum
 
 from decoy_engine import checksums
+from decoy_engine.transforms._fpe_checksum import scheme_length_ok
 
 SEED = 20261125
 FORMAT_VERSION = 1
@@ -41,18 +42,6 @@ _BODY_LENGTHS: dict[str, tuple[int, ...]] = {
 }
 
 
-def _length_ok(scheme: str, n: int) -> bool:
-    """The plan's length rule, written out here so the corpus pins it independently."""
-    return {
-        "luhn": n >= 2,
-        "npi": n == 10,
-        "ean13": n == 13,
-        "isbn13": n == 13,
-        "vin": n == 17,
-        "gtin": n in (8, 12, 13, 14),
-    }[scheme]
-
-
 def _bodies(scheme: str, rng: random.Random) -> list[str]:
     alphabet = _VIN_ALPHABET if scheme == "vin" else _DIGITS
     lengths = _BODY_LENGTHS[scheme]
@@ -63,7 +52,12 @@ def _bodies(scheme: str, rng: random.Random) -> list[str]:
     if scheme == "npi":
         out += ["123456789", "323456789", "023456789", "999999999", "223456789"]
     if scheme == "vin":
-        out += ["1M8GDM9AKP042788", "ZZZZZZZZZZZZZZZZ", "1HGCM82633A004352"[:8] + "33A00435"]
+        out += [
+            "1M8GDM9AKP042788",
+            "ZZZZZZZZZZZZZZZZ",
+            "9" * 16,
+            "1HGCM82633A004352"[:8] + "33A00435",
+        ]
     if scheme == "isbn13":
         out += ["978030640615", "979123456789", "123456789012", "977123456789"]
     while len(out) < BODIES_PER_SCHEME:
@@ -82,7 +76,7 @@ def _body_row(scheme: str, body: str) -> dict[str, Any]:
 
 
 def _value_row(scheme: str, value: str) -> dict[str, Any]:
-    length_ok = _length_ok(scheme, len(value))
+    length_ok = scheme_length_ok(scheme, len(value))
     # The Rust `validate` is the oracle's verdict inside the legal lengths and false outside them
     # (the oracle also accepts other lengths, e.g. an 8-digit ean13; the FPE path never asks).
     # The oracle's ean and isbn validators also strip spaces and dashes; the FPE path never passes
@@ -105,6 +99,7 @@ def _variants(scheme: str, full: str, rng: random.Random) -> list[str]:
     out.append(full + "0")
     if scheme == "vin":
         out.append(full.lower())
+        out.append(full[:8] + ("0" if full[8] != "0" else "1") + full[9:])
         out.append(full[:3] + "I" + full[4:])
         out.append(full[:3] + "é" + full[4:])
     else:

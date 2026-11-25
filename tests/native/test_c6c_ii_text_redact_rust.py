@@ -925,8 +925,8 @@ def test_npi_only_redaction_keeps_the_detector_rule_not_the_fpe_validation() -> 
     # 3234567899 passes the CMS check but not the NPPES leading 1 or 2 rule that FPE `npi`
     # enforces. The detector must keep redacting it, so the shared arithmetic cannot pull in the
     # stricter FPE validation.
-    got = _native(["id 3234567899 end"], detectors=("npi",), token="X", label_token=False)
-    assert got == ["id X end"]
+    got = _native(["id 3234567899 end"], detectors=("npi",), token="<X>", label_token=False)
+    assert got == ["id <X> end"]
     assert got == oracle_text_redact(
-        ["id 3234567899 end"], detectors=("npi",), token="X", label_token=False
+        ["id 3234567899 end"], detectors=("npi",), token="<X>", label_token=False
     )

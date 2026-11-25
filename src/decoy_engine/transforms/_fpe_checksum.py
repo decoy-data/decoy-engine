@@ -37,6 +37,19 @@ _EXACT_LENGTHS: dict[str, frozenset[int]] = {
 _MIN_LENGTHS: dict[str, int] = {"luhn": 2}
 
 
+def scheme_length_ok(scheme: str, n: int) -> bool:
+    """Whether ``n`` characters is a legal length for ``scheme``.
+
+    The one length rule: ``_validate_scheme_length`` enforces it here, and the native
+    companion's check-digit corpus generator reads it, so the two cannot drift.
+    """
+    exact = _EXACT_LENGTHS.get(scheme)
+    if exact is not None:
+        return n in exact
+    minimum = _MIN_LENGTHS.get(scheme)
+    return minimum is None or n >= minimum
+
+
 def _validate_scheme_length(scheme: str, s: str) -> None:
     """Fail closed unless ``s`` has a valid length for ``scheme``.
 
@@ -44,8 +57,10 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
     the checksum path and permutes to itself (len 0/1), nor (b) leaks/truncates a
     surplus character against the scheme's fixed-width body (over-length).
     """
+    if scheme_length_ok(scheme, len(s)):
+        return
     exact = _EXACT_LENGTHS.get(scheme)
-    if exact is not None and len(s) not in exact:
+    if exact is not None:
         expected = " or ".join(str(n) for n in sorted(exact))
         raise FpeChecksumError(
             f"FPE checksum scheme {scheme!r} requires exactly {expected} character(s); "
@@ -56,7 +71,7 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
             scheme=scheme,
         )
     minimum = _MIN_LENGTHS.get(scheme)
-    if minimum is not None and len(s) < minimum:
+    if minimum is not None:
         raise FpeChecksumError(
             f"FPE checksum scheme {scheme!r} requires at least {minimum} characters "
             f"(body + check digit); got {len(s)}. The engine fails closed "
