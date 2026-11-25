@@ -87,6 +87,7 @@ from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import (
     ExecutionError,
     StrategyError,
+    text_mask_fail_closed_error,
     text_mask_unsupported_pair_error,
 )
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
@@ -284,17 +285,7 @@ def _text_mask_array(
                 raise
             unsupported = True
         except FpeUnencryptableError as exc:
-            # Matches the full-frame handler's fail-closed mapping
-            # (`_strategies/_text_mask.TextMaskHandler.run`) so a consumer keying
-            # on `StrategyError.code` sees an identical event on both routes.
-            raise StrategyError(
-                code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
-                strategy="text_mask",
-                message=(
-                    f"column {column!r}: a text span is outside the FPE domain of its charset. "
-                    "The engine fails closed rather than silently choose a sub_floor_span fallback."
-                ),
-            ) from exc
+            raise text_mask_fail_closed_error(column) from exc
         if unsupported:
             # Raised after the catch closed, so no cause or context carries the span.
             raise text_mask_unsupported_pair_error(column)

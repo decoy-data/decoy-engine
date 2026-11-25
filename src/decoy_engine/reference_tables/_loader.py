@@ -84,18 +84,12 @@ def load_table(
     handle: FileHandle
     if path is None:
         if name not in SHIPPED_TABLES:
-            if not fileaccess.is_ambient():
-                # A rejected name may be a path a caller handed in as the lookup key, so under a
-                # strict policy the message names nothing (X4). Membership is checked before any
-                # file access, so this is a lookup miss, never an existence oracle.
-                raise FileNotFoundError(
-                    "no shipped reference table of that name. Provide a path= override or a "
-                    "'customer:' reference."
-                )
+            # A rejected name may be a path or URL a caller handed in as the lookup key, so the
+            # message names nothing under any policy (X4). Membership is checked before any file
+            # access, so this is a lookup miss, never an existence oracle.
             raise FileNotFoundError(
-                f"no shipped reference table {name!r}. "
-                f"Provide a path= override, a 'customer:/path/to/file.parquet' reference, "
-                f"or check the table name."
+                "no shipped reference table of that name. Provide a path= override or a "
+                "'customer:' reference."
             )
         handle = fileaccess.engine_handle(shipped_path(name))
     else:
@@ -130,14 +124,38 @@ def load_table(
 
     id_type = arrow_table.schema.field("id").type
     if id_type != pa.int64():
+        # The kind only: a rendered Arrow type carries file-authored text (a timestamp zone,
+        # struct field names), so it never reaches the message.
         raise ValueError(
-            f"the reference table has 'id' column of type {id_type!r}; "
-            f"expected int64. All reference tables must have a stable int64 'id' column "
-            f"(schema convention -- see reference_tables/__init__.py)."
+            f"the reference table's 'id' column has kind {_type_kind(id_type)}; "
+            "expected int64. All reference tables must have a stable int64 'id' column "
+            "(schema convention -- see reference_tables/__init__.py)."
         )
 
     _check_version(name, arrow_table)
     return ReferenceTable(arrow_table, name=name)
+
+
+# Checked in order; the first predicate that holds names the kind. Engine literals only.
+_TYPE_KINDS: tuple[tuple[str, Any], ...] = (
+    ("integer", pa.types.is_integer),
+    ("floating-point", pa.types.is_floating),
+    ("decimal", pa.types.is_decimal),
+    ("boolean", pa.types.is_boolean),
+    ("string", lambda t: pa.types.is_string(t) or pa.types.is_large_string(t)),
+    ("binary", lambda t: pa.types.is_binary(t) or pa.types.is_large_binary(t)),
+    ("timestamp", pa.types.is_timestamp),
+    ("date", pa.types.is_date),
+    ("time", pa.types.is_time),
+    ("duration", pa.types.is_duration),
+    ("dictionary", pa.types.is_dictionary),
+    ("nested", pa.types.is_nested),
+)
+
+
+def _type_kind(arrow_type: pa.DataType) -> str:
+    """A value-free name for an Arrow type's kind."""
+    return next((kind for kind, test in _TYPE_KINDS if test(arrow_type)), "other")
 
 
 def _check_version(name: str, table: Any) -> None:

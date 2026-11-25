@@ -36,7 +36,7 @@ SRC = ROOT / "src" / "decoy_engine"
 SENTRY_ID = "engine-exception-text-copies"
 BASELINE = _baseline_sources.baseline_path(SENTRY_ID)
 # The F31 audit figure after AE5. A change that removes a copy lowers it with the baseline entries.
-AUDIT_PARITY = 46
+AUDIT_PARITY = 45
 
 
 def _total(counts: dict[str, int], bucket: str) -> int:

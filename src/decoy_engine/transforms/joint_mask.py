@@ -58,7 +58,7 @@ import pandas as pd
 from decoy_engine import reasons
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.determinism import derive, seed_bytes_to_int
-from decoy_engine.fileaccess import FileAccess, entry_point
+from decoy_engine.fileaccess import FileAccess, entry_point, position_key
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.reference_tables import ReferenceTable, load_table
 from decoy_engine.reference_tables._registry import JOINT_MASK_TABLES
@@ -205,6 +205,9 @@ def validate_joint_mask_config(
             ),
         )
 
+    # Inside a host's `at_position` the key carries the table and column, so two joint masks
+    # refuse distinguishably without the reference itself being rendered.
+    ref_path = position_key("joint_masks.reference")
     try:
         tbl = load_table(ref_name)
     except FileNotFoundError:
@@ -215,7 +218,7 @@ def validate_joint_mask_config(
         _raise_without_chain(
             PlanCompileError(
                 code=reasons.plan.JOINT_MASK_REFERENCE_NOT_FOUND,
-                path="joint_masks.reference",
+                path=ref_path,
                 message=(
                     "the joint-mask reference table was not found. "
                     f"Known shipped tables: {sorted(_KNOWN_TABLES)}. "
@@ -224,12 +227,16 @@ def validate_joint_mask_config(
                 ),
             )
         )
-    except ValueError as exc:
+    except ValueError:
+        # The loader's text describes the file, so the code's registered summary stands in.
         _raise_without_chain(
             PlanCompileError(
                 code=reasons.plan.JOINT_MASK_REFERENCE_INVALID,
-                path="joint_masks.reference",
-                message=f"the joint-mask reference table failed to load: {exc}",
+                path=ref_path,
+                message=(
+                    reasons.get("plan", reasons.plan.JOINT_MASK_REFERENCE_INVALID).summary
+                    + " The reference must be a readable Parquet table with an int64 'id' column."
+                ),
             )
         )
 
@@ -317,7 +324,7 @@ def apply_joint_mask(
         elif mode == "gen":
             rows = _pick_rows_gen(len(df), config, job_seed, namespace=namespace, table=table)
         else:
-            raise ValueError(f"joint_mask: unsupported mode {mode!r}. Use 'mask' or 'gen'.")
+            raise ValueError("joint_mask: unsupported mode. Use 'mask' or 'gen'.")
 
         for col in config.columns:
             result[col] = [r.get(col) for r in rows]

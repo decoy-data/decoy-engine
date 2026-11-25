@@ -226,14 +226,16 @@ class ModelPackLoader:
         """
         try:
             return self.load()
-        except ModelPackLoadError as exc:
-            _log.warning("Model pack unavailable; falling back to regex baseline: %s", exc)
+        except ModelPackLoadError:
+            # No exception text: `load()` raises the full diagnostic to a caller that asks.
+            _log.warning("Model pack unavailable; falling back to regex baseline.")
             return None
         except Exception as exc:
             if fileaccess.keeps_class(exc):
                 raise
             _log.warning(
-                "Unexpected error loading model pack; falling back to regex baseline: %s", exc
+                "Unexpected error loading model pack; falling back to regex baseline: %s",
+                safe_error_type(exc).value,
             )
             return None
 
@@ -257,17 +259,16 @@ class ModelPackLoader:
     def _check_format(self, manifest: ModelPackManifest) -> None:
         if manifest.format_version != PACK_FORMAT:
             raise ModelPackLoadError(
-                f"Unsupported pack format {manifest.format_version!r}; "
-                f"this engine expects {PACK_FORMAT!r}."
+                f"Unsupported pack format: manifest field format_version is not {PACK_FORMAT!r}, "
+                "the format this engine reads."
             )
 
     def _check_feature_schema(self, manifest: ModelPackManifest) -> None:
         if manifest.feature_schema_version != FEATURE_SCHEMA_VERSION:
             raise ModelPackLoadError(
-                f"Feature schema mismatch: pack was trained against "
-                f"{manifest.feature_schema_version!r} but the engine produces "
-                f"{FEATURE_SCHEMA_VERSION!r}. Re-train the pack against the "
-                "current feature schema before loading."
+                "Feature schema mismatch: manifest field feature_schema_version is not "
+                f"{FEATURE_SCHEMA_VERSION!r}, the schema this engine produces. Re-train the pack "
+                "against the current feature schema before loading."
             )
 
     def _read_weights(self) -> bytes:
@@ -293,9 +294,8 @@ class ModelPackLoader:
         actual = hashlib.sha256(model_bytes).hexdigest()
         if actual != manifest.sha256:
             raise ModelPackLoadError(
-                f"model.joblib SHA-256 mismatch: "
-                f"expected {manifest.sha256!r}, got {actual!r}. "
-                "The weights file may have been tampered with or corrupted."
+                "model.joblib SHA-256 mismatch: the weights do not hash to the manifest field "
+                "sha256. The weights file may have been tampered with or corrupted."
             )
 
     def _check_signature(self, manifest: ModelPackManifest) -> None:

@@ -341,9 +341,8 @@ def _check_source_version_pin(
             code=reasons.plan.CODE_SET_CORPUS_VERSION_MISMATCH,
             path="provider_config.corpus_source_version",
             message=(
-                f"corpus {name!r}{at}: corpus_source_version pins "
-                f"{expected_source_version!r}, but the loaded corpus's embedded "
-                f"source_version is {actual!r}. The corpus at this name/path has "
+                f"corpus {name!r}{at}: corpus_source_version does not match the "
+                "loaded corpus's embedded source_version. The corpus at this name/path has "
                 "changed since the plan was authored (or never carried the pinned "
                 "release). Update corpus_source_version to match the corpus you "
                 "intend to use, or remove the pin to accept whatever is loaded."
@@ -542,7 +541,7 @@ def _validate_provenance(
                 path="provider_config.code_set",
                 message=(
                     f"shipped corpus {name!r} at {where} carries provenance "
-                    f"for a different corpus ({provenance.corpus!r}). This "
+                    "for a different corpus. This "
                     "looks like a packaging or metadata swap; the embedded "
                     "provenance.corpus must match the requested corpus name."
                 ),

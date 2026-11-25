@@ -123,7 +123,7 @@ def _load_terms(handle: DirHandle, target: Path) -> dict[str, list[str]]:
             "lists the YAML files to load."
         )
 
-    manifest = _read_yaml(handle, _MANIFEST_NAME, manifest_display)
+    manifest = _read_yaml(handle, _MANIFEST_NAME)
     files = manifest.get("files") if isinstance(manifest, dict) else None
     if not isinstance(files, list) or not files:
         raise NameHintLoaderError(f"{manifest_display} must define a non-empty `files:` list.")
@@ -167,7 +167,7 @@ def _read_detector_file(handle: DirHandle, name: str, display: str) -> dict[str,
     -- it's a no-op contribution. A file with an entry that lacks
     ``detector_id`` or ``patterns`` is an error.
     """
-    data = _read_yaml(handle, name, display)
+    data = _read_yaml(handle, name)
     if data is None:
         return {}
     if not isinstance(data, dict):
@@ -203,7 +203,7 @@ def _read_detector_file(handle: DirHandle, name: str, display: str) -> dict[str,
             if not isinstance(term, str) or not term:
                 raise NameHintLoaderError(
                     f"{display} detector {det_id!r} pattern #{t_idx} must be a "
-                    f"non-empty string, got {term!r}."
+                    f"non-empty string, got {type(term).__name__}."
                 )
             cleaned_terms.append(term)
         if det_id in out:
@@ -215,12 +215,15 @@ def _read_detector_file(handle: DirHandle, name: str, display: str) -> dict[str,
     return out
 
 
-def _read_yaml(handle: DirHandle, name: str, display: str) -> Any:
+def _read_yaml(handle: DirHandle, name: str) -> Any:
     """yaml.safe_load with a clear error chain on parse failure."""
     member = handle.open_file(name)
     try:
         return serial.yaml_safe_load(member)
     except yaml.YAMLError as exc:
-        raise NameHintLoaderError(f"{display}: {yaml_error_text(exc)}") from exc
+        # The bare member name only: the ambient display carries the directory.
+        raise NameHintLoaderError(
+            f"pre_scan.name_hints/{PurePosixPath(name).name}: {yaml_error_text(exc)}"
+        ) from exc
     finally:
         member.close()

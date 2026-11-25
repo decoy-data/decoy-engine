@@ -257,3 +257,53 @@ def test_manifest_ignores_unknown_keys() -> None:
     m = ModelPackManifest.from_dict(d)
     assert m.pack_id == "x"
     assert not hasattr(m, "unknown_future_field")
+
+
+# ── F31 AE5: manifest values stay out of load errors and fallback logs ──────
+
+
+def _rewrite_manifest(pack_dir: Path, **fields: str) -> None:
+    raw = json.loads((pack_dir / "manifest.json").read_text())
+    raw.update(fields)
+    (pack_dir / "manifest.json").write_text(json.dumps(raw), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"format_version": "PRIVATE_FORMAT"},
+        {"feature_schema_version": "PRIVATE_SCHEMA"},
+        {"sha256": "PRIVATE_SHA"},
+    ],
+)
+def test_manifest_values_are_not_echoed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, fields: dict[str, str]
+) -> None:
+    pack_dir = _write_minimal_pack(tmp_path)
+    _rewrite_manifest(pack_dir, **fields)
+    weights_sha = hashlib.sha256((pack_dir / "model.joblib").read_bytes()).hexdigest()
+    with pytest.raises(ModelPackLoadError) as exc:
+        ModelPackLoader(pack_dir).load()
+    assert "PRIVATE" not in str(exc.value)
+    assert weights_sha not in str(exc.value)
+    with caplog.at_level("WARNING"):
+        assert ModelPackLoader(pack_dir).load_with_fallback() is None
+    assert caplog.records
+    assert "PRIVATE" not in caplog.text
+    assert weights_sha not in caplog.text
+
+
+def test_unexpected_fallback_error_logs_type_only(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack_dir = _write_minimal_pack(tmp_path)
+    loader = ModelPackLoader(pack_dir)
+
+    def _boom() -> None:
+        raise RuntimeError("PRIVATE_DETAIL")
+
+    monkeypatch.setattr(loader, "load", _boom)
+    with caplog.at_level("WARNING"):
+        assert loader.load_with_fallback() is None
+    assert "RuntimeError" in caplog.text
+    assert "PRIVATE_DETAIL" not in caplog.text

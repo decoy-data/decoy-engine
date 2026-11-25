@@ -162,7 +162,7 @@ def installed_distribution_set() -> tuple[tuple[str, str], ...]:
                     code=reasons.quality.DP_PROVENANCE_DUPLICATE_DISTRIBUTION,
                     message=(
                         f"distribution {name!r} is installed at two different "
-                        f"versions ({seen[name]!r} and {version!r}); the proof-stack "
+                        "versions; the proof-stack "
                         "fingerprint would be ambiguous"
                     ),
                 )
@@ -343,8 +343,7 @@ def validate_recorded_provenance(recorded: object) -> None:
         raise ProvenanceError(
             code=reasons.quality.DP_PLATFORM_UNCERTIFIED,
             message=(
-                f"artifact records platform {prov.platform!r}, which is not the "
-                f"certified {CERTIFIED_PLATFORM!r}"
+                f"the artifact's recorded platform is not the certified {CERTIFIED_PLATFORM!r}"
             ),
         )
     certified = _CERTIFIED_STACKS.get((prov.platform, prov.cpython))
@@ -352,8 +351,7 @@ def validate_recorded_provenance(recorded: object) -> None:
         raise ProvenanceError(
             code=reasons.quality.DP_STACK_UNCERTIFIED,
             message=(
-                f"artifact's recorded proof stack (cpython {prov.cpython!r}, "
-                f"fingerprint {prov.fingerprint!r}) is not a certified row"
+                "the artifact's recorded proof stack (cpython, fingerprint) is not a certified row"
             ),
         )
 
@@ -518,17 +516,18 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
     for name, version in installed_distribution_set():
         active_versions = lock_active.get(name)
         if active_versions is None:
-            strays.append(f"{name}=={version}")
+            strays.append(name)
         elif version not in active_versions:
-            drift.append(f"{name}=={version} (lock: {sorted(active_versions)})")
+            # Names only: a version string is read from the lockfile or the environment.
+            drift.append(name)
 
     if strays or drift:
         raise ProvenanceError(
             code=reasons.quality.DP_LOCK_INSTALLED_MISMATCH,
             message=(
                 "installed distributions do not match the marker-selected lock. "
-                f"strays (installed, not in lock): {strays}; "
-                f"version drift: {drift}"
+                f"strays (installed, not in lock): {sorted(strays)}; "
+                f"version drift: {sorted(drift)}"
             ),
         )
 

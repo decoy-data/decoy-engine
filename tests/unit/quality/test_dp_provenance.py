@@ -403,8 +403,9 @@ def test_assert_lock_matches_installed_detects_version_drift(
         prov.assert_lock_matches_installed(lock_path=lock)
     assert exc.value.code == "dp_lock_installed_mismatch"
     assert "drift" in exc.value.message
-    # The offending name==version must survive into the report, not be nulled.
-    assert "foo==2.0" in exc.value.message
+    # The offending distribution is named; its versions never reach the text.
+    assert "'foo'" in exc.value.message
+    assert "2.0" not in exc.value.message
 
 
 def test_assert_lock_matches_installed_detects_stray_install(
@@ -416,8 +417,9 @@ def test_assert_lock_matches_installed_detects_stray_install(
         prov.assert_lock_matches_installed(lock_path=lock)
     assert exc.value.code == "dp_lock_installed_mismatch"
     assert "stray" in exc.value.message
-    # The offending name==version must survive into the report, not be nulled.
-    assert "bar==1.0" in exc.value.message
+    # The offending distribution is named; its version never reaches the text.
+    assert "'bar'" in exc.value.message
+    assert "1.0" not in exc.value.message
 
 
 def test_assert_lock_matches_installed_respects_markers(
@@ -587,7 +589,8 @@ def test_assert_lock_matches_installed_skips_entries_missing_name_or_version(
     with pytest.raises(ProvenanceError) as exc:
         prov.assert_lock_matches_installed(lock_path=lock)
     assert exc.value.code == "dp_lock_installed_mismatch"
-    assert "foo==2.0 (lock:" in exc.value.message
+    assert "'foo'" in exc.value.message
+    assert "2.0" not in exc.value.message
 
 
 def test_assert_lock_matches_installed_continues_past_a_malformed_entry(

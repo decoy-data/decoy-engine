@@ -288,7 +288,9 @@ def test_customer_corpus_without_provenance_logs_no_locator(
     _corpus(other, {"code": ["a", "b", "c"]})
     with caplog.at_level(logging.WARNING):
         load_corpus("mine", path)
-        assert not any(LOCATOR_SENTINEL in r.getMessage() for r in caplog.records)  # value-free
+        ambient = [r.getMessage() for r in caplog.records]
+        assert ambient, "the ambient warning was expected"  # control: the warning fired
+        assert not any(LOCATOR_SENTINEL in m for m in ambient)  # value-free under every policy
         caplog.clear()
         with fileaccess.scope(xworld.policy):
             load_corpus("mine", other)
@@ -543,10 +545,10 @@ def test_load_table_rejects_a_path_passed_as_a_name_without_a_locator(xworld: XW
     from decoy_engine.reference_tables import load_table
 
     name_as_path = str(xworld.sub / "secretref.parquet")
-    # ambient control: the message echoes the rejected name
+    # The rejected name is never echoed, under any policy (F31).
     with pytest.raises(FileNotFoundError) as control:
         load_table(name_as_path)
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(FileNotFoundError) as info:
         load_table(name_as_path, file_access=xworld.policy)
     assert_no_locator(xworld, rendered(info.value))

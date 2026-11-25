@@ -355,7 +355,7 @@ def load_spec(
                 code=reasons.plan.STATISTICAL_DP_CARRIER_INVALID,
                 message=(
                     f"statistical column {name!r}: source column {source_column!r} is a "
-                    f"verified DP release but records carrier {carrier!r}, not one of "
+                    f"verified DP release but records a carrier that is not one of "
                     "'number'/'flag'/'text'."
                 ),
             )
@@ -408,7 +408,7 @@ def load_spec(
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_KIND_UNSUPPORTED,
             message=(
-                f"statistical column {name!r}: snapshot kind {kind!r} has no sampler "
+                f"statistical column {name!r}: the snapshot kind has no sampler "
                 f"(supported: {', '.join(_SUPPORTED_KINDS)})."
             ),
         )
@@ -419,7 +419,7 @@ def load_spec(
             code=reasons.plan.STATISTICAL_HIGH_CARDINALITY_INVALID_TYPE,
             message=(
                 f"statistical column {name!r}: high_cardinality must be a bool, got "
-                f"{high_cardinality!r}."
+                f"{type(high_cardinality).__name__}."
             ),
         )
     high_cardinality = bool(high_cardinality)
@@ -434,7 +434,7 @@ def load_spec(
             code=reasons.plan.STATISTICAL_ALLOW_REAL_CATEGORIES_INVALID_TYPE,
             message=(
                 f"statistical column {name!r}: allow_real_categories must be a "
-                f"bool, got {allow_real!r}."
+                f"bool, got {type(allow_real).__name__}."
             ),
         )
 
@@ -517,10 +517,7 @@ def load_spec(
     if other_mode not in _OTHER_MODES:
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_OTHER_MODE_INVALID,
-            message=(
-                f"statistical column {name!r}: other_mode {other_mode!r} is not one "
-                f"of {_OTHER_MODES}."
-            ),
+            message=(f"statistical column {name!r}: other_mode is not one of {_OTHER_MODES}."),
         )
 
     # `emit` inserts OTHER_TOKEN ("__other__") as a sampled value, which is not

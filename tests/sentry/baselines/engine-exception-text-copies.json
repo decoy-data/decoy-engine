@@ -138,10 +138,6 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::transforms/joint_mask.py::validate_joint_mask_config::f{exc}::other": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::validation/_config.py::_select_validator::str(exc)::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1

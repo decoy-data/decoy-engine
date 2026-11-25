@@ -126,8 +126,8 @@ def test_r4_reference_table_errors() -> None:
     shipped = _raises(lambda: load_table("nope"))
     assert isinstance(shipped, FileNotFoundError)
     assert _text(shipped) == (
-        "no shipped reference table 'nope'. Provide a path= override, a "
-        "'customer:/path/to/file.parquet' reference, or check the table name."
+        "no shipped reference table of that name. Provide a path= override or a "
+        "'customer:' reference."
     )
     missing = _raises(lambda: load_table("customer:nope.parquet"))
     assert isinstance(missing, ValueError)
@@ -144,7 +144,7 @@ def test_r4_reference_table_errors() -> None:
     pq.write_table(pa.table({"id": pa.array([1], pa.int32())}), "id32.parquet")
     id32 = _raises(lambda: load_table("customer:id32.parquet"))
     assert _text(id32) == (
-        "the reference table has 'id' column of type DataType(int32); expected "
+        "the reference table's 'id' column has kind integer; expected "
         "int64. All reference tables must have a stable int64 'id' column (schema convention "
         "-- see reference_tables/__init__.py)."
     )
