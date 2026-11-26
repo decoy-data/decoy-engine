@@ -309,14 +309,15 @@ def test_job_passes_all_invariants(manifest_path: Path) -> None:
     4. Asserts the job result is fully passing.
 
     A failure in any invariant family fails the test with a message naming
-    the failing families and a fixed category (see failure_text). This is the primary
+    the failing families and a fixed category (see assert_job_passed). This is the primary
     regression gate: any change that breaks an invariant is caught here
     before it reaches CI.
     """
-    from testflight._runner import failure_text, run_job
+    from testflight._assert import assert_job_passed
+    from testflight._runner import run_job
 
     result = run_job(manifest_path)
-    assert result.passed, failure_text(result)
+    assert_job_passed(result)
 
     # LOW-5: assert expected family set actually ran for known jobs.
     # This prevents a silent test that passes only because no invariants were

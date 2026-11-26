@@ -9,6 +9,13 @@ without a live flight.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
 from testflight._report import format_job_section, render_report
 from testflight._runner import (
     INVARIANT_FAILED_CATEGORY,
@@ -71,3 +78,60 @@ def test_job_section_hides_invariant_detail_on_failure() -> None:
 def test_full_report_hides_sentinel() -> None:
     report = render_report([_errored("ValueError"), _invariant_failed()], now="t")
     assert SENTINEL not in report
+
+
+def test_job_section_names_type_for_empty_error_message() -> None:
+    # A bare AssertionError() gives error="" and error_type="AssertionError".
+    bare = JobResult(job_name="j", error="", error_type="AssertionError")
+    assert "AssertionError" in format_job_section(bare)
+
+
+_FAILING_TEST = textwrap.dedent(
+    """
+    import os
+
+    from testflight._assert import assert_job_passed
+    from testflight._runner import InvariantResult, JobResult
+
+    def test_flight() -> None:
+        # Via env so the sentinel is never in this source, which pytest prints.
+        secret = os.environ["FLIGHT_SENTINEL"]
+        assert_job_passed(
+            JobResult(
+                job_name="j",
+                error=f"bad date {secret}",
+                error_type="ValueError",
+                invariant_results=[
+                    InvariantResult(
+                        family="fk_integrity",
+                        passed=False,
+                        detail=f"orphan {secret}",
+                    )
+                ],
+            )
+        )
+    """
+)
+
+
+@pytest.mark.parametrize("flags", [[], ["--tb=short"], ["--tb=long", "-vv"]])
+def test_pytest_failure_output_hides_sentinel(tmp_path: Path, flags: list[str]) -> None:
+    # Real pytest output: assertion rewriting can echo the JobResult repr.
+    (tmp_path / "test_flight_case.py").write_text(_FAILING_TEST, encoding="utf-8")
+    repo_root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run(  # noqa: S603 - fixed argv, test-owned file
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-o", "addopts=", *flags],
+        cwd=tmp_path,
+        env={
+            "PYTHONPATH": f"{repo_root}:{repo_root / 'src'}",
+            "PATH": "/usr/bin:/bin",
+            "FLIGHT_SENTINEL": SENTINEL,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, "the inner test should fail"
+    assert "ValueError" in out
+    assert SENTINEL not in out

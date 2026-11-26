@@ -24,7 +24,7 @@ from __future__ import annotations
 import datetime
 import pathlib
 
-from ._runner import INVARIANT_FAILED_CATEGORY, InvariantResult, JobResult, failure_text
+from ._runner import InvariantResult, JobResult, failed_invariant_fields, failure_text
 
 
 def format_job_section(result: JobResult) -> str:
@@ -44,7 +44,7 @@ def format_job_section(result: JobResult) -> str:
     lines.append(f"=== Job: {result.job_name} [{verdict}] ===")
     lines.append(f"    elapsed: {result.elapsed_s:.2f}s")
 
-    if result.error:
+    if result.error is not None:
         lines.append(f"    ERROR: {failure_text(result)}")
         return "\n".join(lines)
 
@@ -52,7 +52,8 @@ def format_job_section(result: JobResult) -> str:
         mark = "[SKIP]" if ir.skipped else ("[PASS]" if ir.passed else "[FAIL]")
         if not ir.passed:
             # A failure detail can quote a cell value; show a fixed category only.
-            lines.append(f"  {mark}  {ir.family}  ({INVARIANT_FAILED_CATEGORY})")
+            family, category = failed_invariant_fields(ir)
+            lines.append(f"  {mark}  {family}  ({category})")
         elif ir.detail:
             lines.append(f"  {mark}  {ir.family}  ({ir.detail.splitlines()[0]})")
             for detail_line in ir.detail.splitlines()[1:5]:

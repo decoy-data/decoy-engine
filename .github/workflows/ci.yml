@@ -191,7 +191,7 @@ jobs:
         # --ignore: the layer test needs import-linter, which this certified profile lacks; the
         # layers-gate job below owns it.
         run: >
-          pytest tests -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial"
+          pytest tests testflight/test_testflight_value_free.py -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial"
           -n 4 --dist loadfile
           --ignore=tests/sentry/layout/test_import_layers.py
           --tb=short --durations=25 --junitxml=junit-results.xml

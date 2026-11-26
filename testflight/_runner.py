@@ -98,6 +98,15 @@ INVARIANT_FAILED_CATEGORY = "invariant_failed"
 _UNCLASSIFIED = "unclassified"
 
 
+def failed_invariant_fields(ir: InvariantResult) -> tuple[str, str]:
+    """The only parts of a failed invariant that may be shown: (family, fixed category).
+
+    One choke point for the pytest message and the evidence report; the detail text
+    can quote a cell value and is never returned.
+    """
+    return ir.family, INVARIANT_FAILED_CATEGORY
+
+
 def failure_text(result: JobResult) -> str:
     """Value-free text for a failed job, safe for the CI log and report.md.
 
@@ -109,11 +118,10 @@ def failure_text(result: JobResult) -> str:
     lines: list[str] = []
     if result.error is not None:
         lines.append(f"job error type: {result.error_type or _UNCLASSIFIED}")
-    lines.extend(
-        f"[{r.family}] {INVARIANT_FAILED_CATEGORY}"
-        for r in result.invariant_results
-        if not r.passed
-    )
+    for r in result.invariant_results:
+        if not r.passed:
+            family, category = failed_invariant_fields(r)
+            lines.append(f"[{family}] {category}")
     return "\n".join(lines)
 
 
