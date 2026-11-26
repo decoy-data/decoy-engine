@@ -563,8 +563,9 @@ def read_csv_source(
     policy. A parser disagreement the scan cannot see (an unterminated quote) surfaces on
     the step that reads it.
 
-    `compression` is pandas' own argument. The default infers from the name, which a rooted
-    policy hides (its descriptor path has no suffix); a caller that knows the format says so.
+    `compression` is pandas' own argument. The default infers from `path`, the declared name,
+    before pandas sees the handle: a rooted policy hands pandas a descriptor path with no suffix,
+    so pandas could not infer it there. A caller that knows the format says so.
 
     `columns` parses only the named columns and returns every frame or chunk with exactly
     them, in the order given (not file order). A name the file lacks, or a repeated name, is a
@@ -618,9 +619,9 @@ def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
     suffix names a compression format.
 
     Taken from pandas' own inference, so a pandas upgrade changes the answer with it. It looks at
-    the name only and opens nothing. It makes no claim about `read_csv_source` under every file
-    policy: a rooted policy hands pandas a descriptor path with no suffix, so that read infers
-    no compression."""
+    the name only and opens nothing. It does not decide how a read decompresses: `read_csv_source`
+    takes the codec from the declared name and passes it on, so a rooted file policy (which hands
+    pandas a descriptor path with no suffix) still reads a compressed file."""
     return csv_compression(path) is not None
 
 

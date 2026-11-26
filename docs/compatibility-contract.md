@@ -438,11 +438,12 @@ enum values; the read model ignores added fields, reads a new enum value as a st
 reason it cannot validate as `null`. Numbers and flags are strict on both sides (`False` is not a `0`,
 `"1"` is not a `1`). The `schema` key is required on read and accepts only `decoy-run-result/v1`: a
 document of another major (`/v2`), free text or a missing key is refused, never read as v1; a reader
-that wants `/v2` support adds a new model under a new tag. `route.sink` (RUN-STREAM E6) is an optional reference, left out of the written payload while unset,
-under `/v1`: `"used"` or one reason code that says why the caller did not use an output sink. It is
-omitted by a writer that predates it and reads as `null`; a value that is not a safe reference
-(free text, a path) is refused on write. `build_run_result` takes it as `sink=`, default `None`. Hand-authored corpus samples (the v1 sample and its cross-minor variants) are in
-`tests/integration/compat_corpus/run_result/`.
+that wants `/v2` support adds a new model under a new tag. `route.sink` (RUN-STREAM E6) is an
+optional reference under `/v1`: `"used"` or one reason code that says why the caller did not use an
+output sink. It is left out of the written payload while unset. An older writer omits it, and a
+reader reads the missing field as `null`. A value that is not a safe reference (free text, a path)
+is refused on write. `build_run_result` takes it as `sink=`, default `None`. Hand-authored corpus
+samples (the v1 sample and its cross-minor variants) are in `tests/integration/compat_corpus/run_result/`.
 
 `decoy-record/v1` is the envelope of the local record library (`decoy_engine.records`): kind, payload tag, a
 content-addressed `id` (SHA-256 of the canonical envelope without `id`, parsed first so a reformatted file keeps
