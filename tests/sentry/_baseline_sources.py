@@ -146,6 +146,25 @@ def exception_text_copy_census() -> dict[str, int]:
     return census(scan_tree(ROOT / "src" / "decoy_engine"))
 
 
+def swallowed_broad_except_counts() -> dict[str, int]:
+    """Live count of swallowing broad handlers per `src/` file (the sentry's ``max`` per key)."""
+    import ast
+
+    path = SENTRY / "defects" / "_swallowed_except.py"
+    spec = importlib.util.spec_from_file_location("_bl_swallowed_except", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # the module's dataclass looks itself up here
+    spec.loader.exec_module(mod)
+    counts: dict[str, int] = {}
+    for src in sorted((ROOT / "src").rglob("*.py")):
+        n = len(mod.swallowed_sites(ast.parse(src.read_text(encoding="utf-8"))))
+        if n:
+            counts[src.relative_to(ROOT).as_posix()] = n
+    return counts
+
+
 @dataclass(frozen=True)
 class Source:
     sentry_id: str
@@ -400,6 +419,12 @@ SOURCES: tuple[Source, ...] = (
         lambda: set(
             json.loads((BASELINES / "serial-resources.json").read_text(encoding="utf-8"))["entries"]
         ),
+    ),
+    Source(
+        "swallowed-broad-except",
+        "tests/sentry/baselines/swallowed-broad-except.json",
+        lambda: set(swallowed_broad_except_counts()),
+        maxes=swallowed_broad_except_counts,
     ),
     Source(  # keys of the ratchet-schema baseline itself
         "exception-context",
