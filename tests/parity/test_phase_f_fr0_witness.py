@@ -19,6 +19,7 @@ from tests.parity import _f0_fixtures as fx
 from tests.parity import _f0_witness as w
 from tests.parity._f0_canonical import table_fingerprint
 from tests.parity._fr0_support import fingerprints, partition_from_cuts, run_resident
+from tests.parity._pick_spy import picked_values
 
 _THRESHOLD = 90
 _ROWS = 100
@@ -167,16 +168,27 @@ def _trips(
         witness.classify(tables)
 
 
+def _like(out: Any, values: list[Any]) -> Any:
+    """`values` in the form the pick entry point returned: an Arrow array or a Python list."""
+    return pa.array(values) if isinstance(out, pa.Array) else values
+
+
+def _every_pick(mp: pytest.MonkeyPatch, replace: Any) -> None:
+    for name in _faker_pool.PooledSelector.PICK_METHODS:
+        _outer(mp, _faker_pool.PooledSelector, name, replace)
+
+
 def test_core_numpy_discarded_result_trips(monkeypatch: pytest.MonkeyPatch) -> None:
     def discard(inner: Any) -> Any:
-        def take(self: Any, size: int) -> Any:
-            return pa.array([w.strip_mark(v) for v in inner(self, size).to_pylist()])
+        def pick(self: Any, size: int) -> Any:
+            out = inner(self, size)
+            return _like(out, [w.strip_mark(v) for v in picked_values(out)])
 
-        return take
+        return pick
 
     _trips(
         monkeypatch,
-        lambda mp: _outer(mp, _faker_pool.PooledSelector, "take", discard),
+        lambda mp: _every_pick(mp, discard),
         match="numpy-selected",
         marking=True,
     )
@@ -184,15 +196,15 @@ def test_core_numpy_discarded_result_trips(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_core_numpy_recompute_trips(monkeypatch: pytest.MonkeyPatch) -> None:
     def recompute(inner: Any) -> Any:
-        def take(self: Any, size: int) -> Any:
-            picked = inner(self, size)
-            return pa.array([self._values[(i * 7) % len(self._values)] for i in range(len(picked))])
+        def pick(self: Any, size: int) -> Any:
+            out = inner(self, size)
+            return _like(out, [self._values[(i * 7) % len(self._values)] for i in range(size)])
 
-        return take
+        return pick
 
     _trips(
         monkeypatch,
-        lambda mp: _outer(mp, _faker_pool.PooledSelector, "take", recompute),
+        lambda mp: _every_pick(mp, recompute),
         match="numpy-selected",
         marking=True,
     )

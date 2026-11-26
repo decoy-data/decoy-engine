@@ -154,11 +154,19 @@ from decoy_engine.generation import _faker_pool
 
 
 class _StubSelector:
-    # Simulates a pool build that hands back SOMETHING without ever reaching
-    # PooledSelector.take -- the exact mismatch the worker's vacuity guard
-    # (both wrappers must fire on the on arm) exists to catch.
+    # Simulates a pool build that hands back SOMETHING without ever reaching a real
+    # PooledSelector pick entry point -- the exact mismatch the worker's vacuity guard
+    # (both wrappers must fire on the on arm) exists to catch. It defines every listed
+    # entry point so a stub that skips one cannot fail for the wrong reason.
     def take(self, size):
         return pa.array(["stub"] * size)
+
+    def select(self, size):
+        return ["stub"] * size
+
+
+for _name in _faker_pool.PooledSelector.PICK_METHODS:
+    assert callable(getattr(_StubSelector, _name)), _name
 
 
 def _stub_open_pooled_selector(**kwargs):
@@ -191,6 +199,28 @@ def test_vacuity_guard_catches_a_pool_build_that_never_reaches_the_selector(
     assert proc.returncode != 0
     assert "vacuity guard" in proc.stderr
     assert "did not activate" in proc.stderr
+
+
+@pytest.mark.parametrize("method", _faker_pool.PooledSelector.PICK_METHODS)
+def test_vacuity_guard_fires_on_every_pick_entry_point(method: str) -> None:
+    """A column that reaches the batch through `select` (list) or `take` (Arrow) both count."""
+    import numpy as np
+
+    spec = importlib.util.spec_from_file_location("bench_worker_gen", WORKER_PATH)
+    assert spec is not None and spec.loader is not None
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    fired, restore = worker.install_vacuity_guards()
+    try:
+        selector = _faker_pool.PooledSelector(np.array(["a", "b", "c"], dtype=object), b"\x01" * 8)
+        assert fired["pool_sample"] is False
+        getattr(selector, method)(2)
+        assert fired["pool_sample"] is True
+    finally:
+        restore()
+    assert getattr(_faker_pool.PooledSelector, method).__qualname__.endswith(
+        f"PooledSelector.{method}"
+    )
 
 
 # ---------------------------------------------------------------------------

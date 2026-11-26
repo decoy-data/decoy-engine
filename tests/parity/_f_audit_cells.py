@@ -371,12 +371,37 @@ def _sub_categorical(inner: Any) -> Any:
     return next_batch
 
 
+def _recomputed_pick(selector: Any, size: int) -> list[Any]:
+    return [selector._values[(i * 7 + 1) % len(selector._values)] for i in range(size)]
+
+
 def _sub_pooled(inner: Any) -> Any:
-    def take(self: Any, size: int) -> Any:
+    def take(self: Any, size: int) -> pa.Array:
         inner(self, size)
-        return pa.array([self._values[(i * 7 + 1) % len(self._values)] for i in range(size)])
+        return pa.array(_recomputed_pick(self, size))
 
     return take
+
+
+def _sub_pooled_list(inner: Any) -> Any:
+    def select(self: Any, size: int) -> list[Any]:
+        inner(self, size)
+        return _recomputed_pick(self, size)
+
+    return select
+
+
+# One substitute per pick entry point, each with that entry point's return type. A method added
+# to `PICK_METHODS` without an entry here fails the lookup, so a mutant cannot skip it silently.
+_PICK_SUBSTITUTES: dict[str, Callable[[Any], Any]] = {
+    "take": _sub_pooled,
+    "select": _sub_pooled_list,
+}
+
+
+def _replace_every_pick(mp: pytest.MonkeyPatch) -> None:
+    for name in _faker_pool.PooledSelector.PICK_METHODS:
+        _outer(_faker_pool.PooledSelector, name, _PICK_SUBSTITUTES[name])(mp)
 
 
 def _sub_live(inner: Any) -> Any:
@@ -490,7 +515,7 @@ def mutants_for(row_id: str, unmarked_windowed: Callable[..., list[Any]]) -> tup
             fid: (
                 Mutant(
                     "recomputed-pool-index",
-                    _outer(_faker_pool.PooledSelector, "take", _sub_pooled),
+                    _replace_every_pick,
                     "numpy-selected|sampler result",
                 ),
             )
