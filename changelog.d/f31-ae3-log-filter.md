@@ -15,3 +15,5 @@ An object the filter has no row for (a `SimpleNamespace`, an `argparse.Namespace
 Only an exact builtin or an exact scalar type (`Path`, `Decimal`, `date`, `datetime`, `UUID` and similar) prints through its own repr. A subclass is rebuilt as the plain builtin (a `namedtuple` prints as a plain tuple), a number subclass (an `IntEnum` member too, so `%d` still works) is copied to `int`, `float` or `complex`, any other enum member prints as `Class.NAME`, and any other subclass prints as `<object>`.
 
 The filter also drops the formatter's cached `record.message`, so a JSON formatter that dumps the record's attributes cannot print text an earlier formatter cached, and an `extra=` key that is not a string no longer sends the record to the fallback.
+
+The set of standard record fields the filter leaves alone is read from a `LogRecord` built directly, so a host record factory that adds a field (for example `error`) no longer exempts it from scrubbing.

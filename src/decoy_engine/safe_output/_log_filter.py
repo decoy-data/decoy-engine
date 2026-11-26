@@ -171,7 +171,12 @@ _NESTED_PLACEHOLDER = _Label("<nested>")
 # Any object without a row in the table: its repr is caller code (a dataclass prints every field).
 _OBJECT_PLACEHOLDER = _Label("<object>")
 # `LogRecord` attributes the filter leaves alone; any other attribute came from `extra=`.
-_STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+# Built from `LogRecord` directly: `makeLogRecord` runs the host's record factory, and a field that
+# factory adds (for example `error`) would be exempt from scrubbing.
+_STANDARD_FIELDS = frozenset(vars(logging.LogRecord("", logging.INFO, "", 0, "", (), None))) | {
+    "message",
+    "asctime",
+}
 
 
 def _label(exc: BaseException) -> _Label:
