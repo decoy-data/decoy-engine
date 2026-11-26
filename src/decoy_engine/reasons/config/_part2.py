@@ -83,6 +83,7 @@ TARGET_SHARED_DESTINATION = _d(
 TARGET_TABLE_UNKNOWN = _d(
     "target_table_unknown",
     "A target names no table in this config. Name a declared table or remove the target.",
+    since=UNRELEASED,
 )
 COLUMN_DUPLICATE = _d(
     "column_duplicate",

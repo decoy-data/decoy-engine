@@ -271,6 +271,7 @@ STREAMING_UNAVAILABLE = _d(
 REFERENCE_TABLE_UNAVAILABLE = _d(
     "reference_table_unavailable",
     "A reference table that ships with the engine could not be loaded. Reinstall the engine.",
+    since=UNRELEASED,
 )
 TRANSFORM_SOURCE_MISSING = _d("transform_source_missing", "Transform source missing.")
 UNDECLARED_OUTPUT_COLUMNS = _d("undeclared_output_columns", "Undeclared output columns.")
