@@ -110,11 +110,6 @@ class FieldStats:
     # for a profile written before the field existed.
     format_pattern_complete: bool = False
 
-    # What the source says the column holds, so the starter writes a date format only for text.
-    # An input to the starter in this process: `ColumnProfile.to_dict` drops it, so no stored
-    # document carries it and a rebuilt field reads `unknown`.
-    shape: ColumnShape = ColumnShape.UNKNOWN
-
     # Plan B-2 - column-shape signals FORECAST's per-detector choosers
     # consume to pick mask params instead of using hardcoded defaults.
     # All four are Optional / sensibly-defaulted so persisted profiles
@@ -168,6 +163,11 @@ class FieldStats:
     # detector fired. Derived from detector_matches[0]; never persisted as a
     # source of truth.
     domain: str | None = None
+
+    # What the source says the column holds, so the starter writes a date format only for text.
+    # An input to the starter in this process: `ColumnProfile.to_dict` drops it, so no stored
+    # document carries it and a rebuilt field reads `unknown`.
+    shape: ColumnShape = ColumnShape.UNKNOWN
 
 
 @dataclass

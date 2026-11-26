@@ -36,11 +36,15 @@ from decoy_engine.config import (
     parse_pipeline_config,
     relationship_shape_error,
 )
-from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
 from decoy_engine.detection.types import DetectorSource, ModelRef
 from decoy_engine.profiling import recommendations
-from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
+from decoy_engine.profiling._starter_inference import (
+    StarterDecision,
+    format_needed,
+    infer_starter_strategy,
+)
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
 from decoy_engine.safe_output import ConfigProblem
 
@@ -264,7 +268,7 @@ def detector_entry(
     if choice is None:
         return None
     provider_config: Mapping[str, Any] = choice.provider_config
-    if choice.detected_date_format and shape not in TYPED_DATE_SHAPES:
+    if choice.detected_date_format and format_needed(choice.strategy, shape):
         if not isinstance(date_format, str) or not date_format.strip():
             return None
         provider_config = {**provider_config, "date_format": date_format}

@@ -20,7 +20,11 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
+from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.strategy_requirements import (
+    SHAPE_REQUIREMENTS_BY_STRATEGY,
+    shape_declaration_needed,
+)
 from decoy_engine.profiling import recommendations
 
 __all__ = ["StarterDecision", "detected_date_config", "infer_starter_strategy"]
@@ -95,6 +99,16 @@ def detected_date_config(
     return {**choice.provider_config, "date_format": fmt}
 
 
+def format_needed(strategy: str, shape: ColumnShape) -> bool:
+    """Whether the starter must write the detected date format for a column of ``shape``.
+
+    Read from the shape table the plan check uses, so the starter never writes a format the
+    compiler would only warn about, and never omits one it would refuse the column for.
+    """
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy)
+    return shaped is None or shape_declaration_needed(shaped, shape, config_only=False)
+
+
 def _from_descriptor(
     detector_id: str,
     bucket: str | None,
@@ -106,7 +120,7 @@ def _from_descriptor(
         return _FALLBACK
     provider_config: Mapping[str, Any] = choice.provider_config
     # A typed date is read natively and needs no format; text and `unknown` keep it (fail closed).
-    if choice.detected_date_format and shape not in TYPED_DATE_SHAPES:
+    if choice.detected_date_format and format_needed(choice.strategy, shape):
         detected = detected_date_config(choice, match)
         if detected is None:
             return _FALLBACK
