@@ -16,8 +16,7 @@ from __future__ import annotations
 import ast
 import functools
 import importlib
-import importlib.util
-from pathlib import Path
+from collections.abc import Callable
 from typing import Final
 
 FROZEN: Final = "frozen"
@@ -114,27 +113,17 @@ def package_tier(module: str) -> str:
 
 
 @functools.cache
-def _assigned_constants(module: str) -> frozenset[str]:
-    """Names assigned at module level in the source of `module`."""
-    spec = importlib.util.find_spec(module)
-    source: str | None = None
-    if spec is not None and spec.origin:
-        try:
-            # Package source the engine ships, never a caller path. `contracts` may not import
-            # `fileaccess` (policy-direction contract), so this one read has a registry row.
-            source = Path(spec.origin).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            source = None
-    if source is None:
-        # Fail closed: an unreadable source must not turn every constant non-experimental.
-        # Raised outside the except block so no path or OS message rides in __context__.
-        raise RuntimeError(f"no source file to read the constants of {module}")
+def _assigned_constants(source: str) -> frozenset[str]:
+    """Names assigned at module level in `source`; empty source is an error, not "none"."""
     out: set[str] = set()
     for node in ast.parse(source).body:
         if isinstance(node, ast.Assign):
             out |= {t.id for t in node.targets if isinstance(t, ast.Name)}
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             out.add(node.target.id)
+    if not out:
+        # Fail closed: an empty read must not turn every constant non-experimental.
+        raise ValueError("no module-level constants found in the experimental module source")
     return frozenset(out)
 
 
@@ -147,15 +136,20 @@ def tier_key(name: str, obj: object) -> object:
     return (name, id(obj)) if _is_constant(obj) else id(obj)
 
 
-def is_experimental_export(name: str, obj: object) -> bool:
+def is_experimental_export(name: str, obj: object, read_source: Callable[[str], str]) -> bool:
     """True when the export `name` is bound to an object the registry marks experimental.
 
     A class or function by where it is defined, a constant by its name and object identity.
+    `read_source` maps a module name to its source text; the caller owns the file read, as
+    `contracts` does no file I/O.
     """
     if _is_constant(obj):
         # Imported here so `contracts` keeps its rule of no execution imports.
         sdk = importlib.import_module(EXPERIMENTAL_MODULE)
-        return name in _assigned_constants(EXPERIMENTAL_MODULE) and getattr(sdk, name, None) is obj
+        return (
+            name in _assigned_constants(read_source(EXPERIMENTAL_MODULE))
+            and getattr(sdk, name, None) is obj
+        )
     module = getattr(obj, "__module__", None)
     return module == EXPERIMENTAL_MODULE or (module, getattr(obj, "__qualname__", None)) in (
         EXPERIMENTAL_OBJECTS

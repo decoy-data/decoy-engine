@@ -10,6 +10,7 @@ applies to every path that exports it. A constant is matched by `(name, object i
 from __future__ import annotations
 
 import ast
+import functools
 import importlib
 import importlib.util
 import pkgutil
@@ -38,10 +39,19 @@ def public_packages() -> list[str]:
     return sorted(found)
 
 
-def _source_tree(module: str) -> ast.Module:
+def module_source(module: str) -> str:
+    """The source text of `module`; the census reads it so `contracts` does not have to."""
     spec = importlib.util.find_spec(module)
     assert spec is not None and spec.origin, module
-    return ast.parse(Path(spec.origin).read_text(encoding="utf-8"))
+    return Path(spec.origin).read_text(encoding="utf-8")
+
+
+# The seam asks for the same module once per export; fixtures rewrite modules, so only this is cached.
+seam_source = functools.cache(module_source)
+
+
+def _source_tree(module: str) -> ast.Module:
+    return ast.parse(module_source(module))
 
 
 def _literal_names(node: ast.expr, module: str) -> list[str]:
@@ -124,7 +134,7 @@ def classify(exports: list[Export]) -> dict[tuple[str, str], str]:
         st.tier_key(e.name, e.obj)
         for e in exports
         if e.obj is not None
-        and not st.is_experimental_export(e.name, e.obj)
+        and not st.is_experimental_export(e.name, e.obj, seam_source)
         and (
             exceptions.get((e.module, e.name)) == st.FROZEN
             or ((e.module, e.name) not in exceptions and st.package_tier(e.module) == st.FROZEN)
@@ -136,7 +146,7 @@ def classify(exports: list[Export]) -> dict[tuple[str, str], str]:
         key = (e.module, e.name)
         if key in exceptions:
             tier = exceptions[key]
-        elif e.obj is not None and st.is_experimental_export(e.name, e.obj):
+        elif e.obj is not None and st.is_experimental_export(e.name, e.obj, seam_source):
             tier = st.EXPERIMENTAL
         elif e.obj is not None and st.tier_key(e.name, e.obj) in frozen_groups:
             tier = st.FROZEN

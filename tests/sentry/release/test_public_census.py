@@ -254,20 +254,20 @@ def test_the_consumer_seam_names_import_from_the_stability_module() -> None:
 
 def test_the_seam_predicate_decides_the_sdk_cases() -> None:
     """AT-10: a constant, a class and a frozen `errors` object that `sdk` re-exports."""
-    assert st.is_experimental_export("SDK_VERSION", sdk_module.SDK_VERSION)
-    assert st.is_experimental_export("FileSource", sdk_module.FileSource)
-    assert not st.is_experimental_export("ConfigError", sdk_module.ConfigError)
+    assert st.is_experimental_export("SDK_VERSION", sdk_module.SDK_VERSION, census.seam_source)
+    assert st.is_experimental_export("FileSource", sdk_module.FileSource, census.seam_source)
+    assert not st.is_experimental_export("ConfigError", sdk_module.ConfigError, census.seam_source)
     assert st.is_experimental_export(
-        "register_faker_provider", decoy_engine.register_faker_provider
+        "register_faker_provider", decoy_engine.register_faker_provider, census.seam_source
     )
 
 
 def test_the_seam_matches_a_constant_by_name_and_identity() -> None:
     """A constant `sdk` assigns is experimental under its own name and object only."""
-    assert not st.is_experimental_export("OTHER_NAME", sdk_module.SDK_VERSION)
-    assert not st.is_experimental_export("SDK_VERSION", object())
+    assert not st.is_experimental_export("OTHER_NAME", sdk_module.SDK_VERSION, census.seam_source)
+    assert not st.is_experimental_export("SDK_VERSION", object(), census.seam_source)
     assert not st.is_experimental_export(
-        "SEED_PROTOCOL_VERSION", decoy_engine.SEED_PROTOCOL_VERSION
+        "SEED_PROTOCOL_VERSION", decoy_engine.SEED_PROTOCOL_VERSION, census.seam_source
     )
 
 
@@ -283,18 +283,20 @@ def test_the_tier_key_is_the_object_or_the_name_and_the_object() -> None:
     )
 
 
-def test_the_seam_fails_closed_when_the_sdk_source_is_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A constant is never called non-experimental because its source could not be read."""
-    st._assigned_constants.cache_clear()
-    try:
-        monkeypatch.setattr(st.importlib.util, "find_spec", lambda _name: None)
-        with pytest.raises(RuntimeError, match="decoy_engine.sdk"):
-            st.is_experimental_export("SDK_VERSION", sdk_module.SDK_VERSION)
-    finally:
-        monkeypatch.undo()
-        st._assigned_constants.cache_clear()
+@pytest.mark.parametrize("source", ["", "import os\n\ndef f(): ...\n"])
+def test_the_seam_fails_closed_when_the_sdk_source_names_no_constants(source: str) -> None:
+    """A constant is never called non-experimental because the source it was given was empty."""
+    with pytest.raises(ValueError, match="no module-level constants"):
+        st.is_experimental_export("SDK_VERSION", sdk_module.SDK_VERSION, lambda _module: source)
+
+
+def test_the_seam_does_no_file_io() -> None:
+    """The `contracts` package reads no file; the caller supplies a source reader."""
+    tree = ast.parse(Path(st.__file__).read_text(encoding="utf-8"))
+    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    assert not attrs & {"read_text", "read_bytes", "open", "find_spec"}
+    assert not names & {"open", "Path"}
 
 
 CENSUS_SOURCE = Path(census.__file__)
