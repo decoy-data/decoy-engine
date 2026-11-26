@@ -28,7 +28,12 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
-from decoy_engine.internal.cell_text import detector_text, key_text, numpy_bytes_as_objects
+from decoy_engine.internal.cell_text import (
+    ComparisonNotPreservedError,
+    detector_text,
+    key_text,
+    numpy_bytes_as_objects,
+)
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.plan.column_access import TableWrites
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
@@ -176,14 +181,6 @@ def _megabytes(limit: str) -> int:
     if limit_mb == 0:
         raise ValueError("run_post_mask_tables: memory_limit must be above zero")
     return limit_mb
-
-
-class ComparisonNotPreservedError(Exception):
-    """A column's text keys lost the equality its cells have. The text is fixed, so no cell
-    reaches the report; the table fails with this class name."""
-
-    def __init__(self) -> None:
-        super().__init__("a column's text keys do not keep its cells' equality")
 
 
 def _native(series: pd.Series) -> pa.Array | None:

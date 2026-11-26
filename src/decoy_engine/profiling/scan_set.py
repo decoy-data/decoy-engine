@@ -49,7 +49,7 @@ from decoy_engine.fileaccess import (
     FileAccessUnavailable,
     entry_point,
 )
-from decoy_engine.internal.cell_text import UnreadableCellError
+from decoy_engine.internal.cell_text import ComparisonNotPreservedError, UnreadableCellError
 from decoy_engine.profiling import _scan_integrity
 from decoy_engine.profiling._basis import claim_keys, read_basis
 from decoy_engine.profiling._model_pass import (
@@ -312,8 +312,9 @@ def passes_through(exc: BaseException) -> bool:
 
     A cell that cannot be read as text is the exception: it is a fact about the data, so the scan
     or check that met it fails with its fixed class name and the other tables and checks still
-    run. Its registered code (`runtime/cell_unreadable`) names it wherever it does escape."""
-    if isinstance(exc, UnreadableCellError):
+    run. Its registered code (`runtime/cell_unreadable`) names it wherever it does escape. A
+    column whose text keys lost its cells' equality is the same kind of fact (`check_error`)."""
+    if isinstance(exc, (UnreadableCellError, ComparisonNotPreservedError)):
         return False
     return isinstance(exc, (*_PASS_THROUGH, ScanSourceError, *reason_adapter.loaded_families()))
 

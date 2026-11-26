@@ -162,6 +162,11 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
         "PostScanRouteError",
         reasons.route.POST_SCAN_MODELS_UNSUPPORTED,
     ),
+    (
+        "decoy_engine.internal.cell_text",
+        "ComparisonNotPreservedError",
+        reasons.post_scan.CHECK_ERROR,
+    ),
 )
 
 

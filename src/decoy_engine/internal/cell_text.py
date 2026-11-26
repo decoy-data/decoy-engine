@@ -33,6 +33,14 @@ class UnreadableCellError(DecoyError, ValueError):
         super().__init__("a cell could not be read as text")
 
 
+class ComparisonNotPreservedError(DecoyError):
+    """A column's text keys lost the equality its cells have. The text is fixed, so no cell
+    reaches the report; the table fails with this class name."""
+
+    def __init__(self) -> None:
+        super().__init__("a column's text keys do not keep its cells' equality")
+
+
 def cell_text(value: object) -> str:
     """`value` as text: bytes of any kind decoded as UTF-8, anything else as `str`."""
     if not isinstance(value, _BYTES):
