@@ -7,7 +7,8 @@ sequential and chunked routes keep `full_frame_value_unrepresentable`. Profile, 
 reads raise the new `runtime/source_column_unrepresentable`. The post-scan check raises
 `runtime/post_scan_column_not_inspectable`, and the post-mask check marks the column with
 `runtime/postmask_column_not_inspectable` and reports it as an error finding, even for a column with no configured strategy, so neither check
-passes a column it did not read. A resident table with such a column used to be profiled as text and
+passes a column it did not read. A source stream that ends before the output marks every compared column
+with `runtime/postmask_source_length_mismatch`, and the extra output rows are still inspected. A resident table with such a column used to be profiled as text and
 now fails the profile read the same way.
 
 The public chunked oracles `run_mask_chunked` and `run_mask_pipeline_chunked` used to let the raw

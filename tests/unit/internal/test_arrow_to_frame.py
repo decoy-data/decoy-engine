@@ -145,15 +145,25 @@ def test_no_single_failing_column_calls_the_callback_with_none() -> None:
     assert "2932897" not in "".join(traceback.format_exception(exc))
 
 
-@pytest.mark.parametrize("probe_error", [MemoryError("2932897"), pa.ArrowMemoryError("2932897")])
-def test_a_resource_failure_in_a_probe_propagates_as_itself_without_context(
-    probe_error: Exception,
-) -> None:
+def test_a_bare_memory_error_in_a_probe_propagates_as_itself_without_context() -> None:
+    # Not an unrepresentable-value type, so the probe's handler never sees it.
+    probe_error = MemoryError("2932897")
     fake: Any = _FakeTable(probe_error)
-    with pytest.raises(type(probe_error)) as caught:
+    with pytest.raises(MemoryError) as caught:
         arrow_to_frame(fake, on_unrepresentable=_refuse)
     assert caught.value is probe_error
     assert caught.value.__context__ is None
+
+
+def test_an_arrow_memory_error_in_a_probe_is_raised_value_free_without_context() -> None:
+    # Recognised by the shared classifier: raised as its rebuilt twin, never the original.
+    probe_error = pa.ArrowMemoryError("2932897")
+    fake: Any = _FakeTable(probe_error)
+    with pytest.raises(pa.ArrowMemoryError) as caught:
+        arrow_to_frame(fake, on_unrepresentable=_refuse)
+    assert caught.value is not probe_error
+    assert "2932897" not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
 def test_a_resource_failure_in_the_conversion_propagates_as_itself() -> None:
@@ -242,3 +252,72 @@ def test_invalid_utf8_from_a_parquet_file_reaches_the_callback_value_free(
             arrow_to_frame_pair(table, table, on_unrepresentable=_refuse)
     assert caught.value.column == "s"
     _assert_value_free(caught.value)
+
+
+def _raised(call: Callable[[], object]) -> BaseException:
+    try:
+        call()
+    except BaseException as exc:
+        return exc
+    raise AssertionError("the call returned")
+
+
+class _Classified:
+    """A stand-in for `fileaccess.classified_failure` that reads every failure as the given kind."""
+
+    def __init__(self, kind: str, fresh: BaseException | None) -> None:
+        self._kind = kind
+        self._fresh = fresh
+        self.seen: list[BaseException] = []
+
+    def __call__(self, exc: BaseException) -> Any:
+        from decoy_engine.fileaccess import ClassifiedFailure
+
+        self.seen.append(exc)
+        return ClassifiedFailure(self._kind, self._fresh)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("kind", ["typed_memory", "resource"])
+def test_the_choke_point_follows_the_shared_classifier_for_resource_kinds(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One classification: a failure the shared classifier calls a resource failure is raised as
+    its fresh twin from every entry, whatever the text says."""
+    fresh = MemoryError("fixed")
+    classifier = _Classified(kind, fresh)
+    monkeypatch.setattr("decoy_engine.fileaccess.classified_failure", classifier)
+    table: Any = _FakeTable(None)
+    column: Any = _FakeColumn(ValueError("Wrapping 2932897 failed"))
+    for call in (
+        lambda: arrow_to_frame(table, on_unrepresentable=_refuse),
+        lambda: arrow_to_series(column, on_unrepresentable=_refuse, name="ok"),
+    ):
+        raised = _raised(call)
+        assert raised is fresh
+        assert raised.__cause__ is None and raised.__context__ is None
+    assert len(classifier.seen) == 2
+
+
+def test_a_resource_kind_without_a_rebuild_raises_the_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("decoy_engine.fileaccess.classified_failure", _Classified("resource", None))
+    table: Any = _FakeTable(None)
+    raised = _raised(lambda: arrow_to_frame(table, on_unrepresentable=_refuse))
+    assert isinstance(raised, ValueError) and "out of bounds" in str(raised)
+
+
+class _CausedByMemory(_FakeTable):
+    def to_pandas(self, **_kwargs: object) -> pd.DataFrame:
+        try:
+            raise MemoryError("2932897")
+        except MemoryError as inner:
+            raise ValueError("Wrapping 2932897 failed") from inner
+
+
+def test_a_value_error_caused_by_memory_exhaustion_is_a_value_free_memory_error() -> None:
+    fake: Any = _CausedByMemory(None)
+    raised = _raised(lambda: arrow_to_frame(fake, on_unrepresentable=_refuse))
+    assert isinstance(raised, MemoryError)
+    assert "2932897" not in "".join(traceback.format_exception(raised))
+    assert raised.__cause__ is None and raised.__context__ is None

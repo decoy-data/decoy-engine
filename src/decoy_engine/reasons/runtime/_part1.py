@@ -109,6 +109,7 @@ __all__ = [
     "POOL_SIZE_INVALID",
     "POOL_SIZE_OVERFLOW",
     "POSTMASK_COLUMN_NOT_INSPECTABLE",
+    "POSTMASK_SOURCE_LENGTH_MISMATCH",
     "POST_SCAN_COLUMN_NOT_INSPECTABLE",
     "SEED_WRONG_LENGTH",
     "SITE_NOT_PARTITIONABLE",
@@ -408,6 +409,12 @@ OUT_OF_CORE_REORDER_HEAD_FIT_INVALID = _d(
 POSTMASK_COLUMN_NOT_INSPECTABLE = _d(
     "postmask_column_not_inspectable",
     "A column holds a value pandas cannot represent, so the post-mask check could not inspect it.",
+    since=UNRELEASED,
+)
+POSTMASK_SOURCE_LENGTH_MISMATCH = _d(
+    "postmask_source_length_mismatch",
+    "The source and output row streams differ in length, so the post-mask check could not "
+    "compare them row by row.",
     since=UNRELEASED,
 )
 POST_SCAN_COLUMN_NOT_INSPECTABLE = _d(

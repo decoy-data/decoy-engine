@@ -609,6 +609,28 @@ def test_a_source_that_reads_short_marks_identity_unavailable(tmp_path: Path):
     assert facts.comparable_rows == 0 and not facts.bytes_identical
 
 
+def test_a_short_source_fails_every_compared_column_with_its_own_code_and_inspects_the_rest(
+    tmp_path: Path,
+):
+    from decoy_engine import reasons
+
+    emails = [f"user{i}@realmail.com" for i in range(60)]
+    src = pa.table({"e": emails, "n": list(range(60))})
+    out = pa.table({"e": emails, "n": list(range(60))})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["e", "n"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    for column in ("e", "n"):
+        assert facts[column].identity_error == reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
+        assert facts[column].comparable_rows == 0 and not facts[column].bytes_identical
+    # The output rows past the end of the source stream still reach the detectors.
+    assert facts["e"].detectors
+
+
 def _stored_index_table(case: str) -> tuple[pa.Table, list[tuple[str, str]]]:
     emails = [f"user{i}@realmail.com" for i in range(20)]
     others = [f"person{i}@othermail.com" for i in range(20)]

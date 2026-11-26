@@ -249,7 +249,8 @@ def test_subclass_adapter_passthrough_refusal_propagates_raw(make: Any) -> None:
     with pytest.raises(Exception) as entry:
         next(gen)
     # Not wrapped by the chunked route: the choke point's own coded error comes through.
-    assert getattr(entry.value, "code", None) != "chunked_passthrough_value_unrepresentable"
+    assert isinstance(entry.value, ExecutionError)
+    assert entry.value.code == "full_frame_value_unrepresentable"
     assert type(entry.value) is type(oracle.value) and str(entry.value) == str(oracle.value)
 
 

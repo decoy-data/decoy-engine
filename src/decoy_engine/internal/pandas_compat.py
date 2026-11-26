@@ -13,11 +13,14 @@ from __future__ import annotations
 import importlib
 import re
 from collections.abc import Callable, Iterable
-from typing import Any, Final, NoReturn
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+
+if TYPE_CHECKING:
+    from decoy_engine.fileaccess import ClassifiedFailure
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -119,13 +122,6 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
 _UNREPRESENTABLE: Final = (pa.ArrowException, ValueError, OverflowError)
 
 
-def _is_resource_failure(exc: BaseException) -> bool:
-    """Memory pressure and a full disk keep their own type: they say nothing about a value."""
-    from decoy_engine.fileaccess import passes_by_type
-
-    return isinstance(exc, Exception) and passes_by_type(exc)
-
-
 _Mapper = Callable[[pa.DataType], pd.api.extensions.ExtensionDtype | None]
 
 # The callback is told the failing column, or None when no single column reproduces the failure.
@@ -135,6 +131,26 @@ _OnUnrepresentable = Callable[[str | None], NoReturn]
 def _fail(on_unrepresentable: Callable[[Any], NoReturn], column: str | None) -> NoReturn:
     on_unrepresentable(column)
     raise TypeError("on_unrepresentable must raise")
+
+
+def _classify(exc: Exception) -> ClassifiedFailure | None:
+    """The one memory classification (`fileaccess.classified_failure`); imported late, see above."""
+    from decoy_engine.fileaccess import classified_failure
+
+    return classified_failure(exc)
+
+
+def _raise_resource(failure: ClassifiedFailure | None, original: BaseException) -> None:
+    """Raise a memory or resource failure value-free; return for any other kind.
+
+    Called after the handler has closed. `fresh` carries no chain and fixed text; a type that
+    cannot be rebuilt keeps the original object.
+    """
+    if failure is None or failure.kind == "text_memory":
+        return
+    if failure.fresh is not None:
+        raise failure.fresh
+    raise original
 
 
 def _first_failing_column(table: pa.Table, types_mapper: _Mapper | None) -> str | None:
@@ -148,29 +164,13 @@ def _first_failing_column(table: pa.Table, types_mapper: _Mapper | None) -> str 
         try:
             table.column(position).to_pandas(types_mapper=types_mapper)
         except _UNREPRESENTABLE as exc:
-            if _is_resource_failure(exc):
-                raise
-            return name
+            failure = _classify(exc)
+            original = exc
+        else:
+            continue
+        _raise_resource(failure, original)
+        return name
     return None
-
-
-def _memory_lookalike(exc: Exception) -> Exception | None:
-    """The scrubbed twin of a failure that reads as memory pressure by its text, else None.
-
-    Arrow raises the same `Wrapping <cell> failed` for an invalid UTF-8 cell and for an allocation
-    that hit the hard cap, so the text cannot decide. The caller re-probes: a failure that does
-    not reproduce is the cap, and this twin (value-free) is raised so the isolated worker still
-    names it oom_killed.
-    """
-    from decoy_engine.fileaccess import MEMORY_TEXT, is_memory_failure
-
-    if not is_memory_failure(exc):
-        return None
-    try:
-        twin = type(exc)(MEMORY_TEXT)
-    except Exception:
-        return None
-    return twin if is_memory_failure(twin) else None
 
 
 def _no_widening(widen: bool) -> None:
@@ -195,13 +195,13 @@ def arrow_to_frame(
     name, instead of restoring a stored pandas index. Code outside this module does not call `to_pandas` itself.
     """
     _no_widening(widen)
-    twin: Exception | None = None
     try:
         return table.to_pandas(types_mapper=types_mapper, ignore_metadata=ignore_metadata)
     except _UNREPRESENTABLE as exc:
-        if _is_resource_failure(exc):
-            raise
-        twin = _memory_lookalike(exc)
+        failure = _classify(exc)
+        original = exc
+    _raise_resource(failure, original)
+    twin = failure.fresh if failure is not None else None
     # Probed outside the handler above, so no exception raised from here carries a context
     # that quotes the value.
     column = _first_failing_column(table, types_mapper)
@@ -220,13 +220,13 @@ def arrow_to_series(
 ) -> pd.Series:
     """Experimental: `arrow_to_frame` for one column; `name` is what the callback is told."""
     _no_widening(widen)
-    twin: Exception | None = None
     try:
         return array.to_pandas(types_mapper=types_mapper)
     except _UNREPRESENTABLE as exc:
-        if _is_resource_failure(exc):
-            raise
-        twin = _memory_lookalike(exc)
+        failure = _classify(exc)
+        original = exc
+    _raise_resource(failure, original)
+    twin = failure.fresh if failure is not None else None
     if twin is not None:
         try:
             array.to_pandas(types_mapper=types_mapper)

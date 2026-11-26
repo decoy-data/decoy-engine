@@ -702,7 +702,8 @@ def test_masked_column_conversion_failure_is_not_wrapped() -> None:
     with pytest.raises(Exception) as info:
         next(gen)
     # Not wrapped by the chunked route: the choke point's own coded error comes through.
-    assert getattr(info.value, "code", None) != CODE
+    assert isinstance(info.value, ExecutionError)
+    assert info.value.code == "full_frame_value_unrepresentable"
     _same_exc(info.value, oracle_exc)
 
 
@@ -766,7 +767,8 @@ def test_custom_adapter_converting_a_refused_passthrough_raises_raw() -> None:
     with pytest.raises(Exception) as info:
         next(gen)
     # Not wrapped by the chunked route: the choke point's own coded error comes through.
-    assert getattr(info.value, "code", None) != CODE
+    assert isinstance(info.value, ExecutionError)
+    assert info.value.code == "full_frame_value_unrepresentable"
     _same_exc(info.value, oracle_exc)
 
 

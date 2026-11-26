@@ -211,6 +211,7 @@ class _Tally:
 
 
 _NOT_INSPECTABLE_CODE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+_LENGTH_MISMATCH_CODE = reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
 
 
 def _output_series(
@@ -392,7 +393,7 @@ def column_facts(
         def lengths_differ() -> None:
             # Positional identity is void: fail closed on every compared column.
             for c in compared:
-                tallies[c].error = _NOT_INSPECTABLE_CODE
+                tallies[c].error = _LENGTH_MISMATCH_CODE
 
         pairs = _aligned(
             src_read.read(compared, batch_rows),
