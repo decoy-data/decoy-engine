@@ -10,7 +10,6 @@ applies to every path that exports it. A constant is matched by `(name, object i
 from __future__ import annotations
 
 import ast
-import functools
 import importlib
 import importlib.util
 import pkgutil
@@ -70,18 +69,6 @@ def _is_all(target: ast.expr) -> bool:
     return isinstance(target, ast.Name) and target.id == "__all__"
 
 
-@functools.cache
-def assigned_constants(module: str) -> set[str]:
-    """Names assigned at module level in the source of `module`."""
-    out: set[str] = set()
-    for node in _source_tree(module).body:
-        if isinstance(node, ast.Assign):
-            out |= {t.id for t in node.targets if isinstance(t, ast.Name)}
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            out.add(node.target.id)
-    return out
-
-
 def missing_extra(module: str, exc: ImportError) -> str | None:
     """The registered optional dependency this error is about, or None for any other error.
 
@@ -130,37 +117,14 @@ def packages_without_all() -> list[str]:
     return sorted(out)
 
 
-def is_constant(obj: Any) -> bool:
-    return not (isinstance(obj, type) or callable(obj))
-
-
-def group_key(export: Export) -> Any:
-    """One object has one key; a constant is keyed by its name too, as ints and strings repeat."""
-    return (export.name, id(export.obj)) if is_constant(export.obj) else id(export.obj)
-
-
-def experimental_by_identity(export: Export) -> bool:
-    obj = export.obj
-    if obj is None:
-        return False
-    sdk = importlib.import_module(st.EXPERIMENTAL_MODULE)
-    if is_constant(obj):
-        return (
-            export.name in assigned_constants(st.EXPERIMENTAL_MODULE)
-            and getattr(sdk, export.name, None) is obj
-        )
-    key = (obj.__module__, obj.__qualname__)
-    return obj.__module__ == st.EXPERIMENTAL_MODULE or key in st.EXPERIMENTAL_OBJECTS
-
-
 def classify(exports: list[Export]) -> dict[tuple[str, str], str]:
     """`(module, name) -> tier`; raises AssertionError when one object gets two tiers."""
     exceptions = {(m, n): tier for m, n, tier in st.TIER_EXCEPTIONS}
     frozen_groups = {
-        group_key(e)
+        st.tier_key(e.name, e.obj)
         for e in exports
         if e.obj is not None
-        and not experimental_by_identity(e)
+        and not st.is_experimental_export(e.name, e.obj)
         and (
             exceptions.get((e.module, e.name)) == st.FROZEN
             or ((e.module, e.name) not in exceptions and st.package_tier(e.module) == st.FROZEN)
@@ -172,16 +136,16 @@ def classify(exports: list[Export]) -> dict[tuple[str, str], str]:
         key = (e.module, e.name)
         if key in exceptions:
             tier = exceptions[key]
-        elif experimental_by_identity(e):
+        elif e.obj is not None and st.is_experimental_export(e.name, e.obj):
             tier = st.EXPERIMENTAL
-        elif e.obj is not None and group_key(e) in frozen_groups:
+        elif e.obj is not None and st.tier_key(e.name, e.obj) in frozen_groups:
             tier = st.FROZEN
         else:
             tier = st.package_tier(e.module)
         assert key not in tiers, f"{key} exported twice"
         tiers[key] = tier
         if e.obj is not None:
-            groups[group_key(e)][key] = tier
+            groups[st.tier_key(e.name, e.obj)][key] = tier
     clashes = [g for g in groups.values() if len(set(g.values())) > 1]
     assert not clashes, f"one object, two tiers: {clashes[:5]}"
     return tiers
@@ -225,7 +189,7 @@ def marker_problems(rows: list[tuple[Export, str]]) -> list[str]:
     """Callables whose docstring marker disagrees with their tier, both ways."""
     problems = []
     for e, tier in rows:
-        if e.obj is None or is_constant(e.obj):
+        if e.obj is None or not callable(e.obj):
             continue
         marked = (getattr(e.obj, "__doc__", None) or "").lstrip().startswith(st.EXPERIMENTAL_MARKER)
         if tier == st.EXPERIMENTAL and not marked:
