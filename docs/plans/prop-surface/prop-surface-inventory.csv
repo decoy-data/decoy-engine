@@ -1,0 +1,259 @@
+name,home_module,verdict,cli_src_consumers,platform_src_consumers,engine_src_readers,engine_test_or_script_root_imports,kept_because,doubtful_note,slice,at_root_before
+CAP_DRY_RUN,decoy_engine.sdk,move,,,0,0,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+CAP_INTROSPECTION,decoy_engine.sdk,move,,,3,0,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+CAP_MULTIPART,decoy_engine.sdk,move,,,2,0,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+CAP_RESUMABLE,decoy_engine.sdk,move,,,1,0,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+CAP_SIGNED_URL,decoy_engine.sdk,move,,,2,0,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+CAP_STREAMING,decoy_engine.sdk,move,,,3,0,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+FILE_SOURCE_PATH_FIELDS,decoy_engine.config,keep,src/decoy/cli/_sources.py:52; src/decoy/cli/io/_placement.py:225,,1,0,cli:src/decoy/cli/_sources.py,,-,yes
+RELEASE_PHASE,decoy_engine.release,move,,,1,1,,accepted move (LOW-1); doc edits listed in plan section 8,W5-keys-determinism-release,yes
+RUN_RESULT_SCHEMA,decoy_engine.run_result,keep-contract,,,1,0,contract:§3.1 run-result schema id,,-,yes
+SDK_VERSION,decoy_engine.sdk,move,,,0,1,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+SEED_PROTOCOL_VERSION,decoy_engine.determinism,keep,,api/engine_compat.py:69 (root); api/seeds/seeder.py:36 (root),8,0,platform:api/engine_compat.py,,-,yes
+AdapterError,decoy_engine.providers_v2,move,,,2,0,,,W4-providers-generation,yes
+BackendAdapter,decoy_engine.providers_v2,keep-closure,,,3,0,type-of:ProviderRegistry,,-,yes
+CallbackSink,decoy_engine.progress,move,,,0,0,,"move not delete: security, determinism and golden tests use it",W3-progress-context,yes
+CapabilityMatrix,decoy_engine.providers_v2,keep-closure,,,16,0,type-of:BackendAdapter,,-,yes
+CapacityEstimate,decoy_engine.execution,keep,src/decoy/cli/gate/_capacity_text.py:8,,1,0,cli:src/decoy/cli/gate/_capacity_text.py,,-,yes
+CapacityVerdict,decoy_engine.execution,keep,src/decoy/cli/preflight.py:407,,1,0,cli:src/decoy/cli/preflight.py,,-,yes
+CardinalityMode,decoy_engine.generation.pool,move,,,10,0,,,W4-providers-generation,yes
+CheckResult,decoy_engine.sdk,move,,,3,1,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+CheckpointEvent,decoy_engine.progress,keep-closure,,,0,0,type-of:ProgressSink,,-,yes
+CheckpointInfo,decoy_engine.progress,keep-closure,,,0,0,type-of:PhaseEvent,,-,yes
+ColumnProfile,decoy_engine.profiling,keep,,api/storm/helpers.py:748 (home),13,0,platform:api/storm/helpers.py,,-,yes
+CompositeAdapter,decoy_engine.generation.composite,move,,,1,0,,,W4-providers-generation,yes
+CompositeCoherenceReport,decoy_engine.validation.post,move,,,3,0,,,W6-scan-plan-validation-errors,yes
+CompositeCustom,decoy_engine.generation.composite,keep-closure,,,0,0,type-of:composite_custom,,-,yes
+CompositeError,decoy_engine.generation.composite,keep,,api/composites/preview.py:22 (home),7,0,platform:api/composites/preview.py,,-,yes
+CompositeGenerator,decoy_engine.generation.composite,move,,,1,0,,,W4-providers-generation,yes
+CompositePerson,decoy_engine.generation.composite,keep-closure,,,1,0,type-of:composite_person,,-,yes
+CompositeProvider,decoy_engine.generation.composite,keep-closure,,,1,0,type-of:composite_provider,,-,yes
+ConfigError,decoy_engine.errors,keep,src/decoy/cli/unmask.py:186; src/decoy/cli/_sources.py:184; src/decoy/cli/_sources.py:333; src/decoy/cli/preflight.py:645; src/decoy/cli/exit_codes.py:295; src/decoy/cli/tokenize.py:234; src/decoy/cli/tokenize.py:560; src/decoy/cli/gate/_layers.py:171; src/decoy/cli/gate/_layers.py:198,,6,4,cli:src/decoy/cli/unmask.py,,-,yes
+ConfigProblem,decoy_engine.safe_output,keep-closure,,,4,0,type-of:PipelineConfigError,,-,yes
+ConfigRuleError,decoy_engine.errors,move,,,10,1,,,W6-scan-plan-validation-errors,yes
+ConnectorAuthError,decoy_engine.errors,delete,,,0,1,,"no raiser; only readers are its own presence test and a reason-registry exemption row, both removed with it",W7-delete,yes
+ConnectorConfig,decoy_engine.sdk,move,,,3,1,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+ConnectorError,decoy_engine.errors,keep-closure,,,5,1,type-of:TransientError,,-,yes
+CsvDialect,decoy_engine.profile._csv_reader,keep-closure,,,4,0,type-of:resolve_csv_dialect,,-,yes
+DeclarationRequest,decoy_engine.profile._declared_columns,keep,src/decoy/cli/_sources.py:28; src/decoy/cli/_sources.py:167; src/decoy/cli/_sources.py:223,,10,0,cli:src/decoy/cli/_sources.py,,-,yes
+DecodedRecord,decoy_engine.records,keep,src/decoy/cli/library/_read.py:156; src/decoy/cli/library/_store.py:88; src/decoy/cli/library/_store.py:176,,2,0,cli:src/decoy/cli/library/_read.py,,-,yes
+DecoyError,decoy_engine.errors,keep,src/decoy/cli/_sources.py:134; src/decoy/cli/exit_codes.py:228; src/decoy/cli/library/_run_records.py:75; src/decoy/cli/library/_scratch.py:33; src/decoy/cli/report/_compare.py:185,api/generation/pinned_adapter.py:26 (home); api/generation/generation_child.py:219 (home); api/retrieval/decode_child.py:2328 (home); api/jobs/fixed_width_output.py:242 (dynamic home),65,2,cli:src/decoy/cli/_sources.py,,-,yes
+DetectorMatch,decoy_engine.detection,keep-closure,,,6,0,type-of:FieldStats,,-,yes
+DeterminismError,decoy_engine.determinism,move,,,5,0,,,W5-keys-determinism-release,yes
+DiscoveryResult,decoy_engine.data_discovery,keep-closure,,,0,0,type-of:run_discovery_sql,,-,yes
+DiscoverySqlError,decoy_engine.data_discovery,keep,,api/data_tables/router.py:24 (root),0,0,platform:api/data_tables/router.py,,-,yes
+Dismissal,decoy_engine.config,keep-closure,,,1,0,type-of:decoy_engine.config._post_scan.PostScanConfig,,-,yes
+DistinctCount,decoy_engine.validation.post,move,,,3,0,,,W6-scan-plan-validation-errors,yes
+Domain,decoy_engine.determinism,move,,,1,0,,,W5-keys-determinism-release,yes
+ExecutionAdapter,decoy_engine.execution,keep-closure,,,8,0,type-of:select_execution_adapter,,-,yes
+ExecutionContext,decoy_engine.context,keep,,api/storm/router.py:44 (home),2,1,platform:api/storm/router.py,,-,yes
+ExecutionError,decoy_engine.execution,keep,src/decoy/cli/unmask.py:187; src/decoy/cli/preflight.py:407; src/decoy/cli/tokenize.py:235; src/decoy/cli/run/_value_free.py:52,api/unmask/router.py:24 (home); api/jobs/v2_out_of_core.py:84 (home),86,3,cli:src/decoy/cli/unmask.py,,-,yes
+ExecutionEvent,decoy_engine.execution,delete,,,0,0,,,B6 E-S1a,yes
+ExecutionResult,decoy_engine.execution,keep,src/decoy/_native_gate.py:52,api/jobs/v2_cloud_materialize.py:46 (home); api/jobs/v2_sequential.py:45 (home); api/jobs/v2_node_runs.py:24 (home); api/jobs/v2_runner.py:53 (home); api/jobs/v2_out_of_core.py:84 (home),23,0,cli:src/decoy/_native_gate.py,,-,yes
+FieldStats,decoy_engine.profiling,keep,,api/storm/helpers.py:748 (home),4,0,platform:api/storm/helpers.py,,-,yes
+FileMeta,decoy_engine.sdk,move,,,3,1,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+FileSink,decoy_engine.sdk,move,,,3,2,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+FileSource,decoy_engine.sdk,move,,,4,3,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+FixedWidthParseError,decoy_engine.errors,keep,,api/fixed_width_layouts/router.py:474 (home),1,1,platform:api/fixed_width_layouts/router.py,,-,yes
+FkValidityReport,decoy_engine.validation.post,move,,,3,0,,,W6-scan-plan-validation-errors,yes
+GenerationError,decoy_engine.generation.pool,keep,src/decoy/cli/exit_codes.py:228; src/decoy/cli/run/_errors.py:182,,22,1,cli:src/decoy/cli/exit_codes.py,,-,yes
+IdentityDomain,decoy_engine.determinism,move,,,0,0,,move not delete: determinism and golden tests import it from decoy_engine.determinism,W5-keys-determinism-release,yes
+JobEstimate,decoy_engine.execution,keep-closure,,,0,0,type-of:estimate_job,,-,yes
+KeyProvider,decoy_engine.keyprovider,keep-closure,,,20,1,type-of:vault_writer_for_config,,-,yes
+KeyedColumn,decoy_engine.secret_providers,move,,,1,0,,Shared keyed-column walk and pinned oracle stay at the home path.,W5-keys-determinism-release,yes
+KeyedStrategyRequiresSecret,decoy_engine.keyprovider,keep-closure,,,4,1,type-of:vault_writer_for_config,,-,yes
+Logger,decoy_engine.context,keep,,api/persistence/logger.py:89 (callback),0,1,platform:api/persistence/logger.py,,-,yes
+MaskSecretError,decoy_engine.keyprovider,keep,src/decoy/_mask_secret.py:123; src/decoy/_mask_secret.py:74; src/decoy/_mask_secret_guidance.py:139; src/decoy/cli/unmask.py:188; src/decoy/cli/exit_codes.py:328; src/decoy/cli/tokenize.py:305; src/decoy/cli/reports/_vault.py:119; src/decoy/cli/run/_errors.py:212,api/unmask/router.py:26 (home),5,0,cli:src/decoy/_mask_secret.py,,-,yes
+MissingMaskSecret,decoy_engine.keyprovider,keep,src/decoy/_mask_secret.py:130,,2,0,cli:src/decoy/_mask_secret.py,,-,yes
+ModelHit,decoy_engine.profiling,keep-closure,,,1,0,type-of:TableScan,,-,yes
+ModelRef,decoy_engine.detection.types,keep-closure,,,8,0,type-of:ModelHit,,-,yes
+ModelStatus,decoy_engine.detection,keep,src/decoy/cli/io/_integrity_report.py:68; src/decoy/cli/models/_install.py:28; src/decoy/cli/models/_status.py:11; src/decoy/cli/gate/_models.py:15,,1,0,cli:src/decoy/cli/io/_integrity_report.py,,-,yes
+ModelUnavailableError,decoy_engine.detection,keep,src/decoy/cli/exit_codes.py:295; src/decoy/cli/io/_integrity_report.py:79,,0,3,cli:src/decoy/cli/exit_codes.py,,-,yes
+NamespaceBinding,decoy_engine.relationships,keep-closure,,,2,0,type-of:NamespaceRegistry,,-,yes
+NamespaceConfigError,decoy_engine.relationships,keep,src/decoy/cli/preflight.py:453,,0,0,cli:src/decoy/cli/preflight.py,,-,yes
+NamespaceRegistry,decoy_engine.relationships,keep-closure,,,14,0,type-of:ExecutionAdapter,,-,yes
+NativeCompanionStatus,decoy_engine.execution.native._companion_status,keep-closure,,,0,1,type-of:native_companion_status,,-,yes
+NullCount,decoy_engine.validation.post,move,,,3,0,,,W6-scan-plan-validation-errors,yes
+OpaqueRecord,decoy_engine.records,keep,src/decoy/cli/library/_read.py:160; src/decoy/cli/library/_store.py:88,,2,0,cli:src/decoy/cli/library/_read.py,,-,yes
+OrphanPolicy,decoy_engine.relationships,keep-closure,,,15,0,type-of:RelationshipEdge,,-,yes
+PandasExecutionAdapter,decoy_engine.execution,keep,src/decoy/cli/run/_execute.py:181,api/jobs/v2_sequential.py:165 (home),7,0,cli:src/decoy/cli/run/_execute.py,,-,yes
+PermanentError,decoy_engine.sdk,keep,,api/files/s3_pull_router.py:35 (home),4,1,platform:api/files/s3_pull_router.py,,-,yes
+PhaseEvent,decoy_engine.progress,keep-closure,,,2,0,type-of:ProgressSink,,-,yes
+PipelineConfig,decoy_engine.config,keep,src/decoy/cli/schema.py:59; src/decoy/lang/_lower.py:21,api/engine_a8_guard.py:117 (home); api/pipelines/v2_validation.py:296 (home); api/pipelines/router.py:42 (home); api/jobs/v2_config.py:60 (home),3,7,cli:src/decoy/cli/schema.py,,-,yes
+PipelineValidationError,decoy_engine.errors,keep,src/decoy/cli/demo.py:348; src/decoy/cli/subset.py:200; src/decoy/cli/_sources.py:106; src/decoy/cli/_sources.py:167; src/decoy/cli/_sources.py:184; src/decoy/cli/_sources.py:333; src/decoy/cli/_sources.py:399; src/decoy/cli/preflight.py:407; src/decoy/cli/preflight.py:645; src/decoy/cli/exit_codes.,,12,4,cli:src/decoy/cli/demo.py,,-,yes
+PlanCheckError,decoy_engine.plan.validate,move,,,0,0,,,W6-scan-plan-validation-errors,yes
+PlanValidationResult,decoy_engine.plan.validate,move,,,0,0,,,W6-scan-plan-validation-errors,yes
+PoolAdapter,decoy_engine.generation.pool,move,,,0,0,,,W4-providers-generation,yes
+PoolBuilder,decoy_engine.generation.pool,move,,,14,0,,,W4-providers-generation,yes
+PoolCapacityError,decoy_engine.generation.pool,keep-closure,,,4,1,type-of:compile_plan,,-,yes
+PoolSampler,decoy_engine.generation.pool,move,,,9,0,,,W4-providers-generation,yes
+PostScanBlockedError,decoy_engine.verification.postmask._blocked,keep,src/decoy/cli/exit_codes.py:236; src/decoy/cli/run/_errors.py:183,,2,1,cli:src/decoy/cli/exit_codes.py,,-,yes
+PostScanRouteError,decoy_engine.verification.postmask._route_guard,keep,src/decoy/cli/exit_codes.py:295; src/decoy/cli/io/_integrity_report.py:112,,0,1,cli:src/decoy/cli/exit_codes.py,,-,yes
+PostValidationRunner,decoy_engine.validation.post,move,,,1,0,,,W6-scan-plan-validation-errors,yes
+PreScanConfig,decoy_engine.config,keep,src/decoy/cli/scanning/_engine_call.py:19,,4,0,cli:src/decoy/cli/scanning/_engine_call.py,,-,yes
+PreparedDeclaredSources,decoy_engine.profile._declared_columns,keep,src/decoy/cli/_sources.py:28; src/decoy/cli/scanning/_engine_call.py:19; src/decoy/cli/scanning/_engine_call.py:71,,5,0,cli:src/decoy/cli/_sources.py,,-,yes
+ProgressSink,decoy_engine.progress,keep,src/decoy/cli/run/_progress.py:24 (callback),,1,0,cli:src/decoy/cli/run/_progress.py,,-,yes
+ProviderError,decoy_engine.providers_v2,keep-closure,,,17,0,type-of:BackendAdapter,,-,yes
+ProviderRegistry,decoy_engine.providers_v2,keep-closure,,,48,0,type-of:ExecutionAdapter,,-,yes
+ProviderSpec,decoy_engine.providers_v2,keep,,api/composites/preview.py:25 (home),24,0,platform:api/composites/preview.py,,-,yes
+PublicationInfo,decoy_engine.progress,keep-closure,,,0,0,type-of:decoy_engine._progress_events._V1Fields,,-,yes
+QualitySummary,decoy_engine.validation.post,move,,,1,0,,,W6-scan-plan-validation-errors,yes
+QualityWarning,decoy_engine.generation.pool,keep-closure,,,71,0,type-of:snapshot_joint_warnings,,-,yes
+RateSample,decoy_engine.progress,keep-closure,,,1,0,type-of:ProgressSink,,-,yes
+ReasonContext,decoy_engine.reasons,keep-closure,,,6,0,type-of:ReasonRecord,,-,yes
+ReasonRecord,decoy_engine.reasons,keep-closure,,,13,0,type-of:decoy_engine._progress_events._V1Fields,,-,yes
+RecordError,decoy_engine.records,keep,src/decoy/cli/library/_fsck.py:376; src/decoy/cli/library/_fsck.py:290; src/decoy/cli/library/_store.py:320; src/decoy/cli/library/_store.py:324; src/decoy/cli/library/_export.py:79,,4,0,cli:src/decoy/cli/library/_fsck.py,,-,yes
+RecordNeedsNewer,decoy_engine.records,keep,src/decoy/cli/library/_fsck.py:211; src/decoy/cli/library/_store.py:88; src/decoy/cli/library/_store.py:169; src/decoy/cli/library/_exporting.py:126,,2,0,cli:src/decoy/cli/library/_fsck.py,,-,yes
+RelationshipEdge,decoy_engine.relationships,keep-closure,,,25,0,type-of:RelationshipGraph,,-,yes
+RelationshipGraph,decoy_engine.relationships,keep,src/decoy/cli/demo.py:230,api/jobs/v2_sequential.py:175 (home); api/jobs/v2_out_of_core.py:285 (home),51,0,cli:src/decoy/cli/demo.py,,-,yes
+ReleasePhase,decoy_engine.release,move,,,0,0,,pairs with RELEASE_PHASE,W5-keys-determinism-release,yes
+RetryEvent,decoy_engine.progress,keep-closure,,,0,0,type-of:ProgressSink,,-,yes
+RetryInfo,decoy_engine.progress,keep-closure,,,2,0,type-of:PhaseEvent,,-,yes
+RouteEvent,decoy_engine.progress,keep-closure,,,1,0,type-of:ProgressSink,,-,yes
+RunResult,decoy_engine.run_result,keep-contract,,,2,1,contract:§3.1 run-result write model,,-,yes
+RunResultRead,decoy_engine.run_result,keep-contract,,,1,1,contract:§3.1 run-result read model,,-,yes
+ScanDeclaration,decoy_engine.profile._declared_columns,keep-closure,,,0,1,type-of:PreparedDeclaredSources,,-,yes
+ScanSet,decoy_engine.profiling,keep,src/decoy/cli/scanning/_engine_call.py:20,,1,0,cli:src/decoy/cli/scanning/_engine_call.py,,-,yes
+ScanSetCore,decoy_engine.profiling,keep-contract,,,2,1,contract:§3.1 scan-set/v1 write model,,-,yes
+SecretCachePolicy,decoy_engine.secret_providers,move,,,5,0,,in run_pipeline closure until B7 (E-S1b) drops secret_registry and secret_cache_policy; then no consumer,W5-keys-determinism-release,yes
+SecretDescriptor,decoy_engine.secret_providers,move,,,2,0,,in run_pipeline closure until B7 (E-S1b) drops secret_registry and secret_cache_policy; then no consumer,W5-keys-determinism-release,yes
+SecretKeyProvider,decoy_engine.keyprovider,keep,,api/engine_a8_guard.py:119 (home); api/jobs/engine_key.py:37 (root),1,3,platform:api/engine_a8_guard.py,,-,yes
+SecretProvider,decoy_engine.secret_providers,move,,,2,0,,in run_pipeline closure until B7 (E-S1b) drops secret_registry and secret_cache_policy; then no consumer,W5-keys-determinism-release,yes
+SecretProviderError,decoy_engine.secret_providers,move,,,0,0,,,W5-keys-determinism-release,yes
+SecretProviderRegistry,decoy_engine.secret_providers,move,,,3,0,,in run_pipeline closure until B7 (E-S1b) drops secret_registry and secret_cache_policy; then no consumer,W5-keys-determinism-release,yes
+SecretRef,decoy_engine.secret_providers,move,,,3,0,,in run_pipeline closure until B7 (E-S1b) drops secret_registry and secret_cache_policy; then no consumer,W5-keys-determinism-release,yes
+SeedKeyProvider,decoy_engine.keyprovider,move,,,2,2,,,W5-keys-determinism-release,yes
+SentinelFlag,decoy_engine.profiling,keep-closure,,,1,0,type-of:FieldStats,,-,yes
+StrategyError,decoy_engine.execution,keep,,api/nested_preview/router.py:19 (home),29,0,platform:api/nested_preview/router.py,,-,yes
+StrategyInfo,decoy_engine.execution._strategies,keep-closure,,,1,1,type-of:strategy_catalog,,-,yes
+StrategyOption,decoy_engine.execution._strategies,keep-closure,,,27,1,type-of:StrategyInfo,,-,yes
+StructuredEvents,decoy_engine.context,keep,,api/persistence/logger.py:89 (callback),0,1,platform:api/persistence/logger.py,,-,yes
+StructuredEventsSink,decoy_engine.progress,move,,,0,0,,move not delete: tests and f29 baselines use it,W3-progress-context,yes
+TableScan,decoy_engine.profiling,keep-closure,,,1,0,type-of:ScanSet,,-,yes
+TelemetryClient,decoy_engine.context,delete,,,0,0,,,B4 E-S1a,yes
+TerminalEvent,decoy_engine.progress,keep-closure,,,1,0,type-of:ProgressSink,,-,yes
+TransientError,decoy_engine.sdk,keep,,api/files/s3_pull_router.py:35 (home),3,1,platform:api/files/s3_pull_router.py,,-,yes
+UnmaskColumnReport,decoy_engine.unmask,keep-closure,,,0,0,type-of:UnmaskResult,,-,yes
+UnmaskResult,decoy_engine.unmask,keep-closure,,,0,0,type-of:unmask_pipeline,,-,yes
+ValidationError,decoy_engine.errors,move,,,11,0,,,W6-scan-plan-validation-errors,yes
+ValidationMessage,decoy_engine.validation_result,keep,,api/pipelines/v2_validation.py:75 (home),0,0,platform:api/pipelines/v2_validation.py,,-,yes
+ValidationResult,decoy_engine.validation_result,keep,,api/pipelines/v2_validation.py:75 (home),0,0,platform:api/pipelines/v2_validation.py,,-,yes
+ValuePool,decoy_engine.generation.pool,keep-closure,,,17,0,type-of:decoy_engine.generation.composite._bundle_pool.BundlePool,,-,yes
+VaultError,decoy_engine.vault,keep,src/decoy/cli/unmask.py:185; src/decoy/cli/exit_codes.py:228; src/decoy/cli/reports/_vault.py:118; src/decoy/cli/run/_vault.py:50; src/decoy/cli/run/_vault.py:67; src/decoy/cli/run/_errors.py:182,,6,0,cli:src/decoy/cli/unmask.py,,-,yes
+VaultWriter,decoy_engine.vault,keep-closure,,,3,0,type-of:vault_writer_for_config,,-,yes
+WarningEvent,decoy_engine.progress,keep-closure,,,0,0,type-of:ProgressSink,,-,yes
+WeakMaskSecret,decoy_engine.keyprovider,move,,,1,1,,,W5-keys-determinism-release,yes
+WriteResult,decoy_engine.sdk,move,,,3,1,,experimental; stays in decoy_engine.sdk; only the root re-export goes,W2-sdk,yes
+apply_table_transforms,decoy_engine.execution._transforms_table,keep,,api/engine_compat.py:288 (root-getattr); api/jobs/v2_sequential.py:139 (root),0,3,platform:api/engine_compat.py,,-,yes
+atomic_swap_db_providers,decoy_engine.providers,keep,,api/custom_faker_providers.py:66 (root),1,0,platform:api/custom_faker_providers.py,,-,yes
+build_namespace_registry,decoy_engine.relationships,keep,src/decoy/cli/demo.py:230,api/jobs/v2_sequential.py:175 (home); api/jobs/v2_out_of_core.py:285 (home),6,0,cli:src/decoy/cli/demo.py,,-,yes
+build_relationship_graph,decoy_engine.relationships,keep,src/decoy/cli/demo.py:230,api/jobs/v2_sequential.py:175 (home); api/jobs/v2_out_of_core.py:285 (home),5,0,cli:src/decoy/cli/demo.py,,-,yes
+check_columns_declared,decoy_engine.profile._declared_columns,move,,,0,0,,,W6-scan-plan-validation-errors,yes
+check_orphan_fk_policy_completeness,decoy_engine.relationships,keep,src/decoy/cli/demo.py:230,api/jobs/v2_sequential.py:175 (home); api/jobs/v2_out_of_core.py:285 (home),5,0,cli:src/decoy/cli/demo.py,,-,yes
+classifier_status,decoy_engine.profiling.model_pack,keep,src/decoy/cli/io/_integrity_report.py:68; src/decoy/cli/models/_status.py:11; src/decoy/cli/gate/_models.py:22,,0,2,cli:src/decoy/cli/io/_integrity_report.py,,-,yes
+classify_table_kinds,decoy_engine.execution,keep,src/decoy/cli/io/_lazy.py:25; src/decoy/cli/run/_result.py:100,api/jobs/preview_parent.py:776 (root); api/jobs/v2_sequential.py:165 (home); api/jobs/v2_out_of_core.py:270 (home),20,0,cli:src/decoy/cli/io/_lazy.py,,-,yes
+code_set_catalog,decoy_engine.transforms.code_set,keep,src/decoy/cli/cockpit.py:344,,0,1,cli:src/decoy/cli/cockpit.py,,-,yes
+compile_plan,decoy_engine.plan,keep,src/decoy/cli/demo.py:222; src/decoy/cli/compile_explain.py:197; src/decoy/cli/gate/_layers.py:288,api/jobs/v2_sequential.py:171 (home); api/jobs/v2_out_of_core.py:281 (home),8,3,cli:src/decoy/cli/demo.py,,-,yes
+composite_address,decoy_engine.generation.composite,keep,,api/composites/preview.py:14 (home),1,0,platform:api/composites/preview.py,,-,yes
+composite_custom,decoy_engine.generation.composite,keep,,api/composites/preview.py:14 (home),1,0,platform:api/composites/preview.py,,-,yes
+composite_name_email,decoy_engine.generation.composite,keep,,api/composites/preview.py:14 (home),1,0,platform:api/composites/preview.py,,-,yes
+composite_person,decoy_engine.generation.composite,keep,,api/composites/preview.py:14 (home),1,0,platform:api/composites/preview.py,,-,yes
+composite_provider,decoy_engine.generation.composite,keep,,api/composites/preview.py:14 (home),1,0,platform:api/composites/preview.py,,-,yes
+declared_columns,decoy_engine.profile._declared_columns,move,,,0,2,,,W6-scan-plan-validation-errors,yes
+derive,decoy_engine.determinism,move,,,28,0,,,W5-keys-determinism-release,yes
+derive_index,decoy_engine.determinism,move,,,7,0,,,W5-keys-determinism-release,yes
+derive_outcome,decoy_engine.run_result,keep,src/decoy/cli/exit_codes.py:152,,1,0,cli:src/decoy/cli/exit_codes.py,,-,yes
+derive_value,decoy_engine.determinism,move,,,10,0,,,W5-keys-determinism-release,yes
+detect_usable_cpus,decoy_engine.execution.pipeline,keep,src/decoy/_resources.py:288,,1,2,cli:src/decoy/_resources.py,,-,yes
+distribution_snapshot_document,decoy_engine.profiling,keep,src/decoy/cli/gen/_fit.py:98; src/decoy/ui/summary.py:425,,0,0,cli:src/decoy/cli/gen/_fit.py,,-,yes
+emit_fidelity,decoy_engine.context,delete,,,0,1,,,B5 E-S1b,yes
+emit_lineage,decoy_engine.context,move,,,1,1,,,W3-progress-context,yes
+emit_quarantine,decoy_engine.context,delete,,,0,1,,,B5 E-S1b,yes
+emit_step,decoy_engine.context,move,,,2,1,,,W3-progress-context,yes
+emit_throughput_sample,decoy_engine.context,move,,,0,1,,,W3-progress-context,yes
+estimate_job,decoy_engine.execution,keep,,api/jobs/estimate_child.py:133 (root-attr),0,6,platform:api/jobs/estimate_child.py,,-,yes
+estimate_job_capacity,decoy_engine.execution,keep,src/decoy/cli/preflight.py:421,,0,0,cli:src/decoy/cli/preflight.py,,-,yes
+event_to_dict,decoy_engine.progress,move,,,0,0,,CLI test imports it from the root; slice C2 retargets before the repin,W3-progress-context,yes
+event_to_legacy_dict,decoy_engine.progress,delete,,,0,0,,,B8 E-S1a,yes
+generate_tables,decoy_engine.generation.synthesize,move,,,4,0,,,W4-providers-generation,yes
+generated_table_to_pandas,decoy_engine.generation,keep,src/decoy/api.py:658,,0,1,cli:src/decoy/api.py,,-,yes
+get_default_pool_cache,decoy_engine.generation.pool,move,,,0,0,,,W4-providers-generation,yes
+get_default_registry,decoy_engine.providers_v2,keep,src/decoy/cli/cockpit.py:198; src/decoy/cli/cockpit.py:398; src/decoy/cli/demo.py:222; src/decoy/cli/run/_execute.py:304,api/composites/preview.py:24 (home); api/capabilities/_providers.py:73 (home); api/capabilities/_providers.py:99 (home); api/jobs/v2_sequential.py:174 (home); api/jobs/v2_out_of_core.py:284 (home),28,3,cli:src/decoy/cli/cockpit.py,,-,yes
+is_pre_ga,decoy_engine.release,move,,,1,0,,pairs with RELEASE_PHASE,W5-keys-determinism-release,yes
+is_valid_pipeline_name,decoy_engine.config._pipeline,keep,src/decoy/cli/io/_layout.py:71,,0,1,cli:src/decoy/cli/io/_layout.py,,-,yes
+is_value_sensitive,decoy_engine.profiling,move,,,0,0,,move not delete: reader at profiling/_value_redaction.py:468,W6-scan-plan-validation-errors,yes
+job_seed_for_config,decoy_engine.plan,keep,src/decoy/cli/subset.py:211,api/subset/service.py:55 (home),2,1,cli:src/decoy/cli/subset.py,,-,yes
+keyed_columns_for_config,decoy_engine.secret_providers,move,,,0,0,,Shared keyed-column walk and pinned oracle stay at the home path.,W5-keys-determinism-release,yes
+list_generate_faker_providers,decoy_engine.providers,keep,src/decoy/cli/cockpit.py:309; src/decoy/cli/completers.py:71,api/capabilities/_generate_types.py:448 (root-attr); api/strategies/catalog.py:1081 (root-attr),1,1,cli:src/decoy/cli/cockpit.py,,-,yes
+load_custom_providers,decoy_engine.providers,move,,,1,0,,,W4-providers-generation,yes
+load_detectors,decoy_engine.profiling.model_pack,keep,src/decoy/cli/io/_integrity_report.py:79,,2,7,cli:src/decoy/cli/io/_integrity_report.py,,-,yes
+load_vault,decoy_engine.vault,keep,,api/jobs/v2_vault.py:253 (home),1,0,platform:api/jobs/v2_vault.py,,-,yes
+make_key_resolver,decoy_engine.context,keep,src/decoy/api.py:182; src/decoy/cli/run/_prepare.py:117,api/keys/derive.py:66 (root),0,0,cli:src/decoy/api.py,,-,yes
+native_companion_status,decoy_engine.execution.native._companion_status,keep,src/decoy/_native_gate.py:140; src/decoy/distribution/selfcheck.py:48; src/decoy/cli/preflight.py:535; src/decoy/cli/info.py:81,api/engine_compat.py:119 (root),2,2,cli:src/decoy/_native_gate.py,,-,yes
+ner_status,decoy_engine.detection,keep,src/decoy/cli/models/_install.py:28; src/decoy/cli/models/_status.py:11; src/decoy/cli/gate/_models.py:22,,0,3,cli:src/decoy/cli/models/_install.py,,-,yes
+open_protected_dir,decoy_engine.fileaccess,keep,src/decoy/cli/library/_scratch.py:33,,5,0,cli:src/decoy/cli/library/_scratch.py,,-,yes
+output_schema,decoy_engine.safe_output,keep,src/decoy/cli/io/_targets.py:740,,1,0,cli:src/decoy/cli/io/_targets.py,,-,yes
+output_table,decoy_engine.safe_output,keep,src/decoy/cli/io/_targets.py:566; src/decoy/cli/io/_targets.py:740,,1,1,cli:src/decoy/cli/io/_targets.py,,-,yes
+parse_pipeline_config,decoy_engine.config,keep,src/decoy/api.py:520; src/decoy/cli/demo.py:222; src/decoy/cli/compile_explain.py:195; src/decoy/cli/subset.py:166; src/decoy/cli/_sources.py:333; src/decoy/cli/preflight.py:407; src/decoy/cli/preflight.py:645; src/decoy/cli/init.py:321; src/decoy/cli/tokenize.py:232; src/decoy/cli/tokenize.py:558; ,,3,2,cli:src/decoy/api.py,,-,yes
+pipeline_config_hash,decoy_engine.plan,keep,src/decoy/cli/run/_result.py:131,,1,0,cli:src/decoy/cli/run/_result.py,,-,yes
+prepare_declared_sources,decoy_engine.profile._declared_columns,keep,src/decoy/cli/_sources.py:134,,2,0,cli:src/decoy/cli/_sources.py,,-,yes
+profile_columns,decoy_engine.profiling,keep,src/decoy/cli/init.py:367,api/storm/router.py:46 (home); scripts/benchmark_canonical.py:111 (home),3,0,cli:src/decoy/cli/init.py,,-,yes
+profile_document,decoy_engine.profiling,keep-pairing,,,0,0,"pairs-with:profile_columns; the one redacting writer (CLI G-ONE-PROFILE-WRITER sentry, CLI tests/unit/test_api.py:406)",,-,yes
+protected_scratch_dir,decoy_engine.fileaccess,keep,src/decoy/cli/library/_scratch.py:33,,8,0,cli:src/decoy/cli/library/_scratch.py,,-,yes
+read_csv_source,decoy_engine.profile._csv_reader,keep,src/decoy/cli/_sources.py:278,,8,0,cli:src/decoy/cli/_sources.py,,-,yes
+read_fixed_width,decoy_engine.profile._fixed_width_reader,keep,src/decoy/cli/_sources.py:471; src/decoy/cli/_sources.py:495,api/jobs/preview_sample.py:356 (home); api/jobs/v2_cloud_staging.py:386 (home); api/retrieval/decode_child.py:2327 (root),0,9,cli:src/decoy/cli/_sources.py,,-,yes
+reason_from_exception,decoy_engine.reason_adapter,keep,src/decoy/cli/run/_errors.py:112,,3,1,cli:src/decoy/cli/run/_errors.py,,-,yes
+reasons_from_report,decoy_engine.reason_adapter,move,,,0,0,,move not delete: tests/integration/test_f29_outcomes.py reads it from decoy_engine.reason_adapter,W6-scan-plan-validation-errors,yes
+redact_profile_dict,decoy_engine.profiling,move,,,0,0,,move: profile_document is the one writer at the root; the redactor stays reachable at decoy_engine.profiling for engine tests,W6-scan-plan-validation-errors,yes
+register_faker_list_provider,decoy_engine.providers,move,,,1,0,,,W4-providers-generation,yes
+register_faker_provider,decoy_engine.providers,move,,,1,1,,census test line 42 edited in W4; platform repin note,W4-providers-generation,yes
+register_faker_provider_v2,decoy_engine.providers_v2,move,,,0,0,,,W4-providers-generation,yes
+register_secret_provider,decoy_engine.secret_providers,delete,,,0,0,,no src reader; only the presence list,W7-delete,yes
+resolve_conservative_ooc_budget_bytes,decoy_engine.execution.out_of_core,keep,src/decoy/_resources.py:275,,0,2,cli:src/decoy/_resources.py,,-,yes
+resolve_csv_dialect,decoy_engine.profile._csv_reader,keep,src/decoy/cli/_sources.py:278,,6,0,cli:src/decoy/cli/_sources.py,,-,yes
+route_summary,decoy_engine.execution.pipeline,keep,src/decoy/_native_gate.py:486; src/decoy/cli/run/_result.py:169,,0,2,cli:src/decoy/_native_gate.py,,-,yes
+run_config_only_checks,decoy_engine.plan,keep,src/decoy/cli/preflight.py:645; src/decoy/cli/gate/_layers.py:224,,1,23,cli:src/decoy/cli/preflight.py,,-,yes
+run_discovery_sql,decoy_engine.data_discovery,keep,,api/data_tables/router.py:24 (root),0,0,platform:api/data_tables/router.py,,-,yes
+run_mask_chunked,decoy_engine.execution.native._chunked_entry,keep,src/decoy/cli/run/_execute.py:202,api/jobs/v2_runner.py:396 (root-attr),2,52,cli:src/decoy/cli/run/_execute.py,,-,yes
+run_mask_pipeline_chunked,decoy_engine.execution._chunked,keep,,api/jobs/v2_runner.py:409 (home),1,59,platform:api/jobs/v2_runner.py,,-,yes
+run_pipeline,decoy_engine.execution,keep,src/decoy/api.py:520; src/decoy/cli/tokenize.py:232; src/decoy/cli/run/_execute.py:520; src/decoy/cli/run/_execute.py:441; src/decoy/cli/run/_prepare.py:335,api/engine_a8_guard.py:118 (home); api/jobs/v2_runner.py:209 (root); scripts/concurrency_rss_probe.py:76 (home),2,64,cli:src/decoy/api.py,,-,yes
+scan_set_to_dict,decoy_engine.profiling,keep,src/decoy/cli/scanning/_engine_call.py:71,,0,0,cli:src/decoy/cli/scanning/_engine_call.py,,-,yes
+scan_sources,decoy_engine.profiling,keep,src/decoy/cli/scanning/_engine_call.py:71,,0,1,cli:src/decoy/cli/scanning/_engine_call.py,,-,yes
+select_execution_adapter,decoy_engine.execution,keep,src/decoy/cli/demo.py:222,,2,2,cli:src/decoy/cli/demo.py,,-,yes
+snapshot_joint_warnings,decoy_engine.profiling,keep,src/decoy/cli/fit/_command.py:375,,0,1,cli:src/decoy/cli/fit/_command.py,,-,yes
+source_columns,decoy_engine.profile._declared_columns,move,,,0,2,,,W6-scan-plan-validation-errors,yes
+strategy_catalog,decoy_engine.execution._strategies,keep,src/decoy/lang/_lower.py:21,,2,2,cli:src/decoy/lang/_lower.py,,-,yes
+unmask_pipeline,decoy_engine.unmask,keep,src/decoy/cli/unmask.py:185,api/unmask/router.py:23 (root),0,8,cli:src/decoy/cli/unmask.py,,-,yes
+unregister_faker_provider,decoy_engine.providers,move,,,1,1,,"platform tests/test_custom_faker_providers.py:270,346 import from the root; repin note; moves with register_faker_provider",W4-providers-generation,yes
+validate_config,decoy_engine.validation,move,,,0,3,,platform tests/test_health.py:40 imports from the root; repin note,W6-scan-plan-validation-errors,yes
+validate_plan,decoy_engine.plan.validate,move,,,0,0,,,W6-scan-plan-validation-errors,yes
+vault_writer_for_config,decoy_engine.vault,keep,src/decoy/cli/run/_prepare.py:590,api/jobs/v2_vault.py:47 (home),0,0,cli:src/decoy/cli/run/_prepare.py,,-,yes
+write_fixed_width,decoy_engine.profile._fixed_width_writer,keep,src/decoy/cli/io/_targets.py:537,api/jobs/fixed_width_output.py:238 (root-dynamic),0,5,cli:src/decoy/cli/io/_targets.py,,-,yes
+PipelineConfigError,decoy_engine.config._errors,keep,src/decoy/api.py:521; src/decoy/cli/_sources.py:185; src/decoy/cli/_sources.py:334; src/decoy/cli/gate/_layers.py:172; src/decoy/cli/gate/_layers.py:199; src/decoy/cli/gate/_layers.py:22; src/decoy/cli/preflight.py:651; src/decoy/cli/scanning/_detectors.py:65; src/decoy/cli/subset.py:167; src/decoy/cli/tokenize.py:233; src/decoy/cli/tokenize.py:559; src/decoy/lang/_convert.py:23; src/decoy/lang/_validate.py:15,api/jobs/binding_resolve.py:457; api/jobs/runner.py:106; api/jobs/v2_cloud_staging.py:547; api/jobs/v2_config.py:116; api/jobs/v2_config.py:30; api/jobs/v2_config.py:359; api/jobs/v2_config.py:60; api/jobs/v2_submission.py:50; api/subset/router.py:56,,,cli:src/decoy/api.py,,W0-exports,no
+FixedWidthLayout,decoy_engine.config._fixed_width,keep,,api/fixed_width_layouts/router.py:141; api/jobs/binding_resolve.py:457; api/seeder.py:212,,,platform:api/fixed_width_layouts/router.py,,W0-exports,no
+GenerateColumnConfig,decoy_engine.config._tables,keep,,api/capabilities/_generate_types.py:378,,,platform:api/capabilities/_generate_types.py,,W0-exports,no
+CustomDetectorSpec,decoy_engine.detection.types,keep,,api/storm/detectors_router.py:32,,,platform:api/storm/detectors_router.py,,W0-exports,no
+TokenVaultWriter,decoy_engine.execution._adapter,keep,src/decoy/cli/_token_vault.py:100 (callback),api/engine_a8_guard.py:239; api/jobs/v2_token_vault.py (adapter on the platform pin),,,platform:api/engine_a8_guard.py,,W0-exports,no
+FileAccess,decoy_engine.fileaccess._types,keep,,api/data_tables/storage.py:39; api/engine_a8_guard.py:39; api/evidence/_fileio.py:15; api/file_access/broker.py:25; api/file_access/child.py:16; api/file_access/output.py:20; api/file_access/pinned.py:32; api/file_access/policy.py:38; api/file_access/prerun.py:24; api/file_access/sampling.py:15; api/jobs/_io_discovery.py:81; api/jobs/bounded_child.py:30; api/jobs/dispatch_plan.py:83; api/jobs/native_reader.py:26; api/jobs/preflight_worker.py:94; api/jobs/preview_access.py:23; api/jobs/preview_parent.py:61; api/jobs/preview_sample.py:35; api/jobs/runner.py:8; api/jobs/streams.py:60; api/pipelines/preflight.py:34; api/quality/runner_hook.py:101; api/storm/post_mask_hook.py:52; api/synth/runner_hook.py:46,,,platform:api/data_tables/storage.py,,W0-exports,no
+FileHandle,decoy_engine.fileaccess._types,keep,,api/analytics/router.py:5; api/canary_check/scanner.py:16; api/data_tables/router.py:25; api/data_tables/storage.py:39; api/evidence/_fileio.py:15; api/evidence/hashing.py:36; api/file_access/adapters/arrow.py:12; api/file_access/adapters/pandas.py:16; api/file_access/broker.py:25; api/file_access/child.py:16; api/file_access/output.py:20; api/file_access/pinned.py:32; api/file_access/prerun.py:24; api/files/router.py:16; api/fixed_width_layouts/router.py:46; api/jobs/_io_discovery.py:81; api/jobs/bounded_child.py:30; api/jobs/native_reader.py:26; api/jobs/preview_access.py:23; api/jobs/preview_sample.py:35; api/storm/router.py:45; api/unmask/router.py:25,,,platform:api/analytics/router.py,,W0-exports,no
+FileRequest,decoy_engine.fileaccess._types,keep,,api/analytics/router.py:5; api/data_tables/storage.py:39; api/evidence/_fileio.py:15; api/file_access/adapters/pandas.py:117; api/file_access/adapters/pandas.py:132; api/file_access/broker.py:25; api/file_access/child.py:16; api/file_access/claimed.py:19; api/file_access/output.py:20; api/file_access/pinned.py:32; api/file_access/policy.py:38; api/file_access/prerun.py:24; api/file_access/sampling.py:15; api/files/router.py:16; api/fixed_width_layouts/router.py:46; api/jobs/_io_discovery.py:81; api/jobs/bounded_child.py:30; api/jobs/dispatch_plan.py:510; api/jobs/fixed_width_output.py:229; api/jobs/native_reader.py:26; api/jobs/preview_access.py:23; api/jobs/preview_child.py:173; api/jobs/preview_sample.py:35; api/jobs/routes_outputs.py:213; api/jobs/v2_cloud_materialize.py:57; api/jobs/v2_cloud_staging.py:374; api/jobs/v2_config.py:396; api/jobs/v2_config.py:422; api/jobs/v2_orchestrator.py:94; api/jobs/v2_out_of_core.py:166; api/jobs/v2_vault.py:238; api/jobs/v2_vault.py:294; api/pipelines/preflight.py:34; api/storm/router.py:45; api/synth/runner_hook.py:46; api/unmask/router.py:25,,,platform:api/analytics/router.py,,W0-exports,no
+FileRole,decoy_engine.fileaccess._types,keep,,api/analytics/router.py:5; api/data_tables/storage.py:39; api/engine_a8_guard.py:88; api/evidence/_fileio.py:15; api/file_access/adapters/pandas.py:117; api/file_access/adapters/pandas.py:132; api/file_access/broker.py:25; api/file_access/child.py:16; api/file_access/claimed.py:19; api/file_access/output.py:20; api/file_access/pinned.py:32; api/file_access/policy.py:38; api/file_access/prerun.py:24; api/file_access/sampling.py:15; api/files/router.py:16; api/fixed_width_layouts/router.py:46; api/jobs/_io_discovery.py:81; api/jobs/dispatch_plan.py:510; api/jobs/fixed_width_output.py:229; api/jobs/native_reader.py:26; api/jobs/preview_access.py:23; api/jobs/preview_child.py:173; api/jobs/preview_sample.py:35; api/jobs/routes_outputs.py:213; api/jobs/v2_cloud_materialize.py:57; api/jobs/v2_cloud_staging.py:374; api/jobs/v2_config.py:396; api/jobs/v2_config.py:422; api/jobs/v2_orchestrator.py:94; api/jobs/v2_out_of_core.py:166; api/jobs/v2_vault.py:238; api/jobs/v2_vault.py:294; api/logging/extras.py:136; api/pipelines/preflight.py:34; api/quality/runner_hook.py:101; api/retrieval/decode_child.py:2329; api/storm/post_mask_hook.py:52; api/storm/router.py:45; api/synth/runner_hook.py:46; api/unmask/router.py:25,,,platform:api/analytics/router.py,,W0-exports,no
+OutputDir,decoy_engine.fileaccess._types,keep,,api/file_access/broker.py:25; api/file_access/child.py:16; api/file_access/pinned.py:32; api/jobs/bounded_child.py:30,,,platform:api/file_access/broker.py,,W0-exports,no
+OutputTxn,decoy_engine.fileaccess._types,keep,,api/file_access/output.py:20,,,platform:api/file_access/output.py,,W0-exports,no
+PlanCompileError,decoy_engine.plan._errors,keep,src/decoy/cli/compile_explain.py:337; src/decoy/cli/exit_codes.py:301; src/decoy/cli/extras.py:204; src/decoy/cli/gate/_layers.py:200; src/decoy/cli/gate/_layers.py:288; src/decoy/cli/preflight.py:413; src/decoy/cli/preflight.py:652; src/decoy/cli/subset.py:211; src/decoy/cli/tokenize.py:236; src/decoy/cli/tokenize.py:561; src/decoy/cli/unmask.py:189,api/nested_preview/router.py:22; api/pipelines/v2_validation.py:144; api/subset/router.py:57,,,cli:src/decoy/cli/compile_explain.py,,W0-exports,no
+ColumnSeed,decoy_engine.plan._types,keep,,api/nested_preview/router.py:23; api/text_redact/preview.py:12,,,platform:api/nested_preview/router.py,,W0-exports,no
+DpVerification,decoy_engine.plan._types,keep,,api/generation/generation_payload.py:24,,,platform:api/generation/generation_payload.py,,W0-exports,no
+GenerationPlan,decoy_engine.plan._types,keep,,api/generation/generation_payload.py:24,,,platform:api/generation/generation_payload.py,,W0-exports,no
+PinnedSnapshot,decoy_engine.plan._types,keep,,api/generation/generation_payload.py:24,,,platform:api/generation/generation_payload.py,,W0-exports,no
+PinnedStatisticalSpec,decoy_engine.plan._types,keep,,api/generation/generation_payload.py:24,,,platform:api/generation/generation_payload.py,,W0-exports,no
+Plan,decoy_engine.plan._types,keep,,api/generation/generation_child.py:197,,,platform:api/generation/generation_child.py,,W0-exports,no
+PlanCompileResult,decoy_engine.plan._types,keep,,api/generation/generation_child.py:197,,,platform:api/generation/generation_child.py,,W0-exports,no
+SeedEnvelope,decoy_engine.plan._types,keep,,api/generation/generation_child.py:197,,,platform:api/generation/generation_child.py,,W0-exports,no
+LazySource,decoy_engine.profile._readers,keep,,api/jobs/v2_out_of_core.py:276,,,platform:api/jobs/v2_out_of_core.py,,W0-exports,no
+Profile,decoy_engine.profile._types,keep,src/decoy/cli/plan.py:67,,,,cli:src/decoy/cli/plan.py,,W0-exports,no
+PublicationState,decoy_engine.reasons._record,keep-closure,,,,,type-of:ReasonContext,Owner requested this export. ReasonContext.publication_state uses the engine enum. The platform ORM imports its own scheduler enum.,W0-exports,no
+ConfigRef,decoy_engine.run_result._model,keep,src/decoy/cli/run/_result.py:133,,,,cli:src/decoy/cli/run/_result.py,,W0-exports,no
+Links,decoy_engine.run_result._model,keep,src/decoy/cli/run/_result.py:170,,,,cli:src/decoy/cli/run/_result.py,,W0-exports,no
+NativeRoute,decoy_engine.run_result._model,keep,src/decoy/cli/run/_result.py:151,,,,cli:src/decoy/cli/run/_result.py,,W0-exports,no
+TableDelivery,decoy_engine.run_result._model,keep,src/decoy/cli/run/_result.py:73,,,,cli:src/decoy/cli/run/_result.py,,W0-exports,no
+FixedWidthWriteError,decoy_engine.errors,keep,,api/jobs/fixed_width_output.py:241 (dynamic home),,,platform:api/jobs/fixed_width_output.py,,W0-exports,no
