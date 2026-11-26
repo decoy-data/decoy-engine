@@ -118,6 +118,9 @@ def test_a_mixed_hash_and_text_redact_table_runs_the_unified_lane(
         planned=RUST_COMPANION,
         executed=RUST_COMPANION,
         calls=1,
+        table="t",
+        columns=["h"],
+        strategy="hash",
     )
 
 
