@@ -25,6 +25,10 @@ from decoy_engine.contracts.bucketize_width import (
         ({"preset": ["by_year"]}, None),
         ({"width": 10}, 10),
         ({"width": 2.5}, 2.5),
+        ({"width": 2**53 - 1}, 2**53 - 1),
+        ({"width": 2**53}, None),  # an integer width the label arithmetic cannot hold
+        ({"width": 2**70}, None),
+        ({"width": float(2**53)}, float(2**53)),  # a float width never needs the exact bound
         ({"width": True}, None),
         ({"width": 0}, None),
         ({"width": -5}, None),
@@ -57,3 +61,36 @@ def test_the_field_that_leaves_the_width_unresolved(
     config: dict[str, Any], field: str | None
 ) -> None:
     assert unresolvable_width_field(config) == field
+
+
+def test_boundary_width_is_refused_by_every_entry_point() -> None:
+    """One eligibility rule: the resolver, the plan check, the handler and the kernel agree."""
+    import pyarrow as pa
+
+    from decoy_engine.execution._strategies._bucketize import resolve_bucketize_settings
+    from decoy_engine.kernel import bucketize_array
+    from decoy_engine.plan._checks_bucketize import check_bucketize_config
+    from decoy_engine.plan._errors import PlanCompileError
+
+    cfg = {"width": 2**53, "format": "lower"}
+    assert unresolvable_width_field(cfg) == "width"
+    config = {
+        "tables": [
+            {
+                "name": "t",
+                "columns": [{"name": "c", "strategy": "bucketize", "provider_config": cfg}],
+            }
+        ]
+    }
+    with pytest.raises(PlanCompileError):
+        check_bucketize_config(config)
+    with pytest.raises(Exception, match="width") as handler_err:
+        resolve_bucketize_settings(cfg, "c")
+    assert type(handler_err.value).__name__ == "StrategyError"
+    with pytest.raises(ValueError):
+        bucketize_array(pa.array([1]), 2**53, "lower")
+    # the largest width all four accept
+    ok = {"width": 2**53 - 1, "format": "lower"}
+    assert unresolvable_width_field(ok) is None
+    assert resolve_bucketize_settings(ok, "c").width == 2**53 - 1
+    assert bucketize_array(pa.array([1]), 2**53 - 1, "lower").labels.to_pylist() == ["0"]

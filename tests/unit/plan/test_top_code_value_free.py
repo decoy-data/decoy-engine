@@ -45,6 +45,7 @@ def test_validate_plan_error_omits_submitted_values(
     result = validate_plan(config, _profile(), decoy_engine_version=_VERSION)
     assert result.ok is False and result.error is not None, name
     text = f"{result.error.message} {result.error.path}"
-    for canary in ("hunter2", "host.example", str(BIG), str(LOW), str(HIGH)):
+    # "cap nan" is how the old message echoed a submitted NaN ("non-finite cap nan").
+    for canary in ("hunter2", "host.example", str(BIG), str(LOW), str(HIGH), "cap nan"):
         assert canary not in text, (name, canary)
     assert field in text

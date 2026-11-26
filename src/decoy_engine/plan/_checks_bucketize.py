@@ -96,6 +96,7 @@ def check_bucketize_config(config: dict[str, Any]) -> None:
                         f"bucketize column {col_name!r} in table {table_name!r} has "
                         "no usable width. Set "
                         "either a known 'preset' or a positive numeric 'width' "
+                        "(an integer width must be below 2**53) "
                         "(a numeric-looking string does not count; the emitter "
                         "must coerce it to a real number before it reaches the "
                         "engine)."

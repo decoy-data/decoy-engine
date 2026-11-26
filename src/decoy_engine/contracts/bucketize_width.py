@@ -47,13 +47,17 @@ def resolve_bucketize_width(provider_config: Mapping[str, Any]) -> int | float |
     """The effective bucket width, or None when the config names none.
 
     A known ``preset`` gives its width. An unknown ``preset`` gives None. With no ``preset``, a
-    positive, non-boolean number is the width; anything else gives None.
+    positive, non-boolean number is the width; anything else gives None. An integer width at or
+    above ``EXACT_INT_BOUND`` gives None too: its bucket bounds cannot be held exactly, so the
+    handler, the plan check and the array kernel all refuse it by this one rule.
     """
     preset = provider_config.get("preset")
     if preset is not None:
         return BUCKETIZE_PRESETS.get(preset) if isinstance(preset, str) else None
     raw = provider_config.get("width")
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    if isinstance(raw, int) and raw >= EXACT_INT_BOUND:
         return None
     return raw if raw > 0 else None
 
