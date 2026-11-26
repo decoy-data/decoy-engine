@@ -342,8 +342,10 @@ def test_regex_counts_for_any_detector_choice(
 
 def test_effective_detectors_holds_no_regex_literal() -> None:
     """AT-E1f: the rule lives in the config model, so the check does not add regex itself."""
+    import ast
     import inspect
 
     from decoy_engine.profiling.pre_scan import _check
 
-    assert '"regex"' not in inspect.getsource(_check._effective_detectors)
+    tree = ast.parse(inspect.getsource(_check._effective_detectors))
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "regex"]

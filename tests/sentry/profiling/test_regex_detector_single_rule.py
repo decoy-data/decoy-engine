@@ -4,7 +4,8 @@
 builds `{*detectors, "regex"}` is a second copy of that rule (PRE-SCAN-RUN had one).
 
 Covered shapes: a set, tuple or list literal that holds `"regex"` and one more element (a starred
-element counts), and `| {"regex"}`. Everything inside a subscript slice is skipped, so
+element counts), `| {"regex"}` and `|= {"regex"}`, `+` or `+=` with a literal that holds
+`"regex"`, and `.union(...)` with such a literal. Everything inside a subscript slice is skipped, so
 `Literal["regex", "ner"]` does not match. A one-element default such as `("regex",)` does not
 match. `.add("regex")` is not a shape: it records a flag source, not a detector set.
 """
@@ -14,12 +15,16 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SRC = Path(__file__).parents[2] / "src" / "decoy_engine"
+SRC = Path(__file__).parents[3] / "src" / "decoy_engine"
 OWNER = "config/_pre_scan.py"
 
 
 def _is_regex(node: ast.expr) -> bool:
     return isinstance(node, ast.Constant) and node.value == "regex"
+
+
+def _holds_regex(node: ast.expr) -> bool:
+    return isinstance(node, ast.Set | ast.Tuple | ast.List) and any(_is_regex(e) for e in node.elts)
 
 
 def regex_adders(source: str) -> list[int]:
@@ -38,11 +43,18 @@ def regex_adders(source: str) -> list[int]:
         if isinstance(node, ast.Set | ast.Tuple | ast.List):
             if len(node.elts) >= 2 and any(_is_regex(e) for e in node.elts):
                 lines.append(node.lineno)
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            if any(
-                isinstance(side, ast.Set) and any(_is_regex(e) for e in side.elts)
-                for side in (node.left, node.right)
-            ):
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr | ast.Add):
+            if any(_holds_regex(side) for side in (node.left, node.right)):
+                lines.append(node.lineno)
+        elif isinstance(node, ast.AugAssign) and isinstance(node.op, ast.BitOr | ast.Add):
+            if _holds_regex(node.value):
+                lines.append(node.lineno)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "union"
+        ):
+            if any(_holds_regex(arg) for arg in node.args):
                 lines.append(node.lineno)
     return lines
 
@@ -68,6 +80,11 @@ def test_the_scanner_sees_each_shape_and_skips_the_look_alikes() -> None:
         'x = d | {"regex"}',
         'x = {"regex"} | d',
         'x = tuple(sorted({*(p.get("detectors") or ()), "regex"}))',
+        'd |= {"regex"}',
+        'x = tuple(d) + ("regex",)',
+        'x = ("regex",) + tuple(d)',
+        'x = list(d) + ["regex"]',
+        'x = set(d).union({"regex"})',
     ]
     for code in seen:
         assert regex_adders(code), code
@@ -77,6 +94,10 @@ def test_the_scanner_sees_each_shape_and_skips_the_look_alikes() -> None:
         'x = ("regex",)',
         'found.add("regex")',
         'x = {"regex": 1}',
+        'x = "regex" + suffix',
+        'x = tuple(d) + ("ner",)',
+        'x = set(d).union({"ner"})',
+        'd |= {"ner"}',
     ]
     for code in skipped:
         assert not regex_adders(code), code
