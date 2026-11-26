@@ -194,11 +194,19 @@ class _CountingS3:
         assert IfMatch == '"v1"'
         match = re.match(r"bytes=(\d+)-(\d+)", Range)
         assert match
-        chunk = self._data[int(match[1]) : int(match[2]) + 1]
+        start, end = int(match[1]), int(match[2])
+        chunk = self._data[start : end + 1]
         if self._tamper:
             chunk = self._tamper(self.requests - 1, chunk)
         self.bytes_read += len(chunk)
-        return {"Body": io.BytesIO(chunk)}
+        # The answer an honest 206 carries in botocore's shape; a tampered body is the store
+        # losing bytes after it promised the range.
+        return {
+            "Body": io.BytesIO(chunk),
+            "ResponseMetadata": {"HTTPStatusCode": 206},
+            "ContentRange": f"bytes {start}-{end}/{len(self._data)}",
+            "ContentLength": end - start + 1,
+        }
 
 
 class _LedgerCounts:

@@ -28,7 +28,6 @@ import pyarrow.parquet as pq
 
 from decoy_engine._lexeme import LEXEME_KEY, pandas_lexeme_kwargs
 from decoy_engine.connectors import _clients
-from decoy_engine.fileaccess._errors import guarded
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.fileaccess.adapters import pandas as pandas_adapter
 from decoy_engine.fileaccess.adapters.memory import StreamHandle
@@ -53,6 +52,9 @@ _CSV_ESTIMATE_ROWS = 1_000
 _CSV_SAMPLE_MAX_BYTES = 64 << 20
 # The largest single ranged response; a Parquet column chunk over this is read in pieces.
 _RANGE_PIECE_BYTES = 8 << 20
+# `to_frame` Parquet batches this many rows: fewer, larger chunks make the Arrow-to-pandas copy
+# cheaper than the 65,536-row default and stay inside one row group's decode.
+_PARQUET_FRAME_BATCH_ROWS = 1 << 20
 # CSV `to_frame` streams the object to pandas in pieces this size.
 _CSV_STREAM_PIECE_BYTES = 1 << 20
 
@@ -151,7 +153,9 @@ class _RangeFileReader(io.RawIOBase):
 
 
 def _parquet(size: int, fetch: Fetch, provider: str) -> tuple[StreamHandle, pq.ParquetFile]:
-    stream = pa.PythonFile(_RangeFileReader(size, fetch, provider), mode="r")
+    stream = pa.PythonFile(
+        _RangeFileReader(size, fetch, provider, piece=_RANGE_PIECE_BYTES), mode="r"
+    )
     handle = StreamHandle(stream, provider)
     # pre_buffer=False: one request per column chunk, never a coalesced row-group read.
     return handle, arrow_adapter.parquet_file(handle, pre_buffer=False)
@@ -176,7 +180,12 @@ def _read_parquet_frame(size: int, fetch: Fetch, provider: str) -> pd.DataFrame:
     the pandas metadata (index, categoricals, timezones) and a file with no row groups valid."""
     handle, pf = _parquet(size, fetch, provider)
     return arrow_adapter.collect_batches(
-        handle, pf, lambda b: pa.Table.from_batches(b, schema=pf.schema_arrow).to_pandas()
+        handle,
+        pf,
+        lambda b: arrow_adapter.parquet_table_to_pandas(
+            pa.Table.from_batches(b, schema=pf.schema_arrow)
+        ),
+        batch_size=_PARQUET_FRAME_BATCH_ROWS,
     )
 
 
@@ -209,8 +218,9 @@ def _csv_sample_from_window(
 
     If the window is a prefix of a larger object it may end mid-row; the last
     fragment is dropped before parsing so `read_csv` never sees a torn line.
-    `low_memory=False` infers each column's type over the whole window, so a column that
-    mixes numbers and text is text throughout, not a mix of both.
+    The parser settings are the ones `main` used: `low_memory=False` would hold a wide window's
+    whole token table at once. A column that mixes numbers and text across parser chunks comes
+    back as objects of both kinds; `_csv_schema_from_window` settles its type.
 
     A `UnicodeDecodeError` holds the input bytes in its arguments, so it leaves as a new one
     with none (the proof read still tells it apart from a parse failure by type).
@@ -221,7 +231,6 @@ def _csv_sample_from_window(
         return pd.read_csv(
             io.BytesIO(window),
             nrows=sample_rows,
-            low_memory=False,
             **pandas_lexeme_kwargs(lexeme_columns),
         )
     except UnicodeDecodeError:
@@ -232,10 +241,20 @@ def _csv_sample_from_window(
 def _csv_schema_from_window(
     window: bytes, size: int, lexeme_columns: Any, provider: str
 ) -> pa.Schema:
-    """The Arrow schema of a CSV's leading window. The conversion is guarded: Arrow's error
-    text names the cell it could not convert."""
+    """The Arrow schema of a CSV's leading window.
+
+    An object column whose non-null values are not all text (numbers and text from different
+    parser chunks) is text, as `low_memory=False` would have made it. The conversion is guarded:
+    Arrow's error text names the cell it could not convert."""
     head = _csv_sample_from_window(window, size, _CSV_ESTIMATE_ROWS, lexeme_columns)
-    return guarded(provider, True, pa.Table.from_pandas, head, preserve_index=False).schema
+    for position, dtype in enumerate(head.dtypes):
+        column = head.iloc[:, position]
+        if (
+            pd.api.types.is_object_dtype(dtype)
+            and not column.dropna().map(lambda v: isinstance(v, str)).all()
+        ):
+            head.isetitem(position, column.where(column.isna(), column.astype(str)))
+    return arrow_adapter.table_from_pandas(provider, head).schema
 
 
 def _csv_rows_from_ranges(
@@ -321,14 +340,16 @@ def _s3_bind(descriptor: dict[str, Any]) -> tuple[int, Fetch]:
     if not isinstance(etag, str) or not etag:
         raise _clients.source_changed("S3")
 
-    def fetch(start: int, end_inclusive: int) -> bytes:
-        return _s3_range(client, bucket, key, etag, start, end_inclusive)
+    size = int(head["ContentLength"])
 
-    return int(head["ContentLength"]), fetch
+    def fetch(start: int, end_inclusive: int) -> bytes:
+        return _s3_range(client, bucket, key, etag, size, start, end_inclusive)
+
+    return size, fetch
 
 
 def _s3_range(
-    client: Any, bucket: str, key: str, etag: str, start: int, end_inclusive: int
+    client: Any, bucket: str, key: str, etag: str, size: int, start: int, end_inclusive: int
 ) -> bytes:
     try:
         response = _clients.s3_call(
@@ -341,6 +362,17 @@ def _s3_range(
         # Q17: draining .read() does not release the socket; close the body so the
         # connection returns to the pool (multi-range parquet reads reuse it).
         with response["Body"] as stream:
+            # A store may ignore the range and send the whole object, or answer another range:
+            # refuse before a byte of the body is read (the body is closed by the `with`).
+            _clients.check_ranged_response(
+                "S3",
+                status=(response.get("ResponseMetadata") or {}).get("HTTPStatusCode", 0),
+                content_range=response.get("ContentRange"),
+                content_length=response.get("ContentLength"),
+                start=start,
+                end=end_inclusive,
+                size=size,
+            )
             return bytes(_clients.s3_call(stream.read, end_inclusive - start + 1))
     except PermanentError as exc:
         if exc.kind != "precondition_failed":
@@ -428,15 +460,6 @@ def _gcs_blob(descriptor: dict[str, Any], client: Any) -> Any:
     return client.bucket(bucket_name).blob(object_name)
 
 
-def _gcs_version(blob: Any) -> tuple[int, int]:
-    """Size and generation from one metadata view; reloaded unless both are already known."""
-    if blob.size is None or blob.generation is None:
-        _clients.gcs_reload(blob)
-    if blob.size is None or blob.generation is None:
-        raise _clients.source_changed("GCS")
-    return int(blob.size), int(blob.generation)
-
-
 def _with_gcs_reads(descriptor: dict[str, Any], consume: Callable[[int, Fetch], Any]) -> Any:
     """Run `consume(size, fetch)` inside one GCS client block, every read on one generation.
 
@@ -445,7 +468,7 @@ def _with_gcs_reads(descriptor: dict[str, Any], consume: Callable[[int, Fetch], 
     """
     with _clients.gcs_client() as client:
         blob = _gcs_blob(descriptor, client)
-        size, generation = _gcs_version(blob)
+        size, generation = _clients.gcs_pinned_version(blob)
 
         def fetch(start: int, end_inclusive: int) -> bytes:
             return _clients.gcs_download(

@@ -168,10 +168,7 @@ def _stream_blob(get_bucket, path: str) -> Iterator[bytes]:
         blob = get_bucket().blob(path)
         # Blob.open reads ahead 40 MiB per request; pinned 1 MiB ranges bound each response
         # and keep every chunk on the generation the reload saw.
-        _clients.gcs_reload(blob)
-        if blob.size is None or blob.generation is None:
-            raise _clients.source_changed("GCS")
-        size, generation = int(blob.size), int(blob.generation)
+        size, generation = _clients.gcs_pinned_version(blob)
         for start in range(0, size, _DEFAULT_CHUNK_BYTES):
             end = min(start + _DEFAULT_CHUNK_BYTES, size) - 1
             yield _clients.gcs_download(

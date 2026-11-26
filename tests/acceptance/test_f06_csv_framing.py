@@ -132,7 +132,6 @@ def cloud_reader(monkeypatch: pytest.MonkeyPatch) -> Any:
             reader = cr.build_s3_profile_source(descriptor)
             assert isinstance(reader, cr.S3CsvSource)
             return reader, ledger
-        pytest.importorskip("google.cloud.storage")
         ledger = install_gcs(monkeypatch, FakeGcsSession(GcsObject(CLOUD_CSV))).ledger
         reader = cr.build_gcs_profile_source(descriptor)
         assert isinstance(reader, cr.GcsCsvSource)

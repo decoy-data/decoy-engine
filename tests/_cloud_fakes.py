@@ -109,6 +109,31 @@ def _span(header: str | None, size: int) -> tuple[int, int] | None:
     return start, end
 
 
+RANGE_MODES = ("ignored", "other_bytes", "other_total", "other_length", "status_200")
+
+
+def _range_answer(
+    mode: str | None, data: bytes, start: int, end: int
+) -> tuple[int, str, int, bytes]:
+    """``(status, Content-Range, Content-Length, body)`` for a ranged GET under a misbehaving
+    store. ``ignored`` is a 200 with the whole object; ``status_200`` is the one case where the
+    requested bytes and both headers are exact and only the status breaks the 206 contract."""
+    size = len(data)
+    part = data[start : end + 1]
+    if mode == "ignored":
+        return 200, f"bytes 0-{size - 1}/{size}", size, data
+    if mode == "other_bytes":
+        shift = 1 if end + 1 < size else -1
+        return 206, f"bytes {start + shift}-{end + shift}/{size}", len(part), part
+    if mode == "other_total":
+        return 206, f"bytes {start}-{end}/{size + 1}", len(part), part
+    if mode == "other_length":
+        return 206, f"bytes {start}-{end}/{size}", len(part) + 1, part
+    if mode == "status_200":
+        return 200, f"bytes {start}-{end}/{size}", len(part), part
+    return 206, f"bytes {start}-{end}/{size}", len(part), part
+
+
 def _fail_offset(fail_at: int | None, start: int, end: int) -> int | None:
     if fail_at is not None and start <= fail_at <= end:
         return fail_at - start
@@ -124,6 +149,8 @@ class FakeS3:
     ``change_after=n`` gives the object a new version after ``n`` data requests, so a later
     pinned read answers 412. ``fail_at`` raises ``error`` once a body passes that offset.
     ``short=True`` serves each range one byte short, as a store that lost bytes would.
+    ``range_mode`` (one of ``RANGE_MODES``) breaks the 206 contract the way a misbehaving store
+    would, with the answer shaped as botocore shapes it.
     """
 
     def __init__(
@@ -136,9 +163,10 @@ class FakeS3:
         fail_at: int | None = None,
         error: BaseException | None = None,
         short: bool = False,
+        range_mode: str | None = None,
     ) -> None:
         self.data, self.ledger, self.etag = data, ledger or Ledger(), etag
-        self._short = short
+        self._short, self._range_mode = short, range_mode
         self._change_after, self._fail_at, self._error = change_after, fail_at, error
 
     def head_object(self, Bucket: str, Key: str) -> dict[str, Any]:
@@ -166,12 +194,19 @@ class FakeS3:
             )
         span = _span(rng, len(self.data))
         start, end = span if span is not None else (0, len(self.data) - 1)
-        part = self.data[start : end + 1]
+        status, content_range, length, part = _range_answer(self._range_mode, self.data, start, end)
         if self._short and len(part) > 1:
             part = part[:-1]
         self.ledger.responses.append(len(part))
         fail_at = _fail_offset(self._fail_at, start, end)
-        return {"Body": Body(self.ledger, part, fail_at=fail_at, error=self._error)}
+        # The keys botocore puts on a GetObject answer: status under ResponseMetadata,
+        # ContentRange and ContentLength beside the Body.
+        return {
+            "Body": Body(self.ledger, part, fail_at=fail_at, error=self._error),
+            "ResponseMetadata": {"HTTPStatusCode": status},
+            "ContentRange": content_range,
+            "ContentLength": length,
+        }
 
 
 def install_s3(monkeypatch: pytest.MonkeyPatch, fake: FakeS3) -> FakeS3:
@@ -264,7 +299,9 @@ class FakeGcsSession:
         error: BaseException | None = None,
         tamper: Callable[[int, bytes], bytes] | None = None,
         replaced_status: int = 404,
+        range_mode: str | None = None,
     ) -> None:
+        self._range_mode = range_mode
         self.obj, self.ledger, self.ignore_range = obj, ledger or Ledger(), ignore_range
         self._tamper, self._stored_gzip, self._reply = tamper, stored_gzip, reply
         self.log: list[str] = []
@@ -327,8 +364,10 @@ class FakeGcsSession:
         if self.ignore_range or span is None:
             return Response(self.ledger, 200, {}, Body(self.ledger, length=64 * MiB))
         start, end = span
-        part = self.obj.data[start : end + 1]
-        hdrs = {"Content-Range": f"bytes {start}-{end}/{size}", "Content-Length": str(len(part))}
+        status, content_range, length, part = _range_answer(
+            self._range_mode, self.obj.data, start, end
+        )
+        hdrs = {"Content-Range": content_range, "Content-Length": str(length)}
         if self._reply is not None:
             hdrs.update(self._reply(start, end, size))
         if self._tamper is not None:
@@ -336,7 +375,7 @@ class FakeGcsSession:
         self.ledger.responses.append(len(part))
         fail_at = _fail_offset(self._fail_at, start, end)
         return Response(
-            self.ledger, 206, hdrs, Body(self.ledger, part, fail_at=fail_at, error=self._error)
+            self.ledger, status, hdrs, Body(self.ledger, part, fail_at=fail_at, error=self._error)
         )
 
     def close(self) -> None:

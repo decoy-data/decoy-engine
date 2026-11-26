@@ -19,6 +19,7 @@ from decoy_engine.execution._isolated_common import is_memory_failure
 from decoy_engine.fileaccess import FileAccessReadError
 from decoy_engine.fileaccess._errors import resurface_scrubbed
 from decoy_engine.profile import _cloud_readers as cr
+from decoy_engine.profile._readers import has_row_beyond
 from tests.unit.profile.test_cloud_to_frame_bounded import MARKER, _run, _serve, _source
 
 pytest.importorskip("botocore")
@@ -88,8 +89,8 @@ def _wide_mixed_csv() -> bytes:
     inference leaves a column of mixed int and str, which Arrow refuses and names the cell."""
     cols = 1050
     head = ",".join(f"c{i}" for i in range(cols))
-    rows = [",".join([str(i)] + [""] * (cols - 1)) for i in range(512)]
-    rows.append(CANARY + "," * (cols - 1))
+    rows = [",".join([str(i), str(i)] + [""] * (cols - 2)) for i in range(512)]
+    rows.append(f"{CANARY},7" + "," * (cols - 2))
     return ("\n".join([head, *rows]) + "\n").encode()
 
 
@@ -105,14 +106,23 @@ def test_csv_schema_mixed_types_is_text_not_a_leak(
             _assert_free(exc, caplog)
             raise
     assert len(schema) == 1050
+    # Types are asserted, not only the column count: the mixed column is text, the integer
+    # column stays an integer.
+    assert schema.field("c0").type == pa.string()
+    assert schema.field("c1").type == pa.int64()
 
 
 @pytest.mark.parametrize("provider", ["s3", "gcs"])
 def test_csv_schema_conversion_failure_is_read_error(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, provider: str
 ) -> None:
-    mixed = pd.DataFrame({"a": pd.Series([1, CANARY], dtype=object)})
-    monkeypatch.setattr(cr, "_csv_sample_from_window", lambda *a, **k: mixed)
+    # Column names that repeat make Arrow refuse the frame and name them (read_csv itself
+    # mangles repeats, so this stands in for any conversion failure the library words with data).
+    broken = pd.DataFrame([[1, 2]], columns=[CANARY, CANARY])
+    with pytest.raises(ValueError) as raw:
+        pa.Table.from_pandas(broken, preserve_index=False)
+    assert CANARY in str(raw.value)  # non-vacuity: the library text does carry the value
+    monkeypatch.setattr(cr, "_csv_sample_from_window", lambda *a, **k: broken)
     _serve(monkeypatch, provider, b"a\n1\n")
     with caplog.at_level(logging.DEBUG), pytest.raises(FileAccessReadError) as info:
         _source(provider, "csv").schema()
@@ -133,3 +143,47 @@ def test_csv_decode_error_holds_no_input_bytes(
         source.sample_frame(1) if read == "sample" else source.schema()
     assert isinstance(info.value, UnicodeDecodeError)
     _assert_free(info.value, caplog)
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+def test_proof_read_sees_a_row_that_does_not_decode(
+    monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
+    """Row 3 holds the bad bytes and rows 1 and 2 decode: the proof read answers True."""
+    _serve(monkeypatch, provider, b"a,t\n1,x\n2,y\n3,z\xff\n")
+    source: Any = _source(provider, "csv")
+    with pytest.raises(UnicodeDecodeError):  # non-vacuity: reading row 3 does fail to decode
+        source.sample_frame(3)
+    assert has_row_beyond(source.sample_frame, 2) is True
+
+
+_TORN = "TORNCANARY"
+_ROW_BYTES = 100_000
+
+
+def _torn_csv() -> bytes:
+    """Ten whole 100 kB rows, then an eleventh that starts before the 1 MiB mark and ends
+    after it, so the first window cuts it. Its first cell is text in an integer column."""
+    filler = "y" * (_ROW_BYTES - 8)
+    rows = [f"{i},{filler}" for i in range(10)]
+    rows.append(f"{_TORN},{filler}")
+    rows.append(f"11,{filler}")
+    data = ("a,b\n" + "\n".join(rows) + "\n").encode()
+    assert len(data) > cr._CSV_SAMPLE_WINDOW_BYTES > data.index(_TORN.encode()) + 10
+    return data
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+def test_a_window_cut_mid_row_never_holds_the_partial_row(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, provider: str
+) -> None:
+    ledger, _ = _serve(monkeypatch, provider, _torn_csv())
+    source: Any = _source(provider, "csv")
+    with caplog.at_level(logging.DEBUG):
+        schema = source.schema()
+        sample = source.sample_frame(5)
+    assert next(r["range"] for r in ledger.data_requests).startswith("bytes=0-")
+    assert schema.names == ["a", "b"]
+    assert schema.field("a").type == pa.int64()  # the cut fragment is not a row of the sample
+    assert sample.columns.tolist() == ["a", "b"] and len(sample) == 5
+    assert _TORN not in "".join(map(str, sample["a"])) and _TORN not in caplog.text

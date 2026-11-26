@@ -233,6 +233,45 @@ def gcs_reload(blob: Any) -> None:
     _guard(blob.reload, timeout=GCS_TIMEOUT, retry=gcs_retry())
 
 
+def gcs_pinned_version(blob: Any) -> tuple[int, int]:
+    """Size and generation of one object version, both from a single metadata reload.
+
+    Always reloads: a blob built from a name has neither, and one built elsewhere may hold a size
+    that belongs to another generation. A missing value after the reload is ``source_changed``.
+    The one place the pair is made; the connector stream and the profile reader both call it.
+    """
+    gcs_reload(blob)
+    if blob.size is None or blob.generation is None:
+        raise source_changed("GCS")
+    return int(blob.size), int(blob.generation)
+
+
+def check_ranged_response(
+    provider: str,
+    *,
+    status: int,
+    content_range: str | None,
+    content_length: int | str | None,
+    start: int,
+    end: int,
+    size: int,
+) -> None:
+    """Refuse a ranged answer that is not exactly the bytes asked for, before its body is read.
+
+    RFC 9110: a server may ignore ``Range`` and send the whole object as 200 (section 14.2), and
+    a 206 names the bytes it holds in ``Content-Range`` (sections 14.4 and 15.3.7). Only a 206
+    whose ``Content-Range`` is exactly ``bytes <start>-<end>/<size>`` and whose ``Content-Length``,
+    when sent, equals the asked length passes; anything else is kind ``unexpected``. The one
+    check for both providers (S3 reads ``ResponseMetadata``, ``ContentRange`` and
+    ``ContentLength`` from botocore's answer; GCS reads the response headers).
+    """
+    asked = end - start + 1
+    exact = content_range == f"bytes {start}-{end}/{size}"
+    sized = content_length is None or str(content_length) == str(asked)
+    if status != 206 or not exact or not sized:
+        raise _classified(provider, "unexpected")
+
+
 def gcs_download(blob: Any, *, start: int, end: int, size: int, generation: int) -> bytes:
     """Bytes ``start..end`` (inclusive) of one object version, read as a streamed ranged GET.
 
@@ -279,11 +318,18 @@ def _ranged_body(response: Any, start: int, end: int, size: int) -> bytes:
     headers = response.headers
     if (headers.get("X-Goog-Stored-Content-Encoding") or "identity") != "identity":
         raise StoredContentEncoding()
-    encoding = headers.get("Content-Encoding") or "identity"
-    exact = headers.get("Content-Range") == f"bytes {start}-{end}/{size}"
-    if status != 206 or encoding != "identity" or not exact:
-        # An ignored range or a transcoded body: refuse before reading a byte of it.
+    if (headers.get("Content-Encoding") or "identity") != "identity":
+        # A transcoded body is not the stored bytes: refuse before reading a byte of it.
         raise _classified("GCS", "unexpected")
+    check_ranged_response(
+        "GCS",
+        status=status,
+        content_range=headers.get("Content-Range"),
+        content_length=headers.get("Content-Length"),
+        start=start,
+        end=end,
+        size=size,
+    )
     want, got = end - start + 1, 0
     parts: list[bytes] = []
     while got < want:

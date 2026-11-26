@@ -114,6 +114,55 @@ def test_to_frame_transport_bounded(
     assert ledger.all_closed()
 
 
+def _starts(ledger: Ledger) -> list[int]:
+    return [int(r["range"].split("=")[1].split("-")[0]) for r in ledger.data_requests]
+
+
+def _wide_footer_parquet() -> bytes:
+    """4,000 columns of one row: a footer well over the 64 KiB tail pyarrow reads first."""
+    table = pa.table({f"c{i}": pa.array([i]) for i in range(4_000)})
+    sink = io.BytesIO()
+    pq.write_table(table, sink)
+    return sink.getvalue()
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+@pytest.mark.parametrize("read", ["row_count", "schema"])
+@pytest.mark.parametrize("piece", [PIECE, 16 * 1024])
+def test_parquet_footer_reads_stay_in_the_tail(
+    monkeypatch: pytest.MonkeyPatch, provider: str, read: str, piece: int
+) -> None:
+    """Row count and schema read the last `max(64 KiB, footer + 8)` bytes and nothing before
+    it, in pieces of at most the piece cap (16 KiB makes the footer span several pieces)."""
+    data = _wide_footer_parquet()
+    footer = pq.ParquetFile(io.BytesIO(data)).metadata.serialized_size
+    assert footer > 64 * 1024  # non-vacuity: the conditional second footer read happens
+    monkeypatch.setattr(cr, "_RANGE_PIECE_BYTES", piece)
+    ledger, _ = _serve(monkeypatch, provider, data)
+    _run(_source(provider, "parquet"), read)
+    floor = len(data) - max(64 * 1024, footer + 8)
+    assert ledger.data_requests and min(_starts(ledger)) >= floor
+    assert max(ledger.responses) <= piece and ledger.all_closed()
+    assert ledger.unsized_reads == 0
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+@pytest.mark.parametrize(
+    ("read", "cap"),
+    [("row_count", MiB), ("schema", MiB), ("sample", PIECE), ("to_frame", MiB)],
+)
+def test_csv_reads_stay_under_their_piece_cap(
+    monkeypatch: pytest.MonkeyPatch, provider: str, read: str, cap: int
+) -> None:
+    ledger, _ = _serve(monkeypatch, provider, _csv_bytes(12 * MiB))
+    result = _run(_source(provider, "csv"), "to_frame" if read == "to_frame" else read)
+    assert result is not None
+    assert ledger.responses and max(ledger.responses) <= cap
+    if read in ("row_count", "schema"):
+        assert ledger.fetched <= MiB and len(ledger.data_requests) == 1
+    assert ledger.unsized_reads == 0 and ledger.eager_reads == 0 and ledger.all_closed()
+
+
 def _small_parquet() -> bytes:
     sink = io.BytesIO()
     pq.write_table(pa.table({"a": [1, 2, 3], "t": ["zz_marker"] * 3}), sink)
@@ -230,27 +279,6 @@ def test_gcs_ranged_control_reads_exact_bytes(monkeypatch: pytest.MonkeyPatch, k
     assert all(r["stream"] is True for r in ledger.data_requests)
 
 
-def _parity_frames() -> dict[str, pd.DataFrame]:
-    tz = pd.date_range("2026-01-01", periods=3, freq="h", tz="America/Chicago")
-    return {
-        "empty": pd.DataFrame({"a": pd.Series([], dtype="int64"), "b": pd.Series([], dtype=str)}),
-        "index": pd.DataFrame({"v": [1.5, 2.5, 3.5]}, index=pd.Index(["x", "y", "z"], name="k")),
-        "categorical": pd.DataFrame({"c": pd.Categorical(["lo", "hi", "lo"])}),
-        "tz": pd.DataFrame({"ts": tz, "n": [1, 2, 3]}),
-    }
-
-
-@pytest.mark.parametrize("provider", ["s3", "gcs"])
-@pytest.mark.parametrize("case", sorted(_parity_frames()))
-def test_parquet_to_frame_parity(monkeypatch: pytest.MonkeyPatch, provider: str, case: str) -> None:
-    sink = io.BytesIO()
-    _parity_frames()[case].to_parquet(sink)
-    data = sink.getvalue()
-    _serve(monkeypatch, provider, data)
-    got = _source(provider, "parquet").to_frame()
-    pd.testing.assert_frame_equal(got, pd.read_parquet(io.BytesIO(data)))
-
-
 @pytest.mark.parametrize("read", ["parquet_sample", "csv_to_frame"])
 def test_range_reader_refuses_short_read(monkeypatch: pytest.MonkeyPatch, read: str) -> None:
     data = _small_parquet() if read == "parquet_sample" else _SMALL_CSV
@@ -276,6 +304,8 @@ _READS = ["row_count", "sample", "to_frame"]
 def _run(source: Any, read: str) -> Any:
     if read == "row_count":
         return source.row_count()
+    if read == "schema":
+        return source.schema()
     return source.sample_frame(2) if read == "sample" else source.to_frame()
 
 

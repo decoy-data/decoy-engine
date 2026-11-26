@@ -139,6 +139,14 @@ MEMORY_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
 GLIBC_TLS_OOM_MARKER = "cannot allocate memory for thread-local data"
 
 
+def _memory_text(message: str) -> bool:
+    """Whether `message` carries one of the documented memory-failure shapes. The one text test:
+    `is_memory_failure` and `resurface_scrubbed` must never disagree on it."""
+    return any(marker in message for marker in MEMORY_ERROR_MARKERS) or any(
+        pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS
+    )
+
+
 def typed_memory_member(exc: BaseException) -> BaseException | None:
     """The first typed memory error in `exc` or its `__cause__`/`__context__` links, else None.
 
@@ -168,10 +176,7 @@ def is_memory_failure(exc: BaseException) -> bool:
     stays `crashed`. Imports nothing, so it is safe at the memory cap."""
     if typed_memory_member(exc) is not None:
         return True
-    message = str(exc)
-    if any(marker in message for marker in MEMORY_ERROR_MARKERS):
-        return True
-    return any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
+    return _memory_text(str(exc))
 
 
 def passes_by_type(exc: Exception) -> bool:
@@ -193,11 +198,7 @@ def resurface_scrubbed(exc: Exception) -> Exception | None:
     conversion error that names the cell and also the OpenSSL marker), and no redaction of the
     original text can be proven to catch every shape. A typed memory error elsewhere in the
     chain does not make the outer message one."""
-    message = str(exc)
-    if not (
-        any(marker in message for marker in MEMORY_ERROR_MARKERS)
-        or any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
-    ):
+    if not _memory_text(str(exc)):
         return None
     rebuilt = _fixed_text_rebuild(exc)
     return rebuilt if isinstance(rebuilt, Exception) else None

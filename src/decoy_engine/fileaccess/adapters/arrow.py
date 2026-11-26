@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, TypeVar
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.ipc
 import pyarrow.parquet as pq
@@ -90,6 +92,28 @@ def collect_batches(
         return collect(parquet_file.iter_batches(**kwargs))
 
     return guarded(handle.display, _strict(handle), read)
+
+
+def table_from_pandas(display: str, frame: pd.DataFrame) -> pa.Table:
+    """`pa.Table.from_pandas(frame, preserve_index=False)`, guarded under a strict policy.
+
+    Arrow's error for a cell it cannot convert names the cell, so a caller that profiles an
+    object it does not own converts through here and never sees the library text."""
+    return guarded(display, True, pa.Table.from_pandas, frame, preserve_index=False)
+
+
+def parquet_table_to_pandas(table: pa.Table) -> pd.DataFrame:
+    """The frame `pd.read_parquet` returns for `table`: `Table.to_pandas()` (what pandas calls
+    for the default dtype backend), then `attrs` from the `PANDAS_ATTRS` schema metadata.
+
+    Pattern: pandas `io/parquet.py` `PyArrowImpl.read`. pyarrow 14 to 20 leave `attrs` to the
+    caller, and the step is harmless where pyarrow already restores them. Runs inside a guarded
+    collect, so a failure here leaves as the caller's read error."""
+    frame = table.to_pandas()
+    metadata = table.schema.metadata
+    if metadata and b"PANDAS_ATTRS" in metadata:
+        frame.attrs = json.loads(metadata[b"PANDAS_ATTRS"])
+    return frame
 
 
 @contextmanager
