@@ -249,7 +249,8 @@ def _frozen(cell: Any) -> Any:
     if isinstance(cell, list | tuple | np.ndarray):
         return tuple(_frozen(v) for v in cell)
     if isinstance(cell, dict):
-        return tuple((k, _frozen(v)) for k, v in cell.items())
+        # A frozenset of items: mapping equality ignores key order, as a JSON round trip may reorder.
+        return frozenset((k, _frozen(v)) for k, v in cell.items())
     if isinstance(cell, set | frozenset):
         return frozenset(_frozen(v) for v in cell)
     if isinstance(cell, bytearray | memoryview):

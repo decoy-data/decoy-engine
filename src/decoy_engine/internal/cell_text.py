@@ -87,6 +87,8 @@ def _per_cell(series: pd.Series, render: Callable[[object], str]) -> list[str | 
 def _text(values: pd.Series) -> pd.Series:
     if isinstance(values.dtype, pd.CategoricalDtype):
         # The categories hold the cells; each is read once and taken back by its code.
+        # Only the used ones: a filtered-out category may hold bytes no row has.
+        values = values.cat.remove_unused_categories()
         categories = column_text(pd.Series(values.cat.categories))
         taken = categories.to_numpy(dtype=object)[values.cat.codes.to_numpy()]
         return pd.Series(taken, index=values.index, dtype=object)
@@ -286,7 +288,17 @@ def _number_key(value: object) -> str:
         return _binary64_key(int(value) < 0, _int_digits(int(value)), 0)
     if isinstance(value, Decimal):
         return _decimal_key(value)
-    return _text_key(cell_text(value))
+    return _text_key(cell_text(_key_ordered(value)))
+
+
+def _key_ordered(value: object) -> object:
+    """`value` with every mapping in key order, so equal mappings share one text."""
+    if isinstance(value, dict):
+        items = sorted(((k, _key_ordered(v)) for k, v in value.items()), key=lambda kv: repr(kv[0]))
+        return dict(items)
+    if isinstance(value, list | tuple):
+        return type(value)(_key_ordered(v) for v in value)
+    return value
 
 
 def _plain_digits(negative: bool, digits: str, exponent: int) -> str:
