@@ -15,10 +15,10 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from pandas.errors import OutOfBoundsDatetime
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
-from decoy_engine.execution import ExecutionError, run_pipeline
-from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
+from decoy_engine.execution import ExecutionError, PandasExecutionAdapter, run_pipeline
 from decoy_engine.execution.native._chunked_schema_rule import _safe_cast
 from decoy_engine.execution.native._dispatch import NativeRouteEvidence
 from decoy_engine.plan._errors import PlanCompileError
@@ -578,8 +578,8 @@ def test_values_categorical_runs_natively_and_matches_oracle_and_full_frame(
 
 
 # ---------------------------------------------------------------------------
-# PARQUET-CHUNKED-NULLABLE-INT S1: one cell per contract exception class, the
-# adapter rule, and a value-free `_safe_cast` message.
+# One cell per contract exception class, the adapter rule, and a value-free
+# `_safe_cast` message.
 # ---------------------------------------------------------------------------
 
 _E4_ROWS = 7
@@ -590,15 +590,8 @@ def _e4_source(name: str, values: list[Any], dtype: pa.DataType) -> pa.Table:
     return pa.table({"s": pa.array(letters, pa.string()), name: pa.array(values, dtype)})
 
 
-def _e4_run(src: pa.Table, name: str) -> tuple[list[pa.Table], list[NativeRouteEvidence]]:
-    chunks = split(src, 2)
-    evidence: list[NativeRouteEvidence] = []
-    out = _entry(make_config([redact("s"), passthrough(name)]), chunks, evidence)
-    return out, evidence
-
-
 def test_e4_nullable_integers_agree_with_the_oracle_on_every_chunk() -> None:
-    """(a) After UF-DOMAIN S1 the oracle writes an untouched column from the source, so a
+    """(a) The oracle writes an untouched column from the source, so a
     nullable integer is no longer rounded through float64 and the two entries agree."""
     n_vals = [None, 2**53 + 1, 5, None, 2**63 - 1, 7, None]
     u_vals = [2**64 - 1, None, 7, 2**63 + 5, None, 9, None]
@@ -635,8 +628,8 @@ def test_e4_timestamp_ns_minimum_agrees_with_the_oracle() -> None:
 
 
 def test_e4_list_of_int64_above_2_pow_53_agrees_with_the_oracle() -> None:
-    """(c) Characterization: green before and after UF-DOMAIN S1. It backs the contract
-    text, which lists no exception for nested integers."""
+    """(c) Characterization: the oracle already agreed here. It backs the contract text,
+    which lists no exception for nested integers."""
     values = [[2**53 + 1, None], None, [5], [], [2**63 - 1], None, [7]]
     src = _e4_source("l", values, pa.list_(pa.int64()))
     chunks = split(src, 2)
@@ -662,7 +655,9 @@ def test_e4_value_pandas_refuses_raises_on_the_oracle_and_is_exact_on_the_entry(
     src = _e4_source("p", values, dtype)
     chunks = split(src, 2)
     config = make_config([redact("s"), passthrough("p")])
-    with pytest.raises(Exception) as refused:
+    with pytest.raises(
+        (pa.ArrowInvalid, pa.ArrowTypeError, ValueError, OverflowError, OutOfBoundsDatetime)
+    ) as refused:
         _oracle(config, chunks)
     assert not isinstance(refused.value, ExecutionError)
     got = _entry(config, chunks)

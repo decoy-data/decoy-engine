@@ -950,8 +950,9 @@ only this site moves.
   entries. A value pandas refuses to convert, such as a `time64[ns]` with nanoseconds or a `date32`
   outside pandas' range, raises on the oracle and comes back exact here; a read passthrough
   column that pandas refuses raises `chunked_passthrough_value_unrepresentable`. An adapter that
-  is not exactly `PandasExecutionAdapter`, a subclass included, runs the oracle leg with
-  `reroute_reason="adapter_requested"` and carries nothing. The oracle types each chunk on its own,
+  is not exactly `PandasExecutionAdapter`, a subclass included, runs the oracle leg and carries
+  nothing (`reroute_reason="adapter_requested"` when the table would otherwise run natively;
+  an earlier reason such as `when_predicate_not_native:<col>` wins otherwise). The oracle types each chunk on its own,
   so an all-null masked chunk can be `null` there), one output type per column per call (`string` for hash, truncate,
   string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
   that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see

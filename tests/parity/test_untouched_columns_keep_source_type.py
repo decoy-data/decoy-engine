@@ -625,7 +625,8 @@ def test_unchanged_parent_key_is_carried_from_the_source(case: str, route: str) 
     assert _same_cells(out.column("k"), parent.column("k"))
 
 
-# PARQUET-CHUNKED-NULLABLE-INT S1: nullable integer columns on the full-frame and sequential routes.
+# Nullable integer columns on the full-frame and sequential routes. The E8 and E10 plans carry
+# no relationship edge (an empty graph), so they pin the column type only, not FK handling.
 
 
 def _single_table_shape(column: str, array: pa.Array) -> tuple[s.Shape, pa.Table]:
@@ -669,7 +670,7 @@ def test_e7_when_predicate_reading_a_nullable_integer_keeps_it_exact(tmp_path: P
     out = run_pipeline(
         config,
         {"t": source},
-        engine_version="uf-domain-s1",
+        engine_version="test",
         execution_mode="full_frame",
         auto_chunk=False,
         key_provider=key_provider(),
