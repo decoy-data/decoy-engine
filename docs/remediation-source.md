@@ -1,6 +1,6 @@
 # decoy-engine — Remediation Source Document
 
-**Status:** Source-of-truth findings register. Downstream implementation plans are built FROM this document; it does not itself contain per-step implementation specs.
+**Status:** record (historical). This was the findings register for the June 2026 baseline. It no longer tracks current work. Current engine work is tracked as rows in the one roadmap, `docs/ROADMAP.md` in the CLI repo (https://github.com/decoy-data/decoy/blob/main/docs/ROADMAP.md). The latest code-quality findings are in [records/2026-11-25-thermo-nuclear-remediation.md](records/2026-11-25-thermo-nuclear-remediation.md). F1 below (no compatibility corpus) is out of date: the corpus is in `tests/integration/compat_corpus/`.
 **Repo:** `/home/cam/vscode/decoy-engine`
 **Date compiled:** 2026-06-18
 **Provenance:** LLM council review (7 agents) → every actionable claim independently re-verified against the real code by 3 Explore passes. Findings below carry verified `file:line` evidence. Where the council overstated a claim, the correction is recorded inline.
