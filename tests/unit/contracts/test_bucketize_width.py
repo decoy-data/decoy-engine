@@ -8,6 +8,8 @@ import pytest
 
 from decoy_engine.contracts.bucketize_width import (
     BUCKETIZE_PRESETS,
+    is_oversized_integer,
+    is_oversized_integer_width,
     resolve_bucketize_width,
     unresolvable_width_field,
 )
@@ -61,6 +63,41 @@ def test_the_field_that_leaves_the_width_unresolved(
     config: dict[str, Any], field: str | None
 ) -> None:
     assert unresolvable_width_field(config) == field
+
+
+@pytest.mark.parametrize(
+    ("raw", "oversized"),
+    [
+        (2**53 - 1, False),
+        (2**53, True),
+        (2**70, True),
+        (float(2**53), False),  # a float width never exits
+        (True, False),
+        ("9007199254740992", False),
+        (None, False),
+    ],
+)
+def test_oversized_integer_predicate_boundary(raw: Any, oversized: bool) -> None:
+    assert is_oversized_integer(raw) is oversized
+
+
+@pytest.mark.parametrize("width", [2**53 - 1, 2**53, float(2**53)])
+def test_each_caller_agrees_with_the_predicate(width: int | float) -> None:
+    """Resolver, decimal-deferral check and kernel all follow the one predicate at the boundary."""
+    import pyarrow as pa
+
+    from decoy_engine.kernel import bucketize_array
+
+    oversized = is_oversized_integer(width)
+    cfg = {"width": width}
+    assert (resolve_bucketize_width(cfg) is None) is oversized
+    assert is_oversized_integer_width(cfg) is oversized
+    assert is_oversized_integer_width({"preset": "by_decade", "width": width}) is False
+    if oversized:
+        with pytest.raises(ValueError, match="exact integer bound"):
+            bucketize_array(pa.array([1]), width, "lower")
+    else:
+        bucketize_array(pa.array([1]), width, "lower")
 
 
 def test_boundary_width_is_refused_by_every_entry_point() -> None:

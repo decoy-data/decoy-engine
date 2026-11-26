@@ -23,7 +23,11 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine._execution_error import ExecutionError
-from decoy_engine.contracts.bucketize_width import BUCKETIZE_FORMATS, EXACT_INT_BOUND
+from decoy_engine.contracts.bucketize_width import (
+    BUCKETIZE_FORMATS,
+    EXACT_INT_BOUND,
+    is_oversized_integer,
+)
 from decoy_engine.contracts.label_text import is_utf8_text
 from decoy_engine.kernel._scalar import passthrough_array
 
@@ -215,7 +219,7 @@ def bucketize_array(
     if fmt not in BUCKETIZE_FORMATS:
         raise ValueError("bucketize format is not one of lower, range, midpoint")
     is_int_width = isinstance(width, int) and not isinstance(width, bool)
-    if is_int_width and width >= EXACT_INT_BOUND:
+    if is_oversized_integer(width):
         raise ValueError("an integer bucketize width must be below the exact integer bound")
     f = _as_float64(array)
     present = _present(f)

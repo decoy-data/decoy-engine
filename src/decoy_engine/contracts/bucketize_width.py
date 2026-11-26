@@ -16,6 +16,7 @@ __all__ = [
     "BUCKETIZE_PRESETS",
     "EXACT_INT_BOUND",
     "MAX_EXACT_DECIMAL_WIDTH",
+    "is_oversized_integer",
     "is_oversized_integer_width",
     "resolve_bucketize_width",
     "unresolvable_width_field",
@@ -44,6 +45,11 @@ MAX_EXACT_DECIMAL_WIDTH = 10**15
 EXACT_INT_BOUND: int = 2**53
 
 
+def is_oversized_integer(raw: Any) -> bool:
+    """Whether ``raw`` is an integer (not a bool) at or above ``EXACT_INT_BOUND``."""
+    return isinstance(raw, int) and not isinstance(raw, bool) and raw >= EXACT_INT_BOUND
+
+
 def resolve_bucketize_width(provider_config: Mapping[str, Any]) -> int | float | None:
     """The effective bucket width, or None when the config names none.
 
@@ -58,19 +64,15 @@ def resolve_bucketize_width(provider_config: Mapping[str, Any]) -> int | float |
     raw = provider_config.get("width")
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None
-    if isinstance(raw, int) and raw >= EXACT_INT_BOUND:
+    if is_oversized_integer(raw):
         return None
     return raw if raw > 0 else None
 
 
 def is_oversized_integer_width(provider_config: Mapping[str, Any]) -> bool:
     """Whether the width is a positive integer the resolver refuses only for its size."""
-    raw = provider_config.get("width")
-    return (
-        provider_config.get("preset") is None
-        and isinstance(raw, int)
-        and not isinstance(raw, bool)
-        and raw >= EXACT_INT_BOUND
+    return provider_config.get("preset") is None and is_oversized_integer(
+        provider_config.get("width")
     )
 
 
