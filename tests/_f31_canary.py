@@ -88,6 +88,20 @@ def assert_known_leak(
     raise AssertionError(f"known leak changed shape: expected {list(expected)}, got {list(leaked)}")
 
 
+def assert_extra_surface_is_flagged(check: Callable[[], None]) -> None:
+    """`check` runs an `assert_known_leak` cell whose marker also reached a surface beyond the
+    record. It must fail on that surface: neither an xfail nor a pass may hide the new leak."""
+
+    def run() -> None:
+        try:
+            check()
+        except pytest.xfail.Exception:
+            pytest.fail("the cell xfailed although the marker reached a surface beyond the record")
+
+    with pytest.raises(AssertionError, match="beyond the known leak"):
+        run()
+
+
 def assert_path_ran(seen: Observed, *, code: str | None, exc_name: str | None = None) -> None:
     """Fail, not assert, when the intended failure path did not run: `assert_known_leak` only
     xfails on an exact surface match, so a cell that never reached its site cannot pass as a

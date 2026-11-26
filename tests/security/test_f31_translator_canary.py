@@ -26,6 +26,7 @@ from tests._exception_surfaces import rendered_surfaces
 from tests._f31_canary import (
     CANARY,
     EXC_MESSAGE_AND_ATTR_SURFACES,
+    assert_extra_surface_is_flagged,
     assert_known_leak,
     assert_no_canary,
 )
@@ -175,14 +176,7 @@ def test_detail_copy_cell_fails_when_the_marker_reaches_another_surface(
     """The marker also stored in the error's records is a new leak, not the recorded one."""
     translated = _copied_detail(module, translator, code, expected)
     translated.records = [CANARY]  # type: ignore[attr-defined]
-    try:
-        _check_detail_copy(translated, _F3)
-    except pytest.xfail.Exception:
-        pytest.fail("the cell xfailed although the marker reached the error's records")
-    except AssertionError as err:
-        assert "beyond the known leak" in str(err)
-    else:
-        pytest.fail("the cell passed although the marker reached the error's records")
+    assert_extra_surface_is_flagged(lambda: _check_detail_copy(translated, _F3))
 
 
 def _text_mask_translator() -> Callable[[Any, str], BaseException]:
@@ -225,16 +219,11 @@ def test_text_mask_translator_copies_the_message_it_is_given() -> None:
 def test_message_copy_cell_fails_when_the_marker_reaches_another_surface() -> None:
     translated = _copied_message()
     translated.records = [CANARY]  # type: ignore[attr-defined]
-    try:
-        assert_known_leak(
+    assert_extra_surface_is_flagged(
+        lambda: assert_known_leak(
             rendered_surfaces(translated), EXC_MESSAGE_AND_ATTR_SURFACES, _MESSAGE_COPY
         )
-    except pytest.xfail.Exception:
-        pytest.fail("the cell xfailed although the marker reached the error's records")
-    except AssertionError as err:
-        assert "beyond the known leak" in str(err)
-    else:
-        pytest.fail("the cell passed although the marker reached the error's records")
+    )
 
 
 def test_real_fpe_error_reaches_the_text_mask_translator_value_free() -> None:

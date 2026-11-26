@@ -37,7 +37,9 @@ from decoy_engine.profiling.scan_set import scan_sources
 from decoy_engine.unmask import unmask_pipeline
 from tests._f31_canary import (
     CANARY,
+    EXC_MESSAGE_AND_ATTR_SURFACES,
     Observed,
+    assert_extra_surface_is_flagged,
     assert_known_leak,
     assert_no_canary,
     assert_path_ran,
@@ -367,15 +369,7 @@ _LARK_LEAK = "AE5 (#810) rewrites _lark_parser.py:241 to a value-free message"
 # (id, builder, expected exception code, expected exception class name, extra path check, marks)
 # Surfaces observed carrying the marker on main, per cell. The cell xfails only when exactly these
 # surfaces leak; a further surface fails hard (`assert_known_leak`).
-_EXC_SURFACES = (
-    "exc.args",
-    "exc.attrs",
-    "exc.chain",
-    "exc.logged",
-    "exc.repr",
-    "exc.str",
-    "exc.traceback",
-)
+_EXC_SURFACES = EXC_MESSAGE_AND_ATTR_SURFACES
 _KNOWN_LEAKS: dict[str, tuple[str, ...]] = {
     "expression_bad_string_escape": _EXC_SURFACES,
     "expression_bad_string_escape_run": _EXC_SURFACES,
@@ -492,14 +486,7 @@ def test_extra_surface_leak_fails_a_known_leak_cell() -> None:
     """A known-leak cell must not hide a new leak: the marker on a surface beyond the record fails."""
     surfaces = {name: CANARY for name in _EXC_SURFACES}
     surfaces["log.file"] = CANARY
-    try:
-        assert_known_leak(surfaces, _EXC_SURFACES, _LARK_LEAK)
-    except pytest.xfail.Exception:
-        pytest.fail("the cell xfailed although the marker reached a surface beyond the record")
-    except AssertionError as err:
-        assert "beyond the known leak" in str(err)
-    else:
-        pytest.fail("the cell passed although the marker reached a surface beyond the record")
+    assert_extra_surface_is_flagged(lambda: assert_known_leak(surfaces, _EXC_SURFACES, _LARK_LEAK))
 
 
 def test_expression_validate_ran_and_wrote_nothing(

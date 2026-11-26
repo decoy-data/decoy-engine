@@ -31,6 +31,7 @@ from tests._f31_canary import (
     CANARY,
     EXC_MESSAGE_SURFACES,
     ROW_CANARY,
+    assert_extra_surface_is_flagged,
     assert_known_leak,
     assert_no_canary,
 )
@@ -336,14 +337,7 @@ def test_native_leak_cell_fails_when_the_marker_reaches_another_surface(
     """The marker also stored in an exception attribute is a new leak, not the recorded one."""
     error = _raised(raiser, exc_type, prefix)
     error.stored = CANARY  # type: ignore[attr-defined]
-    try:
-        _check_input_text(error, leak)
-    except pytest.xfail.Exception:
-        pytest.fail("the cell xfailed although the marker reached an attribute of the error")
-    except AssertionError as err:
-        assert "beyond the known leak" in str(err)
-    else:
-        pytest.fail("the cell passed although the marker reached an attribute of the error")
+    assert_extra_surface_is_flagged(lambda: _check_input_text(error, leak))
 
 
 @pytest.mark.parametrize(("raiser", "exc_type", "prefix"), _ROW_PLANTED)
