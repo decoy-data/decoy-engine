@@ -36,7 +36,7 @@ TRIAGED: dict[tuple[str, str], str] = {
         "the Breaking bullet on bucketize with a float width on an int64[pyarrow] column covers it; the call raised before and now labels"
     ),
     ("0.28.5", "The Rust text_redact detector now declines a cell whose byte"): (
-        "a decline is not a failure: every released core sends a declined cell to the Python path; above 4 GiB the fallback can redact a match the old kernel missed, a correction"
+        "a decline is not a failure: every released core sends a declined cell to the Python path; at or above 4 GiB the fallback can redact a match the old kernel missed, a correction"
     ),
     ("0.28.5", "Test tooling only; no engine behavior changes. `scripts/dev/"): (
         "test tooling only: the checked diff is a repo change, not a consumer input"
@@ -53,8 +53,11 @@ TRIAGED: dict[tuple[str, str], str] = {
     ("0.28.5", "The no-FK capacity check now runs at the three points where "): (
         "the Breaking bullet on nonfk_full_frame_capacity_exceeded in three more places covers it"
     ),
+    ("0.28.5", "The route narrative in `docs/execution-backends.md` now cove"): (
+        "docs and a bench script only; the refusal it names is the one the Breaking bullet on nonfk_full_frame_capacity_exceeded covers"
+    ),
     ("0.28.5", "`split_subset_config` now checks the `subset:` edge directio"): (
-        "the Breaking bullet on split_subset_config under subset_request=skip covers it"
+        "the Breaking bullet on run_pipeline with subset_request=skip covers it"
     ),
     ("0.28.5", "A `faker` column with `provider: uuid`, `random_int_range` o"): (
         "an addition: these providers were refused at compile and now run; the new refusals cover arguments no earlier config could run"

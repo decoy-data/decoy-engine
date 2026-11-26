@@ -18,7 +18,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - `ValidatorFinding` gains `failing_row_count` and lists at most `FINDING_INDEX_CAP` (10,000) row positions in `failing_row_indices` (all of them under quarantine `validation_fail`); `ValidationReport` gains `results` and its `elapsed_ms` is the time spent folding rows; `parent_window_respected` parses each date column with the format of its first value that pandas would use, and a parent table without its key or window column raises `ValidatorStateError` instead of a pyarrow `KeyError`.
 - a job with no foreign keys under `auto` is now refused with `nonfk_full_frame_capacity_exceeded` in three more places where it used to start and be killed for memory: before a lazy Parquet source is read whole, before a resident table is copied for its transforms, and after a mixed generate and mask job declines to the full-frame route.
 - the physical `plan_hash` and `activation_hash` of every unified-slice job change once, because the provider capability matrix gains a `draw` field and the registry fingerprint hashes it. `pipeline_config_hash` does not change, and no output value changes.
-- `split_subset_config` with `subset_request="skip"` now refuses an invalid `subset:` edge (the same codes as when the subset stage runs). 0.28.4 skipped the check under `skip`, so a config that ran there can now fail at the split.
+- `run_pipeline` with `subset_request="skip"` now refuses an invalid `subset:` edge at `split_subset_config` (the same codes as when the subset stage runs). 0.28.4 skipped the check under `skip`, so a config that ran there can now fail at the split.
 - A temp directory that cannot take a new directory now stops the run with `runtime/scratch_root_unusable`. Before, the engine moved to another temp directory. `fileaccess.scratch_root()` chooses the directory from the first non-empty of `TMPDIR`, `TEMP` and `TMP`.
 
 ### Changed (Companion check-digit arithmetic, FPE-CHECKSUM-NATIVE S2a, 2026-11-25)
@@ -37,7 +37,7 @@ The range exit uses one function, `kernel.integer_width_exit_mask`, and one limi
 
 ### Fixed (native text_redact detector, TEXT-REDACT-RUST-SPLICE S0, 2026-11-24)
 
-The Rust text_redact detector now declines a cell whose byte length does not fit its 32-bit offsets. `text_redact_candidates` and `text_mask_detect_splice` return their usual `None` decline for such a cell, and every released core already sends a declined cell to the Python path. Before this, a cell longer than 4 GiB could wrap an end offset and leave part of a match unredacted. The release wheel smoke test now also refuses a wheel built with the test-only `test-detector-offset-limit` feature.
+The Rust text_redact detector now declines a cell whose byte length does not fit its 32-bit offsets. `text_redact_candidates` and `text_mask_detect_splice` return their usual `None` decline for such a cell, and every released core already sends a declined cell to the Python path. Before this, a cell of 4 GiB or more could wrap an end offset and leave part of a match unredacted. The release wheel smoke test now also refuses a wheel built with the test-only `test-detector-offset-limit` feature.
 
 ### Changed (one scratch root and temp budget, F25 G6-1, 2026-11-24)
 
@@ -103,6 +103,17 @@ ceiling runs as before.
 
 `execution_mode` other than `auto` and any job with a foreign key are not priced. The CLI's own
 whole read of a source is not covered here.
+
+### Added (end-to-end proof and docs for the non-FK memory guard, NONFK-OOM S5, 2026-11-25)
+
+The route narrative in `docs/execution-backends.md` now covers large jobs with no foreign keys: the
+three routes, the resident-fit verdict, what "before the read" means for each entry point, and that
+`--max-memory` does not move the memory ceiling. The bench script
+`scripts/bench-auto-chunk/bench_nonfk_fallthrough.py` now records a refused run and an end-to-end
+`decoy run` under a memory cap. The end-to-end run writes only into a fresh subdirectory of
+`--workdir`, only the registered capacity refusal counts as a refusal, and the lower bound binds
+full-frame trials only (`--phase after` expects W-P on the chunked route).
+No engine behavior changes in this slice.
 
 ### Changed (subset edge directions are checked in the split, VALIDATE-SUBSET-EDGES, 2026-11-24)
 
