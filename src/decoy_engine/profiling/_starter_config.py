@@ -39,7 +39,13 @@ from decoy_engine.config import (
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
 from decoy_engine.detection.types import DetectorSource, ModelRef
 from decoy_engine.profiling import recommendations
-from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
+from decoy_engine.profiling._model_pass import ModelHit
+from decoy_engine.profiling._starter_inference import (
+    StarterDecision,
+    confident_matches,
+    detected_date_config,
+    infer_starter_strategy,
+)
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
 from decoy_engine.safe_output import ConfigProblem
 
@@ -58,6 +64,9 @@ _KEY_STRATEGY = "hash"
 _CHECK_NAMESPACE = "starter-check"
 _TARGETS: TypeAdapter[dict[str, TargetDescriptor]] = TypeAdapter(dict[str, TargetDescriptor])
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+# A note is one line: model and detector ids come from a pack file, so any control character in
+# one is folded to a space before it can reach a YAML comment or a `.decoy` note.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 _KEY_NOTE = (
     "Key column of a declared relationship. hash with one namespace keeps the join after "
@@ -70,6 +79,9 @@ _PLACEHOLDER_NOTE = (
 _LEADING_ZERO_NOTE = (
     "{count} sampled values in this column start with 0. The scan read it as a number, but "
     "`decoy run` reads CSV as text, so check that the strategy keeps leading zeros."
+)
+_HEADER_SUSPECT_TEXT = (
+    "A scanned table looks like it has no header row; its column names may be data."
 )
 _CLOUD_NOTE = (
     "`decoy run` does not read or write S3 or GCS until the CLI-CLOUD row lands. The target "
@@ -88,7 +100,9 @@ class ColumnSuggestion:
     Identity is `(table, column, source, detector_id)`; `detector_id` is empty when no detector
     decided (the fallback, or the integer-key rule). `model` and `band` are for a classifier
     suggestion and stay `None` for a regex one. `entry` is the column entry `starter_config`
-    built, and `live` says it was written into the config. Only a regex suggestion is live.
+    built; every entry is written to the config. `live` says a deterministic rule decided it
+    (regex, declared key, integer-unique hash, fallback), and is false when a model chose the
+    entry. Only a regex suggestion is live. `decided_by` names the rule.
     """
 
     table: str
@@ -106,6 +120,18 @@ class ColumnSuggestion:
     confidence_bucket: str | None = None
     entry: Mapping[str, Any] = field(default_factory=_empty_entry)
     live: bool = True
+
+    @property
+    def decided_by(
+        self,
+    ) -> Literal["declared_key", "regex", "classifier", "integer_key", "fallback"]:
+        if self.is_key:
+            return "declared_key"
+        if self.source == "classifier":
+            return "classifier"
+        if self.detector_id:
+            return "regex"
+        return "integer_key" if self.strategy == _KEY_STRATEGY else "fallback"
 
     def __post_init__(self) -> None:
         # `strategy`, `namespace` and `entry` describe one choice; a confirm matches on one and
@@ -153,6 +179,7 @@ def starter_config(
     """
     if baseline_sha256 is not None and baseline_path is None:
         raise ValueError("baseline_sha256 needs baseline_path")
+    _refuse_header_suspect(scan)
     _check_relationship_shapes(scan, relationships)
     keys = declared_key_namespaces(relationships)
     allocated = _allocate_targets(scan, targets or {})
@@ -168,10 +195,11 @@ def starter_config(
         for stats in table.profile.fields:
             decision = infer_starter_strategy(stats)
             key = keys.get((table.name, stats.name))
-            suggestion = _suggestion(table.name, stats.name, decision, key)
+            hits = table.model_hits.get(stats.name, ())
+            suggestion, lead = _decide(table.name, stats, decision, key, hits)
             suggestions.append(suggestion)
             columns.append(dict(suggestion.entry))
-            notes[(table.name, stats.name)] = _note(table, stats.name, decision, key)
+            notes[(table.name, stats.name)] = _note(table, stats, lead, key, hits)
         tables.append({"name": table.name, "columns": columns})
 
     config: dict[str, Any] = {
@@ -225,15 +253,48 @@ def declared_key_namespaces(
     return found
 
 
-def _suggestion(
-    table: str, column: str, decision: StarterDecision, key: tuple[str, bool] | None
-) -> ColumnSuggestion:
+def _refuse_header_suspect(scan: ScanSet) -> None:
+    """Refuse a scan whose first row the scan guard read as data: its column names may be values.
+
+    The message names no table, column or path; the location is the table's position.
+    """
+    flagged = reasons.warning.SCAN_HEADER_SUSPECT.spec.ref
+    problems = [
+        ConfigProblem(
+            str(reasons.config.STARTER_HEADER_SUSPECT), f"tables[{position}]", _HEADER_SUSPECT_TEXT
+        )
+        for position, table in enumerate(scan.tables)
+        if flagged in table.warnings
+    ]
+    if problems:
+        raise PipelineConfigError.from_problems(problems, prefix="starter config input is invalid")
+
+
+def _decide(
+    table: str,
+    stats: Any,
+    decision: StarterDecision,
+    key: tuple[str, bool] | None,
+    hits: Sequence[ModelHit],
+) -> tuple[ColumnSuggestion, str]:
+    """The suggestion for one column and the lead sentence of its note.
+
+    Order: a declared key, then a confident regex match, then the first high-band classifier hit
+    whose detector has a starter entry, then the regex fallback. NER hits and review-band hits
+    add evidence to the note only.
+    """
     if key is not None:
-        bare = ColumnSuggestion(table, column, _KEY_STRATEGY, namespace=key[0], is_key=True)
-        return dataclasses.replace(bare, entry=MappingProxyType(_entry(bare)))
+        bare = ColumnSuggestion(table, stats.name, _KEY_STRATEGY, namespace=key[0], is_key=True)
+        lead = _KEY_NOTE.format(suggested=decision.strategy)
+        return dataclasses.replace(bare, entry=MappingProxyType(_entry(bare))), lead
+    if not confident_matches(stats):
+        for hit in hits:
+            chosen = _classifier_suggestion(table, stats, hit)
+            if chosen is not None:
+                return chosen
     bare = ColumnSuggestion(
         table,
-        column,
+        stats.name,
         decision.strategy,
         provider=decision.provider,
         provider_config=decision.provider_config,
@@ -241,8 +302,61 @@ def _suggestion(
         detector_id=decision.detector_id,
         confidence_bucket=decision.confidence_bucket,
     )
-    named = dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare
-    return dataclasses.replace(named, entry=MappingProxyType(_entry(named)))
+    named = dataclasses.replace(bare, namespace=stats.name) if _needs_namespace(bare) else bare
+    return dataclasses.replace(named, entry=MappingProxyType(_entry(named))), decision.review
+
+
+def _classifier_suggestion(
+    table: str, stats: Any, hit: ModelHit
+) -> tuple[ColumnSuggestion, str] | None:
+    """The suggestion a high-band classifier hit writes, or None when it writes nothing.
+
+    `hit.detector_id` is already the detector the label maps to (`_model_pass`), so it is used as
+    it is. A date detector needs a complete format from a regex match of the same detector, so
+    a column the scan could not read as one format stays `redact`.
+    """
+    if hit.source != "classifier" or hit.band != "high":
+        return None
+    choice = recommendations.starter_choice(hit.detector_id)
+    if choice is None:
+        return None
+    entry = detector_entry(
+        hit.detector_id,
+        stats.name,
+        date_format=_complete_date_format(stats, hit.detector_id, choice),
+    )
+    if entry is None:
+        return None
+    suggestion = ColumnSuggestion(
+        table,
+        stats.name,
+        entry["strategy"],
+        provider=entry.get("provider"),
+        provider_config=MappingProxyType(entry.get("provider_config", {})),
+        namespace=entry.get("namespace"),
+        source="classifier",
+        detector_id=hit.detector_id,
+        model=hit.model,
+        band="high",
+        entry=MappingProxyType(entry),
+        live=False,
+    )
+    return suggestion, choice.review
+
+
+def _complete_date_format(
+    stats: Any, detector_id: str, choice: recommendations.StarterChoice
+) -> str | None:
+    """The date format a regex match of `detector_id` read completely, or None."""
+    if not choice.detected_date_format:
+        return None
+    for match in getattr(stats, "detector_matches", None) or []:
+        if getattr(match, "detector_id", "") != detector_id:
+            continue
+        config = detected_date_config(choice, match)
+        if config is not None:
+            return str(config["date_format"])
+    return None
 
 
 def detector_entry(
@@ -327,20 +441,42 @@ def _entry(s: ColumnSuggestion) -> dict[str, Any]:
 
 def _note(
     table: TableScan,
-    column: str,
-    decision: StarterDecision,
+    stats: Any,
+    lead: str,
     key: tuple[str, bool] | None,
+    hits: Sequence[ModelHit],
 ) -> str:
+    parts = [lead]
     if key is None:
-        parts = [decision.review]
-    else:
-        parts = [_KEY_NOTE.format(suggested=decision.strategy)]
-        if key[1]:
-            parts.append(_PLACEHOLDER_NOTE)
-    zeros = table.leading_zero_counts.get(column)
+        evidence = _evidence(stats, hits)
+        if evidence:
+            parts.append(f"Model evidence: {evidence}.")
+    elif key[1]:
+        parts.append(_PLACEHOLDER_NOTE)
+    zeros = table.leading_zero_counts.get(stats.name)
     if zeros:
         parts.append(_LEADING_ZERO_NOTE.format(count=zeros))
     return " ".join(p for p in parts if p)
+
+
+def _evidence(stats: Any, hits: Sequence[ModelHit]) -> str:
+    """One line naming each model hit: ids, versions, bands and buckets, never a value.
+
+    A hit that names a detector other than the confident regex match says the regex was kept.
+    """
+    confident = confident_matches(stats)
+    regex_id = getattr(confident[0], "detector_id", "") if confident else ""
+    parts = []
+    for hit in hits:
+        qualifier = f"band {hit.band}" if hit.source == "classifier" else f"rate {hit.rate_bucket}"
+        model = f"{hit.source} {hit.model.id} {hit.model.version}"
+        if regex_id and hit.detector_id != regex_id:
+            parts.append(
+                f"{model} says {hit.detector_id} ({qualifier}), regex says {regex_id}; regex kept"
+            )
+        else:
+            parts.append(f"{model}: {hit.detector_id} ({qualifier})")
+    return " ".join(_CONTROL.sub(" ", "; ".join(parts)).split())
 
 
 def _check_relationship_shapes(scan: ScanSet, relationships: Sequence[Mapping[str, Any]]) -> None:
