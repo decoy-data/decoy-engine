@@ -269,3 +269,15 @@ fn accepted_rows_still_grow_the_piece_buffer_to_fit() {
     assert_eq!(mask(&got).iter().filter(|d| **d).count(), 0);
     assert!(rows(&got).iter().all(|r| r.as_deref() == Some("<X>")));
 }
+
+#[test]
+fn a_caller_ceiling_above_the_offset_domain_is_clamped() {
+    // The i32 offsets wrap past PIECE_BYTE_CEILING, so a usize::MAX caller must still cut there.
+    let edge = PIECE_BYTE_CEILING;
+    assert!(piece_has_room(edge - 2, 2, usize::MAX));
+    assert!(!piece_has_room(edge - 2, 3, usize::MAX));
+    assert!(!piece_has_room(edge, 1, usize::MAX));
+    assert!(!piece_has_room(usize::MAX, 1, usize::MAX));
+    assert!(piece_has_room(5, 5, 10));
+    assert!(!piece_has_room(5, 6, 10));
+}

@@ -7,6 +7,7 @@ Raw tests (AT-2, AT-3, AT-4, AT-8, AT-6 raw codes) call the compiled entry direc
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import types
 from collections.abc import Callable
@@ -37,6 +38,17 @@ try:
     _REAL: Any = importlib.import_module("decoy_engine_native._kernel")
 except Exception:  # companion absent
     _REAL = None
+
+
+def splice_export_gap(real: Any, ci: bool) -> bool:
+    """True when a loaded companion lacks the splice export where an older wheel is not allowed.
+
+    CI builds the companion from this tree, so a missing export there means the registration was
+    removed, and skipping would hide it. Outside CI an older installed wheel may legitimately
+    lack it, so the raw tests skip.
+    """
+    return ci and real is not None and not hasattr(real, "text_span_splice")
+
 
 NEEDS_SPLICE = pytest.mark.skipif(
     _REAL is None or not hasattr(_REAL, "text_span_splice"),
@@ -77,6 +89,24 @@ def _error_text(**kwargs: Any) -> str:
 
 
 # ── raw entry ──────────────────────────────────────────────────────────────────────────────
+
+
+class _FakeCompanion:
+    pass
+
+
+def test_a_fresh_wheel_without_the_splice_export_is_a_gap_in_ci_only() -> None:
+    old = _FakeCompanion()
+    assert splice_export_gap(old, ci=True) is True
+    assert splice_export_gap(old, ci=False) is False
+    assert splice_export_gap(None, ci=True) is False
+    new = _FakeCompanion()
+    new.text_span_splice = lambda *a, **k: None  # type: ignore[attr-defined]
+    assert splice_export_gap(new, ci=True) is False
+
+
+def test_the_built_companion_exports_text_span_splice_in_ci() -> None:
+    assert not splice_export_gap(_REAL, ci=bool(os.environ.get("CI")))
 
 
 @NEEDS_SPLICE

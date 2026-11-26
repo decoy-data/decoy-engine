@@ -159,8 +159,16 @@ impl PieceBuilder {
     }
 }
 
+/// True when `add` more bytes keep a piece holding `used` bytes within `ceiling`. The ceiling is
+/// clamped to `PIECE_BYTE_CEILING` here, in the one place every entry point reaches, because the
+/// piece offsets are i32 and a larger caller value would let them wrap.
+fn piece_has_room(used: usize, add: usize, ceiling: usize) -> bool {
+    used.checked_add(add)
+        .is_some_and(|n| n <= ceiling.min(PIECE_BYTE_CEILING))
+}
+
 /// Splice every row of `rows`, cutting a new piece before a row that would push the current
-/// piece past `ceiling` bytes. A row alone larger than `ceiling` takes its own piece; one larger
+/// piece past `ceiling` bytes (capped at `PIECE_BYTE_CEILING`). A row alone larger than `ceiling` takes its own piece; one larger
 /// than the real offset domain is a fixed error. Always returns at least one piece.
 pub fn splice_rows<'a, I>(
     rows: I,
@@ -198,11 +206,7 @@ where
             CellOutcome::TooLarge => return Err(SpliceError::OutputInvalid),
             CellOutcome::Written => {}
         }
-        let fits = current
-            .data
-            .len()
-            .checked_add(scratch.len())
-            .is_some_and(|n| n <= ceiling);
+        let fits = piece_has_room(current.data.len(), scratch.len(), ceiling);
         if !fits && current.rows() > 0 && !scratch.is_empty() {
             let full = std::mem::replace(&mut current, PieceBuilder::new());
             pieces.push(full.finish()?);
