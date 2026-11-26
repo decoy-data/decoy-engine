@@ -1177,6 +1177,18 @@ only this site moves.
   before any output exists if the frame no longer holds the source's rows. A carried column keeps
   the pandas dtype hint its source named.
   The earlier output of those routes changes for the lossy types named above.
+  ROUTE-OUTPUT-CONTRACT, large non-FK tables (NONFK-OOM S2, S3 and S5, 2026-11-20 to 2026-11-25):
+  under `auto`, a large non-FK table whose only non-chunk-stable columns are unread passthrough
+  columns, or masked `hash`, `redact` or deterministic `faker` columns of an integer-with-nulls,
+  decimal or binary type, takes the chunked lane instead of the full-frame route. The output type of
+  those columns on a large table is now exact: `int64` for an integer with nulls above 2^53,
+  the declared `decimal128(p, s)`, the source dictionary index width, and the source binary, list,
+  struct and map types. The other columns keep their values. A table's output type therefore
+  depends on its size for these columns, until the routes converge. With
+  `chunked_dispatcher_enabled=False` the full-frame types return. Also under `auto`, a no-FK job
+  that stays on the full-frame route and cannot fit the host or cgroup memory ceiling is refused
+  with `runtime/nonfk_full_frame_capacity_exceeded` (a capacity code, `decoy run` exit 5) before
+  output opens, in place of an out-of-memory kill. No frozen artifact shape changes.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
   that would auto-chunk alone dispatches on the same lane, so the auto-chunk shape above now
