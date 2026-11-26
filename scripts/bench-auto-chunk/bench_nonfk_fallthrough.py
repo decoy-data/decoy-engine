@@ -472,8 +472,8 @@ def drive(args: argparse.Namespace) -> int:
                 cell["outcome_failures"] = outcome_failures(
                     warmups, trials, workload, args.phase, args.cgroup_bytes
                 )
-                refused = [t for t in trials if t["exit_status"] == 0 and t.get("refusal")]
-                ok = [t for t in trials if t["exit_status"] == 0 and not t.get("refusal")]
+                refused = [t for t in trials if trial_outcome(t, args.cgroup_bytes) == "refused"]
+                ok = [t for t in trials if trial_outcome(t, args.cgroup_bytes) == "ok"]
                 cell["trials"] = trials
                 cell["refused"] = len(refused)
                 if refused:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 from pathlib import Path
 from typing import Any
 
@@ -308,3 +309,24 @@ def test_drive_w_p_after_fails_when_no_round_was_measured(
         workload="W-P", phase="after", warmup=1, rounds=0,
     )  # fmt: skip
     assert rc != 0
+
+
+def test_report_summary_groups_trials_through_trial_outcome(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The report's refused and ok groups follow `trial_outcome`, the verdict's classifier."""
+    real = bench.trial_outcome
+    monkeypatch.setattr(
+        bench,
+        "trial_outcome",
+        lambda t, cg: "ok" if t.get("counts_as_ok") else real(t, cg),
+    )
+    recorded = {**_ok(False), **_refused(), "counts_as_ok": True}
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [recorded, _refused()],
+        workload="W-A", phase="after", warmup=0, rounds=2,
+    )  # fmt: skip
+    cell = json.loads((tmp_path / "out.json").read_text())["cells"][0]
+    assert rc == 0
+    assert cell["refused"] == 1
+    assert len(cell["peak_bytes"]) == 1
