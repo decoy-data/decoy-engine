@@ -333,6 +333,15 @@ def test_seed_fires(name: str) -> None:
     assert rule in rules, rules
 
 
+def test_plan_compile_error_message_is_read_from_the_third_positional() -> None:
+    # The path argument is already refused in this seed, so only the digest shows which node was read as the message.
+    def digests(v: str) -> set[str]:
+        body = f"def f(v, w):\n    raise_bare(PlanCompileError('c', None, f'{{{v}}}'))\n"
+        return {f.digest for f in scan.scan_source(ZERO, IMPORTS + body, zero=True)}
+
+    assert digests("v") != digests("w")
+
+
 @pytest.mark.parametrize("name", sorted(MATERIALIZER_CALLS))
 def test_every_materializer_is_flagged_outside_a_read_callable(name: str) -> None:
     body = f"def f(t, b, h):\n    return {MATERIALIZER_CALLS[name]}\n"
