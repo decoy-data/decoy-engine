@@ -34,8 +34,8 @@ __all__ = [
     "output_schema",
     "output_table",
     "safe_error_type",
-    "scan_locator",
     "sanitized_schema_metadata",
+    "scan_locator",
     "validation_problems",
     "yaml_error_text",
 ]
