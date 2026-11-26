@@ -1,0 +1,158 @@
+qualified_name,reached_via,reason,category
+decoy_engine._progress_events._V1Fields,PhaseEvent,PhaseEvent inherits _V1Fields.,progress-event-base
+decoy_engine._value_free.SharedRules,decoy_engine.profiling._scan_core._TableCoreRules,_TableCoreRules inherits SharedRules.,validation-base
+decoy_engine._value_free.WriteRules,decoy_engine.profiling._scan_core._WarningRules,_WarningRules inherits WriteRules.,validation-base
+decoy_engine.config._delivery.DeliveryConfig,PipelineConfig,PipelineConfig.delivery has DeliveryConfig in its field type.,config-model
+decoy_engine.config._fixed_width.FixedWidthColumn,decoy_engine.config._fixed_width.FixedWidthLayout,FixedWidthLayout.columns has FixedWidthColumn in its field type.,config-model
+decoy_engine.config._global_settings.DpGenerateSettings,decoy_engine.config._global_settings.GlobalSettings,GlobalSettings.dp has DpGenerateSettings in its field type.,config-model
+decoy_engine.config._global_settings.GlobalSettings,PipelineConfig,PipelineConfig.global_settings has GlobalSettings in its field type.,config-model
+decoy_engine.config._namespaces.NamespaceConfig,PipelineConfig,PipelineConfig.namespaces has NamespaceConfig in its field type.,config-model
+decoy_engine.config._post_scan.DistributionCheck,decoy_engine.config._post_scan.PostScanConfig,PostScanConfig.distribution has DistributionCheck in its field type.,config-model
+decoy_engine.config._post_scan.PostScanConfig,PipelineConfig,PipelineConfig.post_scan has PostScanConfig in its field type.,config-model
+decoy_engine.config._relationships.RelationshipConfig,PipelineConfig,PipelineConfig.relationships has RelationshipConfig in its field type.,config-model
+decoy_engine.config._relationships.RelationshipEnd,decoy_engine.config._relationships.RelationshipConfig,RelationshipConfig.parent has RelationshipEnd in its field type.,config-model
+decoy_engine.config._scan_baseline.ScanBaselineConfig,PipelineConfig,PipelineConfig.scan_baseline has ScanBaselineConfig in its field type.,config-model
+decoy_engine.config._sources.FileSource,PipelineConfig,PipelineConfig reaches FileSource through the configuration schema.,config-model
+decoy_engine.config._sources.GCSSource,PipelineConfig,PipelineConfig reaches GCSSource through the configuration schema.,config-model
+decoy_engine.config._sources.S3Source,PipelineConfig,PipelineConfig reaches S3Source through the configuration schema.,config-model
+decoy_engine.config._subset.SubsetBudgetConfig,decoy_engine.config._subset.SubsetConfig,SubsetConfig.budget has SubsetBudgetConfig in its field type.,config-model
+decoy_engine.config._subset.SubsetConfig,PipelineConfig,PipelineConfig.subset has SubsetConfig in its field type.,config-model
+decoy_engine.config._subset.SubsetPredicateConfig,decoy_engine.config._subset.SubsetSeedConfig,SubsetSeedConfig.predicates has SubsetPredicateConfig in its field type.,config-model
+decoy_engine.config._subset.SubsetSeedConfig,decoy_engine.config._subset.SubsetConfig,SubsetConfig.seeds has SubsetSeedConfig in its field type.,config-model
+decoy_engine.config._tables.ColumnConfig,decoy_engine.config._tables.TableConfig,TableConfig.columns has ColumnConfig in its field type.,config-model
+decoy_engine.config._tables.TableConfig,PipelineConfig,PipelineConfig.tables has TableConfig in its field type.,config-model
+decoy_engine.config._targets.FileTarget,PipelineConfig,PipelineConfig reaches FileTarget through the configuration schema.,config-model
+decoy_engine.config._targets.GCSTarget,PipelineConfig,PipelineConfig reaches GCSTarget through the configuration schema.,config-model
+decoy_engine.config._targets.S3Target,PipelineConfig,PipelineConfig reaches S3Target through the configuration schema.,config-model
+decoy_engine.config._transforms.DedupeOp,decoy_engine.config._tables.TableConfig,TableConfig reaches DedupeOp through the configuration schema.,config-model
+decoy_engine.config._transforms.DeriveOp,decoy_engine.config._tables.TableConfig,TableConfig reaches DeriveOp through the configuration schema.,config-model
+decoy_engine.config._transforms.DropColumnOp,decoy_engine.config._tables.TableConfig,TableConfig reaches DropColumnOp through the configuration schema.,config-model
+decoy_engine.config._transforms.FilterOp,decoy_engine.config._tables.TableConfig,TableConfig reaches FilterOp through the configuration schema.,config-model
+decoy_engine.config._transforms.LimitOp,decoy_engine.config._tables.TableConfig,TableConfig reaches LimitOp through the configuration schema.,config-model
+decoy_engine.config._transforms.SortOp,decoy_engine.config._tables.TableConfig,TableConfig reaches SortOp through the configuration schema.,config-model
+decoy_engine.config._validators.QuarantineConfig,PipelineConfig,PipelineConfig.quarantine has QuarantineConfig in its field type.,config-model
+decoy_engine.config._validators.ValidatorEntry,PipelineConfig,PipelineConfig.validators has ValidatorEntry in its field type.,config-model
+decoy_engine.contracts.column_shape.ColumnShape,decoy_engine.plan._types.PlanColumnShape,PlanColumnShape.shape has ColumnShape in its field type.,column-shape
+decoy_engine.contracts.column_shape.SourceFacts,compile_plan,compile_plan accepts SourceFacts through its sources parameter.,column-shape
+decoy_engine.contracts.declared_casting.ProtectedQuarantineConfig,PipelineConfig,PipelineConfig.protected_quarantine has ProtectedQuarantineConfig in its field type.,config-model
+decoy_engine.contracts.strategy_requirements.StrategyRequirement,StrategyInfo,StrategyInfo.requirements has StrategyRequirement in its field type.,strategy-metadata
+decoy_engine.detection.ner.NerSurface,load_detectors,load_detectors accepts NerSurface through its surface parameter.,detector-mode
+decoy_engine.detection.types.DetectionSignal,FieldStats,FieldStats.detection_trail has DetectionSignal in its field type.,detector-result
+decoy_engine.detection.types.DetectorRun,ScanSet,ScanSet.detectors has DetectorRun in its field type.,detector-result
+decoy_engine.execution._row_errors.RowErrorRecord,ExecutionResult,ExecutionResult.row_errors has RowErrorRecord in its field type.,execution-result
+decoy_engine.execution._throughput_calibration.RuntimeBand,JobEstimate,JobEstimate.runtime has RuntimeBand in its field type.,estimate-band
+decoy_engine.execution._transactional_sink.TransactionalSink,run_pipeline,run_pipeline accepts TransactionalSink through its sink parameter.,engine-sink
+decoy_engine.execution.native._dispatch.NativeRouteEvidence,run_mask_chunked,run_mask_chunked accepts NativeRouteEvidence through its route_evidence_sink parameter.,native-route
+decoy_engine.execution.native._dispatch.NodeRouteRecord,decoy_engine.execution.native._dispatch.NativeRouteEvidence,NativeRouteEvidence.node_routes has NodeRouteRecord in its field type.,native-route
+decoy_engine.execution.native._route_decline_codes.RouteDeclineCode,decoy_engine.execution.native._route_decline_codes.RouteDeclineRecord,RouteDeclineRecord.code has RouteDeclineCode in its field type.,native-route
+decoy_engine.execution.native._route_decline_codes.RouteDeclineRecord,decoy_engine.execution.native._dispatch.NativeRouteEvidence,NativeRouteEvidence.decline_records has RouteDeclineRecord in its field type.,native-route
+decoy_engine.execution.pipeline._route_summary.RouteSummary,route_summary,route_summary returns RouteSummary or a result containing it.,route-summary
+decoy_engine.fileaccess._types.DirHandle,decoy_engine.fileaccess._types.FileAccess,FileAccess.open_dir returns DirHandle or a result containing it.,access-capability
+decoy_engine.fileaccess._types.EntryView,decoy_engine.fileaccess._types.DirHandle,DirHandle.entries returns EntryView or a result containing it.,access-capability
+decoy_engine.fileaccess._types.FileSeal,decoy_engine.fileaccess._types.StageDir,StageDir.claim_from returns FileSeal or a result containing it.,access-capability
+decoy_engine.fileaccess._types.StageDir,decoy_engine.fileaccess._types.OutputTxn,OutputTxn inherits StageDir.,access-capability
+decoy_engine.fileaccess._types.StageEntry,decoy_engine.fileaccess._types.StageDir,StageDir.entries returns StageEntry or a result containing it.,access-capability
+decoy_engine.generation.composite._address.CompositeAddress,composite_address,composite_address returns CompositeAddress or a result containing it.,composite-generation
+decoy_engine.generation.composite._bundle_pool.BundlePool,decoy_engine.generation.pool._cache.PoolCache,PoolCache.get returns BundlePool or a result containing it.,composite-generation
+decoy_engine.generation.composite._name_email.CompositeNameEmail,composite_name_email,composite_name_email returns CompositeNameEmail or a result containing it.,composite-generation
+decoy_engine.generation.pool._cache.CacheStats,decoy_engine.generation.pool._cache.PoolCache,PoolCache.stats returns CacheStats or a result containing it.,pool-cache
+decoy_engine.generation.pool._cache.PoolCache,ExecutionAdapter,ExecutionAdapter.run accepts PoolCache through its pool_cache parameter.,pool-cache
+decoy_engine.instrumentation.timing.StrategyTimingRecord,ExecutionResult,ExecutionResult.timings has StrategyTimingRecord in its field type.,execution-timing
+decoy_engine.plan._types.DeclaredCastingPlan,decoy_engine.plan._types.Plan,Plan.declared_casting has DeclaredCastingPlan in its field type.,compiled-plan
+decoy_engine.plan._types.GroupSeed,decoy_engine.plan._types.TableSeed,TableSeed.per_group has GroupSeed in its field type.,compiled-plan
+decoy_engine.plan._types.NamespaceBinding,decoy_engine.plan._types.Plan,Plan.namespaces has NamespaceBinding in its field type.,compiled-plan
+decoy_engine.plan._types.OrderingNode,decoy_engine.plan._types.Plan,Plan.ordering has OrderingNode in its field type.,compiled-plan
+decoy_engine.plan._types.PlanColumnShape,decoy_engine.plan._types.Plan,Plan.column_shapes has PlanColumnShape in its field type.,compiled-plan
+decoy_engine.plan._types.PlanDeclaredColumn,decoy_engine.plan._types.DeclaredCastingPlan,DeclaredCastingPlan.columns has PlanDeclaredColumn in its field type.,compiled-plan
+decoy_engine.plan._types.PlanRelationship,decoy_engine.plan._types.Plan,Plan.relationships has PlanRelationship in its field type.,compiled-plan
+decoy_engine.plan._types.PlanRelationshipEnd,decoy_engine.plan._types.PlanRelationship,PlanRelationship.parent has PlanRelationshipEnd in its field type.,compiled-plan
+decoy_engine.plan._types.TableSeed,decoy_engine.plan._types.SeedEnvelope,SeedEnvelope.per_table has TableSeed in its field type.,compiled-plan
+decoy_engine.profile._declared_columns.DeclarationInput,PreparedDeclaredSources,PreparedDeclaredSources.__init__ accepts DeclarationInput through its inputs parameter.,declaration-input
+decoy_engine.profile._readers.FooterFacts,decoy_engine.profile._readers.LazySource,LazySource.footer_facts returns FooterFacts or a result containing it.,lazy-reader
+decoy_engine.profile._readers.OpenedLazyBatches,decoy_engine.profile._readers.LazySource,LazySource.open_batches returns OpenedLazyBatches or a result containing it.,lazy-reader
+decoy_engine.profile._types.ColumnProfile,decoy_engine.profile._types.TableProfile,TableProfile.columns has ColumnProfile in its field type. The platform imports the distinct profiling.types.ColumnProfile.,profile-model
+decoy_engine.profile._types.PIIClass,decoy_engine.profile._types.ColumnProfile,ColumnProfile.pii_class has PIIClass in its field type.,profile-model
+decoy_engine.profile._types.Relationship,NamespaceRegistry,NamespaceRegistry.for_relationship accepts Relationship through its relationship parameter.,profile-model
+decoy_engine.profile._types.TableProfile,decoy_engine.profile._types.Profile,Profile.tables has TableProfile in its field type.,profile-model
+decoy_engine.profiling._scan_core.ChildFactsCore,decoy_engine.profiling._scan_core.RelationshipFactsCore,RelationshipFactsCore.children has ChildFactsCore in its field type.,contract-scan
+decoy_engine.profiling._scan_core.FieldCore,decoy_engine.profiling._scan_core.TableCore,TableCore.fields has FieldCore in its field type.,contract-scan
+decoy_engine.profiling._scan_core.ModelHitCore,decoy_engine.profiling._scan_core.FieldCore,FieldCore.model_hits has ModelHitCore in its field type.,contract-scan
+decoy_engine.profiling._scan_core.ModelRefCore,decoy_engine.profiling._scan_core.ModelRunCore,ModelRunCore.model has ModelRefCore in its field type.,contract-scan
+decoy_engine.profiling._scan_core.ModelRunCore,ScanSetCore,ModelRunCore is part of the §3.1 scan model reached through ScanSetCore.,contract-scan
+decoy_engine.profiling._scan_core.RegexRunCore,ScanSetCore,RegexRunCore is part of the §3.1 scan model reached through ScanSetCore.,contract-scan
+decoy_engine.profiling._scan_core.RelationshipFactsCore,ScanSetCore,ScanSetCore.relationships has RelationshipFactsCore in its field type.,contract-scan
+decoy_engine.profiling._scan_core.TableCore,ScanSetCore,ScanSetCore.tables has TableCore in its field type.,contract-scan
+decoy_engine.profiling._scan_core.WarningRefCore,decoy_engine.profiling._scan_core.RelationshipFactsCore,RelationshipFactsCore.warnings has WarningRefCore in its field type.,contract-scan
+decoy_engine.profiling._scan_core._Core,decoy_engine.profiling._scan_core.RegexRunCore,RegexRunCore inherits _Core.,contract-scan
+decoy_engine.profiling._scan_core._KeyRules,decoy_engine.profiling._scan_core.TableCore,TableCore inherits _KeyRules.,contract-scan
+decoy_engine.profiling._scan_core._TableCoreRules,decoy_engine.profiling._scan_core.TableCore,TableCore inherits _TableCoreRules.,contract-scan
+decoy_engine.profiling._scan_core._WarningRules,decoy_engine.profiling._scan_core.WarningRefCore,WarningRefCore inherits _WarningRules.,contract-scan
+decoy_engine.profiling._scan_integrity.ChildFacts,decoy_engine.profiling._scan_integrity.RelationshipFacts,RelationshipFacts.children has ChildFacts in its field type.,scan-integrity
+decoy_engine.profiling._scan_integrity.RelationshipFacts,ScanSet,ScanSet.relationships has RelationshipFacts in its field type.,scan-integrity
+decoy_engine.profiling.model_pack._detectors.DetectorSet,load_detectors,load_detectors returns DetectorSet or a result containing it.,detector-pack
+decoy_engine.profiling.types.Distribution,FieldStats,FieldStats.distribution has Distribution in its field type.,profile-statistic
+decoy_engine.profiling.types.TopValue,FieldStats,FieldStats.top_values has TopValue in its field type.,profile-statistic
+decoy_engine.publication._types.ArtifactSummary,decoy_engine.publication._types.CommitReceipt,CommitReceipt.artifacts has ArtifactSummary in its field type.,commit-receipt
+decoy_engine.publication._types.CommitReceipt,ExecutionResult,ExecutionResult.publication_receipt has CommitReceipt in its field type.,commit-receipt
+decoy_engine.reasons._identity.ReasonRef,TableScan,TableScan.warnings has ReasonRef in its field type.,reason-record
+decoy_engine.reasons._record.CleanupState,ReasonContext,ReasonContext.cleanup_state has CleanupState in its field type.,reason-record
+decoy_engine.reasons._record.Operation,ReasonContext,ReasonContext.operation has Operation in its field type.,reason-record
+decoy_engine.reasons._types.Kind,ReasonRecord,ReasonRecord.kind has Kind in its field type.,reason-record
+decoy_engine.reasons._types.Outcome,decoy_engine.reasons._types.PhaseRule,PhaseRule.outcome has Outcome in its field type.,reason-record
+decoy_engine.reasons._types.Phase,ReasonRecord,ReasonRecord.phase has Phase in its field type.,reason-record
+decoy_engine.reasons._types.PhaseRule,decoy_engine.reasons._types.ReasonSpec,ReasonSpec.rules has PhaseRule in its field type.,reason-record
+decoy_engine.reasons._types.ReasonCode,ReasonRecord,ReasonRecord.for_reason accepts ReasonCode through its reason parameter.,reason-record
+decoy_engine.reasons._types.ReasonSpec,decoy_engine.reasons._types.ReasonCode,ReasonCode.spec returns ReasonSpec or a result containing it.,reason-record
+decoy_engine.reasons._types.RetryClass,ReasonRecord,ReasonRecord.retry_class has RetryClass in its field type.,reason-record
+decoy_engine.reasons._types.Severity,decoy_engine.reasons._types.PhaseRule,PhaseRule.severity has Severity in its field type.,reason-record
+decoy_engine.run_result._model.BaselineLink,decoy_engine.run_result._model.Links,Links.baseline has BaselineLink in its field type.,contract-run-result
+decoy_engine.run_result._model.BaselineLinkRead,decoy_engine.run_result._model.LinksRead,BaselineLinkRead is part of the §3.1 run-result model reached through LinksRead.,contract-run-result
+decoy_engine.run_result._model.Check,RunResult,RunResult.checks has Check in its field type.,contract-run-result
+decoy_engine.run_result._model.CheckCounts,decoy_engine.run_result._model.Check,Check.counts has CheckCounts in its field type.,contract-run-result
+decoy_engine.run_result._model.CheckCountsRead,decoy_engine.run_result._model.CheckRead,CheckCountsRead is part of the §3.1 run-result model reached through CheckRead.,contract-run-result
+decoy_engine.run_result._model.CheckRead,RunResultRead,CheckRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.ConfigRefRead,RunResultRead,ConfigRefRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.Delivery,RunResult,RunResult.delivery has Delivery in its field type.,contract-run-result
+decoy_engine.run_result._model.DeliveryRead,RunResultRead,DeliveryRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.EvidenceLink,decoy_engine.run_result._model.Links,Links.evidence has EvidenceLink in its field type.,contract-run-result
+decoy_engine.run_result._model.EvidenceLinkRead,decoy_engine.run_result._model.LinksRead,EvidenceLinkRead is part of the §3.1 run-result model reached through LinksRead.,contract-run-result
+decoy_engine.run_result._model.Failure,RunResult,RunResult.failure has Failure in its field type.,contract-run-result
+decoy_engine.run_result._model.FailureRead,RunResultRead,FailureRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.LinksRead,RunResultRead,LinksRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.LogLink,decoy_engine.run_result._model.Links,Links.log has LogLink in its field type.,contract-run-result
+decoy_engine.run_result._model.LogLinkRead,decoy_engine.run_result._model.LinksRead,LogLinkRead is part of the §3.1 run-result model reached through LinksRead.,contract-run-result
+decoy_engine.run_result._model.NativeRouteRead,decoy_engine.run_result._model.RouteRead,NativeRouteRead is part of the §3.1 run-result model reached through RouteRead.,contract-run-result
+decoy_engine.run_result._model.PhaseTiming,decoy_engine.run_result._model.Timings,Timings.phases has PhaseTiming in its field type.,contract-run-result
+decoy_engine.run_result._model.PhaseTimingRead,decoy_engine.run_result._model.TimingsRead,PhaseTimingRead is part of the §3.1 run-result model reached through TimingsRead.,contract-run-result
+decoy_engine.run_result._model.ProducerInfo,RunResult,RunResult.producer has ProducerInfo in its field type.,contract-run-result
+decoy_engine.run_result._model.ProducerInfoRead,RunResultRead,ProducerInfoRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.Route,RunResult,RunResult.route has Route in its field type.,contract-run-result
+decoy_engine.run_result._model.RouteRead,RunResultRead,RouteRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.SampleMarker,RunResult,RunResult.sample has SampleMarker in its field type.,contract-run-result
+decoy_engine.run_result._model.SampleMarkerRead,RunResultRead,SampleMarkerRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.TableDeliveryRead,decoy_engine.run_result._model.TableResultRead,TableDeliveryRead is part of the §3.1 run-result model reached through TableResultRead.,contract-run-result
+decoy_engine.run_result._model.TableResult,RunResult,RunResult.tables has TableResult in its field type.,contract-run-result
+decoy_engine.run_result._model.TableResultRead,RunResultRead,TableResultRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.Timings,RunResult,RunResult.timings has Timings in its field type.,contract-run-result
+decoy_engine.run_result._model.TimingsRead,RunResultRead,TimingsRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model.WarningEntry,RunResult,RunResult.warnings has WarningEntry in its field type.,contract-run-result
+decoy_engine.run_result._model.WarningEntryRead,RunResultRead,WarningEntryRead is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model._Base,RunResultRead,_Base is part of the §3.1 run-result model reached through RunResultRead.,contract-run-result
+decoy_engine.run_result._model._Model,decoy_engine.run_result._model.BaselineLink,BaselineLink inherits _Model.,contract-run-result
+decoy_engine.run_result._model._ReadBase,decoy_engine.run_result._model.EvidenceLinkRead,_ReadBase is part of the §3.1 run-result model reached through EvidenceLinkRead.,contract-run-result
+decoy_engine.run_result._outcome.Outcome,derive_outcome,derive_outcome returns Outcome or a result containing it.,contract-run-result
+decoy_engine.secret_providers._buffer.SecretBuffer,decoy_engine.secret_providers._types.PreparedSecret,PreparedSecret.__init__ accepts SecretBuffer through its buffer parameter.,vault-secret
+decoy_engine.secret_providers._errors.SecretClosedError,VaultWriter,VaultWriter.close documents SecretClosedError.,vault-secret
+decoy_engine.secret_providers._types.Clock,SecretCachePolicy,SecretCachePolicy.clock has Clock in its field type. B7 removes its path from run_pipeline.,removed-keyword
+decoy_engine.secret_providers._types.PreparedKeyProvider,decoy_engine.secret_providers._types.PreparedSecret,PreparedSecret.key_provider returns PreparedKeyProvider or a result containing it.,vault-secret
+decoy_engine.secret_providers._types.PreparedSecret,VaultWriter,VaultWriter.__init__ accepts PreparedSecret through its prepared parameter.,vault-secret
+decoy_engine.secret_providers._types.ResolveContext,SecretProvider,SecretProvider.resolve accepts ResolveContext through its context parameter. B7 removes its path from run_pipeline.,removed-keyword
+decoy_engine.secret_providers._types.ResolvedSecret,SecretProvider,SecretProvider.resolve returns ResolvedSecret or a result containing it. B7 removes its path from run_pipeline.,removed-keyword
+decoy_engine.subset._sample.SampleSpec,decoy_engine.subset._scope.SubsetRequest,SubsetRequest.sample has SampleSpec in its field type.,subset-input
+decoy_engine.subset._scope.SubsetRequest,run_pipeline,run_pipeline accepts SubsetRequest through its subset_request parameter.,subset-input
+decoy_engine.subset._types.FanOutBudget,decoy_engine.subset._types.FanOutPolicy,FanOutPolicy.budget has FanOutBudget in its field type.,subset-input
+decoy_engine.subset._types.FanOutPolicy,decoy_engine.subset._scope.SubsetRequest,SubsetRequest.policy has FanOutPolicy in its field type.,subset-input
+decoy_engine.subset._types.Predicate,decoy_engine.subset._types.SeedSpec,SeedSpec.predicates has Predicate in its field type.,subset-input
+decoy_engine.subset._types.SeedSpec,decoy_engine.subset._scope.SubsetRequest,SubsetRequest.seeds has SeedSpec in its field type.,subset-input
+decoy_engine.vault._writer.VaultCommit,VaultWriter,VaultWriter.publish returns VaultCommit or a result containing it.,vault-commit
+decoy_engine.verification.postmask._blocked.PostScanVerdict,PostScanBlockedError,PostScanBlockedError.__init__ accepts PostScanVerdict through its verdict parameter.,post-scan-verdict
