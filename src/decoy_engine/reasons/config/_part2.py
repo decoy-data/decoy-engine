@@ -50,6 +50,7 @@ __all__ = [
     "SCAN_BASELINE_UNBOUND",
     "TABLE_DUPLICATE",
     "TARGET_SHARED_DESTINATION",
+    "TARGET_TABLE_UNKNOWN",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
 ]
@@ -78,6 +79,10 @@ TARGET_SHARED_DESTINATION = _d(
     "target_shared_destination",
     "Two or more targets write to one destination. Give each table its own target.",
     since="1.28.0",
+)
+TARGET_TABLE_UNKNOWN = _d(
+    "target_table_unknown",
+    "A target names no table in this config. Name a declared table or remove the target.",
 )
 COLUMN_DUPLICATE = _d(
     "column_duplicate",

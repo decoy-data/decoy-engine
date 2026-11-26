@@ -8,7 +8,7 @@ at all: every released quantity -- a numeric bin count, a categorical
 label's count, the categorical non-null total, the table row count --
 comes directly out of a chained OpenDP `Transformation >> Measurement`
 invoked on a normalized, recordwise projection of the source frame
-(binding decision 15). `quality.dp_budget.OpenDpReleaseSession` is the
+(binding decision 15). `quality.dp_budget` is the
 sole place in this codebase that constructs or invokes an OpenDP
 measurement (guide section 4.3.5 mitigation 1); this module drives the
 session through the fixed public schedule and serializes what it
@@ -76,7 +76,6 @@ from decoy_engine.quality.carriers import (
 )
 from decoy_engine.quality.dp_budget import (
     DpBudgetError,
-    OpenDpReleaseSession,
     _OpenDpBackend,
 )
 from decoy_engine.quality.dp_fit_schema import (
@@ -96,6 +95,7 @@ from decoy_engine.quality.dp_schema import (
     DP_RELEASE_SCOPE,
     DP_SNAPSHOT_SCHEMA_VERSION,
 )
+from decoy_engine.quality.dp_session import OpenDpReleaseSession
 from decoy_engine.quality.snapshot import DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION, MAX_NUMERIC_BINS
 
 if TYPE_CHECKING:

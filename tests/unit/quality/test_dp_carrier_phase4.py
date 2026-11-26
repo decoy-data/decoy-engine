@@ -18,7 +18,6 @@ from decoy_engine.quality.dp_budget import (
     _DP_EPSILON_CEILING,
     _REAL_BACKEND_CACHE_NAMESPACE,
     DpBudgetError,
-    OpenDpReleaseSession,
     _binary_search_endpoint_aware,
     _budget_cache_key,
     _clear_budget_cache,
@@ -32,6 +31,7 @@ from decoy_engine.quality.dp_schedule import (
     CategoricalQuerySpec,
     Schedule,
 )
+from decoy_engine.quality.dp_session import OpenDpReleaseSession
 
 
 def _text_schedule() -> Schedule:

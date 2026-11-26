@@ -444,7 +444,4 @@ def _post_scan_resident(inputs: Any) -> Any:
     snapshot holds (the same call every runtime and estimator site makes)."""
     from decoy_engine.execution.physical._inputs import thaw_config
 
-    try:
-        return post_scan_resident_for(thaw_config(inputs.config))
-    except Exception:
-        return None
+    return post_scan_resident_for(thaw_config(inputs.config))

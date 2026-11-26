@@ -12,9 +12,7 @@ calibration/composition primitives it imports from `dp_budget`. Keeping it
 free of any `opendp` import is what lets the single-OpenDP-site sentry
 (`tests/unit/quality/test_opendp_dependency.py`) still pass after the move.
 
-`OpenDpReleaseSession` is re-exported from `dp_budget` (bottom-of-module) so
-the documented `decoy_engine.quality.dp_budget.OpenDpReleaseSession` path
-(`quality/dp.py`, the DP test suite) resolves unchanged.
+`dp_budget` no longer re-exports `OpenDpReleaseSession`; import it from here.
 """
 
 from __future__ import annotations

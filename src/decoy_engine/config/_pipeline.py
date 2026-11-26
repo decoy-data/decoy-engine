@@ -64,7 +64,12 @@ from decoy_engine.config._scan_baseline import ScanBaselineConfig
 from decoy_engine.config._sources import FileSource, SourceDescriptor
 from decoy_engine.config._subset import SubsetConfig
 from decoy_engine.config._tables import TableConfig
-from decoy_engine.config._targets import FileTarget, TargetDescriptor, duplicate_target_groups
+from decoy_engine.config._targets import (
+    FileTarget,
+    TargetDescriptor,
+    duplicate_target_groups,
+    unknown_target_names,
+)
 from decoy_engine.config._validators import QuarantineConfig, ValidatorEntry
 from decoy_engine.contracts.declared_casting import ProtectedQuarantineConfig
 from decoy_engine.errors import ConfigRuleError
@@ -488,17 +493,22 @@ class PipelineConfig(BaseModel):
 
     @model_validator(mode="after")
     def _targets_distinct(self) -> PipelineConfig:
-        """Two declared tables cannot write to one destination; the second write would replace the first."""
-        groups = duplicate_target_groups(self.targets, [t.name for t in self.tables])
-        if not groups:
-            return self
-        code = str(reasons.config.TARGET_SHARED_DESTINATION)
-        clashing = {name for group in groups for name in group}
+        """Every target names a declared table, and no two tables write to one destination."""
+        table_names = [t.name for t in self.tables]
+        unknown = str(reasons.config.TARGET_TABLE_UNKNOWN)
         problems: list[tuple[tuple[str | int, ...], str]] = [
-            (("targets", name, target.destination_field), code)
+            (("targets", name), unknown) for name in unknown_target_names(self.targets, table_names)
+        ]
+        groups = duplicate_target_groups(self.targets, table_names)
+        shared = str(reasons.config.TARGET_SHARED_DESTINATION)
+        clashing = {name for group in groups for name in group}
+        problems += [
+            (("targets", name, target.destination_field), shared)
             for name, target in self.targets.items()
             if name in clashing
         ]
+        if not problems:
+            return self
         raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
 
     @model_validator(mode="after")

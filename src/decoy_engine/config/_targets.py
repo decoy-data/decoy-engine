@@ -163,7 +163,8 @@ def duplicate_target_groups(
 ) -> list[list[str]]:
     """Table names that share one destination, each group of 2+ in mapping order.
 
-    Only keys in `active_names` take part: the writers skip a target whose key names no table.
+    Only keys in `active_names` take part; a key that names no table is refused on its own by
+    `unknown_target_names`, so it never reaches a writer.
     """
     active = set(active_names)
     by_identity: dict[tuple[str, ...], list[str]] = {}
@@ -171,6 +172,16 @@ def duplicate_target_groups(
         if name in active:
             by_identity.setdefault(_target_identity(target), []).append(name)
     return [names for names in by_identity.values() if len(names) > 1]
+
+
+def unknown_target_names(targets: Iterable[str], table_names: Iterable[str]) -> list[str]:
+    """Target keys that name no configured table, in mapping order.
+
+    A key is a table name, compared exactly. A source name alone is not a target key, so a typo
+    in a key is refused here instead of being skipped by the writers.
+    """
+    tables = set(table_names)
+    return [name for name in targets if name not in tables]
 
 
 def _endpoint_identity(url: str | None) -> str:

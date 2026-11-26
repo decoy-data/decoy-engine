@@ -168,23 +168,16 @@ def _every_top_level_import(path: pathlib.Path) -> set[str]:
 
 
 def test_dp_session_can_be_imported_before_dp_budget():
-    """MEDIUM-4 (Codex phase-5 review): `OpenDpReleaseSession` was split into
-    `quality/dp_session.py`, which imports the backend/protocol/calibration
-    primitives back from `quality/dp_budget.py`, while `dp_budget` re-exports the
-    class. The original eager bottom-of-module re-export
-    (`OpenDpReleaseSession = _dp_session.OpenDpReleaseSession`) made importing
-    `dp_session` FIRST raise `AttributeError` on a still-initializing module (the
-    cycle was masked only because `dp_budget` usually imports first). The
-    re-export is now a lazy module `__getattr__`. Import `dp_session` first in a
-    FRESH interpreter and confirm the class resolves both directly and via the
-    `dp_budget` re-export path."""
+    """`dp_session` imports the backend and calibration primitives back from `dp_budget`. Importing
+    `dp_session` FIRST in a fresh interpreter must resolve the class, and `dp_budget` no longer
+    carries a re-export of it (AT-D9)."""
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             "from decoy_engine.quality.dp_session import OpenDpReleaseSession as A; "
-            "from decoy_engine.quality.dp_budget import OpenDpReleaseSession as B; "
-            "assert A is B and A.__name__ == 'OpenDpReleaseSession'",
+            "import decoy_engine.quality.dp_budget as B; "
+            "assert A.__name__ == 'OpenDpReleaseSession' and not hasattr(B, 'OpenDpReleaseSession')",
         ],
         capture_output=True,
         text=True,
