@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 from decoy_engine.profiling import recommendations
 
 __all__ = ["StarterDecision", "detected_date_config", "infer_starter_strategy"]
@@ -94,12 +95,18 @@ def detected_date_config(
     return {**choice.provider_config, "date_format": fmt}
 
 
-def _from_descriptor(detector_id: str, bucket: str | None, match: Any = None) -> StarterDecision:
+def _from_descriptor(
+    detector_id: str,
+    bucket: str | None,
+    match: Any = None,
+    shape: ColumnShape = ColumnShape.UNKNOWN,
+) -> StarterDecision:
     choice = recommendations.starter_choice(detector_id)
     if choice is None:
         return _FALLBACK
     provider_config: Mapping[str, Any] = choice.provider_config
-    if choice.detected_date_format:
+    # A typed date is read natively and needs no format; text and `unknown` keep it (fail closed).
+    if choice.detected_date_format and shape not in TYPED_DATE_SHAPES:
         detected = detected_date_config(choice, match)
         if detected is None:
             return _FALLBACK
@@ -139,8 +146,12 @@ def infer_starter_strategy(field_stats: Any) -> StarterDecision:
         confident.sort(key=lambda m: -getattr(m, "match_rate", 0.0))
         top = confident[0]
         bucket = getattr(top, "confidence", None)
+        shape = getattr(field_stats, "shape", ColumnShape.UNKNOWN)
         base = _from_descriptor(
-            getattr(top, "detector_id", ""), bucket if isinstance(bucket, str) else None, top
+            getattr(top, "detector_id", ""),
+            bucket if isinstance(bucket, str) else None,
+            top,
+            shape if isinstance(shape, ColumnShape) else ColumnShape.UNKNOWN,
         )
         ambiguous = (
             len(confident) > 1

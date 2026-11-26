@@ -24,6 +24,7 @@ ALLOWED_CALLERS: dict[str, dict[str, str]] = {
     "classify_column": {
         "profile/_walk.py": "records the observed shape of each profiled column",
         "plan/checks/_column_shapes.py": "classifies a source schema the profile has no entry for",
+        "profiling/scan_set.py": "the scan records each column's observed shape for the starter",
     },
     "declared_shape": {
         "plan/checks/_column_shapes.py": "maps an F06 declaration to its shape",

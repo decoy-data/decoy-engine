@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Final
 
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.detection.types import DetectionSignal, DetectorMatch
 from decoy_engine.profiling._basis import Basis
 
@@ -108,6 +109,11 @@ class FieldStats:
     # under that format (`DetectorMatch.format_pattern_complete`). False for any other column and
     # for a profile written before the field existed.
     format_pattern_complete: bool = False
+
+    # What the source says the column holds, so the starter writes a date format only for text.
+    # An input to the starter in this process: `ColumnProfile.to_dict` drops it, so no stored
+    # document carries it and a rebuilt field reads `unknown`.
+    shape: ColumnShape = ColumnShape.UNKNOWN
 
     # Plan B-2 - column-shape signals FORECAST's per-detector choosers
     # consume to pick mask params instead of using hardcoded defaults.
@@ -210,4 +216,7 @@ class ColumnProfile:
         For a document a person saves, commits or reads, use `profile_document`, which removes
         the values of value-sensitive columns unless `include_values=True`.
         """
-        return asdict(self)
+        out = asdict(self)
+        for field_doc in out["fields"]:
+            field_doc.pop("shape", None)
+        return out
