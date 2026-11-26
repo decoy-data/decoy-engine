@@ -376,7 +376,7 @@ _d = _catalog.runtime("decoy_engine.execution._strategies._faker_positional")
 COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN = _d(
     "computed_draw_position_out_of_domain",
     "Computed draw position out of domain.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 FAKER_POSITION_OUT_OF_DOMAIN = _d("faker_position_out_of_domain", "Faker position out of domain.")
 
@@ -432,7 +432,7 @@ SCRATCH_ROOT_UNUSABLE = _d(
     "The directory a temp variable names cannot hold scratch files.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.35.0",
 )
 
 _d = _catalog.runtime("RecordError")
@@ -526,7 +526,7 @@ PARQUET_FIXED_LIST_NULL = _d(
     "Parquet cannot store a null fixed-size list cell.",
     phases=(Phase.MASK, Phase.FINALIZE, Phase.PUBLISH, Phase.UNKNOWN),
     retry=RetryClass.NEVER,
-    since=UNRELEASED,
+    since="1.35.0",
 )
 
 _d = _catalog.runtime("ValidatorStateError")
@@ -534,20 +534,20 @@ _d = _catalog.runtime("ValidatorStateError")
 VALIDATOR_KEY_STATE_OVER_BUDGET = _d(
     "validator_key_state_over_budget",
     "A keyed validator would hold more state than its validation budget allows.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 VALIDATOR_SOURCE_PAIRING_MISMATCH = _d(
     "validator_source_pairing_mismatch",
     "The source rows read for a leak check do not line up with the published rows.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 VALIDATOR_COLUMN_MISSING = _d(
     "validator_column_missing",
     "A validator needs a parent key or window column that the parent table does not have.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 VALIDATOR_SPAN_REPEATED = _d(
     "validator_span_repeated",
     "A validator that can only read a table whole was given the table in several batches.",
-    since=UNRELEASED,
+    since="1.35.0",
 )

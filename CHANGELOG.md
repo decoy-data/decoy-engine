@@ -9,6 +9,115 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.28.5] - 2026-11-25
+
+### Breaking for consumers
+
+- `bucketize` with an integer width now turns a finite value of magnitude 2**53 or more, and any infinity, into a `format_error` row error with a null cell. A float width on an `int64[pyarrow]` column now labels a large value instead of raising.
+- Parquet output with a null fixed-size list cell now raises `ParquetFixedListNullError` and publishes nothing.
+- `ValidatorFinding` gains `failing_row_count` and lists at most `FINDING_INDEX_CAP` (10,000) row positions in `failing_row_indices` (all of them under quarantine `validation_fail`); `ValidationReport` gains `results` and its `elapsed_ms` is the time spent folding rows; `parent_window_respected` parses each date column with the format of its first value that pandas would use, and a parent table without its key or window column raises `ValidatorStateError` instead of a pyarrow `KeyError`.
+- a job with no foreign keys under `auto` is now refused with `nonfk_full_frame_capacity_exceeded` in three more places where it used to start and be killed for memory: before a lazy Parquet source is read whole, before a resident table is copied for its transforms, and after a mixed generate and mask job declines to the full-frame route.
+- the physical `plan_hash` and `activation_hash` of every unified-slice job change once, because the provider capability matrix gains a `draw` field and the registry fingerprint hashes it. `pipeline_config_hash` does not change, and no output value changes.
+
+### Changed (Companion check-digit arithmetic, FPE-CHECKSUM-NATIVE S2a, 2026-11-25)
+
+The native companion now holds one Rust copy of the luhn, npi, ean13, gtin, isbn13 and vin check-digit rules, locked to `decoy_engine.checksums` by a generated known-answer corpus. The FPE kernel and the text_redact `pan` and `npi` detectors call it. No masked value and no detector result changes.
+
+### Fixed (bucketize range errors and float-width integer sources, BUCKET-TOPCODE-NATIVE S1a, 2026-11-24)
+
+Three byte changes in the `bucketize` handler. None of them moves a plan hash or a seed.
+
+- B2: with an integer width, a finite value whose float64 magnitude is at least 2**53 gives one `format_error` row error with the reason `value is out of range under bucketize` and a null cell. Before, the label was rounded or the cast failed with no code.
+- B3: with an integer width, positive and negative infinity give the same row error and null cell. Before, the cast failed with no code. A valid NaN is still ordinary missing and gives no error. With quarantine on, the row leaves the main output. With the fail policy, the job fails before it publishes.
+- B4: with a float width, an integer source of any pandas dtype is converted to float64 with round-to-nearest before the division. An `int64[pyarrow]` value of magnitude above 2**53 used to raise `ArrowInvalid` with the value in the message. It now gets the label NumPy `int64` and nullable `Int64` already had: 9007199254740993 at width 2.5 gives lower `9007199254740992.0`. Values below 2**53 and float sources are unchanged.
+
+The range exit uses one function, `kernel.integer_width_exit_mask`, and one limit, `contracts.bucketize_width.EXACT_INT_BOUND`, which the `top_code` handler and compile check now share. The reason text has one owner, `contracts/format_error_reasons.py`.
+
+### Fixed (native text_redact detector, TEXT-REDACT-RUST-SPLICE S0, 2026-11-24)
+
+The Rust text_redact detector now declines a cell whose byte length does not fit its 32-bit offsets. `text_redact_candidates` and `text_mask_detect_splice` return their usual `None` decline for such a cell, and every released core already sends a declined cell to the Python path. Before this, a cell longer than 4 GiB could wrap an end offset and leave part of a match unredacted. The release wheel smoke test now also refuses a wheel built with the test-only `test-detector-offset-limit` feature.
+
+### Changed (one scratch root and temp budget, F25 G6-1, 2026-11-24)
+
+One function, `fileaccess.scratch_root()`, now names the directory every engine scratch root goes under. The first non-empty variable of `TMPDIR`, `TEMP` and `TMP` chooses it. If that directory cannot take a new directory, the run stops with `runtime/scratch_root_unusable` instead of moving to another temp directory. The out-of-core disk preflight and the runtime temp-disk cap measure the directory the run spills under.
+
+### Changed (ratchet registry integrity, RG-E1, 2026-11-24)
+
+Test tooling only; no engine behavior changes. `scripts/dev/ratchet_check.py` now fails a diff that removes a sentry id without a dated `[retired]` decision (or keys moved to a new id), deletes or empties the registry, deletes a sentry test file without a rename or a `[retired_files]` decision, adds an unknown key to a registry row, names a baseline path with `..`, a backslash or an absolute part, or adds a baseline file with no `created_in`. A replacement or split now matches each key to one removed id and spends each pair once. A base commit that does not exist, or a base file that cannot be read, fails instead of reading as empty. Each new decision row prints as a `ratchet: decision ...` line. The registry gains empty `[retired]`, `[retired_files]` and `[checker_change]` tables.
+
+### Added (delivery stage, DELIV E2b, 2026-11-23)
+
+`decoy_engine.publication` exports `DeliveryStage`, `StagedMember`, `StageDecision` and `DeliveryReceipt`. A stage opens beside a run folder and hands out members with `reserve`; the writer writes to the member's path and calls `complete()`, which claims the file into the unit with a no-clobber hard link, so the target file system decides name collisions. Under the pointer lock the stage re-checks each claimed file, binds the unit, and swaps `LATEST` with a compare-and-swap on the state read at open. Only claimed files of tables the decision does not deliver are removed. A moved pointer, a refused bind or a failed swap gives receipt `nothing` with a reason code; a bind or swap whose durability is unknown gives `uncertain`, which counts as delivered. A target that cannot hard-link or ignores `chmod` fails at open (named limit `delivery_links_unsupported`). A vault passed with `set_vault` is published create-only before the bind.
+
+`decoy_engine.fileaccess` adds `StageDir.claim_from` and `seal_of`, `FileSeal`, `LinkUnsupported`, `OutputDir.leaf` and `parent_identity`, and the `delivery_slots` stage label. One no-clobber link (`link_noclobber_at`) now serves the durable vault publish, the strict and ambient exclusive file publish, and the claim.
+
+### Fixed (Exact in-memory source handoff, FIXED-LIST-NULL, 2026-11-23)
+
+The engine hands in-memory sources to the isolated child with their Arrow types and values intact. A plain run can return a fixed-size list with null cells in memory. When the child must write such a result as Parquet, `run_pipeline_isolated` returns a crashed result where it previously could raise in the caller. Parquet output reports `runtime/parquet_fixed_list_null` where it previously raised a raw Arrow error or published an unreadable file.
+
+### Added (shared memory failure classifier and refreshed connector error, F25-G7-A1A, 2026-11-24)
+
+`decoy_engine.fileaccess` exports `classified_failure`, `is_memory_failure` and the one chain walker `typed_memory_member`, and `decoy_engine.connectors` exports `refreshed_error`, which rebuilds a caught `TransientError` or `PermanentError` with fixed text and the same class and kind.
+
+### Changed (job-level validators are folds with exact counts, EXPECT-OFF-ROUTE S1, 2026-11-23)
+
+Each validator now takes rows span by span and keeps an exact failing count with at most 10,000
+listed row positions. The count is `failing_row_count` on every finding. Quarantine
+`validation_fail` lists every failing row, because quarantine removes exactly those rows. A
+whole-table `validate()` call gives the same findings, wording and order as before for any
+finding under the cap. `ValidationReport.results` has one `ValidatorResult` per configured entry
+(`passed`, `failed` or `skipped`), and `ValidationSession` is the public way to feed it batches.
+The keyed validators (`fk_intact`, `parent_window_respected`, `reconciliation_holds`) accept their
+parent and child tables in either order. `parent_window_respected` now guesses one date format
+for each column from its first value that is not null or a null string, so a column that mixes formats gives the same
+verdict at any chunk size. `leak_check` records every column and table it does not check. Each
+skip has a registered code: `warning/leak_check_skip_passthrough`, `warning/leak_check_skip_fk_child`,
+`warning/leak_check_skip_when`, `warning/leak_check_skip_exempt`,
+`warning/leak_check_skip_missing_column`, `warning/leak_check_skip_below_min_rows` and
+`warning/leak_check_skip_table_not_produced`. A column that
+`leak_check` names in `columns:` and then skips raises a `QualityWarning`,
+`warning/leak_check_column_not_checked`, in `quality_metrics["validation"]["warnings"]`; the run still
+passes. The new runtime codes are `runtime/validator_key_state_over_budget` and
+`runtime/validator_source_pairing_mismatch`, `runtime/validator_column_missing` (a parent table lacks a key or window column) and `runtime/validator_span_repeated` (a whole-table validator was given a table in several batches), all raised as `ValidatorStateError`. A validator that checked a column or table that is not there now reports it in `ValidatorResult.skipped` with `warning/validator_skip_missing_column` or `warning/validator_skip_missing_table`, and an entry that checked nothing has status `skipped`. No route changes in this
+slice.
+
+### Added (resident fit before the read, the transform copy and a mixed decline, NONFK-OOM, 2026-11-23)
+
+The no-FK capacity check now runs at the three points where the engine makes a whole-table copy
+before it has chosen a route. All three use the same ceilings as the route check: only a strict
+lower bound above the host or cgroup kill ceiling refuses, and a bound between 85% of it and the
+ceiling runs as before.
+
+- Before a lazy Parquet source is read whole (the `resident_fallback` read), the bound is the
+  footer input bytes of the tables about to be read. No table is charged a pandas copy there, a
+  vault run included, because the chunked lane may still take it; a job that ends on full-frame is
+  priced at the full bound in the route decision. A source with no footer is not priced.
+- Before a resident table is copied to pandas for its transforms, the bound is every resident input
+  byte plus that table's pandas copy. A bound in the gap between 85% and 100% of the ceiling caps
+  the final verdict at `route/nonfk_full_frame_unverified`.
+- When a mixed job declines after generation and continues on the full-frame route, the replaced
+  decision is priced like any no-FK full-frame decision, with the generated tables counted at their
+  input bytes, before the lazy mask sources are read.
+
+`execution_mode` other than `auto` and any job with a foreign key are not priced. The CLI's own
+whole read of a source is not covered here.
+
+### Changed (subset edge directions are checked in the split, VALIDATE-SUBSET-EDGES, 2026-11-24)
+
+`split_subset_config` now checks the `subset:` edge directions, so a bad edge is refused before any source is read, on every path that splits a config: `run_pipeline` (including `subset_request="skip"`), `validate_plan` and the CLI gate. The codes stay `subset_unknown_edge` and `subset_dangling_not_acknowledged`. A `SubsetRequest` override skips the block it replaces, so it is not refused for that block. The dangling refusal text names `allow dangling` (`.decoy`) and `allow_dangling: true` (YAML) before the Python `FanOutPolicy` spelling.
+
+`decoy_engine.subset` adds `drop_subset_block(config)`, the run config with its `subset` block set to `None` (the input dict itself when it has no block).
+
+### Added (computed Faker draws on masking, GEN-NONFAKER-DRAWS, 2026-11-23)
+
+A `faker` column with `provider: uuid`, `random_int_range` or `random_choice` now compiles and runs. Before, `compile_plan` refused it with `plan.non_poolable_provider_with_pool_backend`, even though `decoy scan` and `decoy init` write `provider: uuid` for a UUID column. These providers build no pool. The value is drawn from the key: for the source value and namespace in deterministic mode, for the row number under the job seed otherwise. A null source stays null.
+
+- `uuid` writes an RFC 9562 version 4 string. `random_int_range` writes an int64 from `min`, `max` and `step`. `random_choice` writes one of `elements`, typed as the one Arrow type of the list.
+- The new plan reasons `plan/computed_draw_range_invalid`, `plan/computed_draw_elements_invalid`, `plan/computed_draw_mode_unsupported` and `plan/computed_draw_namespace_reserved` refuse arguments, cardinality modes and namespaces a computed draw cannot honor. The new runtime reason `runtime/computed_draw_position_out_of_domain` covers a row number outside the unsigned 64-bit domain. None carries an argument value.
+- `address_full` and `lorem_text` are still refused at compile.
+- Computed providers run the whole frame. The chunked, unified, sequential and out-of-core native routes do not admit them yet; auto routing falls through, and a forced out-of-core run refuses before any write.
+- The argument and default facts for the three providers live in one table, `providers_v2.FAKER_DRAW_CONTRACTS`, which the Faker adapter and the numeric-typing integer table now read. `generation.pool.derive_pool_indices` is the public name of the former private index helper. `classify_provider` gains the class `computed_native`.
+
 ## [0.28.4] - 2026-11-23
 
 ### Breaking for consumers

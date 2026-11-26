@@ -32,6 +32,42 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.5", "- B4: with a float width, an integer source of any pandas dt"): (
+        "the Breaking bullet on bucketize with a float width on an int64[pyarrow] column covers it; the call raised before and now labels"
+    ),
+    ("0.28.5", "The Rust text_redact detector now declines a cell whose byte"): (
+        "a decline is not a failure: every released core sends a declined cell to the Python path, so no output changes"
+    ),
+    ("0.28.5", "Test tooling only; no engine behavior changes. `scripts/dev/"): (
+        "test tooling only: the checked diff is a repo change, not a consumer input"
+    ),
+    ("0.28.5", "`decoy_engine.publication` exports `DeliveryStage`, `StagedM"): (
+        "an addition: the stage and its receipts are new exports, and the refusals named are the new stage's own"
+    ),
+    ("0.28.5", "The engine hands in-memory sources to the isolated child wit"): (
+        "the Breaking bullet on Parquet output with a null fixed-size list cell covers it; the isolated run now returns a crashed result where the caller could raise"
+    ),
+    ("0.28.5", "Each validator now takes rows span by span and keeps an exac"): (
+        "the Breaking bullet on ValidatorFinding, ValidationReport and ValidatorStateError covers it; the new skip codes are warnings and the run still passes"
+    ),
+    ("0.28.5", "The no-FK capacity check now runs at the three points where "): (
+        "the Breaking bullet on nonfk_full_frame_capacity_exceeded in three more places covers it"
+    ),
+    ("0.28.5", "`split_subset_config` now checks the `subset:` edge directio"): (
+        'same codes as before; a bad edge was refused whenever the subset stage ran, and the split now also refuses it under subset_request="skip"'
+    ),
+    ("0.28.5", "A `faker` column with `provider: uuid`, `random_int_range` o"): (
+        "an addition: these providers were refused at compile and now run; the new refusals cover arguments no earlier config could run"
+    ),
+    ("0.28.5", "- The new plan reasons `plan/computed_draw_range_invalid`, `"): (
+        "an addition: the new reasons refuse only arguments of the computed providers, which no earlier config could run"
+    ),
+    ("0.28.5", "- `address_full` and `lorem_text` are still refused at compi"): (
+        "unchanged behavior: the sentence says these providers stay refused"
+    ),
+    ("0.28.5", "- Computed providers run the whole frame. The chunked, unifi"): (
+        "an addition: computed providers had no route before; a forced out-of-core run refuses only a config that could not run there"
+    ),
     ("0.28.4", "A `when:` column can now be written `source.<name>`, which m"): (
         "an addition: `source.<name>` is new accepted syntax; `masked.` is reserved only in the new prefix form"
     ),
