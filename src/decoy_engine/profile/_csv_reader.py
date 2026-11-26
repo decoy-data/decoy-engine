@@ -588,7 +588,7 @@ def read_csv_source(
         chunksize=chunksize,
         dtype=dtype,
         columns=columns,
-        compression=compression,
+        compression=csv_compression(path) if compression == "infer" else compression,
     )
 
 
@@ -608,6 +608,11 @@ def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") ->
     return frame
 
 
+def csv_compression(path: str | os.PathLike[str]) -> str | None:
+    """The one place the codec is read from a declared file name (pandas' own rule)."""
+    return infer_compression(os.fspath(path), "infer")
+
+
 def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
     """What pandas infers from the name of `path` (`compression="infer"`): True when its
     suffix names a compression format.
@@ -616,7 +621,7 @@ def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
     the name only and opens nothing. It makes no claim about `read_csv_source` under every file
     policy: a rooted policy hands pandas a descriptor path with no suffix, so that read infers
     no compression."""
-    return infer_compression(os.fspath(path), "infer") is not None
+    return csv_compression(path) is not None
 
 
 __all__ = [

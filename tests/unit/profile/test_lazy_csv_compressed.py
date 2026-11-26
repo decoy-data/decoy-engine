@@ -137,6 +137,18 @@ def test_a_headerless_compressed_csv_reads_lazily(policy: tuple[Path, FileAccess
     assert _rows(lazy.iter_batches(1)) == [["1", "x"], ["2", "y"]]
 
 
+def test_the_resident_reader_decompresses_a_headerless_file_and_a_direct_source_infers(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "f.csv.gz"
+    path.write_bytes(gzip.compress(b"1,x\n2,y\n"))
+    dialect = CsvDialect(False, ("a", "b"), ",")
+    frame = read_csv_source(path, dialect, table="t", dtype=str, file_access=LocalFileAccess())
+    assert frame.values.tolist() == [["1", "x"], ["2", "y"]]
+    direct = CsvLazySource(path, dialect=dialect, table="t")
+    assert _rows(direct.iter_batches(1)) == [["1", "x"], ["2", "y"]]
+
+
 def test_a_file_replaced_between_facts_and_read_is_refused(
     policy: tuple[Path, FileAccess | None],
 ) -> None:

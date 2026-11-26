@@ -33,13 +33,12 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import pandas as pd
 import pyarrow as pa
-from pandas.io.common import infer_compression
 
 from decoy_engine import reasons
 from decoy_engine._execution_error import ExecutionError
 from decoy_engine._execution_error import lazy_source_changed as lazy_source_changed
 from decoy_engine.config._csv_dialect import CsvDialect
-from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect
+from decoy_engine.profile._csv_reader import csv_compression, read_csv_source, resolve_csv_dialect
 from decoy_engine.profile._lazy_identity import LazyFileIdentity, check_batch_rows
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
 
@@ -173,9 +172,9 @@ class CsvLazySource(LazyFileIdentity, LazySource):
 
     dialect: CsvDialect = field(default_factory=CsvDialect)
     table: str = field(default="source", compare=False)
-    # pandas' name for the codec (`gzip`, `bz2`, ...), or None for plain text. Inferred from the
-    # declared name in `from_descriptor`; a source built directly names its own.
-    compression: str | None = field(default=None, compare=False)
+    # pandas' name for the codec (`gzip`, `bz2`, ...), None for plain text, or "infer" to read it
+    # from the declared name (the reader's rule, so a rooted policy still sees the suffix).
+    compression: str | None = field(default="infer", compare=False)
     # Facts and the identity they were taken under, from the last `footer_facts()` call.
     _seen: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
@@ -197,7 +196,7 @@ class CsvLazySource(LazyFileIdentity, LazySource):
             field_key=field_key,
             dialect=dialect,
             table=table,
-            compression=infer_compression(str(descriptor["path"]), "infer"),
+            compression=csv_compression(descriptor["path"]),
         )
 
     def _chunks(self, batch_rows: int, columns: list[str] | None = None) -> Iterator[pd.DataFrame]:

@@ -902,8 +902,10 @@ only this site moves.
   line in a `changelog.d` fragment that names the object and, for a parameter, the parameter, both in backticks.
   It also includes `read_csv_source`, `CsvDialect` and `resolve_csv_dialect`
   (CLI-DIALECT, 2026-11): `read_csv_source(path, dialect, *, table, dtype=None,
-  nrows=None, chunksize=None, file_access=None, field_key="source.path")` reads
-  a CSV source under its declared dialect. `dtype=str` with the default dialect
+  nrows=None, chunksize=None, file_access=None, field_key="source.path",
+  columns=None, compression="infer")` reads
+  a CSV source under its declared dialect. `compression` is pandas' argument; the default infers
+  it from the declared file name. `dtype=str` with the default dialect
   equals `pd.read_csv(path, dtype=str)`. A headerless file is width-checked and
   a refusal is `PipelineValidationError` with `source_file.column_count_mismatch`,
   `source_file.nul_byte` or `source_file.lone_cr`; the message is

@@ -89,7 +89,7 @@ def _lazy_csv(
     table: str, descriptor: dict[str, Any], file_access: FileAccess | None
 ) -> LazySource | None:
     field_key = f"sources.{table}.path"
-    descriptor_path(descriptor, field_key)
+    descriptor_path(descriptor, field_key)  # validate only; the source builds from the descriptor
     return CsvLazySource.from_descriptor(
         descriptor, table=table, file_access=file_access, field_key=field_key
     )
@@ -106,7 +106,7 @@ def _lazy_fixed_width(
     table: str, descriptor: dict[str, Any], file_access: FileAccess | None
 ) -> LazySource | None:
     field_key = f"sources.{table}.path"
-    descriptor_path(descriptor, field_key)
+    descriptor_path(descriptor, field_key)  # validate only; the source builds from the descriptor
     _layout(descriptor, field_key)
     return FixedWidthLazySource.from_descriptor(
         descriptor, table=table, file_access=file_access, field_key=field_key
