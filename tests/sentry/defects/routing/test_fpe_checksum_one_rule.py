@@ -15,6 +15,7 @@ reading through `getattr`, a subscript, a `.get`, or a bound alias is still seen
 
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from tests.sentry.defects.routing._fpe_checksum_scan import (
     REJ,
     ROOT,
     Edge,
+    bound_scheme_names,
     callers,
     context_forwarders,
     defining_modules,
@@ -52,6 +54,10 @@ SCHEME_READS: dict[Edge, tuple[int, str]] = {
     ("execution/_strategies/_fpe.py", "FpeStrategyHandler.run"): (
         2,
         "oracle carrier: one read, then the annotated bound name feeds the luhn guard",
+    ),
+    ("execution/_strategies/_fpe.py", "FpeStrategyHandler.run.encrypt_one"): (
+        1,
+        "oracle carrier: the closure forwards the scheme it captures from `run`",
     ),
     ("execution/out_of_core/_mask_group_b.py", "fpe_array"): (
         3,
@@ -480,3 +486,41 @@ def test_a_refusal_branching_on_a_name_bound_to_the_scheme_changes_the_count() -
     )
     edge = (rel, "FpeConfig._resolve")
     assert scheme_reads(mutated, rel)[edge] == scheme_reads(src, rel)[edge] + 1
+
+
+_CAPTURED = (
+    "def outer(cfg):\n"
+    "    checksum = cfg.get('checksum') or None\n"
+    "    def inner(v):\n"
+    "        if checksum == 'vin':\n"
+    "            raise ValueError\n"
+    "        return v\n"
+    "    return inner\n"
+)
+_FPE_ROW = (
+    "def f(det_id):\n"
+    "    charset, checksum = _FPE_CONFIG[det_id]\n"
+    "    if checksum == 'vin':\n"
+    "        raise ValueError\n"
+    "    return charset\n"
+)
+
+
+def test_a_branch_on_a_name_captured_by_a_nested_function_is_counted() -> None:
+    """The read counter and the delivery check share one binding rule, so a closure that
+    branches on the enclosing function's scheme name changes the count."""
+    reads = scheme_reads(_CAPTURED, "x.py")
+    assert reads[("x.py", "outer")] == 1  # the key read
+    assert reads[("x.py", "outer.inner")] == 1
+
+
+def test_an_fpe_config_row_unpacking_binds_the_scheme() -> None:
+    """`charset, checksum = _FPE_CONFIG[det_id]` carries the scheme in its second item."""
+    assert scheme_reads(_FPE_ROW, "x.py")[("x.py", "f")] == 1
+    tree = ast.parse(_FPE_ROW)
+    assert bound_scheme_names(tree, "f") == {"checksum"}
+
+
+def test_the_first_item_of_an_fpe_config_row_is_not_the_scheme() -> None:
+    src = "def f(d):\n    charset, checksum = _FPE_CONFIG[d]\n    return charset\n"
+    assert scheme_reads(src, "x.py")[("x.py", "f")] == 0

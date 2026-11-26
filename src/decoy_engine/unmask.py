@@ -97,17 +97,19 @@ class UnmaskResult:
 
 
 def _require_known_checksum_scheme(scheme: object, column: str, table_name: str) -> None:
-    """Raise a value-free `ExecutionError` unless `scheme` names a registered checksum scheme.
+    """Raise a value-free `ExecutionError` unless `scheme` is one FPE can mask, so it can be reversed.
 
     The configured string is never echoed: it is customer config and may carry a credential."""
-    from decoy_engine.checksums import _KNOWN_SCHEMES
+    from decoy_engine.checksums import classify_fpe_scheme
 
-    if not isinstance(scheme, str) or scheme not in _KNOWN_SCHEMES:
+    verdict = classify_fpe_scheme(scheme)
+    if verdict != "supported":
+        kind = "not a recognized scheme" if verdict == "unknown" else "not supported for fpe"
         raise ExecutionError(
             code=reasons.runtime.FPE_CHECKSUM_UNSUPPORTED,
             message=(
                 f"column {column!r} in table {table_name!r} uses fpe with a checksum scheme "
-                "that is not a recognized scheme, so it cannot be reversed."
+                f"that is {kind}, so it cannot be reversed."
             ),
         )
 

@@ -62,9 +62,11 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
     exact = EXACT_LENGTHS.get(scheme)
     if exact is not None:
         expected = " or ".join(str(n) for n in sorted(exact))
+        # The caller stops collecting one past the ceiling, so an over-length count is a floor.
+        got = f"more than {max(exact)}" if len(s) > max(exact) else str(len(s))
         raise FpeChecksumError(
             f"FPE checksum scheme requires exactly {expected} character(s); "
-            f"got {len(s)}. A value outside the scheme's fixed length cannot "
+            f"got {got}. A value outside the scheme's fixed length cannot "
             "be format-preserving-encrypted without leaking or truncating a character, "
             "so the engine fails closed. Fix the source data or route this column "
             "through a different strategy.",
@@ -128,7 +130,7 @@ def _fpe_checksum_permute(
         Use validate-only or a different strategy for IBAN columns.
 
     unknown scheme
-        FAILS CLOSED.  Any scheme name not in ``checksums._KNOWN_SCHEMES``
+        FAILS CLOSED.  Any scheme name not in ``checksums.classify_fpe_scheme``
         raises ``FpeChecksumError``.  The pre-SP04 fall-through to plain
         FPE with no check digit was silent misconfiguration; Decoy forbids
         that pattern.
@@ -156,20 +158,27 @@ def _fpe_checksum_permute(
     forward (encrypt) and inverse (decrypt) directions.
     """
     try:
-        from decoy_engine.checksums import _KNOWN_SCHEMES, calc_check_digit, validate
+        from decoy_engine.checksums import (
+            calc_check_digit,
+            classify_fpe_scheme,
+            recognized_schemes,
+            validate,
+        )
+
+        verdict = classify_fpe_scheme(scheme)
 
         # H2: unknown scheme - fail closed.
-        if scheme not in _KNOWN_SCHEMES:
+        if verdict == "unknown":
             raise FpeChecksumError(
                 "FPE checksum mode received an unknown scheme. "
-                f"Known schemes: {sorted(_KNOWN_SCHEMES)}. "
+                f"Known schemes: {recognized_schemes()}. "
                 "Check your config for typos; valid fpe checksum schemes are "
                 "luhn, npi, vin, isbn13, ean13, gtin (iban is not supported for FPE).",
                 scheme=scheme,
             )
 
         # B1: IBAN - fail closed.
-        if scheme == "iban":
+        if verdict == "unsupported":
             raise FpeChecksumError(
                 "FPE checksum mode does not support 'iban': per-country BBAN "
                 "structure (enforced by stdnum.iban.validate) cannot be satisfied "

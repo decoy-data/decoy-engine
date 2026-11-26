@@ -20,6 +20,7 @@ DECISION = "fpe_checksum_rejection"
 ADAPTER = "fpe_checksum_config_rejection"
 FIELD = "checksum_schemes"
 SCHEME = "checksum"
+FPE_CONFIG = "_FPE_CONFIG"
 
 Edge = tuple[str, str]
 
@@ -72,55 +73,24 @@ def field_readers(source: str, rel: str) -> Counter[Edge]:
     return out
 
 
-def _reads_scheme(n: ast.AST) -> bool:
-    return _key_read(n, SCHEME) or (
-        isinstance(n, ast.Attribute) and n.attr == SCHEME and isinstance(n.ctx, ast.Load)
-    )
-
-
 def scheme_reads(source: str, rel: str) -> Counter[Edge]:
     """Reads of the configured scheme: a mapping key read, a `.checksum` attribute, and any use
-    of a name bound to the scheme slot of `_resolve()` (the fourth item) or assigned from an
-    expression that reads the scheme."""
+    of a name `bound_scheme_names` says carries it, including a nested function that captures
+    the name from its enclosing function."""
     tree = ast.parse(source)
     out: Counter[Edge] = Counter()
     bound: dict[str, set[str]] = {}
-    scoped = _scoped(tree)
-    for scope, node in scoped:
-        if (
-            isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Call)
-            and isinstance(node.value.func, ast.Attribute)
-            and node.value.func.attr == "_resolve"
-            and isinstance(node.targets[0], ast.Tuple)
-            and len(node.targets[0].elts) == 4
-            and isinstance(node.targets[0].elts[3], ast.Name)
-        ):
-            bound.setdefault(scope, set()).add(node.targets[0].elts[3].id)
-    # A name bound from an expression that reads the scheme (`checksum = self.checksum or None`,
-    # or the annotated `checksum: str | None = ...`) carries the scheme too.
-    for scope, node in scoped:
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
-            continue
-        tgts = node.targets if isinstance(node, ast.Assign) else [node.target]
-        if (
-            len(tgts) == 1
-            and isinstance(tgts[0], ast.Name)
-            and any(_reads_scheme(n) for n in ast.walk(node.value))
-        ):
-            bound.setdefault(scope, set()).add(tgts[0].id)
-    for scope, node in scoped:
+    for scope, node in _scoped(tree):
         if _key_read(node, SCHEME):
             out[(rel, scope)] += 1
         elif isinstance(node, ast.Attribute) and node.attr == SCHEME:
             if isinstance(node.ctx, ast.Load):
                 out[(rel, scope)] += 1
-        elif (
-            isinstance(node, ast.Name)
-            and isinstance(node.ctx, ast.Load)
-            and node.id in bound.get(scope, ())
-        ):
-            out[(rel, scope)] += 1
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            if scope not in bound:
+                bound[scope] = bound_scheme_names(tree, scope)
+            if node.id in bound[scope]:
+                out[(rel, scope)] += 1
     return out
 
 
@@ -313,10 +283,29 @@ def _function_scopes(tree: ast.Module) -> set[str]:
     }
 
 
-def _bound_scheme_names(tree: ast.Module, scope: str) -> set[str]:
-    """Names only ever assigned the configured scheme (a key read or the fourth `_resolve()` item)
-    in `scope`, its nested functions and the functions that enclose it. A class field of the same
-    name is not an assignment in that function."""
+def _is_resolve_call(value: ast.AST | None) -> bool:
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and value.func.attr == "_resolve"
+    )
+
+
+def _is_fpe_config_row(value: ast.AST | None) -> bool:
+    """`_FPE_CONFIG[detector_id]`: the text-mask registry row `(charset, checksum)`."""
+    return (
+        isinstance(value, ast.Subscript)
+        and isinstance(value.value, ast.Name)
+        and value.value.id == FPE_CONFIG
+    )
+
+
+def bound_scheme_names(tree: ast.Module, scope: str) -> set[str]:
+    """The one answer to "which names carry the configured scheme" in `scope`: the function
+    itself, its nested functions and the functions that enclose it (a closure captures the name).
+    A name counts when every assignment to it is the scheme (a key read, `.checksum`,
+    `<scheme> or None`), the fourth item of `_resolve()`, or the second item of an
+    `_FPE_CONFIG[...]` row. A class field of the same name is not an assignment in a function."""
     funcs = _function_scopes(tree)
     good: set[str] = set()
     bad: set[str] = set()
@@ -335,15 +324,17 @@ def _bound_scheme_names(tree: ast.Module, scope: str) -> set[str]:
         for target, value in pairs:
             if isinstance(target, ast.Name):
                 (good if _scheme_expr(value, set()) else bad).add(target.id)
-            elif isinstance(target, ast.Tuple) and len(target.elts) == 4:
-                last = target.elts[3]
-                from_resolve = (
-                    isinstance(value, ast.Call)
-                    and isinstance(value.func, ast.Attribute)
-                    and value.func.attr == "_resolve"
+            elif isinstance(target, ast.Tuple):
+                n = len(target.elts)
+                last = target.elts[-1] if n else None
+                carries = (n == 4 and _is_resolve_call(value)) or (
+                    n == 2 and _is_fpe_config_row(value)
                 )
+                for elt in target.elts[:-1]:
+                    if isinstance(elt, ast.Name):
+                        bad.add(elt.id)
                 if isinstance(last, ast.Name):
-                    (good if from_resolve else bad).add(last.id)
+                    (good if carries else bad).add(last.id)
         if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
             bad.add(node.target.id)
     return good - bad
@@ -390,7 +381,7 @@ def delivery_violations(
         if tree is None:
             problems.append(f"{rel}: missing")
             continue
-        bound = _bound_scheme_names(tree, scope)
+        bound = bound_scheme_names(tree, scope)
         sites: list[bool] = []
         for sc, node in _scoped(tree):
             if sc != scope:

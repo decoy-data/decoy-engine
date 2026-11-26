@@ -463,7 +463,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
 
     1. Unknown scheme (typo, e.g. ``checksum: ibna``): Decoy forbids silent
        misconfiguration passthrough.  Any value not in
-       ``checksums._KNOWN_SCHEMES`` raises with code
+       ``checksums.classify_fpe_scheme`` raises with code
        ``fpe_checksum_unknown_scheme``.
 
     2. IBAN (``checksum: iban``): per-country BBAN structure enforced by
@@ -485,10 +485,8 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
     Config-only (no profile, no source data): safe to run in --no-profile
     mode and in ``run_config_only_checks``.
     """
-    from decoy_engine.checksums import _KNOWN_SCHEMES, _SCHEME_REQUIRED_CHARSET
+    from decoy_engine.checksums import classify_fpe_scheme, recognized_schemes, required_charset
     from decoy_engine.transforms.fpe import _CHARSETS as _FPE_CHARSETS
-
-    _FPE_UNSUPPORTED_SCHEMES = frozenset({"iban"})
 
     tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
     for table_entry in tables:
@@ -507,20 +505,21 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
             if not checksum:
                 continue
             col_name = col_entry.get("name", "?")
-            if checksum not in _KNOWN_SCHEMES:
+            verdict = classify_fpe_scheme(checksum)
+            if verdict == "unknown":
                 raise PlanCompileError(
                     code=reasons.plan.FPE_CHECKSUM_UNKNOWN_SCHEME,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.checksum",
                     message=(
                         f"column {col_name!r} in table {table_name!r} uses "
                         "strategy fpe with an unknown checksum scheme. "
-                        f"Known schemes: {sorted(_KNOWN_SCHEMES)}. "
+                        f"Known schemes: {recognized_schemes()}. "
                         "Check for typos; valid fpe checksum schemes are "
                         "luhn, npi, vin, isbn13, ean13, gtin "
                         "(iban is not supported for FPE mode)."
                     ),
                 )
-            if checksum in _FPE_UNSUPPORTED_SCHEMES:
+            if verdict == "unsupported":
                 raise PlanCompileError(
                     code=reasons.plan.FPE_CHECKSUM_IBAN_UNSUPPORTED,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.checksum",
@@ -543,7 +542,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
             )
             charset_str = _FPE_CHARSETS.get(str(charset_spec), str(charset_spec))
             charset_set = frozenset(charset_str)
-            required = _SCHEME_REQUIRED_CHARSET.get(checksum)
+            required = required_charset(checksum)
             if required is not None:
                 missing = required - charset_set
                 if missing:
