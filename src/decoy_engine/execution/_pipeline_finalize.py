@@ -486,7 +486,7 @@ def finalize_validators_and_quarantine(
             quarantine_removed = quarantine_row_mask(
                 outputs, v_report, quarantine_cfg, row_errors=mask_row_errors
             )
-            from decoy_engine.execution.pipeline._post_scan import (
+            from decoy_engine.execution.pipeline.post_scan._gate import (
                 note_quarantined,
                 publish_after_gate,
             )

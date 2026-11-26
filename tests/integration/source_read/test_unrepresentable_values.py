@@ -17,7 +17,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import to_pandas_fk_safe
 from decoy_engine.execution._pipeline_finalize import compute_fidelity_reports
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.profile._readers import ParquetFileSource
 from decoy_engine.profile._readers_resident import ResidentTableSource
 from decoy_engine.verification.postmask import run_post_mask_tables

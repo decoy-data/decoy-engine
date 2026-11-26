@@ -230,10 +230,13 @@ def arrow_to_series(
     if twin is not None:
         try:
             array.to_pandas(types_mapper=types_mapper)
-        except _UNREPRESENTABLE:
-            pass
+        except _UNREPRESENTABLE as exc:
+            retry_failure = _classify(exc)
+            retry_original = exc
         else:
             raise twin from None
+        # The retry can hit a typed allocation failure the first attempt reported ambiguously.
+        _raise_resource(retry_failure, retry_original)
     _fail(on_unrepresentable, name)
 
 

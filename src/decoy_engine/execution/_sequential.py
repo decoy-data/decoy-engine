@@ -174,8 +174,8 @@ from decoy_engine.execution._transactional_sink import (
     TransactionalSink,
     _CallableSinkAdapter,
 )
-from decoy_engine.execution.pipeline._post_scan import note_quarantined, publish_after_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
+from decoy_engine.execution.pipeline.post_scan._gate import note_quarantined, publish_after_gate
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning

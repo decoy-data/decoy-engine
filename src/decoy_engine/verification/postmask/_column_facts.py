@@ -205,6 +205,9 @@ class _Tally:
     error: str | None = None
     # True when the output column itself could not be read (no detectors, no values).
     unreadable: bool = False
+    # Set when the output or source column could not be read. Separate from `error`, which a later
+    # length mismatch takes over, so the inspection failure is never lost.
+    not_inspectable: bool = False
     # detector id -> [hits, non-null values, threshold, name hint]
     detectors: dict[str, list[float | bool]] | None = None
     values: _ValueTally | None = None
@@ -231,6 +234,7 @@ def _output_series(
         if exc.code != _NOT_INSPECTABLE_CODE:
             raise
         tally.error = exc.code
+        tally.not_inspectable = True
         return out_s
     try:
         _add_identity(tally, src_s, out_s)
@@ -414,7 +418,9 @@ def column_facts(
             except ExecutionError as exc:
                 if exc.code != _NOT_INSPECTABLE_CODE:
                     raise
-                tallies[c].error = exc.code
+                # An earlier length mismatch keeps `error`; the failure is recorded either way.
+                tallies[c].error = tallies[c].error or exc.code
+                tallies[c].not_inspectable = True
                 tallies[c].unreadable = True
                 continue
             _add_detectors(tallies[c], out_s, c)
@@ -448,7 +454,7 @@ def column_facts(
             detectors=_fired(t),
             identity_error=t.error,
             distinct_error=distinct_failed
-            or (_NOT_INSPECTABLE_CODE if t.error == _NOT_INSPECTABLE_CODE else None),
+            or (_NOT_INSPECTABLE_CODE if t.not_inspectable else None),
             source_distinct_failed=source_failed,
             output_values=t.values.done() if t.values is not None else None,
         )

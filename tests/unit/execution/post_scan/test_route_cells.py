@@ -19,7 +19,8 @@ import pytest
 
 from decoy_engine.execution import run_pipeline_isolated
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline import _post_scan, _post_scan_suite
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
+from decoy_engine.execution.pipeline.post_scan import _suite as _post_scan_suite
 from decoy_engine.internal.memory_limit import require_megabytes
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _subset_run_support as subset_sup

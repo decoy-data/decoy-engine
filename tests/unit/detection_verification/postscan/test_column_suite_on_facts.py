@@ -595,6 +595,39 @@ def test_output_rows_past_a_short_source_are_still_inspected(tmp_path: Path):
     assert any(f["column"] == "d" and f["severity"] == "error" for f in report["residual_pii"])
 
 
+def test_an_unreadable_output_date_before_the_source_ends_stays_reported(tmp_path: Path):
+    # The unreadable value comes first, then the source stream ends early. The length mismatch
+    # must not erase the inspection failure: both stay on the column's facts and the gate still
+    # raises its unconditional error.
+    from decoy_engine import reasons
+
+    src = pa.table({"d": pa.array([19000, 19001, 19002], pa.date32())})
+    out = pa.table({"d": pa.array([2_932_897, 19001, 19002], pa.date32())})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["d"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )["d"]
+    assert facts.identity_error == reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
+    assert facts.distinct_error == reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+    report = run_post_mask_tables(
+        {"t": _short_source(src)},
+        {"t": from_table("t", out)},
+        config=_cfg(("d", "hash")),
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    assert any(
+        f["column"] == "d"
+        and f["severity"] == "error"
+        and reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE in f["message"]
+        for f in report["residual_pii"]
+    )
+
+
 def test_a_source_that_reads_short_marks_identity_unavailable(tmp_path: Path):
     src = pa.table({"e": ["a@x.com", "b@x.com"]})
     out = pa.table({"e": ["a@x.com", "c@x.com"]})
@@ -651,7 +684,7 @@ def _stored_index_table(case: str) -> tuple[pa.Table, list[tuple[str, str]]]:
 def test_a_stored_index_gets_the_same_verdict_on_the_resident_and_batch_gates(
     case: str, tmp_path: Path
 ):
-    from decoy_engine.execution.pipeline._post_scan_suite import suite_frames
+    from decoy_engine.execution.pipeline.post_scan._suite import suite_frames
 
     table, columns = _stored_index_table(case)
     config = _cfg(*columns)
@@ -680,7 +713,7 @@ def test_a_stored_index_gets_the_same_verdict_on_the_resident_and_batch_gates(
 def test_big_nullable_integers_get_the_same_verdict_on_the_resident_and_batch_gates(
     arrow_type: pa.DataType, tmp_path: Path
 ):
-    from decoy_engine.execution.pipeline._post_scan_suite import suite_frames
+    from decoy_engine.execution.pipeline.post_scan._suite import suite_frames
 
     big = 2**53
     src = pa.table({"n": pa.array([big, big + 2, None], arrow_type)})

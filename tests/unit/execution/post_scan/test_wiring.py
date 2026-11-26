@@ -22,8 +22,8 @@ from decoy_engine import reasons, run_pipeline
 from decoy_engine.execution._chunked_input import capture_source_facts
 from decoy_engine.execution._publication_observer import observed_commit
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline import _post_scan
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.verification.postmask import PostScanBlockedError
 from decoy_engine.verification.postmask.types import ResidualPIIFinding

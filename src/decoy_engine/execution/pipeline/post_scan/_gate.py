@@ -38,12 +38,12 @@ from decoy_engine.config import (
 from decoy_engine.execution._chunked_input import SourceFacts, capture_source_facts, check_opened
 from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
 from decoy_engine.execution.out_of_core import MaskedKeyStager, resolve_ooc_memory_limit
-from decoy_engine.execution.pipeline._post_scan_distribution import (
+from decoy_engine.execution.pipeline.post_scan._distribution import (
     DistributionState,
     refuse_transformed_integrity,
     refuse_unchecked_distribution,
 )
-from decoy_engine.execution.pipeline._post_scan_suite import suite_frames, suite_tables
+from decoy_engine.execution.pipeline.post_scan._suite import suite_frames, suite_tables
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.internal.memory_limit import require_megabytes
 from decoy_engine.profile import LazySource

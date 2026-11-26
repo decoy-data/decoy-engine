@@ -19,7 +19,7 @@ from decoy_engine.execution import ExecutionError, _unified_slice, run_pipeline
 from decoy_engine.execution._chunked_output_sink import decide_output_mode
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution._transforms_gate import post_scan_resident_for
-from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.verification.postmask import PostScanBlockedError
 from tests.security.test_f29_remediation import _decide

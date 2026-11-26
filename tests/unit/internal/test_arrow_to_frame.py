@@ -222,6 +222,28 @@ def test_a_series_cap_failure_that_does_not_reproduce_stays_a_memory_failure() -
     assert "2932897" not in str(caught.value)
 
 
+def test_a_series_retry_that_hits_a_typed_allocation_failure_stays_a_memory_failure() -> None:
+    # The first conversion reports Arrow's ambiguous "Wrapping ... failed"; the retry reports the
+    # typed allocation failure. The caller must see memory, not a bad column, and no value text.
+    from decoy_engine.fileaccess import is_memory_failure
+
+    calls: list[int] = []
+
+    class _Pressure:
+        def to_pandas(self, **_kwargs: object) -> pd.Series:
+            calls.append(1)
+            if len(calls) == 1:
+                raise pa.ArrowException("Unknown error: Wrapping 2932897 failed")
+            raise pa.ArrowMemoryError("malloc of size 2932897 failed")
+
+    fake: Any = _Pressure()
+    with pytest.raises(pa.ArrowMemoryError) as caught:
+        arrow_to_series(fake, on_unrepresentable=_refuse, name="ok")
+    assert is_memory_failure(caught.value)
+    assert "2932897" not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
 def _invalid_utf8_table() -> pa.Table:
     data = b"ok\xff\xfesecret"
     offsets = pa.array([0, 2, len(data)], pa.int32()).buffers()[1]
