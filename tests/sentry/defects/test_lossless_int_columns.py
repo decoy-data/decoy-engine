@@ -44,7 +44,7 @@ ALLOWED: dict[str, dict[tuple[str, str], str]] = {
         ),
     },
     "adapter_fk_safe_columns": {
-        ("execution/_chunked_oracle.py", "_oracle_masked._masked"): "diagnosis of a failed chunk",
+        ("execution/chunked/_oracle_step.py", "oracle_chunk_step"): "diagnosis of a failed chunk",
         ("execution/native/_when_mask.py", "plan_when_masks"): "the native when mask's set",
         (
             "execution/native/_faker_null_mask.py",

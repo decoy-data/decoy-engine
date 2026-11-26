@@ -2,7 +2,7 @@
  "sentry_id": "lossless-int-columns",
  "created_in": "RED-MAIN-BASELINE",
  "entries": {
-  "adapter_fk_safe_columns::execution/_chunked_oracle.py::_oracle_masked._masked": {
+  "adapter_fk_safe_columns::execution/chunked/_oracle_step.py::oracle_chunk_step": {
    "reason": "existing entry of defects/test_lossless_int_columns.py, registered when the baseline scan found it unregistered; may only shrink"
   },
   "adapter_fk_safe_columns::execution/native/_faker_null_mask.py::plan_faker_null_masks": {
