@@ -14,8 +14,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tests._progress_v0 import v0_projection
+
 from decoy_engine import progress, reasons
-from decoy_engine._progress_events import _LEGACY_FIELDS
 from decoy_engine.progress import (
     CheckpointEvent,
     CheckpointInfo,
@@ -100,11 +101,7 @@ def _events() -> dict[str, dict[str, Any]]:
     return {
         name: {
             "v1": progress.event_to_dict(event),
-            "v0": {
-                k: v
-                for k, v in progress.event_to_dict(event).items()
-                if k in _LEGACY_FIELDS[type(event)]
-            },
+            "v0": v0_projection(event),
         }
         for name, event in events.items()
     }

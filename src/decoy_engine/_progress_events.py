@@ -1,8 +1,8 @@
 """Typed, versioned progress events and their serializers (F29).
 
 The event dataclasses, the typed retry, checkpoint and publication groups, the numeric and
-identifier validation, and the projection `event_to_dict` (version 1). The channel, sinks and bindings live in
-`decoy_engine.progress`, which re-exports everything here: import from there.
+identifier validation, and the projection `event_to_dict` (version 1). The channel, sinks and
+bindings live in `decoy_engine.progress`, which re-exports everything here: import from there.
 
 Every field is typed and bounded, and an event can only be serialized through an explicit
 per-variant allowlist, so an arbitrary attribute never rides out of the process.

@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 
 from decoy_engine import phase, progress, reasons
-from decoy_engine._progress_events import _LEGACY_FIELDS
 from decoy_engine.reasons import CleanupState, Operation, PublicationState, ReasonRecord
+from tests._progress_v0 import v0_projection
 
 _RV = reasons.REGISTRY_VERSION
 _TS = 1700000000.0
@@ -279,9 +279,7 @@ _SNAPSHOT = {
 @pytest.mark.parametrize("name", sorted(_SNAPSHOT))
 def test_progress_dicts_unchanged(name: str) -> None:
     event = _events()[name]
-    v1 = progress.event_to_dict(event)
-    v0 = {k: v for k, v in v1.items() if k in _LEGACY_FIELDS[type(event)]}
-    assert (v1, v0) == _SNAPSHOT[name]
+    assert (progress.event_to_dict(event), v0_projection(event)) == _SNAPSHOT[name]
 
 
 class _PlainSubclassError(ValueError):
