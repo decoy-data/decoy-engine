@@ -56,11 +56,18 @@ def canary_surfaces(surfaces: dict[str, str], marker: str = CANARY) -> list[str]
     return sorted(name for name, text in surfaces.items() if marker in text)
 
 
-def leak_xfail(reason: str) -> Any:
-    """A cell observed leaking. Strict, and only an AssertionError counts, so a path that never
-    ran (`pytest.fail`) or an error in the harness cannot hide behind the mark. `reason` cites
-    the V2-LOG entry or the slice that closes the leak."""
-    return pytest.mark.xfail(strict=True, raises=AssertionError, reason=reason)
+# The surfaces a marker reaches when an error formats it into its message and stores it nowhere
+# else: no instance attribute, no `records`, no log record.
+EXC_MESSAGE_SURFACES = (
+    "exc.args",
+    "exc.chain",
+    "exc.logged",
+    "exc.repr",
+    "exc.str",
+    "exc.traceback",
+)
+# The same, for an error whose constructor also stores the message as an instance attribute.
+EXC_MESSAGE_AND_ATTR_SURFACES = tuple(sorted((*EXC_MESSAGE_SURFACES, "exc.attrs")))
 
 
 def assert_known_leak(
@@ -82,8 +89,9 @@ def assert_known_leak(
 
 
 def assert_path_ran(seen: Observed, *, code: str | None, exc_name: str | None = None) -> None:
-    """Fail, not assert, when the intended failure path did not run: `leak_xfail` only absorbs
-    an AssertionError, so a cell that never reached its site cannot pass as a known leak."""
+    """Fail, not assert, when the intended failure path did not run: `assert_known_leak` only
+    xfails on an exact surface match, so a cell that never reached its site cannot pass as a
+    known leak."""
     if seen.exc is None:
         pytest.fail("the failure path did not run")
     if exc_name is not None and type(seen.exc).__name__ != exc_name:

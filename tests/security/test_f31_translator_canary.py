@@ -23,7 +23,12 @@ from typing import Any
 import pytest
 
 from tests._exception_surfaces import rendered_surfaces
-from tests._f31_canary import CANARY, assert_no_canary, leak_xfail
+from tests._f31_canary import (
+    CANARY,
+    EXC_MESSAGE_AND_ATTR_SURFACES,
+    assert_known_leak,
+    assert_no_canary,
+)
 
 _FIXED_DETAIL = "fixed native detail"
 _F3 = "V2-LOG 2026-11-25 F31 AE6-F3 native translators copy the native detail verbatim"
@@ -139,24 +144,45 @@ def test_translated_error_forwards_only_code_and_detail(
 _FIRST_PER_TRANSLATOR = list({row[0]: row for row in reversed(_MAPPED)}.values())
 
 
-@pytest.mark.parametrize(
-    ("module", "translator", "code", "expected"),
-    [
-        pytest.param(
-            *row,
-            id=row[0].strip("_"),
-            marks=leak_xfail(f"{_F3}: {row[0].strip('_')}, the detail is not scrubbed"),
-        )
-        for row in _FIRST_PER_TRANSLATOR
-    ],
-)
-def test_translated_error_copies_the_detail_it_is_given(
-    module: str, translator: str, code: str, expected: str
-) -> None:
+def _check_detail_copy(translated: BaseException, reason: str) -> None:
+    """The recorded leak goes through `assert_known_leak`, so the marker reaching a surface
+    beyond the translated message and its attributes fails the cell instead of passing as the known leak."""
+    assert_known_leak(rendered_surfaces(translated), EXC_MESSAGE_AND_ATTR_SURFACES, reason)
+
+
+def _copied_detail(module: str, translator: str, code: str, expected: str) -> BaseException:
     translated = _translate(module, translator, ValueError(f"{code}: row value {CANARY}"))
     if type(translated).__name__ != expected:
         pytest.fail(f"expected {expected}, got {type(translated).__name__}")
-    assert_no_canary(rendered_surfaces(translated))
+    return translated
+
+
+_COPY_ROWS = [pytest.param(*row, id=row[0].strip("_")) for row in _FIRST_PER_TRANSLATOR]
+
+
+@pytest.mark.parametrize(("module", "translator", "code", "expected"), _COPY_ROWS)
+def test_translated_error_copies_the_detail_it_is_given(
+    module: str, translator: str, code: str, expected: str
+) -> None:
+    translated = _copied_detail(module, translator, code, expected)
+    _check_detail_copy(translated, f"{_F3}: {module.strip('_')}, the detail is not scrubbed")
+
+
+@pytest.mark.parametrize(("module", "translator", "code", "expected"), _COPY_ROWS)
+def test_detail_copy_cell_fails_when_the_marker_reaches_another_surface(
+    module: str, translator: str, code: str, expected: str
+) -> None:
+    """The marker also stored in the error's records is a new leak, not the recorded one."""
+    translated = _copied_detail(module, translator, code, expected)
+    translated.records = [CANARY]  # type: ignore[attr-defined]
+    try:
+        _check_detail_copy(translated, _F3)
+    except pytest.xfail.Exception:
+        pytest.fail("the cell xfailed although the marker reached the error's records")
+    except AssertionError as err:
+        assert "beyond the known leak" in str(err)
+    else:
+        pytest.fail("the cell passed although the marker reached the error's records")
 
 
 def _text_mask_translator() -> Callable[[Any, str], BaseException]:
@@ -178,14 +204,37 @@ def test_text_mask_translator_drops_the_value_the_error_was_given() -> None:
     assert_no_canary(rendered_surfaces(translated))
 
 
-@leak_xfail(f"{_F3}: _text_mask_route, the source message is embedded")
-def test_text_mask_translator_copies_the_message_it_is_given() -> None:
+def _copied_message() -> BaseException:
     from decoy_engine.errors import FpeUnencryptableError
 
     translated = _text_mask_translator()(FpeUnencryptableError(f"row value {CANARY}"), "col")
     if type(translated).__name__ != "StrategyError":
         pytest.fail(f"expected StrategyError, got {type(translated).__name__}")
-    assert_no_canary(rendered_surfaces(translated))
+    return translated
+
+
+_MESSAGE_COPY = f"{_F3}: _text_mask_route, the source message is embedded"
+
+
+def test_text_mask_translator_copies_the_message_it_is_given() -> None:
+    assert_known_leak(
+        rendered_surfaces(_copied_message()), EXC_MESSAGE_AND_ATTR_SURFACES, _MESSAGE_COPY
+    )
+
+
+def test_message_copy_cell_fails_when_the_marker_reaches_another_surface() -> None:
+    translated = _copied_message()
+    translated.records = [CANARY]  # type: ignore[attr-defined]
+    try:
+        assert_known_leak(
+            rendered_surfaces(translated), EXC_MESSAGE_AND_ATTR_SURFACES, _MESSAGE_COPY
+        )
+    except pytest.xfail.Exception:
+        pytest.fail("the cell xfailed although the marker reached the error's records")
+    except AssertionError as err:
+        assert "beyond the known leak" in str(err)
+    else:
+        pytest.fail("the cell passed although the marker reached the error's records")
 
 
 def test_real_fpe_error_reaches_the_text_mask_translator_value_free() -> None:

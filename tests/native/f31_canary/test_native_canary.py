@@ -27,7 +27,13 @@ import pyarrow as pa
 import pytest
 
 from tests._exception_surfaces import rendered_surfaces
-from tests._f31_canary import CANARY, ROW_CANARY, assert_no_canary, leak_xfail
+from tests._f31_canary import (
+    CANARY,
+    EXC_MESSAGE_SURFACES,
+    ROW_CANARY,
+    assert_known_leak,
+    assert_no_canary,
+)
 
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("decoy_engine_native") is None,
@@ -90,8 +96,8 @@ _F1 = "V2-LOG 2026-11-25 F31 AE6-F1 config ids in native errors"
 _F2 = "V2-LOG 2026-11-25 F31 AE6-F2 struct type text in native errors"
 
 
-def _leak(entry: str, site: str, what: str) -> Any:
-    return leak_xfail(f"{entry}: {site} {what}")
+def _leak(entry: str, site: str, what: str) -> str:
+    return f"{entry}: {site} {what}"
 
 
 _NAME = "formats the config id into the error"
@@ -278,8 +284,8 @@ _RAISERS: list[tuple[str, Callable[[Any], Any], type[Exception], str, Any, bool]
 ]
 
 _PARAMS = [
-    pytest.param(raiser, exc, prefix, id=name, marks=[mark] if mark is not None else [])
-    for name, raiser, exc, prefix, mark, _ in _RAISERS
+    pytest.param(raiser, exc, prefix, leak, id=name)
+    for name, raiser, exc, prefix, leak, _ in _RAISERS
 ]
 
 
@@ -303,11 +309,41 @@ def _raised(raiser: Callable[[Any], Any], exc_type: type[Exception], prefix: str
     pytest.fail(f"expected {exc_type.__name__}, nothing was raised")
 
 
-@pytest.mark.parametrize(("raiser", "exc_type", "prefix"), _PARAMS)
+def _check_input_text(error: Exception, leak: str | None) -> None:
+    """A cell with a recorded leak goes through `assert_known_leak`, so the marker reaching a
+    surface beyond the error message fails the cell instead of passing as the known leak."""
+    surfaces = rendered_surfaces(error)
+    if leak is None:
+        assert_no_canary(surfaces)
+    else:
+        assert_known_leak(surfaces, EXC_MESSAGE_SURFACES, leak)
+
+
+@pytest.mark.parametrize(("raiser", "exc_type", "prefix", "leak"), _PARAMS)
 def test_native_error_carries_no_input_text(
-    raiser: Callable[[Any], Any], exc_type: type[Exception], prefix: str
+    raiser: Callable[[Any], Any], exc_type: type[Exception], prefix: str, leak: str | None
 ) -> None:
-    assert_no_canary(rendered_surfaces(_raised(raiser, exc_type, prefix)))
+    _check_input_text(_raised(raiser, exc_type, prefix), leak)
+
+
+_LEAK_CELLS = [p for p in _PARAMS if p.values[3] is not None]
+
+
+@pytest.mark.parametrize(("raiser", "exc_type", "prefix", "leak"), _LEAK_CELLS)
+def test_native_leak_cell_fails_when_the_marker_reaches_another_surface(
+    raiser: Callable[[Any], Any], exc_type: type[Exception], prefix: str, leak: str | None
+) -> None:
+    """The marker also stored in an exception attribute is a new leak, not the recorded one."""
+    error = _raised(raiser, exc_type, prefix)
+    error.stored = CANARY  # type: ignore[attr-defined]
+    try:
+        _check_input_text(error, leak)
+    except pytest.xfail.Exception:
+        pytest.fail("the cell xfailed although the marker reached an attribute of the error")
+    except AssertionError as err:
+        assert "beyond the known leak" in str(err)
+    else:
+        pytest.fail("the cell passed although the marker reached an attribute of the error")
 
 
 @pytest.mark.parametrize(("raiser", "exc_type", "prefix"), _ROW_PLANTED)
