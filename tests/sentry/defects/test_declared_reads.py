@@ -156,3 +156,13 @@ def test_a_gated_nodes_when_reads_are_snapshotted_once_a_node_writes_them() -> N
     )
     order = compile_work_order(build_work_list(plan, ws.REG), ws.NO_GRAPH)
     assert source_snapshot_columns(order)["t"] == {"status"}  # `other` is written by no node
+
+
+def test_a_when_predicates_columns_are_gate_reads_not_masked_reads() -> None:
+    """`ColumnAccess.reads` holds the `when:` columns too; the record keeps them out of
+    `masked_reads` (a gate reads original values, so it must not order the node after a writer),
+    while a driver the node itself reads stays in."""
+    op = _resolve(ws.derived("concat(d_one, d_two)", when="status == 'x'"))
+    assert op.masked_reads == frozenset({"d_one", "d_two"})
+    plain = _resolve(ws.seed("redact", when="status == 'x'"))
+    assert plain.masked_reads == frozenset()
