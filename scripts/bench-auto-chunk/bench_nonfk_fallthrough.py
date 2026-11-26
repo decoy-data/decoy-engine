@@ -118,6 +118,47 @@ def unexpected_exit(status: int, cgroup_bytes: int | None) -> bool:
     return not (cgroup_bytes and status in (137, -9))
 
 
+def trial_outcome(trial: dict[str, Any], cgroup_bytes: int | None) -> str:
+    """`ok`, `refused`, `killed` (a memory kill under a cap) or `crashed`."""
+    status = trial["exit_status"]
+    if status == 0:
+        return "refused" if trial.get("refusal") else "ok"
+    return "crashed" if unexpected_exit(status, cgroup_bytes) else "killed"
+
+
+def allowed_outcomes(workload: str, phase: str) -> frozenset[str]:
+    """Before the row a kill is the recorded case; after it a kill is a regression of the guard.
+
+    W-P after is the chunked part-(a) trigger and must run, never be refused."""
+    if phase == "before":
+        return frozenset({"ok", "killed"})
+    if expected_route(workload, phase) == "chunked":
+        return frozenset({"ok"})
+    return frozenset({"ok", "refused"})
+
+
+def outcome_failures(
+    warmups: list[dict[str, Any]],
+    measured: list[dict[str, Any]],
+    workload: str,
+    phase: str,
+    cgroup_bytes: int | None,
+) -> list[str]:
+    """Reasons a cell's outcomes do not match its workload and phase; warmups count here."""
+    allowed = allowed_outcomes(workload, phase)
+    failures = [
+        f"{kind} outcome not expected"
+        for kind in sorted(
+            {trial_outcome(t, cgroup_bytes) for t in [*warmups, *measured]} - allowed
+        )
+    ]
+    # Where a run is expected to succeed, a cell with no successful measured run proves nothing.
+    if allowed == {"ok"}:
+        if not any(trial_outcome(t, cgroup_bytes) == "ok" for t in measured):
+            failures.append("no measured run succeeded")
+    return failures
+
+
 def snapshot_entries(roots: list[Path]) -> set[str]:
     out: set[str] = set()
     for root in roots:
@@ -423,10 +464,14 @@ def drive(args: argparse.Namespace) -> int:
                         check=True, capture_output=True, text=True, env=_env(),
                     )  # fmt: skip
                     cell["static_estimate_bytes"] = json.loads(est.stdout)["estimate_bytes"]
-                trials = [
+                every = [
                     _trial(cell, source, base, args.cgroup_bytes)
                     for _ in range(args.warmup + args.rounds)
-                ][args.warmup :]
+                ]
+                warmups, trials = every[: args.warmup], every[args.warmup :]
+                cell["outcome_failures"] = outcome_failures(
+                    warmups, trials, workload, args.phase, args.cgroup_bytes
+                )
                 refused = [t for t in trials if t["exit_status"] == 0 and t.get("refusal")]
                 ok = [t for t in trials if t["exit_status"] == 0 and not t.get("refusal")]
                 cell["trials"] = trials
@@ -458,14 +503,13 @@ def drive(args: argparse.Namespace) -> int:
     wrong_route = [c for c in cells if c.get("route_mismatch")]
     for c in wrong_route:
         print(f"UNEXPECTED ROUTE: {c['workload']} {c['rows']}", file=sys.stderr)
-    crashed = [
-        c
-        for c in cells
-        if any(unexpected_exit(t["exit_status"], args.cgroup_bytes) for t in c["trials"])
-    ]
-    for c in crashed:
-        print(f"UNEXPECTED EXIT: {c['workload']} {c['rows']}", file=sys.stderr)
-    return 1 if bad or wrong_route or crashed else 0
+    unexpected = [c for c in cells if c["outcome_failures"]]
+    for c in unexpected:
+        print(
+            f"UNEXPECTED OUTCOME: {c['workload']} {c['rows']}: {'; '.join(c['outcome_failures'])}",
+            file=sys.stderr,
+        )
+    return 1 if bad or wrong_route or unexpected else 0
 
 
 def main(argv: list[str]) -> int:

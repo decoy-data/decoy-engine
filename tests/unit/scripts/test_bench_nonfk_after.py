@@ -6,6 +6,7 @@ turn an OOM kill or a leaked directory into a "pass" in the record."""
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 from pathlib import Path
 from typing import Any
@@ -174,3 +175,126 @@ def test_unexpected_exit_separates_a_kill_from_a_crash(bench: Any) -> None:
     assert bench.unexpected_exit(1, None) is True
     assert bench.unexpected_exit(137, 1_000_000) is False  # killed for memory under the cap
     assert bench.unexpected_exit(1, 1_000_000) is True  # a traceback under the cap is a failure
+
+
+def _killed() -> dict[str, Any]:
+    return {"exit_status": 137}
+
+
+def _refused() -> dict[str, Any]:
+    return {
+        "exit_status": 0,
+        "refusal": {"code": CODE, "clean_chaining": True},
+        "wall_s": 1.0,
+        "new_entries": [],
+    }
+
+
+def _ok(chunked: bool) -> dict[str, Any]:
+    return _trial("full_frame", chunked, 500, wall_s=1.0)
+
+
+def _drive(
+    bench: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    results: list[dict[str, Any]],
+    *,
+    workload: str,
+    phase: str,
+    warmup: int,
+    rounds: int,
+) -> int:
+    """`drive` with the worker subprocesses replaced by a scripted list of trial results."""
+    script = iter(results)
+
+    def fake_worker(*argv: str) -> None:
+        Path(argv[argv.index("--path") + 1]).write_text("x")
+
+    monkeypatch.setattr(bench, "_worker", fake_worker)
+    monkeypatch.setattr(bench, "_trial", lambda *_a, **_k: next(script))
+    args = argparse.Namespace(
+        out=str(tmp_path / "out.json"),
+        rows=[10],
+        workloads=[workload],
+        input="lazy",
+        rounds=rounds,
+        warmup=warmup,
+        cgroup_bytes=1_000_000,
+        phase=phase,
+        no_estimate=True,
+        workdir=str(tmp_path),
+    )
+    return int(bench.drive(args))
+
+
+def test_drive_w_p_after_fails_when_every_worker_is_killed(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [_killed()] * 3,
+        workload="W-P", phase="after", warmup=1, rounds=2,
+    )  # fmt: skip
+    assert rc != 0
+
+
+def test_drive_w_p_after_fails_when_every_worker_is_capacity_refused(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [_refused()] * 3,
+        workload="W-P", phase="after", warmup=1, rounds=2,
+    )  # fmt: skip
+    assert rc != 0
+
+
+def test_drive_w_p_after_passes_on_chunked_runs(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [_ok(True)] * 3,
+        workload="W-P", phase="after", warmup=1, rounds=2,
+    )  # fmt: skip
+    assert rc == 0
+
+
+def test_drive_after_still_accepts_a_refusal_for_a_non_chunking_workload(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [_refused()] * 3,
+        workload="W-S", phase="after", warmup=1, rounds=2,
+    )  # fmt: skip
+    assert rc == 0
+
+
+def test_drive_after_fails_on_a_kill_for_a_non_chunking_workload(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [_ok(False), _killed(), _refused()],
+        workload="W-S", phase="after", warmup=1, rounds=2,
+    )  # fmt: skip
+    assert rc != 0
+
+
+def test_drive_before_still_accepts_a_kill(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [_ok(False), _killed(), _ok(False)],
+        workload="W-P", phase="before", warmup=1, rounds=2,
+    )  # fmt: skip
+    assert rc == 0
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_drive_fails_when_a_warmup_crashes_and_the_measured_rounds_pass(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, phase: str
+) -> None:
+    chunked = phase == "after"
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [{"exit_status": 1}, _ok(chunked), _ok(chunked)],
+        workload="W-P", phase=phase, warmup=1, rounds=2,
+    )  # fmt: skip
+    assert rc != 0
