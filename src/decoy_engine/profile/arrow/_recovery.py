@@ -26,7 +26,7 @@ from decoy_engine.profile.arrow._walk_arrow import arrow_column_profile, holds_d
 if TYPE_CHECKING:
     import pandas as pd
 
-    from decoy_engine.profile._types import TableProfile
+    from decoy_engine.profile.arrow._parent import TableProfile
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -90,7 +90,7 @@ def recover_temporal_profile(
     the schema is outside `_eligible`, a field failed to convert for a reason the physical
     values do not explain, or no field failed alone; the caller then reports the original
     failure. Nothing is published until every field has a profile."""
-    from decoy_engine.profile._types import TableProfile, column_key_fields
+    from decoy_engine.profile.arrow._parent import TableProfile, column_key_fields
 
     if not _eligible(table.schema):
         return None

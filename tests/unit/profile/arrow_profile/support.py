@@ -35,7 +35,7 @@ from tests.unit.profile.test_duplicate_header_readers import _stub_cloud
 READER_KINDS = ("local", "s3", "gcs", "resident")
 PARQUET_KINDS = ("local", "s3", "gcs")
 FILE_FORMAT = {"local": "parquet", "s3": "parquet", "gcs": "parquet", "resident": "table"}
-SAFE_FAILURE = r"^bounded source profile failed \(\w+\)$"
+SAFE_FAILURE = r"^bounded source profile failed \(\w+\)\Z"
 
 
 def parquet_bytes(table: pa.Table, *, row_group_size: int | None = None) -> bytes:

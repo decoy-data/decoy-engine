@@ -47,8 +47,8 @@ def arrow_column_profile(
     string lengths are set only where pandas would call the column a string
     column. The chunked walk passes no PK, FK or PII inputs, so those fields are
     their defaults."""
-    from decoy_engine.profile._types import ColumnProfile
     from decoy_engine.profile._walk import observed_shape
+    from decoy_engine.profile.arrow._parent import ColumnProfile
 
     arr = _normalize(column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column)
     t = arr.type

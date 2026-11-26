@@ -204,18 +204,17 @@ def profile_source(
 # ---------------------------------------------------------------------
 
 
+def _holds_arrow_table(reader: ProfileSource) -> bool:
+    """True for a source that can hold list, struct or map columns: a resident table or a
+    Parquet reader (local, S3 or GCS). One rule for both the Arrow schema and the closed-label
+    failure boundary, so a new Parquet reader gets both or neither."""
+    return isinstance(reader, (ResidentTableSource, ArrowSampleSource))
+
+
 def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
-    """The Arrow schema, for a source that can hold list, struct or map columns.
-
-    Only Parquet and resident tables can; reading a CSV or fixed-width schema infers types
-    from the file, which the bounded profile avoids."""
-    from decoy_engine.profile._cloud_readers import GcsParquetSource, S3ParquetSource
-
-    if isinstance(
-        reader, (ResidentTableSource, ParquetFileSource, S3ParquetSource, GcsParquetSource)
-    ):
-        return reader.schema()
-    return None
+    """The Arrow schema of a source `_holds_arrow_table` accepts. A CSV or fixed-width schema
+    infers types from the file, which the bounded profile avoids."""
+    return reader.schema() if _holds_arrow_table(reader) else None
 
 
 def _passes_through(exc: Exception) -> bool:
@@ -283,7 +282,7 @@ def _profile_one_source(
 
     # The producer's exception text can quote a cell, so a Parquet or resident source fails with
     # its closed label only; other readers keep their own errors.
-    boundary = isinstance(reader, (ResidentTableSource, ArrowSampleSource))
+    boundary = _holds_arrow_table(reader)
     result: TableProfile | str = ""
     fresh: BaseException | None = None
     try:
