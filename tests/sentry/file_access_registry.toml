@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 203 (asserted by the sentry).
+# Count: 204(asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -15,6 +15,15 @@ ordinal = 0
 rule = "operator-set `DECOY_SFTP_KNOWN_HOSTS` or `~/.ssh/known_hosts`"
 owner = "cam"
 reason = "SFTP host-key file; the cloud route is the FA-2 follow-up"
+
+[[entry]]
+module = "decoy_engine/contracts/stability.py"
+function = "_assigned_constants"
+sink = "Path.read_text"
+ordinal = 0
+rule = "`importlib.util.find_spec(<module>).origin` for the one module named by the `EXPERIMENTAL_MODULE` constant (`decoy_engine.sdk`), read to find its assigned constants"
+owner = "cam"
+reason = "the stability census reads shipped package source; `contracts` may not import `fileaccess` (policy-direction contract), so the read is registered like the packaged lark grammar reads"
 
 [[entry]]
 module = "decoy_engine/data_discovery.py"

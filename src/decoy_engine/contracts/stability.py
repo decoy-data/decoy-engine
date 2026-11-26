@@ -117,11 +117,20 @@ def package_tier(module: str) -> str:
 def _assigned_constants(module: str) -> frozenset[str]:
     """Names assigned at module level in the source of `module`."""
     spec = importlib.util.find_spec(module)
-    if spec is None or not spec.origin or not Path(spec.origin).is_file():
+    source: str | None = None
+    if spec is not None and spec.origin:
+        try:
+            # Package source the engine ships, never a caller path. `contracts` may not import
+            # `fileaccess` (policy-direction contract), so this one read has a registry row.
+            source = Path(spec.origin).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            source = None
+    if source is None:
         # Fail closed: an unreadable source must not turn every constant non-experimental.
+        # Raised outside the except block so no path or OS message rides in __context__.
         raise RuntimeError(f"no source file to read the constants of {module}")
     out: set[str] = set()
-    for node in ast.parse(Path(spec.origin).read_text(encoding="utf-8")).body:
+    for node in ast.parse(source).body:
         if isinstance(node, ast.Assign):
             out |= {t.id for t in node.targets if isinstance(t, ast.Name)}
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
