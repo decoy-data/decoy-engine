@@ -42,7 +42,9 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_receipt_is_read_from_the_directory_the_push_acts_in(repo: Path, tmp_path_factory) -> None:
+def test_a_receipt_covers_only_risky_pushes_run_in_its_own_worktree(
+    repo: Path, tmp_path_factory
+) -> None:
     other = tmp_path_factory.mktemp("other")
     subprocess.run([GIT, "init", "-q", str(other)], check=True)  # noqa: S603 - fixed git
     git_dir = subprocess.run(  # noqa: S603 - fixed git executable, test-literal arguments
@@ -57,6 +59,8 @@ def test_receipt_is_read_from_the_directory_the_push_acts_in(repo: Path, tmp_pat
     Path(git_dir, "decoy-quality-gate").write_text(head + "\n")
     assert not denied(repo, "git push --force origin feat/x")
     assert denied(repo, f"git -C {other} push --force origin feat/x")
+    assert denied(repo, f"cd {other} && git push --force-with-lease origin feat/x")
+    assert not denied(repo, f"cd {other} && git push origin feat/x")
 
 
 def denied(repo: Path, command: str) -> bool:
@@ -100,7 +104,11 @@ def denied(repo: Path, command: str) -> bool:
         "env FOO=1 git push -f origin feat/x",
         "git push origin feat/issue#123 --force",
         "git push origin HEAD:refs/tags/v1",
-        "git push origin v9.9.9",
+        "git push origin feat/x && git fetch --all",
+        "git push origin feat/x # not --force",
+        "git push origin feat/x\ngit fetch --all",
+        "if git push --force-with-lease origin feat/x; then echo pushed; fi",
+        'git commit -m "#123: fix typo" && git push --force-with-lease origin feat/x',
     ],
 )
 def test_pr_creation_and_risky_pushes_wait_for_the_gate(repo: Path, command: str) -> None:
@@ -112,15 +120,12 @@ def test_pr_creation_and_risky_pushes_wait_for_the_gate(repo: Path, command: str
     [
         "git push -u origin feat/x",
         "git push origin feat/x",
-        "git push origin feat/x && git fetch --all",
         "git push origin feat/allow--all",
         "git push origin HEAD:feat/x",
         "git fetch --all --prune",
         "git tag -d v1",
         "pytest -q tests/unit",
-        "git push origin feat/x\ngit fetch --all",
         "git push -odeploy=1 origin feat/x",
-        "git push origin feat/x # not --force",
         'git commit -m "first line\n\nsecond line"',
         "cat <<'EOF' > notes.md\nline one\nEOF",
     ],
