@@ -11,7 +11,7 @@ import pytest
 
 BASH = shutil.which("bash") or "/bin/bash"
 GIT = shutil.which("git") or "/usr/bin/git"
-HOOK = Path(__file__).resolve().parents[3] / ".claude" / "hooks" / "decoy-quality-gate.sh"
+HOOK = Path(__file__).resolve().parents[4] / ".claude" / "hooks" / "decoy-quality-gate.sh"
 
 
 @pytest.fixture
@@ -36,7 +36,27 @@ def repo(tmp_path: Path) -> Path:
         ],
         check=True,
     )
+    subprocess.run(  # noqa: S603 - fixed git executable, test-literal arguments
+        [GIT, "-C", str(tmp_path), "tag", "v9.9.9"], check=True
+    )
     return tmp_path
+
+
+def test_receipt_is_read_from_the_directory_the_push_acts_in(repo: Path, tmp_path_factory) -> None:
+    other = tmp_path_factory.mktemp("other")
+    subprocess.run([GIT, "init", "-q", str(other)], check=True)  # noqa: S603 - fixed git
+    git_dir = subprocess.run(  # noqa: S603 - fixed git executable, test-literal arguments
+        [GIT, "-C", str(repo), "rev-parse", "--absolute-git-dir"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    head = subprocess.run(  # noqa: S603 - fixed git executable, test-literal arguments
+        [GIT, "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    Path(git_dir, "decoy-quality-gate").write_text(head + "\n")
+    assert not denied(repo, "git push --force origin feat/x")
+    assert denied(repo, f"git -C {other} push --force origin feat/x")
 
 
 def denied(repo: Path, command: str) -> bool:
@@ -73,6 +93,14 @@ def denied(repo: Path, command: str) -> bool:
         "cd /x && git push --force origin feat/x",
         "git -C /x push -f origin feat/x",
         "git push origin 'feat/x",
+        "git status\ngit push --force origin feat/x",
+        "/usr/bin/git push --force origin feat/x",
+        "GH_HOST=github.com gh pr create --fill",
+        "gh -R decoy-data/decoy-engine pr create --fill",
+        "env FOO=1 git push -f origin feat/x",
+        "git push origin feat/issue#123 --force",
+        "git push origin HEAD:refs/tags/v1",
+        "git push origin v9.9.9",
     ],
 )
 def test_pr_creation_and_risky_pushes_wait_for_the_gate(repo: Path, command: str) -> None:
@@ -90,6 +118,11 @@ def test_pr_creation_and_risky_pushes_wait_for_the_gate(repo: Path, command: str
         "git fetch --all --prune",
         "git tag -d v1",
         "pytest -q tests/unit",
+        "git push origin feat/x\ngit fetch --all",
+        "git push -odeploy=1 origin feat/x",
+        "git push origin feat/x # not --force",
+        'git commit -m "first line\n\nsecond line"',
+        "cat <<'EOF' > notes.md\nline one\nEOF",
     ],
 )
 def test_plain_pushes_and_other_commands_pass(repo: Path, command: str) -> None:

@@ -23,65 +23,25 @@ cmd=$(printf '%s' "$input" \
 # Owner 2026-11-25: every agent may push, since a push only backs up work; only
 # the orchestrator may push main or merge (the user-level branch-only guard
 # enforces that). Opening a PR still waits for this gate, and so do pushes that
-# can lose work by accident: tags, force, delete, prune, mirror or all. Each
-# shell command on the line is checked on its own words, so a plain push next
-# to another command is not caught by that command's options.
-if ! printf '%s' "$cmd" | python3 -c '
-import shlex, sys
+# can lose work by accident: tags, force, delete, prune, mirror or all.
+# push_gate_classify.py reads each command on its own words and names the
+# directories whose receipts count.
+dirs=$(printf '%s' "$cmd" | python3 "$(dirname "$0")/push_gate_classify.py") || exit 0
 
-RISKY_LONG = {"--tags", "--follow-tags", "--force", "--force-with-lease",
-              "--force-if-includes", "--mirror", "--all", "--delete", "--prune"}
-
-def words(text):
-    lex = shlex.shlex(text.replace("\\\n", " "), posix=True, punctuation_chars=";&|")
-    lex.whitespace_split = True
-    seg = []
-    for tok in lex:
-        if tok and set(tok) <= set(";&|"):
-            yield seg
-            seg = []
-        else:
-            seg.append(tok)
-    yield seg
-
-def risky_push(args):
-    for a in args:
-        if a.split("=", 1)[0] in RISKY_LONG:
-            return True
-        if a.startswith("-") and not a.startswith("--") and set(a[1:]) & {"f", "d"}:
-            return True
-        if a.startswith("+") or a.startswith(":") or a == "tag" or a.startswith("refs/tags/"):
-            return True
-    return False
-
-def gated(text):
-    for seg in words(text):
-        if len(seg) >= 3 and seg[0] == "gh" and seg[1] == "pr" and seg[2] == "create":
-            return True
-        if "git" in seg:
-            i = seg.index("git")
-            rest = seg[i + 1:]
-            while rest and rest[0].startswith("-"):
-                rest = rest[2:] if rest[0] in ("-C", "-c") else rest[1:]
-            if rest and rest[0] == "push" and risky_push(rest[1:]):
-                return True
-    return False
-
-try:
-    sys.exit(0 if gated(sys.stdin.read()) else 1)
-except ValueError:
-    sys.exit(0)
-'; then
-  exit 0
-fi
-
-head=$(git rev-parse HEAD 2>/dev/null || echo "")
-git_dir=$(git rev-parse --git-dir 2>/dev/null || echo ".git")
-receipt=$(cat "$git_dir/decoy-quality-gate" 2>/dev/null || echo "")
-
-if [ -n "$head" ] && [ "$head" = "$receipt" ]; then
-  exit 0
-fi
+# Every directory the command acts in must carry a receipt for its own HEAD.
+fail_dir=""
+while IFS= read -r d; do
+  [ -n "$d" ] || continue
+  head=$(git -C "$d" rev-parse HEAD 2>/dev/null || echo "")
+  git_dir=$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null || echo "")
+  receipt=$(cat "$git_dir/decoy-quality-gate" 2>/dev/null || echo "")
+  if [ -z "$head" ] || [ "$head" != "$receipt" ]; then
+    fail_dir=$d
+    break
+  fi
+done <<< "$dirs"
+[ -z "$fail_dir" ] && exit 0
+head=$(git -C "$fail_dir" rev-parse HEAD 2>/dev/null || echo "")
 
 short=${head:0:8}
 reason="Decoy quality gate not satisfied for HEAD ${short}. Before pushing or opening a PR: (1) dispatch the 'dennis' agent to review this change (he runs /code-review, /security-review, and /qa and returns a verdict) and resolve every BLOCKER and HIGH; (2) dispatch the 'barry' agent to sync the docs to the change; (3) record the pass: bash .claude/hooks/decoy-gate-pass.sh. Then re-run the push. Committing more after the gate re-arms it, by design."
