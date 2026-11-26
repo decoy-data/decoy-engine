@@ -15,12 +15,13 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from testflight._report import format_job_section, render_report
-from testflight._runner import (
+from testflight import (
     INVARIANT_FAILED_CATEGORY,
     InvariantResult,
     JobResult,
     failure_text,
+    format_job_section,
+    render_report,
 )
 
 SENTINEL = "SENTINEL-cell-value-0042"
@@ -89,8 +90,7 @@ _FAILING_TEST = textwrap.dedent(
     """
     import os
 
-    from testflight._assert import assert_job_passed
-    from testflight._runner import InvariantResult, JobResult
+    from testflight import InvariantResult, JobResult, assert_job_passed
 
     def test_flight() -> None:
         # Via env so the sentinel is never in this source, which pytest prints.
