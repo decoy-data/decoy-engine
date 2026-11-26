@@ -60,6 +60,8 @@ def test_a_receipt_covers_only_risky_pushes_run_in_its_own_worktree(
     assert not denied(repo, "git push --force origin feat/x")
     assert denied(repo, f"git -C {other} push --force origin feat/x")
     assert denied(repo, f"cd {other} && git push --force-with-lease origin feat/x")
+    assert denied(repo, f"cd {other} && git push --force origin x && gh pr create --fill")
+    assert denied(repo, f"git -C {other} push --force origin feat/x # don't retry")
     assert not denied(repo, f"cd {other} && git push origin feat/x")
 
 
@@ -96,7 +98,6 @@ def denied(repo: Path, command: str) -> bool:
         "git push origin \\\n  --force feat/x",
         "cd /x && git push --force origin feat/x",
         "git -C /x push -f origin feat/x",
-        "git push origin 'feat/x",
         "git status\ngit push --force origin feat/x",
         "/usr/bin/git push --force origin feat/x",
         "GH_HOST=github.com gh pr create --fill",
@@ -104,6 +105,11 @@ def denied(repo: Path, command: str) -> bool:
         "env FOO=1 git push -f origin feat/x",
         "git push origin feat/issue#123 --force",
         "git push origin HEAD:refs/tags/v1",
+        "git push -fodeploy=1 origin feat/x",
+        "git push -4f origin feat/x",
+        "git push origin \\\n--force feat/x",
+        "git push --force>push.log origin feat/x",
+        "bash -lc 'git push --force origin feat/x'",
         "git push origin feat/x && git fetch --all",
         "git push origin feat/x # not --force",
         "git push origin feat/x\ngit fetch --all",
@@ -121,6 +127,8 @@ def test_pr_creation_and_risky_pushes_wait_for_the_gate(repo: Path, command: str
         "git push -u origin feat/x",
         "git push origin feat/x",
         "git push origin feat/allow--all",
+        "git push origin gh-pr-create",
+        "git branch -d feature/push-gate",
         "git push origin HEAD:feat/x",
         "git fetch --all --prune",
         "git tag -d v1",

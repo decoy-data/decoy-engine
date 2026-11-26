@@ -6,14 +6,16 @@ other exit (a crash) is treated as gated by the hook.
 
 Gated: `gh pr create`, and any command that runs `git push` and also carries a
 word that can lose work (force, delete, prune, tags, mirror, all, a `+` or `:`
-refspec, a tag ref). The scan looks at every word of the whole command, so it
-can gate a plain push that sits next to an unrelated `--all`; that costs a
-review, never lost work. A risky push that also changes directory is refused,
-because the receipt is read from this worktree only.
+refspec, a tag ref). The scan looks at every word of the whole command, quoted
+script bodies included, so it can gate a plain push that sits next to an
+unrelated `--all`; that costs a review, never lost work. A gated command that
+also changes directory is refused, because the receipt is read from this
+worktree only.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import sys
@@ -30,26 +32,42 @@ RISKY_LONG = (
     "--delete",
     "--prune",
 )
-GIT_PUSH = re.compile(r"\bgit\b.*\bpush\b", re.DOTALL)
-PR_CREATE = re.compile(r"\bgh\b.*\bpr\b.*\bcreate\b", re.DOTALL)
 CHANGES_DIR = re.compile(
-    r"(^|[\s;&|(])(cd|pushd)\s|\s-C\s|--git-dir|--work-tree|GIT_DIR=|GIT_WORK_TREE="
+    r"(^|[\s;&|(`'\"])(cd|pushd|popd)(\s|$|;)"
+    r"|\s-C\s|--git-dir|--work-tree|GIT_DIR=|GIT_WORK_TREE="
+)
+REFUSAL = (
+    "This command changes directory and also pushes riskily or opens a PR, so it "
+    "cannot be checked against this worktree's gate. Run it from the worktree it "
+    "acts on, as its own command."
 )
 
 
 def words(text: str) -> list[str]:
-    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()")
+    """Every word Bash would pass, plus the words inside quoted script bodies."""
+    text = re.sub(r"\\\r?\n", " ", text)
+    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
     lex.whitespace_split = True
     lex.commenters = ""
-    return list(lex)
+    try:
+        tokens = list(lex)
+    except ValueError:
+        tokens = text.split()
+    out: list[str] = []
+    for tok in tokens:
+        out.append(tok)
+        if any(c.isspace() for c in tok):
+            out.extend(words(tok))
+    return out
 
 
 def risky(word: str) -> bool:
     if word.split("=", 1)[0] in RISKY_LONG:
         return True
-    if re.fullmatch(r"-[A-Za-z]+", word):
-        letters = word[1:].split("o", 1)[0]
-        return "f" in letters or "d" in letters
+    if re.match(r"-[A-Za-z0-9]", word):
+        # Short flags up to an attached -o value: `-fodeploy=1` forces, `-odeploy=1` does not.
+        flags = word[1:].split("o", 1)[0]
+        return "f" in flags or "d" in flags
     return (
         word.startswith(("+", ":"))
         or word == "tag"
@@ -58,23 +76,40 @@ def risky(word: str) -> bool:
     )
 
 
+def _after(tokens: list[str], i: int, skip_values: tuple[str, ...]) -> list[str]:
+    """The non-option words after position i, skipping the values of named options."""
+    rest: list[str] = []
+    skip = False
+    for w in tokens[i + 1 :]:
+        if skip:
+            skip = False
+        elif w in skip_values:
+            skip = True
+        elif not w.startswith("-"):
+            rest.append(w)
+    return rest
+
+
+def runs(tokens: list[str]) -> tuple[bool, bool]:
+    """(runs `git push`, runs `gh pr create`), read from command words, not substrings."""
+    push = create = False
+    for i, w in enumerate(tokens):
+        name = os.path.basename(w)
+        if name == "git" and _after(tokens, i, ("-C", "-c"))[:1] == ["push"]:
+            push = True
+        if name == "gh" and _after(tokens, i, ("-R", "--repo"))[:2] == ["pr", "create"]:
+            create = True
+    return push, create
+
+
 def classify(text: str) -> tuple[int, str]:
-    if PR_CREATE.search(text):
-        return 0, ""
-    if not GIT_PUSH.search(text):
-        return NOT_GATED, ""
-    try:
-        tokens = words(text)
-    except ValueError:
-        return 0, ""
-    if not any(risky(w) for w in tokens):
+    tokens = words(text)
+    push, create = runs(tokens)
+    gated = create or (push and any(risky(w) for w in tokens))
+    if not gated:
         return NOT_GATED, ""
     if CHANGES_DIR.search(text):
-        return 0, (
-            "A risky push (force, delete, prune, tags, mirror or all) that also "
-            "changes directory cannot be checked against this worktree's gate. "
-            "Run it from the worktree it pushes, as its own command."
-        )
+        return 0, REFUSAL
     return 0, ""
 
 
