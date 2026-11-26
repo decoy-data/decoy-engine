@@ -20,7 +20,8 @@ from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._unified_slice_evidence import reconstruct_source_shaped_output
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.relationships._graph import OrphanPolicy
-from tests.native._chunked_entry_support import key_provider
+from tests._declared_schema import declare_rest
+from tests.native._chunked_entry_support import key_provider, make_config, passthrough, redact
 from tests.parity import _d2b_shapes as s
 from tests.unit.execution._auto_chunk_support import (
     TABLE,
@@ -622,3 +623,63 @@ def test_unchanged_parent_key_is_carried_from_the_source(case: str, route: str) 
     out = _passthrough_parent_run(parent, route)
     assert out.schema.field("k").type == parent.schema.field("k").type
     assert _same_cells(out.column("k"), parent.column("k"))
+
+
+# PARQUET-CHUNKED-NULLABLE-INT S1: nullable integer columns on the full-frame and sequential routes.
+
+
+def _single_table_shape(column: str, array: pa.Array) -> tuple[s.Shape, pa.Table]:
+    source = pa.table({"k": s.strs([f"k{i}" for i in range(len(array))]), column: array})
+    plan = s.make_plan({"T": s.table_seed({"k": s.hashed("ns_k"), column: s.passthrough()})})
+    return s.Shape(plan, s.graph(), {"T": source}), source
+
+
+@pytest.mark.parametrize("route", ["full_frame", "sequential"])
+def test_e8_all_null_int64_passthrough_stays_int64(route: str) -> None:
+    shape, source = _single_table_shape("z", pa.nulls(4, pa.int64()))
+    out = (s.run_full(shape) if route == "full_frame" else s.run_seq(shape)).outputs["T"]
+    assert out.schema.field("z").type == pa.int64()
+    assert out.column("z").null_count == 4
+    assert out.column("k").to_pylist() != source.column("k").to_pylist()  # the hash target ran
+
+
+@pytest.mark.parametrize("route", ["full_frame", "sequential"])
+def test_e10_uint8_passthrough_with_nulls_keeps_type_and_values(route: str) -> None:
+    array = pa.array([0, None, 255, 7], pa.uint8())
+    shape, _ = _single_table_shape("b", array)
+    out = (s.run_full(shape) if route == "full_frame" else s.run_seq(shape)).outputs["T"]
+    assert out.schema.field("b").type == pa.uint8()
+    assert out.column("b").to_pylist() == [0, None, 255, 7]
+
+
+def test_e7_when_predicate_reading_a_nullable_integer_keeps_it_exact(tmp_path: Path) -> None:
+    n_values = [10, None, 2**53 + 1, 30, None, 5]
+    source = pa.table(
+        {
+            "s": pa.array([f"s{i}" for i in range(6)], pa.string()),
+            "n": pa.array(n_values, pa.int64()),
+        }
+    )
+    config = make_config([{**redact("s"), "when": "n > 15"}, passthrough("n")])
+    path = str(tmp_path / "source.parquet")
+    write_source(source, path)
+    config["sources"]["t"] = {"type": "file", "format": "parquet", "path": path}
+    config["targets"]["t"] = {"type": "file", "format": "parquet", "path": path + ".out"}
+    declare_rest(config, {"t": source})
+    out = run_pipeline(
+        config,
+        {"t": source},
+        engine_version="uf-domain-s1",
+        execution_mode="full_frame",
+        auto_chunk=False,
+        key_provider=key_provider(),
+        use_byte_estimate_routing=False,
+        use_probe_routing=False,
+    ).outputs["t"]
+    changed = [
+        a != b
+        for a, b in zip(out.column("s").to_pylist(), source.column("s").to_pylist(), strict=True)
+    ]
+    assert changed == [False, False, True, True, False, False]
+    assert out.schema.field("n").type == pa.int64()
+    assert out.column("n").to_pylist() == n_values
