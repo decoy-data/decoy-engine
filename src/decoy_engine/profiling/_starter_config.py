@@ -102,7 +102,8 @@ class ColumnSuggestion:
     suggestion and stay `None` for a regex one. `entry` is the column entry `starter_config`
     built; every entry is written to the config. `live` says a deterministic rule decided it
     (regex, declared key, integer-unique hash, fallback), and is false when a model chose the
-    entry. Only a regex suggestion is live. `decided_by` names the rule.
+    entry. Only a suggestion with `source == "regex"` is live, which every deterministic rule
+    uses. `decided_by` names the rule.
     """
 
     table: str

@@ -34,6 +34,7 @@ from decoy_engine.profiling._starter_inference import (
     infer_starter_strategy,
 )
 from decoy_engine.profiling.scan_set import ScanSet
+from tests.sentry.test_no_residual_removed_surface import RETIRED_PATTERN
 
 MARKER = "MARKER-7f3a"
 LGBM = ModelRef("lgbm-v1", "0.1.0")
@@ -214,7 +215,8 @@ def test_at_e2i_decided_by_names_the_rule_that_chose_each_entry(tmp_path: Path) 
     result = starter_config(scan)
     assert _entry_of(result, "mixed") == {"name": "mixed", "strategy": "redact"}
     assert _suggestion(result, "mixed").decided_by == "fallback"
-    assert "email" in _note(result, "mixed")
+    note = _note(result, "mixed")
+    assert "email" in note and "iso_date" in note and "regex kept" in note
     assert _entry_of(result, "ip")["strategy"] == "redact"
     assert _suggestion(result, "ip").decided_by == "regex"
     assert _entry_of(result, "cvv")["strategy"] == "redact"
@@ -339,12 +341,42 @@ def test_a_complete_date_format_writes_date_shift_and_a_mixed_one_writes_redact(
     assert by_name["mixed"]["strategy"] == "redact"
 
 
-def test_every_starter_review_reads_as_the_scan_found_it() -> None:
-    texts = [_FALLBACK.review, _AMBIGUOUS_TEMPLATE]
-    texts += [
-        choice.review
+# The 19 detectors the CLI scaffolder had a default for (its table, pinned at exactly 19 rows).
+CLI_STARTER_DETECTORS = {
+    "email", "ssn", "us_phone", "person_name", "iso_date", "us_date", "eu_date", "us_zip",
+    "address_street", "address_city", "mrn", "npi", "ndc", "icd10", "pan", "cvv", "iban",
+    "uuid", "ipv4",
+}  # fmt: skip
+
+
+def _starter_reviews() -> dict[str, str]:
+    return {
+        d: choice.review
         for d in recommendations.DETECTOR_DESCRIPTORS
         if (choice := recommendations.starter_choice(d)) is not None
-    ]
-    assert len(texts) > 2
-    assert all(t.startswith("The scan ") for t in texts)
+    }
+
+
+def test_every_starter_review_reads_as_the_scan_found_it() -> None:
+    reviews = _starter_reviews()
+    assert set(reviews) == CLI_STARTER_DETECTORS  # exactly the 19 rows, no more, no fewer
+    assert all(r.startswith("The scan ") for r in reviews.values())
+    assert _FALLBACK.review.startswith("The scan did not flag this column")
+    assert _AMBIGUOUS_TEMPLATE.startswith(
+        "The scan detected multiple candidate signals ({signals})"
+    )
+
+
+def test_no_starter_review_names_the_retired_product() -> None:
+    texts = [*_starter_reviews().values(), _FALLBACK.review, _AMBIGUOUS_TEMPLATE]
+    assert not [t for t in texts if RETIRED_PATTERN.search(t)]
+
+
+def test_the_pan_entry_carries_the_fpe_namespace_and_luhn_settings() -> None:
+    entry = detector_entry("pan", "card_number")
+    assert entry is not None
+    assert entry["strategy"] == "fpe"
+    assert entry["namespace"] == "card_number"
+    assert entry["provider_config"]["charset"] == "digits"
+    assert entry["provider_config"]["validate_luhn"] is True
+    assert "params" not in entry and "key_label" not in str(entry)
