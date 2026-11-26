@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -140,3 +141,32 @@ def test_pr_creation_and_risky_pushes_wait_for_the_gate(repo: Path, command: str
 )
 def test_plain_pushes_and_other_commands_pass(repo: Path, command: str) -> None:
     assert not denied(repo, command)
+
+
+@pytest.mark.parametrize(
+    ("command", "status", "refused"),
+    [
+        ("git -C '/tmp/Other Worktree' push --force-with-lease origin topic", 0, True),
+        ("git push origin '+HEAD:topic' # don't retry", 0, False),
+        ("popd>/dev/null && git push --force", 0, True),
+        ("gh pr create --body 'Run cd src before building'", 0, False),
+        ("git grep -n 'gh pr create'", 10, False),
+        ("bash -lc \"git -C '/tmp/Other Worktree' push --force\"", 0, True),
+        ("git -C ';' push --force", 0, True),
+        ("bash --noprofile -o pipefail -c 'git push --force'", 0, False),
+        ("eval 'git' 'push --force'", 0, False),
+        ("echo bash -c 'gh pr create'", 10, False),
+        ("bash -c 'echo done' arg 'gh pr create'", 10, False),
+        ("popd>/dev/null && gh pr create # don't retry", 0, True),
+    ],
+)
+def test_classifier_status_and_refusal(command: str, status: int, refused: bool) -> None:
+    result = subprocess.run(  # noqa: S603 - fixed classifier, command is stdin data
+        [sys.executable, str(HOOK.with_name("push_gate_classify.py"))],
+        input=command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == status
+    assert bool(result.stdout.strip()) == refused

@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Iterator
 
 NOT_GATED = 10
 RISKY_LONG = (
@@ -32,10 +33,10 @@ RISKY_LONG = (
     "--delete",
     "--prune",
 )
-CHANGES_DIR = re.compile(
-    r"(^|[\s;&|(`'\"])(cd|pushd|popd)(\s|$|;)"
-    r"|\s-C\s|--git-dir|--work-tree|GIT_DIR=|GIT_WORK_TREE="
-)
+CONTROL = ";&|()\n"
+PUNCTUATION = CONTROL + "<>"
+GIT_VALUE_OPTIONS = ("-C", "-c", "--git-dir", "--work-tree")
+SHELLS = {"bash", "sh", "zsh", "dash"}
 REFUSAL = (
     "This command changes directory and also pushes riskily or opens a PR, so it "
     "cannot be checked against this worktree's gate. Run it from the worktree it "
@@ -43,22 +44,64 @@ REFUSAL = (
 )
 
 
-def words(text: str) -> list[str]:
-    """Every word Bash would pass, plus the words inside quoted script bodies."""
+def script_body(tokens: list[str]) -> str | None:
+    args = iter(tokens)
+    for word in args:
+        if word in {"if", "then", "else", "elif", "while", "until", "do", "!", "env", "command"}:
+            continue
+        if re.match(r"[A-Za-z_][A-Za-z_0-9]*=", word):
+            continue
+        if word == "eval":
+            return " ".join(args)
+        if os.path.basename(word) in SHELLS:
+            for option in args:
+                if option in {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}:
+                    next(args, None)
+                    continue
+                if option.startswith("--") and option != "--":
+                    continue
+                if not re.fullmatch(r"-[a-zA-Z]+", option):
+                    break
+                if "c" in option:
+                    return next(args, None)
+                if option.endswith(("o", "O")):
+                    next(args, None)
+        break
+    return None
+
+
+def commands(text: str) -> Iterator[tuple[list[str], bool]]:
+    """Yield one word list per script, with its fail-closed verdict on lexer errors."""
     text = re.sub(r"\\\r?\n", " ", text)
-    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
+    lex = shlex.shlex(text, posix=True, punctuation_chars=PUNCTUATION)
+    lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""
     try:
         tokens = list(lex)
     except ValueError:
-        tokens = text.split()
-    out: list[str] = []
-    for tok in tokens:
-        out.append(tok)
-        if any(c.isspace() for c in tok):
-            out.extend(words(tok))
-    return out
+        # Quoting is unreliable here. Keep directory markers and gate on a mention.
+        words = re.findall(r"""[^\s;&|()<>'"]+""", text)
+        yield words, bool(re.search(r"\bpush\b|\bpr\s+create\b", text))
+        return
+
+    yield tokens, False
+    command: list[str] = []
+    for token in [*tokens, ";"]:
+        if token and all(c in CONTROL for c in token):
+            if command:
+                body = script_body(command)
+                if body:
+                    yield from commands(body)
+                command = []
+        else:
+            command.append(token)
+
+
+def changes_dir(word: str) -> bool:
+    return word in {"cd", "pushd", "popd", "-C", "--git-dir", "--work-tree"} or word.startswith(
+        ("--git-dir=", "--work-tree=", "GIT_DIR=", "GIT_WORK_TREE=")
+    )
 
 
 def risky(word: str) -> bool:
@@ -95,7 +138,7 @@ def runs(tokens: list[str]) -> tuple[bool, bool]:
     push = create = False
     for i, w in enumerate(tokens):
         name = os.path.basename(w)
-        if name == "git" and _after(tokens, i, ("-C", "-c"))[:1] == ["push"]:
+        if name == "git" and _after(tokens, i, GIT_VALUE_OPTIONS)[:1] == ["push"]:
             push = True
         if name == "gh" and _after(tokens, i, ("-R", "--repo"))[:2] == ["pr", "create"]:
             create = True
@@ -103,12 +146,16 @@ def runs(tokens: list[str]) -> tuple[bool, bool]:
 
 
 def classify(text: str) -> tuple[int, str]:
-    tokens = words(text)
-    push, create = runs(tokens)
-    gated = create or (push and any(risky(w) for w in tokens))
-    if not gated:
+    push = gated = risk = changed_dir = False
+    for tokens, fallback_gate in commands(text):
+        runs_push, creates_pr = runs(tokens)
+        push |= runs_push
+        gated |= creates_pr or fallback_gate
+        risk |= any(risky(w) for w in tokens)
+        changed_dir |= any(changes_dir(w) for w in tokens)
+    if not (gated or (push and risk)):
         return NOT_GATED, ""
-    if CHANGES_DIR.search(text):
+    if changed_dir:
         return 0, REFUSAL
     return 0, ""
 
