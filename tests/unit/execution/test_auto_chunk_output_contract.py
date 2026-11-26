@@ -599,14 +599,29 @@ def test_time64_ns_aligned_values_come_back_unchanged(configured: bool, tmp_path
 
 
 @pytest.mark.parametrize("configured", [True, False])
-def test_time64_ns_with_sub_microsecond_values_fails_in_profile_source(
-    configured: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_time64_ns_with_sub_microsecond_values_clears_the_profile_source(
+    configured: bool, tmp_path: Path
 ) -> None:
+    """PREFLIGHT-ARROW-PROFILE S1b (plan section 4, AT-1/2) recovers the bounded Parquet
+    profile for this source, so the run no longer dies in profile with ArrowInvalid. It
+    now succeeds on the default and dispatcher-on calls, and the dispatcher-off call
+    reaches the full-frame ingest and fails with the coded error (AT-7), with no cause
+    or context that could carry a cell value."""
+    from decoy_engine.execution import run_pipeline
+
     arr = pa.array([i * 1000 + 7 for i in range(support.ROWS)], pa.time64("ns"))
     src = support.table_of({**support.string_source(), "x": arr})
     cols = [support.hash_col("h"), support.redact_col("r")] + (
         [support.pass_col("x")] if configured else []
     )
     cfg = support.make_cfg(cols, path=support.write_source(src, tmp_path / "s.parquet"))
-    exc_type, _message = _raises_in_profile(cfg, src, monkeypatch)
-    assert exc_type is not TypeError
+    for kwargs in ({}, {"chunked_dispatcher_enabled": True}):
+        run_pipeline(cfg, sources={support.TABLE: src}, **support.run_kwargs(**kwargs))
+    with pytest.raises(ExecutionError) as raised:
+        run_pipeline(
+            cfg,
+            sources={support.TABLE: src},
+            **support.run_kwargs(chunked_dispatcher_enabled=False),
+        )
+    assert raised.value.code == "full_frame_value_unrepresentable"
+    assert raised.value.__cause__ is None and raised.value.__context__ is None

@@ -33047,16 +33047,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|faker|none": {
@@ -33065,16 +33065,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|hash|all": {
@@ -33185,16 +33185,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|hash|none": {
@@ -33203,16 +33203,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|pass|all": {
@@ -33323,16 +33323,36 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|pass|none": {
@@ -33341,16 +33361,36 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|redact|all": {
@@ -33461,16 +33501,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|redact|none": {
@@ -33479,16 +33519,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|truncate|all": {
@@ -33599,16 +33639,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|truncate|none": {
@@ -33617,16 +33657,16 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|uncfg|all": {
@@ -33737,16 +33777,36 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|uncfg|none": {
@@ -33755,16 +33815,36 @@
    "exc": "ArrowInvalid"
   },
   "disp_oracle": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "legacy": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   }
  },
  "time64_us|faker|all": {

@@ -53,18 +53,32 @@ def _ingest_conversion_errors() -> tuple[type[BaseException], ...]:
     return (*_INGEST_CONVERSION_ERRORS, ValueError, OverflowError, OutOfBoundsDatetime)
 
 
-def _raise_if_source_value_unrepresentable(
+def _raise_if_source_value_unrepresentable(found: tuple[str, str] | None) -> None:
+    """Raise the coded error for the column `_find_unrepresentable_source_column`
+    named. Call it after the ingest handler has ended: the pandas/Arrow error
+    quotes the cell, and `from None` alone would keep it as `__context__`."""
+    if found is None:
+        return
+    table, column = found
+    raise ExecutionError(
+        code=reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE,
+        message=(
+            f"table {table!r} column {column!r} holds a value pandas cannot represent. "
+            "The full-frame pandas route converts every column to pandas; the default "
+            "native (Rust) route keeps columns in Arrow and does not hit this limit."
+        ),
+    )
+
+
+def _find_unrepresentable_source_column(
     resident_sources: Mapping[str, Any], graph: Any, exc: BaseException
 ) -> tuple[str, str] | None:
     """The full-frame pandas oracle converts every source column to pandas up
     front, so a column holding a value pandas cannot represent fails there with
     an uncoded error that names no column. Re-convert each source column alone
-    (the same FK-safe way the oracle did) to find the offender and return its
-    `(table, column)`. If no single source column reproduces the failure -- so it
-    was not the ingest conversion -- return None and let the caller re-raise the
-    original exception unchanged. The caller raises the coded error after its
-    handler ends: the pandas/Arrow error quotes the cell, and `from None` alone
-    would keep it as `__context__`."""
+    (the same FK-safe way the oracle did) and return the offender's
+    `(table, column)`. None means no single column reproduces the failure, so it
+    was not the ingest conversion and the caller re-raises the original."""
     from decoy_engine.execution._fk_keys import fk_columns_for_table, to_pandas_fk_safe
 
     edges = getattr(graph, "edges", ())
@@ -220,21 +234,10 @@ def _run_full_frame(
                 stream=decision.stream,
             )
         except _ingest_conversion_errors() as exc:
-            unrepresentable = _raise_if_source_value_unrepresentable(
-                resident_sources, ctx.graph, exc
-            )
+            unrepresentable = _find_unrepresentable_source_column(resident_sources, ctx.graph, exc)
             if unrepresentable is None:
                 raise
-        if unrepresentable is not None:
-            table, column = unrepresentable
-            raise ExecutionError(
-                code=reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE,
-                message=(
-                    f"table {table!r} column {column!r} holds a value pandas cannot represent. "
-                    "The full-frame pandas route converts every column to pandas; the default "
-                    "native (Rust) route keeps columns in Arrow and does not hit this limit."
-                ),
-            )
+        _raise_if_source_value_unrepresentable(unrepresentable)
         if cast_run is not None and decision.route_chunked:
             # The lane rendered each chunk; finalize still needs companion rows aligned to it.
             step = dataclasses.replace(

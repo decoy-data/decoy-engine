@@ -398,7 +398,7 @@
   "execution/_pipeline_finalize.py::compute_post_validation::dict_payload::name": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
-  "execution/_pipeline_full_frame.py::_run_full_frame::kw::'full_frame_value_unrepresentable'": {
+  "execution/_pipeline_full_frame.py::_raise_if_source_value_unrepresentable::kw::'full_frame_value_unrepresentable'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
   "execution/_pipeline_multi_table.py::run_multi_table_split::kw::'split_sink_needs_all_dispatched'": {
