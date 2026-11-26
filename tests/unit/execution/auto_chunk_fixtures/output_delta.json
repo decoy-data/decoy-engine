@@ -33043,8 +33043,8 @@
  },
  "time64_ns_nonaligned|faker|mixed": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33061,8 +33061,8 @@
  },
  "time64_ns_nonaligned|faker|none": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33181,8 +33181,8 @@
  },
  "time64_ns_nonaligned|hash|mixed": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33199,8 +33199,8 @@
  },
  "time64_ns_nonaligned|hash|none": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33319,8 +33319,28 @@
  },
  "time64_ns_nonaligned|pass|mixed": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
    "columns": [
@@ -33357,8 +33377,28 @@
  },
  "time64_ns_nonaligned|pass|none": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
    "columns": [
@@ -33497,8 +33537,28 @@
  },
  "time64_ns_nonaligned|redact|mixed": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "string",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33515,8 +33575,8 @@
  },
  "time64_ns_nonaligned|redact|none": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33635,8 +33695,28 @@
  },
  "time64_ns_nonaligned|truncate|mixed": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "string",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33653,8 +33733,8 @@
  },
  "time64_ns_nonaligned|truncate|none": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "code": "full_frame_value_unrepresentable",
+   "exc": "ExecutionError"
   },
   "disp_oracle": {
    "code": "full_frame_value_unrepresentable",
@@ -33773,8 +33853,28 @@
  },
  "time64_ns_nonaligned|uncfg|mixed": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
    "columns": [
@@ -33811,8 +33911,28 @@
  },
  "time64_ns_nonaligned|uncfg|none": {
   "disp_native": {
-   "code": null,
-   "exc": "ArrowInvalid"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
    "columns": [
