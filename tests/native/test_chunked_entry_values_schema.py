@@ -726,3 +726,28 @@ def test_e11_a_subclass_adapter_runs_the_oracle_leg_and_carries_nothing() -> Non
         tuple(r.quality_metrics["chunked_route"]["pandas_read_passthrough"]) for r in default
     } == {()}
     assert column_values(out, "p") == column_values(out_default, "p")
+
+
+def test_e11_an_explicit_stock_adapter_carries_like_the_default() -> None:
+    """The exact stock type is the carry's other accepted value besides `None`; a
+    caller that passes it explicitly must not lose the carry."""
+    chunks = split(_e4_source("p", [1, None, 3, 4, None, 6, 7], pa.int64()), 2)
+    config = make_config([redact("s"), passthrough("p")])
+    sink: list[Any] = []
+    evidence: list[NativeRouteEvidence] = []
+    out = list(
+        run_mask_chunked(
+            config,
+            list(chunks),
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            key_provider=key_provider(),
+            adapter=PandasExecutionAdapter(),
+            route_evidence_sink=evidence,
+            chunk_result_sink=sink,
+        )
+    )
+    assert {tuple(r.quality_metrics["chunked_route"]["pandas_read_passthrough"]) for r in sink} == {
+        ()
+    }
+    assert column_values(out, "p") == [1, None, 3, 4, None, 6, 7]
