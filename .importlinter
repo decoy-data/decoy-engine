@@ -33,7 +33,6 @@ ignore_imports =
     decoy_engine.declared_casting._stream -> decoy_engine.execution.out_of_core._budget
     decoy_engine.declared_casting._stream -> decoy_engine.execution.out_of_core._scratch
     decoy_engine.errors -> decoy_engine.execution._row_error_summary
-    decoy_engine.fileaccess._errors -> decoy_engine.execution._isolated_common
     decoy_engine.generation._bounds -> decoy_engine.execution.out_of_core._budget
     decoy_engine.generation._streamed -> decoy_engine.execution._chunked_output_sink
     decoy_engine.generation._streamed -> decoy_engine.execution._mem_estimate
