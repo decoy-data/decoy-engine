@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +40,8 @@ def _ids(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def test_the_table_has_the_planned_rows() -> None:
-    assert len(CASES) == 53
-    assert len(set(_ids(CASES))) == 53
+    assert len(CASES) == 59
+    assert len(set(_ids(CASES))) == 59
 
 
 @pytest.mark.parametrize("row", CASES, ids=_ids(CASES))
@@ -212,3 +213,31 @@ def test_the_known_remote_set_is_not_a_second_copy() -> None:
         if p.name != "_locator.py" and re.search(r"\babfss\b.*\bwasbs\b", p.read_text("utf-8"))
     ]
     assert hits == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["a:" * 4000, "a:b" * 2700, ("x:" * 3 + "/") * 1300, "a" * 8000 + ":"],
+    ids=["colons", "pairs", "segments", "one-run"],
+)
+def test_long_input_scans_in_linear_time(text: str) -> None:
+    """The scp-shape check must not backtrack over a long segment (8k chars)."""
+    start = time.perf_counter()
+    scan_locator(text)
+    assert time.perf_counter() - start < 0.5
+
+
+@pytest.mark.parametrize(
+    ("text", "published"),
+    [
+        ("svc:CANARY@host:/data", None),
+        ("a:b@c", None),
+        ("a::b@c", "a::b@c"),
+        (":b@c", ":b@c"),
+        ("/tmp/a:b@c", None),
+        ("ab:c d@e", "ab:c d@e"),
+        ("a:b/c@d", "a:b/c@d"),
+    ],
+)
+def test_scp_shape_is_one_segment(text: str, published: str | None) -> None:
+    assert scan_locator(text).published == published

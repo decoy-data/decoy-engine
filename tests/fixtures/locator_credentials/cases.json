@@ -475,5 +475,59 @@
   "carries": false,
   "origin_shown": "",
   "note": ""
+ },
+ {
+  "id": "chain-userinfo",
+  "input": "simplecache::s3://AKIA:CANARY@bucket/key",
+  "kind": "local",
+  "shown": "simplecache::s3://<redacted>@bucket/key",
+  "carries": true,
+  "origin_shown": null,
+  "note": "URL start after a non-separator character (fsspec chain, jdbc, bracket)"
+ },
+ {
+  "id": "chain-jdbc",
+  "input": "jdbc:postgresql://svc:CANARY@db.example/app",
+  "kind": "local",
+  "shown": "jdbc:postgresql://<redacted>@db.example/app",
+  "carries": true,
+  "origin_shown": null,
+  "note": "URL start after a non-separator character (fsspec chain, jdbc, bracket)"
+ },
+ {
+  "id": "chain-bracketed",
+  "input": "[https://CANARY@h.example/x]",
+  "kind": "local",
+  "shown": "[https://<redacted>@h.example/x]",
+  "carries": true,
+  "origin_shown": null,
+  "note": "URL start after a non-separator character (fsspec chain, jdbc, bracket)"
+ },
+ {
+  "id": "chain-braced",
+  "input": "{s3://AKIA:CANARY@b/k}",
+  "kind": "local",
+  "shown": "{s3://<redacted>@b/k}",
+  "carries": true,
+  "origin_shown": null,
+  "note": "URL start after a non-separator character (fsspec chain, jdbc, bracket)"
+ },
+ {
+  "id": "chain-pipe",
+  "input": "a|s3://AKIA:CANARY@b/k",
+  "kind": "local",
+  "shown": "a|s3://<redacted>@b/k",
+  "carries": true,
+  "origin_shown": null,
+  "note": "URL start after a non-separator character (fsspec chain, jdbc, bracket)"
+ },
+ {
+  "id": "chain-signed-query",
+  "input": "simplecache::https://h.example/f?sig=CANARY",
+  "kind": "local",
+  "shown": "simplecache::https://h.example/f?<redacted>",
+  "carries": true,
+  "origin_shown": null,
+  "note": "URL start after a non-separator character (fsspec chain, jdbc, bracket)"
  }
 ]

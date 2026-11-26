@@ -29,7 +29,8 @@ _REMOTE = frozenset(
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]+:")
 _HOST = re.compile(r"(?:\[[0-9A-Za-z:.%_~-]+\]|[A-Za-z0-9._~%!$&'()*+,;=-]*)(?::[0-9]*)?")
 # `name:secret@` inside one segment: an scp-style or `/tmp/a:b@c` shape (D6).
-_SCP_USERINFO = re.compile(r"[^\s/\\:]+:[^\s/\\@]*@")
+_SEGMENT_BREAK = re.compile(r"[\s/\\]+")
+_SCHEME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+.-")
 
 
 class LocatorKind(str, Enum):
@@ -100,8 +101,10 @@ class _Walk:
             nxt = self._span(*nxt)
         return self.kind
 
-    def _is_start(self, p: int) -> tuple[str, int, bool, int] | None:
-        """A URL start at `p`: (scheme, index after the separators, literal "//", p)."""
+    def _is_start(self, p: int, bare: bool) -> tuple[str, int, bool, int] | None:
+        """A URL start at `p`: (scheme, index after the separators, literal "//", p). After an
+        ordinary character (`bare`: `a::s3://`, `jdbc:x://`, `[https://`) only two separators
+        count, so a lone `:/` inside a word does not."""
         body = self.body
         m = _SCHEME.match(body, p)
         if m is None:
@@ -110,7 +113,7 @@ class _Walk:
         n = 0
         while n < 2 and end + n < len(body) and body[end + n] in _SEPS:
             n += 1
-        if n == 0:
+        if n == 0 or (bare and n < 2):
             return None
         scheme = body[p : end - 1]
         if p > 0 and body[p - 1] in _SEPS and n == 1 and scheme.lower() not in _REMOTE:
@@ -120,11 +123,14 @@ class _Walk:
     def _next_start(self, frm: int) -> tuple[str, int, bool, int] | None:
         body = self.body
         for p in range(frm, len(body)):
+            bare = False
             if p > 0:
                 prev = body[p - 1]
-                if not (prev.isspace() or prev in "='\"(,;<" or prev in _SEPS):
+                # A URL starts at the first character of its scheme run, whatever precedes it.
+                if prev in _SCHEME_CHARS:
                     continue
-            found = self._is_start(p)
+                bare = not (prev.isspace() or prev in "='\"(,;<" or prev in _SEPS)
+            found = self._is_start(p, bare)
             if found is not None:
                 return found
         return None
@@ -193,9 +199,24 @@ class _Walk:
     def published(self, text: str, shown: str) -> str | None:
         if self.kind in (LocatorKind.URL, LocatorKind.NETWORK):
             return None if self.withhold else "".join(self.origins)
-        if self.withhold or self.urls or self.userinfo_hidden or _SCP_USERINFO.search(text):
+        if self.withhold or self.urls or self.userinfo_hidden or _has_scp_userinfo(text):
             return None
         return shown
+
+
+def _has_scp_userinfo(text: str) -> bool:
+    """`name:secret@` inside one segment (D6), found with one scan per segment."""
+    for seg in _SEGMENT_BREAK.split(text):
+        at = seg.rfind("@")
+        if at < 0:
+            continue
+        colon = seg.find(":", 1, at)
+        while colon >= 0:
+            # `::` is a chain separator, not a name:secret colon.
+            if seg[colon - 1] != ":" and seg[colon + 1] != ":":
+                return True
+            colon = seg.find(":", colon + 1, at)
+    return False
 
 
 def _is_drive(body: str) -> bool:
