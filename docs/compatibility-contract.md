@@ -193,6 +193,8 @@ PRE-SCAN-RUN E1 (additive): writing a `pre_scan` block now turns the run-start p
 
 PRE-SCAN-RUN E2 (additive): `decoy_engine.profiling.evaluate_pre_scan(config, core)` returns a value-free `PreScanVerdict` (table names, column names and detector source names only) and `PreScanVerdict.to_check()` builds the `pre_scan` run result check. `PreScanBlockedError` (code `pre_scan.uncovered_pii_blocked`) and `PreScanFailedError` (code `pre_scan.profile_failed`) are registered coded families in the reason adapter, so the codes reach the run result instead of `decoy.unexpected_error`. `PreScanWarning` is a `UserWarning`. No run calls them yet.
 
+INIT-SCAN-SCAFFOLD E1 (frozen refusal, 2026-11-26): a `pre_scan.detectors` or `post_scan.detectors` list without `regex` is no longer refused with `config.detectors_invalid` ("detectors must include regex."). `canonical_detectors` adds `regex` and returns the canonical order, so `[ner]` parses as `[regex, ner]` and `[]` as `[regex]`. A repeated source and an unknown source still raise as before, and `ner_model` without `ner` still raises `config.pre_scan_ner_inactive`. Two configs that differ only in how they name regex now parse, dump and hash alike. Dumps always carry `regex`, so an older engine still reads them; an older engine refuses a hand-written list without it. `evaluate_pre_scan` reads the same rule through `PreScanConfig`, so its `detectors` field keeps its sorted bytes.
+
 **Pre-GA correction (one environment flag rule, DUP-FREEZE E3, 2026-11-14).** Every boolean engine flag reads
 through one parser (`decoy_engine.internal.env_flags.env_flag`). The accepted set, after `strip().lower()`, is
 `1`, `true`, `yes`, `on` (true) and `0`, `false`, `no`, `off` (false); an unset or empty variable gives the flag's
