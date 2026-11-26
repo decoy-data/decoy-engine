@@ -22,6 +22,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -274,6 +275,11 @@ def _max_of(entry: object) -> int | None:
 def bound_loosened(head: object, base: object) -> bool:
     """True when ``head`` loosens a ``max`` or ``min`` its base entry carries."""
     return bool(_bounds().loosened_fields(head, base))
+
+
+def pair_keys(donors: Mapping[str, Iterable[str]], successors: Mapping[str, Iterable[str]]) -> Any:
+    """The one-to-one donor and successor key rule, shared with the guard retirement check."""
+    return _bounds().pair_keys(donors, successors)
 
 
 def permit_site(key: str) -> str | None:

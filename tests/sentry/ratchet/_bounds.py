@@ -10,6 +10,7 @@ re-arms it.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from typing import NamedTuple
 
 CEILING_FIELDS = ("max",)
 FLOOR_FIELDS = ("min",)
@@ -102,17 +103,50 @@ def guard_findings(
     return findings, report
 
 
+class Pairing(NamedTuple):
+    """Result of ``pair_keys``: which donor key each successor key took, and what is left over."""
+
+    spent: dict[tuple[str, str], str]  # (donor id, key) -> successor id that took it
+    ambiguous: list[str]  # keys a successor holds that more than one free donor holds
+    unmatched: list[tuple[str, str]]  # (successor id, key) with no free donor
+
+
+def pair_keys(
+    donors: Mapping[str, Iterable[str]], successors: Mapping[str, Iterable[str]]
+) -> Pairing:
+    """The one-to-one rule for moving keys from removed ids to new ids: each ``(donor, key)``
+    pair is taken at most once, in successor-id then key order. A key with two free donors is
+    ambiguous and takes neither. Shared by ordinary transfers and guard retirements."""
+    holders: dict[str, list[str]] = {}
+    for did, keys in donors.items():
+        for key in keys:
+            holders.setdefault(key, []).append(did)
+    spent: dict[tuple[str, str], str] = {}
+    ambiguous: list[str] = []
+    unmatched: list[tuple[str, str]] = []
+    for sid in sorted(successors):
+        for key in sorted(successors[sid]):
+            free = [d for d in holders.get(key, []) if (d, key) not in spent]
+            if len(free) > 1:
+                ambiguous.append(key)
+            elif free:
+                spent[(free[0], key)] = sid
+            else:
+                unmatched.append((sid, key))
+    return Pairing(spent, ambiguous, unmatched)
+
+
 def retired_guard_findings(
     sid: str,
     old: dict[str, object],
-    successors: Iterable[dict[str, object]],
+    kept: frozenset[str],
     rows: dict[str, str],
     base_rows: dict[str, str],
     retired_is_fresh: bool,
-    loosened: Callable[[object, object], bool],
 ) -> tuple[list[str], list[str]]:
     """A retired guard id needs a fresh ``[retired]`` decision and, for every old key, either a
-    registered guard successor holding it within its bound or a fresh ``[retired_growth]`` row.
+    registered guard successor holding it within its bound (``kept``) or a fresh
+    ``[retired_growth]`` row.
 
     A successor never excuses the retirement itself or another missing key.
     """
@@ -121,9 +155,8 @@ def retired_guard_findings(
     if not retired_is_fresh:
         findings.append(f"{sid}: guard sentry removed without a fresh [retired] decision")
     new = fresh(rows, base_rows)
-    heirs = list(successors)
     for key in sorted(old):
-        if any(key in heir and not loosened(heir[key], old[key]) for heir in heirs):
+        if key in kept:
             continue
         if key in new:
             report.append(f"{sid}: approved guard removal {key} ({new[key]})")
@@ -169,18 +202,35 @@ def retired_guards_findings(
     head_rows, base_rows = rows
     findings: list[str] = []
     report: list[str] = []
-    for sid in sorted(retired):
+    ids = sorted(retired)
+    pairing = pair_keys(
+        {sid: olds[sid] for sid in ids}, {f"{i:04}": heir for i, heir in enumerate(heirs)}
+    )
+    kept = {
+        sid: frozenset(
+            key
+            for key in olds[sid]
+            if (taker := pairing.spent.get((sid, key))) is not None
+            and not loosened(heirs[int(taker)][key], olds[sid][key])
+        )
+        for sid in ids
+    }
+    donor_keys = {key for sid in ids for key in olds[sid]}
+    findings += [
+        f"{', '.join(ids)}: guard key {key} is held by more than one successor"
+        for key in sorted({k for _, k in pairing.unmatched if k in donor_keys})
+    ]
+    for sid in ids:
         got, said = retired_guard_findings(
             sid,
             olds[sid],
-            heirs,
+            kept[sid],
             head_rows.get(sid, {}),
             base_rows.get(sid, {}),
             sid in fresh_retired,
-            loosened,
         )
         findings += got
         report += said
-    allowed = {sid: olds[sid] for sid in retired if sid in fresh_retired}
-    findings += stray_retired_rows(head_rows, base_rows, allowed)
+    lost = {sid: frozenset(olds[sid]) - kept[sid] for sid in ids if sid in fresh_retired}
+    findings += stray_retired_rows(head_rows, base_rows, lost)
     return findings, report

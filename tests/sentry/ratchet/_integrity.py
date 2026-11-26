@@ -375,27 +375,19 @@ def transfer_findings(
     """
     if not donors and not successors:
         return [], []
-    holders: dict[str, list[str]] = {}
-    for did, entries in donors.items():
-        for key in entries:
-            holders.setdefault(key, []).append(did)
-    spent: set[tuple[str, str]] = set()
-    supplied: set[str] = set()
-    unmatched: set[str] = set()
-    loosened: set[str] = set()
-    out: list[str] = []
-    for sid in sorted(successors):
-        for key in sorted(successors[sid]):
-            free = [d for d in holders.get(key, []) if (d, key) not in spent]
-            if len(free) > 1:
-                out.append(f"replacement or split: key {key} has more than one removed donor")
-            elif free:
-                spent.add((free[0], key))
-                supplied.add(free[0])
-                if r.bound_loosened(successors[sid][key], donors[free[0]][key]):
-                    loosened.add(key)
-            else:
-                unmatched.add(key)
+    pairing = r.pair_keys(donors, successors)
+    spent = set(pairing.spent)
+    supplied = {d for d, _ in spent}
+    unmatched = {key for _, key in pairing.unmatched}
+    loosened = {
+        key
+        for (d, key), sid in pairing.spent.items()
+        if r.bound_loosened(successors[sid][key], donors[d][key])
+    }
+    out = [
+        f"replacement or split: key {key} has more than one removed donor"
+        for key in pairing.ambiguous
+    ]
     report: list[str] = []
     if per_site and unmatched:
         left = frozenset(k for d, e in donors.items() for k in e if (d, k) not in spent)

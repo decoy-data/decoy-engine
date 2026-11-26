@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import ast
 import json
-import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from tests.sentry import _baseline_sources as bs
 from tests.sentry import _ratchet
 from tests.sentry import ratchet as _ratchet_package
 from tests.sentry.ratchet import _limit_constants as lc
@@ -104,56 +105,129 @@ def test_reworded_base_approval_does_not_exempt_a_raise(repo: Path) -> None:  # 
     _assert_red(repo, "max raised or dropped for key(s): m::f")
 
 
-def _raise_real(repo: Path, sid: str) -> None:
-    """Base is the live baseline's header with one scratch bounded entry; head adds one to its ``max``.
+# The bound of each case comes from the registered source (``SOURCES``), read over a seeded live
+# constant, so a source whose ``maxes`` or ``mins`` wiring is gone records no bound and fails the
+# assertion on the recorded bound before the checker runs.
+# sentry id -> (test file under tests/sentry, text with ``@N@`` for the live count, baseline key)
+SEEDED_COUNTS = {
+    "module-size": ("test_module_size.py", "ALLOWLIST = {'pkg/mod.py': @N@}\n", "pkg/mod.py"),
+    "log-interpolation": (
+        "test_log_interpolation.py",
+        "ALLOWLIST = {('a.py', 'f', 'exc'): (@N@, 'why')}\n",
+        "a.py::f::exc",
+    ),
+    "locator-waivers": (
+        "test_locator_hygiene.py",
+        "WAIVERS = {('a.py', 'f', 'path'): (@N@, 'why')}\n",
+        "a.py::f::path",
+    ),
+}
 
-    The entry is made here, so the live list may shrink to nothing without breaking the test.
-    """
-    name = f"{sid}.json"
-    doc = json.loads((ROOT / "tests/sentry/baselines" / name).read_text(encoding="utf-8"))
-    doc["entries"] = {"scratch::KEY": {"reason": REASON, "max": 1}}
-    (repo / A).unlink()
-    path = f"tests/sentry/baselines/{name}"
-    _write(repo, path, json.dumps(doc))
-    _write(repo, REG, _reg({sid: (path, [])}))
-    _commit(repo, "real baseline")
-    doc["entries"]["scratch::KEY"]["max"] = 2
-    _write(repo, path, json.dumps(doc))
-    _assert_red(repo, "max raised or dropped for key(s)")
+
+def _source(sid: str) -> bs.Source:
+    return next(s for s in bs.SOURCES if s.sentry_id == sid)
 
 
-def test_raise_mutation_does_not_depend_on_live_entries(
-    repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+def _seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, files: dict[str, str]) -> None:
+    """Point the sources at a scratch ``tests/sentry`` holding only ``files``."""
+    root = tmp_path / "sentry"
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(bs, "SENTRY", root)
+
+
+def _recorded(sid: str, field: str) -> dict[str, int]:
+    """What ``write_initial`` would record for ``sid``: the registered source's live values."""
+    read = getattr(_source(sid), "maxes" if field == "max" else "mins")
+    return read() if read else {}
+
+
+def _count_raise(sid: str, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    test_file, template, key = SEEDED_COUNTS[sid]
+    path = f"tests/sentry/baselines/{sid}.json"
+    _seed(tmp_path, monkeypatch, {test_file: template.replace("@N@", "5")})
+    base = _recorded(sid, "max")
+    assert base == {key: 5}
+    _limits_repo(repo, {k: {"max": v} for k, v in base.items()}, sid=sid)
+    # A longer value: same-size text written in the same second can load stale bytecode.
+    _seed(tmp_path, monkeypatch, {test_file: template.replace("@N@", "12")})
+    head = _recorded(sid, "max")
+    assert head == {key: 12}
+    _write(repo, path, _bl(sid, {k: {"max": v} for k, v in head.items()}))
+    _assert_red(repo, f"{sid}: max raised or dropped for key(s): {key}")
+
+
+def _seed_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, goal: int, floor: int
+) -> dict[str, dict[str, int]]:
+    """Live ``GOAL`` and ``WALK_FLOOR`` under a scratch tree, read through the ``sentry-limits``
+    source; returns the baseline entries that source records."""
+    limits: Any = bs._limits()
+    limits.LIMITS = {
+        ("test_module_size.py", "GOAL"): "max",
+        ("test_outbound_clients.py", "WALK_FLOOR"): "min",
+    }
+    monkeypatch.setattr(bs, "_limits", lambda: limits)
+    _seed(
+        tmp_path,
+        monkeypatch,
+        {
+            "test_module_size.py": f"GOAL = {goal}\n",
+            "test_outbound_clients.py": f"WALK_FLOOR = {floor}\n",
+        },
+    )
+    entries = {k: {"max": v} for k, v in _recorded(GUARD, "max").items()}
+    entries.update({k: {"min": v} for k, v in _recorded(GUARD, "min").items()})
+    assert entries == {GOAL: {"max": goal}, FLOOR: {"min": floor}}
+    return entries
+
+
+def test_module_size_ceiling_raise_needs_approval(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # red-before
-    live = tmp_path_factory.mktemp("live")
-    sid = "locator-waivers"
-    _write(live, f"tests/sentry/baselines/{sid}.json", _bl(sid, {}))
-    monkeypatch.setattr(sys.modules[__name__], "ROOT", live)
-    _raise_real(repo, sid)
+    _count_raise("module-size", repo, tmp_path, monkeypatch)
 
 
-def test_module_size_ceiling_raise_needs_approval(repo: Path) -> None:  # red-before
-    _raise_real(repo, "module-size")
+def test_log_interpolation_count_raise_needs_approval(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # red-before
+    _count_raise("log-interpolation", repo, tmp_path, monkeypatch)
 
 
-def test_log_interpolation_count_raise_needs_approval(repo: Path) -> None:  # red-before
-    _raise_real(repo, "log-interpolation")
+def test_locator_waiver_count_raise_needs_approval(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # red-before
+    _count_raise("locator-waivers", repo, tmp_path, monkeypatch)
 
 
-def test_locator_waiver_count_raise_needs_approval(repo: Path) -> None:  # red-before
-    _raise_real(repo, "locator-waivers")
-
-
-def test_limit_raise_without_approval_fails(repo: Path) -> None:  # AT-RI5, red-before
-    _limits_repo(repo, BASE)
-    _set(repo, {GOAL: {"max": 650}, FLOOR: {"min": 146}})
+def test_limit_raise_without_approval_fails(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # AT-RI5, red-before
+    _limits_repo(repo, _seed_limits(tmp_path, monkeypatch, 600, 146))
+    _set(repo, _seed_limits(tmp_path, monkeypatch, 650, 146))
     _assert_red(repo, f"max raised or dropped for key(s): {GOAL}")
 
 
-def test_floor_lowered_without_approval_fails(repo: Path) -> None:  # red-before
-    _limits_repo(repo, BASE)
-    _set(repo, {GOAL: {"max": 600}, FLOOR: {"min": 140}})
+def test_floor_lowered_without_approval_fails(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # red-before
+    _limits_repo(repo, _seed_limits(tmp_path, monkeypatch, 600, 146))
+    _set(repo, _seed_limits(tmp_path, monkeypatch, 600, 140))
     _assert_red(repo, f"min lowered or dropped for key(s): {FLOOR}")
+
+
+def test_a_refused_live_constant_raises_a_fixed_diagnostic_without_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # red-before
+    limits: Any = bs._limits()
+    limits.LIMITS = {("test_module_size.py", "GOAL"): "max"}
+    monkeypatch.setattr(bs, "_limits", lambda: limits)
+    _seed(tmp_path, monkeypatch, {"test_module_size.py": "GOAL = True\n"})
+    with pytest.raises(ValueError) as caught:
+        bs.live_bounds("max")
+    assert str(caught.value) == f"{GOAL} {limits.REFUSED}"
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
 def test_floor_lowered_with_a_fresh_approval_passes(repo: Path) -> None:  # red-before
@@ -458,6 +532,72 @@ def test_a_guard_successor_never_excuses_another_missing_key() -> None:  # red-b
     assert len(found) == 1 and "b::B was dropped with its retired id" in found[0]
 
 
+@pytest.mark.parametrize("keeper_first", [True, False], ids=["keeper_first", "raiser_first"])
+def test_a_guard_split_where_one_successor_raises_the_ceiling_fails(
+    keeper_first: bool,
+) -> None:  # red-before
+    keeps, raises = {"a::A": {"max": 5}}, {"a::A": {"max": 6}}
+    heirs = [keeps, raises] if keeper_first else [raises, keeps]
+    helper = _ratchet._bounds()
+    found, _ = helper.retired_guards_findings(
+        ["g"], {"g": {"a::A": {"max": 5}}}, heirs, ({}, {}), {"g"}, _ratchet.bound_loosened
+    )
+    assert any("a::A is held by more than one successor" in f for f in found)
+
+
+def test_a_guard_split_over_distinct_keys_passes() -> None:  # pin
+    helper = _ratchet._bounds()
+    found, _ = helper.retired_guards_findings(
+        ["g"],
+        {"g": {"a::A": {"max": 5}, "b::B": {"min": 9}}},
+        [{"a::A": {"max": 5}}, {"b::B": {"min": 9}}],
+        ({}, {}),
+        {"g"},
+        _ratchet.bound_loosened,
+    )
+    assert found == []
+
+
+def test_retirement_and_replacement_share_one_pairing_rule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # red-before
+    helper = _ratchet._bounds()
+    seen: list[str] = []
+    real = helper.pair_keys
+
+    def spy(donors: Any, successors: Any) -> Any:
+        seen.append("call")
+        return real(donors, successors)
+
+    monkeypatch.setattr(helper, "pair_keys", spy)
+    _ratchet._integrity().transfer_findings(_ratchet, {"d": {"k": {}}}, {"s": {"k": {}}}, False)
+    helper.retired_guards_findings(
+        ["g"],
+        {"g": {"k": {"max": 1}}},
+        [{"k": {"max": 1}}],
+        ({}, {}),
+        {"g"},
+        _ratchet.bound_loosened,
+    )
+    assert seen == ["call", "call"]
+
+
+def test_a_fresh_row_for_a_key_the_successor_retained_is_a_stray() -> None:  # red-before
+    helper = _ratchet._bounds()
+    old = {"g": {"a::A": {"max": 5}, "b::B": {"min": 9}}}
+    heirs = [{"a::A": {"max": 5}}]
+
+    def check(rows: dict[str, str]) -> list[str]:
+        found, _ = helper.retired_guards_findings(
+            ["g"], old, heirs, ({"g": rows}, {}), {"g"}, _ratchet.bound_loosened
+        )
+        return found
+
+    assert check({"b::B": D1}) == []
+    stray = check({"a::A": D1, "b::B": D1})
+    assert len(stray) == 1 and "retired_growth row for g a::A is not a lost key" in stray[0]
+
+
 def _rename_guard(repo: Path, bound: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
     """Retire ``sentry-limits`` with a fresh decision and register ``sentry-limits-v2`` as its guard heir."""
     monkeypatch.setattr(_ratchet, "GUARD_KEYS", frozenset({GUARD, "sentry-limits-v2"}))
@@ -483,6 +623,16 @@ def test_an_approved_guard_rename_that_raises_a_ceiling_fails_check(
     _rename_guard(repo, {"max": 610}, monkeypatch)
     findings, _ = _ratchet.check(repo, "HEAD")
     assert any(f"guard key {GOAL} was dropped with its retired id" in f for f in findings)
+
+
+def test_a_copied_approval_for_a_key_the_renamed_guard_kept_fails_check(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # red-before
+    _rename_guard(repo, {"max": 590}, monkeypatch)
+    text = (repo / REG).read_text(encoding="utf-8") + _retired_growth(GUARD, [(GOAL, D1)])
+    _write(repo, REG, text)
+    findings, _ = _ratchet.check(repo, "HEAD")
+    assert any(f"retired_growth row for {GUARD} {GOAL} is not a lost key" in f for f in findings)
 
 
 # --- the consumer of an imported bound ---------------------------------------------------------

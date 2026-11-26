@@ -102,9 +102,12 @@ def live_bounds(kind: str) -> dict[str, int]:
         if k != kind:
             continue
         try:
-            out[mod.key_of(f, c)] = mod.read_int((SENTRY / f).read_text(encoding="utf-8"), c)
-        except ValueError as exc:
-            raise ValueError(f"{mod.key_of(f, c)} {mod.REFUSED}") from exc
+            value: int | None = mod.read_int((SENTRY / f).read_text(encoding="utf-8"), c)
+        except ValueError:
+            value = None
+        if value is None:  # raised outside the handler so no context carries the refused text
+            raise ValueError(f"{mod.key_of(f, c)} {mod.REFUSED}")
+        out[mod.key_of(f, c)] = value
     return out
 
 
