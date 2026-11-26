@@ -112,7 +112,7 @@ The parity suite pins Python pattern bodies and flags at `tests/native/test_c6c_
 
 These controls catch drift, but coordinated policy still exists in several language-specific locations. Each intended policy change needs synchronized edits across those locations.
 
-The required outcome is one language-neutral detector descriptor. It contains IDs, patterns, validator tags, and vocabularies. The build generates Python, Rust, and parity fixtures from this descriptor.
+The required outcome is one language-neutral detector descriptor. It contains IDs, patterns, validator tags, and vocabularies. The build generates the Python and Rust catalog code from this descriptor. The parity expectation stays a versioned, hand-reviewed snapshot, so a detector edit cannot also update its own expected result.
 
 ### TNR-07: Test modules have no size ratchet
 
@@ -238,10 +238,12 @@ PY
 The file census used these commands:
 
 ```sh
-git ls-files 'src/**/*.py' 'decoy-engine-native/src/**/*.rs' | xargs wc -l
-git ls-files 'tests/**/*.py' 'decoy-engine-native/tests/**/*.rs' | xargs wc -l
-git ls-files 'tests/**/*.py' | xargs wc -l
+git ls-files ':(glob)src/**/*.py' ':(glob)decoy-engine-native/src/**/*.rs' | xargs wc -l
+git ls-files ':(glob)tests/**/*.py' ':(glob)decoy-engine-native/tests/**/*.rs' | xargs wc -l
+git ls-files ':(glob)tests/**/*.py' | xargs wc -l
 ```
+
+The `:(glob)` pathspecs make `**/` also match files directly under each named root. Plain pathspecs miss them and give 995 production files and 2,071 Python test files.
 
 The census ignored the `wc` total rows before it summed file rows. The test thresholds used strict `> 1000` and `> 700` comparisons.
 

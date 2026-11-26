@@ -1,6 +1,6 @@
 # Thermo-Nuclear Remediation Register
 
-Status: plan. All efforts are 1.x work, tracked as rows in the roadmap health group (`docs/ROADMAP.md` in the CLI repo). The rows are pending in CLI PR #415 and are not on CLI main yet. Effort 0 is done.
+Status: plan. Efforts 1 to 8 are 1.x work, tracked as rows in the roadmap health group (`docs/ROADMAP.md` in the CLI repo). The rows are pending in CLI PR #415 and are not on CLI main yet. Effort 0 is the docs correction in engine PR #820 and has no roadmap row. The status column below is a snapshot dated 2026-11-25. The CLI roadmap owns current status.
 
 Source review: [Thermo-Nuclear Code Quality Review](2026-11-25-thermo-nuclear-code-quality-review.md)
 
