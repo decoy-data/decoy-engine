@@ -102,3 +102,22 @@ ignore_imports =
     decoy_engine.plan.validate._consolidator -> decoy_engine.fileaccess
     # finding not numbered in the record; delivery resume reads publication
     decoy_engine.delivery.resume._records -> decoy_engine.publication
+
+# Strategies, `_column_access` and `work_order.rows` are leaves of the work order. The compiler
+# (`operations`, `compile`, `commits`) imports `_column_access`, which reaches strategies, so a
+# direct import from one of them back into the compiler is an import cycle that only shows when
+# the second module loads first (the tiers contract treats `execution` as one tier). `rows` is the
+# one work_order module a strategy may import. Only direct imports are checked (a lazy edge through
+# `_runner` is legal); tests/sentry/layout/test_execution_import_order.py loads every module first.
+[importlinter:contract:work-order-leaves]
+name = execution leaves do not import the work-order compiler
+type = forbidden
+source_modules =
+    decoy_engine.execution._strategies
+    decoy_engine.execution._column_access
+    decoy_engine.execution.work_order.rows
+forbidden_modules =
+    decoy_engine.execution.work_order.operations
+    decoy_engine.execution.work_order.compile
+    decoy_engine.execution.work_order.commits
+allow_indirect_imports = true

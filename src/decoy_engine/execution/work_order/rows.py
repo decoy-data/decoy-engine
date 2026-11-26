@@ -9,17 +9,23 @@ keys for one gated row).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.execution.work_order.operations import gate_reads
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import StrategyContext
-    from decoy_engine.execution.work_order.compile import WorkOrder
+
+
+class _HasOperations(Protocol):
+    """A compiled `WorkOrder`, by the one attribute read here. `rows` is a leaf of the work-order
+    package (strategies import it), so it names no compiler module, not even for a type."""
+
+    @property
+    def ops(self) -> Mapping[Any, Any]: ...
 
 
 def snapshot_rows(
@@ -54,7 +60,7 @@ def snapshot_rows(
 
 
 def take_source_snapshots(
-    order: WorkOrder,
+    order: _HasOperations,
     snapshot_cols: Mapping[str, frozenset[str]],
     table: str,
     frame: pd.DataFrame,
@@ -68,6 +74,8 @@ def take_source_snapshots(
     `snapshot_cols` is `source_snapshot_columns(order)`, computed once per order by the caller; the
     map is sparse, so a table with no entry gets no copies.
     """
+    from decoy_engine.execution._runner import gate_reads  # lazy: `_runner` reaches strategies
+
     present = set(frame.columns)
     for op in order.ops.values():
         if op.table == table and gate_reads(op) - present:

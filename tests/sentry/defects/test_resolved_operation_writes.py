@@ -109,7 +109,7 @@ _PINNED_CALLERS: dict[str, set[tuple[str, str]]] = {
         ("work_order/operations.py", "resolve_operation"),
     },
     "column_access": {
-        ("work_order/operations.py", "entries_written"),
+        ("_column_access.py", "handler_written_columns"),
         ("_column_access.py", "touched_columns"),
         ("_column_access.py", "created_columns"),
         ("_mixed_static.py", "_mask_table_config"),

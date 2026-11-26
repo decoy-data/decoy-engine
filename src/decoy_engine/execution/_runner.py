@@ -32,6 +32,7 @@ from decoy_engine.plan._types import ColumnSeed, GroupSeed
 if TYPE_CHECKING:
     from decoy_engine.execution.native._requirements import NodeRequirements
     from decoy_engine.execution.work_order import WorkOrder
+    from decoy_engine.execution.work_order.operations import ResolvedOperation
     from decoy_engine.plan._types import Plan
     from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships import RelationshipGraph
@@ -315,6 +316,15 @@ def when_columns_of(whens: Iterable[object]) -> frozenset[str]:
     return frozenset(cols)
 
 
+def gate_reads(op: ResolvedOperation) -> frozenset[str]:
+    """The columns the op's `when:` reads, when dispatch evaluates that gate (`op.gated`), else
+    none. The one answer for the snapshot set and the absent-column check."""
+    seed = op.node.plan_slice
+    if not op.gated or not isinstance(seed, ColumnSeed):
+        return frozenset()
+    return when_columns_of([seed.when])
+
+
 def when_read_columns(plan: Plan) -> dict[str, frozenset[str]]:
     """Per table, the columns any column's `when:` reads.
 
@@ -342,8 +352,6 @@ def source_snapshot_columns(order: WorkOrder) -> dict[str, frozenset[str]]:
     configured with. A node whose writes cannot be named snapshots every column its table's
     `when:` reads.
     """
-    from decoy_engine.execution.work_order.operations import gate_reads
-
     out: dict[str, set[str]] = defaultdict(set)
     reads: dict[str, set[str]] = defaultdict(set)
     for op in order.ops.values():
@@ -404,6 +412,25 @@ def _writer_node_map(work: list[WorkNode]) -> dict[tuple[str, str], set[_NodeKey
     return writer
 
 
+def node_entry(node: WorkNode) -> dict[str, Any] | None:
+    """The config entry a work node was built from, the shape `column_access` reads, or None for
+    a node with no `ColumnSeed` (a composite FK group). The one builder: ordering and operation
+    resolution both read a node's declaration through it."""
+    plan_slice = node.plan_slice
+    if not isinstance(plan_slice, ColumnSeed):
+        return None
+    from decoy_engine.execution._adapter import provider_config_to_dict
+
+    return {
+        "name": node.columns[0] if node.columns else None,
+        "strategy": plan_slice.strategy,
+        "provider": plan_slice.provider,
+        "provider_config": provider_config_to_dict(plan_slice.provider_config),
+        "coherent_with": list(plan_slice.coherent_with),
+        "when": plan_slice.when,
+    }
+
+
 def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
     """The same-table sibling columns `node` reads for their MASKED value, so it
     must be ordered AFTER them (the cross-column V1 ordering edge).
@@ -415,18 +442,11 @@ def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
     (including `joint_mask`, whose `key_by` is a SOURCE read via snapshot) imposes no
     ordering edge.
     """
-    plan_slice = node.plan_slice
-    if node.kind != "scalar" or not isinstance(plan_slice, ColumnSeed):
+    entry = node_entry(node)
+    if node.kind != "scalar" or entry is None:
         return frozenset()
-    from decoy_engine.execution._adapter import provider_config_to_dict
     from decoy_engine.execution._column_access import scalar_creating_reads
 
-    entry = {
-        "name": node.columns[0] if node.columns else None,
-        "strategy": plan_slice.strategy,
-        "provider_config": provider_config_to_dict(plan_slice.provider_config),
-        "coherent_with": list(plan_slice.coherent_with),
-    }
     return scalar_creating_reads(entry)
 
 

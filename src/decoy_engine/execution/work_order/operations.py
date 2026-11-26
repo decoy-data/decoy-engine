@@ -13,15 +13,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from decoy_engine.errors import ValidationError
 from decoy_engine.execution._column_access import (
     OWN_TARGET_SOURCE,
     ColumnAccess,
-    column_access,
     creates_own_target,
     declared_access,
 )
-from decoy_engine.expressions._when_parser import parse_when_cached, when_column_refs
+from decoy_engine.execution._runner import node_entry, when_columns_of
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
@@ -76,55 +74,16 @@ class ResolvedOperation:
         return (*own, *sorted(self.writes - set(own)))
 
 
-def gate_reads(op: ResolvedOperation) -> frozenset[str]:
-    """The columns the op's `when:` reads, when dispatch evaluates that gate (`op.gated`), else
-    none. The one answer for the snapshot set and the absent-column check."""
-    from decoy_engine.plan import ColumnSeed
-
-    seed = op.node.plan_slice
-    if not op.gated or not isinstance(seed, ColumnSeed):
-        return frozenset()
-    from decoy_engine.execution._runner import when_columns_of
-
-    return when_columns_of([seed.when])
-
-
-def _entry(node: WorkNode) -> dict[str, object] | None:
-    from decoy_engine.execution._adapter import provider_config_to_dict
-    from decoy_engine.plan import ColumnSeed
-
-    seed = node.plan_slice
-    if not isinstance(seed, ColumnSeed):
-        return None
-    return {
-        "name": node.columns[0] if node.columns else None,
-        "strategy": seed.strategy,
-        "provider": seed.provider,
-        "provider_config": provider_config_to_dict(seed.provider_config),
-        "coherent_with": list(seed.coherent_with),
-        "when": seed.when,
-    }
-
-
-def _when_reads(entry: dict[str, object]) -> frozenset[str]:
-    """The columns the entry's `when:` reads, which `ColumnAccess.reads` also holds."""
-    when = entry.get("when")
-    if not isinstance(when, str) or not when.strip():
-        return frozenset()
-    try:
-        return frozenset(r.column for r in when_column_refs(parse_when_cached(when)))
-    except ValidationError:
-        return frozenset()
-
-
 def _declared(
-    node: WorkNode, entry: dict[str, object], access: ColumnAccess
+    node: WorkNode, entry: Mapping[str, Any], access: ColumnAccess
 ) -> tuple[frozenset[str], frozenset[str], bool, bool]:
     """`(source reads, masked reads, reads own target, reads unknown)` from the declaration."""
     # A scalar's own column is not a sibling read. A deterministic bundle reads its first sorted
     # group column, which is one of its own outputs, so a composite keeps it.
     own_column = set(node.columns) if node.kind == "scalar" else set()
-    masked = access.reads - access.source_reads - _when_reads(entry) - own_column
+    # `ColumnAccess.reads` also holds the `when:` predicate's columns; those are gate reads.
+    when_reads = when_columns_of([entry.get("when")])
+    masked = access.reads - access.source_reads - when_reads - own_column
     own = node.kind == "scalar" and access.own_target == OWN_TARGET_SOURCE
     return access.source_reads, frozenset(masked), own, access.reads_unknown
 
@@ -137,7 +96,7 @@ def resolve_operation(node: WorkNode, graph: RelationshipGraph) -> ResolvedOpera
     own = frozenset(node.columns)
     edges = graph.parents_of(node.table, node.columns)
     has_when = isinstance(node.plan_slice, ColumnSeed) and node.plan_slice.when is not None
-    entry = _entry(node)
+    entry = node_entry(node)
     none = frozenset[str]()
     if edges:
         return ResolvedOperation(
@@ -173,16 +132,3 @@ def resolve_operations(
 ) -> dict[NodeKey, ResolvedOperation]:
     """One record per work node, resolved once against the job's relationship graph."""
     return {n.key: resolve_operation(n, graph) for n in work}
-
-
-def entries_written(entries: Iterable[Mapping[str, Any]], registry: Any) -> frozenset[str] | None:
-    """Columns some handler writes across config `entries`, or None when a declaration cannot
-    name its writes (every source field is then potentially written). The carry side, which holds
-    the table config and no work list, reads the same declaration the resolver does."""
-    written: set[str] = set()
-    for entry in entries:
-        access = column_access(entry, registry)
-        if access.writes_unknown:
-            return None
-        written |= access.writes
-    return frozenset(written)

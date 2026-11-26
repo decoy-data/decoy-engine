@@ -128,7 +128,7 @@
   "work_order/compile.py::compile_work_order::resolve_operations": {
    "reason": "named site of defects/test_compile_once.py, first inventory when its allowlist was registered; may only shrink"
   },
-  "work_order/operations.py::entries_written::column_access": {
+  "_column_access.py::handler_written_columns::column_access": {
    "reason": "named site of defects/test_compile_once.py, first inventory when its allowlist was registered; may only shrink"
   },
   "work_order/operations.py::resolve_operation::declared_access": {

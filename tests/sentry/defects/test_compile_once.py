@@ -58,8 +58,8 @@ ALLOWED: dict[Site, str] = {
     ("work_order/operations.py", "resolve_operation", "parents_of"): _COMPILE,
     ("work_order/operations.py", "resolve_operation", "declared_access"): _COMPILE,
     (
-        "work_order/operations.py",
-        "entries_written",
+        "_column_access.py",
+        "handler_written_columns",
         "column_access",
     ): "the carry side holds config entries and no work list",
     ("_pandas_adapter.py", "run", "build_work_list"): _ENTRY,
