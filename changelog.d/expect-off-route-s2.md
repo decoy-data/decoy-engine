@@ -24,7 +24,7 @@ out-of-core, multi-table split) still keep a validator-bearing job resident unti
 A validator parameter error or finding never carries the parameter text: a bad regex, a non-numeric
 `max_identical_ratio`, `min_rows` or `tolerance` is reported by validator and parameter name through one
 parser (`validators/_params.py`), and a failing `regex_match` finding no longer quotes its pattern.
-A standalone shadow run judges its result with the judgement config its physical plan carries (`PhysicalPlan.validation_config`: the validator entries plus the tables, relationships and quarantine setting they read, frozen with the captured inputs), whatever route it takes. With a validation session bound, it feeds that session instead, and refuses the run (`validator_config_not_owned`) when the session judges a different config (compared with types preserved). A table left to an owner needs an open session (`validator_session_unavailable`). Leaving a `bind_validation_session` scope cleanly closes the session, so rejected rows cannot leave it unjudged. `close()` raises the same verdict each time it is called. `ParamError` is a config rule error, also when `ValidationSession` rethrows it with its entry index.
+A standalone shadow run judges its result with the judgement config its physical plan carries (`PhysicalPlan.validation_config`: the validator entries plus the tables, relationships and quarantine setting they read, frozen with the captured inputs), whatever route it takes. With a validation session bound, it feeds that session instead, and refuses the run (`runtime/validator_config_not_owned`) when the session judges a different config (compared with types preserved). A table left to an owner needs an open session (`runtime/validator_session_unavailable`). Leaving a `bind_validation_session` scope cleanly closes the session, so rejected rows cannot leave it unjudged. `close()` raises the same verdict each time it is called. `ParamError` is a config rule error, also when `ValidationSession` rethrows it with its entry index.
 
 Every table a run delivers is judged exactly once. Marking a table complete no longer counts as
 judging it: `ValidationSession.close()` finishes the session, then raises `ValidatorFailedError` for a
@@ -33,4 +33,4 @@ its verdict, so a covered failure is not raised twice. The out-of-core collector
 verdict under an owner token. A step may leave a table to another caller only with an explicit owner
 token (`ShadowContext.validation_owner`; the unified slice sets it), and `close()` refuses a table
 that was deferred or marked complete but never fed, with the new reason code
-`validator_table_not_observed`.
+`runtime/validator_table_not_observed`.

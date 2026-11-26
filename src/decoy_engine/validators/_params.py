@@ -21,6 +21,10 @@ class ParamError(ConfigRuleError):
 
     A ``ConfigRuleError``, so the reason adapter classifies it as a config failure."""
 
+    def at_entry(self, index: int) -> ParamError:
+        """The same refusal located at ``validators`` entry ``index``, with no exception context."""
+        return ParamError(f"validators entry {index}: {self.message}")
+
 
 def numeric_param(
     params: dict[str, Any], name: str, *, kind: type, default: float, validator: str

@@ -256,7 +256,7 @@ class ValidationSession:
         """Leave ``tables`` to ``owner``, which commits to feeding them before ``close``."""
         _require_owner(owner)
         self._require_open()
-        self._deferred.update(tables)
+        self._deferred |= set(tables)
 
     def record_external_verdict(self, tables: Iterable[str], *, owner: str) -> None:
         """``owner`` judged ``tables`` itself and fails the run on any finding; they are complete."""
@@ -273,7 +273,7 @@ class ValidationSession:
         them for ``close``.
         """
         if report is self._report:
-            self._judged.update(self._rows)
+            self._judged |= self._rows.keys()
 
     def unjudged_tables(self) -> list[str]:
         """Fed tables no judge has acted on yet."""
@@ -298,7 +298,7 @@ class ValidationSession:
         if self._refused:
             raise ValidatorFailedError(report)
         settled = self._judged | self._external
-        self._judged.update(self._rows)
+        self._judged |= self._rows.keys()
         if not report.passed and any(f.table not in settled for f in report.findings):
             # Remembered, so a second `close` raises the same verdict instead of reporting it.
             self._refused = True

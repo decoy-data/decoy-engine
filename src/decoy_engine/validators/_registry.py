@@ -235,16 +235,14 @@ def build_fold(
     _require_params_mapping(entry, index)
     spec = _SPECS.get(name)
     if spec is not None and spec.fn is fn:
-        fold: Fold | None = None
-        locator: str | None = None
         try:
             fold = spec.factory(entry, config, cap, budget)
         except ParamError as exc:
-            locator = str(exc)
-        if fold is None:
-            # Raised outside the handler so the error carries no exception context.
-            raise ParamError(f"validators entry {index}: {locator}")
-        return name, fold
+            located = exc.at_entry(index)
+        else:
+            return name, fold
+        # Raised outside the handler so the error carries no exception context.
+        raise located
     return name, _WholeTableFold(fn, entry, config, sources)
 
 
