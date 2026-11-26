@@ -31,6 +31,7 @@ value, a path or a file name, and the library error is never chained.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import dataclasses
 import io
@@ -41,7 +42,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TextIO, overload
 
 import pandas as pd
-from pandas.io.common import infer_compression
+from pandas.io.common import get_handle, infer_compression
 
 from decoy_engine import fileaccess
 from decoy_engine._lexeme import pandas_lexeme_kwargs
@@ -233,8 +234,23 @@ def _positional_lexemes(columns: tuple[str, ...], names: list[str]) -> dict[str,
     return pandas_lexeme_kwargs([names.index(c) for c in columns if c in names])
 
 
+@contextlib.contextmanager
+def _decompressed(raw: Any, compression: str | None) -> Iterator[Any]:
+    """`raw` as plain bytes: through pandas' own decompressor when the format is named."""
+    if compression in (None, "infer"):
+        yield raw
+        return
+    with get_handle(raw, "rb", compression=compression, is_text=False) as handles:
+        yield handles.handle
+
+
 def _scan_record_widths(
-    open_handle: OpenHandle, dialect: CsvDialect, *, table: str, nrows: int | None
+    open_handle: OpenHandle,
+    dialect: CsvDialect,
+    *,
+    table: str,
+    nrows: int | None,
+    compression: str | None = "infer",
 ) -> None:
     """Refuse when a consumed record's field count differs from the declared names.
 
@@ -243,8 +259,12 @@ def _scan_record_widths(
     """
     expected = len(dialect.column_names or ())
     consumed = 0
-    with open_handle() as handle, handle.open_binary() as raw:
-        text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
+    with (
+        open_handle() as handle,
+        handle.open_binary() as raw,
+        _decompressed(raw, compression) as plain,
+    ):
+        text = io.TextIOWrapper(plain, encoding="utf-8-sig", newline="")
         reader = _record_reader(
             text,
             dialect.delimiter,
@@ -431,6 +451,7 @@ def _read_csv_rows(
     lexeme_columns: tuple[str, ...] = (),
     columns: Sequence[str] | None = None,
     exact_text: bool = False,
+    compression: str | None = "infer",
 ) -> pd.DataFrame | Iterator[pd.DataFrame]:
     """The shared core: one frame, or an iterator of frames when `chunksize` is set.
 
@@ -463,9 +484,11 @@ def _read_csv_rows(
                 names if columns is None else list(columns),
                 chunked=chunksize is not None,
             )
-        _scan_record_widths(open_handle, dialect, table=table, nrows=nrows)
+        _scan_record_widths(open_handle, dialect, table=table, nrows=nrows, compression=compression)
         read_opts = {"header": None, **_positional_lexemes(lexeme_columns, names)}
     kwargs: dict[str, Any] = {"sep": dialect.delimiter, "dtype": dtype, **read_opts, **use}
+    if compression != "infer":
+        kwargs["compression"] = compression
     if exact_text:
         kwargs = {**kwargs, "keep_default_na": False, "na_filter": False}
     if nrows is not None:
@@ -492,6 +515,7 @@ def read_csv_source(
     file_access: FileAccess | None = ...,
     field_key: str = ...,
     columns: Sequence[str] | None = ...,
+    compression: str | None = ...,
 ) -> pd.DataFrame: ...
 
 
@@ -507,6 +531,7 @@ def read_csv_source(
     file_access: FileAccess | None = ...,
     field_key: str = ...,
     columns: Sequence[str] | None = ...,
+    compression: str | None = ...,
 ) -> Iterator[pd.DataFrame]: ...
 
 
@@ -522,6 +547,7 @@ def read_csv_source(
     file_access: FileAccess | None = None,
     field_key: str = "source.path",
     columns: Sequence[str] | None = None,
+    compression: str | None = "infer",
 ) -> pd.DataFrame | Iterator[pd.DataFrame]:
     """Read the CSV file at `path` under `dialect`.
 
@@ -536,6 +562,9 @@ def read_csv_source(
     is an iterator of frames of at most `chunksize` rows, bound to the call's file-access
     policy. A parser disagreement the scan cannot see (an unterminated quote) surfaces on
     the step that reads it.
+
+    `compression` is pandas' own argument. The default infers from the name, which a rooted
+    policy hides (its descriptor path has no suffix); a caller that knows the format says so.
 
     `columns` parses only the named columns and returns every frame or chunk with exactly
     them, in the order given (not file order). A name the file lacks, or a repeated name, is a
@@ -559,6 +588,7 @@ def read_csv_source(
         chunksize=chunksize,
         dtype=dtype,
         columns=columns,
+        compression=compression,
     )
 
 

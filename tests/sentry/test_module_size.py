@@ -100,6 +100,8 @@ ALLOWLIST: dict[str, int] = {
     "src/decoy_engine/execution/out_of_core/_budget.py": 622,
     # float FK key token pricing; split the disk-width helpers into _spill_widths.py.
     "src/decoy_engine/execution/out_of_core/_spill_estimate.py": 665,
+    # compressed CSV: the `compression` argument and its headerless scan; a split would cut the one reader.
+    "src/decoy_engine/profile/_csv_reader.py": 648,
     "src/decoy_engine/detection/detectors.py": 920,
     # monolithic train_and_evaluate; decompose into split/fit/calibrate/evaluate modules.
     "src/decoy_engine/profiling/model_pack/trainer.py": 711,
