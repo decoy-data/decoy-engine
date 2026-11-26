@@ -282,7 +282,8 @@ def closed_keys(
     """
     out: list[str] = []
     used: list[str] = []
-    for row in doc.get("sentry", []):  # shape was checked by ``validate_registry``
+    rows: Any = doc.get("sentry", [])  # shape was checked by ``validate_registry``
+    for row in rows:
         sid = row["id"]
         for key in sorted(set(row) - allowed):
             if (sid, key) in waived:

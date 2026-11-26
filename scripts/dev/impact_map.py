@@ -42,6 +42,10 @@ from impact_select._atomic_write import atomic_write_text
 from impact_select._select_env import classify_skips, fingerprint, hard_mismatches
 from impact_select._select_map import ImpactMap, dump_map
 
+# The one test-file name rule lives in the sentry ratchet; a second copy fails its sentry.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tests.sentry.ratchet import is_test_filename
+
 MODULE = "<module>"
 BOOT_NAME = "_decoy_impact_boot"
 PTH_NAME = "a2_decoy_impact.pth"
@@ -263,7 +267,11 @@ def install_bootstrap() -> list[Path]:
 
 
 def discover_tests(repo: Path, order_file: Path | None) -> list[str]:
-    found = sorted(p.relative_to(repo).as_posix() for p in (repo / "tests").rglob("test_*.py"))
+    found = sorted(
+        p.relative_to(repo).as_posix()
+        for p in (repo / "tests").rglob("*")
+        if is_test_filename(p.name) and p.is_file()
+    )
     secs: dict[str, float] = {}
     if order_file and order_file.is_file():
         secs = json.loads(order_file.read_text(encoding="utf-8")).get("file_seconds", {})
