@@ -184,7 +184,10 @@ def test_the_profile_entry_names_every_private_fileaccess_module() -> None:
     bans = scan.CONSUMER_FACADES["profile/"]
     assert "decoy_engine.fileaccess._errors" in bans
     assert set(bans.values()) == {"decoy_engine.fileaccess.adapters.arrow"}
-    assert all(name.startswith("decoy_engine.fileaccess._") for name in bans)
+    assert all(
+        name.startswith("decoy_engine.fileaccess.") and name.rpartition(".")[2].startswith("_")
+        for name in bans
+    )
 
 
 def test_validation_post_reads_both_names_through_the_facades() -> None:

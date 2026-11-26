@@ -146,6 +146,7 @@ def test_parquet_footer_reads_stay_in_the_tail(
     assert ledger.unsized_reads == 0
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("provider", ["s3", "gcs"])
 @pytest.mark.parametrize(
     ("read", "cap"),
