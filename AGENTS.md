@@ -16,7 +16,7 @@ The main session is the developer. Reviews are handled by the `dennis` subagent 
 
 ## Automatic quality gate
 
-`git push` and `gh pr create` are blocked by a `PreToolUse` hook (`.claude/hooks/decoy-quality-gate.sh`) until the gate has passed for the exact current HEAD. To clear it:
+`gh pr create` and pushes that can lose work (force, delete, prune, tags, mirror, all) are blocked by a `PreToolUse` hook (`.claude/hooks/decoy-quality-gate.sh`) until the gate has passed for the exact current HEAD. A plain branch push is a backup and is not gated. To clear it:
 
 1. Dispatch `dennis` to review the change; resolve every BLOCKER and HIGH.
 2. Dispatch `barry` to sync the docs to the change.
