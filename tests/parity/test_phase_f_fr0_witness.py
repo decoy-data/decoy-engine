@@ -159,11 +159,12 @@ def _trips(
     match: str,
     marking: bool = False,
     attribution: Any = None,
+    run: Any = None,
 ) -> None:
     monkeypatch.setattr(_faker_pool, "N_THRESHOLD", _THRESHOLD)
     with w.end_to_end(monkeypatch, marking=marking, attribution=attribution) as witness:
         mutate(monkeypatch)
-        tables = _run()
+        tables = (run or _run)()
     with pytest.raises(w.WitnessError, match=match):
         witness.classify(tables)
 
@@ -207,6 +208,56 @@ def test_core_numpy_recompute_trips(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda mp: _every_pick(mp, recompute),
         match="numpy-selected",
         marking=True,
+    )
+
+
+def _list_route_config() -> dict[str, Any]:
+    """A pooled parent key column feeds a key collector, so its batches take the list route."""
+    parent = fx.table("lp", _ROWS, [{"name": "k", "type": "faker", "faker_type": "city"}])
+    child = fx.table(
+        "lc",
+        10,
+        [
+            {
+                "name": "pk",
+                "type": "reference",
+                "reference_table": "lp",
+                "reference_column": "k",
+            }
+        ],
+    )
+    return fx.config([parent, child])
+
+
+def _recompute_pick(inner: Any) -> Any:
+    def pick(self: Any, size: int) -> Any:
+        out = inner(self, size)
+        return _like(out, [self._values[(i * 7) % len(self._values)] for i in range(size)])
+
+    return pick
+
+
+def test_a_list_route_column_is_not_reached_by_a_take_only_mutant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reach check: `take` never runs for this column, so replacing only `take` leaves the
+    witness green. That is why the mutants replace every entry in `PICK_METHODS`."""
+    monkeypatch.setattr(_faker_pool, "N_THRESHOLD", _THRESHOLD)
+    with w.end_to_end(monkeypatch, marking=True) as witness:
+        _outer(monkeypatch, _faker_pool.PooledSelector, "take", _recompute_pick)
+        tables = fx.run_generate_tables(_list_route_config())
+    witness.classify(tables)
+
+
+def test_a_list_route_column_is_reached_by_the_select_mutant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _trips(
+        monkeypatch,
+        lambda mp: _every_pick(mp, _recompute_pick),
+        match="numpy-selected",
+        marking=True,
+        run=lambda: fx.run_generate_tables(_list_route_config()),
     )
 
 
