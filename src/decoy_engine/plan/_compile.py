@@ -237,7 +237,7 @@ def compile_plan(
     # Row 23 (Sprint 13 / coercion-13 S3, GATE-1 Q4, 2026-07-03): reject
     # bucketize columns whose width cannot be resolved (sibling silent-
     # passthrough leak). Config-only; both branches + run_config_only_checks.
-    check_bucketize_config(config)
+    check_bucketize_config(config, column_shapes)
     # Row 28 (HC-3b, 2026-07-17): reject top_code columns with no resolvable
     # bound (silent-passthrough leak). Config-only; both branches +
     # run_config_only_checks.
@@ -552,7 +552,7 @@ def run_config_only_checks(
     # validation. Config-only: safe for decoy validate / validate-yaml.
     check_truncate_config(config)
     # Row 23 (Sprint 13 S3, GATE-1 Q4): bucketize width resolution.
-    check_bucketize_config(config)
+    check_bucketize_config(config, config_shapes)
     # Row 28 (HC-3b, 2026-07-17): reject top_code columns with no resolvable
     # bound (silent-passthrough leak). Config-only.
     check_top_code_config(config)

@@ -25,11 +25,16 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.contracts.bucketize_width import BUCKETIZE_PRESETS, unresolvable_width_field
+from decoy_engine.contracts.bucketize_width import (
+    BUCKETIZE_PRESETS,
+    is_oversized_integer_width,
+    unresolvable_width_field,
+)
+from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes
 from decoy_engine.plan._errors import PlanCompileError
 
 
-def check_bucketize_config(config: dict[str, Any]) -> None:
+def check_bucketize_config(config: dict[str, Any], shapes: ColumnShapes | None = None) -> None:
     """Reject bucketize columns whose bucket width cannot be resolved.
 
     Compile-check ownership table row #23 (Sprint 13 / coercion-13 S3,
@@ -89,6 +94,12 @@ def check_bucketize_config(config: dict[str, Any]) -> None:
                     ),
                 )
             if field == "width":
+                if (
+                    shapes is not None
+                    and shapes.get((table_name, col_name)) is ColumnShape.DECIMAL
+                    and is_oversized_integer_width(pc)
+                ):
+                    continue  # the decimal shape rule refuses it as column_shape_mismatch
                 raise PlanCompileError(
                     code=reasons.plan.BUCKETIZE_WIDTH_UNRESOLVABLE,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.width",
