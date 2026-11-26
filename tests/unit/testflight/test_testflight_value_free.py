@@ -15,7 +15,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-
 from testflight._report import format_job_section, render_report
 from testflight._runner import (
     INVARIANT_FAILED_CATEGORY,
@@ -118,7 +117,7 @@ _FAILING_TEST = textwrap.dedent(
 def test_pytest_failure_output_hides_sentinel(tmp_path: Path, flags: list[str]) -> None:
     # Real pytest output: assertion rewriting can echo the JobResult repr.
     (tmp_path / "test_flight_case.py").write_text(_FAILING_TEST, encoding="utf-8")
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[3]
     proc = subprocess.run(  # noqa: S603 - fixed argv, test-owned file
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-o", "addopts=", *flags],
         cwd=tmp_path,

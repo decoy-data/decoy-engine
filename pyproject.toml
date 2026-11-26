@@ -382,9 +382,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-# The value-free formatter tests live with the testflight package but are not marked
-# `testflight`, so they join the default selection.
-testpaths = ["tests", "testflight/test_testflight_value_free.py"]
+testpaths = ["tests"]
 # "scripts" makes scripts/codeset_etl importable as a top-level package
 # from tests (HC-1 slice 2) without a sys.path hack in the test module
 # itself; scripts/ is never packaged into the wheel (see
