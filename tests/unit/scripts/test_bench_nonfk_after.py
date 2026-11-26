@@ -298,3 +298,13 @@ def test_drive_fails_when_a_warmup_crashes_and_the_measured_rounds_pass(
         workload="W-P", phase=phase, warmup=1, rounds=2,
     )  # fmt: skip
     assert rc != 0
+
+
+def test_drive_w_p_after_fails_when_no_round_was_measured(
+    bench: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _drive(
+        bench, monkeypatch, tmp_path, [_ok(True)],
+        workload="W-P", phase="after", warmup=1, rounds=0,
+    )  # fmt: skip
+    assert rc != 0
