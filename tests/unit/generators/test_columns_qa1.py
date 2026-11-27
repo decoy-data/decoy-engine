@@ -461,7 +461,7 @@ class TestWalksGenF7DistributionDatetimeYear9999:
     year-9999 row only; the snapshot maximum (ts_max) clip below still
     bounds the per-row window."""
 
-    def test_beyond_ts_max_year_bin_is_refused_not_clamped(self):
+    def test_year_bin_outside_ns_domain_is_refused_not_clamped(self):
         """A live year bin past the nanosecond domain used to be clamped to ts_max.year, which
         wrote its rows into the wrong year without a word. S5 refuses it with the coded
         `plan/generation_unbounded_column` before any draw (AT-V2)."""
