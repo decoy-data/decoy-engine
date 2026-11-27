@@ -135,6 +135,8 @@ def unknown(result: Any) -> None:
     memory(result, PublicationState.UNKNOWN, UNKNOWN_TEXT)
     assert result.publication_receipt is None
     assert result.committed_output_dir is None
+    # The reserve carries the last complete figures, not the zeros it was built with.
+    assert result.extra["readback"]["tables_read"] == 1
 
 
 def test_a14_a_fault_inside_publish_before_it_binds_is_unknown(
