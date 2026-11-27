@@ -707,3 +707,27 @@ def test_a_changed_record_is_refused_not_graded() -> None:
     assert run({"k": _flat("ns")}, {"k": _record("M", "flat", "ns", 1)}).failed == {
         "t": NOT_COMPARABLE
     }
+
+
+def _readonly(unit: str = "us") -> Any:
+    """A record scalar that NumPy lets a set or a dict key hold."""
+    row = np.zeros(1, dtype=[("t", f"M8[{unit}]")])
+    row["t"][0] = np.array([5], "M8[s]").astype(f"M8[{unit}]")[0]
+    row.setflags(write=False)
+    record = row[0]
+    hash(record)
+    return record
+
+
+def test_a_readonly_record_in_a_set_a_frozenset_or_a_key_is_refused() -> None:
+    record = _readonly()
+    text = str(record.item())
+    pairs = [
+        ({record}, {text}),
+        (frozenset([record]), frozenset([record.item()])),
+        ({record: 1}, {text: 1}),
+    ]
+    for held, other in pairs:
+        assert run(held, other).failed == {"t": NOT_COMPARABLE}
+        assert run(other, held).failed == {"t": NOT_COMPARABLE}
+    assert run({record}, {_readonly()}).failed == {}

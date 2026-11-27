@@ -568,7 +568,8 @@ Rule:
    one fixed rendering of those fields, `record(<field>, ...)`, built by `_canonical_text` in
    `cell_text.py`. No record text comes from `item()`, `str()` or NumPy `repr`.
 2. A record row is identical or refused. When either side's form is a record or holds one (at
-   any depth, in a sequence item or a mapping value), and the two forms are not equal, the pair
+   any depth: a sequence item, a set member, a mapping key or a mapping value; a read-only NumPy
+   record is hashable), and the two forms are not equal, the pair
    is not comparable. `identity_counts` raises `RecordNotComparableError` (a
    `ComparisonNotPreservedError`, fixed text, class name only, same `check_error` classification).
    The table is refused as for any comparison failure. It is never reported as "differs as
