@@ -65,11 +65,11 @@ def test_recovery_runs_where_pyarrow_has_no_view_types(
 # ---------------------------------------------- V1: a pandas error that quotes the OpenSSL text
 
 
-def _quoted_period() -> pa.Table:
+def _quoted_period(freq: str = ENVELOPE) -> pa.Table:
     from pandas.core.arrays.arrow.extension_types import ArrowPeriodType
 
     storage = pa.array([1, 2], pa.int64())
-    return pa.table({"p": pa.ExtensionArray.from_storage(ArrowPeriodType(ENVELOPE), storage)})
+    return pa.table({"p": pa.ExtensionArray.from_storage(ArrowPeriodType(freq), storage)})
 
 
 def test_a_resident_period_frequency_quoting_the_openssl_text_is_not_memory(
@@ -78,6 +78,17 @@ def test_a_resident_period_frequency_quoting_the_openssl_text_is_not_memory(
     table = _quoted_period()
     # The resident fallback profiles the column as text, as the base does (AT-12 pins the same
     # profile for another frequency text against the recorded base).
+    resident = bounded_profile(
+        make_reader("resident", table, b"", tmp_path, monkeypatch), "resident"
+    )
+    p = _column(resident, "p")
+    assert (p.dtype, p.distinct_count, p.avg_length, p.max_length) == ("object", 2, 1.0, 1)
+
+
+def test_a_resident_period_frequency_quoting_the_arrow_text_is_not_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    table = _quoted_period("Unknown error: Wrapping x failed")
     resident = bounded_profile(
         make_reader("resident", table, b"", tmp_path, monkeypatch), "resident"
     )

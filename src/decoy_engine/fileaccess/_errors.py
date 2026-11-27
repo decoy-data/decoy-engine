@@ -175,13 +175,15 @@ def is_memory_failure(exc: BaseException) -> bool:
 
 def is_conversion_memory_failure(exc: BaseException) -> bool:
     """True iff `exc` from an Arrow-to-pandas conversion is a memory failure: a typed memory
-    error in its chain, or Arrow's own `Wrapping <cell> failed` text. The OpenSSL markers are not
+    error in its chain, or Arrow's own `Wrapping <cell> failed` text as the entire message. The OpenSSL markers are not
     read here: only hashlib raises them, and pandas can quote one (an invalid period frequency)
     in an ordinary conversion error."""
     if typed_memory_member(exc) is not None:
         return True
     message = str(exc)
-    return any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
+    # The whole message: pandas can quote the text inside a longer error of its own, as an
+    # invalid period frequency.
+    return any(pattern.fullmatch(message) for pattern in MEMORY_ERROR_PATTERNS)
 
 
 def passes_by_type(exc: Exception) -> bool:
