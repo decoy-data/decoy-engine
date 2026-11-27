@@ -53,6 +53,9 @@ LOCALES: list[Any] = [
     ["en-US", "en_US"],
     ["en-US", "en_GB"],
     ["de_AT", "it_IT"],
+    ["", "en_US"],
+    ["en_US", ""],
+    [""],
 ]
 
 
