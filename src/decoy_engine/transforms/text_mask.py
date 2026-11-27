@@ -478,7 +478,8 @@ def _mask_date_shift(
         shifted = _shift_within_calendar(dt, shift)
         if shifted is None:
             return token
-        return shifted.strftime(fmt)
+        # glibc strftime drops the zero padding of %Y below year 1000; pad it so every platform agrees.
+        return shifted.strftime(fmt.replace("%Y", f"{shifted.year:04d}"))
     except BaseException:
         del span_key
         raise
