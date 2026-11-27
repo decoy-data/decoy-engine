@@ -36,11 +36,19 @@ def _source(bad_row: int | None = BAD_ROW) -> pa.Table:
     return pa.table({"id": pa.array(range(ROWS)), "d": pa.array(days, pa.date32())})
 
 
-def _setup(tmp_path: Path, bad_row: int | None = BAD_ROW) -> tuple[dict[str, Any], Path, pa.Table]:
+def _setup(
+    tmp_path: Path, bad_row: int | None = BAD_ROW, *, config_reads_bad: bool = False
+) -> tuple[dict[str, Any], Path, pa.Table]:
+    """The bad source file and table, and a config that declares a clean copy, so the profile
+    never meets the bad cell and each read hook is tested on its own."""
     table = _source(bad_row)
     path = tmp_path / "t.parquet"
     pq.write_table(table, str(path), row_group_size=GROUP)
-    cfg = support.make_cfg([support.pass_col("id"), support.pass_col("d")], path=str(path))
+    declared = path
+    if not config_reads_bad:
+        declared = tmp_path / "clean.parquet"
+        pq.write_table(_source(None), str(declared), row_group_size=GROUP)
+    cfg = support.make_cfg([support.pass_col("id"), support.pass_col("d")], path=str(declared))
     return cfg, path, table
 
 
@@ -140,7 +148,7 @@ def test_the_relationship_routes_refuse_the_far_date(shape: str, mode: str, tmp_
 
 
 def test_a_first_batch_profile_failure_is_the_same_coded_refusal(tmp_path: Path) -> None:
-    cfg, path, _ = _setup(tmp_path, bad_row=3)
+    cfg, path, _ = _setup(tmp_path, bad_row=3, config_reads_bad=True)
     with pytest.raises(SourceDateUnrepresentableError) as caught:
         run_pipeline(cfg, sources={TABLE: LazySource(path, table=TABLE)}, **_kwargs())
     _assert_value_free(caught.value)
