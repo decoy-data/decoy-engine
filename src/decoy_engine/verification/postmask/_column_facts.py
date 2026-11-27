@@ -245,12 +245,16 @@ def _aligned(
         a, b = a.slice(n), b.slice(n)
 
 
+_MAPPING_TAG = object()
+
+
 def _frozen(cell: Any) -> Any:
     if isinstance(cell, list | tuple | np.ndarray):
         return tuple(_frozen(v) for v in cell)
     if isinstance(cell, dict):
         # A frozenset of items: mapping equality ignores key order, as a JSON round trip may reorder.
-        return frozenset((k, _frozen(v)) for k, v in cell.items())
+        # Tagged, so a mapping never equals a set of key-value pairs.
+        return (_MAPPING_TAG, frozenset((k, _frozen(v)) for k, v in cell.items()))
     if isinstance(cell, set | frozenset):
         return frozenset(_frozen(v) for v in cell)
     if isinstance(cell, bytearray | memoryview):

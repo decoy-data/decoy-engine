@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -60,3 +63,31 @@ def test_a_filtered_out_invalid_category_does_not_fail_the_decode() -> None:
 def test_a_used_invalid_category_still_raises() -> None:
     with pytest.raises(UnreadableCellError):
         column_text(_bytes_categorical([b"ok@x.io", b"\xff\xfe"]))
+
+
+def _array_cell(mapping: dict[str, object]) -> np.ndarray:
+    cell = np.empty(1, dtype=object)
+    cell[0] = mapping
+    return cell
+
+
+def test_text_keys_ignore_dict_key_order_inside_an_array_cell() -> None:
+    first = _objects(_array_cell(A))
+    second = _objects(_array_cell(A_REORDERED))
+    assert key_text(first) == key_text(second)
+    assert key_text(first) != key_text(_objects(_array_cell({**A, "id": 2})))
+
+
+class _Point(NamedTuple):
+    x: int
+    y: int
+
+
+def test_text_key_of_a_namedtuple_cell_renders_without_error() -> None:
+    assert key_text(_objects(_Point(1, 2)))[0] == key_text(_objects((1, 2)))[0]
+
+
+def test_a_dict_cell_does_not_freeze_equal_to_a_set_of_pairs() -> None:
+    mapping, pairs = canonical_cells(_objects({"id": 1}, {("id", 1)}))
+    assert mapping != pairs
+    assert source_distinct(_objects({"id": 1}, {("id", 1)})) == 2

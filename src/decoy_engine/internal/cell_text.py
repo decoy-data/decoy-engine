@@ -296,8 +296,14 @@ def _key_ordered(value: object) -> object:
     if isinstance(value, dict):
         items = sorted(((k, _key_ordered(v)) for k, v in value.items()), key=lambda kv: repr(kv[0]))
         return dict(items)
-    if isinstance(value, list | tuple):
-        return type(value)(_key_ordered(v) for v in value)
+    if isinstance(value, np.ndarray):
+        # `canonical_cells` descends into an object array, so a mapping inside it reads in key order too.
+        return [_key_ordered(v) for v in value.tolist()]
+    if isinstance(value, tuple):
+        # A plain tuple: a namedtuple constructor takes fields, not one generator.
+        return tuple(_key_ordered(v) for v in value)
+    if isinstance(value, list):
+        return [_key_ordered(v) for v in value]
     return value
 
 
