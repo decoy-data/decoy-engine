@@ -31,7 +31,10 @@ class RootRelative(RootedFileAccess):
     def __init__(self, root: Path) -> None:
         self._root_path = os.path.realpath(root)
         self.root_fd = os.open(self._root_path, os.O_RDONLY | os.O_DIRECTORY)
-        super().__init__([Root("tmp", self.root_fd, frozenset(FileRole), ALL_ACCESS)])
+        super().__init__(
+            [Root("tmp", self.root_fd, frozenset(FileRole), ALL_ACCESS)],
+            allow_portable_fallback=True,
+        )
         self._prefix = self._root_path.rstrip("/") + "/"
 
     def select(self, req: FileRequest) -> tuple[Root, str]:
