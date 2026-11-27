@@ -102,11 +102,17 @@ from decoy_engine.execution._isolated_memwatch import error_suffix, evidence_of,
 from decoy_engine.execution._isolated_reason import (
     Attempt,
     in_process_failure,
+    memory_boundary,
 )
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.fileaccess import FileAccess, FileRequest, FileRole, entry_point
 from decoy_engine.profile import DeclarationRequest
-from decoy_engine.publication import CommitReceipt, PublicationRequest, check_request
+from decoy_engine.publication import (
+    CommitReceipt,
+    PublicationRequest,
+    check_request,
+    failed_receipt,
+)
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.reasons import decoy as _decoy_reasons
 from decoy_engine.safe_output import safe_error_type
@@ -262,11 +268,18 @@ def run_pipeline_isolated(
                 "per-job sample; do not feed it into telemetry recalibration."
             )
         output_dir_path = Path(output_dir) if output_dir is not None else None
-        return _run_in_process(config, sources, run_pipeline_kwargs, output_dir_path, request)
+        resident = Attempt.resident()
+        return memory_boundary(
+            resident,
+            lambda: _run_in_process(
+                config, sources, run_pipeline_kwargs, output_dir_path, request, resident
+            ),
+        )
 
-    attempt = Attempt()
-    try:
-        return _run_isolated(
+    attempt = Attempt.isolated()
+    return memory_boundary(
+        attempt,
+        lambda: _run_isolated(
             config,
             sources,
             attempt,
@@ -278,14 +291,8 @@ def run_pipeline_isolated(
             timeout_s=timeout_s,
             run_pipeline_kwargs=run_pipeline_kwargs,
             request=request,
-        )
-    except MemoryError:
-        # From the child's report through both finalizers: a coded result, never a raw error. The
-        # reserve says UNKNOWN once publishing began; none exists before the child reports.
-        reserved = attempt.memory_result()
-        if reserved is None:
-            raise
-        return reserved
+        ),
+    )
 
 
 def _require_ambient_for_paths(*, spawns: bool, names_paths: bool) -> None:
@@ -326,15 +333,18 @@ def _run_in_process(
     sources: dict[str, pa.Table] | None,
     run_pipeline_kwargs: dict[str, Any],
     output_dir: Path | None,
-    request: PublicationRequest | None = None,
+    request: PublicationRequest | None,
+    attempt: Attempt,
 ) -> IsolatedRunResult:
     try:
         result = run_pipeline(config, sources, **run_pipeline_kwargs)
-    except BaseException as exc:
+    except BaseException as exc:  # the run's own failure: outside every window
         return in_process_failure(exc)
+    attempt.enter_readback(None, None)  # from here a memory error is the boundary's, not the run's
 
     receipt: CommitReceipt | None = None
     if output_dir is not None:
+        attempt.enter_publishing()
         # HIGH-2: honor output_dir in the fallback too, through the same publication as the
         # isolated path, so isolate=True/False never diverge on what lands on disk.
         receipt, stage = publish_resident(output_dir, result.outputs, request)
@@ -383,6 +393,8 @@ def _run_isolated(
         pub = begin_publication(Path(output_dir), request) if output_dir is not None else None
         if isinstance(pub, CommitReceipt):
             return failed_publication(pub, None, peak_rss_mb=None, returncode=None, isolated=True)
+        if pub is not None:
+            attempt.failed_receipt_for(failed_receipt(pub.request))
         # The child stages into the publication stage beside `output_dir`, or into scratch.
         staging_output_dir = pub.stage if pub is not None else work_root / "staging_output"
         payload_path = _write_payload(

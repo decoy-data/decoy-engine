@@ -157,17 +157,6 @@ def typed_memory_member(exc: BaseException) -> BaseException | None:
     return None
 
 
-def reraise_memory(exc: BaseException) -> None:
-    """The one rule for a broad handler on the commit, replay and vault-read path.
-
-    A `MemoryError` (Arrow's `ArrowMemoryError` is one) is never a data or format failure. A
-    handler that catches `Exception` or `pyarrow.ArrowException` calls this first, so the
-    memory error reaches the isolated driver's guard instead of becoming a refusal or a
-    malformed-segment verdict. Guarded by tests/sentry/test_commit_path_memory_rule.py."""
-    if isinstance(exc, MemoryError):
-        raise exc
-
-
 def is_memory_failure(exc: BaseException) -> bool:
     """True iff `exc` is one of the documented under-cap failure shapes.
 
@@ -203,6 +192,8 @@ def resurface_scrubbed(exc: Exception) -> Exception | None:
         return None
     try:
         rebuilt = type(exc)(scrub_error_text(str(exc)))
+    except MemoryError:
+        raise
     except Exception:
         return None
     return rebuilt if is_memory_failure(rebuilt) else None
@@ -213,6 +204,8 @@ def _errno_rebuild(exc: OSError) -> OSError:
     code = exc.errno or 0
     try:
         return type(exc)(code, os.strerror(code))
+    except MemoryError:
+        raise
     except Exception:
         return OSError(code, os.strerror(code))
 
@@ -222,6 +215,8 @@ def _fixed_text_rebuild(exc: BaseException) -> BaseException | None:
     result no longer reads as a memory failure."""
     try:
         rebuilt = type(exc)(MEMORY_TEXT)
+    except MemoryError:
+        raise
     except Exception:
         return None
     return rebuilt if is_memory_failure(rebuilt) else None
@@ -245,7 +240,8 @@ def classified_failure(exc: BaseException) -> ClassifiedFailure | None:
     """Classify `exc` for a boundary that must not forward its text, or None when it is none of
     these. A typed memory error anywhere in the chain wins; then a direct disk or quota
     `OSError`; then a direct failure the worker recognises by wording. Build the result in the
-    handler and raise `fresh` outside it (see `ClassifiedFailure`)."""
+    handler and raise `fresh` outside it (see `ClassifiedFailure`). Rebuilding `fresh` can raise
+    `MemoryError`, which is not swallowed."""
     member = typed_memory_member(exc)
     if member is not None:
         if isinstance(member, OSError):
@@ -297,7 +293,7 @@ def guarded_with_parser_errors(
     type is allowed past a strict policy; adapters name the types, never a caller."""
     if not strict:
         return fn(*args, **kwargs)
-    resurfaced: Exception | None = None
+    caught: Exception
     try:
         return fn(*args, **kwargs)
     except (FileAccessDenied, FileAccessReadError, FileAccessUnavailable, StopIteration):
@@ -306,10 +302,14 @@ def guarded_with_parser_errors(
         raise
     except parser_errors:
         raise
+    except MemoryError:
+        raise
     except Exception as exc:
-        resurfaced = _resurface(exc)
-        if resurfaced is exc:
-            raise
+        caught = exc
+    # Rebuilt outside the handler: a rebuild fault then carries no library error as its context.
+    resurfaced = _resurface(caught)
+    if resurfaced is caught:
+        raise caught
     if resurfaced is not None:
         raise resurfaced from None
     raise read_error(display) from None

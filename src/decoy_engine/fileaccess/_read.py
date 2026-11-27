@@ -79,7 +79,7 @@ def keeps_class(exc: BaseException) -> bool:
     call must re-raise it unchanged under a strict policy: a policy decision, a typed read
     error, and the failures callers classify by type or by the memory predicate (memory, a
     full disk or quota). Always False under the ambient policy, whose handlers keep today's
-    behavior."""
+    behavior. Under a strict policy a text rebuild that runs out of memory raises `MemoryError`."""
     if is_ambient():
         return False
     if isinstance(exc, Exception) and passes_by_type(exc):

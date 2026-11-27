@@ -41,7 +41,6 @@ from decoy_engine.fileaccess._errors import (
     encode_field_key,
     is_memory_failure,
     redact_locators,
-    reraise_memory,
     scrub,
     typed_memory_member,
 )
@@ -229,7 +228,6 @@ __all__ = [
     "reclaim_stages",
     "redact_locators",
     "require_ambient",
-    "reraise_memory",
     "reset_for_tests",
     "run_in_context",
     "scope",

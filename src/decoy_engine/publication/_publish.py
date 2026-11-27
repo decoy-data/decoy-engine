@@ -17,11 +17,12 @@ The bind takes the ``VaultCommit`` the vault module issues only after the vault'
 the order is structural. A republish needs the descriptor's vault digest on disk and this
 writer's rows (D3); nothing is written then.
 
-Once its arguments are accepted, every exit is a ``CommitReceipt`` (plan 4.1), except two, both
-raised after the stage is aborted with nothing bound: a ``VaultError`` (``vault_commit_failed``
-and the other codes of the vault module's vocabulary), and a file-access error
-(``FileAccessDenied``) from the vault's ``OutputDir`` before anything is linked; an argument
-error raises. Only a bind can
+Once its arguments are accepted, every exit is a ``CommitReceipt`` (plan 4.1), except a
+``MemoryError`` (Arrow's included), which is raised and never turned into a receipt because the
+target may already exist, and two exits raised after the stage is aborted with nothing bound: a
+``VaultError`` (``vault_commit_failed`` and the other codes of the vault module's vocabulary),
+and a file-access error (``FileAccessDenied``) from the vault's ``OutputDir`` before anything is
+linked; an argument error raises. Only a bind can
 leave anything new at the destination, and every other exit aborts the stage. Receipts hold
 closed tokens, digests, counts and errno names; an exception text is never read. Contract:
 ``docs/publication.md``.
@@ -47,7 +48,6 @@ from decoy_engine.fileaccess import (
     LeafTooLarge,
     LockTimeout,
     LockUnavailable,
-    reraise_memory,
 )
 from decoy_engine.publication._descriptor import (
     DESCRIPTOR_NAME,
@@ -273,8 +273,9 @@ def _judge_and_bind(
             if stage_is_closed(txn, [m.path for m in members])
             else None
         )
+    except MemoryError:
+        raise  # never a failed receipt: the target may already exist (memory_boundary decides)
     except (OSError, pa.ArrowException) as exc:  # unreadable or not a Parquet table
-        reraise_memory(exc)
         failure = _errno_name(exc) if isinstance(exc, OSError) else None
     else:
         if new is not None:
@@ -460,17 +461,14 @@ def publish_tables(
     except OSError as exc:
         failure = _errno_name(exc)
     else:
-        if on_stage is not None:
-            on_stage(txn.local_stage_path())
-        try:
-            for name, component in zip(names, components, strict=True):
-                arrow_adapter.write_output_table(tables[name], txn, component)
-        except OSError as exc:
-            failure = _errno_name(exc)
-            txn.abort()
-        except BaseException:
-            txn.abort()
-            raise
-        else:
-            return publish_unit(out, txn, request, tables=components)
+        with txn:  # aborts on every exit but a bind, also a fault before the first write
+            if on_stage is not None:
+                on_stage(txn.local_stage_path())
+            try:
+                for name, component in zip(names, components, strict=True):
+                    arrow_adapter.write_output_table(tables[name], txn, component)
+            except OSError as exc:
+                failure = _errno_name(exc)
+            else:
+                return publish_unit(out, txn, request, tables=components)
     return _receipt(request, "failed", reasons.decoy.PUBLICATION_FAILED, os_error=failure)

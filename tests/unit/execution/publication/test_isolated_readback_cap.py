@@ -405,8 +405,7 @@ def test_a9_a_failure_while_measuring_is_a_memory_result_and_publishes_nothing(
 def test_a9_nothing_the_result_needs_is_allocated_after_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch: Path
 ) -> None:
-    """Once `publish_unit` has run, a memory failure in any figure code must not matter: the
-    figures were built in the guarded read, so the committed result is reported as it is."""
+    """No readback pricing runs after `publish_unit`, so a fault in it cannot change the result."""
     run = Run(tmp_path, monkeypatch, [ints("t1", 10)], ceiling=HUGE)
     published: list[bool] = []
     real_publish = sys.modules[COMMIT].publish_unit

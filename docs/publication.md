@@ -528,25 +528,22 @@ files are `0600` and unit directories `0700`.
 ## The isolated route on `publish_unit`
 
 `run_pipeline_isolated(..., output_dir=..., request=PublicationRequest(...))` publishes through
-`publish_unit` in both modes, and the receipt is `IsolatedRunResult.publication_receipt`.
-Without a `request` the run is its own attempt (a fresh `operation_id`); a request carrying a
-vault is refused with `ValueError` before anything runs.
+`publish_unit` in both modes; the receipt is `IsolatedRunResult.publication_receipt`. Without a
+`request` the run is its own attempt.
 
-- **Isolated (`isolate=True`).** The parent opens a `publication` stage beside `output_dir`
-  before it spawns the child and hands the child that stage's path. The child stages plain
-  Parquet files there, `<table>.parquet`, owner-only from creation, and nothing else: no
-  descriptor, no lock file, no rename, no nested unit. Its row errors travel in its result
-  envelope, not as a file. When the child reports `completed`, the parent, not the child,
-  decides what is staged: the envelope's table names must each be one path component (no
-  separator, no `..`, no repeat), and the stage must hold exactly those files, each a regular
-  file, besides the reserved `.decoy-publication-stage` marker the parent wrote
-  (`fileaccess.stage_entries` lists a stage without it). A child-written `_decoy_publication.json`, an extra file, a directory, a link or a
-  missing table is refused (`failed`, `publication_failed`) and nothing is bound. The parent
-  sets the stage to `0700` and each admitted file to `0600` through the entry's own descriptor
-  (no link followed) before reading it; a file its owner cannot read is refused, not repaired.
-  `publish_unit` then measures every size, SHA-256 and row count itself and writes the
-  descriptor. The payload's source copies are written owner-only from creation, so the route
-  works under a umask that strips owner bits (`0o477`).
+- **Isolated (`isolate=True`).** The parent opens a `publication` stage beside `output_dir` before
+  it spawns the child and hands it the path. The child stages plain Parquet files there,
+  `<table>.parquet`, owner-only from creation, and nothing else: no descriptor, no lock file, no
+  rename, no nested unit. Its row errors travel in its result envelope. When the child reports
+  `completed`, the parent decides what is staged: the envelope's table names must each be one path
+  component, and the stage must hold exactly those files, each a regular file, besides the reserved
+  `.decoy-publication-stage` marker the parent wrote. A child-written `_decoy_publication.json`, an
+  extra file, a directory, a link or a missing table is refused (`failed`, `publication_failed`) and
+  nothing is bound. The parent sets the stage to `0700` and each admitted file to `0600` through the
+  entry's own descriptor (no link followed) before reading it; a file its owner cannot read is
+  refused, not repaired. `publish_unit` then measures every size, SHA-256 and row count and writes
+  the descriptor. The payload's source copies are owner-only from creation, so the route works under
+  a umask that strips owner bits (`0o477`).
 - **In-process fallback (`isolate=False`).** The tables are staged as `<table>.parquet` in a
   `publication` stage beside `output_dir` and bound by `publish_unit`, as `publish_tables` does.
 
@@ -556,16 +553,14 @@ vault is refused with `ValueError` before anything runs.
 | refused (another result, anything else at the target, the lock), `operation_conflict` | `crashed` | none | the receipt's code |
 | the stage refused, a staging write, the descriptor write or the rename failed | `crashed` | none | `publication_failed` |
 | bound, but a chain fsync failed (`commit_uncertain`) | `crashed` | none | `publication_commit_uncertain`, publication state `unknown` |
-| a memory error from just before `publish_unit` through final cleanup | `crashed` | none | `process_out_of_memory`, publication state `unknown`, no receipt |
-| a memory error before that point | `crashed` | none | `process_out_of_memory`, publication state `not_published` |
-
-After a memory error with state `unknown` the target may or may not exist. Repeat the call with the same request and destination: a unit that was bound returns `already_committed`. Keep the operation id from the first attempt to do this.
+| a memory error from just before `publish_unit` or `publish_resident` through final cleanup, in either mode | `crashed` | none | `process_out_of_memory`, publication state `unknown`, no receipt. The target may exist: repeat the call with the same `operation_id` and destination, and a bound unit returns `already_committed` |
+| a memory error before that point, once the child's output is being read (or the run has returned in process) | `crashed` | none | `process_out_of_memory`, publication state `not_published` |
 
 `error` is then `publication <outcome>: <code>`, with ` (errno=<name>)` when an operating-system
-call failed: never a path, table name or operating-system message text. On every outcome but a
-bind the stage is gone when the call returns, and a killed child leaves nothing at
-`output_dir`. Without an `output_dir` the child stages into the run's own scratch, the parent
-admits and reads the tables back the same way, and nothing is published.
+call failed: never a path, table name or operating-system message text. On every outcome but a bind
+the stage is gone when the call returns, and a killed child leaves nothing at `output_dir`. Without
+an `output_dir` the child stages into scratch, the parent reads the tables back the same way, and
+nothing is published.
 
 ## Named limits
 

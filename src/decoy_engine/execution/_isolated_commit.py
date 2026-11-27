@@ -68,7 +68,6 @@ from decoy_engine.fileaccess import (
     is_memory_failure,
     is_valid_component,
     own_entry,
-    reraise_memory,
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.io.bounded_reader import UnsupportedColumnType
@@ -296,7 +295,9 @@ def collect(
         if _names_ok(names) and _admit(staging, names):
             admitted = True
             reader.run(names)
-    except (OSError, pa.ArrowException, MemoryError, KeyboardInterrupt) as exc:
+    except MemoryError:
+        raise  # to memory_boundary: the window decides what the caller is told
+    except (OSError, pa.ArrowException, KeyboardInterrupt) as exc:
         memory = is_memory_failure(exc)
         if isinstance(exc, KeyboardInterrupt) and not memory:
             raise  # a real interrupt; Arrow reports exhaustion at a cap as one with a memory cause
@@ -322,7 +323,7 @@ def _publish(
     if pub is None:
         return Collected(outputs, None, reader.extra)
     components = [f"{name}.parquet" for name in outputs]
-    attempt.publishing = True  # from here the target may exist: a memory failure is UNKNOWN
+    attempt.enter_publishing()  # from here the target may exist: a memory failure is UNKNOWN
     receipt = publish_unit(pub.out, pub.txn, request, tables=components)
     return Collected(outputs, receipt, reader.extra) if receipt.outcome in COMMITTED else receipt
 
@@ -422,8 +423,8 @@ def result_from_envelope(
     """The result of a child that reported an outcome: its failure, or its staged tables read
     back and published. A readback the driver would not survive is a `crashed` result.
 
-    A completed report reserves both memory results first (`Attempt.reserve`); the guard around
-    the attempt returns one if memory runs out before the result is built."""
+    A completed report opens the pre-call window first (`Attempt.enter_readback`); the memory
+    boundary around the attempt returns a reserved result if memory runs out before it is built."""
     outcome = envelope["outcome"]
     peak = envelope.get("peak_rss_mb")
     if outcome != "completed":
@@ -434,9 +435,7 @@ def result_from_envelope(
     # The scratch stage goes on every exit from here, also when setup raises: a stage left in a
     # caller-named `staging_dir` fails the next job's admission.
     try:
-        attempt.reserve(receipt=None, peak=peak, pid=pid)
-        if pub is not None:
-            attempt.failed_receipt_for(failed_receipt(_request(pub.request)))
+        attempt.enter_readback(pid, peak)
         attempt.extra["readback"] = asdict(Readback(None, 0, 0, 0, 0, 0))
         committed = None if pub is None else str(pub.target)
         row_errors = row_errors_of(envelope)
@@ -488,8 +487,9 @@ def _typed_error(receipt: CommitReceipt) -> BaseException:
     """The typed error a caller raises for this receipt's outcome (`raise_for_outcome`)."""
     try:
         raise_for_outcome(receipt)
+    except MemoryError:
+        raise
     except Exception as exc:
-        reraise_memory(exc)
         return exc
     raise ValueError("a committed receipt is not a failure")
 

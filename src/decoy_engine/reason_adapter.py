@@ -269,6 +269,10 @@ def _record(
     return ReasonRecord.for_reason(reason, phase=phase, context=context)
 
 
+# The record for a memory failure while classifying; phase and context are dropped on purpose.
+_OUT_OF_MEMORY = ReasonRecord.for_reason(reasons.decoy.PROCESS_OUT_OF_MEMORY)
+
+
 def reason_from_exception(
     exc: BaseException,
     *,
@@ -281,13 +285,15 @@ def reason_from_exception(
     ``.code`` of an unregistered class, and leaves ``exc`` untouched. ``phase`` and ``context``
     come from the operation that caught the failure, never from the exception.
     """
-    known = _lookup_captured(exc)
-    if known is not None:
-        # The engine already observed this exception at its boundary, with evidence a caller
-        # holding only the exception cannot reconstruct (phase, publication and cleanup state).
-        return known if context is None else known.with_context(context)
     try:
+        known = _lookup_captured(exc)
+        if known is not None:
+            # The engine already observed this exception at its boundary, with evidence a caller
+            # holding only the exception cannot reconstruct (phase, publication and cleanup).
+            return known if context is None else known.with_context(context)
         return _classify(exc, phase, context)
+    except MemoryError:
+        return _OUT_OF_MEMORY  # built at import: this handler allocates nothing
     except Exception:
         return _record(reasons.decoy.UNEXPECTED_ERROR, phase, context)
 
@@ -327,6 +333,8 @@ def _identified_reason(exc: BaseException) -> ReasonCode:
     """The exception's own registered identity, or ``decoy.unregistered_reason`` when it has none."""
     try:
         identity = exc.identity  # type: ignore[attr-defined]
+    except MemoryError:
+        raise
     except Exception:
         return reasons.decoy.UNREGISTERED_REASON
     if isinstance(identity, ReasonCode) and reasons.find(identity.namespace, identity) is not None:
@@ -338,6 +346,8 @@ def _read_code(exc: BaseException) -> str | None:
     """The exception's ``.code`` if reading it is safe and it is a string; else ``None``."""
     try:
         code = exc.code  # type: ignore[attr-defined]
+    except MemoryError:
+        raise
     except Exception:
         return None
     return code if isinstance(code, str) else None
@@ -480,6 +490,8 @@ def _lookup_captured(exc: BaseException) -> ReasonRecord | None:
             return None
         record = held._record
         record.validate()
+    except MemoryError:
+        raise
     except Exception:  # a hostile or slotted exception is simply not remembered
         return None
     return record
@@ -488,6 +500,8 @@ def _lookup_captured(exc: BaseException) -> ReasonRecord | None:
 def _remember(exc: BaseException, record: ReasonRecord) -> None:
     try:
         exc.__dict__[_ATTR] = _Captured(_TOKEN, record)
+    except MemoryError:
+        raise
     except Exception:
         pass
 

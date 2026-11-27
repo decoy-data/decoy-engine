@@ -24,6 +24,7 @@ from decoy_engine.execution._isolated_common import (
     commit_error_text,
     exception_error_text,
 )
+from decoy_engine.execution._isolated_reason import Attempt
 from tests.unit.execution.test_governor_orchestration_kills import (
     _BUDGET,
     _CFG,
@@ -219,7 +220,10 @@ class TestCodeEchoThroughProducers:
                 raise _r
 
             monkeypatch.setattr(_isolated_run, "run_pipeline", boom)
-            assert _isolated_run._run_in_process({}, None, {}, None).error == expected
+            assert (
+                _isolated_run._run_in_process({}, None, {}, None, None, Attempt.resident()).error
+                == expected
+            )
 
 
 class TestInProcess:
@@ -239,7 +243,7 @@ class TestInProcess:
             raise raised
 
         monkeypatch.setattr(_isolated_run, "run_pipeline", boom)
-        result = _isolated_run._run_in_process({}, None, {}, None)
+        result = _isolated_run._run_in_process({}, None, {}, None, None, Attempt.resident())
         assert result.outcome == outcome
         assert result.error == expected
 
@@ -248,7 +252,7 @@ class TestInProcess:
             raise ConfigError(f"the job {_SEQ_MARKER} ({_SENTINEL})")
 
         monkeypatch.setattr(_isolated_run, "run_pipeline", boom)
-        result = _isolated_run._run_in_process({}, None, {}, None)
+        result = _isolated_run._run_in_process({}, None, {}, None, None, Attempt.resident())
         assert result.error == "ConfigError"
 
 

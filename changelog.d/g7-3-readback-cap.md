@@ -7,3 +7,9 @@
 A memory failure while the driver reads staged output back, including `OSError` with `ENOMEM` and Arrow errors with a known memory marker, now ends the run `crashed` with reason `decoy.process_out_of_memory` and fixed text. It was `decoy.publication_failed`, and a bare `MemoryError` escaped as a raw exception.
 
 On the isolated route, a memory error once publication may have started reports an unknown publication state (`decoy.process_out_of_memory` with publication state `unknown`). Rerun with the same operation id to confirm. A memory error before that point reports `not_published` and removes the stage. Neither path raises a raw `MemoryError`.
+
+#### One memory boundary on both routes
+
+`run_pipeline_isolated(isolate=False)` returns the same coded memory result as the isolated route: `process_out_of_memory` with publication state `unknown` from just before `publish_resident`, and `not_published` before that when there is no `output_dir`. It no longer lets a raw `MemoryError` escape.
+
+An `ArrowMemoryError` during publication measurement or vault segment decoding is raised like any `MemoryError`. It is no longer reported as a failed receipt or a malformed vault segment. `ParquetTransactionalSink.commit` and `DeliveryStage` raise it, as they already raised a bare `MemoryError`. The reason adapter reports `process_out_of_memory` when classification itself runs out of memory, and a strict file-access policy raises `MemoryError` when rebuilding a scrubbed error runs out of memory. `fileaccess.reraise_memory` is removed.

@@ -105,19 +105,20 @@ def test_a14_a_fault_before_the_flag_is_not_published(
     run.nothing_left(output)
 
 
-def test_a14_a_fault_building_the_failed_receipt_keeps_the_reserve(
+def test_a14_a_fault_building_the_failed_receipt_is_raw_before_the_spawn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     scratch: Path,  # noqa: F811
 ) -> None:
-    """The failed receipt is added to a reserve that already stands; losing it loses only the
-    receipt."""
+    """The failed receipt is built before the spawn, where nothing a result could describe has
+    started (D-BEFORE): the error is raw, no child runs and the opened stage is cleaned up."""
     run = a_run(tmp_path, monkeypatch)
     fired: list[str] = []
-    once(monkeypatch, f"{COMMIT}.failed_receipt", fired)
-    result = run.go()
-    assert fired
-    memory(result, PublicationState.NOT_PUBLISHED, BEFORE_TEXT)
+    once(monkeypatch, f"{RUN}.failed_receipt", fired)
+    with pytest.raises(MemoryError):
+        run.go()
+    assert fired and not (tmp_path / "fake-worker-ran").exists()
+    assert list(scratch.iterdir()) == []
     run.nothing_left(True)
 
 

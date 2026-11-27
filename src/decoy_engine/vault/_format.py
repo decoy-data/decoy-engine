@@ -31,7 +31,6 @@ from decoy_engine._canonical import (
 )
 from decoy_engine.determinism import SEED_PROTOCOL_VERSION, derive
 from decoy_engine.errors import DecoyError
-from decoy_engine.fileaccess import reraise_memory
 from decoy_engine.internal.crypto import KEY_CHECK_PATTERN
 from decoy_engine.keyprovider import KEY_VERSION_PATTERN, is_key_version_label
 
@@ -273,8 +272,10 @@ def _decode_rows(payload: bytes) -> list[tuple[str, str, str]] | None:
                 (str(ns), str(masked), str(source))
                 for ns, masked, source in zip(*(c.to_pylist() for c in chunk.columns), strict=True)
             ]
-    except (pa.ArrowException, KeyError, ValueError) as exc:
-        reraise_memory(exc)
+    except MemoryError:
+        raise  # memory pressure is not a malformed segment
+    except (pa.ArrowException, KeyError, ValueError):
+        pass
     return None
 
 
