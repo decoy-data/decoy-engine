@@ -42,7 +42,7 @@
    "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
    "max": 1
   },
-  "quality/dp_provenance.py::_parse": {
+  "quality/dp_provenance.py::assert_lock_matches_installed": {
    "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
    "max": 1
   }

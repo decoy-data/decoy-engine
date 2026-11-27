@@ -58,8 +58,8 @@ import importlib.metadata
 import platform
 import sys
 from collections.abc import Iterable
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Any
 
 from packaging.utils import canonicalize_name
 
@@ -412,15 +412,15 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
     )
     at_lock = config_position("dp", "lock_path")
 
-    def _parse() -> Any:
-        with lock_file.open_binary() as handle:
-            return toml_reader.load(handle)
-
-    lock = read_config(
-        _parse,
-        at_lock,
-        lambda r: refusal_error(reasons.quality.DP_LOCK_PARSE_ERROR, r),
-    )
+    # The open sits inside the protected read (a missing file is a refusal, not a raw OSError);
+    # the stack closes the handle either way. No nested def: the parse stays on this function's
+    # snapshot-parse-single-owner entry.
+    with ExitStack() as stack:
+        lock = read_config(
+            lambda: toml_reader.load(stack.enter_context(lock_file.open_binary())),
+            at_lock,
+            lambda r: refusal_error(reasons.quality.DP_LOCK_PARSE_ERROR, r),
+        )
 
     packages = lock.get("package")
     if not isinstance(packages, list):
