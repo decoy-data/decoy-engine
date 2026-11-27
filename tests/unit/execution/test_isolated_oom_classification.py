@@ -339,17 +339,37 @@ class TestDriverResidue:
     """A self-reported failure leaves no staged output, and the in-process path scrubs too."""
 
     @pytest.mark.parametrize("outcome", ["oom_killed", "crashed"])
-    def test_self_reported_failure_removes_staging(self, tmp_path: Path, outcome: str) -> None:
-        from decoy_engine.execution._isolated_commit import result_from_envelope
-        from decoy_engine.execution._isolated_reason import Attempt
+    @pytest.mark.parametrize("publish", [False, True], ids=["scratch", "publication"])
+    def test_self_reported_failure_removes_staging(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, publish: bool
+    ) -> None:
+        from decoy_engine.execution import _isolated_run, run_pipeline_isolated
+        from tests.unit.execution.publication._isolated_support import ENGINE_VERSION, job
 
-        staging = tmp_path / "_decoy_isolated_stage_x"
-        (staging / "t").mkdir(parents=True)
-        (staging / "t" / "part-0.parquet").write_bytes(b"partial")
-        envelope = {"outcome": outcome, "peak_rss_mb": 1.0, "error": "MemoryError: x"}
-        result = result_from_envelope(envelope, tmp_path / "out", 123, staging, Attempt.isolated())
+        root = tmp_path / "caller-stage"
+        out = tmp_path / "out"
+        stages: list[Path] = []
+
+        def report_failure(result_path: Path) -> dict[str, Any]:
+            payload = json.loads(result_path.with_name("payload.json").read_text("utf-8"))
+            staging = Path(payload["staging_output_dir"])
+            stages.append(staging)
+            (staging / "t").mkdir()
+            (staging / "t" / "part-0.parquet").write_bytes(b"partial")
+            return {"outcome": outcome, "peak_rss_mb": 1.0, "error": "MemoryError: x"}
+
+        proc = SimpleNamespace(pid=123, returncode=0, communicate=lambda **_: ("", ""))
+        monkeypatch.setattr(_isolated_run.subprocess, "Popen", lambda *_, **__: proc)
+        monkeypatch.setattr(_isolated_run, "read_envelope", report_failure)
+        result = run_pipeline_isolated(
+            job(tmp_path, 1),
+            staging_dir=root,
+            output_dir=out if publish else None,
+            engine_version=ENGINE_VERSION,
+        )
         assert result.outcome == outcome
-        assert not staging.exists()
+        (staging,) = stages
+        assert not staging.exists() and not out.exists()
 
     def test_in_process_failure_text_is_scrubbed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from decoy_engine.execution import _isolated_run

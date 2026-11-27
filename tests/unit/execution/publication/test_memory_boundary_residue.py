@@ -132,6 +132,50 @@ def test_a_fault_in_the_stage_removal_on_a_matching_replay_is_unknown(
     assert (route.out / f"{route.table}.parquet").exists()
 
 
+@pytest.mark.parametrize("failure", ["serialization", "spawn"])
+def test_pre_spawn_failure_allows_retry_in_the_same_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    route = Route(tmp_path, monkeypatch, True)
+    root = tmp_path / "caller-stage"
+
+    stage = root / "staging_output"
+    removals: list[Path] = []
+    remove_tree = fileaccess.remove_tree
+
+    def remove(path: Path) -> None:
+        if path == stage:
+            removals.append(path)
+        remove_tree(path)
+
+    monkeypatch.setattr(fileaccess, "remove_tree", remove)
+
+    def run(**kwargs: Any) -> Any:
+        return run_pipeline_isolated(
+            route.cfg, sources(route.cfg), engine_version=ENGINE_VERSION, staging_dir=root, **kwargs
+        )
+
+    if failure == "serialization":
+        with pytest.raises(ValueError, match="must be JSON-serializable"):
+            run(native_threads=object())
+    else:
+
+        def spawn_fails(*args: Any, **kwargs: Any) -> None:
+            assert (root / "staging_output").is_dir()
+            raise OSError("spawn failed")
+
+        with monkeypatch.context() as mp:
+            mp.setattr("subprocess.Popen", spawn_fails)
+            with pytest.raises(OSError, match="spawn failed"):
+                run()
+
+    assert removals == [stage] and root.is_dir() and not stage.exists()
+    assert not (root / "s0000.parquet").exists()
+    result = run()
+    assert result.outcome == "completed" and set(result.outputs) == {"t1"}
+    assert removals == [stage, stage] and not stage.exists()
+
+
 def test_a_caller_staging_output_that_already_exists_is_refused_and_kept(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -141,8 +185,9 @@ def test_a_caller_staging_output_that_already_exists_is_refused_and_kept(
     already in the caller's `staging_dir` holds someone else's file, so the run refuses it."""
     route = Route(tmp_path, monkeypatch, True)
     root = fileaccess.open_protected_dir(tmp_path / "caller-stage", create=True)
-    (root / "staging_output").mkdir()
-    keep = root / "staging_output" / "keep.txt"
+    stage = fileaccess.open_protected_dir(root / "staging_output", create=True)
+    assert stage.stat().st_mode & 0o777 == 0o700
+    keep = stage / "keep.txt"
     keep.write_bytes(b"keep")
     refusal: BaseException | None = None
     try:

@@ -186,11 +186,16 @@ def test_p0_strict_refused_caller_path_but_live_root_children_work(tmp_path: Pat
             with pytest.raises(fileaccess.FileAccessUnavailable):
                 with protected_scratch_dir(tmp_path / "callerparent", "x-"):
                     pass
+            with pytest.raises(fileaccess.FileAccessUnavailable):
+                fileaccess.create_protected_dir(tmp_path / "exclusive")
+            assert not (tmp_path / "exclusive").exists()
             assert not (tmp_path / "caller").exists()
             assert not (tmp_path / "callerparent").exists()
             with protected_scratch_dir(None, "s-") as root:
                 child = open_protected_dir(root / "a" / "b", create=True, parents=True)
                 assert _mode(child) == 0o700
+                exclusive = fileaccess.create_protected_dir(child / "exclusive")
+                assert exclusive == child / "exclusive" and _mode(exclusive) == 0o700
                 with protected_scratch_dir(root, "n-") as nested:
                     assert nested.parent == root
                 escape = root / ".." / "escaped"

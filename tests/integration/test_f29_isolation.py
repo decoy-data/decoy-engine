@@ -124,7 +124,9 @@ def _envelope(**kw: Any) -> dict[str, Any]:
 
 
 def _from_envelope(envelope: dict[str, Any], tmp_path: Path) -> IsolatedRunResult:
-    return result_from_envelope(envelope, None, 1234, tmp_path / "staging", Attempt.isolated())
+    return result_from_envelope(
+        envelope, None, 1234, tmp_path / "staging", Attempt.isolated(), lambda: None
+    )
 
 
 def test_old_missing_corrupt_and_future_envelopes_degrade_safely(tmp_path: Path) -> None:

@@ -29,7 +29,8 @@ import json
 import signal
 import sys
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -224,7 +225,9 @@ def _names_ok(names: object) -> TypeGuard[list[str]]:
     return len(set(components)) == len(components) and all(map(is_valid_component, components))
 
 
-def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, dict[str, str]]:
+def stage_sources(
+    work_root: Path, sources: dict[str, pa.Table], source_rollback: ExitStack | None = None
+) -> dict[str, dict[str, str]]:
     """Stage each table under an opaque name in the private work root.
 
     Raises `UnsupportedColumnType` for a dictionary whose values are a dictionary or an extension
@@ -248,6 +251,8 @@ def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, di
             # The stream format carries each chunk's own dictionary; the file format allows one.
             with arrow_adapter.ipc_new_stream(stage, component, table.schema) as writer:
                 arrow_adapter.ipc_write_exact(writer, table)
+        if source_rollback is not None:
+            source_rollback.callback(stage.remove, component)
         manifest[name] = {"path": str(work_root / component), "format": fmt}
     return manifest
 
@@ -417,6 +422,7 @@ def result_from_envelope(
     pid: int,
     staging_output_dir: Path,
     attempt: Attempt,
+    discard_scratch_stage: Callable[[], None],
     sources: Mapping[str, pa.Table] | None = None,
 ) -> IsolatedRunResult:
     """The result of a child that reported an outcome: its failure, or its staged tables read
@@ -427,22 +433,15 @@ def result_from_envelope(
     outcome = envelope["outcome"]
     peak = envelope.get("peak_rss_mb")
     if outcome != "completed":
-        # A self-reported failure may have staged part of its output; nothing commits it.
-        fileaccess.remove_tree(staging_output_dir)
         return envelope_failure(envelope, pid=pid)
 
-    # The scratch stage goes on every exit from here, also when setup raises: a stage left in a
-    # caller-named `staging_dir` fails the next job's admission.
-    try:
-        attempt.enter_readback(pid, peak)
-        attempt.extra["readback"] = asdict(Readback(None, 0, 0, 0, 0, 0))
-        committed = None if pub is None else str(pub.target)
-        row_errors = row_errors_of(envelope)
-        # Read back before publishing, so `outputs` is right with or without an `output_dir`.
-        collected = collect(envelope, staging_output_dir, pub, attempt, sources)
-    finally:
-        if pub is None:
-            fileaccess.remove_tree(staging_output_dir)  # nothing to publish it to
+    attempt.enter_readback(pid, peak)
+    attempt.extra["readback"] = asdict(Readback(None, 0, 0, 0, 0, 0))
+    committed = None if pub is None else str(pub.target)
+    row_errors = row_errors_of(envelope)
+    collected = collect(envelope, staging_output_dir, pub, attempt, sources)
+    # Cleanup evidence below must observe the stage after its owner's removal attempt.
+    discard_scratch_stage()
     if isinstance(collected, CommitReceipt):
         # MED-1: a refused stage or a publication that did not commit is a classified result.
         fields = {"peak_rss_mb": peak, "returncode": 0, "isolated": True, "pid": pid}

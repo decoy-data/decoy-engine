@@ -248,6 +248,17 @@ def _open(path: str, *, create: bool, parents: bool) -> None:
     _check(path, found, tighten=True)
 
 
+def _authorized_path(path: str | os.PathLike[str]) -> str:
+    raw = os.fspath(path)
+    absolute = os.path.abspath(raw)  # every later call uses this, so the cwd cannot shift it
+    root = _live_root(_key(absolute))
+    if root is None:
+        require_ambient(_WHAT)
+    else:
+        _vet_live(raw, absolute, root)
+    return absolute
+
+
 # -- public API --------------------------------------------------------------------------------
 
 
@@ -258,13 +269,7 @@ def open_protected_dir(
 
     Idempotent: a directory that passes is returned unchanged, so repeated opens do nothing. A
     caller path needs the ambient policy; a live issued root and its children do not."""
-    raw = os.fspath(path)
-    absolute = os.path.abspath(raw)  # every later call uses this, so the cwd cannot shift it
-    root = _live_root(_key(absolute))
-    if root is None:
-        require_ambient(_WHAT)
-    else:
-        _vet_live(raw, absolute, root)
+    absolute = _authorized_path(path)
     _open(absolute, create=create, parents=parents)
     return Path(absolute)
 
@@ -273,13 +278,7 @@ def create_protected_dir(path: str | os.PathLike[str]) -> Path:
     """A new protected directory at ``path``, created exclusively: a name that already exists is
     refused with `ProtectedDirUnsafe` and left untouched, so a caller removes only what it made.
     The parent must exist. A caller path needs the ambient policy, as in `open_protected_dir`."""
-    raw = os.fspath(path)
-    absolute = os.path.abspath(raw)
-    root = _live_root(_key(absolute))
-    if root is None:
-        require_ambient(_WHAT)
-    else:
-        _vet_live(raw, absolute, root)
+    absolute = _authorized_path(path)
     taken = False
     try:
         _create_level(absolute)
@@ -344,12 +343,7 @@ def _parent_base(parent: str | os.PathLike[str] | None) -> str:
     policy check (a live issued root is accepted under every policy), made if it is missing."""
     if parent is None:
         return str(scratch_root())
-    base = os.path.abspath(os.fspath(parent))
-    root = _live_root(_key(base))
-    if root is None:
-        require_ambient(_WHAT)
-    else:
-        _vet_live(os.fspath(parent), base, root)
+    base = _authorized_path(parent)
     if _lstat(base) is None:
         _make(base, parents=True)
     return base

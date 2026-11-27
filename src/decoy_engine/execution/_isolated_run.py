@@ -388,20 +388,25 @@ def _run_isolated(
         else scratch.enter_context(fileaccess.protected_scratch_dir(prefix="decoy-isolated-run-"))
     )
     pub: Publication | CommitReceipt | None = None
+    owned_stage: Path | None = None
+
+    def discard_scratch_stage() -> None:
+        nonlocal owned_stage
+        if owned_stage is not None:
+            stage, owned_stage = owned_stage, None
+            fileaccess.remove_tree(stage)
+
     try:
         pub = begin_publication(Path(output_dir), request) if output_dir is not None else None
         if isinstance(pub, CommitReceipt):
             return failed_publication(pub, None, peak_rss_mb=None, returncode=None, isolated=True)
         if pub is not None:
             attempt.failed_receipt_for(failed_receipt(pub.request))
-        # The child stages into the publication stage beside `output_dir`, or into scratch.
-        # Without an `output_dir` the scratch stage is created here, exclusively: an existing
-        # `staging_output` is refused, and only a stage this run made is ever removed.
-        staging_output_dir = (
-            pub.stage
-            if pub is not None
-            else fileaccess.create_protected_dir(work_root / "staging_output")
-        )
+            staging_output_dir = pub.stage
+        else:
+            owned_stage = fileaccess.create_protected_dir(work_root / "staging_output")
+            staging_output_dir = owned_stage
+        source_rollback = scratch.enter_context(ExitStack())
         payload_path = _write_payload(
             work_root,
             config,
@@ -410,6 +415,7 @@ def _run_isolated(
             mem_cap_bytes,
             rlimit_kind,
             staging_output_dir,
+            source_rollback,
         )
         return _spawn_and_classify(
             payload_path,
@@ -417,6 +423,8 @@ def _run_isolated(
             pub,
             sources or {},
             attempt,
+            source_rollback=source_rollback,
+            discard_scratch_stage=discard_scratch_stage,
             on_spawn=on_spawn,
             timeout_s=timeout_s,
             mem_cap_bytes=mem_cap_bytes,
@@ -426,6 +434,8 @@ def _run_isolated(
         try:
             if isinstance(pub, Publication):
                 pub.txn.abort()  # a no-op once bound
+            else:
+                discard_scratch_stage()
         finally:
             scratch.close()
 
@@ -438,8 +448,9 @@ def _write_payload(
     mem_cap_bytes: int | None,
     rlimit_kind: str,
     staging_output_dir: Path,
+    source_rollback: ExitStack | None = None,
 ) -> Path:
-    sources_manifest = stage_sources(work_root, sources or {})
+    sources_manifest = stage_sources(work_root, sources or {}, source_rollback)
 
     payload = {
         "config": config,
@@ -473,24 +484,17 @@ def _spawn_and_classify(
     sources: dict[str, pa.Table],
     attempt: Attempt,
     *,
+    source_rollback: ExitStack,
+    discard_scratch_stage: Callable[[], None],
     on_spawn: Callable[[int], None] | None,
     timeout_s: float | None,
     mem_cap_bytes: int | None,
     rlimit_kind: str,
 ) -> IsolatedRunResult:
-    # HIGH-1: the envelope is a known FILE in work_root (payload_path's own
-    # parent), never stdout's last line -- see `_isolated_common.RESULT_
-    # FILENAME`'s docstring for the stdout-contamination class this
-    # replaces. stdout/stderr below remain captured for diagnostics only.
+    # Only the result file carries the envelope. A child may write anything to stdout.
     result_path = payload_path.parent / RESULT_FILENAME
     cmd = [sys.executable, "-m", _WORKER_MODULE, str(payload_path)]
-    # _CAPPED_ENV must land BEFORE the child interpreter starts: glibc reads
-    # MALLOC_ARENA_MAX at startup and pyarrow reads ARROW_DEFAULT_MEMORY_POOL
-    # at import, so `env=` at spawn time is the only place this can work.
-    # ISOLATED_WORKER_ENV marks the child as "inside an isolated worker" so a
-    # re-entrant `run_pipeline_isolated` call (probe/governor routing inside
-    # the child's `run_pipeline`) runs in-process instead of spawning a
-    # grandchild -- see that marker's docstring for the runaway it prevents.
+    # The allocator reads its limits at startup. The worker marker prevents recursive spawning.
     env = {**os.environ, **CAPPED_ENV, ISOLATED_WORKER_ENV: "1"}
     proc = subprocess.Popen(  # noqa: S603
         cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -498,6 +502,7 @@ def _spawn_and_classify(
 
     sampler = None
     try:
+        source_rollback.pop_all()  # retain a spawned job's handoff in a caller-named root
         # Started before on_spawn so a callback that kills the child still leaves samples;
         # inside the try so a construction error still kills and reaps the child.
         if mem_cap_bytes is not None:
@@ -516,7 +521,6 @@ def _spawn_and_classify(
         proc.kill()
         _stdout, _stderr = proc.communicate()
         finished = sampler.finish() if sampler else None
-        fileaccess.remove_tree(staging_output_dir)
         return IsolatedRunResult(
             outcome="crashed",
             peak_rss_mb=None,
@@ -549,7 +553,9 @@ def _spawn_and_classify(
         and envelope is not None
         and envelope.get("outcome") in ISOLATED_OUTCOMES
     ):
-        result = result_from_envelope(envelope, pub, proc.pid, staging_output_dir, attempt, sources)
+        result = result_from_envelope(
+            envelope, pub, proc.pid, staging_output_dir, attempt, discard_scratch_stage, sources
+        )
         # A self-reported `crashed` names an exception, not its cause. Native code at the cap
         # can surface exhaustion as an unrelated type (an Arrow cancellation reaches Python as
         # KeyboardInterrupt), so a crash that sat at its cap carries the pressure suspicion.
@@ -559,12 +565,7 @@ def _spawn_and_classify(
             memory_evidence=evidence_of(finished, abnormal=envelope["outcome"] == "crashed"),
         )
 
-    # The child died too hard to self-report (a harder rlimit trip the
-    # kernel turned into a signal, or an external SIGKILL -- the governor
-    # simulation teeth). Classify from the outside; nothing was ever
-    # committed to output_dir, so discard whatever the child may have
-    # started staging.
-    fileaccess.remove_tree(staging_output_dir)
+    # Without a usable envelope the parent classifies the exit from process evidence.
     outcome = classify_abnormal_exit(proc.returncode, stderr)
     signal_number = -proc.returncode if proc.returncode < 0 else None
     signal_name = _signal_name(signal_number)
