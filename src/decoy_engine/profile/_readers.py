@@ -182,8 +182,7 @@ class OpenedLazyBatches:
         self._handle = handle
         self._closed = False
         self.facts = footer_facts_of(parquet_file)
-        # Gate the projected schema of this open file: before the first batch, selected-out
-        # columns never refuse.
+        # Gate the projected schema before the first batch; selected-out columns never refuse.
         check_source_schema(
             arrow_adapter.projected_schema(handle, parquet_file, columns), table=table
         )

@@ -67,9 +67,11 @@ def _list_view(days: list[int]) -> pa.Array:
 
 
 def _ree(days: list[int]) -> pa.Array:
-    return pa.RunEndEncodedArray.from_arrays(
-        pa.array(range(1, len(days) + 1), pa.int32()), pa.array(days, pa.date32())
-    )
+    run_ends = pa.array(range(1, len(days) + 1), pa.int32())
+    try:
+        return pa.RunEndEncodedArray.from_arrays(run_ends, pa.array(days, pa.date32()))
+    except TypeError:  # pyarrow 14 cannot build a run-end-encoded array at all
+        pytest.skip(f"pyarrow {pa.__version__} cannot build a run-end-encoded array")
 
 
 def _extension(days: list[int]) -> pa.Array:
