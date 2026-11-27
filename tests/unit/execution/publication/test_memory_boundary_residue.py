@@ -21,7 +21,9 @@ from typing import Any
 import pytest
 
 from decoy_engine import fileaccess
+from decoy_engine.execution import run_pipeline_isolated
 from decoy_engine.fileaccess import _errors, _local
+from tests.unit.execution.publication._isolated_support import ENGINE_VERSION, sources
 from tests.unit.execution.publication.test_isolated_commit_memory import CANARY
 from tests.unit.execution.publication.test_isolated_readback_cap import scratch  # noqa: F401
 from tests.unit.execution.publication.test_memory_boundary_routes import Route, raises_memory
@@ -128,6 +130,34 @@ def test_a_fault_in_the_stage_removal_on_a_matching_replay_is_unknown(
     assert fired
     route.unknown(result)
     assert (route.out / f"{route.table}.parquet").exists()
+
+
+def test_a_caller_staging_output_that_already_exists_is_refused_and_kept(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scratch: Path,  # noqa: F811
+) -> None:
+    """The parent removes only a scratch stage it made. A `staging_output` folder that was
+    already in the caller's `staging_dir` holds someone else's file, so the run refuses it."""
+    route = Route(tmp_path, monkeypatch, True)
+    root = fileaccess.open_protected_dir(tmp_path / "caller-stage", create=True)
+    (root / "staging_output").mkdir()
+    keep = root / "staging_output" / "keep.txt"
+    keep.write_bytes(b"keep")
+    refusal: BaseException | None = None
+    try:
+        run_pipeline_isolated(
+            route.cfg,
+            sources(route.cfg),
+            engine_version=ENGINE_VERSION,
+            isolate=True,
+            staging_dir=root,
+        )
+    except BaseException as exc:
+        refusal = exc
+    kept = keep.exists()
+    assert isinstance(refusal, fileaccess.ProtectedDirUnsafe), type(refusal).__name__
+    assert kept and keep.read_bytes() == b"keep"
 
 
 # -- the strict guard keeps no library error in its frames --------------------------------------
