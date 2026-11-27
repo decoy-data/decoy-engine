@@ -29,12 +29,12 @@ def max_fixed_length(scheme: str | None) -> int | None:
     return max(exact) if exact else None
 
 
-def _require_ascii_digits(scheme: str, part: str) -> None:
-    """Fail closed, value-free, when a digit-only part carries any other character.
+def _require_decimal_digits(scheme: str, part: str) -> None:
+    """Fail closed, value-free, when a digit-only part carries a non-decimal character.
 
-    An accepted ALPHANUM charset lets a nondigit reach the digit arithmetic, whose own error
-    would quote the part."""
-    if not (part.isascii() and part.isdigit()):
+    Any Unicode decimal passes, since ``int()`` reads it: a full-width prefix stays pinned. An
+    ALPHANUM charset would otherwise let a nondigit reach arithmetic whose error quotes it."""
+    if not part.isdecimal():
         raise FpeChecksumError(
             "FPE checksum mode: a position that must be a digit holds another character, "
             "so the check digit cannot be computed. The engine fails closed.",
@@ -216,9 +216,9 @@ def _fpe_checksum_permute(
         # The pinned NPI leading digit and ISBN-13 bookland prefix skip `_permute`, so no
         # charset gate checks them before the check-digit arithmetic. Validate them here.
         if scheme == "npi":
-            _require_ascii_digits(scheme, s[0])
+            _require_decimal_digits(scheme, s[0])
         elif scheme == "isbn13":
-            _require_ascii_digits(scheme, s[:3])
+            _require_decimal_digits(scheme, s[:3])
 
         # luhn / ean13 / gtin: digit-only, check digit at end.
         if scheme in ("luhn", "ean13", "gtin"):

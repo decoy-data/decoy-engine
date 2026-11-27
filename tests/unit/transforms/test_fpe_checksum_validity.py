@@ -701,6 +701,18 @@ def test_nondigit_prefix_raises_a_value_free_checksum_error(scheme: str, ciphert
     assert "Z" not in _text(info.value)
 
 
+def test_a_fullwidth_pinned_prefix_round_trips_like_the_old_transform() -> None:
+    """A Unicode decimal prefix is a digit to the check arithmetic, so it stays pinned.
+
+    The guard rejects what ``int()`` cannot read (a letter), not a non-ASCII decimal."""
+    charset = "0123456789\uff19\uff17\uff18"
+    source = "\uff19\uff17\uff180306406157"
+    out = fpe_encrypt_value(source, _KEY, charset, _TWEAK, checksum="isbn13")
+    assert out[:3] == "\uff19\uff17\uff18"
+    back = fpe_decrypt_value(out, _KEY, charset, _TWEAK, True, False, "isbn13")
+    assert back == source
+
+
 @pytest.mark.serial
 @pytest.mark.parametrize("scheme", ["npi", "isbn13", "ean13", "gtin", "vin"])
 def test_an_oversized_cell_is_refused_without_a_length_sized_copy(scheme: str) -> None:
