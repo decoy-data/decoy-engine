@@ -88,7 +88,6 @@ from decoy_engine.execution.native._when_mask import plan_when_masks
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool import PoolCache, ValuePool
 from decoy_engine.instrumentation.timing import StrategyTimingRecord
-from decoy_engine.io import checked_batches
 from decoy_engine.profile import PreparedDeclaredSources
 
 # Matches `MAX_NATIVE_THREADS` in decoy-engine-native/src/threads.rs: the compiled
@@ -662,15 +661,15 @@ def run_mask_chunked(
     """
     if vault_writer is not None:
         raise vault_requires_resident_output()
-    chunks = checked_batches(chunks, table=table)
     # Local imports: the core imports this module at load time.
+    from decoy_engine.execution._chunked_input import checked_chunks
     from decoy_engine.execution.native.chunked import _core
     from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
 
     refuse_unchecked_route(config, "native_chunked")
     return _core.mask_chunked(
         config,
-        chunks,
+        checked_chunks(chunks, table=table),
         table=table,
         engine_version=engine_version,
         registry=registry,

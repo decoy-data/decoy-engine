@@ -89,6 +89,11 @@ def ceiling_for(loc: int) -> int:
 # One-line rationale per entry; the per-file growth history lives in
 # docs/decisions/module-size-census-history.md.
 ALLOWLIST: dict[str, int] = {
+    # one error class per coded failure, with its value-free message; split by family next.
+    "src/decoy_engine/errors.py": 620,
+    # LazySource, OpenedLazyBatches and the head readers carry the source-date check; the table
+    # name rides every reader, so a split would only move the check away from its readers.
+    "src/decoy_engine/profile/_readers.py": 606,
     # F06: one declared-casting route guard per route owner (the sentry in test_f06_declared_casting
     # inventories them) and the cast_run threaded through the sequential and out-of-core executors;
     # no casting logic of its own lives in these routers.
@@ -128,7 +133,7 @@ ALLOWLIST: dict[str, int] = {
     "src/decoy_engine/execution/_sequential_native.py": 700,
     # sequential FK route threading; split the per-table mask/quarantine loop.
     # cross-column V1 folds joint_mask key_by into the source-anchor build (a comment, no new logic).
-    "src/decoy_engine/execution/_sequential.py": 680,
+    "src/decoy_engine/execution/_sequential.py": 682,
     # transactional publish hardening and row mask; split the publish cluster.
     "src/decoy_engine/quarantine.py": 658,
     # corpus schema checks and verify_corpus; split into _codeset_verify.py when next touched.

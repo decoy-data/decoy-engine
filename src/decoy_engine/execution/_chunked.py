@@ -172,7 +172,6 @@ from decoy_engine.execution._guards import (  # re-exported: the core's declarat
     prepare_declared_execution_sources as prepare_declared_execution_sources,
 )
 from decoy_engine.fileaccess import FileAccess, entry_point
-from decoy_engine.io import checked_batches
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.providers_v2 import faker_draw_contract
 from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
@@ -450,14 +449,14 @@ def run_mask_pipeline_chunked(
     """
     if vault_writer is not None:
         raise vault_requires_resident_output()
-    chunks = checked_batches(chunks, table=table)
     # Lazy: `_chunked_oracle` imports this module at load time.
     from . import _chunked_oracle
+    from ._chunked_input import checked_chunks
 
     refuse_unchecked_route(config, "chunked")
     return _chunked_oracle._mask_pipeline_chunked(
         config,
-        chunks,
+        checked_chunks(chunks, table=table),
         table=table,
         engine_version=engine_version,
         source_schema=source_schema,

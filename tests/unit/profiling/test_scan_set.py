@@ -98,13 +98,13 @@ def test_bounded_head_reads_one_batch(tmp_path: Path, monkeypatch: pytest.Monkey
     consumed = [0]
     real = _readers.head_frame_from_batches
 
-    def spy(batches: Any, sample_rows: int, schema: Any) -> pd.DataFrame:
+    def spy(batches: Any, sample_rows: int, schema: Any, **kwargs: Any) -> pd.DataFrame:
         def counted() -> Any:
             for batch in batches:
                 consumed[0] += batch.num_rows
                 yield batch
 
-        return real(counted(), sample_rows, schema)
+        return real(counted(), sample_rows, schema, **kwargs)
 
     monkeypatch.setattr(_readers, "head_frame_from_batches", spy)
     scan = scan_sources(
