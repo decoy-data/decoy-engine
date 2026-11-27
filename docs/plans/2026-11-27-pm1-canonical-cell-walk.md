@@ -8,6 +8,8 @@ were each GO-WITH-FIXES with new V1 findings in the same area: how a NumPy scala
 becomes an identity value and a text key. Under the review ladder that is a redesign, so this
 plan replaces the two hand-tuned walks with one. It does not change the number key rule of
 `2026-11-25-pm1-number-keys-r5.md`; that plan stays in force for scalar numbers and numerals.
+Revised after plan review round 1 (Dennis, NO-GO, `~/scratch/dennis-pm1-plan-r1.md`); the
+"Review round 1" section maps each finding to its fix.
 
 Rules consulted: `README.md`, `00-universal.md`, `risk-and-exceptions.md`,
 `development-loop.md`, `bugfix.md`, `testing.md`.
@@ -26,6 +28,13 @@ Two functions walk a cell, and each was fixed for the other's last finding:
 `ComparisonNotPreservedError` when the keys split cells that identity holds equal, and the table
 fails. So every case where the two walks disagree is a false block, and every case where the
 key merges cells identity keeps apart counts a changed row as identical.
+
+The key has a second job: a source value and an output cell that is that value's text must
+key alike. A CSV or JSON round trip, or a mixed column, gives the output side as text. Identity
+holds a `Timestamp` and its string apart, so only the key match counts that row as unchanged.
+If the key splits them too, an unmasked value counts as changed and passes silently. On the
+base, `key_text` keys `pd.Timestamp("2020-01-01")`, `uuid.UUID(int=1)`, `date(2020, 1, 1)` and
+`[1]` the same as their `str()`. The redesign must keep that.
 
 Findings by round (all V1):
 
@@ -53,10 +62,16 @@ key leans on `str()` and pandas conversions, and null is decided before either w
 NumPy kind (0-dim box, typed array, unit and multiplier, calendar unit, sub-ns unit, bool) then
 needs the same fix in two or three places, and a round that fixes one place moves the
 disagreement to another. Checked on this devbox with numpy 2.2.6 and pandas 2.3.3:
-`np.datetime64(1, "2s") == np.datetime64(2, "s")` is True; `np.timedelta64(1, "M") ==
-np.timedelta64(30, "D")` raises `TypeError`; `pd.Timedelta(np.timedelta64(1, "M"))` raises
-`ValueError`; 1 fs and 2 fs are equal once boxed as `pd.Timestamp`; and an object Series
-holding a 0-dim `NaT` array reports the cell as not null.
+
+- `np.datetime64(1, "2s") == np.datetime64(2, "s")` is True.
+- `np.timedelta64(1, "M") == np.timedelta64(30, "D")` raises `TypeError`, and
+  `pd.Timedelta(np.timedelta64(1, "M"))` raises `ValueError`.
+- 1 fs and 2 fs are equal once boxed as `pd.Timestamp`.
+- An object Series holding a 0-dim `NaT` array reports the cell as not null.
+- `pd.Timestamp("3000-01-01").as_unit("s").value` and the same for a `pd.Timedelta` past
+  2262 raise `OverflowError`; `.asm8` gives the unit-preserving NumPy value (UTC for an aware
+  timestamp).
+- `np.timedelta64(5)` has unit `generic`, equals `5`, and subclasses `np.integer`.
 
 ## Established solutions
 
@@ -73,97 +88,150 @@ pyarrow type reference, and the Python numeric hashing rules; in the codebase, `
   `np.datetime_data(dtype)` returns `(unit, count)`, so `[2s]` is unit `s` times 2. Units W and
   below are linear. Y and M are calendar units: a datetime in Y or M converts exactly to days,
   and a timedelta in Y or M does not convert to any linear unit. A 0-dim array unwraps with
-  `value[()]`.
+  `value[()]`. A generic-unit timedelta is a plain count.
+- pandas `Timestamp.asm8` and `Timedelta.asm8`: the value as `datetime64`/`timedelta64` in the
+  object's own unit, with no ns conversion, so it cannot overflow.
 - pyarrow types (`timestamp(unit, tz)`, `duration(unit)`, `month_day_nano_interval`): a
   calendar interval is its own type, never equal to a duration, and timestamps with a time zone
   compare by their UTC instant.
 - Python numeric hashing (stdtypes, "Hashing of numeric types"): numbers equal under `==` hash
   equal across `bool`, `int`, `float`, `Decimal` and NumPy scalars, so number leaves can stay
   numbers.
+- Python `dataclasses.field(compare=False)`: a field left out of `__eq__` and `__hash__`, used
+  here to carry a display zone that identity ignores.
 - In the codebase, `internal/fk_tokens.py` is the precedent: one module defines when two values
   are the same key, and every route reads it.
 
 Pattern adopted: pandas' "one canonical integer form per kind, then one comparison", with an
 exact unit (attoseconds as a Python `int`, so no overflow and no sub-ns loss) instead of the
-dtype's own unit, and Arrow's rule that calendar intervals are a separate kind. Custom code is
-still needed because no library canonicalizes arbitrary nested object cells; the walk is about
-160 lines.
+dtype's own unit, and Arrow's rule that calendar intervals are a separate kind. Keys stay text
+that matches `str()`, as on the base. Custom code is still needed because no library
+canonicalizes arbitrary nested object cells; the walk is about 170 lines.
 
 ## Guarantee and non-goals
 
 Guarantee, for any two cells `a` and `b` of a text-keyed column:
 
-1. `canon(a) == canon(b)` implies `key(a) == key(b)`. The keys never split what identity holds
-   equal, so the walks cannot cause `ComparisonNotPreservedError`.
+1. `canon(a) == canon(b)` implies `key(a) == key(b)`, with two declared exceptions, both of
+   which split the keys and so fail the table closed through `_require_preserved`, as on the
+   base:
+   - E1: aware instants that are equal but shown in different zones (UTC vs `Etc/GMT-1`). The
+     key keeps each zone's text so that a value and its `str()` still match (K4).
+   - E2: nested numbers that are `==` but spell differently (`[1]` vs `[1.0]`, `[True]` vs
+     `[1]`). Nested numbers render as `str()` renders them, so a container and its `str()`
+     still match (K4).
 2. Null agrees: identity treats a cell as null exactly when its key is `None`.
-3. The key merges cells that identity keeps apart only under three declared rules, all from
-   earlier rounds and unchanged: K1 a top-level numeral string keys as the number it spells;
-   K2 numbers that round to one binary64 share a key; K3 bytes key as their UTF-8 text. Outside
-   K1 to K3, `key(a) == key(b)` implies `canon(a) == canon(b)`.
+3. The key merges cells that identity keeps apart only under four declared rules. K1 to K3 come
+   from earlier rounds and are unchanged:
+   - K1: a top-level numeral string keys as the number it spells.
+   - K2: top-level numbers that round to one binary64 share a key.
+   - K3: bytes key as their UTF-8 text.
+   - K4: any other cell keys as its text, so it shares a key with the string that spells it.
+     That is the leak-direction match: a value that came back as text still counts as
+     unchanged.
+   Outside K1 to K4, `key(a) == key(b)` implies `canon(a) == canon(b)`. Every merge only adds
+   identical rows: a false block at worst, never a leak.
 
-Non-goals: the number key rule, the detector text of non-temporal cells, `datetime.date`,
-`pd.Period` and other types (they stay "other" leaves, compared by `==` and keyed by their
-text, as now), and the Arrow batch path's map-as-pairs reading (unchanged).
+Non-goals: the number key rule; the detector text of non-temporal cells; the Arrow batch
+path's map-as-pairs reading; and the canary's Arrow-side `canonical_cells`
+(src/decoy_engine/verification/canary/_canonical.py:212), which converts Arrow arrays by type
+for the canary policy and never sees object cells (follow-up for V2-LOG: one walk for both).
+`datetime.date`, `pd.Period`, `uuid.UUID` and other types stay "other" leaves: compared by
+`==` and keyed by their text, as on the base.
 
 ## The rule
 
 New module `src/decoy_engine/internal/canonical_cell.py`, one public function
-`canonical_cell(value) -> object` and a `NULL` sentinel. It is the only walk. Order of checks:
+`canonical_cell(value) -> object`, a `NULL` sentinel, and the frozen dataclasses `Instant`,
+`Duration` and `Months`. It is the only walk for object cells. It imports only NumPy, pandas and
+the standard library. Order of checks:
 
 1. A 0-dim `np.ndarray` is replaced by `value[()]`, repeatedly, before anything else.
 2. Null: `None`, `pd.NA`, `pd.NaT`, a float NaN (Python or NumPy), and a `datetime64` or
    `timedelta64` NaT of any unit give `NULL`. This applies at every depth.
-3. Temporal, checked before numbers because `np.timedelta64` subclasses `np.integer`:
+3. Temporal, checked before numbers because `np.timedelta64` subclasses `np.integer`. `AS` maps
+   W, D, h, m, s, ms, us, ns, ps, fs, as to attoseconds (`as` is 1). `ticks` is
+   `int(value.astype(np.int64))`.
 
 | Input | Canonical form |
 |---|---|
-| `np.datetime64`, linear unit `u` with count `c` | `("instant", ticks * c * AS[u], False)` |
+| `np.datetime64`, linear unit `u` with count `c` | `Instant(ticks * c * AS[u], aware=False)` |
 | `np.datetime64` in Y or M (any count) | converted with `astype("datetime64[D]")`, then as above |
-| `pd.Timestamp` | `("instant", ts.value * 10**9, ts.tzinfo is not None)` (`value` is UTC ns) |
-| `datetime.datetime` | `("instant", exact attoseconds from the epoch, aware)`, from days, seconds, microseconds |
-| `np.timedelta64`, linear unit | `("duration", ticks * c * AS[u])` |
-| `np.timedelta64` in Y or M | `("months", ticks * c * (12 if Y else 1))` |
-| `pd.Timedelta` | `("duration", td.value * 10**9)` |
-| `datetime.timedelta` | `("duration", exact attoseconds)` |
+| `pd.Timestamp`, naive | `ts.asm8` through the `np.datetime64` row |
+| `pd.Timestamp`, aware | `ts.asm8` (the UTC instant) through the same row, `aware=True`, `zone=ts.tz` |
+| `datetime.datetime`, naive | `Instant(exact attoseconds from the epoch, aware=False)`, from the date's days, seconds and microseconds |
+| `datetime.datetime`, aware | the naive value of `dt - dt.utcoffset()`, as above, `aware=True`, `zone=dt.tzinfo` |
+| `np.timedelta64`, generic unit | the `int` it equals (`np.timedelta64(5) == 5`), then step 4 |
+| `np.timedelta64`, linear unit | `Duration(ticks * c * AS[u])` |
+| `np.timedelta64` in Y or M | `Months(ticks * c * (12 if Y else 1))` |
+| `pd.Timedelta` | `td.asm8` through the `np.timedelta64` row |
+| `datetime.timedelta` | `Duration(exact attoseconds)` from days, seconds, microseconds |
 
-`AS` maps W, D, h, m, s, ms, us, ns, ps, fs, as to attoseconds (`as` is 1). `ticks` is
-`int(value.astype(np.int64))`. `pd.Timestamp` and `pd.Timedelta` are checked before their
-`datetime` parents. A naive and an aware instant never compare equal, as in pandas.
+`pd.Timestamp` and `pd.Timedelta` are checked before their `datetime` parents. No step reads
+`.value` or converts to ns, so a far date in a non-ns unit cannot overflow. `Instant.zone` is
+`field(compare=False)`: equality and hash read `(attoseconds, aware)` only, so a naive and an
+aware instant never compare equal (as in pandas), and the same instant in two zones does.
 
 4. Number leaves: `np.bool_` becomes `bool`; `np.integer` becomes `int`; `np.float16`,
-   `float32` and `float64` become `float` (exact widening); `np.longdouble`, `Decimal`, `int`,
-   `float` and `bool` stay as they are.
+   `float32` and `float64` become `float` (exact widening); `np.longdouble`, `complex`,
+   `Decimal`, `int`, `float` and `bool` stay as they are.
 5. `bytes`, `bytearray`, `memoryview` become `bytes`. `str` stays.
-6. Containers: a `dict` becomes `("map", frozenset((canon(k), canon(v)) ...))`. A `list`,
-   `tuple` (namedtuple included) or non-0-dim `ndarray` of any dtype becomes
-   `("list", tuple(canon(v) for v in value))`. A `set` or `frozenset` becomes
+6. Containers: a `dict` becomes `("map", frozenset((canon(k), canon(v)) ...))`. A `list` or
+   non-0-dim `ndarray` of any dtype becomes `("list", tuple(canon(v) for v in value))`. A
+   `tuple` (namedtuple included) becomes `("tuple", ...)` the same way: Python holds a list and
+   a tuple apart, and the tag keeps the base key `"(1, 2)"` for a tuple. A `set` or `frozenset` becomes
    `("set", frozenset(canon(v) ...))`. The tag keeps a dict, a list of pairs and a set of pairs
    apart.
 7. Anything else is returned unchanged (an "other" leaf).
 
-Every form is hashable when its leaves are. A temporal form is a tagged tuple, so it never
-equals a number or a list.
+Every form is hashable when its leaves are. A temporal form is its own dataclass, so it never
+equals a number or a container.
+
+### Temporal text
+
+`canonical_cell.py` also holds `temporal_text(form) -> str`, the one place a temporal form
+becomes text. It matches pandas `str()` of the value:
+
+- `Instant` with attoseconds a whole number of ns inside the ns range: `str(pd.Timestamp(ns))`,
+  localized to `zone` when aware (`"2020-01-01 00:00:00"`, `"2020-01-01 01:00:00+01:00"`).
+- `Instant` outside the ns range: the coarsest of s, ms, us that divides it exactly,
+  `str(pd.Timestamp(np.datetime64(v, unit)))` (`"3000-01-01 00:00:00"`), localized as above.
+- `Instant` with a sub-ns part: `str(np.datetime64(v, unit))` at the coarsest of ps, fs, as.
+- `Duration`: the same three steps with `pd.Timedelta` and `np.timedelta64`
+  (`"0 days 00:00:01"`, `"146000 days 00:00:00"`, `"1 femtoseconds"`).
+- `Months`: `str(np.timedelta64(n, "M"))` (`"3 months"`).
+- When no unit holds the value in int64 (a `[W]` or count-scaled value past every pandas
+  unit), the text is `f"{attoseconds} attoseconds"`, so the walk never raises.
 
 ### Readers
 
 - Identity: `canonical_cells` (_column_facts.py:268) maps `canonical_cell` over the cells and
   turns `NULL` into `None`; `_frozen` and `_MAPPING_TAG` are deleted. `identity_counts` walks
   both sides unless they share one non-object dtype (then raw `==` is exact and the walk is
-  skipped, as now for typed columns). `source_distinct` walks an object, categorical, datetime
-  or timedelta column and passes a bool, int, uint or float column through.
-- Key: `key_text` renders `canonical_cell(cell)`:
+  skipped, as now for typed columns). `source_distinct` walks every dtype except bool, int,
+  uint and float, which pass through (object, categorical, datetime, timedelta, string and
+  every `pd.ArrowDtype` column are walked).
+- Key: `key_text` in `cell_text.py` renders `canonical_cell(cell)` through one renderer,
+  `_canonical_key`, in the same module (it needs `_number_key` and `_text_key`, and
+  `canonical_cell.py` must not import `cell_text.py`):
   - `NULL` gives `None`.
-  - A top-level number leaf gives `_number_key(leaf)`, a top-level `str` gives
+  - A top-level number leaf gives `_number_key(leaf)` (K2), a top-level `str` gives
     `_text_key(str)` (K1), and top-level `bytes` give `_text_key` of the UTF-8 text (K3). These
-    three are the keys of today, unchanged.
-  - Anything else gives `"\x1e" + json.dumps(tree)`, where `tree` tags each node: `["n", k]` for
-    a number (k from `_number_key`, so K2 applies at every depth), `["s", text]` for a string or
-    UTF-8 bytes, `["t", str(as), aware]`, `["d", str(as)]`, `["mo", str(n)]`, `["z"]` for a
-    nested null, `["L", ...]`, `["M", ...]` and `["S", ...]` with map pairs and set members
-    sorted by their own serialized text, and `["o", cell_text(leaf)]` for an other leaf.
-  - A top-level string that starts with `"\x1e"` keys as `"\x1e" + json.dumps(["s", text])`,
-    so no string can spell a container's key.
-  - `_key_ordered` is deleted. Non-UTF-8 bytes still raise `UnreadableCellError`.
+    are the keys of today, unchanged.
+  - A top-level temporal form gives `_text_key(temporal_text(form))`.
+  - A top-level container or other leaf gives `_text_key(_canonical_text(form))`, where
+    `_canonical_text` renders the form the way `str()` renders the Python value: `"[a, b]"`
+    for a list form (lists and arrays alike, since identity holds them equal), `"(a, b)"` (and
+    `"(a,)"`) for a tuple form, namedtuples included,
+    `"{k: v, ...}"` with pairs sorted by their own text for a map, `"{a, b}"` sorted for a set,
+    `repr` for nested `str`, bytes and numbers, `None` for a nested `NULL`, `repr` of the
+    pandas object rebuilt from `temporal_text` for a nested temporal form
+    (`"Timestamp('2020-01-01 00:00:00')"`), and `cell_text(leaf)` for an other leaf.
+  - So `[1]` keys `"[1]"`, `{"a": 1}` keys `"{'a': 1}"`, and `uuid.UUID(int=1)` keys its
+    hyphenated text, all as on the base (K4). There is no prefix or escape.
+  - `_key_ordered` is deleted. `_number_key` loses its `_python_scalar` call
+    (cell_text.py:281): after the walk a number leaf is already a Python or NumPy number, and
+    that call was the second temporal path. Non-UTF-8 bytes still raise `UnreadableCellError`.
 - Detector text: `detector_text` decides null from `canonical_cell` (so the three readers agree
   on null rows) and renders a 0-dim array's payload. Otherwise unchanged; detectors read cells
   as written.
@@ -172,18 +240,21 @@ equals a number or a list.
 ## Design notes
 
 - One module owns the walk; `internal/cell_text.py` and `verification/postmask/_column_facts.py`
-  both import it. No caller walks a cell itself. This is the choke point: identity, key and
-  null all read `canonical_cell`, and P1 is the guard test that fails if a reader walks on its
-  own (mutation: null check without the 0-dim unwrap turns C13 and P1 red).
+  both import it, and the dependency runs one way (`cell_text` imports `canonical_cell`). No
+  caller walks a cell itself. This is the choke point: identity, key and null all read
+  `canonical_cell`, and P1 is the guard test that fails if a reader walks on its own
+  (mutation: null check without the 0-dim unwrap turns C13 and P1 red).
 - Principles: single source of truth for "same cell" (the change pain is three rounds of fixes
-  in two places); open for a new leaf kind by adding one row to the step list, not a fix per
-  reader.
-- Attoseconds as Python `int` keep `datetime64[as]` and far dates exact; no step goes through
-  `pd.Timestamp` or `pd.Timedelta` for NumPy values.
-- A nested NaN is `NULL`, so `[nan]` equals `[nan]` on both sides. Before, identity depended on
-  whether the two NaN objects were the same object.
-- Nested numbers key through `_number_key`, so `[1]` and `[1.0]` share a key, as identity holds
-  them equal. Before, `cell_text` split them.
+  in two places); a new leaf kind is one row in the step list, not a fix per reader.
+- Two forms of a cell, kept apart on purpose: the canonical form answers "same value?", the
+  key text answers "same value or its text?". The key is built only from the canonical form,
+  so the two can differ only where this plan declares it (E1, E2, K1 to K4).
+- Attoseconds as Python `int` keep `datetime64[as]` and far dates exact.
+- A nested NaN is `NULL`, so `[nan]` equals `[nan]` on both sides and both key `"[None]"`.
+  Before, identity depended on whether the two NaN objects were the same object.
+- Nested numbers keep their `str()` spelling (E2) rather than the number key: a list source
+  and its text output then match (leak direction), and `[1]` vs `[1.0]` fails closed as on the
+  base.
 
 ## Placement
 
@@ -192,14 +263,16 @@ equals a number or a list.
 | `canonical_cell.py` | `src/decoy_engine/internal/` | "`src/decoy_engine/internal/` Private helpers" (line 144); precedent `internal/fk_tokens.py` (line 33) | `cell_text.py`, `fk_tokens.py` |
 | `test_canonical_cell.py` | `tests/unit/internal/` | mirrors the source path | `test_env_flags.py` |
 
-`internal/` holds 14 entries, under the fan-out limit. S2 adds a CODEMAP row for the module.
+`internal/` holds 13 modules, under the fan-out limit. S2 adds a CODEMAP row for the module.
 
 ## Size
 
-`canonical_cell.py` about 160 lines. `cell_text.py` goes from 357 lines to about 340 (minus
-`_key_ordered`, plus the tree renderer). `_column_facts.py` from 519 to about 505. The new test
-file is about 250 lines. All under the engine module cap (600 target, 700 hard max, `tests/sentry/test_module_size.py`) and the 800-line rule. Public names added: `canonical_cell`,
-`NULL` (module-private to the engine; not exported from the package).
+`canonical_cell.py` about 170 lines (walk plus `temporal_text`). `cell_text.py` goes from 357
+lines to about 360 (minus `_key_ordered`, plus `_canonical_key` and `_canonical_text`).
+`_column_facts.py` from 519 to about 505. The new test file is about 280 lines. All under the
+engine module cap (600 target, 700 hard max, `tests/sentry/test_module_size.py`) and the
+800-line rule. Public names added: `canonical_cell`, `temporal_text`, `NULL`, `Instant`,
+`Duration`, `Months` (engine-internal; not exported from the package).
 
 ## Frozen contracts
 
@@ -211,16 +284,16 @@ None. Keys and canonical forms reach no report, log or public API. `ColumnFacts`
 In `tests/unit/internal/test_canonical_cell.py` (walk and key) and
 `tests/unit/verification/test_order_free_facts.py` (through `_frame_tables`, with a second text
 row forcing the text fallback). "Runner ok" means no table error and identical equals
-comparable.
+comparable. "Fails closed" means `ComparisonNotPreservedError`.
 
 | Id | Cells (source vs output) | Expected |
 |---|---|---|
 | C1 | `array([0], "m8[s]")` vs `array([0], "m8[ns]")` | same canon, same key, runner ok (green on base) |
 | C2 | `np.array(7)` vs `np.array(7)` | canon `7`, key `"7"`, runner ok |
 | C3 | 0-dim object array of `{"a": 1}` vs `{"a": 2}` | different canon and key |
-| C4 | `array([1], "m8[s]")` vs `array([1000], "m8[ms]")` | same canon `("list", (("duration", 10**18),))`, same key, runner ok |
+| C4 | `array([1], "m8[s]")` vs `array([1000], "m8[ms]")` | same canon `("list", (Duration(10**18),))`, same key, runner ok |
 | C5 | `array([1, 2])` vs `np.array([1, 2], dtype=object)` | same canon and key, runner ok |
-| C6 | `array([1], "m8[M]")` vs itself | canon `("list", (("months", 1),))`, no raise, runner ok |
+| C6 | `array([1], "m8[M]")` vs itself | canon `("list", (Months(1),))`, no raise, runner ok |
 | C7 | `array([1], "m8[Y]")` vs `array([12], "m8[M]")` | same canon and key |
 | C8 | `array([1], "m8[M]")` vs `array([30], "m8[D]")` | different canon and key, no raise |
 | C9 | `array([1], "M8[2s]")` vs `array([2], "M8[s]")` | same canon and key, runner ok |
@@ -229,57 +302,96 @@ comparable.
 | C12 | `np.array(True)` vs `True` | key `"1"` both, runner ok |
 | C13 | `np.array(np.datetime64("NaT"))` | `NULL`; `key_text` gives `None`; not comparable |
 | C14 | `[{"b": 2, "a": 1}]` (array cell) vs `[{"a": 1, "b": 2}]` | same key |
-| C15 | namedtuple `P(1, 2)` vs `(1, 2)` | same canon, key renders without error |
+| C15 | namedtuple `P(1, 2)` vs `(1, 2)` | same canon, same key `"(1, 2)"`; list `[1, 2]` has a different canon and key |
 | C16 | `{"id": 1}` vs `{("id", 1)}` | different canon and key |
-| C17 | aware `Timestamp("2020-01-01", tz="UTC")` vs the same instant at `Etc/GMT-1` | same canon and key, runner ok |
+| C17 | aware `Timestamp("2020-01-01", tz="UTC")` vs the same instant at `Etc/GMT-1` | same canon, different key (E1), fails closed (green on base) |
 | C18 | naive vs aware `Timestamp("2020-01-01")` | different canon and key |
 | C19 | `[nan]` vs `[nan]` (distinct NaN objects) | same canon and key, identical 1 |
-| C20 | `[1]` vs `[1.0]` | same key (was split) |
-| C21 | `"\x1e[\"L\"]"` vs an empty list cell | different keys |
-| C22 | list `[1]` vs string `"[1]"` | different keys (they shared one before) |
-| C23 | top-level `10001.0`, `10001`, `None`, `memoryview(b"a@x.com")` | keys unchanged (green on base) |
-| C24 | numeric-key regression set in `test_text_fallback_parity.py` | unchanged (green on base) |
+| C20 | `[1]` vs `[1.0]` | same canon, different key (E2), fails closed (green on base) |
+| C21 | `Timestamp("3000-01-01").as_unit("s")` vs itself | key `"3000-01-01 00:00:00"`, no raise, runner ok |
+| C22 | list `[1]` vs string `"[1]"` | same key (K4), identical 1 (green on base) |
+| C23 | `Timedelta` of 146000 days in unit `s` vs itself | key `"146000 days 00:00:00"`, no raise, runner ok |
+| C24 | `np.timedelta64(5)` (generic) vs `5` | same canon `5`, key `"5"`, runner ok |
+| C25 | `datetime(2020, 1, 1, 1, tzinfo=+01:00)` vs `Timestamp("2020-01-01 01:00", tz="Etc/GMT-1")` | same canon and key, runner ok |
+| C26 | `datetime(2020, 1, 1, 1, tzinfo=+01:00)` vs `Timestamp("2020-01-01", tz="UTC")` | same canon, different key (E1), fails closed |
+| C27 | `array([1], "M8[fs]")` | key `"1970-01-01T00:00:00.000000000000001"`, no raise |
+| C28 | top-level `10001.0`, `10001`, `None`, `memoryview(b"a@x.com")` | keys unchanged (green on base) |
+| C29 | numeric-key regression set in `test_text_fallback_parity.py` | unchanged (green on base) |
+
+K4 runner rows (leak direction): each source cell is typed, the output cell is the `str()` of
+the same value in a mixed column, expected identical equals comparable. All green on base.
+
+| Id | Source cell | Output cell |
+|---|---|---|
+| T1 | `pd.Timestamp("2020-01-01")` | `"2020-01-01 00:00:00"` |
+| T2 | `pd.Timestamp("2020-01-01 01:00", tz="Etc/GMT-1")` | `"2020-01-01 01:00:00+01:00"` |
+| T3 | `pd.Timedelta(seconds=1)` | `"0 days 00:00:01"` |
+| T4 | `uuid.UUID(int=1)` | `"00000000-0000-0000-0000-000000000001"` |
+| T5 | `datetime.date(2020, 1, 1)` | `"2020-01-01"` |
+| T6 | `[1, "a"]` | `"[1, 'a']"` |
+| T7 | `{"a": 1}` | `"{'a': 1}"` |
+| T8 | `(1, "a")` | `"(1, 'a')"` |
 
 Property tests (Hypothesis, already a dev dependency, fixed seed through the project profile;
-any failing example is pinned as a C row):
+any failing example is pinned as a C row). Pairs are not drawn independently, since two
+independent draws almost never share a canonical form. Each case draws `a`, then draws `b` as
+either `transform(a)` (about half the cases) or a fresh cell. `transform` applies one
+equality-preserving change: another unit or count for a temporal leaf, a typed array vs an
+object array vs a list, a namedtuple vs a tuple, a 0-dim box, a dict re-inserted in another key order, a
+NumPy scalar for a Python number, an `asm8` round trip. Each test counts the cases where
+`canon(a) == canon(b)` and fails unless that count is at least a quarter of the cases run
+(the counter lives in a module fixture; `hypothesis.event` records it for the report).
 
-- P1, all cells: `canon(a) == canon(b)` implies `key(a) == key(b)`, and `canon(a) is NULL`
-  exactly when `key(a) is None`. The strategy covers every leaf kind above, numeral strings,
-  bytes, `Decimal`, ints past 2**53, every NumPy unit with counts 1 and 2, tz-naive and aware
-  timestamps, NaT of each kind, 0-dim boxing, and lists, tuples, typed and object arrays, dicts
-  and sets nested to depth 3.
-- P2, the same strategy without K1 to K3 inputs (no numeral strings, no bytes, no `Decimal`,
-  ints within 2**53, floats as binary64): `canon(a) == canon(b)` exactly when
-  `key(a) == key(b)`. This is the requested property `_frozen(a) == _frozen(b)` iff
-  `key_text(a) == key_text(b)`, with `canonical_cell` in place of `_frozen`.
-- P3, runner level: for a generated cell `a` and `b` built from it by an equality-preserving
-  change (another unit or count, typed vs object array, 0-dim boxing, another time zone for an
-  aware instant), a mixed column pair gives no table error and identical equals comparable.
+- P1, all cells, no E1 or E2 transforms: `canon(a) == canon(b)` implies `key(a) == key(b)`,
+  and `canon(a) is NULL` exactly when `key(a) is None`. The strategy covers every leaf kind
+  above, numeral strings, bytes, `Decimal`, ints past 2**53, every NumPy unit with counts 1
+  and 2, tz-naive and aware timestamps in UTC, NaT of each kind, 0-dim boxing, and lists,
+  tuples, typed and object arrays, dicts and sets nested to depth 3.
+- P2, the iff: `canon(a) == canon(b)` exactly when `key(a) == key(b)`. It is the requested
+  property `_frozen(a) == _frozen(b)` iff `key_text(a) == key_text(b)`, with `canonical_cell` in
+  place of `_frozen`. The strategy is P1's without the inputs where a declared rule applies:
+  no strings at any depth (K1, K4), no bytes (K3), no `Decimal`, `np.longdouble` or `complex`,
+  ints within 2**53 and floats as binary64 only (K2), no "other" leaves (their `==` can be
+  coarser or finer than their text), no aware instants outside UTC (E1), and no nested
+  numbers of mixed type (E2).
+- P3, runner level: for a generated cell `a` and `b = transform(a)`, a mixed column pair gives
+  no table error and identical equals comparable.
 
 ## Mutations (each must turn the named test red)
 
 | Mutation | Red test |
 |---|---|
 | drop the dtype count from the instant and duration forms | C9, P3 |
-| `AS` table stops at ns (sub-ns merged) | C10 |
+| `AS` table stops at ns (sub-ns merged) | C10, C27 |
 | map calendar months to 30 days | C8 |
 | remove the 0-dim unwrap from the null check | C13 |
-| render nested numbers with `cell_text` | C20, P1 |
-| drop the `"\x1e"` escape for strings | C21 |
+| read `pd.Timestamp.value` instead of `asm8` | C21 |
+| leave out the UTC offset for an aware `datetime` | C25 |
+| look up a generic timedelta in `AS` | C24 |
 | drop the `"map"` tag | C16 |
 | `identity_counts` passes raw cells through when the dtypes differ | C9 runner, P3 |
 | key a `pd.Timestamp` by UTC instant but drop the aware flag | C18 |
+| prefix top-level temporal, container and other keys (the round-1 `"\x1e"` design) | T1-T8, C22 |
+| render nested numbers with `_number_key` | T6 |
+| render a tuple form as a list | T8, C15 |
+| compare `Instant.zone` in `__eq__` | C17 canon assert, C26 |
 
 ## Failure modes
 
+- Leak direction: a typed value whose output came back in a text spelling that is not its
+  `str()` (a JSON dict `'{"a": 1}'`, an ISO timestamp `"2020-01-01T00:00:00"`, an aware value
+  printed in another zone) keys apart from the source and counts as changed. Same as the base;
+  K4 covers the `str()` spelling only. Recorded as a known limit.
 - Unhashable "other" leaf: `canonical_cells` raises `TypeError` as now; the column records it as
   `identity_error` and the table fails closed. Unchanged.
 - A cell nested past the recursion limit or containing itself: `RecursionError`, recorded the
   same way. Unchanged; no new limit.
+- E1 and E2: keys split values identity holds equal, and `_require_preserved` fails the table
+  closed. Same as the base. A false block, not a leak.
 - An "other" type whose `==` is coarser than its text (equal objects with different text): the
   key splits them, and `_require_preserved` fails the table closed. The guard stays as a
   backstop for that and for any future leaf kind.
-- K1 to K3 merges add identical rows only: a false block at worst, never a leak. Accepted for
+- K1 to K4 merges add identical rows only: a false block at worst, never a leak. Accepted for
   V1, as in the number-keys plan.
 - Cost: the walk runs per cell on object and temporal columns of the text-keyed path and on
   `identity_counts` pairs whose dtypes differ. Same-dtype typed pairs skip it, as now.
@@ -289,8 +401,9 @@ any failing example is pinned as a C row):
 If a review finds a new case, the likely cause is a leaf kind the step list misses (a new NumPy
 or pandas scalar). P1 and P2 run every kind in the strategy, so a missed kind shows as a
 property failure, not a one-off. A second likely cause is a reader that walks a cell itself
-again; a grep for `ndim == 0`, `tolist()` and `_python_scalar` outside `canonical_cell.py` and
-`_detector_cell` belongs in the S2 hand-back. This plan follows three Codex fix rounds; a
+again; the S2 hand-back carries a grep for `ndim == 0`, `tolist()`, `.value` and
+`_python_scalar` outside `canonical_cell.py` and `_detector_cell`. A third is a key that drifts
+from `str()`; T1 to T8 hold the leak direction. This plan follows three Codex fix rounds; a
 fourth round of findings in this area goes to the owner, not to another fix round.
 
 ## Slices
@@ -298,15 +411,17 @@ fourth round of findings in this area goes to the owner, not to another fix roun
 On the PR #784 branch, in order, one builder:
 
 1. **S1 walk** (`src/decoy_engine/internal/canonical_cell.py`, new; tests
-   `tests/unit/internal/test_canonical_cell.py`): the walk, `NULL`, and the key renderer as a
-   pure function. Red-first: C1 to C22 at the walk and key level, P1, P2. Commit
-   `fix(postmask): one canonical walk for cell identity and keys`.
+   `tests/unit/internal/test_canonical_cell.py`): the walk, `NULL`, the temporal dataclasses and
+   `temporal_text`. No reader changes. Red-first: the canonical-form asserts of C1 to C27 and
+   the `temporal_text` strings of C21, C23 and C27. Commit
+   `fix(postmask): one canonical walk for cell identity`.
 2. **S2 wire in** (`internal/cell_text.py`, `verification/postmask/_column_facts.py`,
-   `CODEMAP.md`): `key_text` and `detector_text` use the walk; `canonical_cells`,
-   `identity_counts` and `source_distinct` use it; delete `_frozen`, `_MAPPING_TAG` and
-   `_key_ordered`. Red-first: the runner columns of C1 to C19 and P3 in
-   `test_order_free_facts.py`. Update any test that pins a container or temporal key string,
-   and list each one in the hand-back. Commit
+   `CODEMAP.md`): `_canonical_key` and `_canonical_text` in `cell_text.py`; `key_text` and
+   `detector_text` use the walk; `_number_key` drops `_python_scalar`; `canonical_cells`,
+   `identity_counts` and `source_distinct` use the walk; delete `_frozen`, `_MAPPING_TAG` and
+   `_key_ordered`. Red-first: the key asserts of C1 to C29, the runner rows, T1 to T8, P1, P2
+   and P3. Update any test that pins a container or temporal key string, and list each one in
+   the hand-back with the old and new string. Commit
    `fix(postmask): read identity and keys through the canonical walk`.
 3. **S3 close-out**: update `changelog.d/postmask-fail-closed.md`; run the mutation table on the
    final head and record that head with each red test in the PR body and hand-back. Ruff,
@@ -318,20 +433,26 @@ On the PR #784 branch, in order, one builder:
 - `_number_key`, `_text_key`, `cell_text` and `UnreadableCellError` in `cell_text.py`.
 - `canonical_cells`, `identity_counts`, `source_distinct` in `_column_facts.py` (bodies change,
   names and callers stay).
-- `np.datetime_data`, `numpy.datetime64.astype`, `json.dumps`.
+- `np.datetime_data`, `numpy.datetime64.astype`, `Timestamp.asm8`, `Timedelta.asm8`,
+  `dataclasses.field(compare=False)`.
 - The `_frame_tables` helpers and fixtures in `test_order_free_facts.py`.
+- Not reused, and why: the canary's `canonical_cells` (verification/canary/_canonical.py:212)
+  converts Arrow arrays by type and never sees object cells. Merging the two walks is a V2-LOG
+  item.
 
 ## Enumerations
 
 ### Exit paths
 
-- `canonical_cell` returns a form or `NULL`; it raises only `RecursionError` on a self-holding
-  or too-deep cell.
+- `canonical_cell` returns a form or `NULL`. It raises `RecursionError` on a self-holding or
+  too-deep cell, and nothing else: no step reads `.value` or converts a NumPy value to ns, a
+  generic timedelta never reaches `AS`, and `temporal_text` falls back to an attosecond count
+  instead of raising.
 - `key_text` returns one entry per row, `None` for a null; non-UTF-8 bytes raise
   `UnreadableCellError` (unchanged).
 - `identity_counts` raises `TypeError` for an unhashable leaf (unchanged).
-- `_require_preserved` raises `ComparisonNotPreservedError` as now; after this plan only an
-  "other" leaf can trigger it through the walks.
+- `_require_preserved` raises `ComparisonNotPreservedError` as now; after this plan it is
+  reached through the walks only by E1, E2 or an "other" leaf.
 
 ### Routes
 
@@ -357,13 +478,27 @@ N/A: no report field, log line or exit code changes.
 
 | Class | Name | Closing structure | Test | Mutation |
 |---|---|---|---|---|
-| 1 | value | one canonical form per kind, exact units in attoseconds, calendar months apart | C4, C6-C11, P2 | drop count; ns-capped table; months as 30 days |
+| 1 | value | one canonical form per kind, exact units in attoseconds, calendar months apart, `asm8` reads | C4, C6-C11, C21, C23-C25, P2 | drop count; ns-capped table; months as 30 days; `.value` read |
 | 2 | cleanup | N/A: no resources are opened | | |
 | 3 | state | N/A: pure functions | | |
 | 4 | route | one walk; identity, key and detector null all read it | C13, P1, P3 | null check without unwrap; raw pass on differing dtypes |
 | 5 | referential | N/A: no FK or reference handling changes | | |
-| 6 | untrusted | string escape so no cell spells a container key | C21, C22 | drop the escape |
+| 6 | untrusted | keys stay `str()` text so a value returned as text still matches (K4) | T1-T8, C22 | prefix top-level keys |
 | 7 | toctou | N/A: no check-then-use on files or state | | |
-| 8 | weak | runner-level asserts (identical equals comparable), not only key lists; property tests over every kind | P1-P3 | nested numbers via `cell_text` |
+| 8 | weak | runner-level asserts (identical equals comparable); property tests with derived pairs and a floor on equal pairs | P1-P3 | nested numbers via `_number_key` |
 | 9 | refactor | N/A: behavior change, no structure-only move | | |
 | 10 | frozen | N/A: no frozen surface touched | | |
+
+## Review round 1
+
+| Finding | Fix in this plan |
+|---|---|
+| 1 BLOCKER: `\x1e` prefix splits a value from its text | Prefix and escape dropped; temporal, container and other keys are `str()` text built from the canonical form; K4 declared; C22 flipped; T1-T8 runner rows; "prefix top-level keys" mutation; Non-goals now agree |
+| 2 HIGH: `.value` overflows past 2262 | `pd.Timestamp` and `pd.Timedelta` read `asm8` through the NumPy rows; C21, C23; `temporal_text` has an int64 fallback; Exit paths corrected |
+| 3 vacuous properties | `b = transform(a)` in about half the cases; floor of a quarter equal-canon pairs per test |
+| 4 P2 overclaims | P2 exclusions name other leaves, `np.longdouble`, `complex`, strings, E1 and E2 |
+| 5 generic td64, aware datetime | generic timedelta is its `int`; aware `datetime` subtracts `utcoffset()`; C24, C25, C26 |
+| 6 circular import | `_canonical_key` and `_canonical_text` live in `cell_text.py`; S1 is walk-only, key rows move to S2 |
+| 7 `_python_scalar` in `_number_key` | S2 drops it; hand-back grep names it |
+| 8 canary `canonical_cells` | named in Non-goals and Reuse, V2-LOG follow-up |
+| 9 `source_distinct` dtypes | walks every dtype except bool, int, uint, float |
