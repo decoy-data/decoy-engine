@@ -216,8 +216,10 @@ def store_resident_fit(
     return dataclasses.replace(decision, resident_fit=fit)
 
 
-def _kill_ceiling() -> int | None:
-    """The host or cgroup kill ceiling `H`, or `None` when it cannot be detected."""
+def kill_ceiling() -> int | None:
+    """The host or cgroup kill ceiling `H`, or `None` when it cannot be detected.
+
+    The one detector for every resident-fit caller, the isolated readback included."""
     from decoy_engine.execution import out_of_core
     from decoy_engine.execution._errors import ExecutionError
 
@@ -250,7 +252,7 @@ def check_pre_read(
     kinds = classify_table_kinds(config)
     if graph.edges or "mask" not in kinds.values():
         return
-    kill = kill_ceiling_bytes if kill_ceiling_bytes is not None else _kill_ceiling()
+    kill = kill_ceiling_bytes if kill_ceiling_bytes is not None else kill_ceiling()
     if kill is None:
         return
     specs: list[TableBytesSpec] = []
@@ -290,7 +292,7 @@ def check_pre_transform(
     targets = sorted(transform_bearing_mask_tables(config) & resident.keys())
     if not targets:
         return None
-    kill = kill_ceiling_bytes if kill_ceiling_bytes is not None else _kill_ceiling()
+    kill = kill_ceiling_bytes if kill_ceiling_bytes is not None else kill_ceiling()
     if kill is None:
         return None
     bound = max(
@@ -305,6 +307,26 @@ def check_pre_transform(
     fit = _lower_bound_verdict(bound, kill, len(targets), static_estimate_bytes=0)
     require_resident_fit(fit)
     return None if fit.verdict == FIT else fit
+
+
+def check_readback(
+    held: Iterable[TableBytesSpec],
+    pending: Iterable[TableBytesSpec],
+    *,
+    kill_ceiling_bytes: int | None,
+) -> ResidentFit | None:
+    """The verdict for a driver that holds `held` and is about to decode `pending`.
+
+    The strict lower bound over both, `charge_pandas=False` throughout: the driver keeps Arrow
+    tables and never converts them. Only a bound above `H` is `INSUFFICIENT`; every other bound
+    is `UNKNOWN`, so a caller decodes on it. `None` when `kill_ceiling_bytes` is `None` (no
+    ceiling detected, so nothing to compare with). The caller detects the ceiling once.
+    """
+    if kill_ceiling_bytes is None:
+        return None
+    held, pending = tuple(held), tuple(pending)
+    bound = lower_bound_bytes([*held, *pending])
+    return _lower_bound_verdict(bound, kill_ceiling_bytes, len(held) + len(pending))
 
 
 def _lower_bound_verdict(
@@ -336,7 +358,7 @@ def gather_resident_fit(
     Gathers numbers and calls `resident_fit_verdict`; it compares nothing itself.
     """
     names = resident_names(ctx, decision)
-    kill = _kill_ceiling()
+    kill = kill_ceiling()
     if kill is None:
         # No ceiling to compare with: the job runs as it did before this check existed.
         return ResidentFit(

@@ -20,15 +20,19 @@ from decoy_engine.execution.pipeline._resident_bytes import (
     resident_spec,
 )
 from decoy_engine.execution.pipeline._resident_fit import (
+    INSUFFICIENT,
     ResidentFit,
     check_pre_read,
     check_pre_transform,
+    check_readback,
+    kill_ceiling,
     require_resident_fit,
     store_resident_fit,
 )
 from decoy_engine.execution.pipeline._route_summary import RouteSummary, route_summary
 
 __all__ = [
+    "INSUFFICIENT",
     "CgroupMappingError",
     "Mount",
     "ResidentFit",
@@ -36,7 +40,9 @@ __all__ = [
     "TableBytesSpec",
     "check_pre_read",
     "check_pre_transform",
+    "check_readback",
     "detect_usable_cpus",
+    "kill_ceiling",
     "lazy_spec",
     "lower_bound_bytes",
     "native_thread_clamp",

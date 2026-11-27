@@ -17,6 +17,7 @@ __all__ = [
     "CONNECTOR_TRANSIENT_FAILURE",
     "FILE_ACCESS_DENIED",
     "FINDINGS_REPORTED",
+    "ISOLATED_READBACK_CAPACITY_EXCEEDED",
     "ISOLATED_RUN_TIMED_OUT",
     "ISOLATED_WORKER_DIED",
     "ISOLATED_WORKER_OUT_OF_MEMORY",
@@ -149,6 +150,13 @@ ISOLATED_WORKER_OUT_OF_MEMORY = _d(
     "isolated_worker_out_of_memory",
     "The isolated worker ran out of memory.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
+)
+# The driver would run out of memory reading the child's finished output back; refused first.
+ISOLATED_READBACK_CAPACITY_EXCEEDED = _d(
+    "isolated_readback_capacity_exceeded",
+    "The finished output tables would hold more memory than this machine can give the caller.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since=UNRELEASED,
 )
 # A bare MemoryError: the exception text can carry sizes and names, so the message is fixed.
 PROCESS_OUT_OF_MEMORY = _d(

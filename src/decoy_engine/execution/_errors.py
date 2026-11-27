@@ -84,6 +84,21 @@ class QuarantineError(ExecutionError):
         super().__init__(code=code, message=message)
 
 
+def capacity_message(
+    code: ReasonCode, *, needed_bytes: int, kill_ceiling_bytes: int, remedy: str
+) -> str:
+    """The one text of a capacity refusal: the code's registered summary, the two figures, a remedy.
+
+    Numbers and a fixed remedy only: no table, column, path or value can reach it. The summary is
+    looked up in the code's own namespace, so a refusal cannot carry another reason's wording.
+    """
+    summary = reasons.get(code.namespace, code).summary
+    return (
+        f"{summary} The figure checked is {needed_bytes} bytes and the memory ceiling is "
+        f"{kill_ceiling_bytes} bytes. {remedy}"
+    )
+
+
 def nonfk_full_frame_capacity_error(
     *, needed_bytes: int, kill_ceiling_bytes: int
 ) -> ExecutionError:
@@ -93,13 +108,13 @@ def nonfk_full_frame_capacity_error(
     remedies only: no table, column, path or value reaches the text. Callers raise it outside any
     `except`, so it has no `__cause__` or `__context__`.
     """
-    summary = reasons.get("runtime", reasons.runtime.NONFK_FULL_FRAME_CAPACITY_EXCEEDED).summary
     return ExecutionError(
         code=reasons.runtime.NONFK_FULL_FRAME_CAPACITY_EXCEEDED,
-        message=(
-            f"{summary} The figure checked is {needed_bytes} bytes and the memory ceiling is "
-            f"{kill_ceiling_bytes} bytes. Run on a machine with more memory, or reduce the "
-            "table's rows or columns."
+        message=capacity_message(
+            reasons.runtime.NONFK_FULL_FRAME_CAPACITY_EXCEEDED,
+            needed_bytes=needed_bytes,
+            kill_ceiling_bytes=kill_ceiling_bytes,
+            remedy="Run on a machine with more memory, or reduce the table's rows or columns.",
         ),
     )
 

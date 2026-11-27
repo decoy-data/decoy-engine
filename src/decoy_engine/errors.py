@@ -517,6 +517,7 @@ CAPACITY_REASON_CODES: frozenset[str] = frozenset(
         reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED,
         reasons.runtime.OUT_OF_CORE_REORDER_BUDGET_TOO_SMALL,
         reasons.runtime.POOL_EXCEEDS_CACHE_BUDGET,
+        reasons.decoy.ISOLATED_READBACK_CAPACITY_EXCEEDED,
         reasons.decoy.ISOLATED_WORKER_OUT_OF_MEMORY,
         reasons.decoy.PROCESS_OUT_OF_MEMORY,
     }

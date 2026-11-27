@@ -56,7 +56,7 @@ reason = "process memory readout for the governor; no caller or config value rea
 
 [[entry]]
 module = "decoy_engine/execution/_isolated_reason.py"
-function = "commit_reason"
+function = "cleanup_state_of"
 sink = "Path.exists"
 ordinal = 0
 rule = "the caller's staging_dir (or the engine-created staging under its temp_dir) that run_pipeline_isolated already refused under every policy but the ambient one (`_require_ambient_for_paths`, before any I/O)"
@@ -123,8 +123,8 @@ reason = "the subprocess and scratch route cannot carry a strict policy (D6 fail
 ambient_only = true
 
 [[entry]]
-module = "decoy_engine/execution/_isolated_run.py"
-function = "_result_from_envelope"
+module = "decoy_engine/execution/_isolated_commit.py"
+function = "result_from_envelope"
 sink = "shutil.rmtree"
 ordinal = 0
 rule = "path derived from the caller's staging_dir, output_dir or temp_dir, or an engine-created `tempfile.mkdtemp`; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
@@ -1800,8 +1800,8 @@ owner = "cam"
 reason = "F22 class 6 and V1-b: the parent repairs the mode of what it admits from the untrusted child through the entry's own descriptor (no link followed) and reads the admitted tables back; a strict policy never gets here"
 
 [[entry]]
-module = "decoy_engine/execution/_isolated_run.py"
-function = "_result_from_envelope"
+module = "decoy_engine/execution/_isolated_commit.py"
+function = "result_from_envelope"
 sink = "shutil.rmtree"
 ordinal = 1
 rule = "path derived from the caller's staging_dir, output_dir or temp_dir, or an engine-created `tempfile.mkdtemp`; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"

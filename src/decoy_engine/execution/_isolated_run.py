@@ -79,11 +79,10 @@ from decoy_engine.execution._isolated_commit import (
     COMMITTED,
     Publication,
     begin_publication,
-    collect,
     failed_publication,
     publish_resident,
     read_envelope,
-    row_errors_of,
+    result_from_envelope,
     stage_sources,
 )
 from decoy_engine.execution._isolated_commit import signal_name as _signal_name
@@ -101,7 +100,6 @@ from decoy_engine.execution._isolated_common import (
 )
 from decoy_engine.execution._isolated_memwatch import error_suffix, evidence_of, start_sampler
 from decoy_engine.execution._isolated_reason import (
-    envelope_failure,
     in_process_failure,
 )
 from decoy_engine.execution._pipeline import run_pipeline
@@ -387,6 +385,7 @@ def _run_isolated(
             payload_path,
             staging_output_dir,
             pub,
+            sources or {},
             on_spawn=on_spawn,
             timeout_s=timeout_s,
             mem_cap_bytes=mem_cap_bytes,
@@ -437,6 +436,7 @@ def _spawn_and_classify(
     payload_path: Path,
     staging_output_dir: Path,
     pub: Publication | None,
+    sources: dict[str, pa.Table],
     *,
     on_spawn: Callable[[int], None] | None,
     timeout_s: float | None,
@@ -514,7 +514,7 @@ def _spawn_and_classify(
         and envelope is not None
         and envelope.get("outcome") in ISOLATED_OUTCOMES
     ):
-        result = _result_from_envelope(envelope, pub, proc.pid, staging_output_dir)
+        result = result_from_envelope(envelope, pub, proc.pid, staging_output_dir, sources)
         # A self-reported `crashed` names an exception, not its cause. Native code at the cap
         # can surface exhaustion as an unrelated type (an Arrow cancellation reaches Python as
         # KeyboardInterrupt), so a crash that sat at its cap carries the pressure suspicion.
@@ -556,40 +556,4 @@ def _spawn_and_classify(
             if outcome == "oom_killed"
             else _decoy_reasons.ISOLATED_WORKER_DIED
         ),
-    )
-
-
-def _result_from_envelope(
-    envelope: dict[str, Any], pub: Publication | None, pid: int, staging_output_dir: Path
-) -> IsolatedRunResult:
-    outcome = envelope["outcome"]
-    peak = envelope.get("peak_rss_mb")
-    if outcome != "completed":
-        # A self-reported failure may have staged part of its output; nothing commits it.
-        shutil.rmtree(staging_output_dir, ignore_errors=True)
-        return envelope_failure(envelope, pid=pid)
-
-    # Read back before publishing, so `outputs` is right with or without an `output_dir`.
-    collected = collect(envelope, staging_output_dir, pub)
-    if pub is None:
-        shutil.rmtree(staging_output_dir, ignore_errors=True)  # nothing to publish it to
-    if isinstance(collected, CommitReceipt):
-        # MED-1: a refused stage or a publication that did not commit is a classified result.
-        fields = {"peak_rss_mb": peak, "returncode": 0, "isolated": True, "pid": pid}
-        return failed_publication(collected, staging_output_dir, **fields)
-    outputs, receipt = collected
-    return IsolatedRunResult(
-        outcome="completed",
-        peak_rss_mb=peak,
-        outputs=outputs,
-        quality_metrics=envelope.get("quality_metrics") or {},
-        table_kinds=envelope.get("table_kinds") or {},
-        returncode=0,
-        signal_number=None,
-        error=None,
-        isolated=True,
-        pid=pid,
-        committed_output_dir=None if pub is None else str(pub.target),
-        row_errors=row_errors_of(envelope),
-        publication_receipt=receipt,
     )

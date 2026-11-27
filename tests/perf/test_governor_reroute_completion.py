@@ -404,7 +404,7 @@ def test_auto_run_that_trips_full_frame_reroutes_to_a_completed_out_of_core_run(
     # dispatched through the out-of-core runner, not merely that out_of_core
     # was the label requested of it. This value crosses the real subprocess
     # boundary via the worker's JSON envelope (`_isolated_worker.py` ->
-    # `_isolated_run.py`'s `_result_from_envelope`), so it reflects what the
+    # `_isolated_commit.py`'s `result_from_envelope`), so it reflects what the
     # child computed, not something the driver fabricates post hoc.
     execution_metrics = result.result.quality_metrics.get("execution") or {}
     assert execution_metrics.get("execution_mode") == "out_of_core", (

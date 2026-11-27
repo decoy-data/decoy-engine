@@ -416,3 +416,42 @@ def test_isolated_fixed_list_refusal(tmp_path, with_marker):
     assert result.error and all(
         marker not in result.error for marker in (_SENTINEL, "[0, 0]", "[2, 2]", str(tmp_path))
     )
+
+
+class TestReadbackProducers:
+    """(g) the readback refusal and (h) its memory result: fixed text, no sentinel from the
+    tables, from an exception or from the OS."""
+
+    @staticmethod
+    def _run(tmp_path, monkeypatch, *, ceiling, fail=None):
+        from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+        from tests.unit.execution.publication import _isolated_support as support
+
+        entry = {"name": _SENTINEL.lower(), "rows": 20, "columns": {"c": ["str", _SENTINEL]}}
+        support.install_fake_worker(tmp_path, monkeypatch, tables=[entry])
+        monkeypatch.setattr("decoy_engine.execution._isolated_commit.kill_ceiling", lambda: ceiling)
+        if fail is not None:
+
+            def raising(handle, **kwargs):
+                raise fail
+
+            monkeypatch.setattr(arrow_adapter, "read_table", raising)
+        cfg = support.job(tmp_path, 3)
+        return run_pipeline_isolated(cfg, None, engine_version=_ENGINE_VERSION)
+
+    def test_a_refusal_drops_the_names_and_values(self, tmp_path, monkeypatch):
+        result = self._run(tmp_path, monkeypatch, ceiling=1)
+        assert result.outcome == "crashed"
+        assert (
+            result.reason is not None
+            and result.reason.code == "isolated_readback_capacity_exceeded"
+        )
+        assert _SENTINEL.lower() not in result.error and _SENTINEL not in repr(result)
+
+    def test_a_memory_result_drops_the_exception_text(self, tmp_path, monkeypatch):
+        result = self._run(
+            tmp_path, monkeypatch, ceiling=1 << 60, fail=MemoryError(f"{_SENTINEL} 4096 bytes")
+        )
+        assert result.outcome == "crashed"
+        assert result.reason is not None and result.reason.code == "process_out_of_memory"
+        assert _SENTINEL not in repr(result) and "4096" not in result.error

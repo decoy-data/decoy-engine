@@ -26,10 +26,12 @@ so the cleanup of a refused stage is confirmed by looking (F29).
 from __future__ import annotations
 
 import json
+import shutil
 import signal
 import sys
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -38,15 +40,31 @@ import pyarrow as pa
 from decoy_engine import fileaccess
 from decoy_engine.errors import DecoyError
 from decoy_engine.execution._isolated_common import IsolatedRunResult, commit_error_text
-from decoy_engine.execution._isolated_reason import commit_reason
+from decoy_engine.execution._isolated_reason import (
+    commit_reason,
+    envelope_failure,
+    readback_memory_failure,
+    readback_refused,
+)
 from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.execution._transactional_sink import _validate_table_name
+from decoy_engine.execution.pipeline import (
+    INSUFFICIENT,
+    ResidentFit,
+    TableBytesSpec,
+    check_readback,
+    kill_ceiling,
+    lazy_spec,
+    lower_bound_bytes,
+    resident_spec,
+)
 from decoy_engine.fileaccess import (
     FileRequest,
     FileRole,
     OutputDir,
     OutputTxn,
     handed_stage_dir,
+    is_memory_failure,
     is_valid_component,
     own_entry,
 )
@@ -71,13 +89,18 @@ from decoy_engine.reasons import (
 
 __all__ = [
     "COMMITTED",
+    "Collected",
     "CommitError",
     "Publication",
+    "Readback",
+    "ReadbackMemoryFailure",
+    "ReadbackRefused",
     "begin_publication",
     "collect",
     "failed_publication",
     "publish_resident",
     "read_envelope",
+    "result_from_envelope",
     "row_errors_of",
     "signal_name",
     "stage_sources",
@@ -103,6 +126,54 @@ class Publication:
     request: PublicationRequest
     stage: Path
     target: Path
+
+
+@dataclass(frozen=True)
+class Readback:
+    """What the driver measured while reading the child's output back, as plain integers.
+
+    `floor_bytes` is the strict lower bound over the footers of the staged outputs, `held_bytes`
+    the measured buffer bytes of those already read, so a completed run shows the floor was not
+    above reality. `sources_bytes` is the caller's resident sources, which the driver also holds.
+    """
+
+    kill_ceiling_bytes: int | None
+    sources_bytes: int
+    floor_bytes: int
+    held_bytes: int
+    tables_read: int
+    tables_staged: int
+
+    def as_extra(self) -> dict[str, int | None]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Collected:
+    """The staged tables read back, and the publication receipt when there was an `output_dir`."""
+
+    outputs: dict[str, pa.Table]
+    receipt: CommitReceipt | None
+    readback: Readback
+
+
+@dataclass(frozen=True)
+class ReadbackRefused:
+    """The strict floor of the readback was over the kill ceiling; nothing more was read and the
+    stage is aborted. `receipt` is the failed receipt when there was an `output_dir`."""
+
+    fit: ResidentFit
+    receipt: CommitReceipt | None
+    readback: Readback
+
+
+@dataclass(frozen=True)
+class ReadbackMemoryFailure:
+    """A memory failure while the driver read the output back. It carries no exception: the
+    exception's text can name sizes and values."""
+
+    receipt: CommitReceipt | None
+    readback: Readback
 
 
 def _request(request: PublicationRequest | None) -> PublicationRequest:
@@ -203,36 +274,195 @@ def _admit(stage: Path, names: list[str]) -> bool:
 
 
 def collect(
-    envelope: dict[str, Any], staging: Path, pub: Publication | None
-) -> tuple[dict[str, pa.Table], CommitReceipt | None] | CommitReceipt:
+    envelope: dict[str, Any],
+    staging: Path,
+    pub: Publication | None,
+    sources: Mapping[str, pa.Table] | None = None,
+) -> Collected | ReadbackRefused | ReadbackMemoryFailure | CommitReceipt:
     """Admit and read back the child's staged tables, then publish them when there is an
-    `output_dir`. Returns the tables and the receipt, or the receipt of a refusal or of a
-    publication that did not commit; a refused stage is already discarded."""
+    `output_dir`. `sources` are the caller's resident tables, which the driver also holds.
+
+    Returns the tables; a refusal (the strict floor of the readback is over the kill ceiling); a
+    memory failure; or the receipt of a refused stage, a failed read or a publication that did not
+    commit. Each of the last three aborts the transaction first; a refused stage is already
+    discarded. A refusal and a memory failure drop the tables read so far."""
     request = _request(pub.request if pub is not None else None)
     names = envelope.get("staged_tables")
+    reader = _Readback(staging, sources)
+    admitted = False
+    memory = False
     code: int | None = None
-    outputs: dict[str, pa.Table] | None = None
     try:
         if _names_ok(names) and _admit(staging, names):
-            outputs = {n: _read_staged(staging, n) for n in names}
-    except (OSError, pa.ArrowException) as exc:
+            admitted = True
+            reader.run(names)
+    except (OSError, pa.ArrowException, MemoryError) as exc:
+        memory = is_memory_failure(exc)
         code = exc.errno if isinstance(exc, OSError) else None
-    if outputs is None:
-        if pub is not None:
-            pub.txn.abort()
-        return failed_receipt(request, os_errno=code)
+        admitted = False
+    if admitted and reader.refusal is None:
+        return _publish(reader, pub, request)
+    reader.outputs.clear()
+    if pub is not None:
+        pub.txn.abort()
+    failed = failed_receipt(request, os_errno=code)
+    shown = failed if pub is not None else None
+    if reader.refusal is not None:
+        return ReadbackRefused(reader.refusal, shown, reader.figures())
+    return ReadbackMemoryFailure(shown, reader.figures()) if memory else failed
+
+
+def _publish(
+    reader: _Readback, pub: Publication | None, request: PublicationRequest
+) -> Collected | CommitReceipt:
+    """Bind the read-back tables when there is an `output_dir`; the refusals are all before this."""
+    outputs = reader.outputs
     if pub is None:
-        return outputs, None
+        return Collected(outputs, None, reader.figures())
     components = [f"{name}.parquet" for name in outputs]
     receipt = publish_unit(pub.out, pub.txn, request, tables=components)
-    return (outputs, receipt) if receipt.outcome in COMMITTED else receipt
+    return (
+        Collected(outputs, receipt, reader.figures()) if receipt.outcome in COMMITTED else receipt
+    )
+
+
+def _priced(table: pa.Table) -> TableBytesSpec:
+    """`table` measured for the bound: its Arrow buffers only. A metadata-free view shares the
+    buffers and skips the pandas metadata, which the driver never reads."""
+    return resident_spec(table.replace_schema_metadata(None), charge_pandas=False)
+
+
+class _Readback:
+    """The driver's readback of one admitted stage, table by table in envelope order.
+
+    Before each decode the strict lower bound over everything the driver would then hold is
+    compared with the kill ceiling (`check_readback`): the caller's resident sources and the
+    tables read so far at their measured bytes, and this table and the rest at their footer
+    floor. Only a bound over the ceiling refuses; an undetectable ceiling checks nothing."""
+
+    def __init__(self, staging: Path, sources: Mapping[str, pa.Table] | None) -> None:
+        self.outputs: dict[str, pa.Table] = {}
+        self.refusal: ResidentFit | None = None
+        self._staging = staging
+        self._sources = sources or {}
+        self._ceiling: int | None = None
+        self._held: list[TableBytesSpec] = []
+        self._read: list[TableBytesSpec] = []
+        self._footers: list[TableBytesSpec] = []
+        self._staged = 0
+
+    def run(self, names: list[str]) -> None:
+        self._staged = len(names)
+        self._held = [_priced(table) for table in self._sources.values()]
+        self._ceiling = kill_ceiling()
+        self._footers = [self._footer(name) for name in names]
+        for index, name in enumerate(names):
+            fit = check_readback(
+                [*self._held, *self._read],
+                self._footers[index:],
+                kill_ceiling_bytes=self._ceiling,
+            )
+            if fit is not None and fit.verdict == INSUFFICIENT:
+                self.refusal = fit
+                return
+            table = _read_staged(self._staging, name)
+            self.outputs[name] = table
+            self._read.append(_priced(table))
+
+    def figures(self) -> Readback:
+        return Readback(
+            kill_ceiling_bytes=self._ceiling,
+            sources_bytes=lower_bound_bytes(self._held),
+            floor_bytes=lower_bound_bytes(self._footers),
+            held_bytes=lower_bound_bytes(self._read),
+            tables_read=len(self._read),
+            tables_staged=self._staged,
+        )
+
+    def _footer(self, name: str) -> TableBytesSpec:
+        """The rows and Arrow schema from the footer alone; nothing is decoded and the file is
+        closed again before the table is read."""
+        request = _staged_request(self._staging, name)
+        with (
+            fileaccess.capture().open_read(request) as handle,
+            arrow_adapter.parquet_file(handle) as parquet_file,
+        ):
+            return lazy_spec(
+                parquet_file.metadata.num_rows, parquet_file.schema_arrow, charge_pandas=False
+            )
+
+
+def _staged_request(staging: Path, name: str) -> FileRequest:
+    return FileRequest(FileRole.TARGET_OUTPUT, "read", str(staging / f"{name}.parquet"), _FIELD_KEY)
 
 
 def _read_staged(staging: Path, name: str) -> pa.Table:
     """One admitted staged table, read through the file-access choke point."""
-    req = FileRequest(FileRole.TARGET_OUTPUT, "read", str(staging / f"{name}.parquet"), _FIELD_KEY)
-    with fileaccess.capture().open_read(req) as handle:
+    with fileaccess.capture().open_read(_staged_request(staging, name)) as handle:
         return arrow_adapter.read_table(handle)
+
+
+def result_from_envelope(
+    envelope: dict[str, Any],
+    pub: Publication | None,
+    pid: int,
+    staging_output_dir: Path,
+    sources: Mapping[str, pa.Table] | None = None,
+) -> IsolatedRunResult:
+    """The result of a child that reported an outcome: its failure, or its staged tables read
+    back and published. A readback the driver would not survive is a `crashed` result."""
+    outcome = envelope["outcome"]
+    peak = envelope.get("peak_rss_mb")
+    if outcome != "completed":
+        # A self-reported failure may have staged part of its output; nothing commits it.
+        shutil.rmtree(staging_output_dir, ignore_errors=True)
+        return envelope_failure(envelope, pid=pid)
+
+    # Read back before publishing, so `outputs` is right with or without an `output_dir`. The
+    # scratch stage goes on every exit, also when the ceiling check raises.
+    try:
+        collected = collect(envelope, staging_output_dir, pub, sources)
+    finally:
+        if pub is None:
+            shutil.rmtree(staging_output_dir, ignore_errors=True)  # nothing to publish it to
+    if isinstance(collected, CommitReceipt):
+        # MED-1: a refused stage or a publication that did not commit is a classified result.
+        fields = {"peak_rss_mb": peak, "returncode": 0, "isolated": True, "pid": pid}
+        return failed_publication(collected, staging_output_dir, **fields)
+    figures = collected.readback.as_extra()
+    if isinstance(collected, ReadbackRefused):
+        return readback_refused(
+            collected.fit,
+            staging=staging_output_dir,
+            receipt=collected.receipt,
+            readback=figures,
+            peak=peak,
+            pid=pid,
+        )
+    if isinstance(collected, ReadbackMemoryFailure):
+        return readback_memory_failure(
+            staging=staging_output_dir,
+            receipt=collected.receipt,
+            readback=figures,
+            peak=peak,
+            pid=pid,
+        )
+    return IsolatedRunResult(
+        outcome="completed",
+        peak_rss_mb=peak,
+        outputs=collected.outputs,
+        quality_metrics=envelope.get("quality_metrics") or {},
+        table_kinds=envelope.get("table_kinds") or {},
+        returncode=0,
+        signal_number=None,
+        error=None,
+        isolated=True,
+        pid=pid,
+        committed_output_dir=None if pub is None else str(pub.target),
+        row_errors=row_errors_of(envelope),
+        extra={"readback": figures},
+        publication_receipt=collected.receipt,
+    )
 
 
 def _typed_error(receipt: CommitReceipt) -> BaseException:

@@ -9,7 +9,10 @@ it stages `t.parquet` by plain path writes, may plant something beside it, and r
 
 from __future__ import annotations
 
+import inspect
+import json
 import os
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,18 @@ from decoy_engine.config import PipelineConfig
 ENGINE_VERSION = "f22-c2-isolated"
 PLANT_ENV = "DECOY_TEST_F22_PLANT"
 MARKER_ENV = "DECOY_TEST_F22_MARKER"
+TABLES_ENV = "DECOY_TEST_F22_TABLES"
+
+
+def spec_table(entry: dict[str, Any]) -> pa.Table:
+    """One staged table from a spec entry `{"name", "rows", "columns": {col: [kind, text]}}`: an
+    `int` column is `rows` int64 values, a `str` column is `text` followed by the row number.
+    The fake child runs this same source (`FAKE_WORKER_SRC`), so it and the tests always agree."""
+    rows = entry["rows"]
+    cols = {}
+    for col, (kind, text) in entry["columns"].items():
+        cols[col] = list(range(rows)) if kind == "int" else [f"{text}{i}" for i in range(rows)]
+    return pa.table(cols)
 
 
 def job(tmp: Path, rows: int, *, table: str = "t") -> dict[str, Any]:
@@ -44,7 +59,10 @@ def sources(cfg: dict[str, Any]) -> dict[str, pa.Table]:
 
 # The fake child: stage `t.parquet` by a plain path write (the umask decides its mode), plant
 # what `PLANT_ENV` names, leave a marker that it ran (non-vacuity), report `completed`.
-FAKE_WORKER_SRC = """
+FAKE_WORKER_SRC = (
+    "from __future__ import annotations\n\nimport pyarrow as pa\n\n\n"
+    + textwrap.dedent(inspect.getsource(spec_table))
+    + """
 import json, os, sys
 from pathlib import Path
 
@@ -55,7 +73,15 @@ payload_path = Path(sys.argv[1])
 payload = json.loads(payload_path.read_text("utf-8"))
 stage = Path(payload["staging_output_dir"])
 stage.mkdir(parents=True, exist_ok=True)
-pq.write_table(pa.table({"a": ["x", "y"]}), stage / "t.parquet")
+spec = os.environ.get("DECOY_TEST_F22_TABLES")
+if spec:  # an ordered list of tables, in place of the default two-row `t.parquet`
+    names = []
+    for entry in json.loads(spec):
+        pq.write_table(spec_table(entry), stage / (entry["name"] + ".parquet"))
+        names.append(entry["name"])
+else:
+    pq.write_table(pa.table({"a": ["x", "y"]}), stage / "t.parquet")
+    names = ["t"]
 plant = os.environ.get("DECOY_TEST_F22_PLANT", "")
 if plant == "descriptor":
     (stage / "_decoy_publication.json").write_text('{"schema": "decoy-publication/v1"}')
@@ -69,28 +95,42 @@ elif plant == "symlink":
     os.symlink(stage.parent / "elsewhere.parquet", stage / "t.parquet")
 elif plant == "missing_table":
     os.unlink(stage / "t.parquet")
+elif plant == "corrupt_first":  # a regular file whose Parquet footer is not one
+    (stage / (names[0] + ".parquet")).write_bytes(b"PAR1 not a parquet file PAR1")
 elif plant == "broad_mode":
     os.chmod(stage / "t.parquet", 0o644)  # readable, but wider than a unit file may be
 marker = os.environ.get("DECOY_TEST_F22_MARKER")
 if marker:
     Path(marker).write_text(plant or "none")
-tables = ["../t"] if plant == "bad_name" else ["t"]
+tables = ["../t"] if plant == "bad_name" else names
 envelope = {"outcome": "completed", "peak_rss_mb": 1.0, "staging_output_dir": str(stage),
             "staged_tables": tables, "quality_metrics": {}, "table_kinds": {}}
 result = payload_path.parent / "result.json"
 result.write_text(json.dumps(envelope))
 os.chmod(result, 0o600)  # this fake is the untrusted producer; its envelope stays readable
 """
+)
 
 
-def install_fake_worker(tmp: Path, monkeypatch: pytest.MonkeyPatch, *, plant: str = "") -> Path:
-    """Point the isolated route at the fake child; returns the marker path it writes."""
+def install_fake_worker(
+    tmp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    plant: str = "",
+    tables: list[dict[str, Any]] | None = None,
+) -> Path:
+    """Point the isolated route at the fake child; returns the marker path it writes.
+
+    `tables` is an ordered list of spec entries (see `TABLE_SRC`): the child stages exactly
+    those files and reports exactly those names, in place of the default `t.parquet`."""
     fake_dir = tmp / "_fake_workers"
     fake_dir.mkdir(exist_ok=True)
     (fake_dir / "f22_fake_worker.py").write_text(FAKE_WORKER_SRC, encoding="utf-8")
     existing = os.environ.get("PYTHONPATH", "")
     monkeypatch.setenv("PYTHONPATH", str(fake_dir) + (os.pathsep + existing if existing else ""))
     monkeypatch.setenv(PLANT_ENV, plant)
+    if tables is not None:
+        monkeypatch.setenv(TABLES_ENV, json.dumps(tables))
     marker = tmp / "fake-worker-ran"
     monkeypatch.setenv(MARKER_ENV, str(marker))
     monkeypatch.setattr("decoy_engine.execution._isolated_run._WORKER_MODULE", "f22_fake_worker")

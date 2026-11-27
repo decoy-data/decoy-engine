@@ -340,13 +340,13 @@ class TestDriverResidue:
 
     @pytest.mark.parametrize("outcome", ["oom_killed", "crashed"])
     def test_self_reported_failure_removes_staging(self, tmp_path: Path, outcome: str) -> None:
-        from decoy_engine.execution._isolated_run import _result_from_envelope
+        from decoy_engine.execution._isolated_commit import result_from_envelope
 
         staging = tmp_path / "_decoy_isolated_stage_x"
         (staging / "t").mkdir(parents=True)
         (staging / "t" / "part-0.parquet").write_bytes(b"partial")
         envelope = {"outcome": outcome, "peak_rss_mb": 1.0, "error": "MemoryError: x"}
-        result = _result_from_envelope(envelope, tmp_path / "out", 123, staging)
+        result = result_from_envelope(envelope, tmp_path / "out", 123, staging)
         assert result.outcome == outcome
         assert not staging.exists()
 

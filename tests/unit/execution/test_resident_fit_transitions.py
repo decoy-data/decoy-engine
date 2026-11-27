@@ -254,7 +254,7 @@ def test_at_c11b_a_foreign_key_job_is_not_priced_before_its_read(
     fk_cfg, _ = _fk_job(tmp_path)
     fk_lazy = {n: LazySource(Path(s["path"])) for n, s in fk_cfg["sources"].items()}
     detected: list[str] = []
-    monkeypatch.setattr(rf, "_kill_ceiling", lambda: detected.append("asked") or 1, raising=False)
+    monkeypatch.setattr(rf, "kill_ceiling", lambda: detected.append("asked") or 1)
     # Fidelity rules the bounded route out, so the pre-pass reads both tables whole.
     run_pipeline(fk_cfg, fk_lazy, resident_fallback=True, fidelity_report=True, **KW)
     assert "materialize_source" in reads
@@ -262,9 +262,7 @@ def test_at_c11b_a_foreign_key_job_is_not_priced_before_its_read(
 
     # The same kind of read with no foreign key does ask for the ceiling.
     flat, lazy = _declared_job(tmp_path)
-    monkeypatch.setattr(
-        rf, "_kill_ceiling", lambda: detected.append("asked") or (1 << 40), raising=False
-    )
+    monkeypatch.setattr(rf, "kill_ceiling", lambda: detected.append("asked") or (1 << 40))
     run_pipeline(flat, {"t": lazy}, resident_fallback=True, **KW)
     assert detected == ["asked"]
 
@@ -560,7 +558,7 @@ def test_at_c20_a_forced_mode_or_a_foreign_key_job_is_not_priced(
 ) -> None:
     cfg, table = _transform_job(tmp_path)
     asked: list[str] = []
-    monkeypatch.setattr(rf, "_kill_ceiling", lambda: asked.append("asked") or 1, raising=False)
+    monkeypatch.setattr(rf, "kill_ceiling", lambda: asked.append("asked") or 1)
     run_pipeline(cfg, {"t": table}, execution_mode="full_frame", **KW)
     fk_cfg, tables = _fk_job(
         tmp_path, parent_transforms=[{"op": "filter", "expression": "id != ''"}]
