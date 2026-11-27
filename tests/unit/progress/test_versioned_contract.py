@@ -13,7 +13,7 @@ import math
 
 import pyarrow as pa
 import pytest
-from tests._progress_v0 import v0_projection
+from tests.unit.progress.test_consumer_contract import v0_projection
 
 from decoy_engine import progress, reasons
 from decoy_engine._progress_events import _LEGACY_FIELDS

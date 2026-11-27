@@ -10,7 +10,7 @@ import pytest
 
 from decoy_engine import phase, progress, reasons
 from decoy_engine.reasons import CleanupState, Operation, PublicationState, ReasonRecord
-from tests._progress_v0 import v0_projection
+from tests.unit.progress.test_consumer_contract import v0_projection
 
 _RV = reasons.REGISTRY_VERSION
 _TS = 1700000000.0
