@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable
-from typing import Any
 
 import pytest
 
@@ -179,51 +178,19 @@ def test_detail_copy_cell_fails_when_the_marker_reaches_another_surface(
     assert_extra_surface_is_flagged(lambda: _check_detail_copy(translated, _F3))
 
 
-def _text_mask_translator() -> Callable[[Any, str], BaseException]:
+def _text_mask_translator() -> Callable[[str], BaseException]:
     from decoy_engine.execution.native._text_mask_route import text_mask_fail_closed_error
 
     return text_mask_fail_closed_error
 
 
-def test_text_mask_translator_drops_the_value_the_error_was_given() -> None:
-    from decoy_engine.errors import FpeUnencryptableError
-
-    source = FpeUnencryptableError(_FIXED_DETAIL, value=CANARY)
-    source.__cause__ = RuntimeError(CANARY)
-    translated = _text_mask_translator()(source, "col")
+def test_text_mask_translator_takes_no_value_and_carries_none() -> None:
+    """The translator is value-free by construction: it is given the column name only."""
+    translated = _text_mask_translator()("col")
     if type(translated).__name__ != "StrategyError":
         pytest.fail(f"expected StrategyError, got {type(translated).__name__}")
-    if _FIXED_DETAIL not in str(translated):
-        pytest.fail("the translator dropped the source message")
+    assert translated.__cause__ is None
     assert_no_canary(rendered_surfaces(translated))
-
-
-def _copied_message() -> BaseException:
-    from decoy_engine.errors import FpeUnencryptableError
-
-    translated = _text_mask_translator()(FpeUnencryptableError(f"row value {CANARY}"), "col")
-    if type(translated).__name__ != "StrategyError":
-        pytest.fail(f"expected StrategyError, got {type(translated).__name__}")
-    return translated
-
-
-_MESSAGE_COPY = f"{_F3}: _text_mask_route, the source message is embedded"
-
-
-def test_text_mask_translator_copies_the_message_it_is_given() -> None:
-    assert_known_leak(
-        rendered_surfaces(_copied_message()), EXC_MESSAGE_AND_ATTR_SURFACES, _MESSAGE_COPY
-    )
-
-
-def test_message_copy_cell_fails_when_the_marker_reaches_another_surface() -> None:
-    translated = _copied_message()
-    translated.records = [CANARY]  # type: ignore[attr-defined]
-    assert_extra_surface_is_flagged(
-        lambda: assert_known_leak(
-            rendered_surfaces(translated), EXC_MESSAGE_AND_ATTR_SURFACES, _MESSAGE_COPY
-        )
-    )
 
 
 def test_real_fpe_error_reaches_the_text_mask_translator_value_free() -> None:
@@ -231,7 +198,7 @@ def test_real_fpe_error_reaches_the_text_mask_translator_value_free() -> None:
     from decoy_engine.errors import FpeUnencryptableError
     from decoy_engine.transforms.fpe import fpe_encrypt_value
 
-    with pytest.raises(FpeUnencryptableError) as raised:
+    with pytest.raises(FpeUnencryptableError):
         fpe_encrypt_value(CANARY, b"\x01" * 32, "0123456789", b"t", False)
-    translated = _text_mask_translator()(raised.value, "col")
+    translated = _text_mask_translator()("col")
     assert_no_canary(rendered_surfaces(translated))

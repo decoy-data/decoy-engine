@@ -364,16 +364,13 @@ def _cell_connector_auth(tmp_path: Path, ext: Path, port: int) -> Observed:
     )
 
 
-_LARK_LEAK = "AE5 (#810) rewrites _lark_parser.py:241 to a value-free message"
+_LARK_LEAK = "no recorded leak: the expression cells now assert a clean surface"
 
 # (id, builder, expected exception code, expected exception class name, extra path check, marks)
 # Surfaces observed carrying the marker on main, per cell. The cell xfails only when exactly these
 # surfaces leak; a further surface fails hard (`assert_known_leak`).
 _EXC_SURFACES = EXC_MESSAGE_AND_ATTR_SURFACES
-_KNOWN_LEAKS: dict[str, tuple[str, ...]] = {
-    "expression_bad_string_escape": _EXC_SURFACES,
-    "expression_bad_string_escape_run": _EXC_SURFACES,
-}
+_KNOWN_LEAKS: dict[str, tuple[str, ...]] = {}
 
 _CELLS: list[Any] = [
     ("chunked_cast_out_of_range", _cell_chunked_cast, "chunked_schema_mismatch", None, None, []),
