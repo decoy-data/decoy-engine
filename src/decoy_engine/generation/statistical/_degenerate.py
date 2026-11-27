@@ -177,7 +177,7 @@ def check_degenerate(spec: StatisticalSpec) -> None:
         raise StatisticalSpecError(
             code=reasons.plan.GENERATION_UNBOUNDED_COLUMN,
             message=(
-                f"statistical column {spec.column!r}: year_bins: sampled years must lie in "
+                f"statistical column {column_label(spec.column)!r}: year_bins: sampled years must lie in "
                 f"{MIN_YEAR}..{MAX_SAMPLED_YEAR}."
             ),
         ) from None

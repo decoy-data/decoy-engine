@@ -95,7 +95,7 @@ def check_source_schema(schema: pa.Schema, *, table: str) -> None:
 
 def _outside_mask(values: Any) -> Any:
     """Per-cell mask of the cells of a plain date or timestamp array outside calendar years 1 to
-    9999 (null cells are not outside), or `None` when no cell can be. A zoned cell is outside
+    9999 (a null cell is null in the mask, which sums and keeps as not outside), or `None` when no cell can be. A zoned cell is outside
     when its instant is, or its local calendar date is: the mask is the UTC test OR the same test
     over `local_timestamp` of the same cells, so the two line up cell for cell. The local wall
     clock wraps near the int64 extremes, but such a cell is already outside by the UTC test."""
@@ -119,15 +119,12 @@ def _outside_mask(values: Any) -> Any:
     ):
         return None
     utc_outside = _count_outside(ints, low, high)
-    if utc_outside is not None:
-        utc_outside = _pc.fill_null(utc_outside, False)
     if not zone:
         return utc_outside
     local = _count_outside(_pc.local_timestamp(values).cast(pa.int64()), low, high)
-    if local is None:
-        return utc_outside
-    local = _pc.fill_null(local, False)
-    return local if utc_outside is None else _pc.or_(utc_outside, local)
+    if local is None or utc_outside is None:
+        return local if utc_outside is None else utc_outside
+    return _pc.or_(utc_outside, local)
 
 
 def _sum(mask: Any) -> int:

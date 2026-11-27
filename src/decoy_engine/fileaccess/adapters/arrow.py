@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -64,6 +64,22 @@ def read_table(handle: FileHandle, **kwargs: Any) -> pa.Table:
 
 def parquet_file(handle: FileHandle, **kwargs: Any) -> pq.ParquetFile:
     return guarded(handle.display, _strict(handle), pq.ParquetFile, handle.library_path(), **kwargs)
+
+
+def projected_schema(
+    handle: FileHandle | None, parquet_file: pq.ParquetFile, columns: Sequence[str] | None
+) -> pa.Schema:
+    """The schema a read of `columns` returns, from the open file and without decoding a data
+    page: Arrow resolves nested field prefixes and an empty projection the way the batch reader
+    does. With no projection it is the footer schema."""
+    if columns is None:
+        return parquet_file.schema_arrow
+    if handle is None:
+        return parquet_file.read_row_groups([], columns=list(columns)).schema
+    read = guarded(
+        handle.display, _strict(handle), parquet_file.read_row_groups, [], columns=list(columns)
+    )
+    return read.schema
 
 
 def iter_batches(

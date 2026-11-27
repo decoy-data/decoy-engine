@@ -11,6 +11,7 @@ from collections.abc import Generator, Iterable, Iterator
 from typing import Any, cast
 
 from decoy_engine.progress import ProgressChannel, get_active_channel
+from decoy_engine.safe_output import own_date_chunks
 
 
 def observe_chunked(table: str, chunks: Iterable[Any]) -> Iterator[Any]:
@@ -23,6 +24,9 @@ def observe_chunked(table: str, chunks: Iterable[Any]) -> Iterator[Any]:
     open start on a run that succeeded as a table that ran. The late close of an abandoned
     stream therefore never reports a success.
     """
+    # The last stop before the caller: every date column leaves over buffers it owns, so no
+    # slice, null payload or padding carries a date the checked read excluded.
+    chunks = own_date_chunks(chunks)
     channel = get_active_channel()
     if not channel.active:
         return channel.count_rows(table, chunks)

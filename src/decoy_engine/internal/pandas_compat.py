@@ -19,6 +19,8 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine._arrow_types import is_date_leaf
+
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
 
@@ -113,6 +115,50 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
     return dtype_cls() if dtype_cls is not None else None
 
 
+def _working_categorical(column: Any) -> pd.Categorical:
+    """A pandas categorical for a date dictionary column that passed the checked read.
+
+    Arrow keeps the null entries the repair retains, and pandas refuses a null category, so the
+    working copy is built apart from the Arrow source (which keeps its own dictionaries for the
+    output). Categories are the non-null entries in first dictionary order, retaining valid
+    unused ones; a null index or a reference to a null entry is a missing row; codes are int64;
+    several chunks unify their categories in first-seen order and share one code per value."""
+    chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
+    entries = [chunk.dictionary for chunk in chunks]
+    categories = pc.unique(pa.concat_arrays([e.drop_null() for e in entries]))
+    codes = [
+        pc.take(pc.index_in(e, value_set=categories), chunk.indices).cast(pa.int64())
+        for e, chunk in zip(entries, chunks, strict=True)
+    ]
+    flat = pc.fill_null(pa.chunked_array(codes, pa.int64()), -1).to_numpy()
+    return pd.Categorical.from_codes(
+        flat, categories=pd.Index(categories.to_pandas()), ordered=column.type.ordered
+    )
+
+
+def table_to_pandas(table: pa.Table) -> pd.DataFrame:
+    """`table.to_pandas()`, with each date dictionary column built as a working categorical.
+
+    A date dictionary that passed the checked read can hold a null entry (kept for the output)
+    that `to_pandas` refuses, so those columns convert through `_working_categorical`. Every
+    other column converts as pyarrow does."""
+    dated = [
+        i
+        for i, t in enumerate(table.schema.types)
+        if pa.types.is_dictionary(t) and is_date_leaf(t.value_type)
+    ]
+    if not dated:
+        return table.to_pandas()
+    swapped = table
+    for i in dated:
+        swapped = swapped.set_column(i, table.schema.names[i], pa.nulls(table.num_rows))
+    frame = swapped.to_pandas()
+    for i in dated:
+        name = table.schema.names[i]
+        frame[name] = pd.Series(_working_categorical(table.column(i)), index=frame.index)
+    return frame
+
+
 def table_to_pandas_exact_ints(
     table: pa.Table,
     columns: Iterable[str],
@@ -129,7 +175,7 @@ def table_to_pandas_exact_ints(
     does not fit its own dtype calls `on_unconvertible(column)` (which must raise), or re-raises
     the pyarrow error when none is given.
     """
-    df = table.to_pandas()
+    df = table_to_pandas(table)
     failed = None
     for col in columns:
         if col not in table.column_names or not pa.types.is_integer(table.schema.field(col).type):

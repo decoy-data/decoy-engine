@@ -14,7 +14,8 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, is_text
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.safe_output import attach_output_metadata
+from decoy_engine.internal.pandas_compat import table_to_pandas
+from decoy_engine.safe_output import attach_output_metadata, own_date_columns
 
 
 def _with_source_types(
@@ -57,7 +58,7 @@ def _expected_index(source: pa.Table, stored: list[str]) -> pd.Index:
     the range its own pandas metadata describes (any start and step, so `df.iloc[::2]` and
     `df.iloc[::-1]` sources hold), else `0..n`."""
     if stored:
-        values = source.select(stored).replace_schema_metadata(None).to_pandas()
+        values = table_to_pandas(source.select(stored).replace_schema_metadata(None))
         return pd.MultiIndex.from_frame(values) if len(stored) > 1 else pd.Index(values[stored[0]])
     for entry in (source.schema.pandas_metadata or {}).get("index_columns", []):
         if isinstance(entry, dict) and entry.get("kind") == "range":
@@ -176,7 +177,7 @@ def table_from_pandas_keeping_source_types(
         carried=carried,
         carried_meta=hints,
     )
-    return pa.Table.from_arrays(columns, schema=schema)
+    return own_date_columns(pa.Table.from_arrays(columns, schema=schema))
 
 
 __all__ = ["table_from_pandas_keeping_source_types"]

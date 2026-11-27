@@ -42,7 +42,8 @@ import pyarrow.parquet as pq
 from decoy_engine import fileaccess
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
-from decoy_engine.io import check_source_dates, checked_batches
+from decoy_engine.internal.pandas_compat import table_to_pandas
+from decoy_engine.io import check_source_dates, check_source_schema, checked_batches
 from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
@@ -181,6 +182,11 @@ class OpenedLazyBatches:
         self._handle = handle
         self._closed = False
         self.facts = footer_facts_of(parquet_file)
+        # Gate the projected schema of this open file: before the first batch, selected-out
+        # columns never refuse.
+        check_source_schema(
+            arrow_adapter.projected_schema(handle, parquet_file, columns), table=table
+        )
         # The projection narrows the batches only; `facts` stay the whole file's.
         self.batches = checked_batches(self._read(batch_rows, use_threads, columns), table=table)
 
@@ -264,21 +270,14 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
-        rows = check_batch_rows(batch_rows)
-        return checked_batches(self._iter_batches(rows, columns), table=self.table)
+        return self._stream(check_batch_rows(batch_rows), columns)
 
-    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
-        handle = self._handle()
+    def _stream(self, rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
+        opened = self.open_batches(rows, columns=columns)
         try:
-            parquet_file = arrow_adapter.parquet_file(handle)
-            yield from arrow_adapter.iter_batches(
-                handle,
-                parquet_file,
-                batch_size=batch_rows,
-                **({} if columns is None else {"columns": columns}),
-            )
+            yield from opened.batches
         finally:
-            handle.close()
+            opened.close()
 
     def open_batches(
         self,
@@ -414,13 +413,16 @@ class ParquetFileSource(_PolicyBound):
         return self._lazy().schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        lazy = self._lazy()
-        return head_frame_from_batches(
-            lazy.iter_batches(sample_rows), sample_rows, lazy.schema, table=self.table
-        )
+        opened = self._lazy().open_batches(sample_rows)
+        try:
+            return head_frame_from_batches(
+                opened.batches, sample_rows, opened.schema, table=self.table
+            )
+        finally:
+            opened.close()
 
     def to_frame(self) -> pd.DataFrame:
-        return self._lazy().to_table().to_pandas()
+        return table_to_pandas(self._lazy().to_table())
 
 
 @dataclass(frozen=True)
@@ -493,6 +495,7 @@ def head_frame_from_batches(
     an empty frame carrying the schema's columns (so the walker still emits one
     ColumnProfile per column).
     """
+    check_source_schema(schema, table=table)
     collected: list[pa.RecordBatch] = []
     gathered = 0
     for batch in batches:
@@ -501,9 +504,9 @@ def head_frame_from_batches(
         if gathered >= sample_rows:
             break
     if not collected:
-        return schema.empty_table().to_pandas()
+        return table_to_pandas(schema.empty_table())
     head = pa.Table.from_batches(collected).slice(0, sample_rows)
-    return check_source_dates(head, table=table).to_pandas()
+    return table_to_pandas(check_source_dates(head, table=table))
 
 
 # ---------------------------------------------------------------------

@@ -134,18 +134,17 @@ def test_nested_types_enumerated() -> None:
     new pyarrow nested type turns this red; an unhandled nested type fails closed."""
     predicates = {n for n in dir(pa.types) if n.startswith("is_")}
     assert predicates <= fm.HANDLED_PREDICATES | SCALAR_PREDICATES
+    optional = {n for n in ("is_list_view", "is_large_list_view") if hasattr(pa.types, n)}
     assert {
         "is_struct",
         "is_list",
         "is_large_list",
         "is_fixed_size_list",
-        "is_list_view",
-        "is_large_list_view",
         "is_map",
         "is_union",
         "is_dictionary",
         "is_run_end_encoded",
-    } == fm.HANDLED_PREDICATES
+    } | optional == fm.HANDLED_PREDICATES
 
 
 def test_unhandled_nested_type_raises(monkeypatch: pytest.MonkeyPatch) -> None:

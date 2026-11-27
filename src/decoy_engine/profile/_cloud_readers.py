@@ -26,6 +26,7 @@ import pyarrow.parquet as pq
 
 from decoy_engine._lexeme import LEXEME_KEY, pandas_lexeme_kwargs
 from decoy_engine.connectors import _clients
+from decoy_engine.internal.pandas_compat import table_to_pandas
 from decoy_engine.io import check_source_dates
 from decoy_engine.profile._readers import (
     PROOF_READ_ERRORS,
@@ -278,7 +279,7 @@ class S3ParquetSource:
 def _checked_frame(data: bytes, table: str) -> pd.DataFrame:
     """A whole Parquet object as a frame, after its dates passed the calendar check."""
     arrow_table = pq.read_table(io.BytesIO(data))
-    return check_source_dates(arrow_table, table=table).to_pandas()
+    return table_to_pandas(check_source_dates(arrow_table, table=table))
 
 
 class S3CsvSource:

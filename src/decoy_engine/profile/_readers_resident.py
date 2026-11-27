@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
+from decoy_engine.internal.pandas_compat import table_to_pandas
 from decoy_engine.io import check_source_dates
 from decoy_engine.profile._readers import RowCount
 
@@ -18,7 +19,7 @@ def _frame_of(table: pa.Table) -> pd.DataFrame:
     """`table` as a DataFrame; a column pandas cannot hold (a date past year 9999, a
     sub-microsecond time) is profiled as text, so the route that never converts still runs."""
     try:
-        return table.to_pandas()
+        return table_to_pandas(table)
     except (ValueError, OverflowError):
         columns = []
         for column in table.columns:
@@ -27,7 +28,7 @@ def _frame_of(table: pa.Table) -> pd.DataFrame:
             except (ValueError, OverflowError):
                 column = column.cast(pa.string())
             columns.append(column)
-        return pa.Table.from_arrays(columns, names=table.column_names).to_pandas()
+        return table_to_pandas(pa.Table.from_arrays(columns, names=table.column_names))
 
 
 @dataclass(frozen=True)

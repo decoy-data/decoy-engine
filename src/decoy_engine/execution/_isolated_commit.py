@@ -51,6 +51,7 @@ from decoy_engine.fileaccess import (
     own_entry,
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.io import check_source_schema
 from decoy_engine.io.bounded_reader import UnsupportedColumnType
 from decoy_engine.publication import (
     CommitReceipt,
@@ -160,7 +161,11 @@ def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, di
     """Stage each table under an opaque name in the private work root.
 
     Raises `UnsupportedColumnType` for a dictionary whose values are a dictionary or an extension
-    type: Arrow IPC cannot read those back, and Parquet takes no dictionary."""
+    type: Arrow IPC cannot read those back, and Parquet takes no dictionary. A date-bearing type
+    the checked source read refuses is refused first, under the mapping key, so the IPC reasons
+    never hide it."""
+    for name, table in sources.items():
+        check_source_schema(table.schema, table=name)
     for table in sources.values():
         for field in table.schema:
             kind = arrow_adapter.ipc_refusal(field.type)

@@ -456,7 +456,7 @@ def run_mask_pipeline_chunked(
     refuse_unchecked_route(config, "chunked")
     return _chunked_oracle._mask_pipeline_chunked(
         config,
-        checked_chunks(chunks, table=table),
+        checked_chunks(chunks, table=table, source_schema=source_schema),
         table=table,
         engine_version=engine_version,
         source_schema=source_schema,

@@ -40,7 +40,7 @@ import pyarrow.types as pat
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError, lazy_source_changed
-from decoy_engine.io import checked_batches
+from decoy_engine.io import check_source_schema, checked_batches
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
 
 if TYPE_CHECKING:
@@ -329,10 +329,17 @@ class _FixedSchemaChunks:
             self._close()
 
 
-def checked_chunks(chunks: Iterable[pa.Table], *, table: str) -> Iterable[pa.Table]:
+def checked_chunks(
+    chunks: Iterable[pa.Table], *, table: str, source_schema: pa.Schema | None = None
+) -> Iterable[pa.Table]:
     """`chunks` with every table date-checked as it is read. A `_FixedSchemaChunks` stays one,
-    because the native route recognises that concrete type."""
+    because the native route recognises that concrete type. A schema supplied up front (the
+    argument, or the fixed-schema producer's) is gated here, so an empty input refuses too; a
+    schema-less iterable is gated by its first chunk."""
+    if source_schema is not None:
+        check_source_schema(source_schema, table=table)
     if isinstance(chunks, _FixedSchemaChunks):
+        check_source_schema(chunks.source_schema, table=table)
         return _FixedSchemaChunks(
             chunks.source_schema, lambda: checked_batches(chunks, table=table), chunks.close
         )
