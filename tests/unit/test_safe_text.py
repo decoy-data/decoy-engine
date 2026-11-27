@@ -7,7 +7,6 @@ The autouse fixture in ``tests/conftest.py`` turns the strict switch on; ``produ
 from __future__ import annotations
 
 import ast
-import functools
 import logging
 import multiprocessing
 import pickle
@@ -24,7 +23,6 @@ import pytest
 from decoy_engine import _safe_text
 from decoy_engine._safe_text import WITHHELD, SafeText
 
-_MODULE_TEXT = "a module level constant"
 _LEAF = Path(_safe_text.__file__)
 
 
@@ -42,45 +40,36 @@ def production() -> Iterator[None]:
 def _wrapper(module_name: str) -> Callable[[Any], Any]:
     """A function named ``trampoline`` whose globals carry ``module_name``."""
     ns: dict[str, Any] = {"__name__": module_name, "SafeText": SafeText}
-    exec("def trampoline(text):\n    return SafeText.const(text)\n", ns)  # noqa: S102
+    exec("def trampoline(text):\n    return SafeText(text)\n", ns)  # noqa: S102
     return ns["trampoline"]
 
 
-def _wrap_param(v: Any) -> Any:
-    return SafeText.const(v)
-
-
-# Test B: every spelling that is not a literal call.
-_NON_LITERAL: dict[str, Callable[[str], Any]] = {
-    "wrapper-parameter": _wrap_param,
-    "f-string-field": lambda v: SafeText.const(f"value {v}"),
-    "str-of-exception": lambda v: SafeText.const(str(ValueError(v))),
-    "module-constant": lambda v: SafeText.const(_MODULE_TEXT),
-    "partial": lambda v: functools.partial(SafeText.const, v)(),
-    "getattr": lambda v: getattr(SafeText, "const")(v),  # noqa: B009
+# The runtime refuses what it can see. Whether an argument was written as a literal is the AST
+# sentry's job (tests/sentry/safe_output/test_safe_text_literals.py).
+_NON_TEXT: dict[str, Callable[[str], Any]] = {
     "direct-constructor": lambda v: SafeText(v),
-    "template-format": lambda v: SafeText.literal_template(v),
     "not-a-str": lambda v: SafeText.const(1234),  # type: ignore[arg-type]
     "bytes": lambda v: SafeText.const(b"bytes text"),  # type: ignore[arg-type]
+    "template-not-a-str": lambda v: SafeText.literal_template(None),  # type: ignore[arg-type]
 }
 
 
-@pytest.mark.parametrize("case", sorted(_NON_LITERAL))
+@pytest.mark.parametrize("case", sorted(_NON_TEXT))
 def test_a_non_literal_raises_under_the_strict_switch(case: str) -> None:
     canary = _canary()
     with pytest.raises(TypeError) as err:
-        _NON_LITERAL[case](canary)
+        _NON_TEXT[case](canary)
     assert canary not in str(err.value)
     assert "test_safe_text" in str(err.value)  # the call site, as a code location
 
 
-@pytest.mark.parametrize("case", sorted(_NON_LITERAL))
+@pytest.mark.parametrize("case", sorted(_NON_TEXT))
 def test_a_non_literal_is_withheld_in_production_with_no_canary(
     case: str, production: None, caplog: pytest.LogCaptureFixture
 ) -> None:
     canary = _canary()
     with caplog.at_level(logging.WARNING, logger="decoy_engine._safe_text"):
-        out = _NON_LITERAL[case](canary)
+        out = _NON_TEXT[case](canary)
     assert out is WITHHELD
     assert str(out) == "" and not out
     assert canary not in caplog.text and canary not in repr(out)
@@ -91,7 +80,7 @@ def test_production_logs_one_warning_per_call_site(
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="decoy_engine._safe_text"):
         for _ in range(3):
-            _wrap_param(_canary())
+            SafeText(_canary())
     assert len(caplog.records) == 1
 
 
@@ -112,128 +101,20 @@ def test_a_literal_in_every_plain_spelling_passes() -> None:
     ]
 
 
-def test_a_literal_in_a_tuple_constant_is_not_a_literal_of_the_caller() -> None:
-    pair = ("only inside a tuple", "other")
-    with pytest.raises(TypeError):
-        SafeText.const(pair[0])
-
-
-# A20 and A20b: the mutmut wrapper is skipped by module name, never by function name.
-def test_a_wrapper_in_a_mutmut_module_passes_the_literal_of_its_caller() -> None:
-    wrap = _wrapper("mutmut.mutation.trampoline")
-    # Calls sit outside the asserts: pytest's assert rewriting changes folded constants.
-    plain = wrap("plain text")
-    folded = wrap("ab" + "cd-ef")
-    implicit = wrap("one " "two")  # fmt: skip
-    nofield = wrap(f"no field here")  # noqa: F541
-    in_lambda = (lambda: wrap("inside a lambda"))()
-    in_comp = next(wrap("inside a comprehension") for _ in range(1))
-    assert [str(x) for x in (plain, folded, implicit, nofield, in_lambda, in_comp)] == [
-        "plain text",
-        "abcd-ef",
-        "one two",
-        "no field here",
-        "inside a lambda",
-        "inside a comprehension",
-    ]
-
-
-def test_the_same_wrapper_outside_mutmut_withholds_a_non_literal_argument() -> None:
-    wrap = _wrapper("someapp.x")
-    with pytest.raises(TypeError):
-        wrap(_canary())
-    with pytest.raises(TypeError):
-        wrap("plain text")  # the wrapper's own constants do not hold it
+# A20: the call site skips mutmut frames by module name, never by function name.
+def test_a_refusal_through_a_mutmut_wrapper_names_the_callers_module() -> None:
+    with pytest.raises(TypeError, match="test_safe_text"):
+        _wrapper("mutmut.mutation.trampoline")(_canary())
 
 
 def test_a_module_that_only_starts_like_mutmut_is_not_skipped() -> None:
-    with pytest.raises(TypeError):
-        _wrapper("mutmutx.trampoline")("plain text")
+    with pytest.raises(TypeError, match="mutmutx"):
+        _wrapper("mutmutx.trampoline")(_canary())
 
 
-def test_a_mutmut_wrapper_calling_a_body_with_the_literal_passes() -> None:
-    def body() -> Any:
-        return SafeText.const("body literal")
-
-    def body_lambda() -> Any:
-        return (lambda: SafeText.const("lambda body literal"))()
-
-    def body_comp() -> Any:
-        return next(SafeText.const("comprehension body literal") for _ in range(1))
-
-    def body_implicit() -> Any:
-        return SafeText.const("body " "implicit")  # fmt: skip
-
-    ns: dict[str, Any] = {"__name__": "mutmut.mutation.trampoline"}
-    exec("def trampoline(fn):\n    return fn()\n", ns)  # noqa: S102
-    texts = [str(ns["trampoline"](f)) for f in (body, body_lambda, body_comp, body_implicit)]
-    assert texts == [
-        "body literal",
-        "lambda body literal",
-        "comprehension body literal",
-        "body implicit",
-    ]
-
-
-# A22: identity with a literal must not be a cache accident.
-def test_a_one_character_cell_equal_to_a_literal_is_withheld() -> None:
-    literal = "a"
-    cell = sys.intern(b"a".decode())  # 3.11 does not hand back the cached cell without this
-    assert cell is literal  # CPython caches one-character strings
-    with pytest.raises(TypeError):
-        SafeText.const(cell)
-
-
-def test_an_interned_cell_equal_to_no_literal_is_withheld() -> None:
-    cell = sys.intern("".join(["unrelated", "-cell"]))
-    with pytest.raises(TypeError):
-        SafeText.const(cell)
-
-
-# Calls sit outside the asserts in this file: pytest's assert rewriting passes each argument through
-# a temporary variable, which is not a literal at the call site.
-# The plan's intent (A22): only a literal written at the call site prints. Identity with a constant
-# that the function happens to mention elsewhere is not proof, so a variable never qualifies.
-def test_an_interned_cell_equal_to_a_caller_literal_is_withheld_by_both_builders() -> None:
-    literal = "abcdef"
-    cell = sys.intern("".join(["abc", "def"]))
-    assert cell is literal
-    with pytest.raises(TypeError):
-        SafeText.const(cell)
-    with pytest.raises(TypeError):
-        SafeText.literal_template(cell)
-    printed = SafeText.const("abcdef")
-    assert str(printed) == "abcdef"  # the literal itself still prints
-
-
-def test_a_conditional_or_boolean_argument_is_not_a_literal_at_the_call_site() -> None:
-    cell = sys.intern("".join(["abc", "def"]))
-    flag = bool(cell)
-    with pytest.raises(TypeError):
-        SafeText.const(cell if flag else "abcdef")
-    with pytest.raises(TypeError):
-        SafeText.const(cell or "abcdef")
-    with pytest.raises(TypeError):
-        SafeText.literal_template(cell or "abcdef", names={"k": "v"})
-
-
-def test_a_literal_template_with_keyword_slots_still_passes_for_a_literal() -> None:
+def test_a_literal_template_with_keyword_slots_prints_its_text() -> None:
     made = SafeText.literal_template("plain {{x}}", names={"k": "v"}, paths=None)
     assert str(made) == "plain {x}"
-
-
-def test_a_keyword_only_text_is_not_proof() -> None:
-    with pytest.raises(TypeError):
-        SafeText.const(text="keyword text")  # type: ignore[call-arg]
-
-
-# A23: equal is not identical.
-def test_an_equal_but_not_identical_cell_is_withheld() -> None:
-    literal = "CANARY-77"
-    row = "".join(["CANARY", "-77"])
-    assert row == literal and row is not literal
-    with pytest.raises(TypeError):
-        SafeText.const(row)
 
 
 # literal_template: AE1a1 has no safe slot type, so every slot is withheld.
@@ -321,8 +202,8 @@ def _worker_literal() -> Any:
     return SafeText.const("worker literal")
 
 
-def _worker_non_literal(value: str) -> Any:
-    return SafeText.const(value)
+def _worker_non_text() -> Any:
+    return SafeText.const(None)  # type: ignore[arg-type]
 
 
 def _worker_echo(text: object) -> str:
@@ -342,12 +223,7 @@ def test_a_safe_text_crosses_a_process_pool_and_the_worker_withholds() -> None:
         assert isinstance(made, SafeText) and str(made) == "worker literal"
         sent = SafeText.const("sent text")
         assert pool.submit(_worker_echo, sent).result() == "sent text"
-        assert pool.submit(_worker_non_literal, _canary()).result() is WITHHELD
-
-
-def test_a_two_character_literal_is_the_shortest_that_passes() -> None:
-    made = SafeText.const("ok")
-    assert str(made) == "ok"
+        assert pool.submit(_worker_non_text).result() is WITHHELD
 
 
 def test_a_minted_text_cannot_be_changed_or_deleted() -> None:
@@ -395,8 +271,8 @@ def test_the_production_warning_names_module_function_and_line(
     production: None, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="decoy_engine._safe_text"):
-        SafeText.const(_canary())
-    pattern = r"SafeText withheld a non-literal at \S+:test_the_production_warning_[a-z_]+:\d+$"
+        SafeText(_canary())
+    pattern = r"SafeText withheld a refused value at \S+:test_the_production_warning_[a-z_]+:\d+$"
     assert re.search(pattern, caplog.records[0].getMessage())
 
 
@@ -405,19 +281,21 @@ def test_a_template_that_starts_with_a_slot_keeps_only_the_marker(production: No
     assert str(made) == "<withheld>"
 
 
-def test_no_frame_means_no_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_frame_means_an_unknown_site(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_safe_text.inspect, "currentframe", lambda: None)
-    assert _safe_text._caller_code() == (None, ("unknown", "unknown", 0))
+    assert _safe_text._caller_site() == ("unknown", "unknown", 0)
 
 
-def test_an_error_while_walking_frames_means_no_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_error_while_walking_frames_means_an_unknown_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class _Broken:
         @property
         def f_globals(self) -> dict[str, Any]:
             raise RuntimeError("broken frame")
 
     monkeypatch.setattr(_safe_text.inspect, "currentframe", lambda: _Broken())
-    assert _safe_text._caller_code() == (None, ("unknown", "unknown", 0))
+    assert _safe_text._caller_site() == ("unknown", "unknown", 0)
 
 
 class _RaisingLen(str):
@@ -471,8 +349,8 @@ def _worker_strict_active() -> bool:
     return _safe_text._strict_active()
 
 
-def _worker_withholds(value: str) -> bool:
-    return SafeText.const(value) is WITHHELD
+def _worker_withholds(value: object) -> bool:
+    return SafeText.const(value) is WITHHELD  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("method", ["fork", "spawn"])
@@ -483,7 +361,7 @@ def test_strict_applies_only_in_the_process_that_set_it(method: str) -> None:
     ctx = multiprocessing.get_context(method)
     with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
         assert pool.submit(_worker_strict_active).result() is False
-        assert pool.submit(_worker_withholds, _canary()).result() is True
+        assert pool.submit(_worker_withholds, None).result() is True
 
 
 def _worker_set_strict_roundtrip() -> tuple[bool, bool, bool]:
@@ -500,14 +378,3 @@ def test_set_strict_returns_the_effective_value_in_a_forked_child() -> None:
     with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
         # The child's effective strict is off, so save/restore must read False then True.
         assert pool.submit(_worker_set_strict_roundtrip).result() == (False, True, False)
-
-
-# Equal code objects must not share a proof: the check runs against the caller's own constants.
-def test_two_equal_compiled_callers_each_print_their_own_literal() -> None:
-    source = "def render():\n    return SafeText.const('ordinary fixed message')\n"
-    printed = []
-    for _ in range(2):
-        ns: dict[str, Any] = {"__name__": "someapp.render", "SafeText": SafeText}
-        exec(compile(source, "<render>", "exec"), ns)  # noqa: S102
-        printed.append(str(ns["render"]()))
-    assert printed == ["ordinary fixed message"] * 2
