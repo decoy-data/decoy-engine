@@ -322,3 +322,48 @@ def test_det_override_fails_closed_even_when_a_sibling_downgrades_the_table() ->
     producer = fixed_schema_chunks_from_resident(with_force(_INT_SOURCE), 3)
     cols = [faker_col("f"), passthrough("p"), force_oracle(FORCE)]
     _assert_det_pool_error(_run_int_override(producer, cols))
+
+
+# ---------------------------------------------------------------------------
+# A computed draw (`uuid`, `random_choice`) has no pool, so the pool-type preflights never build
+# one for it: the string schema pin stays, the pool check applies to live pool variants only.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+@pytest.mark.parametrize(
+    ("provider", "config"),
+    [("uuid", {}), ("random_choice", {"elements": ["a", "b", "c"]})],
+)
+def test_a_computed_draw_never_builds_a_pool_in_the_chunked_preflight(
+    provider: str, config: dict[str, Any], deterministic: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both pool-type preflights keep the string schema pin but build no pool for a computed
+    draw: the oracle leg has none, and a cache miss must not try to make one."""
+    from types import SimpleNamespace
+
+    from decoy_engine.execution.native import _chunk_masking
+    from decoy_engine.generation.pool import PoolCache
+    from tests.unit.execution.strategies.test_faker_computed_routes import _column, _seed
+
+    def no_pool(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("a pool was built for a computed draw")
+
+    monkeypatch.setattr(_chunk_masking.PoolBuilder, "build", no_pool)
+    seed = _seed(provider, config, deterministic=deterministic)
+    table_seed = SimpleNamespace(per_column=[("f", seed)])
+    state = SimpleNamespace(
+        first=pa.table({"f": pa.array([1, 2], pa.int64())}),
+        plan=SimpleNamespace(
+            seed_envelope=SimpleNamespace(job_seed=b"j" * 8, per_table=[(TABLE, table_seed)])
+        ),
+        pool_cache=PoolCache(),
+        registry=None,
+    )
+    cfg = {
+        "tables": [
+            {"name": TABLE, "columns": [_column(provider, config, deterministic=deterministic)]}
+        ]
+    }
+    _chunk_masking.reject_nonstring_positional_pools(state, table=TABLE)
+    _chunk_masking.reject_nonstring_deterministic_pools(state, config=cfg, table=TABLE)

@@ -362,6 +362,12 @@ for every unified-slice job, because `CapabilityMatrix` gains a `draw` field (`p
 other input to the fingerprint changes: with `draw` removed the fingerprint equals the one on the previous main, and a test
 pins that. `pipeline_config_hash` does not move. No schema version moves.
 
+**Pre-GA correction (GEN-NONFAKER-DRAWS S2, 2026-11-24).** `lorem_text` becomes a poolable provider, so a generate
+column `provider: lorem_text` draws from a pool of Faker paragraphs instead of one seeded Faker call per row. Its values
+change; the type stays text. The masking side had refused `lorem_text` at compile, so no earlier masked output exists.
+The new reasons `route/faker_computed_output_type_unsupported` and
+`runtime/out_of_core_faker_computed_output_type_unsupported` are unreleased. No schema version moves.
+
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
 stays required, and a `tables=` name that does not end in `.parquet` records null); `role` widens from `table` to

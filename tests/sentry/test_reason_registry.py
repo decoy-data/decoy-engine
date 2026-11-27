@@ -147,6 +147,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("execution/_positional_keys.py", "row_positions"): _HELPER,
     ("execution/_positional_keys.py", "positional_key_array"): _HELPER,
     ("execution/_strategies/_faker_positional.py", "positional_pool_indices"): _HELPER,
+    ("execution/native/_operator_step.py", "sample_faker_array_positional"): _HELPER,
     ("execution/_transforms.py", "_reject_nested_keys"): _HELPER,
     ("execution/native/_crypto_reference.py", "_row_error"): _HELPER,
     ("generation/_pinned_compile.py", "_reject_column"): _HELPER,
@@ -229,10 +230,8 @@ _KW_CODE = "`code` is keyword-only, so every caller is checked as a `code=` keyw
 NOT_POSITIONAL_SINKS: dict[tuple[str, str], str] = {
     ("execution/_positional_keys.py", "row_positions"): _KW_CODE,
     ("execution/_positional_keys.py", "positional_key_array"): _KW_CODE,
-    ("execution/_strategies/_faker_positional.py", "positional_pool_indices"): (
-        "`domain_code` is a keyword the caller passes as a registered runtime symbol; the function "
-        "only forwards it to `positional_key_array`"
-    ),
+    ("execution/_strategies/_faker_positional.py", "positional_pool_indices"): _KW_CODE,
+    ("execution/native/_operator_step.py", "sample_faker_array_positional"): _KW_CODE,
     ("execution/_transforms.py", "_reject_nested_keys"): _KW_CODE,
     ("plan/_checks_top_code.py", "_reject_unusable_bound"): _KW_CODE,
     ("generation/_pinned_compile.py", "_reject_column"): (
@@ -796,6 +795,42 @@ def test_forwarding_helper_callers_are_checked(tmp_path: Path) -> None:
     assert ("helper_callers.py", "bad_fstring") in found
     assert ("helper_callers.py", "bad_keyword") in found
     assert ("helper_callers.py", "good") not in found
+
+
+_KEYED_DRAW_BODY = """
+    from decoy_engine import reasons
+    def sample_faker_array_positional(source, *, code="x"):
+        return source
+    def positional_pool_indices(n, *, code="x"):
+        return n
+    def bad_sample():
+        return sample_faker_array_positional([], code="adhoc_unregistered")
+    def bad_pool():
+        return positional_pool_indices(1, code="adhoc_unregistered")
+    def good_sample():
+        return sample_faker_array_positional([], code=reasons.runtime.FAKER_POSITION_OUT_OF_DOMAIN)
+"""
+
+
+def test_keyed_draw_helpers_check_the_code_a_caller_passes(tmp_path: Path) -> None:
+    """A caller of a positional keyed-draw helper cannot pass an unregistered code: the code is
+    the scanned `code=` keyword, with no exemption for the helpers."""
+    root = _tree(tmp_path, "keyed_draw_callers", _KEYED_DRAW_BODY)
+    helpers = frozenset(
+        {
+            ("keyed_draw_callers.py", "sample_faker_array_positional"),
+            ("keyed_draw_callers.py", "positional_pool_indices"),
+        }
+    )
+    found = {k[:2] for k in violations(_scan(root, helpers)) if k[0] == "keyed_draw_callers.py"}
+    assert ("keyed_draw_callers.py", "bad_sample") in found
+    assert ("keyed_draw_callers.py", "bad_pool") in found
+    assert ("keyed_draw_callers.py", "good_sample") not in found
+    for identity in (
+        ("execution/_strategies/_faker_positional.py", "positional_pool_indices"),
+        ("execution/native/_operator_step.py", "sample_faker_array_positional"),
+    ):
+        assert NOT_POSITIONAL_SINKS[identity] == _KW_CODE
 
 
 def test_the_csv_reader_refusals_are_scanned_and_registry_backed() -> None:

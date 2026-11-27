@@ -63,13 +63,18 @@ def _computed_spec(
     Compile refuses out-of-contract arguments, so a refusal here is a hand-built plan."""
     if plan.provider is None:
         return None
-    if ctx.registry.get_capabilities(plan.provider).draw != "computed":
+    # Local import: the native package imports the strategy catalog (see `_run_computed`).
+    from decoy_engine.execution.native._provider_class import resolve_faker_variant
+
+    variant = resolve_faker_variant(plan.provider, cfg, ctx.registry)
+    if variant.kind == "pool":
         return None
-    found = parse_computed_draw("mask", plan.provider, draw_kwargs(cfg))
-    if not isinstance(found, ComputedDrawSpec):
+    if variant.spec is None:
+        # A computed binding the engine has no descriptor for, or arguments outside its contract.
+        found = parse_computed_draw("mask", plan.provider, draw_kwargs(cfg))
         reason = found.kind if isinstance(found, DrawRefusal) else "unknown"
         raise ValueError(f"computed draw arguments are outside the contract ({reason})")
-    return found
+    return variant.spec
 
 
 def _arrow_to_column(drawn: pa.Array) -> np.ndarray[Any, Any]:
@@ -111,6 +116,17 @@ class FakerStrategyHandler:
             if plan.deterministic and plan.namespace is not None
             else resolve_selection_namespace(ctx, column, plan.namespace)
         )
+        # SEQ native seam: an admitted exact-string draw runs on the sequential kernels; every
+        # computed column is offered so a declined one books the rows pandas draws.
+        seq = getattr(ctx, "seq_native", None)
+        if seq is not None:
+            # Local import: the seam pulls in the native-ops/plan chain (see `_group_key`).
+            from decoy_engine.execution.sequential import computed_faker_column
+
+            picked = computed_faker_column(seq, ctx, df, column, plan, spec)
+            if picked is not None:
+                df[column] = picked
+                return df
         drawn = computed_mask_draw(
             sampling_source(ctx, column, df[column], deterministic=plan.deterministic),
             spec=spec,

@@ -162,6 +162,13 @@ class MimesisAdapter:
     def _mimesis_locale(self, locale: str | None) -> Locale | None:
         return _FAKER_TO_MIMESIS_LOCALE.get(locale or self._default_locale)
 
+    def serving_adapter(self, locale: str | None) -> BackendAdapter | None:
+        """The adapter that draws `locale`: this one when Mimesis covers it (an empty or omitted
+        locale means the adapter default), else the Faker fallback, or None when there is none
+        (`generate` then refuses the locale). Admission asks this, so it sees the same resolution
+        dispatch takes."""
+        return self if self._mimesis_locale(locale) is not None else self._fallback
+
     def _generic(self, mlocale: Locale, seed: int | None = None) -> Generic:
         if seed is not None:
             # Fresh seeded instance per batch: constructor-seed reproducibility
