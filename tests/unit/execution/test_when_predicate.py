@@ -44,6 +44,8 @@ class _FakeCtx:
     # so the list stays empty, but the attribute must exist.
     def __init__(self) -> None:
         self.row_errors: list = []
+        # No column of these frames is masked by an earlier node: every read is live.
+        self.source_snapshot_columns: dict = {}
 
 
 # ── basic row-level gating ────────────────────────────────────────────

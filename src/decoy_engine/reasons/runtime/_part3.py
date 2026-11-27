@@ -115,7 +115,7 @@ __all__ = [
     "WHEN_OUTSIDE_CLOSED_GRAMMAR",
     "WHEN_PREDICATE_NOT_NATIVE",
     "WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET",
-    "WHEN_PREDICATE_READS_MASKED_COLUMN",
+    "WHEN_SOURCE_SNAPSHOT_MISSING",
     "WINDOWED_DATE_POSITION_OUT_OF_DOMAIN",
     "WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE",
 ]
@@ -244,6 +244,11 @@ WHEN_MASKED_REFERENCE_UNSUPPORTED = _d(
     since="1.34.0",
 )
 WHEN_OUTSIDE_CLOSED_GRAMMAR = _d("when_outside_closed_grammar", "When outside closed grammar.")
+WHEN_SOURCE_SNAPSHOT_MISSING = _d(
+    "when_source_snapshot_missing",
+    "A when: read needs a pre-mask snapshot that the route did not build.",
+    since=UNRELEASED,
+)
 
 _d = _catalog.runtime("SubsetInternalError")
 
@@ -403,9 +408,6 @@ _d = _catalog.runtime("decoy_engine.execution.native._when_admission")
 WHEN_PREDICATE_NOT_NATIVE = _d("when_predicate_not_native", "When predicate not native.")
 WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET = _d(
     "when_predicate_outside_native_subset", "When predicate outside native subset."
-)
-WHEN_PREDICATE_READS_MASKED_COLUMN = _d(
-    "when_predicate_reads_masked_column", "When predicate reads masked column."
 )
 
 _d = _catalog.runtime("decoy_engine.generation._window_admission")

@@ -187,12 +187,21 @@ def _deprecate(m: dict) -> str:
     return "b"
 
 
+def _deprecate_without_successor(m: dict) -> str:
+    _by(m, "b").update(deprecated_in=PENDING, replaced_by=None)
+    return "b"
+
+
 def _resummarize(m: dict) -> str:
     _by(m, "a")["summary"] = "S a, corrected"
     return "a"
 
 
-EDITS = [(_deprecate, frozenset()), (_resummarize, frozenset({("ns", "a")}))]
+EDITS = [
+    (_deprecate, frozenset()),
+    (_deprecate_without_successor, frozenset()),
+    (_resummarize, frozenset({("ns", "a")})),
+]
 
 
 def test_at1_an_unreleased_identity_passes_every_ordinary_gate() -> None:

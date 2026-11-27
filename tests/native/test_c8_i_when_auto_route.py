@@ -148,22 +148,32 @@ def test_a_raw_dict_predicate_outside_the_grammar_is_rejected_at_compile(
     assert expr not in str(info.value)
 
 
-def test_a_predicate_reading_an_earlier_masked_column_stays_full_frame(tmp_path: Path) -> None:
+def test_a_predicate_reading_an_earlier_masked_column_auto_chunks_and_reads_the_original(
+    tmp_path: Path,
+) -> None:
+    """`a` is masked before `z` runs, and `z`'s predicate reads it: every route reads the
+    original `a`, so the table is admitted, auto-chunks and equals the whole-frame run."""
     source = pa.table({"a": pa.array(_S), "z": pa.array(_S)})
-    cfg = _config([{**redact("z"), "when": "a == 'REDACTED'"}, redact("a")], tmp_path, source)
+    cfg = _config([{**redact("z"), "when": "a == 'name-3'"}, redact("a")], tmp_path, source)
     auto = _run(cfg, source, auto_chunk_threshold_rows=5, chunk_size_rows=7)
-    assert auto.quality_metrics["auto_chunk"]["mode"] == "full_frame"
-    assert "when_predicate_not_chunk_stable" in auto.quality_metrics["auto_chunk"]["reason"]
+    assert auto.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    assert auto.quality_metrics["chunked_route"]["native_admitted"] is True
     _equal_outputs(auto, _full(cfg, source))
+    assert auto.outputs[TABLE].column("z").to_pylist().count("REDACTED") == 1
 
 
 def test_one_declined_when_column_keeps_the_whole_table_full_frame(tmp_path: Path) -> None:
-    # `p` runs before `s` (column order), so `s`'s predicate reads a masked column and
+    # `s` is a `text_redact` with a config the native route does not take, so its predicate
     # declines; `p`'s own predicate is admitted. One declined column keeps the whole table
-    # full-frame.
+    # full-frame. (A predicate that reads an earlier-masked column is no longer a decline.)
     cfg = _config(
         [
-            {**redact("s"), "when": "p == 'x'"},
+            {
+                "name": "s",
+                "strategy": "text_redact",
+                "provider_config": {"token": 7},
+                "when": "p == 'x'",
+            },
             {**truncate("p"), "when": "p == 'x'"},
         ],
         tmp_path,
@@ -175,7 +185,7 @@ def test_one_declined_when_column_keeps_the_whole_table_full_frame(tmp_path: Pat
     registry = get_default_registry()
     assert (
         when_native_rejection("s", entries, registry, table=TABLE, schema=schema)
-        == "when_predicate_reads_masked_column:s:p"
+        == "when_predicate_not_native:s"
     )
     assert when_native_rejection("p", entries, registry, table=TABLE, schema=schema) is None
     auto = _auto(cfg, _source())

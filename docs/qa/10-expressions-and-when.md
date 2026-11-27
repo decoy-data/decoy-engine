@@ -41,6 +41,9 @@ predicate that masks only selected rows.
 | EXPR-10 | `when: "country == 'DE' and consent != 'yes'"` on `redact`. | Only matching rows are redacted. All other rows are byte-identical to the source. |
 | EXPR-11 | `when:` with arithmetic, a function call, a comparison of two columns, and a chained comparison. | Each refused with `config.when_outside_closed_grammar`. The message does not contain the predicate text. |
 | EXPR-12 | `when: "status != 'x'"` on a column with nulls, read as a numpy-backed column and as a pandas nullable `string`. | Numpy-backed: the rows that are not `'x'`, null rows included. Nullable `string`: the non-null rows that are not `'x'`; null rows give a missing result and are not selected (docs/strategies.md, `when:`). |
+| EXPR-13 | `status: hash` and `zz_email: redact` with `when: "status == 'active'"`, then the same job with `zz_email` renamed `aa_email`. | The rows with source `status` = `active` have a redacted email in both jobs. `status` is hashed on every row. Column names do not change the rows selected. |
+| EXPR-14 | The EXPR-13 job on the full-frame, sequential, chunked and unified routes, with and without the native companion. | Same output on every route. The chunked and unified native lanes run the table (no decline for a column masked earlier). |
+| EXPR-15 | `when: "source.status == 'active'"` and `when: "masked.status == 'active'"`; a column named `a.b` read as `` `a.b` == 'x' ``. | `source.` equals the bare name. `masked.` is refused with `when_masked_reference_unsupported`. The quoted name reads the column `a.b`. |
 
 ## Open points
 

@@ -76,10 +76,11 @@ def out_of_core_admission(
     job reroutes instead of being admitted and aborting mid-run (B4). It is a
     cheap schema read, so it stays off the per-row path.
     """
-    from decoy_engine.execution._runner import build_work_list, order_work
+    from decoy_engine.execution._runner import build_work_list
     from decoy_engine.execution.out_of_core._compat import check_out_of_core_compatibility
+    from decoy_engine.execution.work_order import compile_work_order
 
-    work = order_work(build_work_list(plan, registry), graph)
+    work = list(compile_work_order(build_work_list(plan, registry), graph).ordered)
     compat = check_out_of_core_compatibility(plan, work, graph, source_types=source_types)
     return compat.accepted, compat.primary_code
 

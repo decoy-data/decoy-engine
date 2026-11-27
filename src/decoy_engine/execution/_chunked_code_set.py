@@ -150,9 +150,9 @@ def code_set_source_columns(
     """The code_set column names on `table`, resolved once from the plan's
     work list, so the manual entry can validate every chunk's schema against
     them without rebuilding the work list per chunk."""
-    from decoy_engine.execution._runner import build_work_list, order_work
+    from decoy_engine.execution.work_order import compile_plan_order
 
-    ordered_work = order_work(build_work_list(plan, registry), relationship_graph)
+    ordered_work = list(compile_plan_order(plan, registry, relationship_graph).ordered)
     return _code_set_node_columns(ordered_work, table)
 
 
@@ -279,10 +279,10 @@ def resolve_pinned_code_set_records(
     which resolves the same corpus on its first (only) pass over the column
     regardless of row count.
     """
-    from decoy_engine.execution._runner import build_work_list, order_work
+    from decoy_engine.execution.work_order import compile_plan_order
     from decoy_engine.transforms.code_set import CodeSetConfig, resolve_corpus_record
 
-    ordered_work = order_work(build_work_list(plan, registry), relationship_graph)
+    ordered_work = list(compile_plan_order(plan, registry, relationship_graph).ordered)
     records: dict[tuple[str, str], Any] = {}
     for node in ordered_work:
         if node.table != table or node.kind != "scalar" or node.strategy != "code_set":

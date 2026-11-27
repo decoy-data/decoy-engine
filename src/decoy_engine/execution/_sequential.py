@@ -161,12 +161,7 @@ from decoy_engine.execution._publication_observer import (
     report_partial_publication,
 )
 from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
-from decoy_engine.execution._runner import (
-    WorkNode,
-    build_work_list,
-    order_work,
-    source_anchor_columns,
-)
+from decoy_engine.execution._runner import WorkNode, build_work_list, source_snapshot_columns
 from decoy_engine.execution._sequential_composite_chain import decline_composite_chain
 from decoy_engine.execution._sequential_native import SeqNativeRun
 from decoy_engine.execution._sequential_order import table_topo_order
@@ -176,6 +171,8 @@ from decoy_engine.execution._transactional_sink import (
 )
 from decoy_engine.execution.pipeline._post_scan import note_quarantined, publish_after_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
+from decoy_engine.execution.work_order import WorkOrderRun, compile_work_order
+from decoy_engine.execution.work_order.rows import positional_frame, take_source_snapshots
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -310,7 +307,9 @@ def run_sequential(
     counts_by_trigger: dict[str, int] = {}
 
     graph = relationship_graph
-    ordered = order_work(build_work_list(plan, registry), graph)
+    order = compile_work_order(build_work_list(plan, registry), graph)
+    ordered = list(order.ordered)
+    run_state = WorkOrderRun(order)
     node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
     nodes_by_table: dict[str, list[WorkNode]] = {}
     for node in ordered:
@@ -318,13 +317,10 @@ def run_sequential(
 
     table_order = table_topo_order(plan, graph)
 
-    # HC-3a: per-table date_shift group_by anchor columns (Codex R1 P1 #1/#2),
-    # plus cross-column V1 joint_mask key_by source keys (`source_anchor_columns`):
-    # both read an immutable source sibling. Unioned into each table's FK-safe
-    # column set at load (lossless int+null) and snapshotted pre-mask into
-    # ctx.group_anchor_snapshots below.
-    group_anchor_cols = source_anchor_columns(plan, registry)
-    lossless = lossless_int_columns(plan, registry, graph)
+    # HC-3a: per-table source reads (`source_snapshot_columns`): group_by anchors, key_by keys and
+    # written `when:` reads. Unioned into the FK-safe column set at load, snapshotted pre-mask below.
+    group_anchor_cols = source_snapshot_columns(order)
+    lossless = lossless_int_columns(plan, registry, graph, ordered)
 
     # A parent key map is retained until every child table that references it has
     # been processed; this makes multi-parent and diamond graphs safe.
@@ -347,6 +343,7 @@ def run_sequential(
         seq_native=native_run,
         declared_date_columns=declared_date_shift_columns(plan),
         column_shapes=plan_column_shapes(plan),
+        source_snapshot_columns=group_anchor_cols,
     )
 
     parent_map_cache: dict[_NodeKey, dict[_KeyTuple, _KeyTuple]] = {}
@@ -417,10 +414,12 @@ def run_sequential(
                 # silently widens to float64 on this table-at-a-time load either.
                 # HC-3a P1 #2: date_shift group_by anchor columns get the same
                 # lossless int+null path (union into the FK-safe set).
-                df = to_pandas_fk_safe(src, lossless.for_table(table, src))
+                df, kept_index = positional_frame(
+                    to_pandas_fk_safe(src, lossless.for_table(table, src))
+                )
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
-                register_exact_int_sources(ctx, table, src, df, nodes_by_table.get(table, ()))
+                register_exact_int_sources(ctx, table, src, df, order)
                 native_run.prepare_table(plan, table, src.schema, graph)
                 # C5c-ii: capture the degenerate-Faker pin set from the SOURCE schema before
                 # `src` is released; applied to this table's output after from_pandas below.
@@ -441,19 +440,17 @@ def run_sequential(
                             if col in df.columns and (table, col) not in source_snapshots:
                                 source_snapshots[(table, col)] = df[col].copy()
 
-                # HC-3a P1 #1: snapshot this table's date_shift group_by anchor
-                # columns pre-mask (before its node loop below masks anything),
-                # so the handler anchors on immutable source ids. Same-table
-                # lifetime only; evicted with the frame after the node loop.
-                for col in group_anchor_cols.get(table, set()):
-                    if col in df.columns:
-                        ctx.group_anchor_snapshots[(table, col)] = df[col].copy()
+                # HC-3a P1 #1: snapshot this table's source-read columns pre-mask (same-table life).
+                # `|=` (not a loop variable) so no Series outlives its table's eviction below.
+                anchors = ctx.group_anchor_snapshots
+                anchors |= take_source_snapshots(order, group_anchor_cols, table, df)
 
                 table_records_list: list[RowErrorRecord] = []
                 for node in nodes_by_table.get(table, ()):
                     with decline_composite_chain(ordered, graph, table):
                         warnings.extend(
-                            adapter._dispatch_mask_node(
+                            run_state.dispatch(
+                                adapter._dispatch_mask_node,
                                 node,
                                 frames,
                                 graph,
@@ -463,6 +460,7 @@ def run_sequential(
                                 ctx,
                                 key_error_rows=key_error_rows,
                                 errored_keys_cache=errored_keys_cache,
+                                run=run_state,
                             )
                         )
                     # S2 self-ref FK (round 3): drain + fold per node, BEFORE the
@@ -530,6 +528,7 @@ def run_sequential(
                             table,
                         ),
                         [c for (t, c) in ctx.native_date_columns if t == table],
+                        kept_index=kept_index,
                     ),
                     faker_pin,
                 )

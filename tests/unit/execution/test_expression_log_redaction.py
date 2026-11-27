@@ -150,7 +150,9 @@ def test_run_with_when_gate_passes_the_target_column(monkeypatch) -> None:
     handler = SimpleNamespace(run=lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     plan = SimpleNamespace(when="email == 'x'", strategy="hash")
     df = pd.DataFrame({"email": ["a", "b"]})
-    gate.run_with_when_gate(handler, df, "email", plan, SimpleNamespace(row_errors=[]))
+    gate.run_with_when_gate(
+        handler, df, "email", plan, SimpleNamespace(row_errors=[], source_snapshot_columns={})
+    )
     assert seen["column"] == "email"
 
 

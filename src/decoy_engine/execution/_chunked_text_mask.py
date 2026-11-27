@@ -82,9 +82,9 @@ def text_mask_source_columns(
     """The text_mask column names on `table`, resolved once from the plan's work
     list, so the manual entry can validate every chunk's schema against them
     without rebuilding the work list per chunk."""
-    from decoy_engine.execution._runner import build_work_list, order_work
+    from decoy_engine.execution.work_order import compile_plan_order
 
-    ordered_work = order_work(build_work_list(plan, registry), relationship_graph)
+    ordered_work = list(compile_plan_order(plan, registry, relationship_graph).ordered)
     return _text_mask_node_columns(ordered_work, table)
 
 

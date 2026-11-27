@@ -83,6 +83,8 @@ for the full model.
   documented list, and no `when:`). The `unique`, `match_source_cardinality`
   and `scale_source_cardinality` modes draw one seeded whole-column stream from the
   job seed instead.
+- A `when:` selects rows by the original source values of the columns it names, so output does
+  not depend on column order or names, whichever column the job masks first.
 - Non-deterministic `categorical`: seeded by the job seed and the row's position
   in the frame being masked, so the same seed and input give the same output. It
   is keyed by position, not by source value, so it does not preserve joins.

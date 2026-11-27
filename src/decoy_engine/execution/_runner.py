@@ -31,6 +31,8 @@ from decoy_engine.plan._types import ColumnSeed, GroupSeed
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._requirements import NodeRequirements
+    from decoy_engine.execution.work_order import WorkOrder
+    from decoy_engine.execution.work_order.operations import ResolvedOperation
     from decoy_engine.plan._types import Plan
     from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships import RelationshipGraph
@@ -150,7 +152,16 @@ def build_work_list(plan: Plan, registry: ProviderRegistry) -> list[WorkNode]:
     return work
 
 
-def date_shift_group_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def _nodes(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None
+) -> Iterable[WorkNode]:
+    """The caller's compiled nodes, or the work list of a standalone caller that holds none."""
+    return build_work_list(plan, registry) if work is None else work
+
+
+def date_shift_group_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of sibling columns named by a `date_shift` `group_by` (HC-3a).
 
     A `group_by` anchor column has the same two requirements as an FK-parent
@@ -168,7 +179,7 @@ def date_shift_group_columns(plan: Plan, registry: ProviderRegistry) -> dict[str
     from decoy_engine.execution._adapter import provider_config_to_dict
 
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.kind != "scalar" or node.strategy != "date_shift":
             continue
         if not isinstance(node.plan_slice, ColumnSeed):
@@ -179,7 +190,9 @@ def date_shift_group_columns(plan: Plan, registry: ProviderRegistry) -> dict[str
     return out
 
 
-def top_code_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def top_code_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of columns masked by `top_code` (HC-3b).
 
     A top_code column must ingest LOSSLESSLY (nullable Int64), never via a bare
@@ -193,7 +206,7 @@ def top_code_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[st
     float64 on every route already, so no chunk-dependent widening arises).
     """
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.kind != "scalar" or node.strategy != "top_code":
             continue
         for col in node.columns:
@@ -209,7 +222,9 @@ def group_by_sibling(provider_config: Mapping[str, Any] | None) -> str | None:
     return group_by if isinstance(group_by, str) and group_by else None
 
 
-def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def group_key_group_by_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of sibling columns named by a `group_key` `group_by` (Trap B).
 
     A group_by column needs the same lossless-ingest treatment as an FK
@@ -228,7 +243,7 @@ def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[s
     from decoy_engine.execution._adapter import provider_config_to_dict
 
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.kind != "scalar" or node.strategy != "group_key":
             continue
         if not isinstance(node.plan_slice, ColumnSeed):
@@ -239,7 +254,9 @@ def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[s
     return out
 
 
-def joint_mask_key_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def joint_mask_key_by_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """Per-table set of `joint_mask` `key_by` SOURCE-key columns (cross-column V1).
 
     `key_by` selects the reference tuple off the SOURCE key value (its docstring:
@@ -254,7 +271,7 @@ def joint_mask_key_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[st
     from decoy_engine.execution._adapter import provider_config_to_dict
 
     out: dict[str, set[str]] = {}
-    for node in build_work_list(plan, registry):
+    for node in _nodes(plan, registry, work):
         if node.strategy != "joint_mask" or not isinstance(node.plan_slice, ColumnSeed):
             continue
         key_by = provider_config_to_dict(node.plan_slice.provider_config).get("key_by")
@@ -263,7 +280,9 @@ def joint_mask_key_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[st
     return out
 
 
-def source_anchor_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:
+def source_anchor_columns(
+    plan: Plan, registry: ProviderRegistry, work: Iterable[WorkNode] | None = None
+) -> dict[str, set[str]]:
     """All columns a strategy reads at their immutable SOURCE value through the
     pre-mask `ctx.group_anchor_snapshots`: `date_shift` `group_by` anchors plus
     `joint_mask` `key_by` source keys. Both read a sibling's source value via the
@@ -272,10 +291,78 @@ def source_anchor_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, s
     checklist). `group_key`'s `group_by` is NOT here: it reads the MASKED value
     under an ordering edge, not a source snapshot.
     """
-    out = date_shift_group_columns(plan, registry)
-    for table, cols in joint_mask_key_by_columns(plan, registry).items():
+    nodes = list(_nodes(plan, registry, work))
+    out = date_shift_group_columns(plan, registry, nodes)
+    for table, cols in joint_mask_key_by_columns(plan, registry, nodes).items():
         out.setdefault(table, set()).update(cols)
     return out
+
+
+def when_columns_of(whens: Iterable[object]) -> frozenset[str]:
+    """The columns the given `when:` predicates read, from `when_column_refs` (the one producer
+    of `when:` reads). A non-string or an unparsable predicate reads nothing here: the evaluator
+    raises its coded error for it, so there is nothing to snapshot or ingest exactly."""
+    from decoy_engine.errors import ValidationError
+    from decoy_engine.expressions._when_parser import parse_when_cached, when_column_refs
+
+    cols: set[str] = set()
+    for when in whens:
+        if not isinstance(when, str):
+            continue
+        try:
+            cols |= {read.column for read in when_column_refs(parse_when_cached(when))}
+        except ValidationError:
+            continue
+    return frozenset(cols)
+
+
+def gate_reads(op: ResolvedOperation) -> frozenset[str]:
+    """The columns the op's `when:` reads, when dispatch evaluates that gate (`op.gated`), else
+    none. The one answer for the snapshot set and the absent-column check."""
+    seed = op.node.plan_slice
+    if not op.gated or not isinstance(seed, ColumnSeed):
+        return frozenset()
+    return when_columns_of([seed.when])
+
+
+def when_read_columns(plan: Plan) -> dict[str, frozenset[str]]:
+    """Per table, the columns any column's `when:` reads.
+
+    A `when:` selects rows by the ORIGINAL values of these columns, so this one set feeds both
+    the lossless integer ingest (`LosslessInts.when_read`) and the pre-mask snapshot
+    (`source_snapshot_columns`).
+    """
+    out: dict[str, frozenset[str]] = {}
+    for table, table_seed in plan.seed_envelope.per_table:
+        cols = when_columns_of(seed.when for _name, seed in table_seed.per_column)
+        if cols:
+            out[table] = out.get(table, frozenset()) | cols
+    return out
+
+
+def source_snapshot_columns(order: WorkOrder) -> dict[str, frozenset[str]]:
+    """Every column snapshotted pre-mask, from the compiled `order` alone: each operation's
+    `source_reads` (the `joint_mask` `key_by` and `date_shift` `group_by` anchors, always) plus
+    each column an evaluated `when:` reads (`gate_reads`) that some operation writes. A `when:`
+    column no node writes keeps its original value in the live frame, so it costs no copy. Both
+    snapshot sites call this once per order.
+
+    What a node writes comes from its resolved operation (`work_order.operations`), the one
+    answer dispatch and ordering share: an FK child writes its child key whatever handler it is
+    configured with. A node whose writes cannot be named snapshots every column its table's
+    `when:` reads.
+    """
+    out: dict[str, set[str]] = defaultdict(set)
+    reads: dict[str, set[str]] = defaultdict(set)
+    for op in order.ops.values():
+        if op.source_reads:
+            out[op.table] |= op.source_reads
+        reads[op.table] |= gate_reads(op)
+    for op in order.ops.values():
+        hit = reads[op.table] if op.wildcard else reads[op.table] & op.writes
+        if hit:
+            out[op.table] |= hit
+    return {t: frozenset(c) for t, c in out.items() if c}
 
 
 def _writer_output_columns(node: WorkNode) -> tuple[str, ...]:
@@ -325,6 +412,25 @@ def _writer_node_map(work: list[WorkNode]) -> dict[tuple[str, str], set[_NodeKey
     return writer
 
 
+def node_entry(node: WorkNode) -> dict[str, Any] | None:
+    """The config entry a work node was built from, the shape `column_access` reads, or None for
+    a node with no `ColumnSeed` (a composite FK group). The one builder: ordering and operation
+    resolution both read a node's declaration through it."""
+    plan_slice = node.plan_slice
+    if not isinstance(plan_slice, ColumnSeed):
+        return None
+    from decoy_engine.execution._adapter import provider_config_to_dict
+
+    return {
+        "name": node.columns[0] if node.columns else None,
+        "strategy": plan_slice.strategy,
+        "provider": plan_slice.provider,
+        "provider_config": provider_config_to_dict(plan_slice.provider_config),
+        "coherent_with": list(plan_slice.coherent_with),
+        "when": plan_slice.when,
+    }
+
+
 def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
     """The same-table sibling columns `node` reads for their MASKED value, so it
     must be ordered AFTER them (the cross-column V1 ordering edge).
@@ -336,18 +442,11 @@ def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
     (including `joint_mask`, whose `key_by` is a SOURCE read via snapshot) imposes no
     ordering edge.
     """
-    plan_slice = node.plan_slice
-    if node.kind != "scalar" or not isinstance(plan_slice, ColumnSeed):
+    entry = node_entry(node)
+    if node.kind != "scalar" or entry is None:
         return frozenset()
-    from decoy_engine.execution._adapter import provider_config_to_dict
     from decoy_engine.execution._column_access import scalar_creating_reads
 
-    entry = {
-        "name": node.columns[0] if node.columns else None,
-        "strategy": plan_slice.strategy,
-        "provider_config": provider_config_to_dict(plan_slice.provider_config),
-        "coherent_with": list(plan_slice.coherent_with),
-    }
     return scalar_creating_reads(entry)
 
 

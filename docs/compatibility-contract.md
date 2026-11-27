@@ -1128,15 +1128,19 @@ only this site moves.
   `hash`, `redact`, `truncate` and deterministic `categorical` over a `string` source: the row mask
   is the oracle's own predicate function over the oracle's own conversion of the columns the
   predicate reads, per chunk, so a null in a nullable boolean mask selects nothing, exactly as
-  `df.loc[mask]` does. A predicate that reads a column an earlier work node (column-name order)
-  masks, a target that is not `string`, a predicate outside the grammar and every other strategy
-  keep the oracle leg, with the codes `when_predicate_reads_masked_column`,
-  `when_predicate_not_native` and `when_predicate_outside_native_subset`. The chunked output type
+  `df.loc[mask]` does. A target that is not `string`, a predicate outside the grammar and every
+  other strategy keep the oracle leg, with the codes `when_predicate_not_native` and
+  `when_predicate_outside_native_subset`. A `when:` picks rows by the row's ORIGINAL values, from
+  any column, on every route (2026-11-23, WHEN-READS-SOURCE S2): a predicate that names a column
+  an earlier work node masks reads the value the source held, so column order and names no longer
+  change which rows it selects, and the native lanes admit it. The reason codes
+  `route.when_reads_masked_column` and `runtime.when_predicate_reads_masked_column` are
+  deprecated and no longer produced. The chunked output type
   of a native-admitted `when:` column is pinned to `string` on both chunked legs; under
   ROUTE-OUTPUT-CONTRACT a whole-frame column that is empty or entirely null keeps the type pandas
   infers (Arrow `null`), while the chunked route yields `string`; values are unchanged. The
   auto-chunk planner keeps such a table chunked only when every column the predicate reads is a
-  `string`. The unified full-frame route and out-of-core still decline `when:`.
+  `string`. Out-of-core still refuses `when:`.
   The `when:` grammar gained reference forms (2026-11-22, WHEN-READS-SOURCE S1), additive: a column
   is a bare name or `source.<name>` (the same thing: the original value), a backtick-quoted name
   (`` `a.b` ``, with or without the prefix) for a name outside `[A-Za-z0-9_]`, or `masked.<name>`,

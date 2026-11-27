@@ -45,6 +45,8 @@ from decoy_engine.execution._gated_string_guard import (
     widen_numeric_target_for_strings,
 )
 from decoy_engine.execution._row_errors import RowError
+from decoy_engine.execution.work_order.commits import stitch_rows
+from decoy_engine.execution.work_order.rows import snapshot_rows
 from decoy_engine.expressions._when_parser import (
     Compare,
     InList,
@@ -69,6 +71,7 @@ if TYPE_CHECKING:
         StrategyContext,
         StrategyHandler,
     )
+    from decoy_engine.execution.work_order.commits import Selection
     from decoy_engine.generation.pool._events import QualityWarning
     from decoy_engine.plan._types import ColumnSeed
 
@@ -81,7 +84,7 @@ def _remap_gated_row_errors(
     """Rewrite subset-relative RowError indices to full-table positions.
 
     BLOCKER B1 (dennis review 2026-07-04): the `when:` gate hands the
-    handler a SUBSET frame (`df.loc[mask]` / `frame.filter(mask)`), so the
+    handler a SUBSET frame (`df.iloc[positions]` / `frame.filter(mask)`), so the
     handler records ``RowError.row_index`` positional in that subset. The
     pipeline + quarantine machinery (`_pipeline.py` D8, `quarantine.py` D9)
     consume ``row_index`` as a FULL-TABLE position. Left unremapped, a gated
@@ -343,7 +346,7 @@ def _aliased_frame(pdf: pd.DataFrame, aliases: Mapping[str, WhenRead]) -> pd.Dat
     raises its own undefined-name error for it, exactly as it did on the unaliased frame.
     """
     alias_of = {read.column: alias for alias, read in aliases.items()}
-    sub = pdf.loc[:, pdf.columns.isin(list(alias_of))]
+    sub = pdf.iloc[:, pdf.columns.isin(list(alias_of))]
     return sub.set_axis([alias_of[c] for c in sub.columns], axis=1)
 
 
@@ -373,10 +376,8 @@ def _eval_predicate(
     _require_closed_grammar(expression, strategy, column)
     failed = False
     try:
-        # Audit L1 (2026-06-12): same fallback surfacing as
-        # execution/_transforms._eval_clamped -- pandas silently drops
-        # to the python engine on extension-array dtypes with only an
-        # unmonitored RuntimeWarning.
+        # Audit L1: surface pandas' silent python-engine fallback on extension dtypes, as
+        # execution/_transforms._eval_clamped does.
         with warnings.catch_warnings(record=True) as _caught:
             warnings.simplefilter("always", RuntimeWarning)
             # pandas eval cannot read `source.x` or a quoted name, so it runs on the aliased
@@ -436,11 +437,8 @@ def _eval_predicate(
             ),
         )
 
-    # QA-3 F4 (2026-05-31): accept pandas nullable BooleanDtype too.
-    # The pre-fix check `mask.dtype != bool` rejected `pd.BooleanDtype()`
-    # which arises naturally from Arrow-backed columns and from any
-    # boolean expression over a column with NaN. `is_bool_dtype` covers
-    # both numpy bool and pandas nullable BooleanDtype.
+    # QA-3 F4: accept pandas nullable BooleanDtype too (Arrow-backed columns, NaN in a column);
+    # `is_bool_dtype` covers numpy bool and the nullable dtype.
     if not isinstance(mask, pd.Series) or not pd.api.types.is_bool_dtype(mask.dtype):
         raise StrategyError(
             code=reasons.runtime.WHEN_EXPRESSION_NOT_BOOLEAN,
@@ -455,16 +453,62 @@ def _eval_predicate(
     return mask
 
 
+def when_source_frame(
+    df: pd.DataFrame, ctx: StrategyContext, table: str, expression: str, strategy: str
+) -> pd.DataFrame:
+    """`df` with every `when:`-read column that some node writes replaced by its pre-mask value.
+
+    A `when:` selects rows by the ORIGINAL values it names, whatever earlier nodes masked. The
+    pre-mask copies live in `ctx.group_anchor_snapshots` (built from
+    `_runner.source_snapshot_columns`). A read no node writes still holds its original value in
+    `df`. No snapshot set, a missing copy or an unalignable copy fails closed.
+    """
+    snapshot_set = ctx.source_snapshot_columns
+    try:
+        reads = when_column_refs(parse_when_cached(expression))
+    except ValidationError:
+        return df  # `_eval_predicate` raises the coded grammar error
+    if snapshot_set is None or (snapshot_set and not table):
+        raise _snapshot_missing(strategy, table)  # no set, or no table to look the set up by
+    snapped = [r.column for r in reads if r.column in snapshot_set.get(table, ())]
+    snapped = [c for c in snapped if c in df.columns]
+    if not snapped:
+        return df
+    src = df.copy(deep=False)
+    for col in snapped:
+        # By position: `snapshot_rows` fails closed on a length mismatch and never aligns by label.
+        # `ctx.gate_positions` is None here (the predicate sees the whole frame).
+        snapshot = snapshot_rows(
+            ctx, table, col, len(df), lambda _msg: _snapshot_missing(strategy, table)
+        )
+        if snapshot is None:
+            raise _snapshot_missing(strategy, table)
+        src[col] = snapshot.array
+    return src
+
+
+def _snapshot_missing(strategy: str, table: str) -> StrategyError:
+    # Table only: a column name or a predicate can carry user data.
+    return StrategyError(
+        code=reasons.runtime.WHEN_SOURCE_SNAPSHOT_MISSING,
+        strategy=strategy,
+        message=f"when: on table {table!r} has no pre-mask snapshot for a column it reads",
+    )
+
+
 def run_with_when_gate(
     handler: StrategyHandler,
     df: pd.DataFrame,
     column: str,
     plan: ColumnSeed,
     ctx: StrategyContext,
+    outputs: tuple[str, ...] = (),
+    selection: Selection | None = None,
 ) -> tuple[pd.DataFrame, list[QualityWarning]]:
     """Invoke `handler.run(...)` directly when `plan.when` is None.
 
-    When `plan.when` is set, evaluate the predicate on `df`, run the
+    When `plan.when` is set, evaluate the predicate on the pre-mask frame from
+    `when_source_frame`, run the
     handler on the matching subset, and stitch the result back into
     `df` at those row positions. Rows that do not match are left
     untouched.
@@ -483,83 +527,51 @@ def run_with_when_gate(
         require_same_rows(rows, out, column=column, strategy=plan.strategy, table=table)
         return out, warnings
 
-    # Codex P2 FAIL-CLOSED VALIDATION BYPASSED BY A ZERO-MATCH `when` GATE
-    # remediation: a handler's own fail-closed preflight (e.g. CodeSetHandler
-    # loading/validating its corpus) normally runs inside `handler.run()`,
-    # which the `not mask.any()` short-circuit below never reaches. That let
-    # a column referencing a missing/invalid corpus succeed silently
-    # whenever its `when:` predicate happened to match zero rows. A handler
-    # that needs config/data validated regardless of match count exposes an
-    # optional `preflight(plan, ctx) -> None` method; call it unconditionally
-    # here, BEFORE the short-circuit, so it always runs while the handler's
-    # own `run()` (reached only on a non-empty match) still does the real
-    # per-row work and evidence stamping unchanged.
+    # A handler's fail-closed preflight (e.g. CodeSetHandler validating its corpus) would be
+    # skipped by the zero-match short-circuit below, so a missing corpus passed silently when the
+    # predicate matched no row. Call the optional `preflight(plan, ctx)` first, always.
     preflight = getattr(handler, "preflight", None)
     if preflight is not None:
         preflight(plan, ctx)
 
-    mask = _eval_predicate(df, plan.when, plan.strategy, column=column)
-
-    if not mask.any():
-        return df, []
+    source = when_source_frame(df, ctx, table, plan.when, plan.strategy)
+    mask = _eval_predicate(source, plan.when, plan.strategy, column=column)
 
     positions = selected_positions(mask)
-    sub_df = df.loc[mask].copy()
+    if selection is not None:
+        selection.positions = positions
+    if not positions.size:
+        return df, []
+
+    # Rows travel by position from here on: the handler sees `df.iloc[positions]` (labels kept
+    # for the row-count check), snapshots are read at the same positions (`snapshot_rows`) and the
+    # results are written back at them. A label lookup mis-selects rows on a repeated label.
+    sub_df = df.iloc[positions].copy()
     sub_rows = sub_df.index
     err_start = len(ctx.row_errors)
-    sub_df, warnings = handler.run(sub_df, column, plan, gated_context(ctx, column, positions))
-    # Before the index-aligned write-back below, which would turn a dropped row into a null.
+    sub_df, warnings = handler.run(
+        sub_df, column, plan, gated_context(ctx, column, positions, len(df))
+    )
+    # Before the write-back below, which would turn a dropped row into a null.
     require_same_rows(sub_rows, sub_df, column=column, strategy=plan.strategy, table=table)
-    # B1: remap subset-relative row-error indices to full-table positions
-    # BEFORE they leave the gate (see _remap_gated_row_errors). The k-th
-    # mask-True row's full-table position is positions[k], and the handler
-    # records positions 0..len(sub_df)-1 into the subset in the same order
-    # (our row-error producers preserve row order).
+    # B1: remap subset-relative row-error indices to full-table positions before they leave the
+    # gate: the k-th mask-True row sits at positions[k] and row errors keep row order.
     if len(ctx.row_errors) > err_start:
         # `.tolist()` (only on the rare error path) gives a plain Sequence.
         _remap_gated_row_errors(ctx, err_start, positions.tolist())
-    # Stitch every column the handler WROTE back into the full frame for the
-    # selected rows, not just the dispatch `column`. A multi-column handler
-    # (joint_mask writes its whole `columns` config in one pass) declares them
-    # via `gated_output_columns`; a single-column handler leaves `out_cols` as
-    # just the dispatch column, byte-identical to the prior single-column write.
-    # Copying only the dispatch column left the handler's OTHER outputs at their
-    # source value for the gated rows (a silent partial mask).
-    for out_col in _gated_output_columns(handler, plan, column):
+    # Stitch every column the handler WROTE back for the selected rows, not just the dispatch
+    # `column`: `outputs` is the node's resolved write set (a multi-column joint_mask writes its
+    # whole `columns` config). An output the handler did not return is skipped. A returned column
+    # the frame lacks (a creator such as group_key) is created, with a missing value on every
+    # row the gate did not select, as `df.loc[mask, col] = ...` always did.
+    for out_col in dict.fromkeys((column, *outputs)):
         if out_col not in sub_df.columns:
             continue
-        if out_col in df.columns:  # a handler may create a new column (e.g. group_key)
+        produced = sub_df[out_col]
+        if out_col in df.columns:
             reject_gated_string_on_numeric(
-                df[out_col],
-                sub_df[out_col],
-                mask,
-                table=table,
-                column=out_col,
-                strategy=plan.strategy,
+                df[out_col], produced, mask, table=table, column=out_col, strategy=plan.strategy
             )
-            widen_numeric_target_for_strings(df, out_col, sub_df[out_col])
-        # Index-aligned: sub_df carries the gated rows' source index labels, so
-        # each retained row writes back to its own row in the full frame.
-        df.loc[mask, out_col] = sub_df[out_col]
+            widen_numeric_target_for_strings(df, out_col, produced)
+        stitch_rows(df, out_col, produced, positions)
     return df, warnings
-
-
-def _gated_output_columns(
-    handler: StrategyHandler, plan: ColumnSeed, column: str
-) -> tuple[str, ...]:
-    """The columns `run_with_when_gate` must stitch back for the gated rows.
-
-    The dispatch `column` plus any extra outputs a multi-column handler declares
-    through an optional `gated_output_columns(plan) -> tuple[str, ...]` method
-    (duck-typed like `preflight`). A handler without that method writes only its
-    dispatch column, so the result is `(column,)` -- the pre-fix behavior. The
-    dispatch column leads and duplicates are dropped while order is preserved, so
-    the single-column path stays byte-identical.
-    """
-    hook = getattr(handler, "gated_output_columns", None)
-    declared = tuple(hook(plan)) if hook is not None else ()
-    out: list[str] = []
-    for col in (column, *declared):
-        if col not in out:
-            out.append(col)
-    return tuple(out)

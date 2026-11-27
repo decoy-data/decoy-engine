@@ -117,6 +117,7 @@ def _ctx(
         mask_key=job_seed if mask_key is None else mask_key,
         current_table=table,
         row_offset=row_offset,
+        source_snapshot_columns={},
     )
 
 

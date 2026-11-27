@@ -10,7 +10,7 @@ those. The canonical bytes then equal those of the same value in a null-free int
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -24,6 +24,8 @@ from decoy_engine.plan._types import ColumnSeed
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import StrategyContext
     from decoy_engine.execution._runner import WorkNode
+    from decoy_engine.execution.work_order import WorkOrder
+    from decoy_engine.execution.work_order.operations import NodeKey, ResolvedOperation
 
 
 def _widened_int_column(source: pa.Table, frame: pd.DataFrame, column: str) -> bool:
@@ -43,13 +45,19 @@ def _widened_int_column(source: pa.Table, frame: pd.DataFrame, column: str) -> b
 
 
 def exact_int_faker_sources(
-    table: str, source: pa.Table, frame: pd.DataFrame, nodes: Iterable[WorkNode]
+    table: str,
+    source: pa.Table,
+    frame: pd.DataFrame,
+    nodes: Iterable[WorkNode],
+    ops: Mapping[NodeKey, ResolvedOperation] | None = None,
 ) -> dict[tuple[str, str], pa.ChunkedArray]:
     """Original Arrow columns for the table's exact-int Faker and ungated hash columns.
 
     `nodes` are the table's work nodes in the adapter's real dispatch order. A column an
-    earlier node declared as written no longer holds the converted source, so it keeps
-    the behavior it has without this fix.
+    node writes (its own column or a secondary output such as a joint mask's) no longer holds
+    the converted source, so it is not registered: a stale source key can never be read. The
+    write set is the node's compiled record in `ops`; a caller with no compiled order gets the
+    node's own columns, as before.
     """
     out: dict[tuple[str, str], pa.ChunkedArray] = {}
     written: set[str] = set()
@@ -70,6 +78,8 @@ def exact_int_faker_sources(
         ):
             out[(table, column)] = source.column(column)
         written.update(node.columns)
+        if ops is not None:
+            written |= ops[node.key].writes
     return out
 
 
@@ -78,10 +88,13 @@ def register_exact_int_sources(
     table: str,
     source: pa.Table,
     frame: pd.DataFrame,
-    nodes: Iterable[WorkNode],
+    order: WorkOrder,
 ) -> None:
-    """Record the table's exact-int Faker columns on the context, for its frame's lifetime."""
-    ctx.exact_int_sources.update(exact_int_faker_sources(table, source, frame, nodes))
+    """Record the table's exact-int Faker columns on the context, for its frame's lifetime.
+    The table's nodes and their writes come from the compiled `order`, so no node is resolved
+    again here."""
+    nodes = (n for n in order.ordered if n.table == table)
+    ctx.exact_int_sources.update(exact_int_faker_sources(table, source, frame, nodes, order.ops))
 
 
 def release_table(sources: dict[tuple[str, str], pa.ChunkedArray], table: str) -> None:
@@ -98,9 +111,12 @@ def selected_positions(mask: pd.Series[Any]) -> np.ndarray[Any, Any]:
 
 
 def gated_context(
-    ctx: StrategyContext, column: str, positions: np.ndarray[Any, Any]
+    ctx: StrategyContext,
+    column: str,
+    positions: np.ndarray[Any, Any],
+    source_row_count: int,
 ) -> StrategyContext:
-    """A one-call copy of `ctx` carrying the gate's full-table row positions.
+    """A one-call copy of `ctx` carrying the gate's full-table row positions and row count.
 
     A positional strategy (categorical, REUSE Faker, windowed_date) keys each selected row on
     its full-table row, so every gated call carries the positions (C8-iii-d). A deterministic
@@ -111,6 +127,7 @@ def gated_context(
     # frozen (the same pattern nested dispatch uses); copy.copy keeps the sinks shared, as before.
     gated = copy.copy(ctx)
     object.__setattr__(gated, "gate_positions", positions)
+    object.__setattr__(gated, "source_row_count", source_row_count)
     return gated
 
 

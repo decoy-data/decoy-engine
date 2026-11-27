@@ -1383,6 +1383,11 @@ selection is the same, so this knob changes no output.
 Set `when:` on a column to mask only the rows a predicate selects. The other rows
 keep their source value. A blank `when:` means no condition.
 
+The predicate picks rows by the row's ORIGINAL values, from any column. "Mask `email` only on
+rows where the original `country` = 'US'" holds even when the job also masks `country`. Column
+order and names do not change which rows it selects. A column the job creates (`derived`,
+`group_key` and the other creating strategies) keeps reading the masked values of its drivers.
+
 ```yaml
 columns:
   - name: email

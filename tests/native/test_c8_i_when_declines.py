@@ -220,25 +220,22 @@ def test_a_raw_predicate_outside_the_grammar_is_rejected_by_both_entry_points(ex
 # ---------------------------------------------------------------------------
 
 
-def test_a_reference_to_a_column_an_earlier_node_masks_declines_and_equals_today() -> None:
-    """Codex round 2: `a` redacts to 'REDACTED' before `z`, whose predicate reads `a`, and the
-    config order is the reverse of the execution order. The oracle sees the masked `a`."""
-    config = make_config([_when(redact("z"), "a == 'REDACTED'"), redact("a"), passthrough("p")])
+def test_a_reference_to_a_column_an_earlier_node_masks_is_admitted_and_reads_the_original() -> None:
+    """`a` redacts to 'REDACTED' before `z`, whose predicate reads `a`, and the config order is
+    the reverse of the execution order. Every route reads the ORIGINAL `a` (WHEN-READS-SOURCE),
+    so the table is admitted and the rows selected are the rows whose source `a` is 'k1'."""
+    config = make_config([_when(redact("z"), "a == 'k1'"), redact("a"), passthrough("p")])
     entries = config["tables"][0]["columns"]
     assert [e["name"] for e in entries][:2] == ["z", "a"]
-    assert when_native_rejection("z", entries, REG, table=TABLE, schema=_schema_az()) == (
-        "when_predicate_reads_masked_column:z:a"
-    )
+    assert when_native_rejection("z", entries, REG, table=TABLE, schema=_schema_az()) is None
     chunks = [
         pa.table({"a": ["k1", "k2", None], "z": ["v1", "v2", "v3"], "p": ["x", "y", "z"]}),
-        pa.table({"a": ["k3", None], "z": ["v4", "v5"], "p": ["x", "y"]}),
+        pa.table({"a": ["k1", None], "z": ["v4", "v5"], "p": ["x", "y"]}),
     ]
     out, evidence = run_native(config, chunks)
-    assert evidence.native_admitted is False
-    assert (evidence.reroute_reason or "").startswith("when_predicate_reads_masked_column:z:a")
-    # The oracle's predicate saw the masked values, so z is redacted on every row with an `a`
-    # that was masked (a null `a` stays null, which does not equal 'REDACTED').
-    assert out[0].column("z").to_pylist() == ["REDACTED", "REDACTED", "v3"]
+    assert evidence.native_admitted is True, evidence.reroute_reason
+    assert out[0].column("z").to_pylist() == ["REDACTED", "v2", "v3"]
+    assert out[1].column("z").to_pylist() == ["REDACTED", "v5"]
     assert [t.to_pydict() for t in out] == [
         {k: v for k, v in t.to_pydict().items()} for t in run_public_oracle(config, chunks)
     ]
@@ -272,9 +269,10 @@ def _schema_az() -> pa.Schema:
     return pa.schema([("a", pa.string()), ("z", pa.string()), ("p", pa.string())])
 
 
-def test_a_composite_writers_extra_column_counts_as_written() -> None:
-    """Composites are rejected end to end by the chunked compatibility check, so the write-set
-    classifier is exercised directly: a composite earlier in the order writes its bundle."""
+def test_a_composite_writers_extra_column_is_admitted() -> None:
+    """Composites are rejected end to end by the chunked compatibility check, so admission is
+    exercised directly: a predicate that reads a column a composite earlier in the order writes
+    is admitted, because it reads the original value."""
     from decoy_engine.generation.composite._validate import _COMPOSITE_OUTPUT_COLUMNS
 
     outputs = _COMPOSITE_OUTPUT_COLUMNS["composite_name_email"]
@@ -289,23 +287,17 @@ def test_a_composite_writers_extra_column_counts_as_written() -> None:
         _when(redact("z_target"), f"{outputs[-1]} == 'x'"),
     ]
     schema = pa.schema([(c, pa.string()) for c in ("a_head", "z_target", *outputs)])
-    assert (
-        first
-        and when_native_rejection("z_target", entries, REG, table=TABLE, schema=schema)
-        == f"when_predicate_reads_masked_column:z_target:{outputs[-1]}"
-    )
+    assert first
+    assert when_native_rejection("z_target", entries, REG, table=TABLE, schema=schema) is None
 
 
-def test_a_node_with_unknown_writes_declines_any_when_after_it() -> None:
+def test_a_node_with_unknown_writes_does_not_decline_a_later_when() -> None:
     entries = [
         {"name": "a", "strategy": "no_such_strategy_with_unknown_writes"},
         _when(redact("z"), "p == 'x'"),
     ]
     schema = pa.schema([("a", pa.string()), ("z", pa.string()), ("p", pa.string())])
-    assert when_native_rejection("z", entries, REG, table=TABLE, schema=schema) == (
-        "when_predicate_reads_masked_column:z:p"
-    )
-    # An unknown writer that runs AFTER the target does not matter.
+    assert when_native_rejection("z", entries, REG, table=TABLE, schema=schema) is None
     after = [_when(redact("a"), "p == 'x'"), {"name": "z", "strategy": "no_such_strategy"}]
     assert when_native_rejection("a", after, REG, table=TABLE, schema=schema) is None
 

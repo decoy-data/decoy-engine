@@ -70,6 +70,7 @@ from decoy_engine.internal.pandas_compat import (
 )
 
 if TYPE_CHECKING:
+    from decoy_engine.execution._runner import WorkNode
     from decoy_engine.plan._types import Plan
     from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships._graph import RelationshipEdge
@@ -314,27 +315,6 @@ def fk_columns_for_table(edges: Iterable[RelationshipEdge], table: str) -> set[s
     return cols
 
 
-def _when_read_columns(
-    per_table_columns: Iterable[tuple[str, Iterable[tuple[str, object]]]],
-) -> dict[str, set[str]]:
-    """Per table, the columns any column's `when:` predicate reads (an integer among them must
-    ingest losslessly, or a null widens it to float64 and the predicate compares rounded values)."""
-    from decoy_engine.errors import ValidationError
-    from decoy_engine.expressions._when_parser import parse_when_cached, when_column_refs
-
-    out: dict[str, set[str]] = {}
-    for table, columns in per_table_columns:
-        for _name, when in columns:
-            if not isinstance(when, str):
-                continue
-            try:
-                refs = [r.column for r in when_column_refs(parse_when_cached(when))]
-            except ValidationError:
-                continue  # the evaluator raises its coded error; nothing to protect here
-            out[table] = out.get(table, set()) | set(refs)
-    return out
-
-
 @dataclass(frozen=True)
 class LosslessInts:
     """The columns that must ingest as exact nullable integers, per table.
@@ -366,7 +346,12 @@ class LosslessInts:
         }
 
 
-def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> LosslessInts:
+def lossless_int_columns(
+    plan: Plan,
+    registry: ProviderRegistry,
+    graph: Any,
+    work: Iterable[WorkNode] | None = None,
+) -> LosslessInts:
     """Every column that must ingest as an exact nullable integer, per table.
 
     The ONE construction of the set every Arrow-to-pandas ingestion site passes to
@@ -377,30 +362,27 @@ def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> 
     """
     from decoy_engine.declared_casting._boundary import declared_integer_columns
     from decoy_engine.execution._runner import (
+        _nodes,
         group_key_group_by_columns,
         source_anchor_columns,
         top_code_columns,
+        when_read_columns,
     )
 
+    nodes = list(_nodes(plan, registry, work))
     exact: dict[str, set[str]] = {}
     for edge in graph.edges:
         for table in (edge.parent_table, edge.child_table):
             exact[table] = exact.get(table, set()) | fk_columns_for_table(graph.edges, table)
     for source in (
-        source_anchor_columns(plan, registry),
-        top_code_columns(plan, registry),
-        group_key_group_by_columns(plan, registry),
+        source_anchor_columns(plan, registry, nodes),
+        top_code_columns(plan, registry, nodes),
+        group_key_group_by_columns(plan, registry, nodes),
         declared_integer_columns(plan),
     ):
         for table, cols in source.items():
             exact[table] = exact.get(table, set()) | set(cols)
-    when_read = _when_read_columns(
-        (table, ((n, seed.when) for n, seed in table_seed.per_column))
-        for table, table_seed in plan.seed_envelope.per_table
-    )
-    return LosslessInts(
-        {t: frozenset(c) for t, c in exact.items()}, {t: frozenset(c) for t, c in when_read.items()}
-    )
+    return LosslessInts({t: frozenset(c) for t, c in exact.items()}, when_read_columns(plan))
 
 
 def lossless_int_columns_from_config(
@@ -411,7 +393,7 @@ def lossless_int_columns_from_config(
     declared integers, `group_key` `group_by` siblings, and the columns a `when:` reads.
     Relationships are declined upstream and `date_shift`/`top_code` never reach it."""
     from decoy_engine._lexeme import integer_columns_by_table
-    from decoy_engine.execution._runner import group_by_sibling
+    from decoy_engine.execution._runner import group_by_sibling, when_columns_of
 
     exact: set[str] = set(integer_columns_by_table(config).get(table, ()))
     entries = next(
@@ -421,10 +403,8 @@ def lossless_int_columns_from_config(
         group_by = group_by_sibling(entry.get("provider_config"))
         if entry.get("strategy") == "group_key" and group_by is not None:
             exact.add(group_by)
-    when_read = _when_read_columns([(table, ((e.get("name"), e.get("when")) for e in entries))])
-    return LosslessInts(
-        {table: frozenset(exact)}, {table: frozenset(when_read.get(table, ()))}
-    ).for_table(table, source)
+    when_read = when_columns_of(e.get("when") for e in entries)
+    return LosslessInts({table: frozenset(exact)}, {table: when_read}).for_table(table, source)
 
 
 def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFrame:

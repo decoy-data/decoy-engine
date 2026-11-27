@@ -59,6 +59,9 @@ class ColumnAccess:
 
     reads: frozenset[str] = frozenset()
     writes: frozenset[str] = frozenset()
+    # The subset of `reads` the handler takes from the pre-mask snapshot (`joint_mask` `key_by`,
+    # `date_shift` `group_by`); the rest are read at their value when the handler runs.
+    source_reads: frozenset[str] = frozenset()
     reads_unknown: bool = False
     writes_unknown: bool = False
     # `source` unless the strategy writes its own target without reading it. The default is the
@@ -175,8 +178,18 @@ def _derived_aggregate(entry: Mapping[str, Any]) -> ColumnAccess:
 def _joint_mask(entry: Mapping[str, Any]) -> ColumnAccess:
     pc = _provider_config(entry)
     key = pc.get("key_by")
-    reads = _siblings(entry) | (frozenset({key}) if isinstance(key, str) and key else frozenset())
-    return ColumnAccess(reads=reads, writes=_strings(pc.get("columns")))
+    anchor = frozenset({key}) if isinstance(key, str) and key else frozenset()
+    return ColumnAccess(
+        reads=_siblings(entry) | anchor, writes=_strings(pc.get("columns")), source_reads=anchor
+    )
+
+
+def _date_shift(entry: Mapping[str, Any]) -> ColumnAccess:
+    from decoy_engine.execution._runner import group_by_sibling
+
+    group_by = group_by_sibling(_provider_config(entry))
+    anchor = frozenset({group_by}) if group_by else frozenset()
+    return ColumnAccess(reads=_siblings(entry) | anchor, source_reads=anchor)
 
 
 def _nested(entry: Mapping[str, Any]) -> ColumnAccess:
@@ -214,6 +227,7 @@ def _union(a: ColumnAccess, b: ColumnAccess) -> ColumnAccess:
     return ColumnAccess(
         reads=a.reads | b.reads,
         writes=a.writes | b.writes,
+        source_reads=a.source_reads | b.source_reads,
         reads_unknown=a.reads_unknown or b.reads_unknown,
         writes_unknown=a.writes_unknown or b.writes_unknown,
         # Differing own-target claims fall back to reading the source, the fail-closed side.
@@ -270,9 +284,9 @@ def _composite(outputs: Callable[[Mapping[str, Any]], frozenset[str] | None]) ->
         if written is None:
             return ColumnAccess(reads=frozenset(group[:1]), writes_unknown=True)
         # The deterministic key is the first sorted group column's source values.
-        return ColumnAccess(
-            reads=frozenset(group[:1]), writes=written | _strings(entry.get("coherent_with"))
-        )
+        # A `coherent_with` member the provider does not output is read as part of the group
+        # identity but never written.
+        return ColumnAccess(reads=frozenset(group[:1]), writes=written)
 
     return declare
 
@@ -344,6 +358,7 @@ SURFACE_DECLARATIONS: dict[str, Declaration] = {
     },
     "scalar:derived": _creates(_derived),
     "scalar:derived_aggregate": _creates(_derived_aggregate),
+    "scalar:date_shift": _date_shift,
     "scalar:joint_mask": _joint_mask,
     "scalar:nested": _nested,
     **{f"composite:{name}": _composite(_fixed_outputs(name)) for name in _FIXED_COMPOSITES},
@@ -376,17 +391,17 @@ def column_access(entry: Mapping[str, Any], registry: Any) -> ColumnAccess:
     `registry` is the one `build_work_list` receives: it decides whether the entry is a
     composite node, so a caller registry that rebinds or adds a composite is honored.
     """
-    provider = entry.get("provider")
-    if _is_composite(provider, registry):
-        declare = SURFACE_DECLARATIONS.get(f"composite:{provider}")
-        access = _WRITES_UNKNOWN if declare is None else declare(entry)
-        # The when gate is not applied to composite nodes, but the declaration stays
-        # conservative: the predicate's names count as read too.
-        return _with_when(access, entry)
-    declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
-    # An undeclared strategy may write anything: fail closed.
-    access = _WRITES_UNKNOWN if declare is None else declare(entry)
-    return _with_when(access, entry)
+    return declared_access(entry, _is_composite(entry.get("provider"), registry))
+
+
+def declared_access(entry: Mapping[str, Any], composite: bool) -> ColumnAccess:
+    """`column_access` for a caller that already knows whether the entry is a composite node
+    (a `WorkNode` records it in `kind`), so it needs no registry."""
+    key = f"composite:{entry.get('provider')}" if composite else f"scalar:{entry.get('strategy')}"
+    declare = SURFACE_DECLARATIONS.get(key)
+    # An undeclared provider or strategy may write anything: fail closed. A composite's `when:`
+    # is not gated, but its names count as read too.
+    return _with_when(_WRITES_UNKNOWN if declare is None else declare(entry), entry)
 
 
 def _with_when(access: ColumnAccess, entry: Mapping[str, Any]) -> ColumnAccess:
@@ -399,6 +414,13 @@ def _with_when(access: ColumnAccess, entry: Mapping[str, Any]) -> ColumnAccess:
     return replace(merged, own_target=access.own_target)
 
 
+def creates_own_target(entry: Mapping[str, Any]) -> bool:
+    """Whether a scalar entry writes its own target without reading it, so the column may be
+    absent from the source until the entry runs."""
+    declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
+    return declare is not None and declare(entry).own_target == OWN_TARGET_CREATES
+
+
 def scalar_creating_reads(entry: Mapping[str, Any]) -> frozenset[str]:
     """The sibling columns a scalar entry that creates its own target reads, else empty.
 
@@ -406,8 +428,8 @@ def scalar_creating_reads(entry: Mapping[str, Any]) -> frozenset[str]:
     admits by, so a created column runs after every column its value reads. An entry that does
     not create its target orders after nothing. Reads that cannot be named (`reads_unknown`)
     never drop the ones that can, so a dependent never reads a driver before it is masked.
-    A `when:` predicate adds no edge: the gate reads the frame as it stands when the entry
-    runs, and ordering on it would change which rows match and could form a new cycle.
+    A `when:` predicate adds no edge: the gate reads original values, so no ordering changes
+    which rows match, and an edge could only form a new cycle.
     """
     declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
     if declare is None:
@@ -520,9 +542,9 @@ def touched_columns(entries: Iterable[Mapping[str, Any]], registry: Any) -> froz
 def handler_written_columns(
     entries: Iterable[Mapping[str, Any]], registry: Any
 ) -> frozenset[str] | None:
-    """Columns some handler writes (own columns of composites included), or None when some
-    declaration has `writes_unknown`, meaning every source field is potentially written. An
-    unknown read never makes this None."""
+    """Columns some handler writes across config `entries`, or None when a declaration cannot
+    name its writes (every source field is then potentially written). The carry side, which holds
+    the table config and no work list, reads the same declaration the resolver does."""
     written: set[str] = set()
     for entry in entries:
         access = column_access(entry, registry)

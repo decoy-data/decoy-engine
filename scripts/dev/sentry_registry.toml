@@ -261,6 +261,10 @@ id = "lossless-int-columns"
 baseline = "tests/sentry/baselines/lossless-int-columns.json"
 
 [[sentry]]
+id = "compile-once"
+baseline = "tests/sentry/baselines/compile-once.json"
+
+[[sentry]]
 id = "column-shape-classifier"
 baseline = "tests/sentry/baselines/column-shape-classifier.json"
 approved_growth = [

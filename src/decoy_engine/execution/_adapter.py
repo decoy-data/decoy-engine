@@ -252,6 +252,13 @@ class StrategyContext:
     # mutate-in-place / default-empty pattern as the sinks above; a fresh dict
     # per job via default_factory.
     group_anchor_snapshots: dict[tuple[str, str], pd.Series] = field(default_factory=dict)
+    # WHEN-READS-SOURCE: per table, the columns snapshotted pre-mask into `group_anchor_snapshots`
+    # that the `when:` gate may read (`_runner.source_snapshot_columns`). A route that builds no
+    # snapshot leaves it None and the gate fails closed (`when_source_snapshot_missing`).
+    source_snapshot_columns: Mapping[str, frozenset[str]] | None = None
+    # WHEN-READS-SOURCE: the compiled `ResolvedOperation` of the node in flight, stamped by the
+    # dispatcher beside `current_table`. A composite checks its generated keys against its writes.
+    current_operation: Any = None
     # Phase 4 slice 1 (DGRN -> windowed_date): the durable global row offset of
     # this call's FIRST row, i.e. the position the physical row 0 of `df`
     # occupies in the full, unchunked source. Full-frame and every other
@@ -277,6 +284,9 @@ class StrategyContext:
     # Positions, in the full frame, of the rows a `when:` gate handed to the handler.
     # None means every row in order. Set only on the per-call copy the gate makes.
     gate_positions: np.ndarray[Any, Any] | None = None
+    # Length of the full frame the gate ran on, set with `gate_positions` on the same per-call copy.
+    # `snapshot_rows` checks a snapshot against it before indexing by position.
+    source_row_count: int | None = None
     # D1c: rows a date operator emitted unchanged because they matched `preserve_values`,
     # summed per (table, column). A count only, never a value; empty unless a column opts in.
     date_preserved: dict[tuple[str, str], int] = field(default_factory=dict)

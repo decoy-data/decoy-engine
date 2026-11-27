@@ -1,4 +1,4 @@
-"""Registers the shared scratch-env fixture for the tests here that patch `tempfile.tempdir`."""
+"""The shared scratch-env fixture for the execution tests that patch `tempfile.tempdir`."""
 
 from __future__ import annotations
 

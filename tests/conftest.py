@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._copy_on_write import copy_on_write  # noqa: F401 - registers the fixture
 from tests._dp_cert import is_certified_dp_env, should_skip_dp
 from tests._lenient_checks import LENIENT_CHECK_TARGETS, lifted_check
 

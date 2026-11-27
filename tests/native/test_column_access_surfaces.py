@@ -132,7 +132,7 @@ _PINNED_DISPATCH_CALLS = frozenset(
     {
         "ExecutionError",
         "object.__setattr__",
-        "relationship_graph.parents_of",
+        "compile_work_order",
         "self._resolve_fk_node",
         "timed_strategy",
         "self._composite_handler.run",
@@ -249,17 +249,19 @@ _PINNED_RUN_CALLS = frozenset(
         "declared_date_shift_columns",
         "ctx.code_set_corpora_metrics",
         "ctx.date_preserve_metrics",
-        "source_anchor_columns",
+        "source_snapshot_columns",
         "dict",
         "drain_row_errors",
         "enforce_output_projection",
         "frames.items",
+        "converted.items",
         "frozenset",
-        "group_anchor_cols.items",
         "key_error_rows.setdefault",
         "lossless.for_table",
         "lossless_int_columns",
-        "order_work",
+        "compile_work_order",
+        "WorkOrderRun",
+        "list",
         "table_from_pandas_keeping_source_types",
         "untouched_columns",
         "apply_degenerate_faker_pin",
@@ -269,12 +271,14 @@ _PINNED_RUN_CALLS = frozenset(
         "require_mask_key",
         "row_error_records.extend",
         "run_chunk_ingest_guards",
-        "self._dispatch_mask_node",
+        "run_state.dispatch",
         "plan_column_shapes",
         "set",
         "sources.items",
         "time.perf_counter",
         "to_pandas_fk_safe",
+        "positional_frame",
+        "take_source_snapshots",
         "tuple",
         "use_collector",
         "validate_plan_when",
@@ -687,7 +691,7 @@ def test_untouched_columns_agree_with_the_column_access_registry(case: str) -> N
         pytest.skip("a declaration writes unknown columns; no registry set to compare")
     own_masked = {c["name"] for c in columns if c.get("strategy") != "passthrough"}
     expected = frozenset(names) - written - own_masked
-    assert untouched_columns(nodes, names, REG) == expected, case
+    assert untouched_columns(nodes, names) == expected, case
     # The lane's carry candidates are untouched columns that no `when:` entry guards.
     cfg = {"tables": [{"name": "t", "columns": columns}]}
     assert set(passthrough_columns(cfg, table="t", names=names, registry=REG)) <= expected
@@ -721,10 +725,10 @@ def test_composite_reads_the_first_sorted_group_column_and_writes_the_rest() -> 
     assert lone.reads == {"first_name"}
 
 
-def test_composite_writes_include_every_coherent_with_column() -> None:
-    # `z` is in the group but not in the bundle: declared anyway, never under-declared.
+def test_composite_writes_exclude_a_coherent_member_outside_the_bundle() -> None:
+    # `z` is group identity but not a bundle output, so the bundle never writes it.
     access = column_access(_custom("a", ["b", "z"], ["a", "b"]), REG)
-    assert access.writes == {"a", "b", "z"}
+    assert access.writes == {"a", "b"}
 
 
 def test_a_registry_composite_without_a_declaration_has_unknown_writes(

@@ -81,6 +81,7 @@ from decoy_engine.execution._adapter import (
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
+from decoy_engine.execution.work_order.rows import snapshot_rows
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
@@ -187,7 +188,22 @@ class DateShiftStrategyHandler:
         group_by = cfg.get("group_by")
         anchor_col: pd.Series | None = None
         if group_by:
-            snapshot = ctx.group_anchor_snapshots.get((ctx.current_table, group_by))
+            # The snapshot must line up ROW-FOR-ROW with the frame this handler sees:
+            # `snapshot_rows` reads it by position (a `when` gate and an FK-participating column
+            # are compile-rejected for group_by, so the frame is the whole table) and fails closed
+            # on a count mismatch instead of reindexing, so an execution route not yet supported
+            # for group_by is a loud error, never a silent mis-anchor.
+            snapshot = snapshot_rows(
+                ctx,
+                ctx.current_table,
+                group_by,
+                len(col),
+                lambda message: StrategyError(
+                    code=reasons.runtime.DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED,
+                    strategy="date_shift",
+                    message=message,
+                ),
+            )
             if snapshot is None:
                 raise StrategyError(
                     code=reasons.runtime.DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING,
@@ -197,30 +213,6 @@ class DateShiftStrategyHandler:
                         "but no pre-mask anchor snapshot was provided for it; the "
                         "run cannot anchor the shift deterministically. This is an "
                         "adapter wiring error, not a config error."
-                    ),
-                )
-            # The snapshot must line up ROW-FOR-ROW with the frame this handler
-            # sees. On every SUPPORTED path a date_shift+group_by column gets the
-            # full table frame -- a `when` gate, an FK-participating column, and a
-            # nested child are ALL compile-rejected for group_by -- so the snapshot,
-            # built from that same pre-mask frame, has an identical index. Require
-            # that identity and FAIL CLOSED otherwise instead of silently
-            # reindexing: a future/unknown route that handed a filtered or
-            # reordered frame (a fresh RangeIndex) would otherwise mis-anchor
-            # UNDETECTABLY -- the exact wrong-output class this snapshot exists to
-            # prevent (Dennis R2 LOW-1). This backstops any execution route not yet
-            # accounted for at the handler, turning a silent-wrong-output into a
-            # loud fail-closed raise.
-            if not snapshot.index.equals(col.index):
-                raise StrategyError(
-                    code=reasons.runtime.DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED,
-                    strategy="date_shift",
-                    message=(
-                        f"column {column!r} date_shift group_by {group_by!r}: the "
-                        "pre-mask anchor snapshot does not row-align with the frame "
-                        "being masked (indexes differ). Anchoring would be wrong, so "
-                        "the run fails closed. This indicates an execution route not "
-                        "yet supported for group_by, not a config error."
                     ),
                 )
             anchor_col = snapshot

@@ -19,10 +19,15 @@ def _provider_config(outside: Any) -> tuple[tuple[str, Any], ...]:
 
 
 def _column_seed(outside: Any) -> ColumnSeed:
-    seed = object.__new__(ColumnSeed)
-    object.__setattr__(seed, "provider_config", _provider_config(outside))
-    object.__setattr__(seed, "strategy", "code_set")
-    return seed
+    return ColumnSeed(
+        namespace="n",
+        strategy="code_set",
+        provider=None,
+        backend_type="faker",
+        backend_version="v",
+        cardinality_mode="reuse",
+        provider_config=_provider_config(outside),
+    )
 
 
 def _outside(world: World) -> Any:  # noqa: F811
@@ -48,18 +53,22 @@ def test_the_pandas_handler_names_its_column(world: World) -> None:  # noqa: F81
 def test_the_chunked_resolver_names_its_column(world: World, monkeypatch) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
     from decoy_engine.execution import _runner
     from decoy_engine.execution._chunked_code_set import resolve_pinned_code_set_records
+    from decoy_engine.relationships import RelationshipGraph
 
-    node = SimpleNamespace(
+    # The resolver compiles its order through `work_order`, which resolves each node against the
+    # relationship graph, so the fake is a real node and graph, not a bare namespace.
+    node = _runner.WorkNode(
         table="orders",
+        columns=("code",),
         kind="scalar",
         strategy="code_set",
-        columns=("code",),
+        provider=None,
         plan_slice=_column_seed(_outside(world)),
     )
+    graph = RelationshipGraph(edges=(), ordering=())
     monkeypatch.setattr(_runner, "build_work_list", lambda plan, registry: [node])
-    monkeypatch.setattr(_runner, "order_work", lambda work, graph: work)
     with scope(world.policy), pytest.raises(FileAccessDenied) as info:
-        resolve_pinned_code_set_records(None, None, None, table="orders")  # type: ignore[arg-type]
+        resolve_pinned_code_set_records(None, None, graph, table="orders")  # type: ignore[arg-type]
     _assert_denial(info.value, KEY)
 
 

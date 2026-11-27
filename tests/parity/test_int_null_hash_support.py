@@ -257,21 +257,25 @@ def test_a_when_on_a_passthrough_sibling_still_reads_the_widened_frame_column() 
         assert s[:2] == ["a", "b"] and s[2] not in ("c", None)
 
 
-def test_a_when_on_the_hashed_integer_column_behaves_as_it_does_for_a_null_free_one() -> None:
-    # The hash source column is masked before a sibling's predicate reads it, with or without a
-    # null in it. Unchanged by the snapshot, so both fail the same way.
+def test_a_when_on_the_hashed_integer_column_reads_its_original_value_with_or_without_nulls() -> (
+    None
+):
+    # A `when:` reads original values (WHEN-READS-SOURCE), so the sibling's predicate on `h` sees
+    # the source integers even though `h` is hashed first. A null selects nothing, as in pandas.
     from dataclasses import replace
 
     from tests.parity._d1a_hash_data import column_seed
 
     gated = replace(column_seed(namespace="ns_s"), when="h > 1")
-    codes = []
-    for values in ([1, 2, 3], [1, None, 3]):
+    for values, kept, masked in (([1, 2, 3], ["a"], [1, 2]), ([1, None, 3], ["a", "b"], [2])):
         payload = pa.table({"h": pa.array(values, pa.int64()), "s": pa.array(["a", "b", "c"])})
-        with pytest.raises(Exception) as exc:
-            run_full(payload, (("h", column_seed()), ("s", gated)))
-        codes.append(getattr(exc.value, "code", None))
-    assert codes[0] == codes[1] == "when_expression_error"
+        for run in (run_full, run_seq):
+            out = run(payload, (("h", column_seed()), ("s", gated))).outputs["t"]
+            s = out.column("s").to_pylist()
+            assert len(s) == 3
+            assert [s[i] for i in range(len(kept))] == kept
+            for i in masked:
+                assert s[i] not in ("a", "b", "c", None)
 
 
 def test_exact_int_arrow_only_serves_the_frame_it_was_recorded_for() -> None:

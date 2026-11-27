@@ -243,10 +243,11 @@ def _veto_case(
         )
     if case == "when_veto":
         config = make_config([redact("r"), truncate("t"), passthrough("p")])
-        # A grammar predicate the native route still declines: `t` reads `r`, which the
-        # earlier node masks, so the oracle's masked value is what the predicate sees.
-        config["tables"][0]["columns"][1]["when"] = "r == 'x'"
-        return config, ["r", "t", "p"], {}, "when_predicate_reads_masked_column:t:r", arrow
+        # A grammar predicate the native route still declines: `t` is gated, but its strategy
+        # config (a non-string `redact_with`) is one the masked step does not take.
+        config["tables"][0]["columns"][1] = {**redact("t", redact_with=7), "when": "r == 'x'"}
+        planned = {**arrow, "t": "pandas_oracle"}
+        return config, ["r", "t", "p"], {}, "when_predicate_not_native:t", planned
     if case == "adapter_veto":
         return (
             make_config([redact("r"), truncate("t"), passthrough("p")]),

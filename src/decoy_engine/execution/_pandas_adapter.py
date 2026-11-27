@@ -71,8 +71,7 @@ from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
 from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
-    order_work,
-    source_anchor_columns,
+    source_snapshot_columns,
 )
 from decoy_engine.execution._sequential import run_sequential as _run_sequential
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
@@ -82,6 +81,8 @@ from decoy_engine.execution._strategies._orphan import make_remap_fn
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._when_gate import run_with_when_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
+from decoy_engine.execution.work_order import WorkOrderRun, compile_work_order
+from decoy_engine.execution.work_order.rows import positional_frame, take_source_snapshots
 from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -199,22 +200,23 @@ class PandasExecutionAdapter:
         # anchors, top_code, group_key siblings, declared integers, columns a `when:` reads) is
         # named by the ONE `lossless_int_columns`, so a null never widens it to float64 and rounds
         # a value beyond 2**53. Every other column is unaffected.
-        group_anchor_cols = source_anchor_columns(plan, registry)
-        lossless = lossless_int_columns(plan, registry, relationship_graph)
-        frames: dict[str, pd.DataFrame] = {
-            t: to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
+        order = compile_work_order(build_work_list(plan, registry), relationship_graph)
+        ordered = list(order.ordered)
+        group_anchor_cols = source_snapshot_columns(order)
+        lossless = lossless_int_columns(plan, registry, relationship_graph, ordered)
+        converted = {
+            t: positional_frame(to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)))
+            for t, tbl in sources.items()
         }
+        frames: dict[str, pd.DataFrame] = {t: frame for t, (frame, _kept) in converted.items()}
+        kept_indexes = {t: kept for t, (_frame, kept) in converted.items()}
         conversion_ms = (time.perf_counter() - t0) * 1000.0
-        # HC-3a P1 #1: snapshot each group_by anchor column PRE-MASK (before the
-        # node loop mutates any frame), keyed by (table, col), so the handler
-        # anchors on immutable source ids. Same construction as source_snapshots
-        # below but with no cross-table lifetime -- an anchor is same-table only.
-        group_anchor_snapshots: dict[tuple[str, str], pd.Series] = {
-            (t, col): frames[t][col].copy()
-            for t, cols in group_anchor_cols.items()
-            for col in cols
-            if t in frames and col in frames[t].columns
-        }
+        # HC-3a P1 #1: snapshot each source-read column PRE-MASK (before the node loop mutates any
+        # frame), keyed by (table, col). `take_source_snapshots` also refuses a `when:` that names
+        # a column the converted input lacks, for every table, before any node runs.
+        group_anchor_snapshots: dict[tuple[str, str], pd.Series] = {}
+        for t, frame in frames.items():
+            group_anchor_snapshots |= take_source_snapshots(order, group_anchor_cols, t, frame)
 
         cache = pool_cache if pool_cache is not None else PoolCache()
         ctx = StrategyContext(
@@ -225,6 +227,7 @@ class PandasExecutionAdapter:
             job_seed=plan.seed_envelope.job_seed,
             mask_key=require_mask_key(plan, key_provider),
             group_anchor_snapshots=group_anchor_snapshots,
+            source_snapshot_columns=group_anchor_cols,
             row_offset=row_offset,
             # Phase 4 slice 4: a caller (the chunked route) that resolved one
             # corpus record per code_set column up front seeds it here so
@@ -238,12 +241,10 @@ class PandasExecutionAdapter:
             column_shapes=plan_column_shapes(plan),
         )
 
-        ordered = order_work(build_work_list(plan, registry), relationship_graph)
+        run_state = WorkOrderRun(order)
         node_by_key: dict[_NodeKey, WorkNode] = {n.key: n for n in ordered}
         for t, frame in frames.items():
-            register_exact_int_sources(
-                ctx, t, sources[t], frame, (n for n in ordered if n.table == t)
-            )
+            register_exact_int_sources(ctx, t, sources[t], frame, order)
 
         # FK-parent columns are snapshotted pre-mask so an FK child can rebuild
         # the parent source->masked key map. Parents always mask before children
@@ -279,7 +280,8 @@ class PandasExecutionAdapter:
                 if node.table not in frames:
                     continue
                 warnings.extend(
-                    self._dispatch_mask_node(
+                    run_state.dispatch(
+                        self._dispatch_mask_node,
                         node,
                         frames,
                         relationship_graph,
@@ -289,6 +291,7 @@ class PandasExecutionAdapter:
                         ctx,
                         key_error_rows=key_error_rows,
                         errored_keys_cache=errored_keys_cache,
+                        run=run_state,
                     )
                 )
                 # Sprint 2 honesty pack (D7): drain the shared row_errors sink
@@ -330,6 +333,7 @@ class PandasExecutionAdapter:
                         t,
                     ),
                     [c for (table, c) in ctx.native_date_columns if table == t],
+                    kept_index=kept_indexes[t],
                 )
                 for t, f in frames.items()
             },
@@ -361,6 +365,7 @@ class PandasExecutionAdapter:
         *,
         key_error_rows: _KeyErrorRows | None = None,
         errored_keys_cache: dict[_NodeKey, dict[_KeyTuple, str]] | None = None,
+        run: WorkOrderRun | None = None,
     ) -> list[QualityWarning]:
         """Mask one work node in place in `frames[node.table]`, returning its
         warnings. Shared by the full-frame `run` and the sequential
@@ -369,15 +374,15 @@ class PandasExecutionAdapter:
         other node masks via its scalar or composite handler. `key_error_rows`/
         `errored_keys_cache` (S2, default None) thread the quarantine-aware FK
         caches to `_resolve_fk_node`; non-FK nodes ignore them."""
-        # Codex P2 MULTI-TABLE EVIDENCE COLLISION remediation: stamp the
-        # in-flight table onto ctx BEFORE any handler dispatch (scalar,
-        # composite, or fk_resolve) so a scalar handler that needs table
-        # identity for evidence keying (CodeSetHandler) can read it. ctx is
-        # frozen; object.__setattr__ is the sanctioned mutation path (see
-        # StrategyContext.current_table).
+        # Stamp the in-flight table onto ctx BEFORE any handler dispatch so a handler that needs
+        # table identity (CodeSetHandler evidence keying) can read it. ctx is frozen;
+        # object.__setattr__ is the sanctioned path (see StrategyContext.current_table).
         object.__setattr__(ctx, "current_table", node.table)
+        # One compiled record per node: a standalone call compiles its own one-node order first.
+        op = (run.order if run else compile_work_order([node], relationship_graph)).ops[node.key]
+        object.__setattr__(ctx, "current_operation", op)
         df = frames[node.table]
-        child_edges = relationship_graph.parents_of(node.table, node.columns)
+        child_edges = op.fk_edges
         if child_edges:
             with timed_strategy("fk_resolve", ",".join(node.columns)):
                 return self._resolve_fk_node(
@@ -430,7 +435,13 @@ class PandasExecutionAdapter:
             # directly). When set, it evaluates the predicate via numexpr
             # (scope-clamped per Dennis C1) and routes only matching rows through.
             frames[node.table], node_warnings = run_with_when_gate(
-                handler, df, node.columns[0], plan_slice, ctx
+                handler,
+                df,
+                node.columns[0],
+                plan_slice,
+                ctx,
+                op.outputs,
+                run.selection if run else None,
             )
         return node_warnings
 

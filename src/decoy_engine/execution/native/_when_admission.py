@@ -12,8 +12,9 @@ is whether the COLUMN around it is one the masked kernel step reproduces exactly
 2. the target source type is `string`, because the masked step selects between two string
    arrays;
 3. the predicate parses under the closed grammar (a raw-dict predicate outside it declines);
-4. every column the predicate reads is the target itself or one no EARLIER work node writes,
-   because the oracle evaluates the predicate on the live frame, after earlier masks.
+
+A predicate may read a column an earlier work node masks: every route evaluates it on the
+original values (WHEN-READS-SOURCE), and the native row mask reads the raw chunk.
 
 Rule 1 and 2 keep the long-standing `when_predicate_not_native:<column>` code.
 """
@@ -26,7 +27,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.execution._column_access import column_access, has_when
+from decoy_engine.execution._column_access import has_when
 from decoy_engine.execution.native._route_decline_codes import (
     CodedDecline,
     RouteDeclineCode,
@@ -40,7 +41,6 @@ from decoy_engine.expressions._when_parser import (
 
 NOT_NATIVE_CODE = reasons.runtime.WHEN_PREDICATE_NOT_NATIVE
 OUTSIDE_SUBSET_CODE = reasons.runtime.WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET
-READS_MASKED_CODE = reasons.runtime.WHEN_PREDICATE_READS_MASKED_COLUMN
 
 ADMITTED_WHEN_STRATEGIES = frozenset(
     {"hash", "redact", "truncate", "categorical", "text_redact", "bucket_perturb", "date_shift"}
@@ -63,55 +63,6 @@ def parsed_when(entry: Mapping[str, Any]) -> WhenExpr | None:
         return parse_when(str(entry.get("when")))
     except ValidationError:
         return None
-
-
-def _node_key(entry: Mapping[str, Any], registry: Any) -> tuple[str, ...]:
-    """The work node's sort key (`order_work` orders by `(table, columns)`, and the chunked
-    route has no relationship edges, so this order is the execution order)."""
-    from decoy_engine.execution._runner import provider_is_composite
-
-    name = str(entry.get("name", ""))
-    if provider_is_composite(entry.get("provider"), registry):
-        coherent = entry.get("coherent_with")
-        members = (
-            {name, *(c for c in coherent if isinstance(c, str))}
-            if isinstance(coherent, list | tuple)
-            else {name}
-        )
-        return tuple(sorted(members))
-    return (name,)
-
-
-def _earlier_writes(
-    target: str, entries: Sequence[Mapping[str, Any]], registry: Any
-) -> frozenset[str] | None:
-    """Columns written by work nodes that run before `target`'s node, or None when some
-    such node's writes cannot be named.
-
-    A node's writes are its own target column plus its declared extra writes: the
-    declaration helper reports only the extras for a scalar node. A passthrough node
-    writes a value equal to the source, so it is not a write. A node with unknown reads
-    also yields None: it cannot change a value, so declining after it is conservative
-    policy rather than a parity requirement.
-    """
-    target_entry = next((e for e in entries if e.get("name") == target), None)
-    if target_entry is None:
-        return None
-    target_key = _node_key(target_entry, registry)
-    written: set[str] = set()
-    for entry in entries:
-        name = entry.get("name")
-        if entry is target_entry or not isinstance(name, str):
-            continue
-        if _node_key(entry, registry) >= target_key:
-            continue
-        access = column_access(entry, registry)
-        if access.writes_unknown or access.reads_unknown:
-            return None
-        written |= access.writes
-        if entry.get("strategy") != "passthrough":
-            written.add(name)
-    return frozenset(written)
 
 
 def when_native_rejection(
@@ -167,13 +118,6 @@ def when_native_rejection(
             ref = read.column
             if ref not in schema.names or schema.field(ref).type != pa.string():
                 return f"{NOT_NATIVE_CODE}:{column}"
-    written = _earlier_writes(column, entries, registry)
-    if written is None:
-        return f"{READS_MASKED_CODE}:{column}:{refs[0].column}"
-    for read in refs:
-        ref = read.column
-        if ref != column and ref in written:
-            return f"{READS_MASKED_CODE}:{column}:{ref}"
     return None
 
 
@@ -193,7 +137,6 @@ def first_when_rejection(
 _WHEN_DECLINE_CODES: dict[str, RouteDeclineCode] = {
     NOT_NATIVE_CODE: RouteDeclineCode.WHEN_PREDICATE_NOT_NATIVE,
     OUTSIDE_SUBSET_CODE: RouteDeclineCode.WHEN_OUTSIDE_SUBSET,
-    READS_MASKED_CODE: RouteDeclineCode.WHEN_READS_MASKED_COLUMN,
 }
 
 
@@ -299,7 +242,6 @@ __all__ = [
     "ADMITTED_WHEN_STRATEGIES",
     "NOT_NATIVE_CODE",
     "OUTSIDE_SUBSET_CODE",
-    "READS_MASKED_CODE",
     "admitted_when_columns",
     "first_when_decline",
     "first_when_rejection",

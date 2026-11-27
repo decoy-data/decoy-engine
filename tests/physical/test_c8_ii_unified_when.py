@@ -311,7 +311,9 @@ def test_2_several_when_columns_one_table(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_3_a_reference_to_a_column_an_earlier_node_masks_declines(tmp_path: Path) -> None:
+def test_3_a_reference_to_a_column_an_earlier_node_masks_reads_its_original_value(
+    tmp_path: Path,
+) -> None:
     n = 16
     src = pa.table(
         {
@@ -319,10 +321,11 @@ def test_3_a_reference_to_a_column_an_earlier_node_masks_declines(tmp_path: Path
             "c": pa.array([f"src_{i % 5}" for i in range(n)], pa.string()),
         }
     )
-    # Work order is by column name, so `a` runs first and the predicate on `c` reads it masked.
+    # `a` runs first, but a `when:` reads original values (WHEN-READS-SOURCE), so the lane admits
+    # the predicate on `c` and selects the rows the oracle does.
     columns = [target("redact", "a"), target("redact", "c")]
     case = Case(tmp_path, src, columns, mutate=with_when({"c": "a == 'src_0'"}))
-    declined(case)
+    admitted(case)
 
 
 # ---------------------------------------------------------------------------

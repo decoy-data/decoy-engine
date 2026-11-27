@@ -10,6 +10,8 @@ separate language, and is pinned by `test_transform_expression_readers_keep_the_
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -102,3 +104,111 @@ def test_two_column_when_carries_both_reads_and_matches_the_oracle(configured: b
         assert got.column("s").to_pylist() == want.column("s").to_pylist()
         assert same_column(got.column("left"), want.column("left"))
         assert same_column(got.column("right"), want.column("right"))
+
+
+# ---------------------------------------------------------------------------
+# WHEN-READS-SOURCE S2: every `_eval_predicate` caller evaluates over original values.
+# ---------------------------------------------------------------------------
+
+_SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine" / "execution"
+# (file, the one allowed first argument as source text, why it holds original values)
+_EVAL_CALLERS = {
+    "_when_gate.py": ("source", "`when_source_frame`: the live frame with pre-mask snapshots"),
+    "native/_when_mask.py": ("frame", "the raw chunk the source produced, before any mask"),
+    "_unified_slice_when.py": ("frame", "the unified slice's source frame, before any mask"),
+}
+
+
+def _eval_calls(path: Path) -> list[ast.Call]:
+    tree = ast.parse(path.read_text())
+    return [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "_eval_predicate"
+    ]
+
+
+def test_every_predicate_evaluation_reads_an_allowed_frame() -> None:
+    """A new `_eval_predicate` caller, or a caller that changes its frame argument, fails here
+    until it is added to `_EVAL_CALLERS` with its reason."""
+    found = {
+        str(p.relative_to(_SRC)): [ast.unparse(c.args[0]) for c in calls]
+        for p in _SRC.rglob("*.py")
+        if (calls := _eval_calls(p))
+    }
+    assert found == {name: [arg] for name, (arg, _why) in _EVAL_CALLERS.items()}
+
+
+def test_the_gate_frame_comes_from_when_source_frame() -> None:
+    tree = ast.parse((_SRC / "_when_gate.py").read_text())
+    gate = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "run_with_when_gate"
+    )
+    assigned = [
+        ast.unparse(n.value)
+        for n in ast.walk(gate)
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "source" for t in n.targets)
+    ]
+    assert len(assigned) == 1 and assigned[0].startswith("when_source_frame(")
+
+
+def test_the_unified_slice_passes_the_candidate_source_frame() -> None:
+    """`compute_when_masks` must get the candidate's source frame, never a frame the run masked."""
+    tree = ast.parse((_SRC / "_unified_slice.py").read_text())
+    args = [
+        ast.unparse(n.args[0])
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "compute_when_masks"
+    ]
+    assert args == ["candidate.source_frame"]
+
+
+# ---------------------------------------------------------------------------
+# WHEN-READS-SOURCE S2 fix round 1: one `when:` column reader, one node-to-entry builder.
+# ---------------------------------------------------------------------------
+
+_WORK_ORDER = _SRC / "work_order"
+
+
+def test_when_columns_of_is_the_one_reader_of_a_predicates_columns() -> None:
+    """`_runner.when_columns_of` answers for every predicate the declaration reads, and the
+    work-order package holds no second parser of the grammar."""
+    from decoy_engine.execution._runner import when_columns_of
+
+    for expr, expected in _VALID.values():
+        assert when_columns_of([expr]) == expected, expr
+    assert when_columns_of([None, 7, "x >", "   "]) == frozenset()
+    seen = {
+        f"{p.name}: {n.id}"
+        for p in _WORK_ORDER.glob("*.py")
+        for n in ast.walk(ast.parse(p.read_text()))
+        if isinstance(n, ast.Name) and n.id in {"parse_when_cached", "when_column_refs"}
+    } | {
+        f"{p.name}: {a.name}"
+        for p in _WORK_ORDER.glob("*.py")
+        for n in ast.walk(ast.parse(p.read_text()))
+        if isinstance(n, ast.ImportFrom)
+        for a in n.names
+        if a.name in {"parse_when_cached", "when_column_refs"}
+    }
+    assert seen == set()
+
+
+def test_one_builder_turns_a_work_node_into_a_config_entry() -> None:
+    """The entry dict (`name`, `strategy`, `provider`, `provider_config`, ...) is built once,
+    in `_runner.node_entry`; ordering and resolution both call it."""
+    sites = []
+    for path in [_SRC / "_runner.py", *_WORK_ORDER.glob("*.py")]:
+        for n in ast.walk(ast.parse(path.read_text())):
+            if isinstance(n, ast.Dict):
+                keys = {k.value for k in n.keys if isinstance(k, ast.Constant)}
+                if {"strategy", "provider_config"} <= keys:
+                    sites.append(path.name)
+    assert sites == ["_runner.py"]

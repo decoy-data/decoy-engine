@@ -131,8 +131,11 @@ class CompositeHandler:
         bundle = generator.generate_bundle(
             spec, len(df), source=source, deterministic=deterministic
         )
+        op = ctx.current_operation  # the compiled operation, stamped by the dispatcher
+        declared = None if op is None or op.wildcard else op.writes
         for out_col, series in bundle.items():
-            if out_col not in df.columns:
+            # A generated key outside the declared outputs is refused before any assignment.
+            if out_col not in df.columns or (declared is not None and out_col not in declared):
                 # A composite that cannot write a declared output column is a
                 # wiring error, not a silent partial-write (Dennis slice-2h M1).
                 raise ExecutionError(

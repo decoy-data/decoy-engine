@@ -278,6 +278,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("defects/test_lossless_int_columns.py", "ALLOWED", nested=True),
     ),
     Source(
+        "compile-once",
+        "defects/test_compile_once.py",
+        in_code("defects/test_compile_once.py", "ALLOWED"),
+    ),
+    Source(
         "output-assembly-one-path",
         "defects/test_output_assembly_one_path.py",
         in_code("defects/test_output_assembly_one_path.py", "ALLOWED"),
