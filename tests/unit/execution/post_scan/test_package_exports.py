@@ -3,43 +3,50 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 from decoy_engine.execution.pipeline import post_scan
+from tests.sentry._platform_ast import engine_trees, import_map
 
-SRC = Path(post_scan.__file__).resolve().parents[3]
 PACKAGE = "decoy_engine.execution.pipeline.post_scan"
-OWN_DIR = Path(post_scan.__file__).resolve().parent
+OWN_DIR = "decoy_engine/execution/pipeline/post_scan/"
 
 
-def _private_imports(tree: ast.AST) -> list[int]:
-    lines = []
+def _private_imports(tree: ast.AST, rel: str) -> list[str]:
+    """Every dotted name under the package with an underscore part, absolute or relative."""
+    names = list(import_map(tree, rel).values())
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.startswith(PACKAGE + "._") or (
-                node.module == PACKAGE and any(a.name.startswith("_") for a in node.names)
-            ):
-                lines.append(node.lineno)
-        elif isinstance(node, ast.Import):
-            if any(a.name.startswith(PACKAGE + "._") for a in node.names):
-                lines.append(node.lineno)
-    return lines
+        if isinstance(node, ast.Import):
+            names += [alias.name for alias in node.names]
+    prefix = PACKAGE.split(".")
+    return [
+        name
+        for name in names
+        if name.split(".")[: len(prefix)] == prefix
+        and any(part.startswith("_") for part in name.split(".")[len(prefix) :])
+    ]
 
 
 def test_no_production_module_imports_a_private_post_scan_module() -> None:
-    offenders = []
-    for path in sorted(SRC.rglob("*.py")):
-        if OWN_DIR in path.parents:
-            continue
-        for line in _private_imports(ast.parse(path.read_text(encoding="utf-8"))):
-            offenders.append(f"{path.relative_to(SRC)}:{line}")
+    offenders = [
+        rel
+        for rel, tree in engine_trees().items()
+        if not rel.startswith(OWN_DIR) and _private_imports(tree, rel)
+    ]
     assert offenders == []
 
 
-def test_the_guard_flags_a_private_import() -> None:
-    bad = ast.parse(f"from {PACKAGE}._gate import settle\nfrom {PACKAGE} import _suite\n")
-    assert _private_imports(bad) == [1, 2]
-    assert _private_imports(ast.parse(f"from {PACKAGE} import settle\n")) == []
+def test_the_guard_sees_every_spelling() -> None:
+    rel = "decoy_engine/execution/_pipeline_route_dispatch.py"
+    for line in (
+        f"from {PACKAGE}._gate import settle",
+        f"from {PACKAGE} import _suite",
+        f"import {PACKAGE}._gate",
+        "from .pipeline.post_scan._gate import settle",
+        "from .pipeline.post_scan import _gate",
+    ):
+        assert _private_imports(ast.parse(line), rel) != [], line
+    assert _private_imports(ast.parse(f"from {PACKAGE} import settle"), rel) == []
+    assert _private_imports(ast.parse("from .pipeline.post_scan import settle"), rel) == []
 
 
 def test_every_name_in_all_resolves() -> None:
