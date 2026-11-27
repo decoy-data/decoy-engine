@@ -4,8 +4,8 @@ Declared keys are measured over Arrow batches by `check_keys`. The column suite 
 `run_post_mask` only when `post_scan.integrity` asks for it, so a run that only declares
 relationships is never scanned for findings it did not opt in to. `post_scan_verdict` decides and a
 block raises `PostScanBlockedError` after every `except` block has closed, so its chain is empty.
-A coded engine error from a part propagates unchanged; any other keeps only its class name,
-because a reader or DuckDB message can quote key values.
+A coded engine error from a part propagates unchanged; any other keeps only its class name (a
+reader or DuckDB message can quote key values).
 
 `execute_route` binds one gate per run (`bind_gate`); a route that holds its outputs resident
 runs it before it commits, and `observed_commit` refuses a commit while a required gate has not
@@ -46,6 +46,7 @@ from decoy_engine.execution.pipeline._post_scan_distribution import (
 )
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.internal.memory_limit import require_megabytes
+from decoy_engine.internal.pandas_compat import table_to_pandas
 from decoy_engine.profile import LazySource
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
 from decoy_engine.progress import safe_error_class
@@ -89,8 +90,7 @@ __all__ = [
 _NOT_RUN: Final = "PostScanGateNotRun"
 
 
-# A smaller cap starves DuckDB's hash join even at 100k keys (it fails to pin a block), so a small
-# run budget never takes the key scan below this.
+# A smaller cap starves DuckDB's hash join even at 100k keys, so a run budget never goes below it.
 _FLOOR_MB: Final = 128
 
 
@@ -282,8 +282,8 @@ class PostScanGate:
         masked = _suite_tables(outputs, sources, table_kinds)
         if masked:
             self.report = run_post_mask(
-                {n: materialize_source(sources[n]).to_pandas() for n in masked},
-                {n: outputs[n].to_pandas() for n in masked},
+                {n: table_to_pandas(materialize_source(sources[n])) for n in masked},
+                {n: table_to_pandas(outputs[n]) for n in masked},
                 config=dict(self._config),
                 detectors=self._detectors,
             )
@@ -432,8 +432,8 @@ class PostScanGate:
         # Generated tables have no source to compare against, as in the report-only suite.
         masked = _suite_tables(outputs, sources, table_kinds)
         return run_post_mask(
-            {n: materialize_source(sources[n]).to_pandas() for n in masked},
-            {n: outputs[n].to_pandas() for n in masked},
+            {n: table_to_pandas(materialize_source(sources[n])) for n in masked},
+            {n: table_to_pandas(outputs[n]) for n in masked},
             config=dict(self._config),
             detectors=self._detectors,
             keys=keys,

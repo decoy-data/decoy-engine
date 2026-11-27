@@ -31,6 +31,7 @@ runner; the runner imports it through the re-export shim at its old path.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -42,6 +43,8 @@ import pyarrow.parquet as pq
 from decoy_engine import fileaccess
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.internal.pandas_compat import table_to_pandas
+from decoy_engine.io import check_source_dates, check_source_schema, checked_batches
 from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
@@ -53,10 +56,8 @@ from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
-# Fallback bounded sample size when a caller asks for a full scan
-# (sample_rows=None) under residency="bounded" -- see profile_source. A full
-# scan on a source too big to hold is exactly what this module removes, so the
-# combination degrades to a bounded scan with a loud warning rather than OOM.
+# Fallback bounded sample size for sample_rows=None under residency="bounded" (see
+# profile_source): a full scan of a source too big to hold degrades to a bounded one, loudly.
 BOUNDED_FALLBACK_ROWS = 10_000
 
 
@@ -64,10 +65,8 @@ BOUNDED_FALLBACK_ROWS = 10_000
 class RowCount:
     """A table's total row count plus whether that count is exact.
 
-    `exact=True` for Parquet (footer `num_rows`) and fixed_width (a framing
-    pass); `exact=False` for CSV, whose count is an O(1) byte-size estimate.
-    The flag rides onto `TableProfile.row_count_exact` so route admission knows
-    whether it is trusting a footer count or an estimate.
+    `exact=True` for Parquet (footer `num_rows`) and fixed_width (a framing pass); `exact=False`
+    for CSV, an O(1) byte-size estimate. The flag rides onto `TableProfile.row_count_exact`.
     """
 
     value: int
@@ -78,10 +77,8 @@ class RowCount:
 class ProfileSource(Protocol):
     """One source, readable as cheap metadata plus a bounded sample.
 
-    Separates the three things profiling needs so a large source is never
-    fully materialized just to be sampled. `to_frame()` is the explicit
-    opt-out (small-job / residency="full") full read.
-    """
+    The three things profiling needs stay apart, so a large source is never fully materialized
+    just to be sampled. `to_frame()` is the explicit full read (small jobs, residency="full")."""
 
     def row_count(self) -> RowCount:
         """Total rows, exact or estimated, from cheap metadata only."""
@@ -130,9 +127,10 @@ def _footer_null_counts(metadata: pq.FileMetaData) -> dict[str, int | None]:
         total = 0
         complete = True
         for group in range(metadata.num_row_groups):
-            if metadata.row_group(group).num_rows == 0:
+            row_group = metadata.row_group(group)
+            if row_group.num_rows == 0:
                 continue
-            stats = metadata.row_group(group).column(leaf).statistics
+            stats = row_group.column(leaf).statistics
             if stats is None or not stats.has_null_count:
                 complete = False
                 break
@@ -158,29 +156,44 @@ def footer_facts_of(parquet_file: pq.ParquetFile) -> FooterFacts:
     )
 
 
+def _gate_open(
+    handle: FileHandle, columns: Sequence[str] | None, table: str, **options: Any
+) -> pq.ParquetFile:
+    """Open `handle` as a Parquet file whose projected schema passed the type gate before any
+    decode: the one gate for every batch reader. A refusal closes the file, not the handle."""
+    parquet_file = arrow_adapter.parquet_file(handle, **options)
+    try:
+        check_source_schema(
+            arrow_adapter.projected_schema(handle, parquet_file, columns), table=table
+        )
+    except BaseException:
+        parquet_file.close()
+        raise
+    return parquet_file
+
+
 class OpenedLazyBatches:
     """One open Parquet handle: its footer facts, a batch iterator and the owner of the close.
 
-    `schema`, the facts and `batches` all come from the same handle, so what a caller
-    validates is what it reads. `close()` is idempotent and safe to call from a `finally`
-    on any exit, including one before the first batch."""
+    `schema`, the facts and `batches` come from the same handle. `close()` is idempotent and
+    safe from a `finally` on any exit, including one before the first batch."""
 
     def __init__(
         self,
         parquet_file: pq.ParquetFile,
         batch_rows: int,
         use_threads: bool,
-        handle: FileHandle | None = None,
+        handle: FileHandle,
         columns: Sequence[str] | None = None,
+        table: str = "source",
     ) -> None:
         self._parquet_file = parquet_file
-        # The authorized handle lives as long as the batches do, through early failure and
-        # interrupted consumption, because a strict handle's descriptor is the file.
+        # The handle lives as long as the batches: a strict handle's descriptor is the file.
         self._handle = handle
         self._closed = False
         self.facts = footer_facts_of(parquet_file)
         # The projection narrows the batches only; `facts` stay the whole file's.
-        self.batches = self._read(batch_rows, use_threads, columns)
+        self.batches = checked_batches(self._read(batch_rows, use_threads, columns), table=table)
 
     @property
     def schema(self) -> pa.Schema:
@@ -201,23 +214,16 @@ class OpenedLazyBatches:
     def _read(
         self, batch_rows: int, use_threads: bool, columns: Sequence[str] | None
     ) -> Iterator[pa.RecordBatch]:
-        # Wrap pyarrow's own iterator in a Python generator, as `iter_batches` does.
-        # Returning the C-level iterator raw makes a downstream `yield from` raise
-        # `RuntimeError: generator raised StopIteration` on Python 3.10 for an empty file:
-        # the iterator's StopIteration escapes the consuming generator frame (PEP 479).
+        # A Python generator, not pyarrow's raw iterator: its StopIteration escapes a consuming
+        # `yield from` as a RuntimeError on Python 3.10 for an empty file (PEP 479).
         projection = {} if columns is None else {"columns": list(columns)}
-        if self._handle is not None:
-            yield from arrow_adapter.iter_batches(
-                self._handle,
-                self._parquet_file,
-                batch_size=batch_rows,
-                use_threads=use_threads,
-                **projection,
-            )
-        else:
-            yield from self._parquet_file.iter_batches(
-                batch_size=batch_rows, use_threads=use_threads, **projection
-            )
+        yield from arrow_adapter.iter_batches(
+            self._handle,
+            self._parquet_file,
+            batch_size=batch_rows,
+            use_threads=use_threads,
+            **projection,
+        )
 
     def close(self) -> None:
         if not self._closed:
@@ -225,8 +231,7 @@ class OpenedLazyBatches:
             try:
                 self._parquet_file.close()
             finally:
-                if self._handle is not None:
-                    self._handle.close()
+                self._handle.close()
 
 
 @dataclass(frozen=True)
@@ -234,17 +239,16 @@ class LazySource:
     """A batch-readable handle onto one on-disk Parquet file.
 
     Holds only a path and the policy it was built under: every read (batches, schema, row
-    count) asks that policy for the file fresh, so passing a `LazySource` around never pins
-    a resident Arrow table and a later read is judged by the policy that created the source
-    even after the entry point returned. Reading is delegated to
-    `pyarrow.parquet.ParquetFile.iter_batches`, which decodes one `batch_size` chunk at a
-    time rather than the whole file; schema and row count come from the Parquet footer,
-    which parsing does not touch column data.
+    count) asks that policy for the file fresh, so a `LazySource` never pins a resident table
+    and a later read is judged by the policy that created it. Batches come from
+    `ParquetFile.iter_batches`, one `batch_size` chunk at a time; schema and row count come
+    from the footer, which does not touch column data.
     """
 
     path: Path
     access: FileAccess | None = field(default=None, compare=False, repr=False)
     field_key: str = field(default="source.path", compare=False)
+    table: str = field(default="source", compare=False)  # names a refused read
 
     def __post_init__(self) -> None:
         if self.access is None:
@@ -261,20 +265,30 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
-        return self._iter_batches(check_batch_rows(batch_rows), columns)
+        batches = self._iter_batches(check_batch_rows(batch_rows), columns)
+        return checked_batches(batches, table=self.table)
 
-    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
+    @contextmanager
+    def _gated(self, columns: Sequence[str] | None) -> Iterator[tuple[FileHandle, pq.ParquetFile]]:
+        """One gated open (`_gate_open`); the file and handle close on every exit."""
         handle = self._handle()
         try:
-            parquet_file = arrow_adapter.parquet_file(handle)
+            parquet_file = _gate_open(handle, columns, self.table)
+            try:
+                yield handle, parquet_file
+            finally:
+                parquet_file.close()
+        finally:
+            handle.close()
+
+    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
+        with self._gated(columns) as (handle, parquet_file):
             yield from arrow_adapter.iter_batches(
                 handle,
                 parquet_file,
                 batch_size=batch_rows,
                 **({} if columns is None else {"columns": columns}),
             )
-        finally:
-            handle.close()
 
     def open_batches(
         self,
@@ -287,14 +301,11 @@ class LazySource:
     ) -> OpenedLazyBatches:
         """Open the file once and return its footer facts, a batch iterator and the owner
         of the close, so the schema a caller validates is the schema its batches are read
-        under. `schema` then `iter_batches` reopens the file twice and leaves a gap in
-        which it can change; a caller that must trust the two agree needs this. The schema
-        is real even for a zero-row file, whose iterator yields none.
+        under. The schema is real even for a zero-row file, whose iterator yields none.
 
-        `pre_buffer=None` omits the argument, so each installed PyArrow keeps its own
-        default (`False` on 24.0.0, `True` on 25.0.1); pass it to pin the behavior.
-        `buffer_size` and `use_threads` default to pyarrow's own defaults. `columns` narrows the
-        batches; the schema and facts stay the whole file's."""
+        `pre_buffer=None` omits the argument, so each installed PyArrow keeps its own default;
+        pass it to pin the behavior. `columns` narrows the batches; the schema and facts stay
+        the whole file's."""
         batch_rows = check_batch_rows(batch_rows)
         options: dict[str, Any] = {}
         if pre_buffer is not None:
@@ -303,22 +314,22 @@ class LazySource:
             options["buffer_size"] = buffer_size
         handle = self._handle()
         try:
-            parquet_file = arrow_adapter.parquet_file(handle, **options)
+            parquet_file = _gate_open(handle, columns, self.table, **options)
         except BaseException:
             handle.close()
             raise
         try:
-            return OpenedLazyBatches(parquet_file, batch_rows, use_threads, handle, columns)
+            return OpenedLazyBatches(
+                parquet_file, batch_rows, use_threads, handle, columns, self.table
+            )
         except BaseException:
             parquet_file.close()
             handle.close()
             raise
 
     def footer_facts(self) -> FooterFacts:
-        """Schema, row count, footer null counts and row-group layout from ONE open handle.
-
-        The `schema`, `num_rows` and `column_null_counts` accessors each reopen the file; a
-        caller that needs the facts to agree with one another reads them here."""
+        """Schema, row count, footer null counts and row-group layout from ONE open handle (the
+        single accessors each reopen the file, so a caller needing them to agree reads here)."""
         handle = self._handle()
         try:
             parquet_file = arrow_adapter.parquet_file(handle)
@@ -353,10 +364,8 @@ class LazySource:
     def column_null_counts(self) -> dict[str, int | None]:
         """Exact null count per flat top-level column, from footer statistics only.
 
-        `None` when any row group lacks a null count for the column (statistics
-        written off), so the caller must not read it as "no nulls". A file with no
-        rows (no row groups, or only empty ones) has none. Nested columns have no single leaf and are omitted.
-        """
+        `None` when any row group lacks a null count for the column, so the caller must not
+        read it as "no nulls". Nested columns have no single leaf and are omitted."""
         handle = self._handle()
         try:
             return _footer_null_counts(arrow_adapter.read_metadata(handle))
@@ -367,37 +376,40 @@ class LazySource:
         """Read the file (or just `columns`) into memory. Fallback for small jobs only."""
         handle = self._handle()
         try:
-            return arrow_adapter.read_table(
-                handle, **({} if columns is None else {"columns": columns})
+            table = arrow_adapter.read_table_gated(
+                handle,
+                lambda schema: check_source_schema(schema, table=self.table),
+                **({} if columns is None else {"columns": columns}),
             )
         finally:
             handle.close()
+        return check_source_dates(table, table=self.table)
 
 
 @dataclass(frozen=True)
 class ParquetFileSource(_PolicyBound):
     """`ProfileSource` for a local Parquet file, backed by `LazySource`.
 
-    row_count/schema come from the footer; the bounded sample is the first
-    `sample_rows` rows via `iter_batches`. `pd.read_parquet` is never called
-    on the whole file on the bounded path (only `to_frame()` reads everything).
+    row_count/schema come from the footer; the bounded sample is the first `sample_rows` rows
+    via `iter_batches`, and only `to_frame()` reads the whole file.
     """
 
     path: Path
     access: FileAccess | None = field(default=None, compare=False, repr=False)
     field_key: str = field(default="source.path", compare=False)
+    table: str = field(default="source", compare=False)
 
     def __post_init__(self) -> None:
         if self.access is None:
             object.__setattr__(self, "access", fileaccess.capture())
 
     @classmethod
-    def from_lazy(cls, lazy: LazySource) -> ParquetFileSource:
+    def from_lazy(cls, lazy: LazySource, table: str | None = None) -> ParquetFileSource:
         """The reader for a file handle a caller supplied, under that handle's own policy."""
-        return cls(lazy.path, lazy.access, lazy.field_key)
+        return cls(lazy.path, lazy.access, lazy.field_key, table or lazy.table)
 
     def _lazy(self) -> LazySource:
-        return LazySource(self.path, self.access, self.field_key)
+        return LazySource(self.path, self.access, self.field_key, self.table)
 
     def row_count(self) -> RowCount:
         return RowCount(self._lazy().num_rows, exact=True)
@@ -406,22 +418,21 @@ class ParquetFileSource(_PolicyBound):
         return self._lazy().schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return head_frame_from_batches(
-            self._lazy().iter_batches(sample_rows), sample_rows, self._lazy().schema
-        )
+        rows = check_batch_rows(sample_rows)
+        with self._lazy()._gated(None) as (handle, pf):
+            batches = arrow_adapter.iter_batches(handle, pf, batch_size=rows)
+            return head_frame_from_batches(batches, rows, pf.schema_arrow, table=self.table)
 
     def to_frame(self) -> pd.DataFrame:
-        return self._lazy().to_table().to_pandas()
+        return table_to_pandas(self._lazy().to_table())
 
 
 @dataclass(frozen=True)
 class FixedWidthFileSource(_PolicyBound):
     """`ProfileSource` for a local fixed-width file.
 
-    Row count is exact and costs one framing pass of the shared record parser (no casts; blank
-    lines skipped, a missing final newline fine). The bounded sample reads only
-    the first `sample_rows` records.
-    """
+    Row count is exact and costs one framing pass of the shared record parser. The bounded
+    sample reads only the first `sample_rows` records."""
 
     path: Path
     layout: Any
@@ -475,7 +486,7 @@ def has_row_beyond(read_sample: Callable[[int], pd.DataFrame], n: int) -> bool:
 
 
 def head_frame_from_batches(
-    batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema
+    batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema, *, table: str = "source"
 ) -> pd.DataFrame:
     """Collect batches until `sample_rows` rows are gathered, as a DataFrame.
 
@@ -484,6 +495,7 @@ def head_frame_from_batches(
     an empty frame carrying the schema's columns (so the walker still emits one
     ColumnProfile per column).
     """
+    check_source_schema(schema, table=table)
     collected: list[pa.RecordBatch] = []
     gathered = 0
     for batch in batches:
@@ -492,11 +504,9 @@ def head_frame_from_batches(
         if gathered >= sample_rows:
             break
     if not collected:
-        return schema.empty_table().to_pandas()
-    table = pa.Table.from_batches(collected)
-    if table.num_rows > sample_rows:
-        table = table.slice(0, sample_rows)
-    return table.to_pandas()
+        return table_to_pandas(schema.empty_table())
+    head = pa.Table.from_batches(collected).slice(0, sample_rows)
+    return table_to_pandas(check_source_dates(head, table=table))
 
 
 # ---------------------------------------------------------------------
@@ -527,21 +537,19 @@ def build_profile_source(
     """Build the `ProfileSource` for one validated source descriptor. A local file is
     read through the installed policy under `field_key`, the config position it came from.
 
-    Dispatches on `type` (file/s3/gcs) exactly as the old eager loader did.
-    Cloud readers are imported lazily so the boto3 / google-cloud SDKs stay
-    optional dependencies loaded only when a cloud source is actually used.
-    """
+    Dispatches on `type` (file/s3/gcs). Cloud readers import lazily, so the boto3 and
+    google-cloud SDKs stay optional."""
     src_type = descriptor.get("type")
     if src_type == "file":
         return _build_file_source(descriptor, field_key, table=table)
     if src_type == "s3":
         from decoy_engine.profile._cloud_readers import build_s3_profile_source
 
-        return build_s3_profile_source(descriptor)
+        return build_s3_profile_source(descriptor, table)
     if src_type == "gcs":
         from decoy_engine.profile._cloud_readers import build_gcs_profile_source
 
-        return build_gcs_profile_source(descriptor)
+        return build_gcs_profile_source(descriptor, table)
     raise NotImplementedError(
         f"profile_source: unsupported source type "
         f"{fileaccess.shown(repr(src_type), _at(field_key, 'type'))}. "

@@ -396,6 +396,41 @@ provider_config:
   (`date_preserve_values_unsupported_fk_shape`). Put it on the parent key of a
   single-column relationship between two tables; the child inherits it.
 
+#### Dates outside the calendar
+
+Parquet and database `DATE` columns can hold dates far outside the years 1 to 9999 that Python
+and pandas can represent, for example a `date32` value in year 10183. The engine checks every
+`date`, `timestamp` and zoned `timestamp` column as it reads the source, before any strategy runs.
+A run that finds such a value stops with `runtime/source_date_unrepresentable`. The message names
+the table, the column and how many cells in the checked batch are outside the calendar. It never
+shows the date. Nothing is published.
+
+This check covers the whole table on every route, including cells in later row groups, and it
+applies to every column, not only the ones a date strategy masks. For a zoned timestamp the local
+calendar date decides: a cell at the last instant of year 9999 UTC is refused in a zone east of
+UTC, because its local date is in year 10000. A date outside the calendar cannot be listed in
+`preserve_values`; fix or drop it in the source.
+
+The read covers plain `date` and `timestamp` columns, and a dictionary-encoded column of either.
+A dictionary column is checked by the rows that use each entry, so an out-of-calendar entry that no
+row uses does not stop the run. The read drops that entry, keeps the other entries in their order,
+and the column goes on with its index type and ordered flag unchanged.
+
+A column that holds a date inside a list, map, struct, union, run-end-encoded, extension or nested
+dictionary type is not read. The run stops with `runtime/source_date_type_unsupported` before any
+row is read, whether the dates are inside the calendar or not. The message names the table, the
+column and the kind of the column's outermost type. To continue, drop the column, select it out of
+the source, or cast it to a plain date or text column before the run. A column of `time` or
+`duration` values holds no date and is read as before.
+
+The same limit applies to a generator column fitted from a datetime snapshot (the legacy
+`ColumnGenerator` `distribution` sampler; the V2 config `type: distribution` is the parametric
+family and reads no snapshot). A statistical column that reaches a year past 9998 is refused with
+the same code when the plan is compiled. Its `min`, `max` and every year bin with a non-zero count must lie between 1677-09-22
+and 2262-04-10, the whole days inside the pandas nanosecond range. A snapshot outside that range
+is refused at once with `plan/generation_unbounded_column`, before any value is drawn. The first
+and last partial years (1677 and 2262) are sampled between the snapshot `min` and `max`.
+
 ### bucketize
 
 Rounds numeric values into fixed-width bins. Deterministic by construction

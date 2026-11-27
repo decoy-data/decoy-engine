@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
+from decoy_engine.internal.pandas_compat import table_to_pandas
+from decoy_engine.io import check_source_dates
 from decoy_engine.profile._readers import RowCount
 
 if TYPE_CHECKING:
@@ -17,16 +19,16 @@ def _frame_of(table: pa.Table) -> pd.DataFrame:
     """`table` as a DataFrame; a column pandas cannot hold (a date past year 9999, a
     sub-microsecond time) is profiled as text, so the route that never converts still runs."""
     try:
-        return table.to_pandas()
+        return table_to_pandas(table)
     except (ValueError, OverflowError):
         columns = []
-        for column in table.columns:
-            try:
-                column.to_pandas()
+        for name, column in zip(table.column_names, table.columns, strict=True):
+            try:  # the shared conversion, so an admitted date dictionary is not mistaken for one
+                table_to_pandas(pa.Table.from_arrays([column], names=[name]))
             except (ValueError, OverflowError):
                 column = column.cast(pa.string())
             columns.append(column)
-        return pa.Table.from_arrays(columns, names=table.column_names).to_pandas()
+        return table_to_pandas(pa.Table.from_arrays(columns, names=table.column_names))
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class ResidentTableSource:
     """
 
     table: pa.Table
+    name: str = "source"
 
     def row_count(self) -> RowCount:
         return RowCount(self.table.num_rows, exact=True)
@@ -46,7 +49,8 @@ class ResidentTableSource:
         return self.table.schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return _frame_of(self.table.slice(0, sample_rows))
+        head = self.table.slice(0, sample_rows)
+        return _frame_of(check_source_dates(head, table=self.name))
 
     def to_frame(self) -> pd.DataFrame:
-        return _frame_of(self.table)
+        return _frame_of(check_source_dates(self.table, table=self.name))

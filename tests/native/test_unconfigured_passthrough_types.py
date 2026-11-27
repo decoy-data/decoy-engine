@@ -105,6 +105,23 @@ def test_type_catalogue_as_an_unconfigured_column(name: str, null: bool) -> None
 _SIZES = (5, 3, 4, 1, 4)
 _I64MIN = -(2**63)
 _I64MAX = 2**63 - 1
+# The reader refuses a date outside years 1 to 9999 (DATE-RANGE-SENTINEL S5), so the extremes
+# here are the edges of that calendar. The ns columns keep the int64 extremes: they lie in 1677
+# to 2262.
+_DAY = 86_400
+_FIRST_DAY, _LAST_DAY = -719_162, 2_932_896
+_PER_SECOND = {"s": 1, "ms": 10**3, "us": 10**6}
+
+
+def _timestamp_extremes(unit: str, zoned: bool) -> list[int]:
+    """Five values holding both ends of the calendar; a zoned column stays a day inside each end
+    so the local date fits in any zone."""
+    if unit == "ns":
+        return [_I64MIN, _I64MAX, 0, _I64MIN + 1, 7]
+    per = _PER_SECOND[unit]
+    low = (_FIRST_DAY + 1) * _DAY * per if zoned else _FIRST_DAY * _DAY * per
+    high = _LAST_DAY * _DAY * per if zoned else (_LAST_DAY + 1) * _DAY * per - 1
+    return [low, high, 0, low + 1, 7]
 
 
 def _per_chunk(make: Any) -> list[pa.Array]:
@@ -164,13 +181,13 @@ def _unusual() -> dict[str, list[pa.Array]]:
         lambda i, n: pa.array([decimal.Decimal(10**60 + j) for j in range(n)], pa.decimal256(76, 0))
     )
     cols["date32_far"] = _per_chunk(
-        lambda i, n: pa.array([2**31 - 1 - j for j in range(n)], pa.date32())
+        lambda i, n: pa.array([_LAST_DAY - j for j in range(n)], pa.date32())
     )
     cols["date32_ordinary"] = _per_chunk(
         lambda i, n: pa.array([dt.date(2020, 1, 1 + j) for j in range(n)], pa.date32())
     )
     cols["date64_far"] = _per_chunk(
-        lambda i, n: pa.array([2**62 - j * 86400000 for j in range(n)], pa.date64())
+        lambda i, n: pa.array([(_LAST_DAY - j) * _DAY * 1000 for j in range(n)], pa.date64())
     )
     cols["time64_ns_unaligned"] = _per_chunk(
         lambda i, n: pa.array([1000 * j + 1 for j in range(n)], pa.time64("ns"))
@@ -179,8 +196,8 @@ def _unusual() -> dict[str, list[pa.Array]]:
         for tz in (None, "America/New_York", "+05:30"):
             t = pa.timestamp(unit, tz=tz)
             cols[f"ts_{unit}_{tz or 'naive'}"] = _per_chunk(
-                lambda i, n, t=t: pa.array(
-                    [_I64MIN, _I64MAX, 0, _I64MIN + 1, 7][:n] + [0] * max(0, n - 5), t
+                lambda i, n, t=t, u=unit, z=tz is not None: pa.array(
+                    _timestamp_extremes(u, z)[:n] + [0] * max(0, n - 5), t
                 )
             )
         d = pa.duration(unit)

@@ -451,11 +451,12 @@ def run_mask_pipeline_chunked(
         raise vault_requires_resident_output()
     # Lazy: `_chunked_oracle` imports this module at load time.
     from . import _chunked_oracle
+    from ._chunked_input import checked_chunks
 
     refuse_unchecked_route(config, "chunked")
     return _chunked_oracle._mask_pipeline_chunked(
         config,
-        chunks,
+        checked_chunks(chunks, table=table, source_schema=source_schema),
         table=table,
         engine_version=engine_version,
         source_schema=source_schema,

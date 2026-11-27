@@ -28,6 +28,7 @@ import pyarrow.compute as pc
 
 from decoy_engine._canonical import StrictJsonError, strict_json_loads
 from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY, column_metadata, pairs_for
+from decoy_engine.safe_output._date_buffers import own_date_columns
 
 __all__ = [
     "HANDLED_PREDICATES",
@@ -67,13 +68,20 @@ _RULES: Final[tuple[tuple[str, Callable[[Any], pa.DataType]], ...]] = (
     ("is_dictionary", lambda t: pa.dictionary(t.index_type, _type(t.value_type), t.ordered)),
     ("is_run_end_encoded", lambda t: pa.run_end_encoded(t.run_end_type, _type(t.value_type))),
 )
+# List views arrived in pyarrow 16; the declared floor is 14. A row whose predicate does not exist
+# in the installed pyarrow has no such type to rebuild, so it is left out. Every other row
+# resolves its predicate normally, so a rename in a new pyarrow still fails at import.
+_OPTIONAL: Final = frozenset({"is_list_view", "is_large_list_view"})
+_ACTIVE: Final = tuple(
+    (name, rebuild) for name, rebuild in _RULES if name not in _OPTIONAL or hasattr(pa.types, name)
+)
 _REBUILDERS: tuple[tuple[Callable[[pa.DataType], bool], Callable[[Any], pa.DataType]], ...] = tuple(
-    (getattr(pa.types, name), rebuild) for name, rebuild in _RULES
+    (getattr(pa.types, name), rebuild) for name, rebuild in _ACTIVE
 )
 
 # The predicates `_REBUILDERS` handles; `tests/unit/safe_output/test_file_metadata.py` checks them
 # against every `pa.types.is_*` predicate at the pin, so a new nested type turns it red.
-HANDLED_PREDICATES: Final = frozenset(name for name, _ in _RULES)
+HANDLED_PREDICATES: Final = frozenset(name for name, _ in _ACTIVE)
 
 
 # Extension types with no free-text parameter. Anything else (opaque, tensors, a type a Python
@@ -346,7 +354,9 @@ def output_schema(schema: pa.Schema) -> pa.Schema:
 
 
 def output_table(table: pa.Table) -> pa.Table:
-    """`table` under `output_schema`. The types are equal, so the cast copies no buffers, and a
-    table that already conforms is returned as is."""
+    """`table` under `output_schema`, with each date column over buffers it owns. The types are
+    equal, so the cast copies no buffers; a table with no date column that already conforms is
+    returned as is."""
     target = output_schema(table.schema)
-    return table if table.schema.equals(target, check_metadata=True) else table.cast(target)
+    conformed = table if table.schema.equals(target, check_metadata=True) else table.cast(target)
+    return own_date_columns(conformed)

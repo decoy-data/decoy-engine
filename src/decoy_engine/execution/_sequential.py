@@ -56,10 +56,9 @@ the tables. By the time staging now runs, the sink's target directory
 already exists from its own successful rename, so a sibling temp file cannot
 collide with a rename that already happened.
 
-Because staging only happens after a successful commit, ``_tsink.abort()`` is
-never called once commit has already succeeded (tracked via an explicit
-``_committed`` flag) -- calling abort() on an already-committed custom sink
-could otherwise delete tables it just durably published. A failure while
+Because staging only happens after a successful commit, ``_tsink.abort()`` is never
+called once commit has succeeded (tracked via ``_committed``): abort() on an
+already-committed custom sink could delete tables it just durably published. A failure while
 staging or publishing the sidecar after that point (e.g. ``os.replace``
 itself failing) discards the orphaned staged file
 (``quarantine.discard_staged_jsonl``, best-effort) and re-raises, without
@@ -85,9 +84,8 @@ know A was already applied) -- out of scope here, which only closes the
 "quarantine published despite sink abort" leak for the existing
 single-sink-instance contract.
 
-Lives in its own module so `_pandas_adapter.py` stays under the orchestration LOC
-cap. It reuses the adapter's per-node masking (`_dispatch_mask_node`) and parent-map
-builder (`_parent_map`), so masking stays defined in one place.
+Lives in its own module so `_pandas_adapter.py` stays under the orchestration LOC cap. It
+reuses the adapter's `_dispatch_mask_node` and `_parent_map`, so masking is defined once.
 
 Row-error enforcement (S2, engine "Finish Open-Ended Surfaces" program):
 `run_sequential` owns the SAME D8 fail-loud/quarantine rule as `run()` for the
@@ -180,6 +178,7 @@ from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.instrumentation.timing import TimingCollector, use_collector
+from decoy_engine.io import checked_loader
 from decoy_engine.keyprovider import require_mask_key
 from decoy_engine.progress import get_active_channel
 from decoy_engine.quarantine import (
@@ -292,6 +291,7 @@ def run_sequential(
     """
     refuse_unchecked_route(config, "sequential")
     declared_route_guard("sequential", plan=plan, raise_on_decline=True)
+    source_loader = checked_loader(source_loader)
     q_cfg: dict[str, Any] = quarantine_config or {}
     q_enabled = bool(q_cfg.get("enabled", False))
     q_triggers: list[str] = list(q_cfg.get("triggers") or [])

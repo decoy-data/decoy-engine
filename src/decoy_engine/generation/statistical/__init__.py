@@ -16,7 +16,11 @@ from decoy_engine.generation.statistical._cell_format import (
     learn_cell_format,
     scrub_cell_format,
 )
-from decoy_engine.generation.statistical._degenerate import check_degenerate, degenerate_finding
+from decoy_engine.generation.statistical._degenerate import (
+    check_degenerate,
+    degenerate_finding,
+    names_far_year,
+)
 from decoy_engine.generation.statistical._fanout import (
     FanoutSpec,
     add_fanout,
@@ -61,6 +65,7 @@ __all__ = [
     "fitted_reference_values",
     "learn_cell_format",
     "load_spec",
+    "names_far_year",
     "parse_snapshot_json",
     "sample_column",
     "scrub_cell_format",

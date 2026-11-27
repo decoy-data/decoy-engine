@@ -4,20 +4,26 @@
 value the pandas round trip refuses or alters comes back exactly as the source
 held it, on either route and in any chunk. The public oracle keeps its
 behavior, pinned per shape in `_rev9_support`.
+
+A date outside calendar years 1 to 9999 is refused at the source read (DATE-RANGE-SENTINEL S5,
+plan section 4.4a), so the date shapes carry the first and last value of the calendar instead,
+and `test_an_out_of_calendar_carried_date_is_refused` pins the original values as refusals.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pandas
 import pyarrow as pa
 import pytest
 
-from decoy_engine import run_mask_chunked
+from decoy_engine import reasons, run_mask_chunked
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import _pandas_adapter
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
+from decoy_engine.io import SourceDateUnrepresentableError
 from decoy_engine.profile import _walk
 from tests.native._b8_support import run_mask_chunked_below_gate
 from tests.native._chunked_entry_support import (
@@ -128,8 +134,15 @@ def test_public_oracle_behavior_is_unchanged(shape: Shape, pos: int, configured:
             assert got.column("x")[2].as_py() == src.column("x")[2].as_py()
 
 
-@pytest.mark.parametrize("unit", ["s", "ms", "us", "ns"])
-@pytest.mark.parametrize("kind", ["timestamp", "duration"])
+# A timestamp minimum below year 1 is a source the reader refuses; ns timestamps and every
+# duration unit keep the exact `-2^63` claim.
+_MIN_KEPT = [
+    ("timestamp", "ns"),
+    *(("duration", unit) for unit in ("s", "ms", "us", "ns")),
+]
+
+
+@pytest.mark.parametrize(("kind", "unit"), _MIN_KEPT)
 def test_min_int64_is_yielded_itself_and_the_oracle_keeps_it(kind: str, unit: str) -> None:
     shape = BY_NAME[f"{kind}_{unit}_min"]
     chunks = stream(shape, 1)
@@ -146,6 +159,35 @@ def test_min_int64_is_yielded_itself_and_the_oracle_keeps_it(kind: str, unit: st
             True,
             False,
         ]
+
+
+_REFUSED = [shape for shape in SHAPES if shape.refused is not None]
+
+
+@pytest.mark.parametrize("route", _ROUTES)
+@pytest.mark.parametrize("configured", [True, False], ids=["configured", "unconfigured"])
+@pytest.mark.parametrize("pos", [0, 2])
+@pytest.mark.parametrize("shape", _REFUSED, ids=[s.name for s in _REFUSED])
+def test_an_out_of_calendar_carried_date_is_refused(
+    shape: Shape, pos: int, configured: bool, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The original far values, including the int64 minimum of the s, ms and us timestamps, are
+    refused at the source on both routes: coded, naming table and column, quoting no value."""
+    assert shape.refused is not None
+    far = dataclasses.replace(shape, bad=shape.refused)
+    with pytest.raises(Exception) as caught:
+        _entry(far, pos, configured, route, monkeypatch)
+    exc = caught.value
+    assert isinstance(exc, SourceDateUnrepresentableError), type(exc).__name__
+    assert (exc.table, exc.column, exc.count) == (TABLE, "x", 1)
+    assert exc.code == reasons.runtime.SOURCE_DATE_UNREPRESENTABLE
+    assert exc.__cause__ is None and exc.__context__ is None
+    text = str(exc) + repr(exc)
+    raw = shape.refused
+    if pa.types.is_date32(raw.type):
+        raw = raw.cast(pa.int32())
+    stored = raw.cast(pa.int64())[0].as_py()
+    assert str(stored) not in text and str(I64MIN) not in text
 
 
 # ---------------------------------------------------------------------------

@@ -103,6 +103,46 @@ class UnsupportedColumnType(BoundedReadError):  # noqa: N818 - coded condition
     code = reasons.connector.UNSUPPORTED_COLUMN_TYPE
 
 
+class SourceDateUnrepresentableError(DecoyError):
+    """A source date or timestamp column holds a value outside the calendar years 1 to 9999.
+
+    The checked source read raises it before the value can reach pandas or a strategy, so no
+    exception text quotes the date. The message names the table, the column and how many cells of
+    the checked batch are outside the calendar, and nothing else.
+    """
+
+    code: str = reasons.runtime.SOURCE_DATE_UNREPRESENTABLE
+
+    def __init__(self, *, table: str, column: str, count: int) -> None:
+        self.table = table
+        self.column = column
+        self.count = count
+        super().__init__(
+            f"[{self.code}] {reasons.get('runtime', self.code).summary} "
+            f"Table {table!r}, column {column!r}."
+        )
+
+
+class SourceDateTypeUnsupportedError(DecoyError):
+    """A source column holds dates inside a type the checked read does not read.
+
+    The gate reads the schema only, so it refuses a nested, encoded or extension date column
+    whether its dates are inside the calendar or not. The message names the table, the column and
+    the kind of the column's outermost type; no value, count, child field name or cause."""
+
+    code: str = reasons.runtime.SOURCE_DATE_TYPE_UNSUPPORTED
+
+    def __init__(self, *, table: str, column: str, kind: str) -> None:
+        self.table = table
+        self.column = column
+        self.kind = kind
+        super().__init__(
+            f"[{self.code}] {reasons.get('runtime', self.code).summary} "
+            f"Table {table!r}, column {column!r}, type kind {kind}. Drop the column, select it "
+            "out, or cast it to a plain date or text column before the run."
+        )
+
+
 @dataclass(frozen=True)
 class ChunkBudget:
     """What bounds one table's chunks: decoded input bytes plus a per-row output
@@ -404,6 +444,8 @@ __all__ = [
     "CsvMalformed",
     "CsvRecordExceedsMaxRowBytes",
     "RowExceedsMaxRowBytes",
+    "SourceDateTypeUnsupportedError",
+    "SourceDateUnrepresentableError",
     "UnsupportedColumnType",
     "csv_convert_options",
     "cut_batch",

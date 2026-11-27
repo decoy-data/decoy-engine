@@ -74,6 +74,8 @@ __all__ = [
     "SORT_ASCENDING_LENGTH_MISMATCH",
     "SORT_COLUMN_MISSING",
     "SORT_UNSUPPORTED_TYPE",
+    "SOURCE_DATE_TYPE_UNSUPPORTED",
+    "SOURCE_DATE_UNREPRESENTABLE",
     "SPOOL_DISK_FULL",
     "SUBSET_CLOSURE_INVARIANT_VIOLATED",
     "SUBSET_CLOSURE_NONTERMINATION",
@@ -550,4 +552,43 @@ VALIDATOR_SPAN_REPEATED = _d(
     "validator_span_repeated",
     "A validator that can only read a table whole was given the table in several batches.",
     since="1.35.0",
+)
+
+_d = _catalog.runtime("SourceDateUnrepresentableError")
+
+# Read before any strategy runs, so the phases cover the profile and the mask read alike. The
+# remedy is in the source: the column holds a date the Python calendar (years 1 to 9999) cannot.
+SOURCE_DATE_UNREPRESENTABLE = _d(
+    "source_date_unrepresentable",
+    "A source date or timestamp column holds a value outside the calendar years 1 to 9999.",
+    phases=(
+        Phase.RESOLVE,
+        Phase.COMPILE,
+        Phase.MASK,
+        Phase.GENERATE,
+        Phase.FINALIZE,
+        Phase.UNKNOWN,
+    ),
+    retry=RetryClass.NEVER,
+    since=UNRELEASED,
+)
+
+_d = _catalog.runtime("SourceDateTypeUnsupportedError")
+
+# Raised by the same checked read, on the schema alone, so it holds whether or not a nested date is
+# in the calendar. The remedy is in the source: drop the column, select it out, or cast it to a
+# plain date or text column.
+SOURCE_DATE_TYPE_UNSUPPORTED = _d(
+    "source_date_type_unsupported",
+    "A source column holds dates inside a nested, encoded or extension type the engine does not read.",
+    phases=(
+        Phase.RESOLVE,
+        Phase.COMPILE,
+        Phase.MASK,
+        Phase.GENERATE,
+        Phase.FINALIZE,
+        Phase.UNKNOWN,
+    ),
+    retry=RetryClass.NEVER,
+    since=UNRELEASED,
 )

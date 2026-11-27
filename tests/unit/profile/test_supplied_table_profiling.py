@@ -14,6 +14,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.io import SourceDateUnrepresentableError
 from decoy_engine.profile import _readers_resident, _source, profile_source
 from decoy_engine.profile._readers import LazySource, ParquetFileSource
 from decoy_engine.profile._readers_resident import ResidentTableSource
@@ -102,12 +103,25 @@ def test_a_resident_table_goes_through_the_resident_reader(
     assert ResidentTableSource in readers
 
 
-def test_a_date_pandas_cannot_hold_does_not_fail_the_profile(tmp_path: Path) -> None:
+def test_a_date_pandas_cannot_hold_is_refused_without_the_year(tmp_path: Path) -> None:
     far = pa.table({"d": pa.array([4_000_000, 4_000_001], pa.date32()), "n": [1, 2]})
     for residency in ("bounded", "full"):
-        profile = profile_source(
-            _config(tmp_path), seed=1, residency=residency, supplied_sources={"s": far}
+        with pytest.raises(SourceDateUnrepresentableError) as caught:
+            profile_source(
+                _config(tmp_path), seed=1, residency=residency, supplied_sources={"s": far}
+            )
+        assert "Table 's', column 'd'" in str(caught.value)
+        assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def test_a_supplied_lazy_source_is_named_by_its_table_key(tmp_path: Path) -> None:
+    far = pa.table({"d": pa.array([4_000_000], pa.date32()), "n": [1]})
+    path = tmp_path / "far.parquet"
+    pq.write_table(far, str(path))
+    with pytest.raises(SourceDateUnrepresentableError) as caught:
+        profile_source(
+            _config(tmp_path),
+            seed=1,
+            supplied_sources={"s": LazySource(path)},
         )
-        s = _table_of(profile, "s")
-        assert [c.name for c in s.columns] == ["d", "n"]
-        assert s.row_count == 2
+    assert caught.value.table == "s"

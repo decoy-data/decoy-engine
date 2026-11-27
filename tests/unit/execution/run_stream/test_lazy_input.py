@@ -290,6 +290,14 @@ def test_the_pre_pass_copies_no_eligibility_rule() -> None:
 # ---------------------------------------------------------------- the run_pipeline wiring
 
 
+def _assert_same_source(copy: Any, original: LazySource, key: str) -> None:
+    """The run binds a lazy source to its mapping key with a copy: the policy that opens the
+    file (`access`, `field_key`) and the path stay the caller's, and only `table` is the key."""
+    assert isinstance(copy, LazySource) and copy.path == original.path
+    assert copy.access is original.access and copy.field_key == original.field_key
+    assert copy.table == key
+
+
 def _spy_context(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Record the sources the run context carries once the fallback has read what it rejects."""
     from decoy_engine.execution import _pipeline_context
@@ -367,7 +375,7 @@ def test_a_safe_lazy_table_stays_lazy(tmp_path: Path, monkeypatch: pytest.Monkey
     cfg, lazy = rs.single_table_job(tmp_path, rs.two_column_table(50))
     seen = _spy_context(monkeypatch)
     _run(cfg, {"t": lazy}, resident_fallback=True)
-    assert seen["sources"]["t"] is lazy
+    _assert_same_source(seen["sources"]["t"], lazy, "t")
 
 
 def _forbid_pre_pass(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -395,7 +403,7 @@ def test_the_default_runs_no_pre_pass(tmp_path: Path, monkeypatch: pytest.Monkey
     seen = _spy_context(monkeypatch)
     _run(cfg, {"t": lazy}, auto_chunk=False)
     assert calls == []
-    assert seen["sources"]["t"] is lazy
+    _assert_same_source(seen["sources"]["t"], lazy, "t")
 
 
 def test_stream_skips_the_pre_pass_and_reads_no_whole_table(
@@ -472,8 +480,8 @@ def test_a_mixed_job_is_routed_over_every_source(
     assert rejected == frozenset()
     seen = _spy_context(monkeypatch)
     _run(cfg, sources, resident_fallback=True)
-    assert seen["sources"]["child"] is sources["child"]
-    assert seen["sources"]["parent"] is sources["parent"]
+    _assert_same_source(seen["sources"]["child"], sources["child"], "child")
+    assert seen["sources"]["parent"] is sources["parent"]  # a clean resident table is as it was
     assert calls[-1][0] == calls[0][0]
 
 

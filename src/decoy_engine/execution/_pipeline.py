@@ -89,6 +89,7 @@ from decoy_engine.execution._transforms_prepare import prepare_transform_sources
 from decoy_engine.execution.pipeline._native_notice import with_native_notice
 from decoy_engine.execution.pipeline._subset_stage import resolve_subset
 from decoy_engine.fileaccess import FileAccess, entry_point
+from decoy_engine.io import check_resident_sources, checked_loader
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.progress import ProgressSink, use_progress
 from decoy_engine.secret_providers import AdmissionScope
@@ -287,11 +288,14 @@ def run_pipeline(
     `resident_fallback`: a plain `auto` run reads whole each lazy source it cannot keep lazy.
     """
     _ctx.refuse_vault_with_sink(sink, vault_writer)  # B0, before any config read
+    source_loader = checked_loader(source_loader)
     config, stage = resolve_subset(config, subset_request, source_loader)
     detectors = _dispatch.load_post_scan_detectors(config, file_access)
     stream_required = execution_mode == "stream"
     execution_mode = "auto" if stream_required else execution_mode
     require_optional_nonempty_str("quarantine_path", quarantine_path)
+    # After the knob checks: a bad knob refuses before any read.
+    sources = check_resident_sources(sources)
     # MG-5: a `tokenize` job's token vault reaches only the full-frame adapter, so under `auto`
     # it forces full-frame and disables auto-chunk; an explicit execution_mode is left alone.
     if token_vault_writer is not None and execution_mode == "auto":

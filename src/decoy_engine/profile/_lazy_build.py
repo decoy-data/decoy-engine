@@ -77,7 +77,9 @@ def _resident_csv(descriptor: dict[str, Any], field_key: str, table: str) -> Pro
 
 
 def _resident_parquet(descriptor: dict[str, Any], field_key: str, table: str) -> ProfileSource:
-    return ParquetFileSource(Path(descriptor_path(descriptor, field_key)), field_key=field_key)
+    return ParquetFileSource(
+        Path(descriptor_path(descriptor, field_key)), field_key=field_key, table=table
+    )
 
 
 def _resident_fixed_width(descriptor: dict[str, Any], field_key: str, table: str) -> ProfileSource:
@@ -101,7 +103,7 @@ def _lazy_parquet(
     table: str, descriptor: dict[str, Any], file_access: FileAccess | None
 ) -> LazySource | None:
     field_key = f"sources.{table}.path"
-    return LazySource(Path(descriptor_path(descriptor, field_key)), file_access, field_key)
+    return LazySource(Path(descriptor_path(descriptor, field_key)), file_access, field_key, table)
 
 
 def _lazy_fixed_width(

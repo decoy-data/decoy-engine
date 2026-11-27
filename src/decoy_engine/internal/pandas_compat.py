@@ -13,11 +13,14 @@ from __future__ import annotations
 import importlib
 import re
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any, Final, NoReturn
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+
+from decoy_engine._arrow_types import is_date_dictionary
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -113,6 +116,111 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
     return dtype_cls() if dtype_cls is not None else None
 
 
+@dataclass(frozen=True, order=True)
+class WorkingInstant:
+    """One timestamp category kept as its physical value: nanoseconds since the epoch and the
+    zone name. pandas cannot hold a nanosecond value at its own bounds (INT64_MIN is NaT, and a
+    zone shift past them raises with the value in the message), so a column with such an entry
+    is built from these instead, which keeps every entry exact."""
+
+    ns: int
+    tz: str | None = None
+
+
+_BOUND_MARGIN_NS = 2 * 86_400 * 10**9  # beyond any zone offset: nearer entries need no shift
+
+
+def _instants(categories: pa.Array) -> pd.Index | None:
+    """The categories as `WorkingInstant`s when a nanosecond entry sits at pandas' bounds, else
+    None. Nothing here converts a value, so no error can quote one."""
+    arrow_type = categories.type
+    if not (pa.types.is_timestamp(arrow_type) and arrow_type.unit == "ns" and len(categories)):
+        return None
+    ints = categories.cast(pa.int64())
+    extremes = pc.min_max(ints).as_py()
+    if (
+        extremes["min"] > -(2**63) + _BOUND_MARGIN_NS
+        and extremes["max"] < 2**63 - 1 - _BOUND_MARGIN_NS
+    ):
+        return None
+    values = [WorkingInstant(v, arrow_type.tz) for v in ints.to_pylist()]
+    return pd.Index(values, dtype=object)
+
+
+def _working_categorical(column: Any) -> pd.Categorical:
+    """A pandas categorical for a date dictionary column that passed the checked read.
+
+    Arrow keeps the null entries the repair retains, and pandas refuses a null category, so the
+    working copy is built apart from the Arrow source (which keeps its own dictionaries for the
+    output). Categories are the non-null entries in first dictionary order, retaining valid
+    unused ones; a null index or a reference to a null entry is a missing row; codes are int64;
+    several chunks unify their categories in first-seen order and share one code per value. A
+    column with no chunk has no category and no row."""
+    chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
+    entries = [chunk.dictionary for chunk in chunks]
+    parts = [e.drop_null() for e in entries]
+    categories = pc.unique(
+        pa.concat_arrays(parts) if parts else pa.array([], column.type.value_type)
+    )
+    codes = [
+        pc.take(pc.index_in(e, value_set=categories), chunk.indices).cast(pa.int64())
+        for e, chunk in zip(entries, chunks, strict=True)
+    ]
+    flat = (
+        pc.fill_null(pa.chunked_array(codes, pa.int64()), -1).to_numpy()
+        if codes
+        else np.empty(0, dtype=np.int64)
+    )
+    exact = _instants(categories)
+    return pd.Categorical.from_codes(
+        flat,
+        categories=pd.Index(categories.to_pandas()) if exact is None else exact,
+        ordered=column.type.ordered,
+    )
+
+
+def _stored_index_columns(table: pa.Table) -> list[str]:
+    """The physical field names of the index levels pandas stored with `table`, in level order
+    (a range index is metadata only and is not listed)."""
+    meta = table.schema.pandas_metadata or {}
+    return [c for c in meta.get("index_columns", []) if isinstance(c, str)]
+
+
+def table_to_pandas(table: pa.Table) -> pd.DataFrame:
+    """`table.to_pandas()`, with each date dictionary column built as a working categorical.
+
+    A date dictionary that passed the checked read can hold a null entry (kept for the output)
+    that `to_pandas` refuses, so those columns convert through `_working_categorical`. Every
+    other column converts as pyarrow does. A stored index level is restored from its physical
+    field (the `index_columns` of the pandas metadata) in level order, and keeps the display
+    name pyarrow gave it, so an unnamed level or one named like a data column is not mistaken
+    for a column."""
+    dated = [i for i, t in enumerate(table.schema.types) if is_date_dictionary(t)]
+    if not dated:
+        return table.to_pandas()
+    swapped = table
+    for i in dated:
+        swapped = swapped.set_column(i, table.schema.names[i], pa.nulls(table.num_rows))
+    frame = swapped.to_pandas()
+    levels = {table.schema.names[i]: _working_categorical(table.column(i)) for i in dated}
+    physical = _stored_index_columns(table)
+    if any(name in levels for name in physical):
+        arrays = [
+            levels[name] if name in levels else frame.index.get_level_values(position)
+            for position, name in enumerate(physical)
+        ]
+        names = list(frame.index.names)
+        frame.index = (
+            pd.MultiIndex.from_arrays(arrays, names=names)
+            if len(arrays) > 1
+            else pd.Index(arrays[0], name=names[0])
+        )
+    for name, categorical in levels.items():
+        if name not in physical:
+            frame[name] = pd.Series(categorical, index=frame.index)
+    return frame
+
+
 def table_to_pandas_exact_ints(
     table: pa.Table,
     columns: Iterable[str],
@@ -129,7 +237,7 @@ def table_to_pandas_exact_ints(
     does not fit its own dtype calls `on_unconvertible(column)` (which must raise), or re-raises
     the pyarrow error when none is given.
     """
-    df = table.to_pandas()
+    df = table_to_pandas(table)
     failed = None
     for col in columns:
         if col not in table.column_names or not pa.types.is_integer(table.schema.field(col).type):
