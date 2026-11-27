@@ -31,6 +31,7 @@ runner; the runner imports it through the re-export shim at its old path.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -177,8 +178,7 @@ class OpenedLazyBatches:
         table: str = "source",
     ) -> None:
         self._parquet_file = parquet_file
-        # The authorized handle lives as long as the batches do, through early failure and
-        # interrupted consumption, because a strict handle's descriptor is the file.
+        # The handle lives as long as the batches: a strict handle's descriptor is the file.
         self._handle = handle
         self._closed = False
         self.facts = footer_facts_of(parquet_file)
@@ -207,10 +207,8 @@ class OpenedLazyBatches:
     def _read(
         self, batch_rows: int, use_threads: bool, columns: Sequence[str] | None
     ) -> Iterator[pa.RecordBatch]:
-        # Wrap pyarrow's own iterator in a Python generator, as `iter_batches` does.
-        # Returning the C-level iterator raw makes a downstream `yield from` raise
-        # `RuntimeError: generator raised StopIteration` on Python 3.10 for an empty file:
-        # the iterator's StopIteration escapes the consuming generator frame (PEP 479).
+        # A Python generator, not pyarrow's raw iterator: its StopIteration escapes a consuming
+        # `yield from` as a RuntimeError on Python 3.10 for an empty file (PEP 479).
         projection = {} if columns is None else {"columns": list(columns)}
         yield from arrow_adapter.iter_batches(
             self._handle,
@@ -234,12 +232,10 @@ class LazySource:
     """A batch-readable handle onto one on-disk Parquet file.
 
     Holds only a path and the policy it was built under: every read (batches, schema, row
-    count) asks that policy for the file fresh, so passing a `LazySource` around never pins
-    a resident Arrow table and a later read is judged by the policy that created the source
-    even after the entry point returned. Reading is delegated to
-    `pyarrow.parquet.ParquetFile.iter_batches`, which decodes one `batch_size` chunk at a
-    time rather than the whole file; schema and row count come from the Parquet footer,
-    which parsing does not touch column data.
+    count) asks that policy for the file fresh, so a `LazySource` never pins a resident table
+    and a later read is judged by the policy that created it. Batches come from
+    `ParquetFile.iter_batches`, one `batch_size` chunk at a time; schema and row count come
+    from the footer, which does not touch column data.
     """
 
     path: Path
@@ -265,20 +261,30 @@ class LazySource:
         rows = check_batch_rows(batch_rows)
         return checked_batches(self._iter_batches(rows, columns), table=self.table)
 
-    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
+    @contextmanager
+    def _gated(self, columns: Sequence[str] | None) -> Iterator[tuple[FileHandle, pq.ParquetFile]]:
+        """One open whose projected schema passed the type gate before any decode; it closes on
+        every exit, a refusal included."""
         handle = self._handle()
         try:
             parquet_file = arrow_adapter.parquet_file(handle)
-            schema = arrow_adapter.projected_schema(handle, parquet_file, columns)
-            check_source_schema(schema, table=self.table)
+            try:
+                schema = arrow_adapter.projected_schema(handle, parquet_file, columns)
+                check_source_schema(schema, table=self.table)
+                yield handle, parquet_file
+            finally:
+                parquet_file.close()
+        finally:
+            handle.close()
+
+    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
+        with self._gated(columns) as (handle, parquet_file):
             yield from arrow_adapter.iter_batches(
                 handle,
                 parquet_file,
                 batch_size=batch_rows,
                 **({} if columns is None else {"columns": columns}),
             )
-        finally:
-            handle.close()
 
     def open_batches(
         self,
@@ -291,9 +297,7 @@ class LazySource:
     ) -> OpenedLazyBatches:
         """Open the file once and return its footer facts, a batch iterator and the owner
         of the close, so the schema a caller validates is the schema its batches are read
-        under. `schema` then `iter_batches` reopens the file twice and leaves a gap in
-        which it can change; a caller that must trust the two agree needs this. The schema
-        is real even for a zero-row file, whose iterator yields none.
+        under. The schema is real even for a zero-row file, whose iterator yields none.
 
         `pre_buffer=None` omits the argument, so each installed PyArrow keeps its own
         default (`False` on 24.0.0, `True` on 25.0.1); pass it to pin the behavior.
@@ -371,13 +375,10 @@ class LazySource:
 
     def to_table(self, columns: list[str] | None = None) -> pa.Table:
         """Read the file (or just `columns`) into memory. Fallback for small jobs only."""
-        handle = self._handle()
-        try:
+        with self._gated(columns) as (handle, _):  # the gate reads the footer, no column data
             table = arrow_adapter.read_table(
                 handle, **({} if columns is None else {"columns": columns})
             )
-        finally:
-            handle.close()
         return check_source_dates(table, table=self.table)
 
 
@@ -414,10 +415,10 @@ class ParquetFileSource(_PolicyBound):
         return self._lazy().schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        lazy = self._lazy()
-        return head_frame_from_batches(
-            lazy.iter_batches(sample_rows), sample_rows, lazy.schema, table=self.table
-        )
+        rows = check_batch_rows(sample_rows)
+        with self._lazy()._gated(None) as (handle, pf):
+            batches = arrow_adapter.iter_batches(handle, pf, batch_size=rows)
+            return head_frame_from_batches(batches, rows, pf.schema_arrow, table=self.table)
 
     def to_frame(self) -> pd.DataFrame:
         return table_to_pandas(self._lazy().to_table())

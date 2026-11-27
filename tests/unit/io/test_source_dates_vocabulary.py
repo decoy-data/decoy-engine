@@ -79,7 +79,10 @@ IMPORTS_ALLOWED = {
     "decoy_engine._arrow_types": {
         "CALENDAR_FIRST_DAY_NUMBER",
         "CALENDAR_LAST_DAY_NUMBER",
+        "is_admitted_date_shape",
+        "is_date_dictionary",
         "is_date_leaf",
+        "is_unclassified",
         "type_kind",
         "type_nodes",
     },
@@ -94,11 +97,43 @@ MODULES_ALLOWED = {
 }
 
 
+def _compute_aliases(tree: ast.AST) -> set[str]:
+    """Every local name bound to `pyarrow.compute`: the import spellings and plain aliases."""
+    aliases = {"pc", "_pc"}
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            bound: str | None = None
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.name == "pyarrow.compute" and a.asname:
+                        bound = a.asname
+            elif isinstance(node, ast.ImportFrom) and node.module == "pyarrow":
+                for a in node.names:
+                    if a.name == "compute":
+                        bound = a.asname or "compute"
+            elif isinstance(node, ast.Assign | ast.AnnAssign):
+                value = node.value
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if isinstance(value, ast.Name) and value.id in aliases:
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in aliases:
+                            aliases.add(target.id)
+                            changed = True
+            if bound is not None and bound not in aliases:
+                aliases.add(bound)
+                changed = True
+    return aliases
+
+
 def violations(text: str) -> list[str]:
     found: list[str] = []
-    for node in ast.walk(ast.parse(text)):
+    tree = ast.parse(text)
+    compute = _compute_aliases(tree)
+    for node in ast.walk(tree):
         if isinstance(node, ast.Attribute):
-            on_compute = isinstance(node.value, ast.Name) and node.value.id in {"pc", "_pc"}
+            on_compute = isinstance(node.value, ast.Name) and node.value.id in compute
             allowed = PC_ALLOWED if on_compute else ATTRS_ALLOWED
             if node.attr not in allowed:
                 found.append(f"{'pc.' if on_compute else '.'}{node.attr}")
@@ -106,7 +141,11 @@ def violations(text: str) -> list[str]:
             found += [f"import {a.name}" for a in node.names if a.name not in MODULES_ALLOWED]
         elif isinstance(node, ast.ImportFrom):
             names = {a.name for a in node.names}
-            if node.module in IMPORTS_ALLOWED:
+            if node.module == "pyarrow.compute":  # a bare name would dodge the attribute check
+                found += [f"from pyarrow.compute import {n}" for n in names - PC_ALLOWED]
+            elif node.module == "pyarrow":
+                found += [f"from pyarrow import {n}" for n in names - {"compute"}]
+            elif node.module in IMPORTS_ALLOWED:
                 found += [
                     f"from {node.module} import {n}" for n in names - IMPORTS_ALLOWED[node.module]
                 ]
@@ -136,6 +175,10 @@ def test_source_dates_stays_inside_its_closed_vocabulary() -> None:
         "import numpy",
         "from decoy_engine.profile import LazySource",
         "from decoy_engine._arrow_types import type_children",
+        "from pyarrow.compute import list_flatten\nx = list_flatten(column)",
+        "import pyarrow.compute as xc\nx = xc.list_flatten(column)",
+        "from pyarrow import compute as xc\nx = xc.struct_field(column, 0)",
+        "import pyarrow.compute as xc\nyc = xc\nx = yc.list_flatten(column)",
     ],
 )
 def test_a_seeded_walk_or_import_fails_the_vocabulary(seed: str) -> None:

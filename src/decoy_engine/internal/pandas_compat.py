@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
-from decoy_engine._arrow_types import is_date_leaf
+from decoy_engine._arrow_types import is_date_dictionary
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -115,6 +115,32 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
     return dtype_cls() if dtype_cls is not None else None
 
 
+def _floor_index(categories: pa.Array) -> pd.Index | None:
+    """The categories as timestamp objects when pandas would read one as NaT, else None. A
+    nanosecond value of INT64_MIN is NaT to pandas, which no category may be, so that one value
+    is kept at microsecond precision (pandas' own floor for it)."""
+    arrow_type = categories.type
+    if (
+        pa.types.is_timestamp(arrow_type)
+        and arrow_type.unit == "ns"
+        and pc.min(categories.cast(pa.int64())).as_py() == -(2**63)
+    ):
+        floor = (
+            _NS_FLOOR
+            if arrow_type.tz is None
+            else _NS_FLOOR.tz_localize("UTC").tz_convert(arrow_type.tz)
+        )
+        values = [
+            pd.Timestamp(v, unit="ns", tz=arrow_type.tz) if v != -(2**63) else floor
+            for v in categories.cast(pa.int64()).to_pylist()
+        ]
+        return pd.Index(values, dtype=object)
+    return None
+
+
+_NS_FLOOR = pd.Timestamp("1677-09-21 00:12:43.145224")  # INT64_MIN ns, to the microsecond
+
+
 def _working_categorical(column: Any) -> pd.Categorical:
     """A pandas categorical for a date dictionary column that passed the checked read.
 
@@ -122,17 +148,28 @@ def _working_categorical(column: Any) -> pd.Categorical:
     working copy is built apart from the Arrow source (which keeps its own dictionaries for the
     output). Categories are the non-null entries in first dictionary order, retaining valid
     unused ones; a null index or a reference to a null entry is a missing row; codes are int64;
-    several chunks unify their categories in first-seen order and share one code per value."""
+    several chunks unify their categories in first-seen order and share one code per value. A
+    column with no chunk has no category and no row."""
     chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
     entries = [chunk.dictionary for chunk in chunks]
-    categories = pc.unique(pa.concat_arrays([e.drop_null() for e in entries]))
+    parts = [e.drop_null() for e in entries]
+    categories = pc.unique(
+        pa.concat_arrays(parts) if parts else pa.array([], column.type.value_type)
+    )
     codes = [
         pc.take(pc.index_in(e, value_set=categories), chunk.indices).cast(pa.int64())
         for e, chunk in zip(entries, chunks, strict=True)
     ]
-    flat = pc.fill_null(pa.chunked_array(codes, pa.int64()), -1).to_numpy()
+    flat = (
+        pc.fill_null(pa.chunked_array(codes, pa.int64()), -1).to_numpy()
+        if codes
+        else np.empty(0, dtype=np.int64)
+    )
+    floor = _floor_index(categories)
     return pd.Categorical.from_codes(
-        flat, categories=pd.Index(categories.to_pandas()), ordered=column.type.ordered
+        flat,
+        categories=pd.Index(categories.to_pandas()) if floor is None else floor,
+        ordered=column.type.ordered,
     )
 
 
@@ -141,21 +178,30 @@ def table_to_pandas(table: pa.Table) -> pd.DataFrame:
 
     A date dictionary that passed the checked read can hold a null entry (kept for the output)
     that `to_pandas` refuses, so those columns convert through `_working_categorical`. Every
-    other column converts as pyarrow does."""
-    dated = [
-        i
-        for i, t in enumerate(table.schema.types)
-        if pa.types.is_dictionary(t) and is_date_leaf(t.value_type)
-    ]
+    other column converts as pyarrow does. A stored index level (pandas metadata) is rebuilt in
+    its place with its name, so the index keeps its levels and position."""
+    dated = [i for i, t in enumerate(table.schema.types) if is_date_dictionary(t)]
     if not dated:
         return table.to_pandas()
     swapped = table
     for i in dated:
         swapped = swapped.set_column(i, table.schema.names[i], pa.nulls(table.num_rows))
     frame = swapped.to_pandas()
-    for i in dated:
-        name = table.schema.names[i]
-        frame[name] = pd.Series(_working_categorical(table.column(i)), index=frame.index)
+    levels = {table.schema.names[i]: _working_categorical(table.column(i)) for i in dated}
+    names = list(frame.index.names)
+    if any(name in levels for name in names):
+        arrays = [
+            levels[name] if name in levels else frame.index.get_level_values(position)
+            for position, name in enumerate(names)
+        ]
+        frame.index = (
+            pd.MultiIndex.from_arrays(arrays, names=names)
+            if len(arrays) > 1
+            else pd.Index(arrays[0], name=names[0])
+        )
+    for name, categorical in levels.items():
+        if name in frame.columns:
+            frame[name] = pd.Series(categorical, index=frame.index)
     return frame
 
 

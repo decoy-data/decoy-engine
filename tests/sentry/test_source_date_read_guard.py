@@ -267,6 +267,7 @@ def scan(texts: Mapping[str, str] | None = None) -> dict[str, list[str]]:
         "dropped_check": [],
         "new_caller": [],
         "edges": [],
+        "sinks": [],
     }
     sites: set[Site] = set()
     for rel, tree in trees.items():
@@ -278,9 +279,11 @@ def scan(texts: Mapping[str, str] | None = None) -> dict[str, list[str]]:
             calls = [n for n in ast.walk(func) if isinstance(n, ast.Call)]
             for call in calls:
                 name = getattr(call.func, "id", None) or getattr(call.func, "attr", None)
-                if name in _SINKS or name in _CONVERSION_HELPERS:
-                    sites.add(site)
                 resolved = imports.resolve(call, modules)
+                # The name a call resolves to through its import, so an alias is still a sink.
+                real = resolved[1] if resolved is not None else name
+                if {name, real} & (_SINKS | _CONVERSION_HELPERS):
+                    sites.add(site)
                 if resolved is not None and resolved in _RAW_HELPER_CALLERS:
                     found["edges"].append(f"{rel}::{qualname} -> {resolved[0]}::{resolved[1]}")
                     if site not in _RAW_HELPER_CALLERS[resolved] and site != resolved:
@@ -302,6 +305,7 @@ def scan(texts: Mapping[str, str] | None = None) -> dict[str, list[str]]:
         if site not in _SELF_CHECKED and site not in _DOWNSTREAM_FUNCTIONS:
             found["unchecked_sink"].append(f"{site[0]}::{site[1]}")
     found["dropped_check"] = sorted(set(found["dropped_check"]))
+    found["sinks"] = sorted(f"{rel}::{qualname}" for rel, qualname in sites)
     return found
 
 
@@ -328,9 +332,13 @@ def test_every_listed_entry_still_exists_still_calls_its_check_and_is_still_a_si
         assert func is not None, f"{rel}::{qualname} is gone; update the guard"
         missing = required - _called_names(func)
         assert not missing, f"{rel}::{qualname} no longer calls {sorted(missing)}"
+    sinks = set(scan()["sinks"])
     for site in _DOWNSTREAM_FUNCTIONS:
         assert site[1] in trees.get(site[0], {}), (
             f"{site} is gone; drop it from _DOWNSTREAM_FUNCTIONS"
+        )
+        assert f"{site[0]}::{site[1]}" in sinks, (
+            f"{site} is no longer a sink site; drop it from _DOWNSTREAM_FUNCTIONS"
         )
     for helper, callers in _RAW_HELPER_CALLERS.items():
         assert helper in {(r, q) for r, f in trees.items() for q in f}, f"{helper} is gone"
@@ -430,3 +438,24 @@ def test_a_stale_allowance_fails_the_entry_check(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setitem(_DOWNSTREAM_FUNCTIONS, ("execution/_gone.py", "gone"), "stale")
     with pytest.raises(AssertionError):
         test_every_listed_entry_still_exists_still_calls_its_check_and_is_still_a_sink()
+
+
+def test_a_downstream_allowance_that_stopped_being_a_sink_fails_the_entry_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_nfkc` exists but never converts: listing it would leave a dead allowance behind."""
+    monkeypatch.setitem(
+        _DOWNSTREAM_FUNCTIONS, ("internal/pandas_compat.py", "numeric_cells"), "no longer a sink"
+    )
+    with pytest.raises(AssertionError, match="no longer a sink"):
+        test_every_listed_entry_still_exists_still_calls_its_check_and_is_still_a_sink()
+
+
+def test_seed_5_an_aliased_import_of_the_conversion_helper_is_still_a_sink() -> None:
+    text = (
+        "from decoy_engine.internal.pandas_compat import table_to_pandas_exact_ints as exact\n\n\n"
+        "def run_seeded(chunks):\n"
+        "    return [exact(c, columns=()) for c in chunks]\n"
+    )
+    found = _seeded({"execution/_seeded_alias.py": text})
+    assert "execution/_seeded_alias.py::run_seeded" in found["unchecked_sink"]

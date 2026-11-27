@@ -67,11 +67,12 @@ def _list_view(days: list[int]) -> pa.Array:
 
 
 def _ree(days: list[int]) -> pa.Array:
+    # `from_buffers` builds it on every supported pyarrow; `from_arrays` fails on 14.
     run_ends = pa.array(range(1, len(days) + 1), pa.int32())
-    try:
-        return pa.RunEndEncodedArray.from_arrays(run_ends, pa.array(days, pa.date32()))
-    except TypeError:  # pyarrow 14 cannot build a run-end-encoded array at all
-        pytest.skip(f"pyarrow {pa.__version__} cannot build a run-end-encoded array")
+    arrow_type = pa.run_end_encoded(pa.int32(), pa.date32())
+    return pa.Array.from_buffers(
+        arrow_type, len(days), [None], children=[run_ends, pa.array(days, pa.date32())]
+    )
 
 
 def _extension(days: list[int]) -> pa.Array:
@@ -246,24 +247,29 @@ def test_a_null_entry_before_the_bad_one_is_kept_and_later_rows_remap() -> None:
     assert cleaned.to_pylist() == [_days(5), None, _days(7)]
 
 
+@pytest.mark.parametrize("index_type", [pa.uint8(), pa.int8(), pa.uint16()], ids=str)
 def test_the_remap_vector_is_int64_before_it_narrows_to_the_index_type(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, index_type: pa.DataType
 ) -> None:
-    """A uint8 remap overflows past 255 kept entries; the cumulative sum runs in int64 (M-28)."""
+    """The running count of kept entries is summed in int64 whatever the index type (M-28): a
+    narrow sum wraps past 127 or 255 kept entries. The spy watches the sum itself."""
     from decoy_engine.io import source_dates
 
-    seen: list[pa.DataType] = []
-    real = source_dates._pc.take
+    seen: list[tuple[pa.DataType, int]] = []
+    real = source_dates._pc.cumulative_sum
 
-    def spy(values: Any, indices: Any, *args: Any, **kwargs: Any) -> Any:
-        seen.append(values.type)
-        return real(values, indices, *args, **kwargs)
+    def spy(values: Any, *args: Any, **kwargs: Any) -> Any:
+        out = real(values, *args, **kwargs)
+        seen.append((values.type, out[-1].as_py()))
+        return out
 
-    monkeypatch.setattr(source_dates._pc, "take", spy)
+    monkeypatch.setattr(source_dates._pc, "cumulative_sum", spy)
     entries = [FAR_DAY, *range(300)]
-    column = _dictionary(entries, [1, 2, 3], index_type=pa.uint16())
-    check_source_dates(pa.table({"d": column}), table="t")
-    assert seen == [pa.int64()]
+    column = _dictionary(entries, [1, 2, 3], index_type=index_type)
+    cleaned = check_source_dates(pa.table({"d": column}), table="t").column("d")
+    assert seen == [(pa.int64(), 300)]
+    assert _indices(cleaned) == [0, 1, 2] and cleaned.chunk(0).dictionary.type == pa.date32()
+    assert cleaned.type == column.type
 
 
 def test_two_chunks_with_different_dictionaries_are_repaired_chunk_by_chunk() -> None:

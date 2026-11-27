@@ -31,6 +31,40 @@ def is_date_leaf(t: pa.DataType) -> bool:
     return pa.types.is_date32(t) or pa.types.is_date64(t) or pa.types.is_timestamp(t)
 
 
+def is_date_dictionary(t: pa.DataType) -> bool:
+    """True for a top-level dictionary whose entries are dates or timestamps."""
+    return pa.types.is_dictionary(t) and is_date_leaf(t.value_type)
+
+
+def is_admitted_date_shape(t: pa.DataType) -> bool:
+    """The only date shapes the checked source read reads: a plain date leaf, or a top-level
+    dictionary of one. The read, the repair, the output ownership and the pandas conversion all
+    ask this one question, so a change to what is admitted moves all four together."""
+    return is_date_leaf(t) or is_date_dictionary(t)
+
+
+def is_known_leaf(t: pa.DataType) -> bool:
+    """True for a leaf type known to hold no calendar date: numbers, text, bytes, booleans,
+    nulls, decimals, times of day, durations and intervals."""
+    types: Any = pa.types
+    predicates = (
+        "is_null", "is_boolean", "is_integer", "is_floating", "is_decimal", "is_string",
+        "is_large_string", "is_binary", "is_large_binary", "is_fixed_size_binary", "is_time",
+        "is_duration", "is_interval", "is_string_view", "is_binary_view",
+    )  # fmt: skip
+    return any(
+        (predicate := getattr(types, name, None)) is not None and predicate(t)
+        for name in predicates
+    )
+
+
+def is_unclassified(t: pa.DataType) -> bool:
+    """True for a type this module cannot place: not a date, not a known date-free leaf and not
+    a nested kind `type_kind` names. A layout added by a later pyarrow lands here, so the source
+    read refuses it instead of passing it as date-free."""
+    return type_kind(t) == "other" and not is_date_leaf(t) and not is_known_leaf(t)
+
+
 def type_children(t: pa.DataType) -> list[pa.DataType]:
     """The types directly inside `t`: the one place the type checks learn Arrow's nesting rules."""
     if isinstance(t, pa.BaseExtensionType):
@@ -43,7 +77,7 @@ def type_children(t: pa.DataType) -> list[pa.DataType]:
         return [t.field(i).type for i in range(t.num_fields)]
     if hasattr(t, "value_type"):  # list, large list, fixed-size list and the list views
         return [t.value_type]
-    return []
+    return [t.field(i).type for i in range(getattr(t, "num_fields", 0))]  # any other layout
 
 
 def type_kind(t: pa.DataType) -> str:

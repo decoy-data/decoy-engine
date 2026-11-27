@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 import pyarrow as pa
 
-from decoy_engine._arrow_types import is_date_leaf
+from decoy_engine._arrow_types import is_admitted_date_shape
 
 
 def _physical(arrow_type: pa.DataType) -> pa.DataType:
@@ -56,12 +56,6 @@ def _owned_dictionary(array: pa.DictionaryArray) -> pa.DictionaryArray:
     )
 
 
-def _owns(arrow_type: pa.DataType) -> bool:
-    if pa.types.is_dictionary(arrow_type):
-        return is_date_leaf(arrow_type.value_type)
-    return is_date_leaf(arrow_type)
-
-
 def _column(column: Any) -> Any:
     chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
     rebuilt = [
@@ -79,7 +73,7 @@ def own_date_columns(data: Any) -> Any:
     """`data` (a Table or RecordBatch) with each date column over buffers it owns. A table with
     no such column comes back as it is; schema, units, zones, entry order, index types and the
     ordered flag are kept."""
-    names = [i for i, t in enumerate(data.schema.types) if _owns(t)]
+    names = [i for i, t in enumerate(data.schema.types) if is_admitted_date_shape(t)]
     if not names:
         return data
     columns = [data.column(i) for i in range(data.num_columns)]

@@ -27,7 +27,10 @@ import pyarrow.compute as pc
 from decoy_engine._arrow_types import (
     CALENDAR_FIRST_DAY_NUMBER,
     CALENDAR_LAST_DAY_NUMBER,
+    is_admitted_date_shape,
+    is_date_dictionary,
     is_date_leaf,
+    is_unclassified,
     type_kind,
     type_nodes,
 )
@@ -81,15 +84,9 @@ def _fixed_offset_seconds(tz: str) -> int | None:
 
 
 def _holds_dates(arrow_type: pa.DataType) -> bool:
-    """Whether a value of this type can contain a date or timestamp, at any depth."""
-    return any(is_date_leaf(node) for node in type_nodes(arrow_type))
-
-
-def _is_read(arrow_type: pa.DataType) -> bool:
-    """A plain date or timestamp, or a top-level dictionary of one: the only shapes read."""
-    if pa.types.is_dictionary(arrow_type):
-        return is_date_leaf(arrow_type.value_type)
-    return is_date_leaf(arrow_type)
+    """Whether a value of this type can contain a date or timestamp, at any depth. A layout the
+    type walker cannot place counts as holding one, so it is refused, never passed."""
+    return any(is_date_leaf(node) or is_unclassified(node) for node in type_nodes(arrow_type))
 
 
 def check_source_schema(schema: pa.Schema, *, table: str) -> None:
@@ -99,7 +96,7 @@ def check_source_schema(schema: pa.Schema, *, table: str) -> None:
     It reads the type only, so it refuses whether the dates are inside the calendar or not, and
     for zero rows alike. No handler is open at the raise, so the error has no cause or context."""
     for name, arrow_type in zip(schema.names, schema.types, strict=True):
-        if _holds_dates(arrow_type) and not _is_read(arrow_type):
+        if _holds_dates(arrow_type) and not is_admitted_date_shape(arrow_type):
             raise SourceDateTypeUnsupportedError(
                 table=table, column=name, kind=type_kind(arrow_type)
             )
@@ -164,9 +161,9 @@ def _offending_rows(column: Any) -> int:
     arrow_type = column.type
     if not _holds_dates(arrow_type):
         return 0
-    if not _is_read(arrow_type):
+    if not is_admitted_date_shape(arrow_type):
         raise RuntimeError("source date count reached a type the schema gate must refuse")
-    if pa.types.is_dictionary(arrow_type):
+    if is_date_dictionary(arrow_type):
         return _offending_rows(column.cast(arrow_type.value_type))
     return _sum(_outside_mask(column))
 
@@ -194,7 +191,7 @@ def _without_unused_bad_entries(column: Any) -> Any:
     for a column the job may read. The values rows reference, their order, the entry order, the
     index type and the ordered flag stay; a column with no bad entry comes back as it is."""
     arrow_type = column.type
-    if not (pa.types.is_dictionary(arrow_type) and is_date_leaf(arrow_type.value_type)):
+    if not is_date_dictionary(arrow_type):
         return column
     chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
     repaired = [_repaired_dictionary(chunk) for chunk in chunks]

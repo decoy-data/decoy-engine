@@ -53,7 +53,18 @@ def _dictionary(far_trailing: bool) -> pa.Array:
     return column.slice(1, 3)
 
 
+def _poisoned_entries() -> pa.Array:
+    """Entries `[5, null, 7]` whose null slot and tail word hold the excluded day; rows are
+    `[7, 5, null, 5]`, one row with a null index."""
+    data = pa.py_buffer(b"".join(v.to_bytes(4, "little", signed=True) for v in (5, FAR, 7, FAR)))
+    entries = pa.Array.from_buffers(
+        pa.date32(), 3, [pa.py_buffer(bytes([0b0000_1101])), data], null_count=1
+    )
+    return pa.DictionaryArray.from_arrays(pa.array([2, 0, None, 0], pa.int8()), entries)
+
+
 CASES: dict[str, Any] = {
+    "dictionary_poisoned_null_word": _poisoned_entries,
     "offset_zero_slice": lambda: pa.array([0, FAR], pa.date32()).slice(0, 1),
     "nonzero_offset_slice": lambda: pa.array([FAR, 0, 3, FAR], pa.date32()).slice(1, 2),
     "poisoned_null_payload": _poisoned_nulls,
@@ -77,17 +88,23 @@ def _assert_clean(returned: pa.Table, expected: pa.Table) -> None:
         assert column.type == expected.column("d").type  # index type and ordered flag
         assert column.dictionary.to_pylist() == expected.column("d").chunk(0).dictionary.to_pylist()
         assert column.indices.to_pylist() == expected.column("d").chunk(0).indices.to_pylist()
+        _assert_owned(column.dictionary)  # entries: null words and tail bits too
+        _assert_owned(column.indices)
     else:
-        validity, payload = column.buffers()[0], column.buffers()[1]
-        width = column.type.bit_width // 8
-        assert payload.size == width * len(column)  # exact length, no hidden tail
-        if validity is not None and len(column) % 8:
-            assert (
-                validity.to_pybytes()[len(column) // 8] >> (len(column) % 8) == 0
-            )  # zero tail bits
-        for slot, valid in enumerate(column.is_valid().to_pylist()):
-            if not valid:
-                assert payload.to_pybytes()[slot * width : (slot + 1) * width] == bytes(width)
+        _assert_owned(column)
+
+
+def _assert_owned(column: pa.Array) -> None:
+    """The reopened array's buffers hold exactly its logical range: no hidden tail, zero tail
+    bits in the validity bitmap, and a zero word in every null slot."""
+    validity, payload = column.buffers()[0], column.buffers()[1]
+    width = column.type.bit_width // 8
+    assert payload.size == width * len(column)  # exact length, no hidden tail
+    if validity is not None and len(column) % 8:
+        assert validity.to_pybytes()[len(column) // 8] >> (len(column) % 8) == 0  # zero tail bits
+    for slot, valid in enumerate(column.is_valid().to_pylist()):
+        if not valid:
+            assert payload.to_pybytes()[slot * width : (slot + 1) * width] == bytes(width)
 
 
 def _table(column: pa.Array) -> pa.Table:
@@ -135,3 +152,30 @@ def test_the_owned_column_keeps_unit_zone_and_entry_order() -> None:
     owned = own_date_columns(pa.table({"d": column})).column("d").chunk(0)
     assert owned.type == column.type and owned.type.ordered is True
     assert owned.dictionary.to_pylist() == column.dictionary.to_pylist()
+
+
+@pytest.mark.parametrize("route", ["CH", "NCH"])
+def test_a_far_entry_no_row_uses_is_repaired_away_and_the_rest_is_clean(route: str) -> None:
+    """The repair drops the unused FAR entry (so its bytes cannot ride out), and the retained
+    null entry keeps a zero word in the reopened dictionary buffer."""
+    entries = pa.array([7, FAR, 9, None, 11], pa.date32())
+    column = pa.DictionaryArray.from_arrays(pa.array([0, 2, 0, 4, None], pa.int8()), entries)
+    table = _table(column)
+    cfg = support.make_cfg([support.pass_col("id"), support.pass_col("d")])
+    if route == "CH":
+        stream = run_mask_pipeline_chunked(
+            cfg,
+            iter([table]),
+            table=support.TABLE,
+            engine_version=support.ENGINE_VERSION,
+            source_schema=table.schema,
+        )
+    else:
+        stream = run_native_chunked(
+            cfg, iter([table]), table=support.TABLE, engine_version=support.ENGINE_VERSION
+        )
+    returned = pa.concat_tables(list(stream))
+    kept = pa.DictionaryArray.from_arrays(
+        pa.array([0, 1, 0, 3, None], pa.int8()), pa.array([7, 9, None, 11], pa.date32())
+    )
+    _assert_clean(returned, _table(kept))

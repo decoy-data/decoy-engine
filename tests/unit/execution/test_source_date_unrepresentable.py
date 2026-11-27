@@ -97,7 +97,7 @@ def test_every_run_pipeline_route_refuses_the_far_date(
     _assert_value_free(caught.value)
 
 
-@pytest.mark.parametrize("shape", ["lazy", "resident", "loader"])
+@pytest.mark.parametrize("shape", ["lazy", "lazy_stale", "resident", "loader"])
 @pytest.mark.parametrize("mode", ["sequential", "out_of_core"])
 def test_the_relationship_routes_refuse_the_far_date(shape: str, mode: str, tmp_path: Path) -> None:
     child = _source()
@@ -139,6 +139,8 @@ def test_the_relationship_routes_refuse_the_far_date(shape: str, mode: str, tmp_
     kwargs: dict[str, Any] = {"execution_mode": mode, "key_provider": key_provider()}
     if shape == "lazy":
         sources: dict[str, Any] | None = {n: LazySource(p) for n, p in paths.items()}
+    elif shape == "lazy_stale":  # each source still carries a name from some other mapping
+        sources = {n: LazySource(p, table="stale") for n, p in paths.items()}
     elif shape == "resident":
         sources = tables
     else:
@@ -440,3 +442,19 @@ def test_the_isolated_manifest_loader_names_the_mapping_key(tmp_path: Path) -> N
     with pytest.raises(SourceDateUnrepresentableError) as caught:
         list(source.iter_batches(GROUP))
     assert caught.value.table == "key"
+
+
+def test_the_staging_return_is_loaded_under_the_mapping_key(tmp_path: Path) -> None:
+    """The real manifest `stage_sources` returns, through the worker's loader: the refusal names
+    the key the parent gave, not a path component."""
+    from decoy_engine.execution import _isolated_worker
+    from decoy_engine.execution._isolated_commit import stage_sources
+
+    work_root = tmp_path / "work"
+    work_root.mkdir(mode=0o700)
+    manifest = stage_sources(work_root, {"key": _source()})
+    source = _isolated_worker._load_sources(manifest, lazy=True)["key"]
+    assert isinstance(source, LazySource) and source.table == "key"
+    with pytest.raises(SourceDateUnrepresentableError) as caught:
+        list(source.iter_batches(GROUP))
+    assert (caught.value.table, caught.value.column) == ("key", "d")

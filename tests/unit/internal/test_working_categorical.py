@@ -138,3 +138,53 @@ def test_the_far_unused_entry_is_not_in_the_output_dictionary(tmp_path: Path) ->
         )
     )
     assert len(out.column("d").chunk(0).dictionary) == 2
+
+
+# ---- remediation round 1 (V1-3, V1-4) ------------------------------------------------------
+
+_INT64_MIN = -(2**63)
+
+
+def _indexed(names: list[str], levels: list[Any]) -> pa.Table:
+    """A table as pandas would store it, with the date dictionary level(s) as the index."""
+    import pandas as pd
+
+    day = dt.date
+    arrays = [
+        pd.CategoricalIndex([day(2020, 1, 1), day(2020, 1, 2)], name=names[0]),
+        *[pd.Index(level, name=n) for n, level in zip(names[1:], levels, strict=False)],
+    ]
+    index = arrays[0] if len(arrays) == 1 else pd.MultiIndex.from_arrays(arrays, names=names)
+    table = pa.Table.from_pandas(pd.DataFrame({"v": [1, 2]}, index=index))
+    assert pa.types.is_dictionary(table.schema.field(names[0]).type)
+    return table
+
+
+def test_a_stored_date_categorical_index_keeps_its_name_and_position() -> None:
+    frame = table_to_pandas(_indexed(["d"], []))
+    assert list(frame.columns) == ["v"]
+    assert frame.index.name == "d" and str(frame.index.dtype) == "category"
+    assert [x.isoformat() for x in frame.index] == ["2020-01-01", "2020-01-02"]
+
+
+def test_a_date_categorical_level_of_a_multi_index_keeps_its_name_and_position() -> None:
+    frame = table_to_pandas(_indexed(["d", "k"], [[10, 20]]))
+    assert list(frame.columns) == ["v"]
+    assert list(frame.index.names) == ["d", "k"]
+    assert list(frame.index.get_level_values("k")) == [10, 20]
+    assert str(frame.index.get_level_values("d").dtype) == "category"
+
+
+def test_a_date_dictionary_with_no_chunk_converts_to_an_empty_categorical() -> None:
+    schema = pa.schema([("d", pa.dictionary(pa.int8(), pa.date32()))])
+    frame = table_to_pandas(pa.Table.from_batches([], schema=schema))
+    assert len(frame) == 0 and str(frame["d"].dtype) == "category"
+
+
+def test_a_nanosecond_entry_at_int64_min_is_a_category_not_a_missing_value() -> None:
+    entries = pa.array([_INT64_MIN, 1_000], pa.timestamp("ns"))
+    column = pa.DictionaryArray.from_arrays(pa.array([0, 1, 0], pa.int8()), entries)
+    frame = table_to_pandas(pa.table({"d": column}))
+    assert not frame["d"].isna().any()
+    assert len(frame["d"].cat.categories) == 2
+    assert frame["d"].iloc[0] == frame["d"].iloc[2] != frame["d"].iloc[1]

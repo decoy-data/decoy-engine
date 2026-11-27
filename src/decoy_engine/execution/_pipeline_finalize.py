@@ -173,6 +173,7 @@ def compute_fidelity_reports(
     tables are skipped. Called only when `fidelity_report=True`, so the
     caller pays this cost opt-in.
     """
+    from decoy_engine.internal.pandas_compat import table_to_pandas
     from decoy_engine.quality.report import compute_quality_report
 
     fidelity_reports: dict[str, Any] = {}
@@ -183,8 +184,8 @@ def compute_fidelity_reports(
         if src_table is None:
             continue
         fidelity_reports[table_name] = compute_quality_report(
-            src_table.to_pandas(),
-            out_table.to_pandas(),
+            table_to_pandas(src_table),
+            table_to_pandas(out_table),
             expect_row_parity=True,
             joint_columns=None,
             now_iso=now_iso,
