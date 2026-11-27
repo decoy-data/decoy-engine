@@ -38,19 +38,14 @@ def column_label(column: object) -> str:
     return Name(column).shown()
 
 
-def refuse_degenerate(column: str, why: str, *, unbounded: bool = False) -> NoReturn:
-    """Raise the one coded refusal for an unsampleable snapshot of `column`; `unbounded` names a
-    year the sampler cannot hold (`GENERATION_UNBOUNDED_COLUMN`) instead of a degenerate shape."""
+def refuse_degenerate(column: str, why: str) -> NoReturn:
+    """Raise the one coded refusal for an unsampleable snapshot of `column`."""
     # Lazy: `_spec` imports the modules that import this one.
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
-    message = f"statistical column {column!r}: {why}."
-    if unbounded:
-        raise StatisticalSpecError(
-            code=reasons.plan.GENERATION_UNBOUNDED_COLUMN, message=message
-        ) from None
     raise StatisticalSpecError(
-        code=reasons.plan.STATISTICAL_STATS_DEGENERATE, message=message
+        code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
+        message=f"statistical column {column!r}: {why}.",
     ) from None
 
 
@@ -173,15 +168,20 @@ def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     return None
 
 
+def _refuse_far_year() -> NoReturn:
+    from decoy_engine.generation.statistical._spec import StatisticalSpecError
+
+    raise StatisticalSpecError(
+        code=reasons.plan.GENERATION_UNBOUNDED_COLUMN,
+        message="year_bins: sampled years must lie in 1..9998.",
+    ) from None
+
+
 def check_degenerate(spec: StatisticalSpec) -> None:
     """Raise `STATISTICAL_STATS_DEGENERATE` when `spec`'s snapshot cannot be sampled, or
     `GENERATION_UNBOUNDED_COLUMN` when a datetime snapshot names a year the sampler cannot hold."""
     if spec.kind == "datetime" and names_far_year(spec):
-        refuse_degenerate(
-            column_label(spec.column),
-            f"year_bins: sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
-            unbounded=True,
-        )
+        _refuse_far_year()
     finding = degenerate_finding(spec)
     if finding is not None:
         refuse_degenerate(column_label(spec.column), f"{finding[1]}. {_REFIT_HINT}")
