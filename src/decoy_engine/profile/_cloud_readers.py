@@ -278,7 +278,9 @@ class S3ParquetSource:
 
 def _checked_frame(data: bytes, table: str) -> pd.DataFrame:
     """A whole Parquet object as a frame, after its dates passed the calendar check."""
-    check_source_schema(pq.ParquetFile(io.BytesIO(data)).schema_arrow, table=table)  # footer only
+    check_source_schema(  # the footer only: no column decodes before the type gate
+        _read_parquet_schema(len(data), lambda start, end: data[start : end + 1]), table=table
+    )
     return table_to_pandas(check_source_dates(pq.read_table(io.BytesIO(data)), table=table))
 
 

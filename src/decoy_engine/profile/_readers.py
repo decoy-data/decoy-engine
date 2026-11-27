@@ -31,7 +31,7 @@ runner; the runner imports it through the re-export shim at its old path.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -56,10 +56,8 @@ from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
-# Fallback bounded sample size when a caller asks for a full scan
-# (sample_rows=None) under residency="bounded" -- see profile_source. A full
-# scan on a source too big to hold is exactly what this module removes, so the
-# combination degrades to a bounded scan with a loud warning rather than OOM.
+# Fallback bounded sample size for sample_rows=None under residency="bounded" (see
+# profile_source): a full scan of a source too big to hold degrades to a bounded one, loudly.
 BOUNDED_FALLBACK_ROWS = 10_000
 
 
@@ -67,10 +65,8 @@ BOUNDED_FALLBACK_ROWS = 10_000
 class RowCount:
     """A table's total row count plus whether that count is exact.
 
-    `exact=True` for Parquet (footer `num_rows`) and fixed_width (a framing
-    pass); `exact=False` for CSV, whose count is an O(1) byte-size estimate.
-    The flag rides onto `TableProfile.row_count_exact` so route admission knows
-    whether it is trusting a footer count or an estimate.
+    `exact=True` for Parquet (footer `num_rows`) and fixed_width (a framing pass); `exact=False`
+    for CSV, an O(1) byte-size estimate. The flag rides onto `TableProfile.row_count_exact`.
     """
 
     value: int
@@ -133,9 +129,10 @@ def _footer_null_counts(metadata: pq.FileMetaData) -> dict[str, int | None]:
         total = 0
         complete = True
         for group in range(metadata.num_row_groups):
-            if metadata.row_group(group).num_rows == 0:
+            row_group = metadata.row_group(group)
+            if row_group.num_rows == 0:
                 continue
-            stats = metadata.row_group(group).column(leaf).statistics
+            stats = row_group.column(leaf).statistics
             if stats is None or not stats.has_null_count:
                 complete = False
                 break
@@ -299,10 +296,9 @@ class LazySource:
         of the close, so the schema a caller validates is the schema its batches are read
         under. The schema is real even for a zero-row file, whose iterator yields none.
 
-        `pre_buffer=None` omits the argument, so each installed PyArrow keeps its own
-        default (`False` on 24.0.0, `True` on 25.0.1); pass it to pin the behavior.
-        `buffer_size` and `use_threads` default to pyarrow's own defaults. `columns` narrows the
-        batches; the schema and facts stay the whole file's."""
+        `pre_buffer=None` omits the argument, so each installed PyArrow keeps its own default;
+        pass it to pin the behavior. `columns` narrows the batches; the schema and facts stay
+        the whole file's."""
         batch_rows = check_batch_rows(batch_rows)
         options: dict[str, Any] = {}
         if pre_buffer is not None:
@@ -375,7 +371,11 @@ class LazySource:
 
     def to_table(self, columns: list[str] | None = None) -> pa.Table:
         """Read the file (or just `columns`) into memory. Fallback for small jobs only."""
-        with self._gated(columns) as (handle, _):  # the gate reads the footer, no column data
+        with ExitStack() as stack:
+            try:
+                handle, _ = stack.enter_context(self._gated(columns))
+            except (OSError, pa.ArrowException):  # unopenable: the read below raises its own text
+                handle = stack.enter_context(closing(self._handle()))
             table = arrow_adapter.read_table(
                 handle, **({} if columns is None else {"columns": columns})
             )
@@ -386,9 +386,8 @@ class LazySource:
 class ParquetFileSource(_PolicyBound):
     """`ProfileSource` for a local Parquet file, backed by `LazySource`.
 
-    row_count/schema come from the footer; the bounded sample is the first
-    `sample_rows` rows via `iter_batches`. `pd.read_parquet` is never called
-    on the whole file on the bounded path (only `to_frame()` reads everything).
+    row_count/schema come from the footer; the bounded sample is the first `sample_rows` rows
+    via `iter_batches`, and only `to_frame()` reads the whole file.
     """
 
     path: Path
