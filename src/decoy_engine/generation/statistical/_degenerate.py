@@ -44,13 +44,13 @@ def refuse_degenerate(column: str, why: str, *, unbounded: bool = False) -> NoRe
     # Lazy: `_spec` imports the modules that import this one.
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
+    message = f"statistical column {column!r}: {why}."
+    if unbounded:
+        raise StatisticalSpecError(
+            code=reasons.plan.GENERATION_UNBOUNDED_COLUMN, message=message
+        ) from None
     raise StatisticalSpecError(
-        code=(
-            reasons.plan.GENERATION_UNBOUNDED_COLUMN
-            if unbounded
-            else reasons.plan.STATISTICAL_STATS_DEGENERATE
-        ),
-        message=f"statistical column {column!r}: {why}.",
+        code=reasons.plan.STATISTICAL_STATS_DEGENERATE, message=message
     ) from None
 
 
