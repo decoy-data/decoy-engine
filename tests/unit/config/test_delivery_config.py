@@ -103,9 +103,8 @@ def test_at3_the_delivery_block_and_plan_still_accept_best_effort() -> None:
 
 def test_at4_the_reason_is_registered_once_in_the_validation_group() -> None:
     assert str(reasons.config.DELIVERY_BEST_EFFORT_UNRELEASED) == CODE
-    found = [s for s in reasons.lookup(CODE) if s.namespace == "config"]
-    assert len(found) == 1
-    assert found[0].owner == "PipelineValidationError"
+    found = reasons.lookup(CODE)
+    assert [(s.namespace, s.owner) for s in found] == [("config", "PipelineValidationError")]
 
 
 def test_at5_the_refusal_carries_no_submitted_text() -> None:

@@ -40,7 +40,11 @@ def _with(config: dict[str, Any], **blocks: Any) -> dict[str, Any]:
     return out
 
 
-@pytest.mark.parametrize("subset", [None, {"fraction": 0.5}], ids=["plain", "with_subset"])
+@pytest.mark.parametrize(
+    "subset",
+    [None, {"seeds": [{"table": "t", "mode": "sample", "key_columns": ["id"], "count": 9}]}],
+    ids=["plain", "with_subset"],
+)
 def test_at10_best_effort_is_refused_before_the_subset_guard(
     job: tuple[dict[str, Any], Any], subset: Any
 ) -> None:
