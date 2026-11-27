@@ -979,6 +979,7 @@ The cap, the reserves and A14 and A15 are built on `feat/f25-g7-3-readback-cap` 
 - `OSError(ENOMEM)` and marker-text memory failures inside the shared publisher stay failed receipts; only `MemoryError` instances pass its handlers.
 - A memory boundary for `ParquetTransactionalSink` and `DeliveryStage`, and the publication state the sink records for a memory error during a matching replay.
 - A `KeyboardInterrupt` with a memory cause after the flag; memory errors in `BEFORE` on either route.
+- `_resurface`'s own parameter frame still holds the library error on the rebuild-out-of-memory path of `guarded_with_parser_errors` (round 7); the guard frame itself deletes `caught` on every exit.
 - The guard does not resolve an exception class bound to another name.
 - An `OSError` from `pub.txn.abort()` in `_run_isolated`'s `finally` replaces an in-flight `MemoryError` (Dennis r1 L6).
 - A frame-allocation failure on the `enter_readback` call leaves the window at `BEFORE` (L7).
