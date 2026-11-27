@@ -57,3 +57,19 @@ def test_the_post_scan_column_suite_runs_over_a_date_dictionary_with_a_null_entr
     )
     assert result.outputs[support.TABLE].num_rows == 5
     assert "post_scan_integrity" in result.quality_metrics
+
+
+def test_the_deferred_post_scan_check_runs_over_a_date_dictionary_with_a_null_entry(
+    tmp_path: Path,
+) -> None:
+    """A loader run defers the gate; its report-only check is the second conversion site."""
+    table = _source()
+    result = run_pipeline(
+        _cfg(tmp_path, post_scan=True),
+        sources=None,
+        **support.run_kwargs(
+            source_loader=lambda name: table, source_loader_schemas={support.TABLE: table.schema}
+        ),
+    )
+    assert result.outputs[support.TABLE].num_rows == 5
+    assert "post_scan_integrity" in result.quality_metrics

@@ -176,9 +176,9 @@ def test_source_dates_stays_inside_its_closed_vocabulary() -> None:
         "from decoy_engine.profile import LazySource",
         "from decoy_engine._arrow_types import type_children",
         "from pyarrow.compute import list_flatten\nx = list_flatten(column)",
-        "import pyarrow.compute as xc\nx = xc.list_flatten(column)",
-        "from pyarrow import compute as xc\nx = xc.struct_field(column, 0)",
-        "import pyarrow.compute as xc\nyc = xc\nx = yc.list_flatten(column)",
+        "import pyarrow.compute as xc\nx = xc.cast(column)",
+        "from pyarrow import compute as xc\nx = xc.filter(column, 0)",
+        "import pyarrow.compute as xc\nyc = xc\nx = yc.cast(column)",
     ],
 )
 def test_a_seeded_walk_or_import_fails_the_vocabulary(seed: str) -> None:
