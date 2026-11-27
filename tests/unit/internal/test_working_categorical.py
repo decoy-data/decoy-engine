@@ -240,3 +240,18 @@ def test_a_named_stored_date_index_that_shares_a_data_column_name_keeps_both() -
     assert list(frame.columns) == ["d"] and frame["d"].tolist() == [10, 20]
     assert frame.index.name == "d"
     assert [x.isoformat() for x in frame.index] == ["2020-01-01", "2020-01-02"]
+
+
+@pytest.mark.parametrize("near", [_INT64_MIN + 42, 2**63 - 1 - 42], ids=["low", "high"])
+@pytest.mark.parametrize("tz", ["America/New_York", "Asia/Kolkata"])
+def test_an_entry_near_the_bound_without_the_bound_itself_is_exact_in_any_zone(
+    near: int, tz: str
+) -> None:
+    """A zone shift passes pandas' bounds from a few nanoseconds away, so the working
+    representation does not wait for the bound value itself."""
+    from decoy_engine.internal.pandas_compat import WorkingInstant
+
+    entries = pa.array([near, 5], pa.timestamp("ns", tz))
+    column = pa.DictionaryArray.from_arrays(pa.array([0, 1], pa.int8()), entries)
+    frame = table_to_pandas(pa.table({"d": column}))
+    assert list(frame["d"].cat.categories) == [WorkingInstant(near, tz), WorkingInstant(5, tz)]
