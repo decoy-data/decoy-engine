@@ -272,3 +272,36 @@ def test_a_self_holding_cell_fails_with_recursion_error() -> None:
     loop.append(loop)
     with pytest.raises(RecursionError):
         canonical_cell(loop)
+
+
+def test_the_masked_constant_is_a_null_and_a_cycle_through_a_box_raises() -> None:
+    assert canonical_cell(np.ma.masked) == NULL
+    cell = np.empty((), dtype=object)
+    cell[()] = cell
+    with pytest.raises(RecursionError):
+        canonical_cell(cell)
+
+
+@pytest.mark.parametrize("months", [-5000, -13, -1, 0, 1, 2, 3, 11, 12, 13, 24000])
+def test_a_calendar_date_equals_the_same_date_in_days(months: int) -> None:
+    date = np.datetime64(months, "M")
+    assert canonical_cell(date) == canonical_cell(date.astype("datetime64[D]"))
+
+
+def test_a_far_calendar_date_keeps_its_sign() -> None:
+    far = canonical_cell(np.datetime64(2**62, "M"))
+    assert isinstance(far, Instant)
+    assert far.attoseconds > 0
+
+
+def test_the_reserved_integer_is_not_read_as_nat() -> None:
+    low = -(2**62)
+    instant = canonical_cell(np.datetime64(low, "2ns"))
+    duration = canonical_cell(np.timedelta64(low, "2ns"))
+    assert isinstance(instant, Instant)
+    assert isinstance(duration, Duration)
+    assert temporal_text(instant) != "NaT"
+    assert temporal_text(instant) != temporal_text(duration)
+    assert (
+        temporal_text(canonical_cell(np.timedelta64(2**62, "2M"))) == "9223372036854775808 months"
+    )

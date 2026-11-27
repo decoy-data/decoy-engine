@@ -12,6 +12,7 @@ import itertools
 import random
 import uuid
 from typing import Any, NamedTuple
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -20,7 +21,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from decoy_engine.internal.canonical_cell import Null, canonical_cell
-from decoy_engine.internal.cell_text import key_text
+from decoy_engine.internal.cell_text import detector_text, key_text
+from decoy_engine.verification.postmask import runner as runner_module
 from decoy_engine.verification.postmask._column_facts import identity_counts
 from decoy_engine.verification.postmask.runner import _frame_tables
 
@@ -53,13 +55,31 @@ def _arr(values: list[int], dtype: str) -> np.ndarray:
     return np.array(values, dtype=dtype)
 
 
-def run(src_cell: object, out_cell: object) -> tuple[dict[str, str], tuple[int, int]]:
-    """The runner's table errors, and (comparable, identical) of the cells, for one cell pair
-    next to an unchanged marker row that keeps the column off the native Arrow path."""
+class Run(NamedTuple):
+    failed: dict[str, str]
+    cells: tuple[int, int]  # (comparable, identical) of the cells
+    keys: tuple[int, int] | None  # the same, on the keys the runner emitted
+
+
+def run(src_cell: object, out_cell: object) -> Run:
+    """The runner's table errors and the identity counts of one cell pair, next to an unchanged
+    marker row that keeps the column off the native Arrow path. The key counts read the arrays
+    the runner emits, not keys rebuilt by the test."""
     src = pd.DataFrame({"v": _objects(src_cell, MARKER)})
     out = pd.DataFrame({"v": _objects(out_cell, MARKER)})
-    failed = _frame_tables({"t": src}, {"t": out})[2]
-    return failed, identity_counts(src["v"], out["v"])
+    emitted: list[pd.Series] = []
+    real = runner_module._text
+
+    def spy(series: pd.Series) -> Any:
+        array = real(series)
+        emitted.append(pd.Series(array.to_pylist(), dtype=object))
+        return array
+
+    with mock.patch.object(runner_module, "_text", spy):
+        failed = _frame_tables({"t": src}, {"t": out})[2]
+    # The output frame is converted first, then the source.
+    keys = identity_counts(emitted[1], emitted[0]) if len(emitted) == 2 else None
+    return Run(failed, identity_counts(src["v"], out["v"]), keys)
 
 
 class _P(NamedTuple):
@@ -118,16 +138,15 @@ FAILS_CLOSED = [
 
 @pytest.mark.parametrize(("a", "b"), OK)
 def test_runner_ok_when_the_keys_keep_the_cells_equality(a: object, b: object) -> None:
-    failed, (comparable, identical) = run(a, b)
-    assert failed == {}
-    assert identical == comparable == 2
+    result = run(a, b)
+    assert result.failed == {}
+    assert result.cells == (2, 2)
     assert key(a) == key(b)
 
 
 @pytest.mark.parametrize(("a", "b"), FAILS_CLOSED)
 def test_runner_fails_closed_on_a_declared_spelling_split(a: object, b: object) -> None:
-    failed, _ = run(a, b)
-    assert failed == {"t": BACKSTOP}
+    assert run(a, b).failed == {"t": BACKSTOP}
     assert key(a) != key(b)
     assert canonical_cell(a) == canonical_cell(b)
 
@@ -144,6 +163,10 @@ def test_runner_fails_closed_on_a_declared_spelling_split(a: object, b: object) 
 )
 def test_different_cells_have_different_keys(a: object, b: object) -> None:
     assert key(a) != key(b)
+    result = run(a, b)
+    assert result.failed == {}
+    assert result.cells == (2, 1)
+    assert result.keys == (2, 1)
 
 
 def test_c2_c13_c24_exact_keys() -> None:
@@ -172,7 +195,10 @@ def test_c19_a_nested_nan_keys_as_nan_and_identity_holds_for_distinct_objects() 
 
 def test_c22_a_list_and_its_text_share_a_key() -> None:
     assert key([1]) == key("[1]")
-    assert run([1], "[1]")[0] == {}
+    result = run([1], "[1]")
+    assert result.failed == {}
+    assert result.cells == (2, 1)
+    assert result.keys == (2, 2)
 
 
 def test_c30_a_tuple_and_an_array_split_by_keys_only() -> None:
@@ -222,13 +248,9 @@ K4 = [
 def test_a_typed_cell_keys_like_its_text(source: object, text: str) -> None:
     assert text == str(source)
     assert key(source) == key(text)
-    failed, _ = run(source, text)
-    assert failed == {}
-    keys = (
-        pd.Series(key_text(_objects(source, MARKER)), dtype=object),
-        pd.Series(key_text(_objects(text, MARKER)), dtype=object),
-    )
-    assert identity_counts(*keys) == (2, 2)
+    result = run(source, text)
+    assert result.failed == {}
+    assert result.keys == (2, 2)
 
 
 def test_numpy_numbers_inside_a_dict_key_as_python_numbers() -> None:
@@ -440,6 +462,41 @@ def test_p3_a_spelling_preserving_copy_passes_the_runner(
     a, _fresh, rng, _derived = case
     b = _same_value(a, rng, nested=False)
     _count(p3_tally, a, b)
-    failed, (comparable, identical) = run(a, b)
-    assert failed == {}
-    assert identical == comparable
+    result = run(a, b)
+    assert result.failed == {}
+    assert result.cells[0] == result.cells[1]
+    assert result.keys is None or result.keys[0] == result.keys[1]
+
+
+def test_a_nested_complex_nan_keeps_its_python_spelling() -> None:
+    assert key([np.complex64(complex("nan+0j"))]) == "[(nan+0j)]"
+    assert run([np.complex64(complex("nan+0j"))], "[(nan+0j)]").keys == (2, 2)
+
+
+def test_a_nested_numpy_void_keeps_its_python_spelling() -> None:
+    assert key([np.void(b"ABC")]) == "[b'ABC']"
+
+
+def test_a_masked_cell_is_a_null_and_does_not_hang() -> None:
+    assert key(np.ma.masked) is None
+    assert key_text(_objects(np.ma.masked, "x")) == [None, "x"]
+    assert detector_text(_objects(np.ma.masked, "x")) == [None, "x"]
+
+
+def test_a_zero_dimensional_nat_reads_as_null_in_every_reader() -> None:
+    nat = np.array(np.datetime64("NaT"))
+    assert detector_text(_objects(nat, "x")) == [None, "x"]
+    assert key_text(_objects(nat, "x")) == [None, "x"]
+
+
+def test_distinct_extreme_temporal_values_never_share_a_key() -> None:
+    low = -(2**62)
+    instant, duration = np.datetime64(low, "2ns"), np.timedelta64(low, "2ns")
+    keys = {
+        key(instant),
+        key(duration),
+        key(np.timedelta64(2**62, "2M")),
+        key(np.datetime64(2**62, "M")),
+    }
+    assert len(keys) == 4
+    assert "NaT" not in keys

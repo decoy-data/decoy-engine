@@ -133,7 +133,13 @@ def canonical_cell(value: object) -> object:
 
 
 def unboxed(value: object) -> object:
-    while isinstance(value, np.ndarray) and value.ndim == 0:
+    """A 0-dim array as the payload it holds, repeatedly. The masked constant is a 0-dim array
+    that holds itself, so it stays as it is, and a cycle raises as a nested cell does."""
+    seen: set[int] = set()
+    while isinstance(value, np.ndarray) and value.ndim == 0 and value is not np.ma.masked:
+        if id(value) in seen:
+            raise RecursionError
+        seen.add(id(value))
         value = value[()]
     return value
 
@@ -144,6 +150,8 @@ def is_null(value: object) -> bool:
 
 
 def _is_null(value: object) -> bool:
+    if value is np.ma.masked:
+        return True
     if isinstance(value, (list, tuple, dict, set, frozenset, np.ndarray, str, bytes)):
         return False
     result = pd.isna(value)
@@ -153,8 +161,9 @@ def _is_null(value: object) -> bool:
 def _null_spelling(value: object) -> str:
     if isinstance(value, (np.datetime64, np.timedelta64)):
         return "NaT"
-    if isinstance(value, np.floating):
-        return repr(float(value))
+    if isinstance(value, np.generic):
+        # The Python value it holds, as a container shows it.
+        return repr(value.item())
     return repr(value)
 
 
@@ -179,10 +188,24 @@ def _temporal(value: object) -> Temporal | int | None:
 
 def _datetime64(value: np.datetime64, source: object) -> Instant:
     unit, count = np.datetime_data(value.dtype)
+    ticks = int(value.astype(np.int64)) * count
     if unit in ("Y", "M"):
-        # A calendar date converts to days exactly; a calendar length would not.
-        value, unit, count = value.astype("datetime64[D]"), "D", 1
-    return Instant(int(value.astype(np.int64)) * count * _AS[unit], False, None, source)
+        # A calendar date converts to days exactly; a calendar length would not. Python integers,
+        # because NumPy would wrap the day count of a far year.
+        months = ticks * (12 if unit == "Y" else 1)
+        return Instant(_first_of_month(months) * _AS["D"], False, None, source)
+    return Instant(ticks * _AS[unit], False, None, source)
+
+
+def _first_of_month(months: int) -> int:
+    """Days from 1970-01-01 to the first day of the month `months` after January 1970
+    (Hinnant, `days_from_civil`)."""
+    year, month = 1970 + months // 12, months % 12 + 1
+    year -= month <= 2
+    era, year_of_era = divmod(year, 400)
+    day_of_year = (153 * (month - 3 if month > 2 else month + 9) + 2) // 5
+    day_of_era = year_of_era * 365 + year_of_era // 4 - year_of_era // 100 + day_of_year
+    return era * 146_097 + day_of_era - 719_468
 
 
 def _timedelta64(value: np.timedelta64, source: object) -> Temporal | int:
@@ -224,6 +247,11 @@ def _leaf(value: object) -> object:
         return value if type(value) is bytes else bytes(value)
     if isinstance(value, str):
         return value if type(value) is str else str(value)
+    if isinstance(value, np.generic):
+        # Any other NumPy scalar (a void, a record) as the Python value it holds.
+        item = value.item()
+        if type(item) is not type(value):
+            return canonical_cell(item)
     return value
 
 
@@ -254,31 +282,33 @@ def temporal_text(form: Temporal, *, nested: bool = False) -> str:
     return _exact_text(form.attoseconds, isinstance(form, Instant), nested)
 
 
+def _fits(ticks: int) -> bool:
+    """True when NumPy can hold `ticks` as a value. The lowest int64 is its NaT."""
+    return _INT64[0] < ticks <= _INT64[1]
+
+
 def _months_text(months: int) -> str:
-    try:
-        return str(np.timedelta64(months, "M"))
-    except OverflowError:
+    if not _fits(months):
         return f"{months} months"
+    return str(np.timedelta64(months, "M"))
 
 
 def _exact_text(attoseconds: int, instant: bool, nested: bool) -> str:
     make_np: Any = np.datetime64 if instant else np.timedelta64
     make_pd = pd.Timestamp if instant else pd.Timedelta
     nanos, remainder = divmod(attoseconds, _AS["ns"])
-    if remainder == 0 and _INT64[0] < nanos <= _INT64[1]:
+    if remainder == 0 and _fits(nanos):
         shown = pd.Timestamp(nanos) if instant else pd.Timedelta(nanos, unit="ns")
         return repr(shown) if nested else str(shown)
     for unit in ("s", "ms", "us"):
-        if attoseconds % _AS[unit] == 0:
+        if attoseconds % _AS[unit] == 0 and _fits(attoseconds // _AS[unit]):
             try:
                 shown = make_pd(make_np(attoseconds // _AS[unit], unit))
             except (OverflowError, ValueError):
                 break
             return repr(shown) if nested else str(shown)
     for unit in ("ns", "ps", "fs", "as"):
-        if attoseconds % _AS[unit] == 0:
-            try:
-                return str(make_np(attoseconds // _AS[unit], unit))
-            except (OverflowError, ValueError):
-                break
-    return f"{attoseconds} attoseconds"
+        if attoseconds % _AS[unit] == 0 and _fits(attoseconds // _AS[unit]):
+            return str(make_np(attoseconds // _AS[unit], unit))
+    # No unit holds it. The kind stays in the text so an instant never keys as a duration.
+    return f"{attoseconds} attoseconds" + (" from the epoch" if instant else "")
