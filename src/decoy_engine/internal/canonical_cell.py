@@ -115,13 +115,13 @@ class Blob(bytes):
 
 
 Temporal = Instant | Duration | Months
+TEMPORAL = (Instant, Duration, Months)
 
 
 def canonical_cell(value: object) -> object:
     """`value` as its canonical form: `NULL` for a null, a temporal form, a number or text leaf,
     a container form, or the value itself when it is none of those (an "other" leaf)."""
-    while isinstance(value, np.ndarray) and value.ndim == 0:
-        value = value[()]
+    value = unboxed(value)
     if _is_null(value):
         spelling = _null_spelling(value)
         return NULL if spelling == NULL.spelling else Null(spelling)
@@ -130,6 +130,17 @@ def canonical_cell(value: object) -> object:
         return temporal
     leaf = _leaf(value)
     return leaf if leaf is not value else _container(value)
+
+
+def unboxed(value: object) -> object:
+    while isinstance(value, np.ndarray) and value.ndim == 0:
+        value = value[()]
+    return value
+
+
+def is_null(value: object) -> bool:
+    """True when `canonical_cell(value)` is a null, without walking a container."""
+    return _is_null(unboxed(value))
 
 
 def _is_null(value: object) -> bool:

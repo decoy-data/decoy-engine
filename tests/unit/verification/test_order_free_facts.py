@@ -6,6 +6,7 @@ from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from decoy_engine.internal.cell_text import UnreadableCellError, column_text, key_text
@@ -129,3 +130,21 @@ def test_a_zero_dimensional_array_cell_survives_the_identity_check() -> None:
     cells = _objects(np.array(7), "x")
     assert identity_counts(cells, _objects(np.array(7), "x")) == (2, 2)
     assert source_distinct(cells) == 2
+
+
+def test_a_zero_dimensional_nat_is_not_comparable() -> None:
+    nat = np.array(np.datetime64("NaT"))
+    assert identity_counts(_objects(nat, "x"), _objects(nat, "x")) == (1, 1)
+    assert source_distinct(_objects(nat, "x")) == 1
+
+
+def test_identity_counts_walk_both_sides_when_the_dtypes_differ() -> None:
+    lists = _objects([1, 2], [3])
+    arrow = pd.Series(pd.arrays.ArrowExtensionArray(pa.array([[1, 2], [3]])))
+    assert lists.dtype != arrow.dtype
+    assert identity_counts(lists, arrow) == (2, 2)
+
+
+def test_source_distinct_walks_a_datetime_column() -> None:
+    column = pd.Series(pd.to_datetime(["2020-01-01", None, "2020-01-01", "2020-01-02"]))
+    assert source_distinct(column) == 2

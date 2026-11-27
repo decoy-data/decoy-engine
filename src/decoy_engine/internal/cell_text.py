@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable
 from decimal import Decimal
 
 import numpy as np
@@ -21,6 +20,18 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine._error_base import DecoyError
+from decoy_engine.internal.canonical_cell import (
+    TEMPORAL,
+    Blob,
+    Map,
+    Members,
+    Null,
+    Seq,
+    canonical_cell,
+    is_null,
+    temporal_text,
+    unboxed,
+)
 
 _BYTES = (bytes, bytearray, memoryview)
 
@@ -64,8 +75,10 @@ def column_text(series: pd.Series) -> pd.Series:
 def key_text(series: pd.Series) -> list[str | None]:
     """One text key per row of `series`, None for a null. Cells of one value share a key
     whatever their type, as pandas `==` treats them: a float 10001.0 and an int 10001 must not
-    read as two values, or a leaked source value looks changed. See `_number_key`."""
-    return _per_cell(series, _number_key)
+    read as two values, or a leaked source value looks changed. A cell that is not a number
+    keys as its `str()` text, built from `canonical_cell`, so a value and its exported text
+    still match. See `_number_key` and `_canonical_key`."""
+    return [_canonical_key(canonical_cell(c)) for c in _cells(series)]
 
 
 def detector_text(series: pd.Series) -> list[str | None]:
@@ -73,15 +86,11 @@ def detector_text(series: pd.Series) -> list[str | None]:
     written, except that an integral number reads as its exact plain digits, so a PAN or phone
     kept as an int, float or `Decimal("4111111111111111.00")` stays visible. Never the key: the
     key rounds a number to its binary64 and drops the digits a detector reads."""
-    return _per_cell(series, _detector_cell)
+    return [None if is_null(c) else _detector_cell(c) for c in _cells(series)]
 
 
-def _per_cell(series: pd.Series, render: Callable[[object], str]) -> list[str | None]:
-    series = _bytes_as_objects(series)
-    present = series.notna().to_numpy(dtype=bool)
-    out = np.full(len(series), None, dtype=object)
-    out[present] = series[present].astype(object).map(render).to_numpy(dtype=object)
-    return list(out)
+def _cells(series: pd.Series) -> list[object]:
+    return list(_bytes_as_objects(series).astype(object))
 
 
 def _text(values: pd.Series) -> pd.Series:
@@ -277,8 +286,6 @@ def _text_key(text: str) -> str:
 
 
 def _number_key(value: object) -> str:
-    # First: `np.timedelta64` subclasses `np.integer` and must key as the duration it equals.
-    value = _python_scalar(value)
     if isinstance(value, (bool, np.bool_)):
         # pandas `==` holds True equal to 1 and 1.0, so a bool keys as the number it equals.
         return "1" if value else "0"
@@ -288,31 +295,38 @@ def _number_key(value: object) -> str:
         return _binary64_key(int(value) < 0, _int_digits(int(value)), 0)
     if isinstance(value, Decimal):
         return _decimal_key(value)
-    return _text_key(cell_text(_key_ordered(value)))
+    return _text_key(cell_text(value))
 
 
-def _key_ordered(value: object) -> object:
-    """`value` with every mapping in key order, so equal mappings share one text."""
-    if isinstance(value, dict):
-        items = sorted(((k, _key_ordered(v)) for k, v in value.items()), key=lambda kv: repr(kv[0]))
-        return dict(items)
-    if isinstance(value, np.ndarray):
-        # `canonical_cells` descends into an array, so a mapping inside it reads in key order too,
-        # and every dtype renders its elements alike (an int array equals an object array of ints).
-        if value.ndim == 0:
-            return _key_ordered(value[()])
-        return [_key_ordered(v) for v in value]
-    if isinstance(value, np.generic):
-        # A duration or date keys as the pandas value it equals, whatever its unit; any other
-        # NumPy scalar as the Python value it holds.
-        value = _python_scalar(value)
-        return value.item() if isinstance(value, np.generic) else value
-    if isinstance(value, tuple):
-        # A plain tuple: a namedtuple constructor takes fields, not one generator.
-        return tuple(_key_ordered(v) for v in value)
-    if isinstance(value, list):
-        return [_key_ordered(v) for v in value]
-    return value
+def _canonical_key(form: object) -> str | None:
+    """The key of a canonical form: None for a null, a number or text leaf as `_number_key`
+    reads it, and anything else as the `str()` text of the value it stands for."""
+    if isinstance(form, Null):
+        return None
+    if isinstance(form, TEMPORAL):
+        return _text_key(temporal_text(form))
+    if isinstance(form, (Seq, Map, Members)):
+        return _text_key(_canonical_text(form))
+    return _number_key(form)
+
+
+def _canonical_text(form: object) -> str:
+    """`form` as Python writes the value inside a container: a leaf by its `repr`, a container
+    by its punctuation, a mapping in key order."""
+    if isinstance(form, Null):
+        return form.spelling
+    if isinstance(form, TEMPORAL):
+        return temporal_text(form, nested=True)
+    if isinstance(form, Seq):
+        inner = ", ".join(_canonical_text(item) for item in form.items)
+        if form.style == "tuple":
+            return f"({inner},)" if len(form.items) == 1 else f"({inner})"
+        return f"[{inner}]"
+    if isinstance(form, Map):
+        return "{" + ", ".join(f"{k}: {_canonical_text(v)}" for k, v in form.entries) + "}"
+    if isinstance(form, Members):
+        return form.spelling
+    return form.spelling if isinstance(form, Blob) else repr(form)
 
 
 def _plain_digits(negative: bool, digits: str, exponent: int) -> str:
@@ -326,7 +340,13 @@ def _plain_digits(negative: bool, digits: str, exponent: int) -> str:
 
 
 def _detector_cell(value: object) -> str:
-    value = _python_scalar(value)
+    value = unboxed(value)
+    if isinstance(value, (np.datetime64, np.timedelta64)):
+        # The same exact conversion as the key; a bare count comes back as the number it equals.
+        form = canonical_cell(value)
+        if isinstance(form, TEMPORAL):
+            return temporal_text(form)
+        value = form
     if isinstance(value, (bool, np.bool_)):
         return cell_text(value)
     if isinstance(value, (float, np.floating)):
@@ -346,12 +366,3 @@ def _detector_cell(value: object) -> str:
 def _is_integral(exact: tuple[bool, str, int]) -> bool:
     _, coefficient, exponent = _reduced(*exact)
     return not coefficient or exponent >= 0
-
-
-def _python_scalar(value: object) -> object:
-    """A NumPy date or duration as the pandas value it equals, so both share one key."""
-    if isinstance(value, np.timedelta64):
-        return pd.Timedelta(value)
-    if isinstance(value, np.datetime64):
-        return pd.Timestamp(value)
-    return value

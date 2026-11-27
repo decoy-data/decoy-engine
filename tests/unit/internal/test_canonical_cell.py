@@ -38,7 +38,8 @@ def _boxed(payload: object) -> np.ndarray:
 
 def _object_array(*cells: object) -> np.ndarray:
     out = np.empty(len(cells), dtype=object)
-    out[:] = list(cells)
+    for i, cell in enumerate(cells):
+        out[i] = cell
     return out
 
 

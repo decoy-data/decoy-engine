@@ -30,6 +30,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
+from decoy_engine.internal.canonical_cell import Null, canonical_cell
 from decoy_engine.internal.pandas_compat import exact_int_types_mapper
 from decoy_engine.plan.column_access import (
     TableWrites,
@@ -245,44 +246,35 @@ def _aligned(
         a, b = a.slice(n), b.slice(n)
 
 
-_MAPPING_TAG = object()
-
-
-def _frozen(cell: Any) -> Any:
-    if isinstance(cell, np.ndarray) and cell.ndim == 0:
-        return _frozen(cell[()])
-    if isinstance(cell, list | tuple | np.ndarray):
-        return tuple(_frozen(v) for v in cell)
-    if isinstance(cell, dict):
-        # A frozenset of items: mapping equality ignores key order, as a JSON round trip may reorder.
-        # Tagged, so a mapping never equals a set of key-value pairs.
-        return (_MAPPING_TAG, frozenset((k, _frozen(v)) for k, v in cell.items()))
-    if isinstance(cell, set | frozenset):
-        return frozenset(_frozen(v) for v in cell)
-    if isinstance(cell, bytearray | memoryview):
-        # Equal to the same bytes under `==`, and hashable for a distinct count.
-        return bytes(cell)
-    return cell
+def _canonical_or_none(cell: object) -> object:
+    form = canonical_cell(cell)
+    return None if isinstance(form, Null) else form
 
 
 def canonical_cells(series: pd.Series) -> pd.Series:
-    """`series` as object cells in the one form both checks compare and count.
+    """`series` as object cells in the one form both checks compare and count: the canonical
+    walk of every cell, a null as None.
 
     A caller's frame holds a list cell as a Python list and a struct as a dict; the batch check
-    reads them through Arrow as a NumPy array, and a map as a list of key-value tuples. Each
-    container becomes a tuple (a set a frozenset), so a list equals the same list on either
-    path, never its one element, and is hashable for a distinct count."""
+    reads them through Arrow as a NumPy array, and a map as a list of key-value tuples. The walk
+    gives each container one hashable form, so a list equals the same list on either path,
+    never its one element, and a distinct count can hash it."""
     cells = series.astype(object)
-    # Only an object column can hold a container; a typed one is passed as it is.
-    if series.dtype != object:
-        return cells
     # Not `Series.map`: it re-infers the result and rounds a wide float cell to a double.
-    return pd.Series([_frozen(c) for c in cells], index=cells.index, dtype=object)
+    return pd.Series([_canonical_or_none(c) for c in cells], index=cells.index, dtype=object)
+
+
+def _typed(series: pd.Series, other: pd.Series | None = None) -> bool:
+    """True when raw `==` and `nunique` are exact: both sides share one non-object dtype."""
+    if other is None:
+        return isinstance(series.dtype, np.dtype) and series.dtype.kind in "biuf"
+    return series.dtype == other.dtype and series.dtype != object
 
 
 def source_distinct(series: pd.Series) -> int:
     """The non-null distinct cells of `series`, counted on the cells `identity_counts` compares."""
-    return int(canonical_cells(series).nunique(dropna=True))
+    cells = series.astype(object) if _typed(series) else canonical_cells(series)
+    return int(cells.nunique(dropna=True))
 
 
 def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
@@ -291,7 +283,10 @@ def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
     The one comparison the frame check and the batch check both run, so the two cannot grade
     the same cells differently. Both series must share a positional index. A cell comparison
     that fails raises; the caller records the class name as the column's `identity_error`."""
-    src_o, out_o = canonical_cells(src), canonical_cells(out)
+    if _typed(src, out):
+        src_o, out_o = src.astype(object), out.astype(object)
+    else:
+        src_o, out_o = canonical_cells(src), canonical_cells(out)
     present = src_o.notna() & out_o.notna()
     return int(present.sum()), int((src_o[present] == out_o[present]).sum())
 
