@@ -958,13 +958,18 @@ only this site moves.
   base_row_offset=0, native_threads=1, route_evidence_sink=None,
   pool_cache=None)`: `config` and `chunks` are positional-or-keyword, everything
   after the `*` is keyword-only, and new parameters are additive. Its pinned
-  guarantees are value equality with `run_mask_pipeline_chunked` (one stated
-  exception: on the stock-adapter path, a passthrough column no `when:` predicate,
+  guarantees are value equality with `run_mask_pipeline_chunked` (stated
+  exceptions: on the stock-adapter path, a passthrough column no `when:` predicate,
   sibling-reading strategy or composite generator reads or writes is the source
-  column itself and never goes through pandas, so a value the oracle's round trip rounds or refuses, such as a
-  nullable integer above 2^53, comes back exact; a read passthrough column that
-  pandas refuses raises `chunked_passthrough_value_unrepresentable`, and a custom
-  or subclass adapter carries nothing), one output type per column per call (`string` for hash, truncate,
+  column itself and never goes through pandas. The oracle also writes an untouched column from the
+  source, so a nullable integer above 2^53 or a `timestamp[ns]` of `-2**63` is exact on both
+  entries. A value pandas refuses to convert, such as a `time64[ns]` with nanoseconds or a `date32`
+  outside pandas' range, raises on the oracle and comes back exact here; a read passthrough
+  column that pandas refuses raises `chunked_passthrough_value_unrepresentable`. An adapter that
+  is not exactly `PandasExecutionAdapter`, a subclass included, runs the oracle leg and carries
+  nothing (`reroute_reason="adapter_requested"` when the table would otherwise run natively;
+  an earlier reason such as `when_predicate_not_native:<col>` wins otherwise). The oracle types each chunk on its own,
+  so an all-null masked chunk can be `null` there), one output type per column per call (`string` for hash, truncate,
   string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
   that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see
   "Pass-through text width" in §3.4), no pandas
