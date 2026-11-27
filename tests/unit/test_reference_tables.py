@@ -310,3 +310,31 @@ class TestVersionMismatch:
 
         tbl = load_table("us_zip5_city_state", path=parquet_path)
         assert tbl is not None
+
+
+def test_reference_table_log_lines_keep_a_locator_with_credentials_out(
+    tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The version diagnostics name the table, never the file or its metadata value."""
+    import logging
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from decoy_engine.reference_tables import load_table
+    from decoy_engine.reference_tables._loader import _SHIPPED_VERSIONS
+
+    pw = "DECOY_CANARY_F31_PW"
+    name = next(iter(_SHIPPED_VERSIONS))
+    for meta in (None, {b"decoy_table_version": pw.encode()}):
+        table = pa.table({"id": pa.array([1], pa.int64())})
+        if meta is not None:
+            table = table.replace_schema_metadata(meta)
+        target = tmp_path / f"user:{pw}@host-{meta is None}.parquet"
+        pq.write_table(table, str(target))
+        with caplog.at_level(logging.DEBUG):
+            load_table(name, target)
+    assert caplog.records
+    for record in caplog.records:
+        assert pw not in record.getMessage()
+        assert all(pw not in repr(a) for a in (record.args or ()))

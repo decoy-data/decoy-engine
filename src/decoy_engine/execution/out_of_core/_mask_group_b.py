@@ -77,6 +77,7 @@ from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 from decoy_engine.transforms.fpe import (
     FF1_TWEAK_SCOPE_COLUMN,
     FF1_TWEAK_SCOPE_JOIN_GROUP,
+    FPE_CHARSET_DUPLICATE_TEXT,
     build_ff1_tweak,
     check_charset_unique,
     fpe_encrypt_value,
@@ -110,7 +111,9 @@ def _fpe_charset(cfg: dict[str, Any]) -> str:
         check_charset_unique(charset_spec, charset)
     except FpeUnencryptableError as exc:
         raise StrategyError(
-            code=reasons.runtime.FPE_CHARSET_DUPLICATE_SYMBOLS, strategy="fpe", message=str(exc)
+            code=reasons.runtime.FPE_CHARSET_DUPLICATE_SYMBOLS,
+            strategy="fpe",
+            message=FPE_CHARSET_DUPLICATE_TEXT,
         ) from exc
     if len(charset) < 2:
         raise StrategyError(
@@ -200,15 +203,15 @@ def fpe_array(
                 code=strategy_code_for_unencryptable(exc),
                 strategy="fpe",
                 message=(
-                    f"column {column!r}: {exc}. The engine fails closed rather than "
-                    "emit unmaskable or non-round-trip output."
+                    f"column {column!r}: a value is outside the FPE domain of its charset. "
+                    "The engine fails closed rather than emit unmaskable or non-round-trip output."
                 ),
             ) from exc
         except FpeChecksumError as exc:
             raise StrategyError(
                 code=strategy_code_for_checksum(exc),
                 strategy="fpe",
-                message=f"column {column!r}: {exc}",
+                message=f"column {column!r}: a value cannot carry the configured checksum.",
             ) from exc
         return pa.array(out, type=pa.string())
     except BaseException:

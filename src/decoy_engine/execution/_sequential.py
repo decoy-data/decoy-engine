@@ -336,7 +336,7 @@ def run_sequential(
     cache = pool_cache if pool_cache is not None else PoolCache()
     # D2a: per-run hash decisions, kept for the whole run so REMAP on a child table still sees
     # its parent's decision after the parent frame is evicted.
-    native_run = SeqNativeRun(native_threads=native_threads)
+    native_run = SeqNativeRun(native_threads=native_threads, registry=registry)
     ctx = StrategyContext(
         registry=registry,
         pool_cache=cache,
@@ -429,7 +429,7 @@ def run_sequential(
                 )
 
                 faker_pin = deterministic_faker_pin_columns_from_plan(
-                    plan, table, src.schema, relationship_graph=graph
+                    plan, table, src.schema, relationship_graph=graph, registry=registry
                 )
                 # `src` stays until the output is assembled: untouched columns are written from it.
 
