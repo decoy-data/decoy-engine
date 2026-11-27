@@ -556,6 +556,10 @@ vault is refused with `ValueError` before anything runs.
 | refused (another result, anything else at the target, the lock), `operation_conflict` | `crashed` | none | the receipt's code |
 | the stage refused, a staging write, the descriptor write or the rename failed | `crashed` | none | `publication_failed` |
 | bound, but a chain fsync failed (`commit_uncertain`) | `crashed` | none | `publication_commit_uncertain`, publication state `unknown` |
+| a memory error from just before `publish_unit` through final cleanup | `crashed` | none | `process_out_of_memory`, publication state `unknown`, no receipt |
+| a memory error before that point | `crashed` | none | `process_out_of_memory`, publication state `not_published` |
+
+After a memory error with state `unknown` the target may or may not exist. Repeat the call with the same request and destination: a unit that was bound returns `already_committed`. Keep the operation id from the first attempt to do this.
 
 `error` is then `publication <outcome>: <code>`, with ` (errno=<name>)` when an operating-system
 call failed: never a path, table name or operating-system message text. On every outcome but a

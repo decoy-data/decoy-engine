@@ -176,9 +176,11 @@ def test_a14_a_fault_after_the_real_publisher_returns_is_unknown_with_the_target
     unknown(result)
     committed(run)
     # The advice works: the same request on the same destination confirms the commit.
-    monkeypatch.undo()
-    again = Run(tmp_path, monkeypatch, [ints("t1", 10)], ceiling=HUGE)
-    assert again.out == run.out
+    monkeypatch.setattr(f"{COMMIT}.publish_unit", real)
+    again = run.go()
+    assert again.outcome == "completed"
+    assert again.publication_receipt is not None
+    assert again.publication_receipt.outcome == "already_committed"
 
 
 @pytest.mark.parametrize("target", [f"{COMMIT}.IsolatedRunResult", f"{RUN}.evidence_of"])

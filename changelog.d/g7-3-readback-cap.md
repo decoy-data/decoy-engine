@@ -5,3 +5,5 @@
 #### Memory failure while reading staged output
 
 A memory failure while the driver reads staged output back, including `OSError` with `ENOMEM` and Arrow errors with a known memory marker, now ends the run `crashed` with reason `decoy.process_out_of_memory` and fixed text. It was `decoy.publication_failed`, and a bare `MemoryError` escaped as a raw exception.
+
+On the isolated route, a memory error once publication may have started reports an unknown publication state (`decoy.process_out_of_memory` with publication state `unknown`). Rerun with the same operation id to confirm. A memory error before that point reports `not_published` and removes the stage. Neither path raises a raw `MemoryError`.
