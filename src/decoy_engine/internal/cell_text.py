@@ -296,8 +296,11 @@ def _key_ordered(value: object) -> object:
     if isinstance(value, dict):
         items = sorted(((k, _key_ordered(v)) for k, v in value.items()), key=lambda kv: repr(kv[0]))
         return dict(items)
-    if isinstance(value, np.ndarray):
-        # `canonical_cells` descends into an object array, so a mapping inside it reads in key order too.
+    if isinstance(value, np.ndarray) and value.dtype == object:
+        # `canonical_cells` descends into an object array, so a mapping inside it reads in key order
+        # too. A typed array keeps its own rendering, which carries the unit of a time delta.
+        if value.ndim == 0:
+            return _key_ordered(value.item())
         return [_key_ordered(v) for v in value.tolist()]
     if isinstance(value, tuple):
         # A plain tuple: a namedtuple constructor takes fields, not one generator.

@@ -91,3 +91,22 @@ def test_a_dict_cell_does_not_freeze_equal_to_a_set_of_pairs() -> None:
     mapping, pairs = canonical_cells(_objects({"id": 1}, {("id", 1)}))
     assert mapping != pairs
     assert source_distinct(_objects({"id": 1}, {("id", 1)})) == 2
+
+
+def test_equal_typed_array_cells_of_different_units_share_a_key() -> None:
+    seconds = np.zeros(1, dtype="timedelta64[s]")
+    nanos = np.zeros(1, dtype="timedelta64[ns]")
+    assert key_text(_objects(seconds)) == key_text(_objects(nanos))
+
+
+def test_a_zero_dimensional_array_cell_keys_its_payload() -> None:
+    scalar = np.array(7)
+    assert key_text(_objects(scalar, "x"))[0] is not None
+    boxed = np.empty((), dtype=object)
+    boxed[()] = A
+    other = np.empty((), dtype=object)
+    other[()] = A_REORDERED
+    changed = np.empty((), dtype=object)
+    changed[()] = {**A, "id": 2}
+    assert key_text(_objects(boxed)) == key_text(_objects(other))
+    assert key_text(_objects(boxed)) != key_text(_objects(changed))
