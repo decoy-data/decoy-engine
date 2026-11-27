@@ -11,6 +11,7 @@ import pyarrow as pa
 import pyarrow.ipc
 import pyarrow.parquet as pq
 
+from decoy_engine._arrow_types import type_children, type_nodes
 from decoy_engine.errors import ParquetFixedListNullError
 from decoy_engine.fileaccess._errors import guarded, guarded_iter
 from decoy_engine.fileaccess._types import FileHandle, StageDir
@@ -148,29 +149,8 @@ def parquet_writer(txn: StageDir, component: str, schema: pa.Schema, **kwargs: A
     return _FileBacked(writer, fh, txn.display, txn.strict)
 
 
-def _type_children(t: pa.DataType) -> list[pa.DataType]:
-    """The types directly inside `t`: the one place the type checks learn Arrow's nesting rules."""
-    if isinstance(t, pa.BaseExtensionType):
-        return [t.storage_type]
-    if pa.types.is_dictionary(t):
-        return [t.value_type]
-    if pa.types.is_map(t):
-        return [t.field(0).type]  # the entries struct, whose fields are key and item
-    if pa.types.is_struct(t) or pa.types.is_union(t):
-        return [t.field(i).type for i in range(t.num_fields)]
-    if hasattr(t, "value_type"):  # list, large list, fixed-size list and the list views
-        return [t.value_type]
-    return []
-
-
-def _type_nodes(t: pa.DataType) -> Iterator[pa.DataType]:
-    yield t
-    for child in _type_children(t):
-        yield from _type_nodes(child)
-
-
 def _array_children(t: pa.DataType, array: pa.Array) -> list[pa.Array]:
-    """The slice's children in `_type_children` order, struct validity pushed down; none where
+    """The slice's children in `type_children` order, struct validity pushed down; none where
     child positions do not follow the parent's (dictionary values, union members, list views)."""
     if isinstance(t, pa.BaseExtensionType):
         return [array.storage]
@@ -186,7 +166,7 @@ def _array_children(t: pa.DataType, array: pa.Array) -> list[pa.Array]:
 def _walk(t: pa.DataType, array: pa.Array) -> Iterator[tuple[pa.DataType, pa.Array]]:
     """Visit the slice's logical children with arrays that line up with its rows."""
     yield t, array
-    for child_type, child in zip(_type_children(t), _array_children(t, array), strict=False):
+    for child_type, child in zip(type_children(t), _array_children(t, array), strict=False):
         yield from _walk(child_type, child)
 
 
@@ -235,14 +215,14 @@ def _parquet_exact(t: pa.DataType) -> bool:
 
 
 def parquet_holds_type(t: pa.DataType) -> bool:
-    return all(_parquet_exact(node) for node in _type_nodes(t))
+    return all(_parquet_exact(node) for node in type_nodes(t))
 
 
 def ipc_refusal(t: pa.DataType) -> str | None:
     """Why IPC cannot stage `t`, or None. A dictionary may hold a struct, list, map or union of
     anything, but not a dictionary (IPC reads the inner indices back as values) or an extension
     type (the reader rejects the extension over dictionary storage)."""
-    for node in _type_nodes(t):
+    for node in type_nodes(t):
         if pa.types.is_dictionary(node):
             if pa.types.is_dictionary(node.value_type):
                 return "dictionary_in_dictionary"
@@ -253,7 +233,7 @@ def ipc_refusal(t: pa.DataType) -> str | None:
 
 def _refuse_fixed_list_null(data: pa.Table | pa.RecordBatch) -> None:
     for field, column in zip(data.schema, data.columns, strict=True):
-        if not any(pa.types.is_fixed_size_list(t) for t in _type_nodes(field.type)):
+        if not any(pa.types.is_fixed_size_list(t) for t in type_nodes(field.type)):
             continue
         chunks = column.chunks if isinstance(column, pa.ChunkedArray) else (column,)
         for chunk in chunks:

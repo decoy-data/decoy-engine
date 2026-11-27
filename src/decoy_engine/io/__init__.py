@@ -14,6 +14,7 @@ from decoy_engine.io.bounded_reader import (
     CsvMalformed,
     CsvRecordExceedsMaxRowBytes,
     RowExceedsMaxRowBytes,
+    SourceDateTypeUnsupportedError,
     SourceDateUnrepresentableError,
     UnsupportedColumnType,
     csv_convert_options,
@@ -25,6 +26,7 @@ from decoy_engine.io.bounded_reader import (
 from decoy_engine.io.source_dates import (
     check_resident_sources,
     check_source_dates,
+    check_source_schema,
     checked_batches,
     checked_loader,
 )
@@ -36,10 +38,12 @@ __all__ = [
     "CsvMalformed",
     "CsvRecordExceedsMaxRowBytes",
     "RowExceedsMaxRowBytes",
+    "SourceDateTypeUnsupportedError",
     "SourceDateUnrepresentableError",
     "UnsupportedColumnType",
     "check_resident_sources",
     "check_source_dates",
+    "check_source_schema",
     "checked_batches",
     "checked_loader",
     "csv_convert_options",

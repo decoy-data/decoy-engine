@@ -55,6 +55,7 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.execution._errors", "QuarantineError", "runtime"),
     ("decoy_engine.errors", "ParquetFixedListNullError", "runtime"),
     ("decoy_engine.io.bounded_reader", "SourceDateUnrepresentableError", "runtime"),
+    ("decoy_engine.io.bounded_reader", "SourceDateTypeUnsupportedError", "runtime"),
     ("decoy_engine.contracts.calendar_range", "FittedRangeError", "plan"),
     ("decoy_engine.errors", "FixedWidthRecordOverlongError", "runtime"),
     ("decoy_engine.plan.validate._consolidator", "PlanCheckError", "plan"),
