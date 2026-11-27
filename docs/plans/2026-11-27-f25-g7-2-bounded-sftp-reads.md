@@ -47,8 +47,8 @@ pinned to the file seen at open:
 
 - Per request: each piece asks for at most 1 MiB and never more than the bytes left. paramiko
   sends each piece as SFTP READ requests of at most 32 KiB (`MAX_REQUEST_SIZE`, paramiko 5.0.0
-  `sftp_file.py:59`). Each request ends within the channel timeout (60 s, OQ-2).
-- In total: the read returns exactly the size seen at open, never more.
+  `sftp_file.py:59`). A channel I/O wait with no progress times out after 60 s (OQ-2).
+- In total: a successful read returns exactly the size seen at open, never more.
 - Pinned: size, mtime and file type come once from the open handle (`fstat`). Before each piece
   is yielded, a new `fstat` of the same handle must match them. If not, the read fails with kind
   `source_changed` and that piece is not yielded.
@@ -56,7 +56,7 @@ pinned to the file seen at open:
   shared connect) is a `ConnectorError` subclass with fixed text and a `kind`. It holds no data
   bytes, no server or SDK text and no secret, in `str`, `repr`, `args` or `__notes__`. Its
   `__cause__` and `__context__` are `None`.
-- Parity: a read of an unchanged regular file that `main` completes still completes, with the
+- Parity: a read of an unchanged regular file with size and mtime available on a responsive server returns the
   same bytes in the same chunk sequence (1 MiB chunks, the last one shorter). The connector yields
   bytes, not a frame, so "same frame" here means same bytes and same chunks.
 
@@ -80,13 +80,13 @@ content hash. OpenSSH does not serve the `check-file` extension. So:
 **Non-goals.**
 
 - Resume after a dropped transport, retry of SFTP reads, the session factory, agent and
-  `identity_file` auth, the typed unknown-host error, and the SFTP CI lane. These are F02-E3 and
+  `identity_file` auth, the typed unknown-host error, and the broader F02 SFTP CI lane. These are F02-E3 and
   F02-E4 (plan `docs/plans/2026-11-17-f02-sftp-cloud.md` on `plan/f02-sftp-cloud`, row 87, 1.x).
   This slice builds the read and classify pieces that F02 names (`iter_sftp_file`, `sftp_error`
   in `connectors/_sftp_client.py`), so E3 adds the session and resume around them without moving
   code.
-- The SFTP sink (`SFTPFileSink.write`, stage then rename): F02-E4. Its error text becomes
-  value-free here only because it shares the one classifier.
+- Staging sink writes and publishing them by rename belongs to F02-E4. The current sink writes
+  directly. This slice updates its shared connection timeout, file-open spelling and error text.
 - A configured byte limit on SFTP reads. The total bound is the size at open. A new cap would
   refuse reads that `main` completes. Byte quotas are row 58b (1.x).
 - The platform's own SFTP reader (`api/cloud/reader.py` in decoy-platform): platform is parked.
@@ -127,11 +127,11 @@ then `yield from iter_sftp_file(sftp, full_path)`. `iter_sftp_file` lives in the
 Every paramiko or OS failure in steps 0 to 3, and in `_open_sftp`, `list`, `head` and the sink,
 goes through one classifier `sftp_error(exc) -> ConnectorError`. The caller raises its result
 after the `except` block closes (the `_clients._call` rule, `connectors/_clients.py:150-162`).
-Kinds, by exact type, follow the F02 4.4 table:
+Kinds, by exception class in the order shown, follow the F02 4.4 table:
 
 | Exception | Class | Kind |
 |---|---|---|
-| a `ConnectorError` already raised by engine code | same class (`refreshed_error`, `_clients.py:78`) | same kind |
+| an engine `TransientError` or `PermanentError` | same class (`refreshed_error`, `_clients.py:78`) | same kind |
 | `paramiko.BadHostKeyException` | `PermanentError` | `host_key_rejected` |
 | `paramiko.BadAuthenticationType`, `AuthenticationException`, `PasswordRequiredException` | `PermanentError` | `credentials` |
 | other `paramiko.SSHException` | `TransientError` | `transient` |
@@ -140,6 +140,8 @@ Kinds, by exact type, follow the F02 4.4 table:
 | `socket.timeout`, `EOFError`, `ConnectionResetError`, other `OSError` | `TransientError` | `transient` |
 | `paramiko.SFTPError` (protocol: "Expected data", "Garbage packet") and anything else | `PermanentError` | `unexpected` |
 
+Put the optional paramiko import inside the classified connect block. Case 10 also exercises
+a missing extra through `source.check()` and expects the fixed `unexpected` detail.
 The classifier reads paramiko from `sys.modules` and never imports it: when paramiko was never
 imported, no paramiko exception can exist. Each paramiko class is looked up with
 `getattr(module, name, None)` and a missing one is skipped, so a stub module that lacks a class
@@ -165,8 +167,8 @@ stay `PermanentError` (`test_sftp.py:174-217`); a missing path stays `PermanentE
 `CheckResult.detail` keeps `str(exc)`, which is now fixed text.
 
 `_open_sftp` calls `sftp.get_channel().settimeout(SFTP_REQUEST_TIMEOUT_S)` after `open_sftp()`.
-`SFTP_REQUEST_TIMEOUT_S = 60.0` is a module constant in `_sftp_client.py`, so one request ends
-within 60 s (the F02 4.4 bound, OQ-2) and tests patch the constant, not the call.
+`SFTP_REQUEST_TIMEOUT_S = 60.0` is a module constant in `_sftp_client.py`, and `_open_sftp` reads it from that module at call time. The timeout bounds each blocking
+channel I/O wait after session setup. A request that keeps making partial progress can take longer.
 
 `SFTPFileSource.open` and `SFTPFileSink.write` stop calling `sftp.open`. The sink moves to
 `sftp.file(full_path, "wb")` too, so both rows leave `tests/sentry/baselines/gcs-call-kwargs.json`.
@@ -203,13 +205,15 @@ within 60 s (the F02 4.4 bound, OQ-2) and tests patch the constant, not the call
 
 ## Acceptance tests, red first
 
+Use `pytest.importorskip("paramiko")` in the real-server module so a base install can collect the suite.
 Cases 1 to 13 run in the base environment (no paramiko) on one SFTP fake module,
 `tests/connectors/_sftp_fakes.py`. It is the only SFTP fake in the tree: the existing
 `_FakeSFTPAttributes`, `_FakeSFTPFile` and `_FakeSFTPClient` (`test_sftp.py:44`, `:54`, `:82`),
 `_FakeSSHClient` (`test_sftp.py:115`), and `_FakeSFTP` and `_FakeSSHClient`
 (`test_sftp_stale_session.py:21`, `:40`) move into it, and both test files import them from
 there. The client and handle share one call ledger (`file`, `stat` with its path, `read(n)` with
-`n`, handle `stat`, `close`, `listdir_attr`). The handle gains `stat()` and the client gains
+`n`, handle `stat`, `close`, `listdir_attr`). Keep attributes on the opened file with a stable mtime until the fixture changes it.
+The client records channel timeout calls. The handle gains `stat()` and the client gains
 `file`; the stale-session fake becomes the same client class with an `alive` flag. The fake
 raises on `prefetch`, `readv`, `getfo` and `get`. The module also holds `stub_paramiko()`
 (Behaviour section). Each
@@ -244,17 +248,21 @@ it red again on the final head.
    refused with the same kind, zero `read` calls. A `None` `st_mode` reads as today. Red on
    `main`. Mutations: drop the step 0 test (red on (a): the ledger shows the open); drop the
    step 2 test (red on (b)).
-9. Pin source. The fake replaces the path by rename after open: a path `stat` shows another size
-   and mtime, and the handle keeps the old bytes. The read completes with the old bytes. The
-   ledger shows exactly one `stat(full_path)`, ordered before the `file` call (the step 0 type
-   check), and no `stat(full_path)` after the `file` call; the liveness probe `stat(".")` in
-   `_connect` is told apart by its argument. Mutation: take the pin from the step 0 path stat or
-   from a new `sftp.stat(full_path)` after open: red (old bytes refused as changed, or a path
-   stat after the open).
+9. Pin source. Use two regular files with different bytes and mtimes but the same nonzero size.
+
+   - 9a. Replace the path just after open. The handle returns all the old bytes. M5 using a new
+     path stat after open fails this cell.
+   - 9b. Return the old attributes from the step 0 path stat, then swap the path before
+     `file()`. The handle opens the replacement. Assert the read completes with all the new
+     bytes. M5 using the step 0 pin sees the old mtime and refuses the first piece as
+     `source_changed`.
+
+   In both cells the ledger shows exactly one path stat for the file, before open, and a handle
+   stat after open. Count the session liveness probe `stat(".")` separately.
 10. Value-free classification. A corpus of failures, each with a data, path, host and user
    canary in its message: `FileNotFoundError`, `PermissionError`, `OSError(ECONNRESET)`,
-   `socket.timeout`, `EOFError`, `RuntimeError`, and a `ConnectorError` that carries a canary.
-   The fake raises each one at each point: `file` (open), the k-th `read`, the k-th `fstat`,
+   `socket.timeout`, `EOFError`, `RuntimeError`, and a `PermanentError` with a known kind and canary text.
+   The fake raises each one at each point: the step 0 path stat, `file` (open), the k-th `read`, the k-th `fstat`,
    `listdir_attr` (`list`), `stat` (`head`), connect, and the sink's `write`. The error that leaves
    `SFTPFileSource` or `SFTPFileSink` has the class and kind of the Behaviour table. The canary is
    absent from `str`, `repr`, `args` and `__notes__`; `__cause__` and `__context__` are `None`;
@@ -263,18 +271,24 @@ it red again on the final head.
    `from exc` at a caller; restore `f"SFTP path not found: {exc}"`; remove the classifier around
    the piece read.
 11. Cleanup. The handle is closed exactly once on: a full read, a consumer that stops after the
-   first chunk (`gen.close()`), each refusal of cases 4 to 8, and each mid-read failure of case
-   10. A `close` that raises after a full read does not fail it. Red on `main` for the refusals
+   first chunk (`gen.close()`), each refusal after open in cases 4 to 8, and each mid-read failure of case
+   10. A step 0 refusal has zero opens and zero handle closes. A `close` that raises after a full read does not fail it. Red on `main` for the refusals
    (they do not exist). Mutation: drop the `finally`.
 12. Request timeout wiring. `_open_sftp` with `stub_paramiko()` and the fake SSH client: the
    channel's `settimeout` was called with `SFTP_REQUEST_TIMEOUT_S` (asserted equal to 60.0) after
    `open_sftp()`. This proves the wiring only; the stall itself is proved in case 14 (f). Red on
    `main`. Mutation: drop the call.
-13. Read-primitive sentry `tests/sentry/test_sftp_read_primitives.py`. It parses the AST of
+13. Read-primitive sentry `tests/sentry/connectors/test_sftp_read_primitives.py`. It parses the AST of
    `connectors/sftp.py` and `connectors/_sftp_client.py`. Receiver scope: a name is an SFTP
    receiver when it is bound, in the same function, from a call to `open_sftp()`, `.file(...)` or
    `.open(...)`, or from `self._connect()`, or is the attribute `self._sftp`, or is a parameter
-   named `sftp` or `fp`. Only calls on those receivers are checked, so `os.environ.get` in
+   named `sftp` or `fp`. Track assignments, `with ... as` bindings and walrus targets
+   from those expressions. For tuple targets from `_open_sftp(...)`, track the second item
+   (`client, sftp = _open_sftp(config)`), including assignment to `self._sftp`. Seed each
+   binding with a prohibited call. For example, flag `handle.prefetch()` inside
+   `with sftp.file(path, "rb") as handle`, `remote.get(...)` after
+   `client, remote = _open_sftp(config)`, and `remote.get(...)` under
+   `if (remote := self._connect())`. Check that the first tuple item stays outside the receiver set. Only calls on those receivers are checked, so `os.environ.get` in
    `_open_sftp` and `sys.modules.get` in `sftp_error` are out of scope by construction, with no
    allowlist. On an SFTP receiver it flags `.prefetch(`, `.readv(`, `.getfo(`, `.get(`, `.open(`
    (the `file` spelling is the one open), and `.read()` or `.read(-1)`. A `.file(` call with a
@@ -286,29 +300,40 @@ it red again on the final head.
    `fp.read(n)` must give no finding; and the real tree gives none. Mutation: add `fp.prefetch()`
    to `iter_sftp_file`: red.
 14. Real paramiko (runs in the `sftp-gate` job, which fails on a skip). An in-process paramiko SFTP
-   server (`paramiko.SFTPServer` with a `SFTPServerInterface` stub over a socket pair, the pattern
-   of paramiko's own test suite) serves a temporary directory. Case 1 parity on fixed sizes with
-   the real client; case 4 with a real append between pieces (the test appends after the first
-   chunk is received); the open handle's `stat()` carries `st_size`, `st_mtime` and `st_mode`;
-   the paramiko-typed rows of case 10 (`BadHostKeyException`, `AuthenticationException`,
-   `BadAuthenticationType`, `PasswordRequiredException`, other `SSHException`, `SFTPError`)
-   classify as the table says, with no canary. (f) Stall: with `SFTP_REQUEST_TIMEOUT_S` patched
-   to 0.5, the stub server's `read` handler blocks on an event the test never sets; the read
-   raises within 5 s, the real paramiko error is `socket.timeout` (spy on `sftp_error`'s input),
-   and the error that leaves is `TransientError` kind `transient` with no canary and no cause or
-   context. Mutations: as case 4; and drop the `settimeout` call (red on (f): the read does not
-   end within 5 s; the test runs the read in a thread with a join timeout so it cannot hang the
-   job).
+   server (`paramiko.SFTPServer` with a `SFTPServerInterface` serving a temporary directory)
+   listens on `127.0.0.1` on an ephemeral port. Set `DECOY_SFTP_KNOWN_HOSTS` to a temporary
+   file with the fixture host key under `[127.0.0.1]:port`. Connect through `_open_sftp` using
+   the fixture credentials. This exercises production timeout wiring and host verification.
+   On a fresh connection with an empty known-hosts file, assert that RejectPolicy refuses the
+   unknown key before any file is opened.
+
+   Check case 1 on fixed sizes and case 4 with a real append after the first chunk. Check the
+   handle stat fields and all six real paramiko exception types in the Behaviour table against
+   their expected kinds, including the canary assertions.
+
+   (f) Patch `SFTP_REQUEST_TIMEOUT_S` to 0.5 at the production lookup before connecting. Run
+   the read on that connection in a reader thread with `daemon=True`. The server signals when
+   its READ handler starts, then waits on a release event. Wait a bounded time for entry and
+   join the reader for at most 5 s. Before releasing the server, assert the reader has exited,
+   the classifier saw `socket.timeout`, and the caller received a value-free `TransientError`
+   of kind `transient` with no cause or context. Capture the result in the worker and assert
+   it in the test thread. In `finally`, set the server release event, close the transports
+   and listener, and join workers with bounded waits. M12 removes the production `settimeout`
+   call. The reader is still alive at the first join, so (f) fails before teardown.
 
 Existing tests: `tests/connectors/test_sftp.py` and `test_sftp_stale_session.py` keep every
-assertion. Their fakes move to `_sftp_fakes.py` (import change only). `test_sftp.py` still skips
+assertion. Move their fakes to `_sftp_fakes.py`. Exercise the two QA-7 classifier assertions
+through the source: have the patched SSH client raise the original typed exceptions at connect
+and assert that advancing `source.open(path)` raises the expected permanent error. This removes
+both test imports of the retired `_wrap_sftp_error`. `test_sftp.py` still skips
 without paramiko in the base lanes; the new `sftp-gate` job (OQ-3, resolved) runs it, the
 stale-session test and the real-server test with paramiko installed, and fails on any skip.
 
 **CI job `sftp-gate`** (in `.github/workflows/ci.yml`, modelled on `ml-gate` at `ci.yml:246`):
 `./.github/actions/lock-env` with `extras: "dev sftp"`. paramiko 5.0.0 is already in `uv.lock`
-(the `sftp` extra), so no lock change. Step 1:
-`pytest tests/connectors/test_sftp.py tests/connectors/test_sftp_stale_session.py tests/connectors/test_sftp_real_server.py --junitxml=sftp.xml --tb=short`.
+(the `sftp` extra), so no lock change. Set job-level `timeout-minutes: 10`. Put this comment
+above the pytest step: `# The SFTP sink does not advertise multipart support.` Step 1:
+`pytest tests/connectors/test_sftp.py tests/connectors/test_sftp_stale_session.py tests/connectors/test_sftp_real_server.py --deselect tests/connectors/test_sftp.py::TestSFTPFileSinkContract::test_multipart_round_trip_when_advertised --junitxml=sftp.xml --tb=short`.
 Step 2: `python scripts/dev/junit_ran.py sftp.xml`, which exits 1 unless passed > 0 and
 skipped, errors and failures are all 0 (`scripts/dev/junit_ran.py`). No `continue-on-error` and
 no `|| true`. The job joins the `ci.yml` merge jobs in `ci/required-jobs.toml` (beside `ml-gate`
@@ -318,15 +343,19 @@ rule (`tests/sentry/tooling/_ci_lanes.py`) fails, so the registration is red fir
 isolated job: no existing selection, fixture or lock changes, so it is not a full-suite trigger.
 After merge, the branch-protection required contexts are refreshed from
 `scripts/dev/required_checks.py contexts` (an owner or admin step; the gate record says when).
-Case 15 (lane check): `junit_ran.py` on a JUnit file with one skip exits 1, and on the job's own
-output exits 0; the gate records the `sftp-gate` run on the final head with its pass count.
+Case 15 checks the final job command for exactly the one named deselection above. Assert that
+pytest reports exactly one deselected and that the job's JUnit report passes the existing
+`junit_ran.py` check with zero skips. A report with a pass and a skip must still exit 1. Record
+the final head, pass count and deselection count. In `tests/sentry/test_ci_config.py`, reuse
+`tests/sentry/_ci_lock_scan.py:497` (`hiding_findings`) on the pytest and JUnit steps to catch M15.
+The existing lane registry test catches removal from the merge jobs.
 
 ## Choke points
 
 | Choke point | Where | Callers | Guard mutation (test that must go red) |
 |---|---|---|---|
 | Pinned bounded SFTP read | new `_sftp_client.iter_sftp_file(sftp, path)` | `SFTPFileSource.open` (`sftp.py:321`); later F02-E3 resume and E5 table readers | M1 always ask 1 MiB: case 2. M2 loop to an empty read: case 3. M3 check the pin only at the end: case 4. M4 early EOF as the end: case 5 |
-| Pin from the handle | `iter_sftp_file` step 2, `fp.stat()` | the read above | M5 pin from a path stat (step 0 or after the open): case 9. M6 size-only compare: case 6. M7 missing value as 0: case 7. M8 drop the file-type test: case 8 |
+| Pin from the handle | `iter_sftp_file` step 2, `fp.stat()` | the read above | M5 pin from step 0: case 9b. Pin from a path stat after open: case 9a. M6 size-only compare: case 6. M7 missing value as 0: case 7. M8 drop the file-type test: case 8 |
 | One SFTP classifier, raised after the handler | new `_sftp_client.sftp_error(exc)` on `_clients._classified` and `refreshed_error` | `_open_sftp`, `list`, `head`, `iter_sftp_file`, `SFTPFileSink.write` (replaces `_wrap_sftp_error`, `sftp.py:49-87`) | M9 `raise ... from exc`: case 10. M10 restore `{exc}` text: case 10 |
 | Handle cleanup | `finally` in `iter_sftp_file` | every exit | M11 drop the `finally`: case 11 |
 | Request time bound | channel `settimeout(SFTP_REQUEST_TIMEOUT_S)` in `_open_sftp` | every SFTP operation | M12 drop the call: cases 12 and 14 (f) |
@@ -406,7 +435,7 @@ N/A: the connector yields the bytes of one file; no relational data crosses it.
 | 6 | Untrusted producer (SFTP server replies) | never ask past the size; per-piece `fstat` check; no unbounded paramiko primitive; request timeout | cases 2, 3, 12, 13 | M1, M2, M12, M13 |
 | 7 | Check then use (TOCTOU) on the file | pin from the open handle, checked again before each piece is yielded | cases 4, 5, 6, 9 | M3, M5, M6 |
 | 8 | Weak tests and overclaimed evidence | ledger non-vacuity per case; case 14 with a real paramiko client and server, run in the `sftp-gate` job with `junit_ran.py` | cases 2, 14, 15 | M4 (early EOF as the end), M15 |
-| 9 | Behavior-preserving refactor drift | chunk-by-chunk property parity with `main`'s loop; existing tests unchanged except fixture methods | case 1, `test_sftp.py` | M1 (always ask 1 MiB) |
+| 9 | Behavior-preserving refactor drift | chunk-by-chunk property parity with `main`'s loop; existing tests unchanged except for the shared fakes and QA-7 call path | case 1, `test_sftp.py` | read the whole remaining file in one call: case 1 red |
 | 10 | Frozen contract drift | public SDK names, the `FileSource.open` signature and the error classes unchanged; kinds from the existing closed set | case 10 asserts class and kind | change a class: case 10 red |
 
 ## Recurring defects (dev-rules catalog)
@@ -417,9 +446,9 @@ N/A: the connector yields the bytes of one file; no relational data crosses it.
 | R2 strict wire and stored types | n/a: no persisted model |
 | R3 no exception context | case 10 asserts `__cause__` and `__context__` are `None` |
 | R4 versioned read models | n/a: no persisted format |
-| R5 normalized guard scanners | case 13 walks the AST for attribute calls on any receiver, covered spellings listed, seeded cases |
+| R5 normalized guard scanners | case 13 walks the AST for calls on the SFTP receivers listed in case 13, covered spellings listed, seeded cases |
 | R6 no reaching into private modules | `sftp.py` imports its sibling `_sftp_client` in the same package; nothing outside `connectors/` imports it |
-| R7 no hidden CI failures | cases 1 to 13 run in every lane; the paramiko cases run in the `sftp-gate` job, a merge requirement, with `junit_ran.py` failing on any skip and no hiding form (case 15, M15) |
+| R7 no hidden CI failures | cases 1 to 13 run in the base environment; the paramiko cases run in the `sftp-gate` job, a merge requirement, with `junit_ran.py` failing on any skip and no hiding form (case 15, M15) |
 | R8 one trust class per entry point | one trust class: SFTP server replies |
 | R9 mutations on the final head | M1 to M15 rerun on the final head; the gate records each |
 | R10 allowlisted helpers are still checked | `iter_sftp_file` is the one allowed `.file(` read call, by exact `(path, function)`, and the sentry still scans its body |
@@ -459,16 +488,20 @@ Each replaces code in `sftp.py`; none is speculative.
 | `src/decoy_engine/connectors/_sftp_client.py` (new) | `iter_sftp_file`, `sftp_error` | `CODEMAP.md:286` | `sftp.py`, `_clients.py` | 0 | about 150 |
 | `src/decoy_engine/connectors/sftp.py` | `open` delegates; classifier moves out; `.file(`; channel timeout | `CODEMAP.md:286` | `_sftp_client.py` | 388 | about 330 |
 | `tests/connectors/_sftp_fakes.py` (new) | the one SFTP fake: client, handle, SSH client, attributes, one ledger, `stub_paramiko()`; the fakes from `test_sftp.py` and `test_sftp_stale_session.py` move here | `CODEMAP.md:286` | `test_sftp.py` | 0 | about 200 |
-| `tests/connectors/test_sftp_bounded_read.py` (new) | cases 1 to 9, 11 | `CODEMAP.md:286` | `test_sftp.py` | 0 | about 260 |
-| `tests/connectors/test_sftp_error_text.py` (new) | cases 10, 12 | `CODEMAP.md:286` | `test_s3_error_text.py` | 0 | about 150 |
+| `tests/connectors/bounded_sftp/__init__.py` (new) | package for the fake-backed acceptance tests | `CODEMAP.md:286` | shared fake in the parent directory | 0 | empty |
+| `tests/connectors/bounded_sftp/test_sftp_bounded_read.py` (new) | cases 1 to 9, 11 | `CODEMAP.md:286` | `test_sftp.py` | 0 | about 260 |
+| `tests/connectors/bounded_sftp/test_sftp_error_text.py` (new) | cases 10, 12 | `CODEMAP.md:286` | `test_s3_error_text.py` | 0 | about 150 |
 | `tests/connectors/test_sftp_real_server.py` (new) | case 14, including the stall cell (f) | `CODEMAP.md:286` | `test_sftp.py` | 0 | about 200 |
 | `tests/connectors/test_sftp.py` | fakes move out; imports them | `CODEMAP.md:286` | `test_sftp_stale_session.py` | 351 | about 240 |
 | `tests/connectors/test_sftp_stale_session.py` | fakes move out; imports them | `CODEMAP.md:286` | `test_sftp.py` | 113 | about 85 |
-| `.github/workflows/ci.yml`, `ci/required-jobs.toml`, `tests/unit/scripts/test_required_checks.py` | `sftp-gate` job and its merge registration (case 15) | `CODEMAP.md:164` | `ml-gate`, `ner-gate` | n/a | about +25 |
-| `tests/sentry/test_sftp_read_primitives.py` (new) | case 13 | `CODEMAP.md:164` | `test_outbound_clients.py` | 0 | about 90 |
+| `.github/workflows/ci.yml`, `ci/required-jobs.toml`, `tests/unit/scripts/test_required_checks.py`, `tests/sentry/test_ci_config.py` | `sftp-gate` job and its merge registration (case 15) | `CODEMAP.md:164` | `ml-gate`, `ner-gate` | n/a | about +25 |
+| `tests/sentry/connectors/test_sftp_read_primitives.py` (new) | case 13 | `CODEMAP.md:164,286` (add connector sentry directory to the map) | `test_outbound_clients.py` in the parent directory | 0 | about 90 |
 | `tests/sentry/baselines/engine-exception-text-copies.json`, `gcs-call-kwargs.json` | rows removed | `CODEMAP.md:164` | other sentry baselines | n/a | smaller |
 
-`connectors/` goes from 10 to 11 modules. Every file stays under 600 lines, so no census entry.
+Update the connector row of `CODEMAP.md` to name the two test directories.
+Production `connectors/` goes from 10 to 11 modules. Keep the shared fake beside the existing
+tests that import it and group the two new fake-backed suites in `bounded_sftp/`. The sentry
+goes under `tests/sentry/connectors/` because the sentry root already exceeds 25 direct modules.
 
 ## Slices
 
@@ -477,7 +510,8 @@ it tests. Order: the fakes, then red tests 2 to 13, then `_sftp_client.py`, then
 changes and the baseline removals, then case 14 and the `sftp-gate` job with its registration
 (case 15). Test depth per
 `testing.md`: T0 the touched test files per edit; T1 impact-selected per commit; T2 gate on the
-exact head with M1 to M15. No full-suite trigger is hit: the new CI job is isolated and changes
+exact head with M1 to M15. T2 also reruns `tests/sentry/tooling/test_ci_lanes.py`,
+`tests/sentry/test_ci_config.py` and `tests/unit/scripts/test_required_checks*.py`. No full-suite trigger is hit: the new CI job is isolated and changes
 no existing selection, fixture or lock.
 
 ## Pre-mortem
@@ -486,7 +520,7 @@ no existing selection, fixture or lock.
   handle `stat()` that lacks fields), so the bounds hold on the fake only. Case 14 runs the same
   parity and append cases on a real paramiko client and server.
 - A server whose `fstat` mtime moves on every read (some network file systems update times
-  oddly) refuses every read. Case 14 shows OpenSSH does not. The refusal names
+  oddly) refuses every read. Case 14 checks stable metadata on the paramiko fixture. The refusal names
   `source_changed`, so an SDK user sees the cause. V2-LOG: collect reports.
 - The per-piece `fstat` adds one round trip per 1 MiB, about 3% over the 32 reads per MiB. The
   gate records a case 14 timing on a 64 MiB file for head and `main`.
@@ -500,8 +534,8 @@ no existing selection, fixture or lock.
 - The sentry flags ordinary `.get(` calls (`os.environ.get`, `sys.modules.get`) and is red on
   day one, or a builder widens it: the receiver scope in case 13 leaves them out by
   construction, and the seeded negative case proves it.
-- The stall case hangs the CI job if the timeout wiring breaks: it runs the read in a thread
-  with a join timeout, and the job has `timeout-minutes`.
+- The stall case hangs the CI job if the timeout wiring breaks: it runs the read in a daemon thread
+  with a bounded join. Teardown releases the server and closes the transport. The job has a 10-minute limit.
 
 ## V2-LOG
 
@@ -542,7 +576,7 @@ Acceptance tests). The one-off gate-venv option is dropped: it would leave the r
 classifier untested after merge. F02-E3's `DECOY_REQUIRE_SFTP` helper and its `gates.sh` step
 are not needed here and stay with F02.
 
-## Finding map (Dennis plan round 1)
+## Finding map (Dennis plan rounds 1 and 2)
 
 | # | Severity | Plan change |
 |---|---|---|
@@ -550,7 +584,12 @@ are not needed here and stay with F02.
 | 2 | DESIGN | Behaviour step 0: type-only path stat before the open, not used for the pin; case 8 (a) zero opens, M14; case 9 checks no path stat after the open; FIFO limit stated |
 | 3 | DESIGN | Case 13 receiver scope named (bound from `open_sftp`, `.file`, `.open`, `self._connect`, `self._sftp`, `sftp` and `fp` parameters); `os.environ.get` and `sys.modules.get` out of scope by construction; seeded negative case |
 | 4 | DESIGN | One fake module `_sftp_fakes.py` with one ledger; the fakes at `test_sftp.py:44-115` and `test_sftp_stale_session.py:21-40` move into it |
-| 5 | MEDIUM | `stub_paramiko()` and its class hierarchy named; classifier uses `getattr(module, name, None)` and skips a missing class; cell with a stub lacking one class |
-| 6 | MEDIUM | `SFTP_REQUEST_TIMEOUT_S` module constant; case 12 is wiring only; case 14 (f) real-server stall, patched to 0.5 s, `socket.timeout` to `transient` |
+| 5 | V2-LOG | `stub_paramiko()` and its class hierarchy named; classifier uses `getattr(module, name, None)` and skips a missing class; cell with a stub lacking one class |
+| 6 | V2-LOG | `SFTP_REQUEST_TIMEOUT_S` module constant; case 12 is wiring only; case 14 (f) real-server stall, patched to 0.5 s, `socket.timeout` to `transient` |
 | 7 | V2-LOG | errno-less `OSError` to `transient`, noted for F02-E3 in V2-LOG |
 | 8 | V2-LOG | `paramiko.transport` logger text, noted in V2-LOG |
+| A | DESIGN | Case 15 checks the single multipart deselection and zero skips. The existing JUnit check stays strict. |
+| B | V2-LOG | Case 14(f) uses the loopback server through `_open_sftp`. Removing the production timeout fails the stall test. |
+| C | V2-LOG | Case 9b swaps the path before open and requires the replacement bytes. With a step 0 pin, the read fails. |
+| D | V2-LOG | Case 14(f) bounds the join and releases the server in teardown. The job has a 10-minute timeout. |
+| E | V2-LOG | Case 13 seeds with-as, tuple and walrus bindings. T2 names the three registry test paths. |
