@@ -14,6 +14,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -76,6 +77,50 @@ class InCode:
 
 
 in_code = InCode
+
+
+def _limits() -> ModuleType:
+    """``ratchet/_limit_constants.py``, loaded by path; it imports its sibling helper by package."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    path = SENTRY / "ratchet" / "_limit_constants.py"
+    spec = importlib.util.spec_from_file_location("_bl_limit_constants", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def live_bounds(kind: str) -> dict[str, int]:
+    """Live value per ``sentry-limits`` key for the ``"max"`` or ``"min"`` rows of ``LIMITS``."""
+    mod = _limits()
+    if problems := mod.direction_problems(mod.LIMITS):
+        raise ValueError("; ".join(problems))
+    out: dict[str, int] = {}
+    for (f, c), k in sorted(mod.LIMITS.items()):
+        if k != kind:
+            continue
+        try:
+            value: int | None = mod.read_int((SENTRY / f).read_text(encoding="utf-8"), c)
+        except ValueError:
+            value = None
+        if value is None:  # raised outside the handler so no context carries the refused text
+            raise ValueError(f"{mod.key_of(f, c)} {mod.REFUSED}")
+        out[mod.key_of(f, c)] = value
+    return out
+
+
+@dataclass(frozen=True)
+class InLimits:
+    """Keys of ``LIMITS``: one ``<test file>::<constant>`` per scalar cap or floor."""
+
+    test_file: str = "ratchet/_limit_constants.py"
+    constant: str = "LIMITS"
+
+    def __call__(self) -> set[str]:
+        mod = _limits()
+        return {mod.key_of(f, c) for f, c in mod.LIMITS}
 
 
 def json_keys(rel: str, section: str, fields: tuple[str, ...]) -> Callable[[], set[str]]:
@@ -146,6 +191,16 @@ def exception_text_copy_census() -> dict[str, int]:
     return census(scan_tree(ROOT / "src" / "decoy_engine"))
 
 
+def self_maxes(name: str) -> Callable[[], dict[str, int]]:
+    """For a baseline its own sentry reads as the source of truth: the ``max`` it records."""
+
+    def maxes() -> dict[str, int]:
+        entries = json.loads((BASELINES / f"{name}.json").read_text(encoding="utf-8"))["entries"]
+        return {k: e["max"] for k, e in entries.items() if "max" in e}
+
+    return maxes
+
+
 def config_refusal_census() -> dict[str, int]:
     """Live refusal constructions outside the zero set that break S1: site key to count."""
     if str(ROOT) not in sys.path:
@@ -163,6 +218,8 @@ class Source:
     note: str = ""
     # Live numeric value per key, for a list whose entries are counts (recorded as ``max``).
     maxes: Callable[[], dict[str, int]] | None = None
+    # Live floor per key, for a bound that may only rise (recorded as ``min``).
+    mins: Callable[[], dict[str, int]] | None = None
 
 
 F29 = "tests/fixtures/f29"
@@ -207,11 +264,17 @@ SOURCES: tuple[Source, ...] = (
         "tests/sentry/baselines/reason-unchecked-helpers.json",
         in_code("test_reason_registry.py", "UNCHECKED_HELPERS"),
     ),
-    Source("module-size", "test_module_size.py", in_code("test_module_size.py", "ALLOWLIST")),
+    Source(
+        "module-size",
+        "test_module_size.py",
+        in_code("test_module_size.py", "ALLOWLIST"),
+        maxes=in_code("test_module_size.py", "ALLOWLIST").maxes,
+    ),
     Source(
         "date-shift-window-reader",
         "test_date_shift_window_reader.py",
         in_code("test_date_shift_window_reader.py", "CENSUS"),
+        maxes=in_code("test_date_shift_window_reader.py", "MAX_HITS").maxes,
     ),
     Source(
         "column-shape-classifier",
@@ -340,12 +403,24 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_post_scan_route_guard.py", "EXEMPT"),
     ),
     Source(
-        "locator-waivers", "test_locator_hygiene.py", in_code("test_locator_hygiene.py", "WAIVERS")
+        "locator-waivers",
+        "test_locator_hygiene.py",
+        in_code("test_locator_hygiene.py", "WAIVERS"),
+        maxes=in_code("test_locator_hygiene.py", "WAIVERS", count_at=0).maxes,
     ),
     Source(
         "log-interpolation",
         "test_log_interpolation.py",
         in_code("test_log_interpolation.py", "ALLOWLIST"),
+        maxes=in_code("test_log_interpolation.py", "ALLOWLIST", count_at=0).maxes,
+    ),
+    Source(
+        "sentry-limits",
+        "ratchet/_limit_constants.py",
+        InLimits(),
+        "scalar caps and floors the sentries compare against; a guard, so a key may not be dropped",
+        maxes=lambda: live_bounds("max"),
+        mins=lambda: live_bounds("min"),
     ),
     Source(
         "eval-sites", "test_source_hygiene.py", in_code("test_source_hygiene.py", "_EVAL_ALLOWLIST")
@@ -399,6 +474,7 @@ SOURCES: tuple[Source, ...] = (
                 (BASELINES / "parquet-intermediate-writers.json").read_text(encoding="utf-8")
             )["entries"]
         ),
+        maxes=self_maxes("parquet-intermediate-writers"),
     ),
     Source(  # keys of the ratchet-schema baseline itself
         "metadata-carrier-allow",
@@ -408,6 +484,7 @@ SOURCES: tuple[Source, ...] = (
                 "entries"
             ]
         ),
+        maxes=self_maxes("metadata-carrier-allow"),
     ),
     Source(  # keys of the ratchet-schema baseline itself
         "serial-resources",
@@ -574,6 +651,8 @@ def write_initial() -> None:
         entries: dict[str, dict[str, object]] = {k: {"reason": reason} for k in sorted(src.keys())}
         for k, value in (src.maxes() if src.maxes else {}).items():
             entries[k]["max"] = value
+        for k, value in (src.mins() if src.mins else {}).items():
+            entries[k]["min"] = value
         doc = {"sentry_id": src.sentry_id, "created_in": CREATED_IN, "entries": entries}
         path.write_text(json.dumps(doc, indent=1, sort_keys=False) + "\n", encoding="utf-8")
         rows.append(
