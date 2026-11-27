@@ -321,7 +321,7 @@ def _safe_cast(column: Any, target: pa.DataType, *, table: str, name: str, chunk
             message=(
                 f"{table!r} chunk {chunk_index}: column {name!r} came back as "
                 f"{column.type} but every chunk of this call must be {target}, and the "
-                f"values cannot be converted without loss ({exc})"
+                "values cannot be converted without loss"
             ),
         ) from exc
 
