@@ -68,6 +68,7 @@ from decoy_engine.fileaccess import (
     is_memory_failure,
     is_valid_component,
     own_entry,
+    reraise_memory,
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.io.bounded_reader import UnsupportedColumnType
@@ -430,15 +431,16 @@ def result_from_envelope(
         shutil.rmtree(staging_output_dir, ignore_errors=True)
         return envelope_failure(envelope, pid=pid)
 
-    attempt.reserve(receipt=None, peak=peak, pid=pid)
-    if pub is not None:
-        attempt.failed_receipt_for(failed_receipt(_request(pub.request)))
-    attempt.extra["readback"] = asdict(Readback(None, 0, 0, 0, 0, 0))
-    committed = None if pub is None else str(pub.target)
-    row_errors = row_errors_of(envelope)
-    # Read back before publishing, so `outputs` is right with or without an `output_dir`. The
-    # scratch stage goes on every exit, also when the ceiling check raises.
+    # The scratch stage goes on every exit from here, also when setup raises: a stage left in a
+    # caller-named `staging_dir` fails the next job's admission.
     try:
+        attempt.reserve(receipt=None, peak=peak, pid=pid)
+        if pub is not None:
+            attempt.failed_receipt_for(failed_receipt(_request(pub.request)))
+        attempt.extra["readback"] = asdict(Readback(None, 0, 0, 0, 0, 0))
+        committed = None if pub is None else str(pub.target)
+        row_errors = row_errors_of(envelope)
+        # Read back before publishing, so `outputs` is right with or without an `output_dir`.
         collected = collect(envelope, staging_output_dir, pub, attempt, sources)
     finally:
         if pub is None:
@@ -487,6 +489,7 @@ def _typed_error(receipt: CommitReceipt) -> BaseException:
     try:
         raise_for_outcome(receipt)
     except Exception as exc:
+        reraise_memory(exc)
         return exc
     raise ValueError("a committed receipt is not a failure")
 

@@ -157,6 +157,17 @@ def typed_memory_member(exc: BaseException) -> BaseException | None:
     return None
 
 
+def reraise_memory(exc: BaseException) -> None:
+    """The one rule for a broad handler on the commit, replay and vault-read path.
+
+    A `MemoryError` (Arrow's `ArrowMemoryError` is one) is never a data or format failure. A
+    handler that catches `Exception` or `pyarrow.ArrowException` calls this first, so the
+    memory error reaches the isolated driver's guard instead of becoming a refusal or a
+    malformed-segment verdict. Guarded by tests/sentry/test_commit_path_memory_rule.py."""
+    if isinstance(exc, MemoryError):
+        raise exc
+
+
 def is_memory_failure(exc: BaseException) -> bool:
     """True iff `exc` is one of the documented under-cap failure shapes.
 

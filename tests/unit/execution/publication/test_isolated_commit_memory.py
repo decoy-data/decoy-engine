@@ -266,3 +266,99 @@ def test_a14_a_normal_run_keeps_its_outputs_and_receipt(
     assert result.outputs is not None and set(result.outputs) == {"t1"}
     assert ENGINE_VERSION
     committed(run)
+
+
+def test_a15_a_matching_replay_measurement_fault_is_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scratch: Path,  # noqa: F811
+) -> None:
+    """The publisher's measurement handler used to turn Arrow's memory error into a refusal."""
+    import pyarrow as pa
+
+    run = a_run(tmp_path, monkeypatch)
+    fired: list[str] = []
+
+    def measure(*args: Any, **kwargs: Any) -> Any:
+        fired.append("measure")
+        raise pa.ArrowMemoryError(CANARY)
+
+    monkeypatch.setattr("decoy_engine.publication._publish._measure", measure)
+    result = run.go()
+    assert fired
+    unknown(result)
+
+
+def test_a15_a_vault_segment_memory_error_is_not_a_malformed_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from decoy_engine.vault import _format
+
+    def read(*args: Any, **kwargs: Any) -> Any:
+        raise pa.ArrowMemoryError(CANARY)
+
+    monkeypatch.setattr(pq, "read_table", read)
+    with pytest.raises(MemoryError):
+        _format._decode_rows(b"x")
+    monkeypatch.setattr(
+        pq, "read_table", lambda *a, **k: (_ for _ in ()).throw(pa.ArrowInvalid("x"))
+    )
+    assert _format._decode_rows(b"x") is None  # a bad segment is still a bad segment
+
+
+def test_a15_a_memory_error_building_a_refusal_error_is_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scratch: Path,  # noqa: F811
+) -> None:
+    run = a_run(tmp_path, monkeypatch)
+    run.out.mkdir(parents=True)
+    (run.out / "other.txt").write_text("not ours")
+    fired: list[str] = []
+    once(monkeypatch, f"{COMMIT}.raise_for_outcome", fired)
+    result = run.go()
+    assert fired
+    unknown(result)
+
+
+def test_a15_a_setup_fault_leaves_no_stage_in_a_caller_named_staging_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scratch: Path,  # noqa: F811
+) -> None:
+    run = a_run(tmp_path, monkeypatch)
+    stage = tmp_path / "caller_staging"
+    fired: list[str] = []
+    once(monkeypatch, f"{COMMIT}.row_errors_of", fired)
+    result = run.go(output=False, staging=stage)
+    assert fired
+    memory(result, PublicationState.NOT_PUBLISHED, BEFORE_TEXT)
+    # A table left here fails the admission of the next job that uses this directory.
+    assert not (stage / "staging_output").exists()
+
+
+@pytest.mark.parametrize("output", [True, False], ids=["output_dir", "no_output_dir"])
+def test_a15_a_fault_in_scratch_close_is_a_coded_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scratch: Path,  # noqa: F811
+    output: bool,
+) -> None:
+    run = a_run(tmp_path, monkeypatch)
+
+    class Stack(ExitStack):
+        def close(self) -> None:
+            super().close()
+            raise MemoryError(CANARY)
+
+    monkeypatch.setattr(f"{RUN}.ExitStack", Stack)
+    result = run.go(output=output)
+    if output:
+        unknown(result)
+        committed(run)
+    else:
+        memory(result, PublicationState.NOT_PUBLISHED, BEFORE_TEXT)
+    assert list(scratch.iterdir()) == []

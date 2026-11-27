@@ -47,6 +47,7 @@ from decoy_engine.fileaccess import (
     LeafTooLarge,
     LockTimeout,
     LockUnavailable,
+    reraise_memory,
 )
 from decoy_engine.publication._descriptor import (
     DESCRIPTOR_NAME,
@@ -273,6 +274,7 @@ def _judge_and_bind(
             else None
         )
     except (OSError, pa.ArrowException) as exc:  # unreadable or not a Parquet table
+        reraise_memory(exc)
         failure = _errno_name(exc) if isinstance(exc, OSError) else None
     else:
         if new is not None:
