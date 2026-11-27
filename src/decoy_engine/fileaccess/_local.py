@@ -1,10 +1,8 @@
 """`LocalFileAccess`: today's ambient semantics, the no-policy CLI default.
 
 Paths are plain paths relative to the CWD, symlinks are followed, `display` is the path, and every
-open is lazy so a missing file fails inside the library call. Output transactions use ordinary path
-calls (a stage directory beside the target, one `os.replace`), as before the policy existed. With
-`_local_chain.py`, the one place ambient opens of caller or config paths are allowed. A durable
-directory publish fsyncs the stage tree, renames, then fsyncs each parent up to the mount.
+open is lazy, so a missing file fails inside the library call. With `_local_chain.py` this is the
+one place ambient opens are allowed.
 """
 
 from __future__ import annotations
