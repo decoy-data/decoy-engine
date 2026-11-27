@@ -265,7 +265,7 @@ id = "column-shape-classifier"
 baseline = "tests/sentry/baselines/column-shape-classifier.json"
 approved_growth = [
   { key = "observed_shape::profile/arrow/_walk_arrow.py", decision = "owner 2026-11-24 standing: re-home after the Arrow profiler move; same site" },
-  { key = "classify_column::profiling/scan_set.py", decision = "owner 2026-11-27 standing go-with-recommended authority (orchestrator applied, pending owner confirmation): COLUMN-SHAPE-RULE E5 plan section 8.2 adds the scan as one reviewed caller of classify_column; it calls the classifier and maps no types itself" },
+  { key = "classify_column::profiling/scan_set.py", decision = "awaiting owner decision, question COLUMN-SHAPE-RULE--E5-ratchet" },
 ]
 
 [[sentry]]
