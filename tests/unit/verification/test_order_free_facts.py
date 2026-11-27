@@ -110,3 +110,22 @@ def test_a_zero_dimensional_array_cell_keys_its_payload() -> None:
     changed[()] = {**A, "id": 2}
     assert key_text(_objects(boxed)) == key_text(_objects(other))
     assert key_text(_objects(boxed)) != key_text(_objects(changed))
+
+
+def test_a_duration_array_keys_alike_in_every_unit() -> None:
+    one_second = np.array([1], dtype="timedelta64[s]")
+    in_millis = np.array([1000], dtype="timedelta64[ms]")
+    assert key_text(_objects(one_second, "x")) == key_text(_objects(in_millis, "x"))
+
+
+def test_an_int_array_keys_like_an_object_array_of_the_same_ints() -> None:
+    typed = np.array([1, 2])
+    boxed = np.empty(2, dtype=object)
+    boxed[:] = [1, 2]
+    assert key_text(_objects(typed, "x")) == key_text(_objects(boxed, "x"))
+
+
+def test_a_zero_dimensional_array_cell_survives_the_identity_check() -> None:
+    cells = _objects(np.array(7), "x")
+    assert identity_counts(cells, _objects(np.array(7), "x")) == (2, 2)
+    assert source_distinct(cells) == 2

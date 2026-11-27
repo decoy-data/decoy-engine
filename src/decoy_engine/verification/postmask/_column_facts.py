@@ -249,6 +249,8 @@ _MAPPING_TAG = object()
 
 
 def _frozen(cell: Any) -> Any:
+    if isinstance(cell, np.ndarray) and cell.ndim == 0:
+        return _frozen(cell[()])
     if isinstance(cell, list | tuple | np.ndarray):
         return tuple(_frozen(v) for v in cell)
     if isinstance(cell, dict):
