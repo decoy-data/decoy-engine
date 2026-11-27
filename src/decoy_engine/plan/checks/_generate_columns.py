@@ -23,7 +23,12 @@ from decoy_engine import reasons
 from decoy_engine.config import is_exact_sequence_key
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import formula_is_evaluable
-from decoy_engine.internal.faker_locale import effective_locale, locale_entries
+from decoy_engine.internal.faker_locale import (
+    effective_locale,
+    faker_keys,
+    is_single_factory,
+    locale_entries,
+)
 from decoy_engine.plan._checks import check_derived_column_refs
 from decoy_engine.plan._checks_derived_aggregate import check_derived_aggregate_refs
 from decoy_engine.plan._checks_group_key import check_group_key_refs
@@ -220,9 +225,9 @@ class _FakerView:
         # One Faker per entry: a multi-locale Faker proxies attribute reads and some raise.
         entries = locale_entries(locale)
         first, names = _builtin(entries[0])
-        if len(entries) > 1:
+        if not is_single_factory(locale):
             # Generation draws through the multi-locale proxy, so only what it can serve counts.
-            names = _proxy_names(entries)
+            names = _proxy_names(faker_keys(locale))
         return first, names
 
     def check(
@@ -246,7 +251,12 @@ class _FakerView:
             raise _refusal(reasons.plan.GENERATE_LOCALE_UNKNOWN, table, name, "locale")
         if not locale and isinstance(default_locale, _Deferred):
             return
-        fake, names = self._locale(effective_locale(locale, default_locale))
+        effective = effective_locale(locale, default_locale)
+        # A locale-less column runs in the platform default, which make_faker would silently
+        # replace with en_US if it is unknown.
+        if not self._locales_known(effective):
+            raise _refusal(reasons.plan.GENERATE_LOCALE_UNKNOWN, table, name, "locale")
+        fake, names = self._locale(effective)
         faker_type = col.get("faker_type", "word")
         if faker_type not in names and not has_custom_faker_override(faker_type, self._snapshot):
             if faker_type in registry_provider_names():

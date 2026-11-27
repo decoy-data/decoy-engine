@@ -44,3 +44,23 @@ def open_column_faker(
     requested = requested_locale(column_locale, default_locale)
     pre_seed = None if column_locale else seed
     return (make_faker(requested), pre_seed) if requested else (default_faker(), seed)
+
+
+def faker_keys(locale: Any) -> tuple[str, ...]:
+    """The keys Faker's own proxy keeps for ``locale``: ``-`` folded to ``_``, duplicates dropped.
+
+    Unlike ``locale_entries`` this does not resolve names, so ``["it", "it_IT"]`` is two keys:
+    Faker builds a multi-locale proxy for it even though both open the ``it_IT`` data.
+    """
+    entries = locale if isinstance(locale, list) else [locale]
+    names = (str(e).replace("-", "_") if e else DEFAULT_GENERATE_LOCALE for e in entries)
+    return tuple(dict.fromkeys(names)) or (DEFAULT_GENERATE_LOCALE,)
+
+
+def is_single_factory(locale: Any) -> bool:
+    """Whether Faker opens one factory (no multi-locale proxy) for ``locale``.
+
+    Validation and generation both read this, so a column that validates against a single-locale
+    Faker is never generated through a proxy that lacks its provider.
+    """
+    return len(faker_keys(locale)) == 1
