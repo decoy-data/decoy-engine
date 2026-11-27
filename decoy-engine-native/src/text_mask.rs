@@ -48,12 +48,13 @@ pub struct SpliceSpan {
     pub verbatim: bool,
 }
 
-/// Append one unmatched gap under the policy; an empty gap emits nothing (`apply_unmatched`).
-fn push_gap(out: &mut String, gap: &str, token: &str, passthrough_unmatched: bool) {
-    if gap.is_empty() {
-        return;
+/// The outcome the legacy exports derive from one token and a verbatim flag.
+fn legacy_out(token: &str, verbatim: bool) -> SpanOut<'_> {
+    if verbatim {
+        SpanOut::Verbatim
+    } else {
+        SpanOut::Replace(token)
     }
-    out.push_str(if passthrough_unmatched { gap } else { token });
 }
 
 /// Rebuild `text` from start-ordered, non-overlapping `spans`. Returns `None` when the input is
@@ -71,27 +72,18 @@ pub fn splice_cell(
     if text.is_empty() {
         return Some(String::new());
     }
+    let outcomes: Vec<(usize, usize, SpanOut<'_>)> = spans
+        .iter()
+        .map(|s| (s.start, s.end, legacy_out(token, s.verbatim)))
+        .collect();
     let mut out = String::with_capacity(text.len());
-    let mut cursor = 0usize;
-    for span in spans {
-        if span.start < cursor || span.end < span.start || span.end > text.len() {
-            return None;
-        }
-        push_gap(
-            &mut out,
-            &text[cursor..span.start],
-            token,
-            passthrough_unmatched,
-        );
-        out.push_str(if span.verbatim {
-            &text[span.start..span.end]
-        } else {
-            token
-        });
-        cursor = span.end;
-    }
-    push_gap(&mut out, &text[cursor..], token, passthrough_unmatched);
-    Some(out)
+    splice_out(
+        text,
+        &outcomes,
+        legacy_out(token, passthrough_unmatched),
+        &mut out,
+    )
+    .then_some(out)
 }
 
 /// Detection + the oracle's merge + the splice for one eligible cell. `indices` are catalog
@@ -106,25 +98,187 @@ pub fn detect_splice_cell(
     token: &str,
     passthrough_unmatched: bool,
 ) -> Option<String> {
-    if !is_eligible(text) {
-        return None;
+    let outs: [SpanOut<'_>; CATALOG_LEN] = std::array::from_fn(|i| legacy_out(token, verbatim[i]));
+    let mut out = eligible_buffer(text)?;
+    matches!(
+        detect_splice_cell_out(
+            text,
+            indices,
+            &outs,
+            legacy_out(token, passthrough_unmatched),
+            usize::MAX,
+            &mut out,
+        ),
+        CellOutcome::Written
+    )
+    .then_some(out)
+}
+
+/// An output buffer sized for `text`, or `None` when the cell is ineligible. Allocation waits for
+/// eligibility so a declined cell (non-ASCII, oversized) never reserves memory.
+fn eligible_buffer(text: &str) -> Option<String> {
+    is_eligible(text).then(|| String::with_capacity(text.len()))
+}
+
+/// The outcome for one resolved span or gap: keep the text, or replace it with a literal. The
+/// legacy exports build it from one token and a verbatim flag; the additive Arrow entry carries
+/// one literal per detector and an independent gap outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpanOut<'a> {
+    Verbatim,
+    Replace(&'a str),
+}
+
+/// Hand `emit` the text one gap piece resolves to under `gap_out`. An empty gap emits nothing:
+/// there is no text to keep or to replace.
+fn emit_gap<'t>(gap: &'t str, gap_out: SpanOut<'t>, emit: &mut impl FnMut(&'t str)) {
+    if gap.is_empty() {
+        return;
     }
+    match gap_out {
+        SpanOut::Verbatim => emit(gap),
+        SpanOut::Replace(literal) => emit(literal),
+    }
+}
+
+/// Hand `emit` the text one span resolves to under its outcome. A zero-length span still writes
+/// its replacement literal, as the Python oracle does; a verbatim span keeps its (possibly
+/// empty) text, and an empty literal is a removal that emits nothing.
+fn emit_span<'t>(span: &'t str, outcome: SpanOut<'t>, emit: &mut impl FnMut(&'t str)) {
+    match outcome {
+        SpanOut::Verbatim => {
+            if !span.is_empty() {
+                emit(span);
+            }
+        }
+        SpanOut::Replace(literal) => {
+            if !literal.is_empty() {
+                emit(literal);
+            }
+        }
+    }
+}
+
+/// The one walker behind every splice entry. Visit, in order, each non-empty gap piece (under
+/// `gap_out`) and each span (zero-length ones included) (under its outcome), handing the text each one resolves to
+/// to `emit`. Returns false when a span is out of order, out of range or not on a character
+/// boundary, so the caller declines instead of emitting a guess.
+fn walk_splice<'t>(
+    text: &'t str,
+    spans: &'t [(usize, usize, SpanOut<'t>)],
+    gap_out: SpanOut<'t>,
+    mut emit: impl FnMut(&'t str),
+) -> bool {
+    let mut cursor = 0usize;
+    for &(start, end, outcome) in spans {
+        if start < cursor || end < start {
+            return false;
+        }
+        let (Some(gap), Some(span)) = (text.get(cursor..start), text.get(start..end)) else {
+            return false;
+        };
+        emit_gap(gap, gap_out, &mut emit);
+        emit_span(span, outcome, &mut emit);
+        cursor = end;
+    }
+    match text.get(cursor..) {
+        Some(tail) => {
+            emit_gap(tail, gap_out, &mut emit);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Rebuild `text` from start-ordered, non-overlapping `spans` into `out`, each span written per
+/// its outcome and each non-empty gap per `gap_out`. Returns false (leaving `out` unspecified)
+/// when the spans are unusable, as `walk_splice` defines.
+pub fn splice_out(
+    text: &str,
+    spans: &[(usize, usize, SpanOut<'_>)],
+    gap_out: SpanOut<'_>,
+    out: &mut String,
+) -> bool {
+    walk_splice(text, spans, gap_out, |piece| out.push_str(piece))
+}
+
+/// The byte length `splice_out` would write, by checked arithmetic and without writing.
+/// `Ok(None)` when the spans are unusable; `Err(())` when the length overflows `usize`.
+fn splice_len(
+    text: &str,
+    spans: &[(usize, usize, SpanOut<'_>)],
+    gap_out: SpanOut<'_>,
+) -> Result<Option<usize>, ()> {
+    let mut total = Some(0usize);
+    let usable = walk_splice(text, spans, gap_out, |piece| {
+        total = total.and_then(|n| n.checked_add(piece.len()));
+    });
+    match (usable, total) {
+        (false, _) => Ok(None),
+        (true, Some(n)) => Ok(Some(n)),
+        (true, None) => Err(()),
+    }
+}
+
+/// Detect the requested detectors in one cell and resolve overlaps with the oracle's sweep:
+/// stable sort by `(start, -length)` (an exact tie keeps request order), then keep each span
+/// that starts at or after the previous end. Returns `(catalog index, start, end)`.
+fn resolve_spans(text: &str, indices: &[usize]) -> Vec<(usize, usize, usize)> {
     let mut cands = candidates_for_cell(text, indices);
-    // Stable, like Python's list.sort: equal (start, length) keeps requested-detector order.
     cands.sort_by(|a, b| a.1.cmp(&b.1).then((b.2 - b.1).cmp(&(a.2 - a.1))));
-    let mut spans: Vec<SpliceSpan> = Vec::with_capacity(cands.len());
+    let mut spans = Vec::with_capacity(cands.len());
     let mut last_end: i64 = -1;
     for (idx, start, end) in cands {
         if i64::from(start) >= last_end {
-            spans.push(SpliceSpan {
-                start: start as usize,
-                end: end as usize,
-                verbatim: verbatim[idx as usize],
-            });
+            spans.push((idx as usize, start as usize, end as usize));
             last_end = i64::from(end);
         }
     }
-    splice_cell(text, &spans, token, passthrough_unmatched)
+    spans
+}
+
+/// What `detect_splice_cell_out` did with one cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellOutcome {
+    /// The cell is not eligible or its spans are unusable; `out` is untouched.
+    Declined,
+    /// The resolved cell would exceed `limit` bytes; `out` is untouched.
+    TooLarge,
+    /// The resolved cell was appended to `out`.
+    Written,
+}
+
+/// Detection, overlap resolution and the splice for one cell into `out`, with one outcome per
+/// catalog index (`outs`) and an independent gap outcome. The resolved byte length is computed
+/// first with checked arithmetic, so a cell over `limit` is refused before any byte is written.
+/// A declined cell is repaired on the Python path. An empty cell writes nothing.
+pub fn detect_splice_cell_out(
+    text: &str,
+    indices: &[usize],
+    outs: &[SpanOut<'_>; CATALOG_LEN],
+    gap_out: SpanOut<'_>,
+    limit: usize,
+    out: &mut String,
+) -> CellOutcome {
+    if !is_eligible(text) {
+        return CellOutcome::Declined;
+    }
+    let spans: Vec<(usize, usize, SpanOut<'_>)> = resolve_spans(text, indices)
+        .into_iter()
+        .map(|(idx, start, end)| (start, end, outs[idx]))
+        .collect();
+    match splice_len(text, &spans, gap_out) {
+        Ok(None) => CellOutcome::Declined,
+        Err(()) => CellOutcome::TooLarge,
+        Ok(Some(n)) if n > limit => CellOutcome::TooLarge,
+        Ok(Some(_)) => {
+            if splice_out(text, &spans, gap_out, out) {
+                CellOutcome::Written
+            } else {
+                CellOutcome::Declined
+            }
+        }
+    }
 }
 
 // ── PyO3 boundary ───────────────────────────────────────────────────────────────────────────
@@ -266,6 +420,22 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_length_span_still_writes_its_replacement() {
+        // Oracle parity: "ab" with an empty replaced span at 1 is "a[X]b", also at both ends.
+        let at = |i: usize, verbatim: bool| splice_cell("ab", &[sp(i, i, verbatim)], "[X]", true);
+        assert_eq!(at(0, false).as_deref(), Some("[X]ab"));
+        assert_eq!(at(1, false).as_deref(), Some("a[X]b"));
+        assert_eq!(at(2, false).as_deref(), Some("ab[X]"));
+        assert_eq!(at(1, true).as_deref(), Some("ab"));
+        // The length pass counts the same bytes the write pass emits.
+        let spans = [(1usize, 1usize, SpanOut::Replace("[X]"))];
+        let mut written = String::new();
+        assert!(splice_out("ab", &spans, SpanOut::Verbatim, &mut written));
+        assert_eq!(written, "a[X]b");
+        assert_eq!(splice_len("ab", &spans, SpanOut::Verbatim), Ok(Some(5)));
+    }
+
+    #[test]
     fn gap_policy_and_span_strategy_are_independent() {
         // gap redact + span verbatim, and the reverse.
         assert_eq!(
@@ -337,5 +507,61 @@ mod tests {
         verbatim[0] = true; // email passes through, ipv4 is redacted
         let got = detect_splice_cell("a@b.com 10.0.0.1", &[0, 4], &verbatim, "[X]", true);
         assert_eq!(got.as_deref(), Some("a@b.com [X]"));
+    }
+
+    #[test]
+    fn an_over_limit_cell_is_refused_before_any_byte_is_written() {
+        // V1-1: three emails at a 64 byte literal resolve to 192 bytes; the limit is 100.
+        let literal = "L".repeat(64);
+        let outs: [SpanOut<'_>; CATALOG_LEN] = [SpanOut::Replace(&literal); CATALOG_LEN];
+        let mut out = String::new();
+        let got = detect_splice_cell_out(
+            "a@b.com c@d.com e@f.com",
+            &[0],
+            &outs,
+            SpanOut::Verbatim,
+            100,
+            &mut out,
+        );
+        assert_eq!(got, CellOutcome::TooLarge);
+        assert!(out.is_empty(), "nothing may be written before the check");
+        let got = detect_splice_cell_out(
+            "a@b.com c@d.com e@f.com",
+            &[0],
+            &outs,
+            SpanOut::Verbatim,
+            192 + 2,
+            &mut out,
+        );
+        assert_eq!(got, CellOutcome::Written);
+        assert_eq!(out.len(), 192 + 2);
+    }
+
+    #[test]
+    fn splice_len_matches_the_written_bytes_and_flags_overflow() {
+        let spans = [(0usize, 3usize, SpanOut::Replace("xyz!"))];
+        let mut written = String::new();
+        assert!(splice_out(
+            "abc def",
+            &spans,
+            SpanOut::Verbatim,
+            &mut written
+        ));
+        assert_eq!(
+            splice_len("abc def", &spans, SpanOut::Verbatim),
+            Ok(Some(written.len()))
+        );
+        assert_eq!(
+            splice_len("abc", &[(2, 9, SpanOut::Verbatim)], SpanOut::Verbatim),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn an_ineligible_cell_reserves_no_output_buffer() {
+        // V1-3: S0 declined non-ASCII and oversized cells before allocating.
+        assert!(eligible_buffer("café").is_none());
+        let buf = eligible_buffer("a@b.com").expect("eligible");
+        assert!(buf.capacity() >= 7);
     }
 }
