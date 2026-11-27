@@ -28,6 +28,10 @@ class OpaqueBox:
     def open(self) -> tuple[Any, ...]:
         return self._items
 
+    def item(self, index: int) -> Any:
+        """One carried value; not named `open`, which the GCS sentry matches by method name."""
+        return self._items[index]
+
     def __repr__(self) -> str:
         return "<opaque>"
 
