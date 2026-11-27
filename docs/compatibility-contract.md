@@ -286,7 +286,7 @@ It said "written into the config", which is true of every starter entry. It now 
 entry (regex, declared key, integer-unique hash, fallback) and is false when a classifier chose it. `starter_config`
 reads `TableScan.model_hits`: a high-band classifier hit writes its detector's entry only when no regex match is
 confident, and NER or review-band hits add note evidence only. `ColumnSuggestion.decided_by` is new and read-only.
-`starter_config` now refuses a scan with a `scan_header_suspect` table with the new reason `config/starter_header_suspect`
+`starter_config` now refuses a scan with a `scan_header_suspect` table with the new reason `config/starter_header_suspect` (ships in 0.28.5, registry 1.35.0)
 (a coded, value-free `PipelineConfigError` at `tables[<index>]`).
 
 **Pre-GA correction (COLUMN-SHAPE E1a, 2026-11-21).** Breaking for stored artifacts, no shim. A profile
@@ -1393,7 +1393,7 @@ excluded from the plan hash because it is data binding, not masking semantics.
 `tests/unit/config/test_pipeline_name.py` pins all of this.
 
 `PipelineConfig` refuses `delivery.mode: best_effort` with `config.delivery_best_effort_unreleased` (DELIV BE0-E,
-registry `since` stamped at release), at the location `delivery`. The mode was accepted before and no run
+ships in 0.28.5, registry 1.35.0), at the location `delivery`. The mode was accepted before and no run
 implemented it, so the narrowing is pre-GA. `compile_plan` refuses the same value on a raw mapping through
 `decoy_engine.config.refuse_unreleased_delivery`. `DeliveryConfig`, `plan_delivery` and the frozen
 `pipeline-config.schema.json` keep `best_effort`, so row 61b lifts the refusal without a schema change and the
