@@ -284,15 +284,15 @@ def _container(value: object) -> object:
 
 
 def contains_record(form: object) -> bool:
-    """True when `form` is a record or holds one at any depth."""
+    """True when `form` is a record or holds one at any depth. A set cannot hold a record (a
+    NumPy record is unhashable) and neither can a mapping key, so only a sequence item or a
+    mapping value is read."""
     if isinstance(form, Record):
         return True
     if isinstance(form, Seq):
         return any(contains_record(item) for item in form.items)
-    if isinstance(form, Members):
-        return any(contains_record(item) for item in form.items)
     if isinstance(form, Map):
-        return any(contains_record(k) or contains_record(v) for k, v in form.pairs)
+        return any(contains_record(value) for _, value in form.pairs)
     return False
 
 

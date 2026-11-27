@@ -290,10 +290,10 @@ def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
         src_o, out_o = canonical_cells(src), canonical_cells(out)
     present = src_o.notna() & out_o.notna()
     if not _typed(src, out) and any(
-        contains_record(a) != contains_record(b)
+        (contains_record(a) or contains_record(b)) and a != b
         for a, b in zip(src_o[present], out_o[present], strict=True)
     ):
-        # No text of a record is predicted, so a record against another kind cannot be compared.
+        # No text of a record is predicted, so a record row is identical or refused.
         raise RecordNotComparableError
     return int(present.sum()), int((src_o[present] == out_o[present]).sum())
 

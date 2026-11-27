@@ -648,3 +648,62 @@ def test_r4_case_2_a_subarray_of_nested_records_keys_alike_in_every_unit() -> No
     result = run(a, b)
     assert result.failed == {}
     assert result.keys == (2, 2)
+
+
+def _deep3(unit: str) -> Any:
+    leaf = [("t", f"M8[{unit}]")]
+    row = np.zeros(1, dtype=[("a", [("b", [("c", leaf)])])])
+    row["a"]["b"]["c"]["t"][0] = np.array([5], "M8[s]").astype(f"M8[{unit}]")[0]
+    return row[0]
+
+
+def _object_field(held: object) -> Any:
+    row = np.zeros(1, dtype=[("o", object)])
+    row["o"][0] = held
+    return row[0]
+
+
+PARTIAL_EXPORTS = [
+    pytest.param(_subarray_of_nested("us"), lambda r: r.item(), id="item-of-subarray-of-nested"),
+    pytest.param(_subarray_of_nested("us"), lambda r: r["t"].tolist(), id="tolist-of-subfield"),
+    pytest.param(_subarray_of_nested("us"), lambda r: {"t": r["t"]}, id="dict-of-subarray"),
+    pytest.param(_record("M", "nested", "us", 0), lambda r: tuple(r), id="tuple-of-nested"),
+    pytest.param(_deep3("us"), lambda r: tuple(r), id="tuple-of-deep3"),
+    pytest.param(_deep3("us"), lambda r: {"a": r["a"]}, id="dict-of-deep3-field"),
+    pytest.param(
+        _record("M", "nested", "us", 0), lambda r: {"inner": r["inner"]}, id="dict-of-nested"
+    ),
+    pytest.param(
+        _record("M", "flat", "us", 0), lambda r: {"k": r}, id="dict-value-holding-the-record"
+    ),
+]
+
+
+@pytest.mark.parametrize(("record", "export"), PARTIAL_EXPORTS)
+def test_a_partial_export_that_keeps_an_inner_record_is_refused(record: Any, export: Any) -> None:
+    other = export(record)
+    assert run(record, other).failed == {"t": NOT_COMPARABLE}
+    assert run(other, record).failed == {"t": NOT_COMPARABLE}
+    assert run(export(record), export(record)).failed == {}
+    # The export keeps the inner record, and the wrapper itself carries the same record.
+    assert run({"k": record}, {"k": str(record.item())}).failed == {"t": NOT_COMPARABLE}
+
+
+def test_an_object_field_holding_a_record_against_its_text_is_refused() -> None:
+    inner = _record("M", "flat", "us", 0)
+    held, text = _object_field(inner), _object_field(str(inner.item()))
+    assert run(held, text).failed == {"t": NOT_COMPARABLE}
+    assert run(text, held).failed == {"t": NOT_COMPARABLE}
+    assert run(held, _object_field(inner)).failed == {}
+
+
+def test_a_changed_record_is_refused_not_graded() -> None:
+    assert run(_record("M", "flat", "ns", 0), _record("M", "flat", "ns", 1)).failed == {
+        "t": NOT_COMPARABLE
+    }
+    assert run([_record("M", "flat", "ns", 0)], [_record("M", "flat", "ns", 1)]).failed == {
+        "t": NOT_COMPARABLE
+    }
+    assert run({"k": _flat("ns")}, {"k": _record("M", "flat", "ns", 1)}).failed == {
+        "t": NOT_COMPARABLE
+    }

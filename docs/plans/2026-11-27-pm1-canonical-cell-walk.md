@@ -567,16 +567,21 @@ Rule:
    recursing into nested records and subarrays. Field names stay out of identity. Its key text is
    one fixed rendering of those fields, `record(<field>, ...)`, built by `_canonical_text` in
    `cell_text.py`. No record text comes from `item()`, `str()` or NumPy `repr`.
-2. A record, or a container holding one, facing a non-null cell that holds no record is not
-   comparable, in either direction. `identity_counts` raises `RecordNotComparableError` (a
+2. A record row is identical or refused. When either side's form is a record or holds one (at
+   any depth, in a sequence item or a mapping value), and the two forms are not equal, the pair
+   is not comparable. `identity_counts` raises `RecordNotComparableError` (a
    `ComparisonNotPreservedError`, fixed text, class name only, same `check_error` classification).
    The table is refused as for any comparison failure. It is never reported as "differs as
-   expected".
+   expected". The first draft asked only whether exactly one side held a record, so a partial
+   export that kept an inner record (`item()` of a subarray of nested records, `tuple(rec)` of a
+   nested record, a dict holding a record, an object field holding a record against its text)
+   passed. Equality of forms is the only test, so no position walk is needed. A masked record
+   column therefore refuses the table.
 3. Scope: table level, as the plan already has. One record column refuses the whole table.
 
 Removed: `Record.spelling`, `_record_spelling`, `_field_spelling`.
 Added: `RecordNotComparableError` (`internal/cell_text.py`), `contains_record`
-(`internal/canonical_cell.py`).
+(`internal/canonical_cell.py`). `ComparisonNotPreservedError` takes an optional fixed message.
 
 Cases closed: r3 ns vs us (identity from fields); r4 case 1 (record to text is refused); r4 case 2
 (the subarray keys from fields, so the units cannot split it); text to record is refused the same

@@ -49,17 +49,19 @@ class ComparisonNotPreservedError(DecoyError):
     """A column's text keys lost the equality its cells have. The text is fixed, so no cell
     reaches the report; the table fails with this class name."""
 
-    def __init__(self) -> None:
-        super().__init__("a column's text keys do not keep its cells' equality")
+    def __init__(
+        self, message: str = "a column's text keys do not keep its cells' equality"
+    ) -> None:
+        super().__init__(message)
 
 
 class RecordNotComparableError(ComparisonNotPreservedError):
-    """A record cell faces a cell that is not a record. No spelling of a record is predicted, so
-    the pair is not comparable and the table is refused. The text is fixed, so no cell reaches the
+    """A record, or a cell holding one, faces a cell that is not equal to it. No spelling of a record
+    is predicted, so a record row is identical or the table is refused. The text is fixed, so no cell reaches the
     report; the table fails with this class name."""
 
     def __init__(self) -> None:
-        DecoyError.__init__(self, "a record cell cannot be compared with a cell of another kind")
+        super().__init__("a record cell cannot be compared with another cell unless they are equal")
 
 
 def cell_text(value: object) -> str:
