@@ -500,3 +500,11 @@ def test_distinct_extreme_temporal_values_never_share_a_key() -> None:
     }
     assert len(keys) == 4
     assert "NaT" not in keys
+
+
+def test_a_numpy_record_keys_as_its_python_export() -> None:
+    record = np.array([(np.array([1, 2], dtype=np.int32),)], dtype=[("samples", "i4", (2,))])[0]
+    text = str(record.item())
+    assert key(record) == key(text)
+    assert key([record]) == f"[{record.item()!r}]"
+    assert run(record, text).keys == (2, 2)

@@ -26,6 +26,7 @@ from decoy_engine.internal.canonical_cell import (
     Map,
     Members,
     Null,
+    Record,
     Seq,
     canonical_cell,
     is_null,
@@ -305,7 +306,7 @@ def _canonical_key(form: object) -> str | None:
         return None
     if isinstance(form, TEMPORAL):
         return _text_key(temporal_text(form))
-    if isinstance(form, (Seq, Map, Members)):
+    if isinstance(form, (Seq, Map, Members, Record)):
         return _text_key(_canonical_text(form))
     return _number_key(form)
 
@@ -324,7 +325,7 @@ def _canonical_text(form: object) -> str:
         return f"[{inner}]"
     if isinstance(form, Map):
         return "{" + ", ".join(f"{k}: {_canonical_text(v)}" for k, v in form.entries) + "}"
-    if isinstance(form, Members):
+    if isinstance(form, (Members, Record)):
         return form.spelling
     return form.spelling if isinstance(form, Blob) else repr(form)
 

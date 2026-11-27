@@ -103,6 +103,15 @@ class Members:
     spelling: str = field(default="", compare=False)
 
 
+@dataclass(frozen=True)
+class Record:
+    """A NumPy record scalar. It compares as the record; `spelling` is the `repr` of the Python
+    tuple it holds, as an exporter writes it."""
+
+    value: object
+    spelling: str = field(default="", compare=False)
+
+
 class Blob(bytes):
     """Bytes read from a bytearray or memoryview: equal to the same bytes, spelled as the source."""
 
@@ -250,6 +259,8 @@ def _leaf(value: object) -> object:
     if isinstance(value, np.generic):
         # Any other NumPy scalar (a void, a record) as the Python value it holds.
         item = value.item()
+        if isinstance(value, np.void) and value.dtype.names:
+            return Record(value, repr(item))
         if type(item) is not type(value):
             return canonical_cell(item)
     return value
