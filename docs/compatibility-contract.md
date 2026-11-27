@@ -1434,8 +1434,9 @@ collection. The requirements are `StrategyRequirement` descriptors in `decoy_eng
 `family` and `admitted` (sorted shape names) are read from `SHAPE_REQUIREMENTS_BY_STRATEGY`, the one table the
 plan check uses. `declaration` is the column-entry path that tells the engine how to read a text column
 (`provider_config.date_format` for the date family, `logical_type` for the number family, `None` for `fpe`).
-The starter config writes `date_format` for a text or unknown-shape date and none for a typed date (a Parquet
-date or zoned timestamp), so it never writes a format the compiler would only warn about. Scan documents and
+The starter config writes `date_format` for a text or unknown-shape date. When a date detector matches a typed
+date (a Parquet date or zoned timestamp) it writes a `date_shift` with no `date_format`; a zoned timestamp no
+detector matches still gets the fallback `redact`. It never writes a format the compiler would only warn about. Scan documents and
 the profile document do not change: the observed shape is not written into them.
 
 **Nested cell reading and output (F07 E1).** Recorded pre-GA semantic change (2026-11-17): the `nested`

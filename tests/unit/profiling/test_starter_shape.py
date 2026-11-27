@@ -81,3 +81,26 @@ def test_shape_the_strategy_cannot_read_gets_no_date_shift(shape: ColumnShape) -
 def test_detector_entry_refuses_a_shape_the_strategy_cannot_read(shape: ColumnShape) -> None:
     assert detector_entry("iso_date", "dob", date_format="%Y-%m-%d", shape=shape) is None
     assert detector_entry("iso_date", "dob", shape=ColumnShape.DATE) is not None
+
+
+def test_zoned_timestamp_with_a_date_match_gets_no_format() -> None:
+    """When a date detector matches a zoned timestamp, the starter writes `date_shift` bare."""
+    profile = profile_columns(
+        pd.DataFrame({"dob": DATES}), "t", shapes={"dob": ColumnShape.TIMESTAMP_TZ}
+    )
+    got = infer_starter_strategy(profile.fields[0])
+    assert got.strategy == "date_shift"
+    assert "date_format" not in got.provider_config
+
+
+def test_zoned_timestamp_parquet_without_a_detector_match_gets_redact(
+    tmp_path: Path,
+) -> None:
+    """Pins today's behaviour: no date detector matches a zoned timestamp, so the starter redacts."""
+    stamps = pd.to_datetime(DATES).tz_localize("UTC")
+    pq.write_table(
+        pa.table({"dob": pa.array(stamps, pa.timestamp("us", tz="UTC"))}), tmp_path / "z.parquet"
+    )
+    src = {"z": {"type": "file", "format": "parquet", "path": str(tmp_path / "z.parquet")}}
+    col = _dob(starter_config(scan_sources(src)), "z")
+    assert col["strategy"] == "redact"
