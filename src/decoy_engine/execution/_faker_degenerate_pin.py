@@ -26,11 +26,14 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._faker_deterministic_admission import (
     DETERMINISTIC_FAKER_SOURCE_TYPES,
     is_effective_deterministic_faker,
 )
+from decoy_engine.execution.native._provider_class import draws_computed_string
+from decoy_engine.providers_v2 import ProviderRegistry
 from decoy_engine.safe_output import attach_output_metadata
 
 # The string-output provider allowlist: only these providers draw guaranteed-string values, so
@@ -66,13 +69,17 @@ def _fk_child_columns(config: Mapping[str, Any], table: str) -> set[str]:
 
 
 def deterministic_faker_pin_columns(
-    config: Mapping[str, Any], table: str, source_schema: pa.Schema
+    config: Mapping[str, Any],
+    table: str,
+    source_schema: pa.Schema,
+    registry: ProviderRegistry | None = None,
 ) -> frozenset[str]:
     """The columns of `table` whose degenerate deterministic-Faker output is pinned to `string`.
 
     Effective-deterministic Faker over a bool/int/uint source, not `when:`-bearing and not an FK
     child key. The string-output provider / pool content is validated by the route's own pool
-    check, not here."""
+    check, not here. `registry` is the run's live registry: a rebound computed provider decides
+    its own output type, so the pin never reads the stock binding when the run holds another."""
     table_cfg = next(
         (
             t
@@ -92,7 +99,14 @@ def deterministic_faker_pin_columns(
         name = col.get("name")
         if not isinstance(name, str) or name not in source_names or name in fk_children:
             continue
-        if _has_when(col) or not is_effective_deterministic_faker(col):
+        if _has_when(col):
+            continue
+        if col.get("strategy") == "faker" and draws_computed_string(
+            col.get("provider"), col.get("provider_config"), registry
+        ):
+            pinned.add(name)
+            continue
+        if not is_effective_deterministic_faker(col):
             continue
         if col.get("provider") not in _FAKER_PROVIDER_ALLOWLIST:
             continue
@@ -102,7 +116,12 @@ def deterministic_faker_pin_columns(
 
 
 def deterministic_faker_pin_columns_from_plan(
-    plan: Any, table: str, source_schema: pa.Schema, *, relationship_graph: Any = None
+    plan: Any,
+    table: str,
+    source_schema: pa.Schema,
+    *,
+    relationship_graph: Any = None,
+    registry: ProviderRegistry | None = None,
 ) -> frozenset[str]:
     """`deterministic_faker_pin_columns` from the compiled plan's column seeds, for the full-frame
     oracle routes that work from the plan rather than the raw config. The `allow_collisions` alias
@@ -120,7 +139,14 @@ def deterministic_faker_pin_columns_from_plan(
     for name, seed in table_seed.per_column:
         if name not in source_names or name in fk_children:
             continue
-        if seed.strategy != "faker" or not seed.deterministic or seed.when:
+        if seed.strategy != "faker" or seed.when:
+            continue
+        if draws_computed_string(
+            seed.provider, provider_config_to_dict(seed.provider_config), registry
+        ):
+            pinned.add(name)
+            continue
+        if not seed.deterministic:
             continue
         if seed.provider not in _FAKER_PROVIDER_ALLOWLIST:
             continue
@@ -135,6 +161,7 @@ def pin_frame_outputs(
     sources: Mapping[str, pa.Table],
     *,
     relationship_graph: Any = None,
+    registry: ProviderRegistry | None = None,
 ) -> dict[str, pa.Table]:
     """Apply the degenerate pin to each from_pandas output using the plan and the pre-mask source
     schema. A table absent from `sources` (a generate echo) is returned unchanged."""
@@ -142,7 +169,7 @@ def pin_frame_outputs(
         t: pin_degenerate_to_string(
             out,
             deterministic_faker_pin_columns_from_plan(
-                plan, t, sources[t].schema, relationship_graph=relationship_graph
+                plan, t, sources[t].schema, relationship_graph=relationship_graph, registry=registry
             )
             if t in sources
             else frozenset(),
@@ -157,6 +184,7 @@ def apply_degenerate_faker_pin(
     sources: Mapping[str, pa.Table],
     *,
     relationship_graph: Any = None,
+    registry: ProviderRegistry | None = None,
     enabled: bool,
 ) -> dict[str, pa.Table]:
     """Full-frame route hook for C5c-ii option A. When `enabled`, pin each admitted
@@ -167,7 +195,9 @@ def apply_degenerate_faker_pin(
     chunked contract strips)."""
     if not enabled:
         return dict(outputs)
-    return pin_frame_outputs(outputs, plan, sources, relationship_graph=relationship_graph)
+    return pin_frame_outputs(
+        outputs, plan, sources, relationship_graph=relationship_graph, registry=registry
+    )
 
 
 def pin_degenerate_to_string(table: pa.Table, columns: frozenset[str]) -> pa.Table:

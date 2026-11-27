@@ -281,6 +281,14 @@ disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templ
 platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
 (DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
 
+**Pre-GA change (starter model hits, INIT-SCAN-SCAFFOLD E2, 2026-11-26).** `ColumnSuggestion.live` changes meaning.
+It said "written into the config", which is true of every starter entry. It now says a deterministic rule chose the
+entry (regex, declared key, integer-unique hash, fallback) and is false when a classifier chose it. `starter_config`
+reads `TableScan.model_hits`: a high-band classifier hit writes its detector's entry only when no regex match is
+confident, and NER or review-band hits add note evidence only. `ColumnSuggestion.decided_by` is new and read-only.
+`starter_config` now refuses a scan with a `scan_header_suspect` table with the new reason `config/starter_header_suspect` (ships in 0.28.5, registry 1.35.0)
+(a coded, value-free `PipelineConfigError` at `tables[<index>]`).
+
 **Pre-GA correction (COLUMN-SHAPE E1a, 2026-11-21).** Breaking for stored artifacts, no shim. A profile
 column now carries `shape` (`text`, `date`, `timestamp_tz`, `timestamp_naive`, `integer`, `float`, `decimal`,
 `decimal_wide`, `boolean`, `other`, `unknown`). Profile JSON gains the field and `schema_version` stays 1: a
@@ -355,6 +363,12 @@ for every unified-slice job, because `CapabilityMatrix` gains a `draw` field (`p
 `registry_fingerprint()` hashes the dump of every provider's matrix. Both hashes are written to output evidence. No
 other input to the fingerprint changes: with `draw` removed the fingerprint equals the one on the previous main, and a test
 pins that. `pipeline_config_hash` does not move. No schema version moves.
+
+**Pre-GA correction (GEN-NONFAKER-DRAWS S2, 2026-11-24).** `lorem_text` becomes a poolable provider, so a generate
+column `provider: lorem_text` draws from a pool of Faker paragraphs instead of one seeded Faker call per row. Its values
+change; the type stays text. The masking side had refused `lorem_text` at compile, so no earlier masked output exists.
+The new reasons `route/faker_computed_output_type_unsupported` and
+`runtime/out_of_core_faker_computed_output_type_unsupported` are unreleased. No schema version moves.
 
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
@@ -1379,6 +1393,13 @@ nothing is coerced. While `name` is unset the config dump and
 `Plan.pipeline_config_hash` are byte-identical to before, and a set `name` is
 excluded from the plan hash because it is data binding, not masking semantics.
 `tests/unit/config/test_pipeline_name.py` pins all of this.
+
+`PipelineConfig` refuses `delivery.mode: best_effort` with `config.delivery_best_effort_unreleased` (DELIV BE0-E,
+ships in 0.28.5, registry 1.35.0), at the location `delivery`. The mode was accepted before and no run
+implemented it, so the narrowing is pre-GA. `compile_plan` refuses the same value on a raw mapping through
+`decoy_engine.config.refuse_unreleased_delivery`. `DeliveryConfig`, `plan_delivery` and the frozen
+`pipeline-config.schema.json` keep `best_effort`, so row 61b lifts the refusal without a schema change and the
+lift is additive under §4.1. `tests/unit/config/test_delivery_config.py` pins it.
 
 **Declaration gate on the run, isolated and profile routes (CONFIG-EXPLICIT E2c).** `prepare_declared_sources`
 (`DeclarationRequest.for_run`, `for_descriptors`) is the one boundary. `profile_source` calls it first, or accepts the

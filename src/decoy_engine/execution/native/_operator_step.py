@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution.native._crypto_ext import FpeRowError
     from decoy_engine.execution.native._group_key_ext import RawHexDerivationKernel
     from decoy_engine.execution.native._index_ext import IndexDerivationKernel
-    from decoy_engine.generation.pool import ValuePool
+    from decoy_engine.generation.pool import SelectableValues, ValuePool
     from decoy_engine.transforms.date_preserve import PreserveSet
 
 __all__ = [
@@ -73,7 +73,7 @@ __all__ = [
 def sample_faker_array(
     source: pa.Array | pa.ChunkedArray,
     *,
-    pool: ValuePool,
+    pool: SelectableValues,
     namespace: str,
     mask_key: bytes | None,
     index_kernel: IndexDerivationKernel,
@@ -139,7 +139,7 @@ def sample_faker_array(
 def sample_faker_array_positional(
     source: pa.Array | pa.ChunkedArray,
     *,
-    pool: ValuePool,
+    pool: SelectableValues,
     row_offset: int,
     job_seed: bytes | None,
     namespace: str,
@@ -147,6 +147,7 @@ def sample_faker_array_positional(
     native_threads: int | None,
     missing_mask: pa.Array | None = None,
     gate_positions: np.ndarray[Any, Any] | None = None,
+    code: str = reasons.runtime.FAKER_POSITION_OUT_OF_DOMAIN,
 ) -> pa.Array:
     """Select one batch's non-deterministic REUSE faker values by global row position.
 
@@ -167,6 +168,9 @@ def sample_faker_array_positional(
     `missing_mask` is the oracle's own missingness for the batch (see `_faker_null_mask`): pandas
     decides it from the dtype it rebuilds, so it is not always Arrow validity. Both routes pass
     it; `None` falls back to Arrow validity, which is the oracle's answer for a string source.
+
+    `code` is the registered runtime code raised for a row number outside the unsigned
+    64-bit domain; a computed draw passes its own, as `positional_pool_indices` does.
     """
     try:
         if job_seed is None:  # pragma: no cover - the chunked adapter always passes the job seed
@@ -176,7 +180,7 @@ def sample_faker_array_positional(
         keys = positional_key_array(
             row_offset,
             n,
-            code=reasons.runtime.FAKER_POSITION_OUT_OF_DOMAIN,
+            code=code,
             gate_positions=gate_positions,
         )
         idx = _checked_batch(
@@ -229,7 +233,7 @@ def _checked_batch(idx: object, *, n: int) -> pa.Array:
     return idx
 
 
-def _gather_pool_values(pool: ValuePool, idx: pa.Array, valid: Any) -> pa.Array:
+def _gather_pool_values(pool: SelectableValues, idx: pa.Array, valid: Any) -> pa.Array:
     """The pool values at `idx` where `valid`, null elsewhere.
 
     A null-safe NumPy gather (no dedup, raw pool order preserved -- pool.values may be gathered

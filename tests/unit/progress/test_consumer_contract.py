@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from decoy_engine import progress, reasons
+from decoy_engine._progress_events import _LEGACY_FIELDS
 from decoy_engine.progress import (
     CheckpointEvent,
     CheckpointInfo,
@@ -38,6 +39,15 @@ from decoy_engine.reasons import (
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "f29" / "consumer-contract.json"
 _TS = 1_700_000_000.0
+
+
+def v0_projection(event: progress.ProgressEvent) -> dict[str, Any]:
+    """The version-0 keys of `event_to_dict(event)`, in version-1 order.
+
+    Defined here, not in a shared test module: the registry tooling runs this file as a bare
+    script in a scratch checkout where the `tests` package does not exist."""
+    legacy = _LEGACY_FIELDS[type(event)]
+    return {k: v for k, v in progress.event_to_dict(event).items() if k in legacy}
 
 
 def _records() -> dict[str, dict[str, Any]]:
@@ -99,7 +109,7 @@ def _events() -> dict[str, dict[str, Any]]:
     return {
         name: {
             "v1": progress.event_to_dict(event),
-            "v0": progress.event_to_legacy_dict(event),
+            "v0": v0_projection(event),
         }
         for name, event in events.items()
     }

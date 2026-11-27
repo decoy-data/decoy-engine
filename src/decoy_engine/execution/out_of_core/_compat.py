@@ -15,12 +15,14 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.declared_casting._refusals import note_declined
-from decoy_engine.execution.native._real_type_admission import C1_PROVIDER_ALLOWLIST
+from decoy_engine.execution.native._real_type_admission import faker_provider_decline
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met
+from decoy_engine.execution.native._route_decline_codes import RouteDeclineCode
 
 if TYPE_CHECKING:
     from decoy_engine.execution._runner import WorkNode
     from decoy_engine.plan._types import ColumnSeed, Plan
+    from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships import RelationshipGraph
     from decoy_engine.relationships._graph import RelationshipEdge
 
@@ -177,6 +179,7 @@ def check_out_of_core_compatibility(
     relationship_graph: RelationshipGraph,
     *,
     source_types: Mapping[tuple[str, str], pa.DataType] | None = None,
+    registry: ProviderRegistry | None = None,
 ) -> OutOfCoreCompatibility:
     """Return the current Option 4 compatibility decision.
 
@@ -338,7 +341,7 @@ def check_out_of_core_compatibility(
             # faker is ported only for the deterministic-REUSE allowlisted shape
             # with an exact-string source; other shapes and, when the schema is in
             # hand, non-string sources fall back to sequential/full-frame.
-            faker_rej = _faker_conditional_rejection(node, source_types)
+            faker_rej = _faker_conditional_rejection(node, source_types, registry)
             if faker_rej is not None:
                 rejections.append(faker_rej)
         elif node.strategy == "categorical" and not _is_deterministic(node.plan_slice):
@@ -365,26 +368,33 @@ def check_out_of_core_compatibility(
 
 
 def _faker_conditional_rejection(
-    node: WorkNode, source_types: Mapping[tuple[str, str], pa.DataType] | None
+    node: WorkNode,
+    source_types: Mapping[tuple[str, str], pa.DataType] | None,
+    registry: ProviderRegistry | None = None,
 ) -> OutOfCoreRejection | None:
-    """Reject a faker node whose plan shape is not the admitted deterministic-REUSE
-    allowlisted-provider variant, or (when `source_types` is in hand) whose source is not an
-    exact `string`; None admits it.
+    """Reject a faker node outside the admitted deterministic-REUSE shape, or (when `source_types`
+    is in hand) with a non-`string` source; None admits it.
 
-    The admitted shape is the one `_faker_native` runs: a provider on the native
-    allowlist, `deterministic` with `cardinality_mode=reuse`, and a namespace. Non-deterministic/positional REUSE and UNIQUE/MATCH/SCALE
-    decline on the shape alone, so the job keeps the sequential/full-frame route.
-
-    The exact-`string` source gate is the no-regression fix: a non-string source
-    (int/bool/large_string/float/temporal) still produces a correct column on
-    full-frame/sequential, so it MUST reroute, not be admitted and then abort
-    mid-run (faker has no in-route Python reference). When `source_types` is known
-    (routing with resident/lazy sources; the runner preflight), a non-string
-    source declines here with a caller-visible code so the job reroutes. When it
-    is None, admission is shape-only and the per-table mask planner enforces the
-    source type fail-closed as a backstop.
+    The provider's variant comes from the live registry, and a rebound provider that resolves
+    differently from the stock binding declines. The exact-`string` source gate reroutes a
+    non-string source (a correct column on full-frame/sequential, no in-route Python reference
+    here) instead of admitting it and aborting mid-run; with `source_types` None the per-table
+    mask planner enforces it fail-closed.
     """
-    if node.provider not in C1_PROVIDER_ALLOWLIST or not faker_pool_precondition_met(node):
+    cfg = dict(getattr(node.plan_slice, "provider_config", ()) or ())
+    provider_decline = faker_provider_decline(
+        node.columns[0], node.provider, cfg, runs_computed=True, registry=registry, stock_only=True
+    )
+    if (
+        provider_decline is not None
+        and provider_decline[1] is RouteDeclineCode.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED
+    ):
+        return OutOfCoreRejection(
+            reasons.runtime.OUT_OF_CORE_FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED,
+            f"{node.table}.{node.columns}: out-of-core faker carries exact-string computed draws "
+            "only; this draw's output is another type, so the job reroutes to sequential/full-frame.",
+        )
+    if provider_decline is not None or not faker_pool_precondition_met(node):
         return OutOfCoreRejection(
             "out_of_core_faker_pool_unsupported",
             f"{node.table}.{node.columns}: out-of-core faker admits only deterministic REUSE with "

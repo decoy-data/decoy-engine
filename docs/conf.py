@@ -216,6 +216,12 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
     ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
+    # F31 AE5: `ProvenanceError`, `PlatformTriple` and `Provenance` moved to the private
+    # `quality.dp_record._record` and are re-exported by `quality.dp_record` and
+    # `quality.dp_provenance`. Same class as the entries above.
+    ("py:exc", "ProvenanceError"),
+    ("py:class", "decoy_engine.quality.dp_record.PlatformTriple"),
+    ("py:class", "decoy_engine.quality.dp_record.Provenance"),
     # Owner 2026-11-19: the experimental review functions import StarterConfig
     # from its public package; listed here for the same CI-E1 reason.
     ("py:class", "decoy_engine.profiling.StarterConfig"),

@@ -115,6 +115,11 @@ class OocFakerPoolContext:
             del job_seed
             raise
 
+    @property
+    def registry(self) -> ProviderRegistry:
+        """The registry this run's providers resolve through."""
+        return self._registry
+
     def prepare(
         self,
         *,

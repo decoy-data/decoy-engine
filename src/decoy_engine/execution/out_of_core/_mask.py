@@ -27,6 +27,7 @@ from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, narrow_passthrough
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError, StrategyError
+from decoy_engine.execution.native._provider_class import computed_mask_spec
 from decoy_engine.execution.out_of_core._categorical_native import native_categorical_array
 from decoy_engine.execution.out_of_core._faker_native import NativeFaker, native_faker_array
 from decoy_engine.execution.out_of_core._fpe_native import native_fpe_array
@@ -271,8 +272,10 @@ def masked_output_type(seed: ColumnSeed, source_type: pa.DataType | None = None)
     if seed.strategy == "faker":
         # The native allowlist holds only providers whose pools are string
         # values, so the admitted faker payload always emits string (nulls
-        # preserved). A schema-less consumer can pin this before any batch.
-        return pa.string()
+        # preserved). A computed draw states its own output type in its spec, the one
+        # reader every route shares. A schema-less consumer can pin this before any batch.
+        spec = computed_mask_spec(seed.provider, cfg)
+        return pa.string() if spec is None else spec.output_type
     if seed.strategy == "truncate":
         # Validate fail-closed (raises on an invalid config, exactly as the
         # mask would); a valid truncate always emits string.
