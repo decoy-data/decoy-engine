@@ -97,6 +97,15 @@ def _column_values(config: dict[str, Any], table: str, key: str) -> dict[str, An
     return {}
 
 
+def _callback_can_run(caps: Any, provider_config: Mapping[str, Any] | None) -> bool:
+    """True when a registered Faker callback can draw this column: a Faker-backed binding always
+    calls it, and a Mimesis-backed one only when the configured locale falls back to Faker."""
+    if caps.backend_type == "faker":
+        return True
+    locale = (provider_config or {}).get("locale")
+    return isinstance(locale, str) and locale not in caps.supported_locales
+
+
 def _binding_matches_stock(
     provider: object,
     provider_config: Mapping[str, Any] | None,
@@ -112,11 +121,16 @@ def _binding_matches_stock(
         return True
     # A callback registered under the stock name replaces the string-returning method inside the
     # stock adapter, so the adapter class alone does not prove the output type.
-    if isinstance(provider, str) and provider in custom_provider_names():
+    stock = get_default_registry()
+    if (
+        isinstance(provider, str)
+        and provider in custom_provider_names()
+        and stock.has(provider)
+        and _callback_can_run(stock.get_capabilities(provider), provider_config)
+    ):
         return False
     if registry is None:
         return True
-    stock = get_default_registry()
     if not (isinstance(provider, str) and registry.has(provider) and stock.has(provider)):
         return True
     return type(registry.get_adapter(provider)) is type(stock.get_adapter(provider))

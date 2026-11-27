@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from decoy_engine.execution.sequential._faker_admission import (
+        bound_decline,
+        faker_admit,
+        load_faker_kernels,
+    )
 
 __all__ = ["bound_decline", "computed_faker_column", "faker_admit", "load_faker_kernels"]
 

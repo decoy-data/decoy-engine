@@ -174,6 +174,25 @@ class TestLiveVariant:
             is None
         )
 
+    @pytest.mark.parametrize(
+        ("backend", "locale", "runs"),
+        [
+            ("faker", None, True),
+            ("mimesis", None, False),
+            ("mimesis", "en_US", False),
+            ("mimesis", "xx_XX", True),
+        ],
+    )
+    def test_a_callback_runs_only_where_the_binding_can_reach_faker(
+        self, backend: str, locale: str | None, runs: bool
+    ) -> None:
+        from decoy_engine.execution.native._real_type_admission import _callback_can_run
+
+        caps = _DEFAULT.get_capabilities("person_email").model_copy(
+            update={"backend_type": backend, "supported_locales": ("en_US",)}
+        )
+        assert _callback_can_run(caps, {"locale": locale} if locale else {}) is runs
+
     def test_the_out_of_core_route_refuses_an_integer_pool_and_auto_reroutes(
         self, tmp_path
     ) -> None:
