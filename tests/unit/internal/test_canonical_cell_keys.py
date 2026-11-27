@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 
 from decoy_engine.internal.canonical_cell import Null, canonical_cell
 from decoy_engine.internal.cell_text import detector_text, key_text
+from decoy_engine.verification.postmask import run_post_mask
 from decoy_engine.verification.postmask import runner as runner_module
 from decoy_engine.verification.postmask._column_facts import identity_counts
 from decoy_engine.verification.postmask.runner import _frame_tables
@@ -511,3 +512,65 @@ def test_a_numpy_record_keys_as_its_python_export() -> None:
     assert result.failed == {}
     assert result.keys == (2, 2)
     assert run(record, record).failed == {}
+
+
+# ----- records: every field reads through the same unit-normalizing walk ------------------------
+
+UNITS = ["s", "ms", "us", "ns"]
+UNIT_PAIRS = list(itertools.combinations(UNITS, 2))
+
+
+def _record(kind: str, shape: str, unit: str, index: int) -> Any:
+    """A one-field record holding the same instant (or length) whatever `unit` is."""
+    value = np.array([5, 7], f"{kind}8[s]").astype(f"{kind}8[{unit}]")[index]
+    leaf = f"{kind}8[{unit}]"
+    if shape == "flat":
+        row = np.zeros(1, dtype=[("t", leaf)])
+        row["t"][0] = value
+    elif shape == "sub":
+        row = np.zeros(1, dtype=[("t", leaf, (2,))])
+        row["t"][0] = [value, value]
+    else:
+        row = np.zeros(1, dtype=[("inner", [("t", leaf)])])
+        row["inner"]["t"][0] = value
+    return row[0]
+
+
+@pytest.mark.parametrize("shape", ["flat", "sub", "nested"])
+@pytest.mark.parametrize("kind", ["M", "m"])
+@pytest.mark.parametrize(("left", "right"), UNIT_PAIRS)
+def test_records_with_the_same_instant_in_any_unit_are_one_value(
+    kind: str, shape: str, left: str, right: str
+) -> None:
+    a, b = _record(kind, shape, left, 0), _record(kind, shape, right, 0)
+    assert canonical_cell(a) == canonical_cell(b)
+    assert hash(canonical_cell(a)) == hash(canonical_cell(b))
+    assert key(a) == key(b)
+    assert key(_record(kind, shape, left, 1)) != key(a)
+
+
+@pytest.mark.parametrize(("left", "right"), UNIT_PAIRS)
+def test_an_unchanged_record_column_in_another_unit_still_fails_the_hash_check(
+    left: str, right: str
+) -> None:
+    emails = [f"user{i}@realmail.com" for i in range(64)]
+    fake = [f"fake{i}@masked.example" for i in range(64)]
+    column = [_record("M", "flat", left, i % 2) for i in range(64)]
+    same = [_record("M", "flat", right, i % 2) for i in range(64)]
+    config = {
+        "version": 2,
+        "tables": [
+            {
+                "name": "t",
+                "columns": [
+                    {"name": "email", "strategy": "faker"},
+                    {"name": "n", "strategy": "hash"},
+                ],
+            }
+        ],
+    }
+    src = pd.DataFrame({"email": emails, "n": _objects(*column)})
+    out = pd.DataFrame({"email": fake, "n": _objects(*same)})
+    report = run_post_mask({"t": src}, {"t": out}, config=config)
+    (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
+    assert finding["severity"] == "fail"

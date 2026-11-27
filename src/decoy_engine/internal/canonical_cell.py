@@ -105,8 +105,9 @@ class Members:
 
 @dataclass(frozen=True)
 class Record:
-    """A NumPy record scalar. It compares as the canonical form of the Python tuple it holds, so it
-    is hashable; `spelling` is that tuple's `repr`, as an exporter writes it."""
+    """A NumPy record scalar. It compares as the canonical forms of its fields in dtype order, so it
+    is hashable and unit-exact; `spelling` is the `repr` of its Python tuple, as an exporter writes
+    it. Field names stay out of the comparison."""
 
     fields: object
     spelling: str = field(default="", compare=False)
@@ -260,10 +261,31 @@ def _leaf(value: object) -> object:
         # Any other NumPy scalar (a void, a record) as the Python value it holds.
         item = value.item()
         if isinstance(value, np.void) and value.dtype.names:
-            return Record(canonical_cell(item), repr(item))
+            # Each field through the walk, so a date or duration field is exact whatever its
+            # unit. `.item()` would turn one unit into an int and another into a datetime.
+            fields = tuple(canonical_cell(value[name]) for name in value.dtype.names)
+            return Record(fields, _record_spelling(value))
         if type(item) is not type(value):
             return canonical_cell(item)
     return value
+
+
+def _record_spelling(record: np.void) -> str:
+    """The `repr` of the record's Python tuple, except that a date or duration field reads as the
+    normalized pandas text, so the same instant in two units keys alike."""
+    parts = [_field_spelling(record[name]) for name in record.dtype.names or ()]
+    return f"({parts[0]},)" if len(parts) == 1 else f"({', '.join(parts)})"
+
+
+def _field_spelling(field_value: object) -> str:
+    if isinstance(field_value, np.void) and field_value.dtype.names:
+        return _record_spelling(field_value)
+    if isinstance(field_value, np.ndarray) and field_value.dtype.kind in "Mm":
+        return f"[{', '.join(_field_spelling(v) for v in field_value)}]"
+    if isinstance(field_value, (np.datetime64, np.timedelta64)):
+        form = canonical_cell(field_value)
+        return temporal_text(form, nested=True) if isinstance(form, TEMPORAL) else repr(form)
+    return repr(field_value.item() if isinstance(field_value, np.generic) else field_value)
 
 
 def _container(value: object) -> object:
