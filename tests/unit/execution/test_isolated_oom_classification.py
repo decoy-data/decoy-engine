@@ -347,18 +347,19 @@ class TestDriverResidue:
         (staging / "t").mkdir(parents=True)
         (staging / "t" / "part-0.parquet").write_bytes(b"partial")
         envelope = {"outcome": outcome, "peak_rss_mb": 1.0, "error": "MemoryError: x"}
-        result = result_from_envelope(envelope, tmp_path / "out", 123, staging, Attempt())
+        result = result_from_envelope(envelope, tmp_path / "out", 123, staging, Attempt.isolated())
         assert result.outcome == outcome
         assert not staging.exists()
 
     def test_in_process_failure_text_is_scrubbed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from decoy_engine.execution import _isolated_run
+        from decoy_engine.execution._isolated_reason import Attempt
 
         def boom(*_args: Any, **_kwargs: Any) -> Any:
             raise pa.ArrowException(_WRAPPING.format("John Smith"))
 
         monkeypatch.setattr(_isolated_run, "run_pipeline", boom)
-        result = _isolated_run._run_in_process({}, None, {}, None)
+        result = _isolated_run._run_in_process({}, None, {}, None, None, Attempt.resident())
         assert result.error is not None
         # The whole message is dropped now, not only the Arrow pattern: type name stays.
         assert "John Smith" not in result.error

@@ -104,7 +104,7 @@ def _run_isolated(staging_dir: Path | None, monkeypatch: pytest.MonkeyPatch) -> 
     result = _isolated_run._run_isolated(
         {},
         None,
-        Attempt(),
+        Attempt.isolated(),
         mem_cap_bytes=None,
         rlimit_kind="data",
         staging_dir=staging_dir,
@@ -165,7 +165,7 @@ def test_isolated_work_root_is_removed_when_the_spawn_fails(
         _isolated_run._run_isolated(
             {},
             None,
-            Attempt(),
+            Attempt.isolated(),
             mem_cap_bytes=None,
             rlimit_kind="data",
             staging_dir=None,
