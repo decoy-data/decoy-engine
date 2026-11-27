@@ -62,7 +62,6 @@ __all__ = [
 
 _KEY_STRATEGY = "hash"
 _DATE_FALLBACK_STRATEGY = "redact"
-_DATE_FALLBACK_STRATEGY = "redact"
 _CHECK_NAMESPACE = "starter-check"
 _TARGETS: TypeAdapter[dict[str, TargetDescriptor]] = TypeAdapter(dict[str, TargetDescriptor])
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
