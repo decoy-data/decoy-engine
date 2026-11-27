@@ -295,6 +295,18 @@ def contains_record(form: object) -> bool:
     return False
 
 
+def contains_members(form: object) -> bool:
+    """True when `form` is an unordered set or holds one at any depth. Arrow stores a set as an
+    ordered list, so a column holding one cannot be compared natively."""
+    if isinstance(form, Members):
+        return True
+    if isinstance(form, Seq):
+        return any(contains_members(item) for item in form.items)
+    if isinstance(form, Map):
+        return any(contains_members(k) or contains_members(v) for k, v in form.pairs)
+    return False
+
+
 def temporal_text(form: Temporal, *, nested: bool = False) -> str:
     """The text of a temporal form: `str()` of the value it came from at the top level, its
     `repr` inside a container. A NumPy value has no spelling of its own, so it reads as the

@@ -20,7 +20,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from decoy_engine.internal.canonical_cell import Null, canonical_cell
+from decoy_engine.internal.canonical_cell import Null, canonical_cell, contains_record
 from decoy_engine.internal.cell_text import RecordNotComparableError, detector_text, key_text
 from decoy_engine.verification.postmask import post_scan_verdict, run_post_mask
 from decoy_engine.verification.postmask import runner as runner_module
@@ -512,7 +512,7 @@ def test_a_numpy_record_keys_from_its_fields_only() -> None:
     assert key(record) == "record([1, 2],)"
     assert key([record]) == "[record([1, 2],)]"
     assert key((1, 2)) != key(np.array([(1, 2)], dtype=[("a", "i4"), ("b", "i4")])[0])
-    assert run(record, record).failed == {}
+    assert run(record, record).failed == {"t": NOT_COMPARABLE}
 
 
 # ----- records: every field reads through the same unit-normalizing walk ------------------------
@@ -574,7 +574,7 @@ def test_an_unchanged_record_column_in_another_unit_still_fails_the_hash_check(
     out = pd.DataFrame({"email": fake, "n": _objects(*same)})
     report = run_post_mask({"t": src}, {"t": out}, config=config)
     (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
-    assert finding["severity"] == "fail"
+    assert finding["severity"] == "error"
 
 
 # ----- a record against another kind is not comparable ------------------------------------------
@@ -628,10 +628,10 @@ def test_a_record_against_another_kind_is_refused_both_ways(other: str) -> None:
         identity_counts(_objects(record), _objects(cell))
 
 
-def test_a_record_against_a_null_or_a_record_is_comparable() -> None:
-    assert run(_flat("ns"), None).failed == {}
-    assert run(_flat("ns"), _flat("us")).failed == {}
-    assert run([_flat("ns")], [_flat("us")]).failed == {}
+def test_a_record_against_a_null_or_a_record_is_refused() -> None:
+    assert run(_flat("ns"), None).failed == {"t": NOT_COMPARABLE}
+    assert run(_flat("ns"), _flat("us")).failed == {"t": NOT_COMPARABLE}
+    assert run([_flat("ns")], [_flat("us")]).failed == {"t": NOT_COMPARABLE}
 
 
 def _subarray_of_nested(unit: str) -> Any:
@@ -645,9 +645,7 @@ def test_r4_case_2_a_subarray_of_nested_records_keys_alike_in_every_unit() -> No
     a, b = _subarray_of_nested("us"), _subarray_of_nested("ns")
     assert canonical_cell(a) == canonical_cell(b)
     assert key(a) == key(b)
-    result = run(a, b)
-    assert result.failed == {}
-    assert result.keys == (2, 2)
+    assert run(a, b).failed == {"t": NOT_COMPARABLE}
 
 
 def _deep3(unit: str) -> Any:
@@ -684,7 +682,8 @@ def test_a_partial_export_that_keeps_an_inner_record_is_refused(record: Any, exp
     other = export(record)
     assert run(record, other).failed == {"t": NOT_COMPARABLE}
     assert run(other, record).failed == {"t": NOT_COMPARABLE}
-    assert run(export(record), export(record)).failed == {}
+    held = contains_record(canonical_cell(export(record)))
+    assert run(export(record), export(record)).failed == ({"t": NOT_COMPARABLE} if held else {})
     # The export keeps the inner record, and the wrapper itself carries the same record.
     assert run({"k": record}, {"k": str(record.item())}).failed == {"t": NOT_COMPARABLE}
 
@@ -694,7 +693,7 @@ def test_an_object_field_holding_a_record_against_its_text_is_refused() -> None:
     held, text = _object_field(inner), _object_field(str(inner.item()))
     assert run(held, text).failed == {"t": NOT_COMPARABLE}
     assert run(text, held).failed == {"t": NOT_COMPARABLE}
-    assert run(held, _object_field(inner)).failed == {}
+    assert run(held, _object_field(inner)).failed == {"t": NOT_COMPARABLE}
 
 
 def test_a_changed_record_is_refused_not_graded() -> None:
@@ -730,4 +729,65 @@ def test_a_readonly_record_in_a_set_a_frozenset_or_a_key_is_refused() -> None:
     for held, other in pairs:
         assert run(held, other).failed == {"t": NOT_COMPARABLE}
         assert run(other, held).failed == {"t": NOT_COMPARABLE}
-    assert run({record}, {_readonly()}).failed == {}
+    assert run({record}, {_readonly()}).failed == {"t": NOT_COMPARABLE}
+
+
+# ----- one comparison authority at the public entry ---------------------------------------------
+
+HASH_CONFIG = {
+    "version": 2,
+    "tables": [
+        {
+            "name": "t",
+            "columns": [
+                {"name": "email", "strategy": "faker"},
+                {"name": "n", "strategy": "hash"},
+            ],
+        }
+    ],
+}
+
+
+def _gate(src_cells: list[Any], out_cells: list[Any]) -> Any:
+    """`run_post_mask` over a faker email column and a hash column holding the given cells."""
+    count = len(src_cells)
+    emails = [f"user{i}@realmail.com" for i in range(count)]
+    fake = [f"fake{i}@masked.example" for i in range(count)]
+    src = pd.DataFrame({"email": emails, "n": _objects(*src_cells)})
+    out = pd.DataFrame({"email": fake, "n": _objects(*out_cells)})
+    return run_post_mask({"t": src}, {"t": out}, config=HASH_CONFIG)
+
+
+def _blocks(report: Any) -> bool:
+    return bool(post_scan_verdict(report).blocking)
+
+
+def test_codex_1_an_unchanged_nested_object_column_blocks() -> None:
+    cells = [{"a": [1, 2]} if i % 2 else {"a": [3, 4]} for i in range(64)]
+    assert _blocks(_gate(cells, [dict(c) for c in cells]))
+
+
+def test_codex_2_equal_sets_in_another_iteration_order_block() -> None:
+    forward = [{0, 8} if i % 2 else {1, 9} for i in range(64)]
+    backward = [{8, 0} if i % 2 else {9, 1} for i in range(64)]
+    assert list(forward[1]) != list(backward[1])
+    assert forward[1] == backward[1]
+    assert _blocks(_gate(forward, backward))
+
+
+def test_codex_3_record_columns_block_whatever_the_dtype_equality_or_nulls() -> None:
+    rows = np.zeros(2, dtype=[("t", "i8")])
+    rows["t"] = [1, 2]
+    rows.setflags(write=False)
+    first, second = rows[0], rows[1]
+    one = [_flat("us")]
+    assert _blocks(_gate(one, [_flat("us")]))
+    cells = [_flat("us") if i % 2 else _flat("ns") for i in range(64)]
+    assert _blocks(_gate(cells, list(cells)))
+    assert _blocks(_gate(cells, [None if i % 3 == 0 else c for i, c in enumerate(cells)]))
+    codes = [i % 2 for i in range(64)]
+    straight = pd.Categorical.from_codes(codes, categories=[first, second])
+    swapped = pd.Categorical.from_codes([1 - c for c in codes], categories=[first, second])
+    src = pd.DataFrame({"email": [f"user{i}@realmail.com" for i in range(64)], "n": straight})
+    out = pd.DataFrame({"email": [f"fake{i}@masked.example" for i in range(64)], "n": swapped})
+    assert _blocks(run_post_mask({"t": src}, {"t": out}, config=HASH_CONFIG))

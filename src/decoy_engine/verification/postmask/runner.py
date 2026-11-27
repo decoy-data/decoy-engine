@@ -28,6 +28,7 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
+from decoy_engine.internal.canonical_cell import canonical_cell, contains_members
 from decoy_engine.internal.cell_text import (
     ComparisonNotPreservedError,
     detector_text,
@@ -185,7 +186,14 @@ def _megabytes(limit: str) -> int:
 
 def _native(series: pd.Series) -> pa.Array | None:
     try:
-        return pa.array(numpy_bytes_as_objects(series), from_pandas=True)
+        array = pa.array(numpy_bytes_as_objects(series), from_pandas=True)
+        # Arrow keeps a set as an ordered list, so the native compare would call equal sets in
+        # another iteration order different. The text keys and the preservation check decide it.
+        if pa.types.is_nested(array.type) and any(
+            contains_members(canonical_cell(c)) for c in series.astype(object)
+        ):
+            return None
+        return array
     # Only Arrow refusing the column selects the text keys; any other error fails the table.
     except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         if passes_through(exc):

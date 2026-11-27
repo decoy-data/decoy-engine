@@ -278,37 +278,50 @@ def source_distinct(series: pd.Series) -> int:
     return int(cells.nunique(dropna=True))
 
 
+def _compared(src: pd.Series, out: pd.Series) -> tuple[int, int, bool]:
+    """Comparable rows, identical rows, and whether every row, a null included, is equal.
+
+    The one comparator: the canonical form of each cell decides all three, so no dtype, Arrow
+    or pandas equality can grade a row differently."""
+    typed = _typed(src, out)
+    if _has_record(src) or _has_record(out):
+        # No text of a record is predicted, so a record column is refused whole, before any
+        # dtype, equality or null shortcut.
+        raise RecordNotComparableError
+    if typed:
+        src_o, out_o = src.astype(object), out.astype(object)
+    else:
+        src_o, out_o = canonical_cells(src), canonical_cells(out)
+    present = src_o.notna() & out_o.notna()
+    identical = int((src_o[present] == out_o[present]).sum())
+    same = bool(((src_o.isna() & out_o.isna()) | (present & (src_o == out_o))).all())
+    return int(present.sum()), identical, same
+
+
+def _has_record(series: pd.Series) -> bool:
+    if isinstance(series.dtype, np.dtype) and series.dtype.kind != "O":
+        return False
+    cells = series.astype(object)
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        cells = pd.concat([cells, pd.Series(list(series.cat.categories), dtype=object)])
+    return any(contains_record(canonical_cell(c)) for c in cells)
+
+
 def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
     """Comparable and identical row counts of a positional source-to-output comparison.
 
     The one comparison the frame check and the batch check both run, so the two cannot grade
     the same cells differently. Both series must share a positional index. A cell comparison
     that fails raises; the caller records the class name as the column's `identity_error`."""
-    if _typed(src, out):
-        src_o, out_o = src.astype(object), out.astype(object)
-    else:
-        src_o, out_o = canonical_cells(src), canonical_cells(out)
-    present = src_o.notna() & out_o.notna()
-    if not _typed(src, out) and any(
-        (contains_record(a) or contains_record(b)) and a != b
-        for a, b in zip(src_o[present], out_o[present], strict=True)
-    ):
-        # No text of a record is predicted, so a record row is identical or refused.
-        raise RecordNotComparableError
-    return int(present.sum()), int((src_o[present] == out_o[present]).sum())
+    comparable, identical, _ = _compared(src, out)
+    return comparable, identical
 
 
 def _add_identity(tally: _Tally, src: pd.Series, out: pd.Series) -> None:
-    comparable, identical = identity_counts(src, out)
+    comparable, identical, same = _compared(src, out)
     tally.comparable += comparable
     tally.identical += identical
-    src_o, out_o = src.astype(object), out.astype(object)
-    # A null is NaN in a float column and pd.NA in an Arrow-typed integer one; `equals` treats
-    # NaN and None as one null but not NaN and pd.NA, so a float source against an int output of
-    # the same numbers would read as different.
-    tally.same_bytes = tally.same_bytes and bool(
-        src_o.where(src_o.notna(), None).equals(out_o.where(out_o.notna(), None))
-    )
+    tally.same_bytes = tally.same_bytes and same
 
 
 def _add_detectors(tally: _Tally, out: pd.Series, column: str) -> None:
