@@ -22,29 +22,28 @@ CLASS = "SafeText"
 
 
 def _class_names(tree: ast.AST) -> set[str]:
-    """``SafeText`` plus every alias it is imported under."""
+    """``SafeText`` plus every alias: an import ``as`` name or ``Alias = SafeText``."""
     names = {CLASS}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             names |= {a.asname for a in node.names if a.name == CLASS and a.asname}
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
+            if node.value.id in names:
+                names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
     return names
 
 
 def _is_builder(node: ast.AST, classes: set[str]) -> bool:
-    return (
-        isinstance(node, ast.Attribute)
-        and node.attr in BUILDERS
-        and (
-            (isinstance(node.value, ast.Name) and node.value.id in classes)
-            or (isinstance(node.value, ast.Attribute) and node.value.attr == CLASS)
-        )
-    )
+    """A ``.const`` or ``.literal_template`` access, on any receiver, in a module that uses
+    ``SafeText``. A receiver can be an instance (``label.const(x)``), so the receiver is not
+    matched by name."""
+    return isinstance(node, ast.Attribute) and node.attr in BUILDERS and bool(classes)
 
 
 def violations(source: str, name: str = "<scratch>") -> list[str]:
     """One ``name:line: reason`` per call that does not take a string literal first."""
     tree = ast.parse(source)
-    classes = _class_names(tree)
+    classes = _class_names(tree) if CLASS in source else set()
     called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     found: list[str] = []
     for node in ast.walk(tree):
@@ -53,7 +52,9 @@ def violations(source: str, name: str = "<scratch>") -> list[str]:
         if not (isinstance(node, ast.Call) and _is_builder(node.func, classes)):
             continue
         first = node.args[0] if node.args else None
-        if isinstance(first, ast.Starred) or any(k.arg is None for k in node.keywords):
+        if any(isinstance(a, ast.Starred) for a in node.args) or any(
+            k.arg is None for k in node.keywords
+        ):
             found.append(f"{name}:{node.lineno}: star argument")
         elif first is None:
             found.append(f"{name}:{node.lineno}: text passed by keyword or missing")
@@ -85,6 +86,9 @@ def test_every_call_under_src_takes_a_string_literal() -> None:
         "decoy_engine._safe_text.SafeText.const(str(exc))",
         "Safe.const(name)",
         "make = SafeText.const",
+        "Text = SafeText\nText.const(name)",
+        'label = SafeText.const("ready")\nlabel.const(name)',
+        'SafeText.const("fixed", *extra)',
     ],
 )
 def test_a_non_literal_spelling_is_red_in_a_scratch_module(call: str) -> None:
