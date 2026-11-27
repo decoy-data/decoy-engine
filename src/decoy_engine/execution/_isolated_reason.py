@@ -139,17 +139,17 @@ def readback_refused(
 ) -> IsolatedRunResult:
     """A completed child whose output the driver would not hold: refused before the next decode.
 
-    The text is the registered summary and two integers; no table, column or value reaches it.
+    The fixed_text is the registered summary and two integers; no table, column or value reaches it.
     Output size is the same on every route, so the governor has nothing to reroute to: `crashed`.
     """
     code = _decoy.ISOLATED_READBACK_CAPACITY_EXCEEDED
-    text = capacity_message(
+    fixed_text = capacity_message(
         code,
         needed_bytes=fit.estimated_bytes,
         kill_ceiling_bytes=fit.kill_ceiling_bytes,
         remedy=_READBACK_REMEDY,
     )
-    return _readback_result(code, text, staging, receipt, readback, peak, pid)
+    return _readback_result(code, fixed_text, staging, receipt, readback, peak, pid)
 
 
 def readback_memory_failure(
@@ -160,17 +160,17 @@ def readback_memory_failure(
     peak: float | None,
     pid: int,
 ) -> IsolatedRunResult:
-    """A memory failure while the driver read the child's output back, with fixed text.
+    """A memory failure while the driver read the child's output back, with fixed fixed_text.
 
     Built from the registry, never from the exception: its message can carry sizes and names."""
     code = _decoy.PROCESS_OUT_OF_MEMORY
-    text = f"{reasons.get(code.namespace, code).summary} {_READBACK_REMEDY}"
-    return _readback_result(code, text, staging, receipt, readback, peak, pid)
+    fixed_text = f"{reasons.get(code.namespace, code).summary} {_READBACK_REMEDY}"
+    return _readback_result(code, fixed_text, staging, receipt, readback, peak, pid)
 
 
 def _readback_result(
     code: ReasonCode,
-    text: str,
+    fixed_text: str,
     staging: Path,
     receipt: CommitReceipt | None,
     readback: dict[str, int | None],
@@ -196,7 +196,7 @@ def _readback_result(
         table_kinds={},
         returncode=0,
         signal_number=None,
-        error=text,
+        error=fixed_text,
         isolated=True,
         pid=pid,
         extra={"readback": readback},

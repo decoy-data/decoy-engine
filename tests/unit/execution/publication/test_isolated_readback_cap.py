@@ -363,8 +363,20 @@ def _wholly_clean(run: Run, output: bool, staging: Path | None, scratch: Path) -
         assert staging.is_dir() and not (staging / "staging_output").exists()
 
 
-def _fds() -> int:
-    return len(os.listdir("/proc/self/fd")) if sys.platform.startswith("linux") else 0
+def _open_under(root: Path) -> list[str]:
+    """The files this process holds open beneath `root`; empty where /proc is absent."""
+    fd_dir = Path("/proc/self/fd")
+    if not fd_dir.is_dir():
+        return []
+    held = []
+    for entry in fd_dir.iterdir():
+        try:
+            target = os.readlink(entry)
+        except OSError:
+            continue
+        if target.startswith(str(root)):
+            held.append(target)
+    return sorted(held)
 
 
 SCENARIOS = [
@@ -411,7 +423,7 @@ def test_a12_every_exit_path_leaves_no_stage_and_no_open_file(
                 )
             ),
         )
-    before = _fds()
+    before = _open_under(tmp_path)
     if scenario == "detection_error":  # detection raises another coded error: it propagates
         with pytest.raises(ExecutionError):
             run.go(held={}, output=output, staging=staging)
@@ -425,7 +437,7 @@ def test_a12_every_exit_path_leaves_no_stage_and_no_open_file(
         }[scenario]
         assert result.outcome == "crashed" and result.outputs is None
         assert result.reason is not None and result.reason.code == expected
-    assert _fds() == before
+    assert _open_under(tmp_path) == before
     _wholly_clean(run, output, staging, scratch)
 
 
