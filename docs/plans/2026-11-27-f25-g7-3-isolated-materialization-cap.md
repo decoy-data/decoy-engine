@@ -4,7 +4,7 @@ Status: plan
 
 Rules consulted: 00-universal, risk-and-exceptions, development-loop, profiles/local-operations,
 feature-dev, testing, security, cross-cutting-concerns, architecture, proportionality, reuse-first,
-catalogs/recurring-defects.
+catalogs/recurring-defects, code-review, documentation, verification.
 
 Risk: R2. Repo: engine. Row 58 (F25) 1.0 acceptance, finding G7 (CLI repo
 `docs/roadmap/findings-register.md`, row G7: "The isolated-route materialization cap is still
@@ -202,13 +202,19 @@ return (resident), takes the stack at that moment, and stops when `run_pipeline_
 returns. Each scenario ran once untraced first. No thread started in any window. Sentinels
 recorded: `_judge_and_bind`, `_check_vault`, `_decode_rows` (replay), `reason_from_exception`
 (occupied, conflict). The window ran through 44 source files. Eleven of them hold a
-memory-catching handler. The `SCOPE` below is those eleven plus `_isolated_reason.py` (the
+memory-catching handler. The `SCOPE` patterns below cover those files plus `_isolated_reason.py` (the
 boundary) and `_isolated_common.py`, kept from the earlier list. Non-compliant handlers found:
 the six this design already names (`collect`, `_typed_error`, the old guard, `_judge_and_bind`,
 `_decode_rows`, the adapter) and one more, `fileaccess/_errors.py:309`. Every
 `contextlib.suppress` in the window names `OSError` only, and no `finally` in a `SCOPE` file holds
 a `return`, `break` or `continue`. The fault scenario returned UNKNOWN on the isolated route and
 escaped raw as `MemoryError` on the resident route: R6-2's class, which part 1 closes.
+
+The expanded `trace3.py` records 26 runs and 45 source files. Its supplied 3.10 and 3.12
+reports are identical. The additional cases exercise capacity refusal with and without a
+destination, EIO and ENOMEM during measurement, and ENOMEM and marker text during readback.
+They add no memory-catching handler to the scope. The readback-only injections are inactive
+on the resident route. A19 checks the applicable cases below.
 
 How the resident route reports errors today: `_run_in_process` (`_isolated_run.py:323`) catches
 every failure of `run_pipeline` and returns `in_process_failure(exc)` (memory is `oom_killed`).
@@ -271,10 +277,13 @@ failed receipt only because the handler swallowed it.
    - `failed_receipt_for(receipt)`: unchanged, but called in `_run_isolated` right after
      `begin_publication` (still `BEFORE`, before the spawn), not inside the readback.
    - `settle(result)`: in `PUBLISHING`, a non-completed result whose `reason.code` is
-     `process_out_of_memory` is replaced by `_unknown`. Every other result is returned as built.
-     In `BEFORE` and `PRE_CALL` it changes nothing, so `in_process_failure`'s `oom_killed` and the
-     readback memory result keep their current shape. `settle` compares two strings and
-     allocates nothing.
+     `process_out_of_memory` is replaced by `_unknown`. Other publishing results are returned as built.
+     In `PRE_CALL`, select the pre-call reserve for a memory-coded failure whose
+     `reason.context.publication_state is None`. This is the context-free adapter fallback
+     during classification of a failed admission or corrupt footer. Keep the already-contextual
+     `ReadbackMemoryFailure` result, including its cleanup evidence and receipt. In `BEFORE`
+     return the original result, including the resident run's own `oom_killed`. Inspect the
+     existing fields without building a new result.
 
    Windows per route:
 
@@ -288,7 +297,9 @@ failed receipt only because the handler swallowed it.
    `output_dir` the resident window goes to `PUBLISHING` before any publication code runs, so a
    pre-call receipt would never be used. The texts are the existing two: the summary plus the
    readback remedy, and the summary plus "Rerun with the same operation id to confirm."
-   The isolated reserves keep their current fields.
+   The isolated reserves keep their current fields. On the resident route put the window
+   transition immediately after the run-only `try/except BaseException`, outside its protected
+   body. A post-run allocation must never enter `in_process_failure`.
 
 2. **Inner handlers are memory-transparent.** In every module the window runs through, a handler
    that can catch a `MemoryError` takes one of three shapes:
@@ -327,19 +338,24 @@ failed receipt only because the handler swallowed it.
 
    | Handler | Effect of the clause on a `MemoryError` | Non-memory verdicts |
    |---|---|---|
-   | `:309` `guarded_with_parser_errors` | none: `passes_by_type` already re-raises the same object. The clause only makes the shape checkable | unchanged |
-   | `:206` `resurface_scrubbed` | was `None`, so `:309` raised `FileAccessReadError` (a memory error reported as a read error); now `MemoryError` | unchanged |
-   | `:216` `_errno_rebuild` | was a second `OSError` built under the same pressure; now `MemoryError` | unchanged |
-   | `:225` `_fixed_text_rebuild` | was `None`; now `MemoryError` | unchanged |
+   | `:309` `guarded_with_parser_errors` (also `guarded` and strict iteration) | a typed `MemoryError` still passes by identity. A rebuild fault now propagates after the library handler closes | retain parser, denial, iterator and other by-type pass-throughs |
+   | `:206` `resurface_scrubbed` | the text rebuild used to return `None`, leading to a read error or a false predicate. The rebuild now raises `MemoryError` | unchanged |
+   | `:216` `_errno_rebuild` | serves both ENOMEM and resource errnos ENOSPC/EDQUOT. A constructor OOM used to trigger the plain `OSError` fallback. It now propagates | ordinary constructor rejection still uses the fallback |
+   | `:225` `_fixed_text_rebuild` | the fixed-text constructor used to return `None` on OOM. It now propagates the fault | unchanged |
+   | `fileaccess.keeps_class` (`_read.py:77–95`) | about 21 handlers use this predicate. Under a strict policy a text rebuild OOM in `resurface_scrubbed` now raises where the predicate returned `False` | ambient policy still returns `False` without a rebuild |
+   | exported `fileaccess.classified_failure` (`_errors.py:244–259`) | strict boundaries use this policy-independent classifier. Errno rebuild OOM now raises where the caller received a fallback OS error in `fresh`. Fixed-text rebuild OOM now raises where it received a classification with `fresh=None` | unrecognised input still returns `None` |
 
-   The three rebuild clauses change behaviour outside the window too, for every strict-policy
-   reader: when rebuilding a text-recognised memory failure itself runs out of memory, the caller
-   now sees `MemoryError` instead of `FileAccessReadError` or `OSError`. That is the class this
-   section exists to fix, so it is accepted and pinned by a direct test (A21). The clause
-   re-raises the rebuild's own `MemoryError`, never the original text-bearing exception, though
-   that exception stays its `__context__`. The boundary and the adapter never render exception
-   text or chains, so no result carries it; a caller outside the window that prints a full
-   traceback could, as it can for any chained error today (V2-LOG). The other A19 additions (`_local_chain.py`, `_output.py`,
+   In `guarded_with_parser_errors`, keep the transparent clauses. In the translating handler
+   save the exception in a separate local (`caught = exc`, since Python clears the handler
+   target on exit). Call `_resurface(caught)` after that handler closes. If it returns the
+   original, raise that object with its existing chain. Raise a fresh replacement or the
+   ordinary read error as today. The rebuild's own `MemoryError` now has no library error as
+   its context. A21(ii) checks the exception object and traceback rendering.
+
+   The existing guarded contract, `vault/_reader.py:231` and the `ClassifiedFailure` docstring
+   deliberately keep fresh failures free of the original chain. Rebuilding inside another
+   caller's active handler can **introduce** that chain. A21 covers the remaining callers'
+   changed verdicts. The residual traceback surfaces are recorded under V2-LOG. The other A19 additions (`_local_chain.py`, `_output.py`,
    `determinism/_derive.py`, `determinism/_hkdf.py`, `internal/crypto.py`) already pass shape 2
    and need no edit; `SCOPE` keeps them that way.
 
@@ -352,6 +368,12 @@ failed receipt only because the handler swallowed it.
    a failed receipt. The vault decoder's clause has the same effect on vault readers: memory
    pressure is raised, never reported as a malformed segment.
 
+   In resident `publish_tables` (`publication/_publish.py:458–474`), use the existing
+   `with txn:` after a successful begin. It owns cleanup through the stage-path callback,
+   table writes and the call into `publish_unit`. Keep the write-only OSError-to-receipt
+   handler narrow. The txn context replaces the manual write-path aborts and closes the
+   gap before the callee's own finalizer starts. Abort is idempotent after bind or abort.
+
 3. **The adapter never hides a memory error.** `reason_from_exception` moves
    `_lookup_captured` and `known.with_context` inside its `try` and gets one clause ahead of
    `except Exception`:
@@ -363,11 +385,11 @@ failed receipt only because the handler swallowed it.
 
    `_OUT_OF_MEMORY` is a module-level `ReasonRecord.for_reason(PROCESS_OUT_OF_MEMORY)` built at
    import, so the handler allocates nothing. It drops the caller's phase and context. The code is
-   what a consumer acts on, and a memory failure while classifying is rare. Every other caller
-   keeps the documented never-raises behavior and now gets `process_out_of_memory` instead of
+   what a consumer acts on, and a memory failure while classifying is rare. Callers now get `process_out_of_memory` instead of
    `unexpected_error` or `unregistered_reason` when classification runs out of memory. On the
    isolated and resident routes that record reaches `settle`, which selects the UNKNOWN reserve
-   once publishing has started. It needs no phase input and no new public name.
+   once publishing has started. Before publication the same fallback selects the pre-call
+   reserve as specified in part 1. The adapter needs no new public name.
 
    The adapter has a second change, the clauses at `:483` (`_lookup_captured`) and `:491`
    (`_remember`). These change behaviour outside the window. `capture_failure`,
@@ -547,12 +569,14 @@ A4 requires one decode per staged table. A10, A11, A13 and class 9 are direct te
   `staging_dir` setup fault and `scratch.close()`. A15's vault-decode and refusal-build cases also
   run on `isolate=False` in the new file below (both routes, same assertions, `isolated is False`).
 
-New cases go in `tests/unit/execution/publication/test_memory_boundary_routes.py`. Each runs on
-both routes through the public `run_pipeline_isolated`: `isolate=True` with the fake child, and
+New cases go in `tests/unit/execution/publication/test_memory_boundary_routes.py`. Route cases use the public `run_pipeline_isolated`: `isolate=True` with the fake child, and
 `isolate=False`, which runs `run_pipeline` in process on the same two-row job. Reuse `once`,
-`memory` and `UNKNOWN_TEXT` from `test_isolated_commit_memory.py`. Each case asserts its fault
+`memory` and `UNKNOWN_TEXT` from `test_isolated_commit_memory.py`. Each fault case asserts its fault
 fired. A16 to A18 and A21 (i), (ii) must fail on `c2b81ef1f`, at least on the route their finding
-names, before the change. Record the red run's failing ids. A19, A20 and the guard are proven by
+names, before the change. On the pin, arm A16 at the actual publish call and fault
+`_readback_result` from `Attempt.reserve` for A18(i). After refactoring, arm the corresponding
+window and builder. Missing new symbols do not count as red evidence. Record fired injections,
+observed verdicts and the red run's failing ids. A19, A20 and the guard are proven by
 their mutations.
 
 - **A16 memory error while classifying a refusal (R6-1).** Occupied destination: a different
@@ -563,8 +587,14 @@ their mutations.
   bound target unchanged (descriptor bytes equal). Red on `c2b81ef1f`: `unexpected_error`,
   NOT_PUBLISHED. Direct adapter cases in the same file: with `_classify`, `_read_code`,
   `_identified_reason` or `_lookup_captured` raising `MemoryError`, `reason_from_exception`
-  returns `process_out_of_memory` and does not raise. With `_classify` raising `RuntimeError` it
-  still returns `unexpected_error`.
+  returns `process_out_of_memory` and does not raise. Exercise the real inner handlers too:
+  fault the property read inside `_identified_reason` and `_read_code` using their registered
+  exception families. Fault `known.with_context` on a captured record with caller context. With `_classify` raising `RuntimeError` it
+  still returns `unexpected_error`. Also force an ordinary corrupt-footer refusal on the
+  isolated route, then fault classification of its failed receipt in PRE_CALL. Assert fixed
+  pre-call memory text, NOT_PUBLISHED, failed receipt for a requested target (none for scratch),
+  stage removed, and no outputs. Without the classification fault retain the ordinary receipt
+  verdict. A9's ENOMEM result retains its measured cleanup evidence.
 - **A17 measurement memory error (R6-2).** `ArrowMemoryError` from the publisher's `_measure`
   (patched at `decoy_engine.publication._publish._measure`), first on a fresh destination, then
   on a matching replay. Expect the UNKNOWN reserve on both routes and no raw exception. The fresh
@@ -572,7 +602,12 @@ their mutations.
   returns `already_committed`. Red on `c2b81ef1f` for `isolate=False`: the raw `ArrowMemoryError`
   escapes. Controls on both routes: `ArrowInvalid`, `OSError(EIO)` and `OSError(ENOMEM)`
   measurement faults still return `publication_failed` with a failed receipt and NOT_PUBLISHED.
-  The ENOMEM control proves `settle` does not turn an ordinary failed receipt into UNKNOWN.
+  On the resident route also fault the stage-path callback lookup (`txn.local_stage_path()`)
+  and the entry to `publication._publish.publish_unit` before its body runs. For each, require
+  UNKNOWN, an absent fresh target and no pending publication stage. With no output directory,
+  fault the resident completed-result build after the real run returns. Require the PRE_CALL
+  result, `isolated=False`, no receipt and the fixed pre-call text.
+  The measurement ENOMEM control pins the ordinary failed receipt through `settle`.
 - **A18 reserve faults (R6-3).** (i) A `MemoryError` on the first call of the reserve builder
   (`_isolated_reason._reserved_result`). Expect `MemoryError` raised from `run_pipeline_isolated`.
   On the isolated route, `on_spawn` is never called, no `decoy-isolated-run-*` work root exists
@@ -580,19 +615,32 @@ their mutations.
   resident route, a spy on `run_pipeline` sees no call. Red on `c2b81ef1f`: the child has already
   run when the raw error appears. (ii) A `MemoryError` inside `enter_readback`'s reserve refresh,
   isolated only. Expect the pre-call reserve with `pid is None` and `peak_rss_mb is None`,
-  NOT_PUBLISHED, and the stage removed.
+  NOT_PUBLISHED, and the stage removed. Compute both refreshed copies before assigning either.
+  Fault each replacement in turn. Also retarget the existing A14 failed-receipt construction
+  test (`test_isolated_commit_memory.py:108`) to its new pre-spawn lookup: per D-BEFORE it
+  raises raw, skips spawn and cleans up the opened transaction. Keep A14's post-entry setup
+  faults expecting NOT_PUBLISHED.
 - **A19 the guard's scope is the window's.** Run the scenario matrix under `sys.setprofile`:
   scratch-only success; `output_dir` publish without and with a vault; matching replay with a
   vault; occupied refusal; operation conflict; and a `MemoryError` at `publish_unit` entry. Use
-  both routes (14 runs). The prototype is described under "A19 trace" in the Memory boundary
-  section; the test follows it:
+  both routes (14 runs). Add the expanded trace's measurement controls on both routes and
+  the refusal and readback cases on the isolated route (eight additional runs). Require each
+  injected fault or refusal condition to fire. The prototype is described under "A19 trace" in the Memory boundary
+  section. Run this gate with PyNaCl installed (`nacl.bindings` importable) on each
+  supported trace interpreter. A skipped vault case cannot establish the replay sentinel.
+  Assert the expected result per scenario and route. Check the applicable sentinels within the
+  corresponding route and scenario (for example, vault decode on each matching replay). The test follows the prototype:
   - Warm each scenario once untraced, so lazy imports run outside the trace, and ignore
     `<module>` code objects.
-  - Recording starts when `enter_readback` or the resident window entry is called (spied). It
-    adds every frame on the stack at that moment whose file is under `src/decoy_engine/` (the
+  - Bind the trace to the outer public invocation and its own `Attempt`. Start at that
+    attempt's first window transition only. A resident `run_pipeline` can launch an isolated
+    admission probe before it returns. Its reserve, sampler thread and return must neither
+    start nor stop the resident trace. Assert exactly one start and stop for the selected
+    attempt. Apply the same outer-attempt filter when arming route-specific OOM injections.
+    At entry add every frame on the stack at that moment whose file is under `src/decoy_engine/` (the
     same filter as later events), then every later `call` event under `src/decoy_engine/`.
-  - Recording stops when `memory_boundary` (equivalently `run_pipeline_isolated`) returns, not
-    when the entry returns.
+  - Stop on return from that same boundary frame. Restore the previous profiler and thread spy
+    in teardown, including when the run raises.
   - Map each code object, including a lambda, comprehension or nested function, to the
     innermost enclosing `def` whose AST line span (first decorator line to `end_lineno`) holds
     its `co_firstlineno`. This works the same on 3.10 to 3.12.
@@ -601,18 +649,27 @@ their mutations.
     vault replay, and `reason_from_exception` on the occupied refusal. A trace that misses them
     is vacuous.
   - Every recorded function that contains a memory-catching handler or a memory-naming
-    `contextlib.suppress` must be in a file in the guard's `SCOPE`. The failure message names
+    `contextlib.suppress`, or a forbidden finally exit, must be in a file in the guard's `SCOPE`. The failure message names
     the file and function.
 
   G18: remove `reason_adapter.py` from `SCOPE`; A19 goes red naming `reason_from_exception`.
-- **A21 behaviour outside the window.** Direct cases in the same file. (i) With `_remember`
-  raising `MemoryError`, `tag_exception(exc, ...)` and `capture_failure(...)` raise
-  `MemoryError`; with `_remember` raising `RuntimeError` they keep today's result. (ii) With the
-  rebuild constructor raising `MemoryError`, `resurface_scrubbed`, `_errno_rebuild` and
-  `_fixed_text_rebuild` raise `MemoryError`, and `guarded_with_parser_errors` over a
-  text-recognised memory failure raises `MemoryError`, not `FileAccessReadError`. (iii) A typed
-  `ArrowMemoryError` through `guarded_with_parser_errors` is the same object before and after
-  (`is`). Red on `c2b81ef1f` for (i) and (ii).
+- **A21 behaviour outside the window.** Direct cases in the same file.
+  1. In `tag_exception` and standalone `capture_failure`, fault construction of `_Captured`
+     **inside** the real `_remember` try. A `MemoryError` propagates. A `RuntimeError`
+     retains the ordinary return (original exception or reason record respectively). For
+     `_lookup_captured`, fault validation of a genuinely remembered record inside its try.
+     Classification returns the reserved memory code, and direct `amend_failure` propagates OOM.
+  2. (A21 ii) Construct the original error first, then arm its type's constructor to raise
+     a fresh, fixed-text `MemoryError` only on rebuild. Assert the fault fired and the same
+     fault reached the caller. Exercise the three real rebuild helpers. Through a strict
+     `guarded_with_parser_errors`, fault a marker-text rebuild and a resource-errno rebuild.
+     Assert `__context__ is None`, `__cause__ is None`, and no original data canary in the
+     formatted traceback or exception text. Under a strict policy call exported `keeps_class`
+     on the marker case. Call exported `classified_failure` on a marker-text error and on
+     ENOMEM, ENOSPC and EDQUOT. Each fault must raise. Controls use an unarmed constructor
+     and check normal classification, scrubbed text and preserved errno where applicable.
+  3. A typed `ArrowMemoryError` through the strict guard retains identity, and an allowed
+     parser error passes unchanged. Cases (i) and (ii) distinguish the old behavior on the pin.
 - **A20 the raising `publish_unit` callers.** `ArrowMemoryError` in measurement through
   `ParquetTransactionalSink.commit` and through `DeliveryStage`'s bind. Each raises
   `MemoryError` (`isinstance`), binds nothing (target absent), and leaves no stage. For the sink,
@@ -633,6 +690,11 @@ recurring-defect class rules in `tests/sentry/defects/`. Delete
   `fileaccess/_output.py`, `determinism/_derive.py`, `determinism/_hkdf.py`,
   `internal/crypto.py`. The guard asserts each entry matches at least one file, so a rename
   cannot empty the scope silently.
+- Reuse `ModuleIndex` from `tests/sentry/defects/_defect_scan.py:70` to resolve imported
+  exception and suppress aliases. Seed `from pyarrow import ArrowException as AE`,
+  `import contextlib as cl` and `from contextlib import suppress as ignore`. Use the same
+  normalized predicate for A19 discovery, including forbidden finally exits in traced
+  functions that contain no handler.
 - A handler can catch `MemoryError` when its type is bare, or names (as a `Name` or the last
   `Attribute` part, inside a tuple or not) `Exception`, `BaseException`, `ArrowException`,
   `MemoryError` or `ArrowMemoryError`.
@@ -643,7 +705,12 @@ recurring-defect class rules in `tests/sentry/defects/`. Delete
   (nested `def` and `lambda` excluded) must hold no `return`, `break` or `continue`. A
   `contextlib.suppress` call naming a memory-catching type, and a `return`, `break` or
   `continue` inside a `finally`, are findings in any `SCOPE` file. Classifiers are matched by module and qualified function
-  name, and each must hold exactly one memory-catching handler. A classifier name that no longer
+  name, and only the registered handler may translate memory.
+  In the adapter the exact `except MemoryError: return _OUT_OF_MEMORY` precedes its ordinary
+  `except Exception` fallback in the same try. Count the converting arm once and check its
+  sibling order explicitly. In the resident classifier only the `run_pipeline` call belongs
+  in the protected body. Check any other handler in these functions by the ordinary rules.
+  A classifier name that no longer
   exists fails the test, and so does a fourth one.
 - `__del__` bodies are skipped: Python discards exceptions raised in a finalizer, so a clause
   there changes nothing.
@@ -656,7 +723,8 @@ recurring-defect class rules in `tests/sentry/defects/`. Delete
   into a function that is not registered; `except Exception: if cond: return None` then a final
   `raise`; `except Exception as exc: if cond: raise Other(...) from exc` then a final `raise`;
   `with contextlib.suppress(Exception):`; `with suppress(MemoryError):`; `return` inside a
-  `finally`; `break` inside a `finally` in a loop. Accepted seeds: the clause before `except Exception`;
+  `finally`; a post-run result build moved inside the resident run handler; a second converting
+  arm in a registered classifier; `break` inside a `finally` in a loop. Accepted seeds: the clause before `except Exception`;
   `except BaseException: cleanup(); raise`; `except (OSError, ValueError): pass`.
 - Known limit, recorded and not chased (development-loop "guard tests prove the realistic case"):
   an exception class bound to another name (`Broad = Exception`) is not resolved.
@@ -668,7 +736,9 @@ G16b: call `_run_in_process` outside `memory_boundary`; A17 resident goes red (r
 reserves in `enter_readback` instead of the constructor; A18 (i) goes red. G18 and G19 as above.
 G20: make `settle` return its argument unchanged; A16 goes red on both routes. G21: delete the
 vault decoder's clause; the A15 vault case goes red, and so does the guard. G22: delete the
-clause at `fileaccess/_errors.py:206`; A21 (ii) and the guard go red.
+clause at `fileaccess/_errors.py:206`; A21 (ii) and the guard go red. Also run the context-only
+mutation with all clauses intact: move `_resurface` back inside the guard handler. A21(ii)
+must fail on the chain even though it still receives the correct exception type.
 
 Existing suites that must stay green: `tests/unit/execution/test_isolated_run.py`,
 `test_isolated_oom_classification.py`, `tests/unit/execution/publication/` (route outcome matrix,
@@ -789,13 +859,13 @@ count and byte figures, numbers and tokens only.
 |---|---|
 | 1 anchored validation | A6 uses `fullmatch` and the trailing-newline case |
 | 2 strict wire and stored types | `extra["readback"]` asserted as exact `int` or `None` in A4, A5 |
-| 3 no exception context | refusal built outside any `except`; memory result from fixed text; A13 asserts no cause or context |
+| 3 no exception context | refusal built outside any `except`; memory result from fixed text; A13 checks the refusal and A21(ii) checks the strict guard rebuild |
 | 4 versioned read models | n/a: no persisted format |
-| 5 normalized guard scanners | n/a: no new scanner |
+| 5 normalized guard scanners | the memory sentry and A19 share normalized handler, suppress and finally checks with alias seeds |
 | 6 no private-module imports | `_isolated_commit` imports `check_readback`, `lazy_spec`, `resident_spec` from `decoy_engine.execution.pipeline` |
 | 7 no hidden CI failures | A12 Linux skip states its reason; the gate records a Linux pass on the final head |
 | 8 one trust class per entry point | n/a: one trust class (the child's stage) |
-| 9 mutations on the final head | G1 to G12, G14 to G22 (with G16b), the guard's seeded bypasses and the class 9 one-word mutation rerun on the final head and recorded |
+| 9 mutations on the final head | G1 to G12, G14 to G22 (with G16b), the guard's seeded bypasses, the A21(ii) context-only mutation and the class 9 one-word mutation rerun on the final head and recorded |
 | 10 allowlisted helpers are still checked | no new file-access registry row; the readback stays on the capability path |
 | 11 no raised caps | no module-size ceiling raised and no baseline row added; every touched module stays at or under 600 lines (Placement) |
 
@@ -837,11 +907,12 @@ New names: `check_readback`, `kill_ceiling`, `ReadbackRefused`, `ReadbackMemoryF
 | `src/decoy_engine/execution/_isolated_run.py` | both branches through `memory_boundary`; the old guard moves out; `failed_receipt_for` after `begin_publication`; resident window entries | `CODEMAP.md:271` | `_isolated_commit.py` | 575 on c2b81ef1f | at most 580 |
 | `src/decoy_engine/execution/_isolated_reason.py` | `Window`, `Attempt.isolated()` and `.resident()`, `enter_readback`, `enter_publishing`, `settle`, `memory_boundary`; the builder, renamed `_reserved_result`, takes `isolated`, `returncode` and the operation; module docstring rewritten | `CODEMAP.md:271` | `_isolated_common.py` | 264 on c2b81ef1f | about 330 |
 | `src/decoy_engine/reason_adapter.py` | `_OUT_OF_MEMORY`, the classifier clause, `_lookup_captured` and `known.with_context` inside the `try`, the transparent clause at four inner handlers | `CODEMAP.md` Foundation row | `reasons/` | 580 on c2b81ef1f | at most 600; shorten docstring prose if needed, no census row |
-| `src/decoy_engine/publication/_publish.py` | `reraise_memory` call becomes the clause; the module docstring's non-receipt exits (`:20-27`) add memory errors (A20) | `CODEMAP.md` Publication row | `_members.py` | 476 | about 478 |
+| `src/decoy_engine/publication/_publish.py` | `reraise_memory` call becomes the clause; scope the resident stage with its existing txn context; the module docstring's non-receipt exits (`:20-27`) add memory errors (A20) | `CODEMAP.md` Publication row | `_members.py` | 476 | about 478 |
 | `src/decoy_engine/vault/_format.py` | `reraise_memory` call becomes the clause | `CODEMAP.md` Token vault row | `_writer.py` | 307 | 308 |
-| `src/decoy_engine/fileaccess/_errors.py` | remove `reraise_memory` (added on this branch, never released, about -11); the clause at `:206`, `:216`, `:225`, `:309` (+8) | `CODEMAP.md` file access row | `is_memory_failure` | 342 | about 339 |
+| `src/decoy_engine/fileaccess/_errors.py` | remove `reraise_memory` (added on this branch, never released, about -11); the clause at `:206`, `:216`, `:225`, `:309` (+8), move the guarded rebuild outside its handler, and document that `classified_failure` may raise `MemoryError` during rebuild | `CODEMAP.md` file access row | `is_memory_failure` | 342 | about 345 |
+| `src/decoy_engine/fileaccess/_read.py` | update the `keeps_class` docstring: a strict text rebuild may raise `MemoryError` | `CODEMAP.md` file access row | `_errors.py` | 95 | about 96 |
 | `src/decoy_engine/fileaccess/__init__.py` | remove the `reraise_memory` export | `CODEMAP.md` file access row | n/a | 244 | 242 |
-| `fileaccess/_local_chain.py`, `fileaccess/_output.py`, `determinism/_derive.py`, `determinism/_hkdf.py`, `internal/crypto.py` | none: in `SCOPE` from the A19 trace, every handler already passes shape 2 | their own rows | n/a | 131, 489, 430, 92, 72 | unchanged |
+| `fileaccess/_local_chain.py`, `fileaccess/_output.py`, `determinism/_derive.py`, `determinism/_hkdf.py`, `internal/crypto.py` | none: in `SCOPE` from the A19 trace, the existing memory-catching handlers already pass shape 2 | their own rows | n/a | 131, 489, 430, 92, 72 | unchanged |
 | any further file a later A19 run adds | the clause at each traced handler | their own rows | n/a | n/a | at most 2 lines per handler. If a later run adds more than three source files, or a handler where the clause would change a non-memory verdict, stop and report |
 | `src/decoy_engine/execution/_errors.py` | `capacity_message` | `CODEMAP.md:271` | `_isolated_reason.py` | 140 | about 150 |
 | `src/decoy_engine/execution/pipeline/_resident_fit.py` | `check_readback`, public `kill_ceiling` | `CODEMAP.md:271` | `_resident_bytes.py` | 470 | about 505 |
@@ -855,7 +926,7 @@ New names: `check_readback`, `kill_ceiling`, `ReadbackRefused`, `ReadbackMemoryF
 | `tests/unit/reasons/test_capacity_reason_codes.py` | update A11's expected membership | existing registry tests | registry walk | 80 | 81 |
 | `tests/unit/execution/publication/test_isolated_readback_cap.py` | existing A1 to A9, A12. Shorten the A9 docstring to describe its actual check, no readback pricing after publish. Retain every assertion | `CODEMAP.md:172` | `_isolated_support.py` | 601 on abc5998fd | at most 600. All new cases go in the next file |
 | `tests/unit/execution/publication/test_isolated_commit_memory.py` | A14, A15 (on the branch); A9-style exact `MemoryError` readback case now expects the reserve | `CODEMAP.md:172` | `test_isolated_readback_cap.py` | 364 on c2b81ef1f | at most 380 |
-| `tests/unit/execution/publication/test_memory_boundary_routes.py` (new) | A16 to A21; A16 to A20 on both routes. A19 imports `SCOPE` and the predicate from the sentry-private `_memory_scan` (one definition; the only import of a sentry helper from a unit test) | `CODEMAP.md:172` | `test_isolated_commit_memory.py` | 0 | about 380 |
+| `tests/unit/execution/publication/test_memory_boundary_routes.py` (new) | A16 to A21; route-specific and direct cases as specified above. A19 imports `SCOPE` and the predicate from the sentry-private `_memory_scan` (one definition; the only import of a sentry helper from a unit test) | `CODEMAP.md:172` | `test_isolated_commit_memory.py` | 0 | about 380 |
 | `tests/sentry/defects/memory_boundary/__init__.py` (new) | empty; `tests/sentry/defects/` already has 35 entries | `CODEMAP.md:298` | n/a | 0 | 0 |
 | `tests/sentry/defects/memory_boundary/_memory_scan.py` (new) | `SCOPE`, the handler predicate, the three shapes, the `suppress` and `finally` checks, `CLASSIFIERS` | `CODEMAP.md:298` (recurring-defect class rules in `tests/sentry/defects/`) | `../_defect_scan.py` | 0 | about 140 |
 | `tests/sentry/defects/memory_boundary/test_memory_errors_reach_the_boundary.py` (new) | the guard, the scope-glob check and its seeded bypasses | `CODEMAP.md:298` | `../test_exception_context.py` | 0 | about 160 |
@@ -872,12 +943,12 @@ directory already holds the isolated publication tests (`test_isolated_parent_me
 CODEMAP row is needed. A10 tests the shared floor formula of `execution/pipeline/`, so it goes in
 `tests/unit/execution/pipeline/`.
 
-No new source module and no new package: `execution/` is over its fan-out freeze (109 entries
+No new production module or production package: `execution/` is over its fan-out freeze (109 entries
 against 104, `CODEMAP.md:271`), and every change fits an existing module under 600 lines.
 
 ## Slices
 
-The cap, the reserves and A14 and A15 are built on `feat/f25-g7-3-readback-cap` at `c2b81ef1f`. The remaining slice replaces the per-site `reraise_memory` rule with the memory boundary: write A16 to A18 and A21 and run them red on `c2b81ef1f`; then `Attempt` windows and `memory_boundary` on both routes; the clause at every non-compliant handler in `SCOPE` (the A19 trace found them all: `collect`, `_typed_error`, `_judge_and_bind`, `_decode_rows`, the adapter's four, and `fileaccess/_errors.py`'s four); the adapter clause; the guard in `tests/sentry/defects/memory_boundary/` and A19 over the 13-entry `SCOPE`; A20 and the changelog lines. Run the acceptance suite and final-head mutations (G1 to G22). Use T0 and T1 per commit and T2 at each gate. The registry change rides the next merge train for one full suite against the stored baseline. Expected size: 8 source files edited (`_isolated_commit.py`, `_isolated_run.py`, `_isolated_reason.py`, `reason_adapter.py`, `_publish.py`, `vault/_format.py`, `fileaccess/_errors.py`, `fileaccess/__init__.py`; the trace added no file beyond those already planned), about 3 test files changed, four test files added (one an empty `__init__.py`), one deleted; new names `Window`, `memory_boundary`, `Attempt.isolated`, `Attempt.resident`, `enter_readback`, `enter_publishing`, `settle`, `_OUT_OF_MEMORY`; renamed `_readback_result` to `_reserved_result`; one name removed, `fileaccess.reraise_memory`. No new public API.
+The cap, the reserves and A14 and A15 are built on `feat/f25-g7-3-readback-cap` at `c2b81ef1f`. The remaining slice replaces the per-site `reraise_memory` rule with the memory boundary: write A16 to A18 and A21 and run them red on `c2b81ef1f`; then `Attempt` windows and `memory_boundary` on both routes; the clause at every non-compliant handler in `SCOPE` (the A19 trace found them all: `collect`, `_typed_error`, `_judge_and_bind`, `_decode_rows`, the adapter's four, and `fileaccess/_errors.py`'s four); the adapter clause; the guard in `tests/sentry/defects/memory_boundary/` and A19 over the 13-entry `SCOPE`; A20 and the changelog lines. Run the acceptance suite and the final-head mutations in the recurring-defects table, including the A21 context-only mutation. Use T0 and T1 per commit and T2 at each gate. The registry change rides the next merge train for one full suite against the stored baseline. Expected size: 9 source files edited (`_isolated_commit.py`, `_isolated_run.py`, `_isolated_reason.py`, `reason_adapter.py`, `_publish.py`, `vault/_format.py`, `fileaccess/_errors.py`, `fileaccess/_read.py`, `fileaccess/__init__.py`), about 3 test files changed, four test files added (one an empty `__init__.py`), one deleted; new names `Window`, `memory_boundary`, `Attempt.isolated`, `Attempt.resident`, `enter_readback`, `enter_publishing`, `settle`, `_OUT_OF_MEMORY`; renamed `_readback_result` to `_reserved_result`; one name removed, `fileaccess.reraise_memory`. No new public API.
 
 ## Pre-mortem
 
@@ -912,7 +983,7 @@ The cap, the reserves and A14 and A15 are built on `feat/f25-g7-3-readback-cap` 
 - An `OSError` from `pub.txn.abort()` in `_run_isolated`'s `finally` replaces an in-flight `MemoryError` (Dennis r1 L6).
 - A frame-allocation failure on the `enter_readback` call leaves the window at `BEFORE` (L7).
 - A second memory error in the reason adapter's `_record(UNEXPECTED_ERROR)` arm escapes, as on `main` (L1).
-- The `MemoryError` that `fileaccess/_errors.py`'s rebuild clauses re-raise keeps the text-bearing original as `__context__`; only a caller that prints full tracebacks outside the window could show it.
+- A rebuild OOM in `keeps_class` or `classified_failure` called inside an active handler can retain the original data-bearing error as context. CLI `--verbose`, the `decoy ci` unsafe debug log, and platform `logger.exception` at `api/jobs/iteration.py:633` can render the chain. The strict guarded rebuild runs after its handler closes. Public result text stays value-free.
 - Codex R6: a retry that reuses a caller `staging_dir` with resident input tables finds the earlier `s0000.parquet` during input staging (`_isolated_commit.py:246`), before output admission. Input staging into a reused caller root is outside this slice.
 - Defer guaranteed completed results for verified replay and pre-built completed results per receipt. The old A14 bind, rename, fsync and replay transition tests belong to that stronger guarantee.
 - The CPython emergency-object reserve and PostgreSQL durable-commit comparison described the deferred completed-result design. Neither can establish that a Python caller observed a bind.
@@ -986,3 +1057,33 @@ D-A20 and D-BEFORE (orchestrator, 2026-11-27): see the Memory boundary section. 
 | Dennis r1 M5 sentry placement | `tests/sentry/defects/memory_boundary/` subpackage |
 | Dennis r1 L1 to L10 | L1 residual and `known.with_context` inside the `try`; L2 "publication state" and `cleanup_state`; L3 `memory_boundary`, docstring, `_reserved_result`; L4 ENOMEM control in A17; L5 A16 armed after `enter_publishing`; L6, L7 residuals and V2-LOG; L8 `_publish.py` docstring in Placement; L9 Codex R6 input-staging item in V2-LOG; L10 Placement note on the `_memory_scan` import |
 | Orchestrator decisions 2026-11-27 | D-A20 and D-BEFORE written in the Memory boundary section |
+
+
+### Dennis round 2 and final plan self-review against `c2b81ef1f`
+
+| Finding | Fix and verification required of the build |
+|---|---|
+| DESIGN · Dennis R2 medium · strict callers missing from the effect table | Part 2 follows both rebuild paths through exported `keeps_class` and `classified_failure`. Placement includes both docstrings. A21(ii) faults the constructors through each public caller. |
+| V1 · Dennis R2 low · strict rebuild can acquire the original library context | Part 2 moves reconstruction outside the handler. A21(ii) checks identity, both chain slots and rendered canary. The remaining diagnostic surfaces are in V2-LOG. |
+| V2-LOG · Dennis R2 low · errno rebuild description | The table and A21(ii) include disk-full and quota errors as well as ENOMEM. |
+| V2-LOG · Dennis R2 · vault dependency | A19 requires PyNaCl and a replay sentinel on each route. |
+| V1 · self-review · adapter OOM during pre-call refusal classification | `_isolated_commit.py:449–451,512` can classify a failed receipt before publication. Part 1 and A16 give the context-free adapter result the pre-call reserve while preserving A9's detailed readback result. |
+| V1 · self-review · resident stage ownership gap | Faulting the resident publisher at `publish_unit` entry on the pin left a pending stage on disk. Part 2 and A17 use the existing transaction context across the callback and handoff, with stage and target assertions. |
+| DESIGN · self-review · classifier exception too broad and adapter arm count unsatisfiable | The guard checks the adapter's ordered pair and restricts the resident exemption to the run-only try. A17 also faults resident scratch completion. A19 shares the guard's discovery predicate, including finally exits and import aliases, and exercises the applicable expanded trace cases. |
+| DESIGN · self-review · A19 could start on a nested probe | A local run of the original trace recorded 140 files and counted pre-window sampler threads. A19 now keys start and stop to the outer attempt and keeps the thread assertion. |
+| V2-LOG · self-review · ineffective or stale fault injections | A16 and A21 inject inside the real inner handlers. A16/A18 specify executable seams on the pin. A18 checks both refresh allocations and aligns the earlier A14 receipt test with D-BEFORE. |
+
+The existing commit-memory and file-access policy tests passed on the pinned source (83 tests,
+Python 3.10.20). A static walk of all 25 source files matched by the 13 scope entries confirmed
+the listed broad-handler sites. The resident handoff and pre-call adapter probes exercised the
+pinned code directly, with the proposed adapter fallback supplied for the latter. An in-memory
+probe of the revised strict guard preserved typed Arrow exception identity and kept the original
+out of both chain slots for text, ENOMEM, ENOSPC and EDQUOT rebuild faults. Rerunning the
+26-scenario prototype on 3.10 with route-specific entry and a public-return stop recovered the
+same 45 files and handler sites as the supplied reports, all four sentinels and zero in-window
+thread starts. The number of scenarios observing local abort differed (19 versus 21). A19
+checks handler coverage and scenario outcomes independently of that incidental count.
+
+**Plan verdict: GO.** The code and recorded Python 3.10/3.12 traces support the revised build
+and acceptance instructions. Implementation, acceptance runs and final-head mutations remain
+build gates. D-A20 and D-BEFORE stand. No size ceiling increase or baseline addition is required.
