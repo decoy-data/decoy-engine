@@ -121,3 +121,15 @@ def test_csv_to_frame_equals_the_local_read(
     if lexemes:
         assert got["age"].tolist() == ["NA", "042", ""]
     assert ledger.data_requests
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+def test_csv_schema_keeps_a_nullable_boolean_column_boolean(
+    monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
+    """True/False/NA parses as object holding bools; only mixed text and numbers become text."""
+    data = b"flag,mixed\nTrue,1\nFalse,x\nNA,2\n"
+    _serve(monkeypatch, provider, data)
+    schema = _build(provider)(_desc(provider, "csv")).schema()
+    assert pa.types.is_boolean(schema.field("flag").type)
+    assert pa.types.is_string(schema.field("mixed").type)

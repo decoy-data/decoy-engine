@@ -244,14 +244,16 @@ def _csv_schema_from_window(
     """The Arrow schema of a CSV's leading window.
 
     An object column whose non-null values are not all text (numbers and text from different
-    parser chunks) is text, as `low_memory=False` would have made it. The conversion is guarded:
+    parser chunks) is text, except a column of only booleans (True/False with NA), which stays boolean, as `low_memory=False` would have made it. The conversion is guarded:
     Arrow's error text names the cell it could not convert."""
     head = _csv_sample_from_window(window, size, _CSV_ESTIMATE_ROWS, lexeme_columns)
     for position, dtype in enumerate(head.dtypes):
         column = head.iloc[:, position]
+        values = column.dropna()
         if (
             pd.api.types.is_object_dtype(dtype)
-            and not column.dropna().map(lambda v: isinstance(v, str)).all()
+            and not values.map(lambda v: isinstance(v, str)).all()
+            and not values.map(lambda v: isinstance(v, bool)).all()
         ):
             head.isetitem(position, column.where(column.isna(), column.astype(str)))
     return arrow_adapter.table_from_pandas(provider, head).schema
