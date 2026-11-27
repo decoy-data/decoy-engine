@@ -10,7 +10,9 @@ RNG families), consumed incrementally:
 - sequence: no RNG, `start + step * global_i`;
 - categorical: one `random.Random(base_int("py"))`, `choices(k=batch)` per call;
 - per-row faker: `seed_instance(row_int("faker", global_i))` then the provider;
-- pooled faker: pool built once, then one persistent `default_rng(selection_seed)`;
+- pooled faker: pool built once, then one persistent `default_rng(selection_seed)`; its picks can
+  also leave as an Arrow array (`next_array`), which `stream/_batches.py` uses when no consumer
+  needs Python values;
 - reference (no repair): parent key set materialized once, one persistent `random.Random`;
 - constant: no draw, the one configured value;
 - distribution: one persistent `default_rng(base_int("dist"))`, `size` draws per call;
@@ -30,11 +32,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
 
 from decoy_engine.generation import _faker_pool
-from decoy_engine.generation._bounds import faker_pool_bytes
+from decoy_engine.generation import stream as gen_stream
 from decoy_engine.generation._numeric_typing import sequence_affixes
 from decoy_engine.generation.kinds import ConstantStream, ParametricStream
+from decoy_engine.generation.pool import DEFAULT_POOL_SIZE, faker_pool_resident_bytes
 from decoy_engine.generation.relational import check_reference_pool
 from decoy_engine.generators.derivation import (
     TABLE_KEY,
@@ -42,7 +47,8 @@ from decoy_engine.generators.derivation import (
     column_identity,
     with_table,
 )
-from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+from decoy_engine.internal.faker_locale import open_column_faker, requested_locale
+from decoy_engine.internal.faker_setup import get_faker_providers
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -69,7 +75,7 @@ class WindowedDateStream:
     def __init__(self, col: dict[str, Any], seed: int) -> None:
         from decoy_engine.transforms.windowed_date import WindowedDateConfig
 
-        cfg: dict[str, Any] = {"anchor": col.get("anchor", "")}
+        cfg: dict[str, Any] = {"anchor": gen_stream.sibling_input(col, "windowed_date") or ""}
         for key in ("min_days", "max_days", "distribution"):
             if key in col:
                 cfg[key] = col[key]
@@ -166,20 +172,12 @@ class PerRowFakerStream:
         from decoy_engine.generation.synthesize import _get_default_faker
 
         faker_type = col.get("faker_type", "word")
-        locale = col.get("locale")
         raw_kwargs = col.get("faker_kwargs") or {}
         self._kwargs: dict[str, Any] = raw_kwargs if isinstance(raw_kwargs, dict) else {}
         self._ctx = ctx
-        pre_seed: int | None
-        if locale:
-            self._inst = make_faker(locale)
-            pre_seed = None
-        elif instance_default_locale:
-            self._inst = make_faker(instance_default_locale)
-            pre_seed = seed
-        else:
-            self._inst = _get_default_faker()
-            pre_seed = seed
+        self._inst, pre_seed = open_column_faker(
+            col.get("locale"), instance_default_locale, seed, _get_default_faker
+        )
         providers = get_faker_providers(self._inst, provider_snapshot=provider_snapshot)
         self._provider = providers.get(faker_type) or providers["word"]
         if pre_seed is not None:
@@ -197,8 +195,15 @@ class PooledFakerStream:
     def __init__(self, selector: _faker_pool.PooledSelector) -> None:
         self._selector = selector
 
+    @property
+    def supports_array(self) -> bool:
+        return self._selector.has_arrow
+
     def next_batch(self, offset: int, size: int) -> list[Any]:
         return self._selector.select(size)
+
+    def next_array(self, offset: int, size: int) -> pa.Array:
+        return self._selector.take(size)
 
 
 class ReferenceStream:
@@ -246,6 +251,22 @@ class NullMaskedStream:
         self._p = probability
         self._rng = np.random.default_rng(ctx.base_int("np"))
 
+    @property
+    def supports_array(self) -> bool:
+        return supports_array(self._inner)
+
+    def next_array(self, offset: int, size: int) -> pa.Array:
+        """The inner array with the same mask positions nulled.
+
+        A take whose index is null gives a null slot with no value bytes, as `pa.array` does for
+        a `None` cell on the list path, so the written buffers match that path. `if_else` would
+        keep the generated value's bytes under each null.
+        """
+        arr: pa.Array = self._inner.next_array(offset, size)  # type: ignore[attr-defined]
+        masked = self._rng.random(size) < self._p
+        positions = pa.array(np.arange(size, dtype=np.int64), mask=masked)
+        return pc.take(arr, positions)  # type: ignore[no-untyped-call, unused-ignore]
+
     def next_batch(self, offset: int, size: int) -> list[Any]:
         return self.next_batch_from(offset, size, {})
 
@@ -256,6 +277,11 @@ class NullMaskedStream:
         for idx in np.flatnonzero(self._rng.random(size) < self._p):
             values[int(idx)] = None
         return values
+
+
+def supports_array(stream: object) -> bool:
+    """True when the stream can hand a batch over as an Arrow array (`next_array`)."""
+    return getattr(stream, "supports_array", False) is True
 
 
 def draw_batch(
@@ -341,22 +367,24 @@ def _faker_stream(
     faker_payload: int | None,
 ) -> ColumnStream:
     faker_type = col.get("faker_type", "word")
-    requested_locale = col.get("locale") or instance_default_locale
+    requested = requested_locale(col.get("locale"), instance_default_locale)
     # Pool admission is the TABLE row count, fixed for the column before the first batch.
     if _faker_pool.pool_eligible(
-        faker_type, requested_locale, rows, opted_out=_faker_pool.pool_opted_out(col)
+        faker_type, requested, rows, opted_out=_faker_pool.pool_opted_out(col)
     ):
         raw_kwargs = col.get("faker_kwargs") or {}
-        # Reserve before the 10_000 provider calls that build the pool allocate anything.
+        # Reserve before the provider calls that build the pool allocate anything.
         reservation = ledger.reserve(
             f"faker_pool_build:{label}",
-            faker_pool_bytes(10_000, faker_payload if faker_payload is not None else 0),
+            faker_pool_resident_bytes(
+                DEFAULT_POOL_SIZE, faker_payload if faker_payload is not None else 0
+            ),
         )
         selector = _faker_pool.open_pooled_selector(
             faker_type=faker_type,
             faker_kwargs=raw_kwargs if isinstance(raw_kwargs, dict) else {},
             gen_ctx=ctx,
-            effective_locale=requested_locale,
+            effective_locale=requested,
             provider_snapshot=provider_snapshot,
         )
         if selector is not None:
@@ -378,4 +406,5 @@ __all__ = [
     "WindowedDateStream",
     "draw_batch",
     "make_column_stream",
+    "supports_array",
 ]

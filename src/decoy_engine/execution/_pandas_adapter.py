@@ -337,6 +337,7 @@ class PandasExecutionAdapter:
             plan,
             sources,
             relationship_graph=relationship_graph,
+            registry=registry,
             enabled=pin_degenerate_faker,
         )
         conversion_ms += (time.perf_counter() - t1) * 1000.0

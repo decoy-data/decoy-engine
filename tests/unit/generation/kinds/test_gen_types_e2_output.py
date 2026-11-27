@@ -1,7 +1,7 @@
 """GEN-TYPES E2: AT-7 type and text on every route, AT-8 choke point, AT-9 reference, AT-15 text, AT-17 values.
 
 Mutants named in the plan: `round_to_scale` with ROUND_HALF_UP (AT-7, see the catalog tests),
-the cast call removed from `arrow_table` or from `_table_batches` (AT-8 below patches each site to
+the cast call removed from `arrow_table` or from `table_batches` (AT-8 below patches each site to
 a no-op), `output_type` dropped from `_EXCLUDED_FROM_FINGERPRINT` (AT-17 and the config tests).
 """
 
@@ -296,7 +296,7 @@ def test_the_resident_cast_site_is_load_bearing(monkeypatch: pytest.MonkeyPatch)
 def test_the_streamed_cast_site_is_load_bearing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from decoy_engine.generation import _streamed as site
+    from decoy_engine.generation.stream import _batches as site
 
     col = _col("x", "constant", "decimal(2)", value=12.3)
     monkeypatch.setattr(site, "cast_output_values", lambda values, *a, **k: values)
@@ -305,9 +305,10 @@ def test_the_streamed_cast_site_is_load_bearing(
 
 
 def test_both_routes_call_the_one_cast_function() -> None:
-    from decoy_engine.generation import _statistical_column, _streamed
+    from decoy_engine.generation import _statistical_column
+    from decoy_engine.generation.stream import _batches
 
-    assert _streamed.cast_output_values is kinds.cast_output_values
+    assert _batches.cast_output_values is kinds.cast_output_values
     assert _statistical_column.cast_output_columns is kinds.cast_output_columns
 
 

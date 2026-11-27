@@ -62,7 +62,9 @@ def test_snapshot_parse_diagnostics_name_no_locator(
     path = xworld.sub / "snap.json"
     path.write_bytes(content)
     ambient_pinned, ambient_failures = read_and_pin_snapshots(_snapshot_config(path))
-    assert LOCATOR_SENTINEL in str(next(iter(ambient_failures.values())))  # positive control
+    assert LOCATOR_SENTINEL not in str(
+        next(iter(ambient_failures.values()))
+    )  # value-free under every policy (F31)
     with fileaccess.scope(xworld.policy):
         pinned, failures = read_and_pin_snapshots(_snapshot_config(path))
     (failure,) = failures.values()
@@ -81,7 +83,9 @@ def test_snapshot_size_error_names_no_locator(
     monkeypatch.setattr(_generation, "EMBEDDED_SNAPSHOT_MAX_BYTES", 8)
     with pytest.raises(PlanCompileError) as control:
         _generation.read_and_pin_snapshots(_snapshot_config(path))
-    assert LOCATOR_SENTINEL in str(control.value) + control.value.path  # positive control
+    assert (
+        LOCATOR_SENTINEL not in str(control.value) + control.value.path
+    )  # value-free under every policy (F31)
     with fileaccess.scope(xworld.policy), pytest.raises(PlanCompileError) as info:
         _generation.read_and_pin_snapshots(_snapshot_config(path))
     assert_no_locator(xworld, [*rendered(info.value), info.value.path])
@@ -97,7 +101,7 @@ def test_load_snapshot_diagnostics_name_no_locator(xworld: XWorld, content: byte
     path.write_bytes(content)
     with pytest.raises(StatisticalSpecError) as control:
         _load_snapshot(str(path))
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(StatisticalSpecError) as info:
         _load_snapshot(str(path))
     assert_no_locator(xworld, rendered(info.value))
@@ -126,10 +130,11 @@ def test_a_read_failure_text_that_names_the_file_is_redacted(
     # ambient controls: the raw diagnostic names the file
     with pytest.raises(StatisticalSpecError) as c1:
         _load_snapshot(str(path))
-    assert LOCATOR_SENTINEL in str(c1.value)
+    assert LOCATOR_SENTINEL not in str(c1.value)
     with pytest.raises(RuntimeError) as c2:
         _snapshot_content_digest(str(path))
-    assert LOCATOR_SENTINEL in str(c2.value)
+    # The digest error is value-free under every policy (F31): no locator even when ambient.
+    assert LOCATOR_SENTINEL not in str(c2.value)
     with fileaccess.scope(xworld.policy):
         with pytest.raises(StatisticalSpecError) as e1:
             _load_snapshot(str(path))
@@ -251,7 +256,7 @@ def test_customer_corpus_diagnostics_name_no_locator(
         _corpus(path, {"code": ["a", "b"]}, {"decoy_corpus": "mine", "source": "s"})
     with pytest.raises(PlanCompileError) as control:
         load_corpus("mine", path)
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(PlanCompileError) as info:
         load_corpus("mine", path)
     assert_no_locator(xworld, rendered(info.value, caplog))
@@ -265,7 +270,7 @@ def test_customer_corpus_version_pin_diagnostic_names_no_locator(xworld: XWorld)
     _corpus(path, {"code": ["a", "b"]})
     with pytest.raises(PlanCompileError) as control:
         _get_corpus_record("mine", path, is_shipped=False, expected_source_version="X")
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(PlanCompileError) as info:
         _get_corpus_record("mine", path, is_shipped=False, expected_source_version="X")
     assert_no_locator(xworld, rendered(info.value))
@@ -283,7 +288,9 @@ def test_customer_corpus_without_provenance_logs_no_locator(
     _corpus(other, {"code": ["a", "b", "c"]})
     with caplog.at_level(logging.WARNING):
         load_corpus("mine", path)
-        assert any(LOCATOR_SENTINEL in r.getMessage() for r in caplog.records)  # control
+        ambient = [r.getMessage() for r in caplog.records]
+        assert ambient, "the ambient warning was expected"  # control: the warning fired
+        assert not any(LOCATOR_SENTINEL in m for m in ambient)  # value-free under every policy
         caplog.clear()
         with fileaccess.scope(xworld.policy):
             load_corpus("mine", other)
@@ -305,7 +312,7 @@ def test_model_pack_diagnostics_name_no_locator(
     pack.mkdir()
     with pytest.raises(ModelPackLoadError) as control:
         ModelPackLoader(pack).load()
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     (pack / "manifest.json").write_text("{not json")
     with fileaccess.scope(xworld.policy):
         loader = ModelPackLoader(pack, file_access=xworld.policy)
@@ -398,7 +405,9 @@ def test_name_hint_diagnostics_name_no_locator(xworld: XWorld) -> None:
     folder.mkdir()
     with pytest.raises(NameHintLoaderError) as control:
         load_name_hint_terms(folder)
-    assert LOCATOR_SENTINEL in str(control.value)
+    # The ambient CLI no longer prints the directory: the member is named under a fixed position.
+    assert LOCATOR_SENTINEL not in str(control.value)
+    assert "pre_scan.name_hints/manifest.yaml" in str(control.value)
     with fileaccess.scope(xworld.policy):
         # An absent manifest and a manifest that lists a missing file both surface as a preserved
         # denial under a strict policy (deny-by-default, no existence oracle): the loader no longer
@@ -430,7 +439,7 @@ def test_sign_pack_malformed_manifest_names_no_locator(xworld: XWorld) -> None:
     # ambient control: the message names the pack directory
     with pytest.raises(ValueError) as control:
         sign_pack(pack, b"k" * 32)
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(ValueError) as info:
         sign_pack(pack, b"k" * 32)
     assert_no_locator(xworld, rendered(info.value))
@@ -463,11 +472,11 @@ def test_lockfile_diagnostics_name_no_locator(xworld: XWorld) -> None:
     lock.write_text("not = [valid")
     with pytest.raises(ProvenanceError) as control:
         assert_lock_matches_installed(lock)
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     lock.write_text("version = 1\n")
     with pytest.raises(ProvenanceError) as control2:
         assert_lock_matches_installed(lock)
-    assert LOCATOR_SENTINEL in str(control2.value)
+    assert LOCATOR_SENTINEL not in str(control2.value)
     lock.write_text("not = [valid")
     with fileaccess.scope(xworld.policy), pytest.raises(ProvenanceError) as info:
         assert_lock_matches_installed(lock)
@@ -502,7 +511,8 @@ def test_reference_table_diagnostics_use_the_position(xworld: XWorld) -> None:
     pq.write_table(pa.table({"x": [1]}), path)
     with pytest.raises(ValueError) as control:
         load_table("ref", path)
-    assert LOCATOR_SENTINEL in str(control.value)
+    # The loader error carries no locator under any policy (F31), ambient included.
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(ValueError) as info:
         load_table("ref", path)
     assert_no_locator(xworld, rendered(info.value))
@@ -519,7 +529,8 @@ def test_joint_mask_unknown_reference_names_no_locator(xworld: XWorld) -> None:
     }
     with pytest.raises(PlanCompileError) as control:
         validate_joint_mask_config(cfg)
-    assert LOCATOR_SENTINEL in str(control.value)
+    # The validator text is locator-free under every policy (F31), ambient included.
+    assert LOCATOR_SENTINEL not in str(control.value)
     with (
         fileaccess.scope(xworld.policy),
         pytest.raises((PlanCompileError, fileaccess.FileAccessDenied)) as info,
@@ -536,10 +547,10 @@ def test_load_table_rejects_a_path_passed_as_a_name_without_a_locator(xworld: XW
     from decoy_engine.reference_tables import load_table
 
     name_as_path = str(xworld.sub / "secretref.parquet")
-    # ambient control: the message echoes the rejected name
+    # The rejected name is never echoed, under any policy (F31).
     with pytest.raises(FileNotFoundError) as control:
         load_table(name_as_path)
-    assert LOCATOR_SENTINEL in str(control.value)
+    assert LOCATOR_SENTINEL not in str(control.value)
     with fileaccess.scope(xworld.policy), pytest.raises(FileNotFoundError) as info:
         load_table(name_as_path, file_access=xworld.policy)
     assert_no_locator(xworld, rendered(info.value))
@@ -556,7 +567,7 @@ def test_joint_mask_bare_path_reference_chain_names_no_locator(xworld: XWorld) -
     cfg = {"columns": ["a"], "reference": str(xworld.sub / "bare_ref.parquet"), "key_by": "a"}
     with pytest.raises(PlanCompileError) as control:
         validate_joint_mask_config(cfg)
-    assert LOCATOR_SENTINEL in str(control.value)  # positive control (ambient)
+    assert LOCATOR_SENTINEL not in str(control.value)  # locator-free under every policy (F31)
     with fileaccess.scope(xworld.policy), pytest.raises(PlanCompileError) as info:
         validate_joint_mask_config(cfg)
     assert_no_locator(xworld, rendered(info.value))

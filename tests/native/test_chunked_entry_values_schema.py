@@ -15,9 +15,11 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from pandas.errors import OutOfBoundsDatetime
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
-from decoy_engine.execution import ExecutionError, run_pipeline
+from decoy_engine.execution import ExecutionError, PandasExecutionAdapter, run_pipeline
+from decoy_engine.execution.native._chunked_schema_rule import _safe_cast
 from decoy_engine.execution.native._dispatch import NativeRouteEvidence
 from decoy_engine.plan._errors import PlanCompileError
 from tests._declared_schema import declare_rest, declared_schema
@@ -573,3 +575,174 @@ def test_values_categorical_runs_natively_and_matches_oracle_and_full_frame(
 ) -> None:
     config = make_config([redact("r"), passthrough("p"), categorical("c")])
     _assert_three_way(config, ["r", "p", "c"], tmp_path, expect_native=True)
+
+
+# ---------------------------------------------------------------------------
+# One cell per contract exception class, the adapter rule, and a value-free
+# `_safe_cast` message.
+# ---------------------------------------------------------------------------
+
+_E4_ROWS = 7
+
+
+def _e4_source(name: str, values: list[Any], dtype: pa.DataType) -> pa.Table:
+    letters = [f"s{i}" for i in range(len(values))]
+    return pa.table({"s": pa.array(letters, pa.string()), name: pa.array(values, dtype)})
+
+
+def test_e4_nullable_integers_agree_with_the_oracle_on_every_chunk() -> None:
+    """(a) The oracle writes an untouched column from the source, so a
+    nullable integer is no longer rounded through float64 and the two entries agree."""
+    n_vals = [None, 2**53 + 1, 5, None, 2**63 - 1, 7, None]
+    u_vals = [2**64 - 1, None, 7, 2**63 + 5, None, 9, None]
+    src = pa.table(
+        {
+            "s": pa.array([f"s{i}" for i in range(_E4_ROWS)], pa.string()),
+            "n": pa.array(n_vals, pa.int64()),
+            "u": pa.array(u_vals, pa.uint64()),
+        }
+    )
+    chunks = split(src, 2)
+    config = make_config([redact("s"), passthrough("n"), passthrough("u")])
+    oracle = _oracle(config, chunks)
+    got = _entry(config, chunks)
+    assert len(oracle) == len(got) == len(chunks)
+    for chunk in oracle:
+        assert chunk.schema.field("n").type == pa.int64()
+        assert chunk.schema.field("u").type == pa.uint64()
+    assert column_values(oracle, "n") == n_vals
+    assert column_values(oracle, "u") == u_vals
+    assert pa.concat_tables(oracle).equals(pa.concat_tables(got))
+
+
+def test_e4_timestamp_ns_minimum_agrees_with_the_oracle() -> None:
+    """(b) `-2**63` ns is pandas' NaT sentinel; the oracle used to turn it into null."""
+    values = [-(2**63), None, 5, -(2**63), 7, None, 9]
+    src = _e4_source("t", values, pa.timestamp("ns"))
+    chunks = split(src, 2)
+    config = make_config([redact("s"), passthrough("t")])
+    oracle, got = _oracle(config, chunks), _entry(config, chunks)
+    assert column_values(got, "t") == column_values(oracle, "t")
+    assert [v is None for v in column_values(got, "t")] == [v is None for v in values]
+    assert pa.concat_tables(oracle).equals(pa.concat_tables(got))
+
+
+def test_e4_list_of_int64_above_2_pow_53_agrees_with_the_oracle() -> None:
+    """(c) Characterization: the oracle already agreed here. It backs the contract text,
+    which lists no exception for nested integers."""
+    values = [[2**53 + 1, None], None, [5], [], [2**63 - 1], None, [7]]
+    src = _e4_source("l", values, pa.list_(pa.int64()))
+    chunks = split(src, 2)
+    config = make_config([redact("s"), passthrough("l")])
+    oracle, got = _oracle(config, chunks), _entry(config, chunks)
+    assert column_values(got, "l") == values
+    assert pa.concat_tables(oracle).equals(pa.concat_tables(got))
+
+
+@pytest.mark.parametrize(
+    "dtype, values",
+    [
+        (pa.time64("ns"), [1000, None, 3001, 5, 7, None, 9]),
+        (pa.date32(), [2**31 - 1, None, 0, 1, 2, None, 3]),
+    ],
+    ids=["time64_ns_with_nanoseconds", "date32_outside_pandas_range"],
+)
+def test_e4_value_pandas_refuses_raises_on_the_oracle_and_is_exact_on_the_entry(
+    dtype: pa.DataType, values: list[Any]
+) -> None:
+    """(d) and (e) The oracle still converts every passthrough column through pandas; the
+    stock-adapter entry carries the column from the source."""
+    src = _e4_source("p", values, dtype)
+    chunks = split(src, 2)
+    config = make_config([redact("s"), passthrough("p")])
+    with pytest.raises(
+        (pa.ArrowInvalid, pa.ArrowTypeError, ValueError, OverflowError, OutOfBoundsDatetime)
+    ) as refused:
+        _oracle(config, chunks)
+    assert not isinstance(refused.value, ExecutionError)
+    got = _entry(config, chunks)
+    assert pa.concat_tables(got).column("p").equals(pa.chunked_array([pa.array(values, dtype)]))
+
+
+def test_e9_safe_cast_message_holds_no_value_and_no_exception_context() -> None:
+    marker = "MARKER-7f3a9c"
+    column = pa.chunked_array([pa.array(["1", marker], pa.string())])
+    with pytest.raises(ExecutionError) as caught:
+        _safe_cast(column, pa.int64(), table=TABLE, name="c", chunk_index=3)
+    exc = caught.value
+    assert exc.code == "chunked_schema_mismatch"
+    assert marker not in str(exc)
+    text = str(exc)
+    assert TABLE in text and "chunk 3" in text and "'c'" in text
+    assert "string" in text and "int64" in text
+    assert exc.__cause__ is None and exc.__context__ is None
+
+
+class _StockSubclass(PandasExecutionAdapter):
+    """No body: the CLI passes exactly this shape to turn the native route off."""
+
+
+def test_e11_a_subclass_adapter_runs_the_oracle_leg_and_carries_nothing() -> None:
+    chunks = split(_e4_source("p", [1, None, 3, 4, None, 6, 7], pa.int64()), 2)
+    config = make_config([redact("s"), passthrough("p")])
+    evidence: list[NativeRouteEvidence] = []
+    default: list[Any] = []
+    out_default = list(
+        run_mask_chunked(
+            config,
+            list(chunks),
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            key_provider=key_provider(),
+            route_evidence_sink=[],
+            chunk_result_sink=default,
+        )
+    )
+    sink: list[Any] = []
+    out = list(
+        run_mask_chunked(
+            config,
+            list(chunks),
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            key_provider=key_provider(),
+            adapter=_StockSubclass(),
+            route_evidence_sink=evidence,
+            chunk_result_sink=sink,
+        )
+    )
+    assert evidence[0].native_admitted is False
+    assert evidence[0].reroute_reason == "adapter_requested"
+    # The carry is off, so the passthrough column is listed as read through pandas.
+    assert {tuple(r.quality_metrics["chunked_route"]["pandas_read_passthrough"]) for r in sink} == {
+        ("p",)
+    }
+    assert {
+        tuple(r.quality_metrics["chunked_route"]["pandas_read_passthrough"]) for r in default
+    } == {()}
+    assert column_values(out, "p") == column_values(out_default, "p")
+
+
+def test_e11_an_explicit_stock_adapter_carries_like_the_default() -> None:
+    """The exact stock type is the carry's other accepted value besides `None`; a
+    caller that passes it explicitly must not lose the carry."""
+    chunks = split(_e4_source("p", [1, None, 3, 4, None, 6, 7], pa.int64()), 2)
+    config = make_config([redact("s"), passthrough("p")])
+    sink: list[Any] = []
+    evidence: list[NativeRouteEvidence] = []
+    out = list(
+        run_mask_chunked(
+            config,
+            list(chunks),
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            key_provider=key_provider(),
+            adapter=PandasExecutionAdapter(),
+            route_evidence_sink=evidence,
+            chunk_result_sink=sink,
+        )
+    )
+    assert {tuple(r.quality_metrics["chunked_route"]["pandas_read_passthrough"]) for r in sink} == {
+        ()
+    }
+    assert column_values(out, "p") == [1, None, 3, 4, None, 6, 7]

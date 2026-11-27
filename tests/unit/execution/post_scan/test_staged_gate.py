@@ -125,7 +125,7 @@ def test_at16_a_streamed_publish_session_is_gated_at_its_commit(tmp_path: Path) 
     sources = {"parent": pa.table({"id": ["a", "b", "c"]}), "child": pa.table({"pid": ["a"]})}
     gate = PostScanGate({"relationships": [rel]}, sources=sources)
     publish = OutputPublish(sink, True, False)
-    publish.open()
+    publish.start_streaming()
     sink.write("parent", pa.table({"id": ["a", "a", "b"]}))
     sink.write("child", pa.table({"pid": ["a"]}))
     with _bound(gate), pytest.raises(PostScanBlockedError) as caught:

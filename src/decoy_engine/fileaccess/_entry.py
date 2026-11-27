@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any, NoReturn, TypeVar
 
+from decoy_engine._error_base import raise_bare
 from decoy_engine.fileaccess._local import LocalFileAccess
 from decoy_engine.fileaccess._types import FileAccess, FileAccessUnavailable
 
@@ -36,13 +37,7 @@ def _unavailable(message: str) -> NoReturn:
     """Raise `FileAccessUnavailable` with no inherited chain: a caller may resolve a policy
     while handling its own exception (a decode error holding secret bytes, say), which Python
     would otherwise attach as `__context__`."""
-    try:
-        raise FileAccessUnavailable(message)
-    except FileAccessUnavailable as fresh:
-        fresh.__cause__ = None
-        fresh.__context__ = None
-        fresh.__suppress_context__ = True
-        raise
+    raise_bare(FileAccessUnavailable(message))
 
 
 class _Arguments:

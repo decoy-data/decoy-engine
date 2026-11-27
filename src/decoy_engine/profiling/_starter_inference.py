@@ -22,7 +22,7 @@ from typing import Any
 
 from decoy_engine.profiling import recommendations
 
-__all__ = ["StarterDecision", "detected_date_config", "infer_starter_strategy"]
+__all__ = ["StarterDecision", "confident_matches", "detected_date_config", "infer_starter_strategy"]
 
 _AMBIGUITY_WINDOW = 0.1
 _CONFIDENT_BUCKETS = ("high", "medium")
@@ -114,6 +114,23 @@ def _from_descriptor(detector_id: str, bucket: str | None, match: Any = None) ->
     )
 
 
+def confident_matches(field_stats: Any) -> list[Any]:
+    """The detector matches that decide a starter column, highest match rate first.
+
+    The one rule for "confident regex": a bucket of high or medium, or a match rate of 0.5 or
+    more. `starter_config` asks it too, so a model hit never overrides a column this rule keeps.
+    """
+    matches = getattr(field_stats, "detector_matches", None) or []
+    confident = [
+        m
+        for m in matches
+        if getattr(m, "confidence_bucket", None) in _CONFIDENT_BUCKETS
+        or getattr(m, "match_rate", 0.0) >= _CONFIDENT_RATE
+    ]
+    confident.sort(key=lambda m: -getattr(m, "match_rate", 0.0))
+    return confident
+
+
 def infer_starter_strategy(field_stats: Any) -> StarterDecision:
     """Pick a strategy for one column from its `FieldStats`.
 
@@ -127,16 +144,8 @@ def infer_starter_strategy(field_stats: Any) -> StarterDecision:
     Reads attributes only, so any object with `detector_matches`, `inferred_type` and
     `is_likely_unique` works.
     """
-    matches = getattr(field_stats, "detector_matches", None) or []
-    confident = [
-        m
-        for m in matches
-        if getattr(m, "confidence_bucket", None) in _CONFIDENT_BUCKETS
-        or getattr(m, "match_rate", 0.0) >= _CONFIDENT_RATE
-    ]
-
+    confident = confident_matches(field_stats)
     if confident:
-        confident.sort(key=lambda m: -getattr(m, "match_rate", 0.0))
         top = confident[0]
         bucket = getattr(top, "confidence", None)
         base = _from_descriptor(
