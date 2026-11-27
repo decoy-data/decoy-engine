@@ -552,11 +552,11 @@ def build_profile_source(
     if src_type == "s3":
         from decoy_engine.profile._cloud_readers import build_s3_profile_source
 
-        return build_s3_profile_source(descriptor)
+        return build_s3_profile_source(descriptor, table)
     if src_type == "gcs":
         from decoy_engine.profile._cloud_readers import build_gcs_profile_source
 
-        return build_gcs_profile_source(descriptor)
+        return build_gcs_profile_source(descriptor, table)
     raise NotImplementedError(
         f"profile_source: unsupported source type "
         f"{fileaccess.shown(repr(src_type), _at(field_key, 'type'))}. "

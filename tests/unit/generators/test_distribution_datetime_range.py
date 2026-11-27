@@ -110,3 +110,12 @@ def test_nine_fractional_digits_are_kept_on_every_interpreter() -> None:
     snap = _snap(stamp, stamp, [(2020, 5)])
     out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
     assert {int(v.value) for v in out} == {pd.Timestamp(stamp).value}
+
+
+@pytest.mark.parametrize(
+    "bound", ["2020-06-01T00:99:00", "2020-06-01T24:00:00", "2020-06-01T00:00:00+99:99"]
+)
+def test_a_malformed_clock_or_offset_stays_unparseable_not_shifted(bound: str) -> None:
+    snap = _snap(bound, bound, [(2020, 5)])
+    out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
+    assert out.isna().all()

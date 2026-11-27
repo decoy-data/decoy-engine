@@ -108,12 +108,15 @@ def _read_parquet_schema(size: int, fetch: Callable[[int, int], bytes]) -> pa.Sc
 
 
 def _read_parquet_sample(
-    size: int, fetch: Callable[[int, int], bytes], sample_rows: int
+    size: int, fetch: Callable[[int, int], bytes], sample_rows: int, table: str
 ) -> pd.DataFrame:
     reader = _RangeFileReader(size, fetch)
     parquet_file = pq.ParquetFile(pa.PythonFile(reader, mode="r"))
     return head_frame_from_batches(
-        parquet_file.iter_batches(batch_size=sample_rows), sample_rows, parquet_file.schema_arrow
+        parquet_file.iter_batches(batch_size=sample_rows),
+        sample_rows,
+        parquet_file.schema_arrow,
+        table=table,
     )
 
 
@@ -240,8 +243,9 @@ def _s3_full(client: Any, bucket: str, key: str) -> bytes:
 class S3ParquetSource:
     """Bounded `ProfileSource` for an S3 Parquet object (footer + batch reads)."""
 
-    def __init__(self, descriptor: dict[str, Any]) -> None:
+    def __init__(self, descriptor: dict[str, Any], table: str = "source") -> None:
         self._descriptor = descriptor
+        self._table = table
         self._bucket = _require_str(descriptor, "bucket", "s3")
         self._key = _require_str(descriptor, "key", "s3")
 
@@ -264,18 +268,18 @@ class S3ParquetSource:
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
         _, size, fetch = self._bind()
-        return _read_parquet_sample(size, fetch, sample_rows)
+        return _read_parquet_sample(size, fetch, sample_rows, self._table)
 
     def to_frame(self) -> pd.DataFrame:
         client = _s3_for(self._descriptor)
-        return _checked_frame(_s3_full(client, self._bucket, self._key))
+        return _checked_frame(_s3_full(client, self._bucket, self._key), self._table)
 
 
-def _checked_frame(data: bytes) -> pd.DataFrame:
+def _checked_frame(data: bytes, table: str) -> pd.DataFrame:
     """A whole Parquet object as a frame, after its dates passed the calendar check."""
-    table = pq.read_table(io.BytesIO(data))
-    check_source_dates(table, table="source")
-    return table.to_pandas()
+    arrow_table = pq.read_table(io.BytesIO(data))
+    check_source_dates(arrow_table, table=table)
+    return arrow_table.to_pandas()
 
 
 class S3CsvSource:
@@ -329,12 +333,12 @@ class S3CsvSource:
         )
 
 
-def build_s3_profile_source(descriptor: dict[str, Any]) -> ProfileSource:
+def build_s3_profile_source(descriptor: dict[str, Any], table: str = "source") -> ProfileSource:
     fmt = descriptor.get("format")
     if fmt == "csv":
         return S3CsvSource(descriptor)
     if fmt == "parquet":
-        return S3ParquetSource(descriptor)
+        return S3ParquetSource(descriptor, table)
     raise NotImplementedError(
         f"profile_source: unsupported s3 format {fmt!r}. V1 supports csv | parquet only."
     )
@@ -379,8 +383,9 @@ def _with_gcs_reads(
 class GcsParquetSource:
     """Bounded `ProfileSource` for a GCS Parquet object (footer + batch reads)."""
 
-    def __init__(self, descriptor: dict[str, Any]) -> None:
+    def __init__(self, descriptor: dict[str, Any], table: str = "source") -> None:
         self._descriptor = descriptor
+        self._table = table
 
     def row_count(self) -> RowCount:
         return _with_gcs_reads(self._descriptor, _read_parquet_row_count)
@@ -390,13 +395,14 @@ class GcsParquetSource:
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
         return _with_gcs_reads(
-            self._descriptor, lambda size, fetch: _read_parquet_sample(size, fetch, sample_rows)
+            self._descriptor,
+            lambda size, fetch: _read_parquet_sample(size, fetch, sample_rows, self._table),
         )
 
     def to_frame(self) -> pd.DataFrame:
         with _clients.gcs_client() as client:
             data = _clients.gcs_download(_gcs_blob(self._descriptor, client))
-        return _checked_frame(data)
+        return _checked_frame(data, self._table)
 
 
 class GcsCsvSource:
@@ -448,12 +454,12 @@ class GcsCsvSource:
         )
 
 
-def build_gcs_profile_source(descriptor: dict[str, Any]) -> ProfileSource:
+def build_gcs_profile_source(descriptor: dict[str, Any], table: str = "source") -> ProfileSource:
     fmt = descriptor.get("format")
     if fmt == "csv":
         return GcsCsvSource(descriptor)
     if fmt == "parquet":
-        return GcsParquetSource(descriptor)
+        return GcsParquetSource(descriptor, table)
     raise NotImplementedError(
         f"profile_source: unsupported gcs format {fmt!r}. V1 supports csv | parquet only."
     )

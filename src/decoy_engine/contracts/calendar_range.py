@@ -18,13 +18,13 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER
 from decoy_engine.errors import DecoyError
-from decoy_engine.io import CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER
 
 NS_FIRST_DAY = date(1677, 9, 22)
 NS_LAST_DAY = date(2262, 4, 10)
 _EPOCH = date(1970, 1, 1)
-# The day numbers live in the checked reader; the dates derive from them.
+# The day numbers live in `_arrow_types`; the dates derive from them.
 CALENDAR_FIRST_DAY = _EPOCH + timedelta(days=CALENDAR_FIRST_DAY_NUMBER)
 CALENDAR_LAST_DAY = _EPOCH + timedelta(days=CALENDAR_LAST_DAY_NUMBER)
 NS_PER_DAY = 86_400 * 1_000_000_000
@@ -79,14 +79,16 @@ def _ns_since_epoch(text: str) -> int:
         raise ValueError("not an ISO date or datetime")
     year, month, day, hour, minute, second, fraction, zone = match.groups()
     days = (date(int(year), int(month), int(day)) - _EPOCH).days
-    seconds = int(hour or 0) * 3600 + int(minute or 0) * 60 + int(second or 0)
-    if seconds >= 86_400:
+    if int(hour or 0) > 23 or int(minute or 0) > 59 or int(second or 0) > 59:
         raise ValueError("time of day out of range")
+    seconds = int(hour or 0) * 3600 + int(minute or 0) * 60 + int(second or 0)
     nanos = int((fraction or "").ljust(9, "0"))
     offset = 0
     if zone and zone != "Z":
         sign = -1 if zone[0] == "-" else 1
         digits = zone[1:].replace(":", "")
+        if int(digits[:2]) > 23 or int(digits[2:]) > 59:
+            raise ValueError("zone offset out of range")
         offset = sign * (int(digits[:2]) * 3600 + int(digits[2:]) * 60)
     return ((days * 86_400 + seconds - offset) * 1_000_000_000) + nanos
 

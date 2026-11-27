@@ -8,8 +8,6 @@ caller: these readers take a local path and a budget, nothing else.
 
 from decoy_engine.io import csv_framer
 from decoy_engine.io.bounded_reader import (
-    CALENDAR_FIRST_DAY_NUMBER,
-    CALENDAR_LAST_DAY_NUMBER,
     PANDAS_DEFAULT_NA_VALUES,
     BoundedReadError,
     ChunkBudget,
@@ -29,8 +27,6 @@ from decoy_engine.io.bounded_reader import (
 )
 
 __all__ = [
-    "CALENDAR_FIRST_DAY_NUMBER",
-    "CALENDAR_LAST_DAY_NUMBER",
     "PANDAS_DEFAULT_NA_VALUES",
     "BoundedReadError",
     "ChunkBudget",

@@ -22,6 +22,7 @@ from datetime import date
 
 import pyarrow as pa
 
+from decoy_engine._arrow_types import CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER
 from decoy_engine.verification.canary._types import CanaryPolicyInputError
 
 
@@ -39,7 +40,7 @@ Cell = str | CellState
 _Convert = Callable[[pa.Array], list[Cell]]
 
 NULL, UNCOMPARED = CellState.NULL_LIKE, CellState.UNCOMPARED
-DATE_MIN, DATE_MAX = -719_162, 2_932_896  # 0001-01-01 and 9999-12-31 as days since 1970-01-01
+DATE_MIN, DATE_MAX = CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER  # years 1 and 9999
 _EPOCH_ORDINAL = 719_163  # date(1970, 1, 1).toordinal()
 _PER_SECOND = {"s": 1, "ms": 10**3, "us": 10**6, "ns": 10**9}
 _DAY_SECONDS = 86_400

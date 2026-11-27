@@ -29,6 +29,7 @@ import pyarrow.compute as pc
 import pyarrow.csv as pa_csv
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._arrow_types import CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER
 from decoy_engine.errors import DecoyError, SourceDateUnrepresentableError
 from decoy_engine.fileaccess import FileAccess, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
@@ -398,10 +399,6 @@ def iter_csv_chunks(
             yield flush()
 
 
-# Calendar years 1 to 9999 as day counts since 1970-01-01 (the date32 value). The one definition:
-# the date contracts derive their calendar dates from these.
-CALENDAR_FIRST_DAY_NUMBER = -719_162
-CALENDAR_LAST_DAY_NUMBER = 2_932_896
 _FIRST_DAY = CALENDAR_FIRST_DAY_NUMBER
 _LAST_DAY = CALENDAR_LAST_DAY_NUMBER
 _SECONDS_PER_DAY = 86_400
@@ -534,8 +531,6 @@ def checked_loader(loader: Callable[[str], pa.Table] | None) -> Callable[[str], 
 
 
 __all__ = [
-    "CALENDAR_FIRST_DAY_NUMBER",
-    "CALENDAR_LAST_DAY_NUMBER",
     "PANDAS_DEFAULT_NA_VALUES",
     "BoundedReadError",
     "ChunkBudget",

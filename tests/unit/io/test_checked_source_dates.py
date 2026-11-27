@@ -171,5 +171,20 @@ def test_a_cloud_parquet_object_is_checked_before_pandas_reads_it() -> None:
 
     buffer = bytes_io.BytesIO()
     pq.write_table(_table(pa.array([FAR_DAY], pa.date32())), buffer)
-    with pytest.raises(SourceDateUnrepresentableError):
-        _checked_frame(buffer.getvalue())
+    with pytest.raises(SourceDateUnrepresentableError) as caught:
+        _checked_frame(buffer.getvalue(), "orders")
+    assert caught.value.table == "orders"
+
+
+def test_the_cloud_builders_carry_the_configured_table_name() -> None:
+    from decoy_engine.profile._cloud_readers import (
+        GcsParquetSource,
+        S3ParquetSource,
+        build_gcs_profile_source,
+        build_s3_profile_source,
+    )
+
+    s3 = build_s3_profile_source({"format": "parquet", "bucket": "b", "key": "k"}, "orders")
+    gcs = build_gcs_profile_source({"format": "parquet", "bucket": "b", "key": "k"}, "orders")
+    assert isinstance(s3, S3ParquetSource) and s3._table == "orders"
+    assert isinstance(gcs, GcsParquetSource) and gcs._table == "orders"

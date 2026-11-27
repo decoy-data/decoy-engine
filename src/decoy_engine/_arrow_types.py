@@ -17,6 +17,11 @@ from itertools import pairwise
 import numpy as np
 import pyarrow as pa
 
+# Calendar years 1 to 9999 as day counts since 1970-01-01 (the date32 value). The one definition:
+# the checked source read, the date contracts and the canary derive their ranges from these.
+CALENDAR_FIRST_DAY_NUMBER = -719_162
+CALENDAR_LAST_DAY_NUMBER = 2_932_896
+
 
 def is_text(t: pa.DataType) -> bool:
     """True for `string` and `large_string`."""

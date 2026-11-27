@@ -87,3 +87,26 @@ def test_the_legacy_sampler_refuses_a_year_past_the_range_before_any_draw() -> N
             3, {"name": "d", "type": "distribution", "snapshot": FAR}, "t", {}
         )
     assert caught.value.code == CODE
+
+
+def test_the_plan_compile_check_refuses_a_statistical_year_past_the_range() -> None:
+    from decoy_engine.generation.statistical import StatisticalSpecError, check_degenerate
+
+    spec = _statistical_spec({"year_bins": FAR["year_bins"], "min": FAR["min"], "max": FAR["max"]})
+    with pytest.raises(StatisticalSpecError) as caught:
+        check_degenerate(spec)
+    assert caught.value.code == CODE
+    assert "9999" not in str(caught.value)
+
+
+@pytest.mark.parametrize("bound", ["min", "max"])
+def test_the_plan_compile_check_refuses_an_unparseable_statistical_bound(bound: str) -> None:
+    from decoy_engine.generation.statistical import StatisticalSpecError, check_degenerate
+
+    stats = {"year_bins": [{"year": 2020, "count": 5}], "min": "2020-01-01", "max": "2020-12-31"}
+    stats[bound] = "not a datetime"
+    with pytest.raises(StatisticalSpecError) as caught:
+        check_degenerate(_statistical_spec(stats))
+    assert caught.value.code == CODE
+    assert "not a datetime" not in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
