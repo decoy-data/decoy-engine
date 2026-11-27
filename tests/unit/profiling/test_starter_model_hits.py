@@ -392,8 +392,11 @@ def test_a_date_hit_on_a_unique_integer_column_writes_redact_not_hash(tmp_path: 
     assert _entry_of(control)["strategy"] == "hash"
     result = starter_config(_patched(scan, hits=(_classifier("iso_date"),)))
     assert _entry_of(result) == {"name": COLUMN, "strategy": "redact"}
-    assert _suggestion(result).decided_by == "fallback"
-    assert "classifier lgbm-v1 0.1.0: iso_date (band high)" in _note(result)
+    assert _suggestion(result).decided_by == "classifier"
+    note = _note(result)
+    assert "no single complete date format" in note
+    assert "Hash preserves" not in note and "No PII detector" not in note
+    assert "classifier lgbm-v1 0.1.0: iso_date (band high)" in note
 
 
 def test_a_declared_key_note_keeps_its_model_evidence_on_both_sides(tmp_path: Path) -> None:
@@ -415,3 +418,38 @@ def test_a_declared_key_note_keeps_its_model_evidence_on_both_sides(tmp_path: Pa
         assert sides[name]["namespace"] == "ns"
     assert "classifier lgbm-v1 0.1.0: us_ssn (band high)" in result.notes[("p", "id")]
     assert "ner en_core_web_sm 3.8.0: person_name (rate >=50%)" in result.notes[("k", "pid")]
+
+
+def test_a_confident_regex_beats_a_date_hit_without_a_format(tmp_path: Path) -> None:
+    email = DetectorMatch(detector_id="email", match_rate=0.9)
+    result = starter_config(
+        _patched(_plain(tmp_path), matches=[email], hits=(_classifier("iso_date"),))
+    )
+    assert _entry_of(result)["strategy"] == "faker"
+    assert _suggestion(result).source == "regex"
+
+
+def test_the_first_eligible_hit_decides_when_an_earlier_date_hit_has_no_format(
+    tmp_path: Path,
+) -> None:
+    hits = (_classifier("iso_date"), _classifier("email"))
+    result = starter_config(_patched(_plain(tmp_path), hits=hits))
+    assert _entry_of(result) == {"name": COLUMN, "strategy": "redact"}
+
+
+def test_a_declared_key_note_does_not_claim_the_regex_won(tmp_path: Path) -> None:
+    parent = _scan(tmp_path, {"id": [str(i) for i in range(1, 21)]}, table="p")
+    email = DetectorMatch(detector_id="email", match_rate=0.9)
+    parent = _patched(parent, matches=[email], hits=(_classifier("us_ssn"),), column="id")
+    child = _scan(tmp_path, {"pid": [str(i) for i in range(1, 21)]}, table="k")
+    scan = dataclasses.replace(parent, tables=(*parent.tables, *child.tables))
+    rel = {
+        "parent": {"table": "p", "columns": ["id"]},
+        "children": [{"table": "k", "columns": ["pid"]}],
+        "namespace": "ns",
+        "orphan_policy": "warn",
+    }
+    result = starter_config(scan, relationships=[rel])
+    note = result.notes[("p", "id")]
+    assert "us_ssn (band high), regex says email" in note
+    assert "regex kept" not in note

@@ -62,6 +62,7 @@ __all__ = [
 
 _KEY_STRATEGY = "hash"
 _DATE_FALLBACK_STRATEGY = "redact"
+_DATE_FALLBACK_STRATEGY = "redact"
 _CHECK_NAMESPACE = "starter-check"
 _TARGETS: TypeAdapter[dict[str, TargetDescriptor]] = TypeAdapter(dict[str, TargetDescriptor])
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
@@ -76,6 +77,10 @@ _KEY_NOTE = (
 _PLACEHOLDER_NOTE = (
     "Set the same namespace on the relationship and on every key column of it before "
     "running; `decoy validate` refuses the placeholder."
+)
+_DATE_NO_FORMAT_NOTE = (
+    "A model read this column as a date, but the scan found no single complete date format, so "
+    "it stays redact until you choose one."
 )
 _LEADING_ZERO_NOTE = (
     "{count} sampled values in this column start with 0. The scan read it as a number, but "
@@ -293,11 +298,6 @@ def _decide(
             chosen = _classifier_suggestion(table, stats, hit)
             if chosen is not None:
                 return chosen
-    if _unreadable_date_hit(stats, hits):
-        # A date hit with no complete format must not fall through to the inferred strategy:
-        # a likely-unique integer column would become `hash`, where E2 requires `redact`.
-        bare = ColumnSuggestion(table, stats.name, _DATE_FALLBACK_STRATEGY)
-        return dataclasses.replace(bare, entry=MappingProxyType(_entry(bare))), decision.review
     bare = ColumnSuggestion(
         table,
         stats.name,
@@ -310,17 +310,6 @@ def _decide(
     )
     named = dataclasses.replace(bare, namespace=stats.name) if _needs_namespace(bare) else bare
     return dataclasses.replace(named, entry=MappingProxyType(_entry(named))), decision.review
-
-
-def _unreadable_date_hit(stats: Any, hits: Sequence[ModelHit]) -> bool:
-    """True when a high-band classifier hit names a date detector the scan read no format for."""
-    for hit in hits:
-        if hit.source != "classifier" or hit.band != "high":
-            continue
-        choice = recommendations.starter_choice(hit.detector_id)
-        if choice is not None and choice.detected_date_format:
-            return _complete_date_format(stats, hit.detector_id, choice) is None
-    return False
 
 
 def _classifier_suggestion(
@@ -337,11 +326,15 @@ def _classifier_suggestion(
     choice = recommendations.starter_choice(hit.detector_id)
     if choice is None:
         return None
-    entry = detector_entry(
-        hit.detector_id,
-        stats.name,
-        date_format=_complete_date_format(stats, hit.detector_id, choice),
-    )
+    date_format = _complete_date_format(stats, hit.detector_id, choice)
+    if choice.detected_date_format and date_format is None:
+        # The hit says date but the scan read no complete format. Falling through would let the
+        # inferred strategy decide, and a likely-unique integer column would become `hash`.
+        entry: dict[str, Any] | None = build_entry(_DATE_FALLBACK_STRATEGY, stats.name)
+        note = _DATE_NO_FORMAT_NOTE
+    else:
+        entry = detector_entry(hit.detector_id, stats.name, date_format=date_format)
+        note = choice.review
     if entry is None:
         return None
     suggestion = ColumnSuggestion(
@@ -358,7 +351,7 @@ def _classifier_suggestion(
         entry=MappingProxyType(entry),
         live=False,
     )
-    return suggestion, choice.review
+    return suggestion, note
 
 
 def _complete_date_format(
@@ -464,7 +457,7 @@ def _note(
     hits: Sequence[ModelHit],
 ) -> str:
     parts = [lead]
-    evidence = _evidence(stats, hits)
+    evidence = _evidence(stats, hits, declared_key=key is not None)
     if evidence:
         parts.append(f"Model evidence: {evidence}.")
     if key is not None and key[1]:
@@ -475,10 +468,11 @@ def _note(
     return " ".join(p for p in parts if p)
 
 
-def _evidence(stats: Any, hits: Sequence[ModelHit]) -> str:
+def _evidence(stats: Any, hits: Sequence[ModelHit], *, declared_key: bool = False) -> str:
     """One line naming each model hit: ids, versions, bands and buckets, never a value.
 
-    A hit that names a detector other than the confident regex match says the regex was kept.
+    A hit that names a detector other than the confident regex match says the regex was kept,
+    except on a declared key, where the declaration decided and the line only lists both views.
     """
     confident = confident_matches(stats)
     regex_id = getattr(confident[0], "detector_id", "") if confident else ""
@@ -486,7 +480,9 @@ def _evidence(stats: Any, hits: Sequence[ModelHit]) -> str:
     for hit in hits:
         qualifier = f"band {hit.band}" if hit.source == "classifier" else f"rate {hit.rate_bucket}"
         model = f"{hit.source} {hit.model.id} {hit.model.version}"
-        if regex_id and hit.detector_id != regex_id:
+        if regex_id and hit.detector_id != regex_id and declared_key:
+            parts.append(f"{model} says {hit.detector_id} ({qualifier}), regex says {regex_id}")
+        elif regex_id and hit.detector_id != regex_id:
             parts.append(
                 f"{model} says {hit.detector_id} ({qualifier}), regex says {regex_id}; regex kept"
             )
