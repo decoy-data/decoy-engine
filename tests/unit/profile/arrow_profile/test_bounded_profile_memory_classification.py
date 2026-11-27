@@ -194,8 +194,7 @@ def test_capacity_hides_a_cell_quoted_by_a_memory_failure(
 
 
 def test_the_duplicate_name_refusal_passes_through_by_the_reason_registry() -> None:
-    """`_passes_through` names no engine error class itself: the duplicate-field-name refusal
-    keeps its type because the reason adapter registers it."""
+    """The duplicate-field-name refusal keeps its type, and the reason adapter registers it."""
     from decoy_engine._field_names import DuplicateFieldNamesError
     from decoy_engine.profile._source import _passes_through
 

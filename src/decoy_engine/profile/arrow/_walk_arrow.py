@@ -28,7 +28,7 @@ def holds_date32(t: pa.DataType) -> bool:
     """A 32-bit date. The date decision goes through the shared classifier (the column-shape
     sentry forbids a second one); the width tells date32 from date64."""
     from decoy_engine.contracts.column_shape import ColumnShape
-    from decoy_engine.profile._walk import observed_shape
+    from decoy_engine.profile import observed_shape
 
     return observed_shape(t, None) is ColumnShape.DATE and t.bit_width == 32
 
@@ -47,7 +47,7 @@ def arrow_column_profile(
     string lengths are set only where pandas would call the column a string
     column. The chunked walk passes no PK, FK or PII inputs, so those fields are
     their defaults."""
-    from decoy_engine.profile._walk import observed_shape
+    from decoy_engine.profile import observed_shape
     from decoy_engine.profile.arrow._parent import ColumnProfile
 
     arr = _normalize(column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column)
@@ -95,6 +95,13 @@ def arrow_column_profile(
     )
 
 
+def _is_view(t: pa.DataType, kind: str) -> bool:
+    """Whether `t` is the string or binary view type. The predicates arrive in PyArrow 16; the
+    declared floor is 14, where no value can have a view type."""
+    predicate = getattr(pa.types, f"is_{kind}_view", None)
+    return predicate is not None and bool(predicate(t))
+
+
 def _normalize(arr: pa.Array) -> pa.Array:
     """The representation pandas sees, using only types the compute kernels handle:
     an extension type is its storage (as `to_pandas` converts it), a run-end-encoded
@@ -112,9 +119,9 @@ def _normalize(arr: pa.Array) -> pa.Array:
             values = _normalize(arr.values)
             rebuilt = pa.RunEndEncodedArray.from_arrays(arr.run_ends, values)
             return pc.run_end_decode(rebuilt.slice(arr.offset, len(arr)))
-    if pa.types.is_string_view(t):
+    if _is_view(t, "string"):
         return arr.cast(pa.large_string())
-    if pa.types.is_binary_view(t):
+    if _is_view(t, "binary"):
         return arr.cast(pa.large_binary())
     if pa.types.is_dictionary(t):
         dictionary = _normalize(arr.dictionary)

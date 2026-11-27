@@ -173,6 +173,17 @@ def is_memory_failure(exc: BaseException) -> bool:
     return any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
 
 
+def is_conversion_memory_failure(exc: BaseException) -> bool:
+    """True iff `exc` from an Arrow-to-pandas conversion is a memory failure: a typed memory
+    error in its chain, or Arrow's own `Wrapping <cell> failed` text. The OpenSSL markers are not
+    read here: only hashlib raises them, and pandas can quote one (an invalid period frequency)
+    in an ordinary conversion error."""
+    if typed_memory_member(exc) is not None:
+        return True
+    message = str(exc)
+    return any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
+
+
 def passes_by_type(exc: Exception) -> bool:
     """Failures the caller classifies by TYPE keep their class under a strict policy: memory
     pressure, and a full disk or quota. Masking them as a read failure would break OOM

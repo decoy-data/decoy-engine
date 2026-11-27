@@ -42,8 +42,9 @@ SHAPE_PREDICATE = re.compile(r"^is_(date|timestamp|decimal)")
 
 MODULE = "decoy_engine.contracts.column_shape"
 # Where a wrapper over the classifier is defined: the module it is imported from, and its file.
-WRAPPERS: dict[str, tuple[str, str]] = {
-    "observed_shape": ("decoy_engine.profile._walk", "profile/_walk.py")
+# A wrapper is reached by its defining module or by the owning package's public export.
+WRAPPERS: dict[str, tuple[tuple[str, ...], str]] = {
+    "observed_shape": (("decoy_engine.profile._walk", "decoy_engine.profile"), "profile/_walk.py")
 }
 
 
@@ -52,7 +53,8 @@ def _call_sites(root: Path, name: str) -> set[str]:
     unrelated `classify_column` for memory estimates, so a call counts only when the file got
     the name from its home module, by import or through the module. The defining file of a
     wrapper counts its own calls."""
-    module, home_file = WRAPPERS.get(name, (MODULE, HOME))
+    modules, home_file = WRAPPERS.get(name, ((MODULE,), HOME))
+    module = modules[0]
     found: set[str] = set()
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root).as_posix()
@@ -62,7 +64,7 @@ def _call_sites(root: Path, name: str) -> set[str]:
         imported = {
             (a.asname or a.name)
             for n in ast.walk(tree)
-            if isinstance(n, ast.ImportFrom) and n.module == module
+            if isinstance(n, ast.ImportFrom) and n.module in modules
             for a in n.names
             if a.name == name
         }
@@ -125,6 +127,16 @@ def test_the_sentry_catches_a_planted_wrapper_caller(tmp_path: Path) -> None:
     probe.parent.mkdir()
     probe.write_text(
         "from decoy_engine.profile._walk import observed_shape\nx = observed_shape(t, None)\n",
+        encoding="utf-8",
+    )
+    assert _call_sites(tmp_path, "observed_shape") == {"plan/_x.py"}
+
+
+def test_the_sentry_catches_a_planted_public_wrapper_caller(tmp_path: Path) -> None:
+    probe = tmp_path / "plan" / "_x.py"
+    probe.parent.mkdir()
+    probe.write_text(
+        "from decoy_engine.profile import observed_shape\nx = observed_shape(t, None)\n",
         encoding="utf-8",
     )
     assert _call_sites(tmp_path, "observed_shape") == {"plan/_x.py"}

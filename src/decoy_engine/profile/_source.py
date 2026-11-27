@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import fileaccess, reason_adapter
+from decoy_engine._field_names import DuplicateFieldNamesError
 from decoy_engine._lexeme import profile_descriptors
 from decoy_engine.contracts.column_shape import source_format_for
 from decoy_engine.fileaccess import FileAccess, entry_point
@@ -218,10 +219,15 @@ def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
 
 
 def _passes_through(exc: Exception) -> bool:
-    """True when `exc` must reach the caller as it is: a file-access policy decision or an engine
-    error family the reason adapter classifies (the duplicate-name refusal is one of them).
-    Every other failure of a bounded profile is stripped to a closed label."""
-    return fileaccess.keeps_class(exc) or isinstance(exc, tuple(reason_adapter.loaded_families()))
+    """True when `exc` must reach the caller as it is: a file-access policy decision, an engine
+    failure that carries a registered code, or the duplicate-name refusal. An uncoded engine
+    error (a `ConfigError`, a connector `PermanentError`) can quote a cell, so it is stripped to a
+    closed label like every other failure of a bounded profile."""
+    return (
+        fileaccess.keeps_class(exc)
+        or reason_adapter.carries_registered_code(exc)
+        or isinstance(exc, DuplicateFieldNamesError)
+    )
 
 
 def _profile_one_source(
@@ -347,7 +353,7 @@ def _profile_bounded(
             sample_df = table.to_pandas()
         except (ValueError, OverflowError) as exc:
             # A memory failure is not a pandas limit: leave it to the classifier above.
-            if fileaccess.is_memory_failure(exc):
+            if fileaccess.is_conversion_memory_failure(exc):
                 raise
             failure = safe_error_type(exc).value
     proven_total = len(table) if table is not None else len(sample_df)  # type: ignore[arg-type]

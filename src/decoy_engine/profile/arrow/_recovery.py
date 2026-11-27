@@ -103,7 +103,7 @@ def recover_temporal_profile(
             frame = projection.to_pandas()
         except (ValueError, OverflowError) as exc:
             # A memory failure is not a pandas limit: leave it to the bounded profile's classifier.
-            if fileaccess.is_memory_failure(exc):
+            if fileaccess.is_conversion_memory_failure(exc):
                 raise
             column = projection.column(0)
             if not _is_temporal(column.type) or not _explains_failure(column):

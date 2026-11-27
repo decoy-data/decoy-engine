@@ -20,14 +20,14 @@ def _frame_of(table: pa.Table) -> pd.DataFrame:
     try:
         return table.to_pandas()
     except (ValueError, OverflowError) as exc:
-        if fileaccess.is_memory_failure(exc):
+        if fileaccess.is_conversion_memory_failure(exc):
             raise
         columns = []
         for column in table.columns:
             try:
                 column.to_pandas()
             except (ValueError, OverflowError) as column_exc:
-                if fileaccess.is_memory_failure(column_exc):
+                if fileaccess.is_conversion_memory_failure(column_exc):
                     raise
                 column = column.cast(pa.string())
             columns.append(column)
