@@ -23,19 +23,13 @@ refusal below, never the decoder's own text, which can quote the bytes it choked
 from __future__ import annotations
 
 import contextlib
-import lzma
-import tarfile
-import zipfile
-import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyarrow as pa
 
-from decoy_engine import reasons
-from decoy_engine._execution_error import ExecutionError
 from decoy_engine._execution_error import lazy_source_changed as lazy_source_changed
 from decoy_engine.config._csv_dialect import CsvDialect
 from decoy_engine.profile._csv_reader import csv_compression, read_csv_source, resolve_csv_dialect
@@ -43,68 +37,12 @@ from decoy_engine.profile._lazy_identity import LazyFileIdentity, check_batch_ro
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     from decoy_engine.fileaccess import FileAccess
 
 # Rows per chunk in the counting pass; only the counts survive each chunk.
 _FACTS_CHUNK_ROWS = 65_536
-
-_T = TypeVar("_T")
-
-# What a decoder raises on bad bytes: invalid UTF-8, a damaged or truncated gzip, bzip2, xz, zip
-# or tar stream. Each one's text can quote the bytes. An `OSError` with no errno is a decoder's
-# (`BadGzipFile`, bzip2's "Invalid data stream"); one with an errno is the disk (full, no memory,
-# missing file) and keeps its own class.
-_DECODER_ERRORS = (
-    UnicodeDecodeError,
-    EOFError,
-    zlib.error,
-    lzma.LZMAError,
-    zipfile.BadZipFile,
-    tarfile.TarError,
-)
-
-
-def _is_decoder_failure(exc: Exception) -> bool:
-    return isinstance(exc, _DECODER_ERRORS) or (isinstance(exc, OSError) and exc.errno is None)
-
-
-def _decode_refusal(table: str) -> ExecutionError:
-    """The one value-free refusal for a source that cannot be decoded. Build and raise it after
-    the `except` that caught the decoder error closes, so nothing is chained."""
-    return ExecutionError(
-        code=reasons.runtime.CHUNKED_PASSTHROUGH_VALUE_UNREPRESENTABLE,
-        message=f"the source of table {table!r} could not be decoded.",
-    )
-
-
-def _decoded(table: str, call: Callable[[], _T]) -> _T:
-    """`call()`, with a decoder failure at the call replaced by the coded refusal."""
-    try:
-        return call()
-    except Exception as exc:
-        if not _is_decoder_failure(exc):
-            raise
-    raise _decode_refusal(table)
-
-
-def _translating(table: str, chunks: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
-    """`chunks`, with a decoder failure on any step replaced by the coded refusal. Closes
-    `chunks` on every exit."""
-    failed = False
-    try:
-        yield from chunks
-    except Exception as exc:
-        if not _is_decoder_failure(exc):
-            raise
-        failed = True
-    finally:
-        close = getattr(chunks, "close", None)
-        if close is not None:
-            close()
-    if failed:
-        raise _decode_refusal(table)
 
 
 @contextlib.contextmanager
@@ -200,36 +138,29 @@ class CsvLazySource(LazyFileIdentity, LazySource):
         )
 
     def _chunks(self, batch_rows: int, columns: list[str] | None = None) -> Iterator[pd.DataFrame]:
-        chunks = _decoded(
-            self.table,
-            lambda: read_csv_source(
-                self.path,
-                self.dialect,
-                table=self.table,
-                dtype=str,
-                chunksize=batch_rows,
-                file_access=self.access,
-                field_key=self.field_key,
-                columns=columns,
-                compression=self.compression,
-            ),
+        return read_csv_source(
+            self.path,
+            self.dialect,
+            table=self.table,
+            dtype=str,
+            chunksize=batch_rows,
+            file_access=self.access,
+            field_key=self.field_key,
+            columns=columns,
+            compression=self.compression,
         )
-        return _translating(self.table, chunks)
 
     def preflight(self) -> pa.Schema:
         """The all-text schema from the dialect and the header, before any data row is read."""
-        header = _decoded(
-            self.table,
-            lambda: read_csv_source(
-                self.path,
-                self.dialect,
-                table=self.table,
-                dtype=str,
-                nrows=0,
-                file_access=self.access,
-                field_key=self.field_key,
-                compression=self.compression,
-            ),
+        header = read_csv_source(
+            self.path,
+            self.dialect,
+            table=self.table,
+            dtype=str,
+            nrows=0,
+            file_access=self.access,
+            field_key=self.field_key,
+            compression=self.compression,
         )
         return _text_schema([str(name) for name in header.columns])
 

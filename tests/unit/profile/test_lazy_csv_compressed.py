@@ -10,6 +10,8 @@ import bz2
 import gzip
 import lzma
 import os
+import sys
+import types
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ from decoy_engine.execution import ExecutionError
 from decoy_engine.execution import _chunked_input as ci
 from decoy_engine.fileaccess import FileAccess, FileRole, LocalFileAccess, Root, RootedFileAccess
 from decoy_engine.fileaccess._openat2 import openat2_usable
+from decoy_engine.profile import _csv_reader as csv_reader
 from decoy_engine.profile import build_lazy_source
 from decoy_engine.profile._csv_reader import CsvDialect, read_csv_source
 from decoy_engine.profile._lazy_csv import CsvLazySource
@@ -230,3 +233,63 @@ def test_a_decoder_failure_in_the_rooted_policy_carries_no_cell_text(tmp_path: P
         assert CANARY not in f"{err.value!s} {err.value!r}"
     finally:
         os.close(fd)
+
+
+# V1 (codex r1): the shared reader, not only the lazy wrapper, owns decoder-error translation.
+def _assert_refusal(exc: ExecutionError) -> None:
+    assert exc.code == reasons.runtime.CHUNKED_PASSTHROUGH_VALUE_UNREPRESENTABLE
+    text = f"{exc!s} {exc!r} {exc.message}"
+    for marker in (CANARY, "secret@x.com", "gzipped", "Invalid data", "b'"):
+        assert marker not in text, marker
+    assert exc.__cause__ is None and exc.__context__ is None
+
+
+@pytest.mark.parametrize("chunksize", [None, 7])
+def test_a_direct_headerless_read_of_a_damaged_gzip_is_the_coded_refusal(
+    tmp_path: Path, chunksize: int | None
+) -> None:
+    suffix, raw = _damaged()["gzip_plaintext_tail"]
+    path = tmp_path / f"f{suffix}"
+    path.write_bytes(raw)
+    dialect = CsvDialect(has_header=False, column_names=("a", "b"))
+    with pytest.raises(ExecutionError) as err:
+        result = read_csv_source(path, dialect, table="t", dtype=str, chunksize=chunksize)
+        if chunksize is not None:
+            _rows(result)
+    _assert_refusal(err.value)
+    assert str(tmp_path) not in f"{err.value!s} {err.value.message}"
+
+
+def test_a_corrupt_zstd_file_is_the_coded_refusal(tmp_path: Path) -> None:
+    pytest.importorskip("zstandard")
+    path = tmp_path / "f.csv.zst"
+    # A valid zstd frame magic followed by bytes that are not a frame.
+    path.write_bytes(b"\x28\xb5\x2f\xfd" + b"\xff" * 64)
+    lazy = _lazy(tmp_path, None, path.name)
+    for op in (lambda: _rows(lazy.iter_batches(7)), lazy.footer_facts, lazy.to_table):
+        with pytest.raises(ExecutionError) as err:
+            op()
+        _assert_refusal(err.value)
+
+
+def test_a_zstd_backend_error_is_the_coded_refusal_without_the_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backend is optional; a stand-in module proves the mapping where it is not installed."""
+    stand_in = types.ModuleType("zstandard")
+
+    class ZstdError(Exception):
+        pass
+
+    stand_in.ZstdError = ZstdError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "zstandard", stand_in)
+
+    def _raise(*_a: Any, **_k: Any) -> Any:
+        raise ZstdError("frame header b'LEAKCELL,secret@x.com'")
+
+    monkeypatch.setattr(csv_reader.pandas_adapter, "read_csv_chunks", _raise)
+    (tmp_path / "f.csv.zst").write_bytes(b"x")
+    dialect = CsvDialect()
+    with pytest.raises(ExecutionError) as err:
+        _rows(read_csv_source(tmp_path / "f.csv.zst", dialect, table="t", dtype=str, chunksize=7))
+    _assert_refusal(err.value)

@@ -51,6 +51,7 @@ from decoy_engine.errors import ConfigError, PipelineValidationError
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import pandas as pandas_adapter
 from decoy_engine.fileaccess.adapters.memory import MemoryHandle
+from decoy_engine.profile._csv_decode import decoded, translating
 from decoy_engine.validation_result import CODES
 
 if TYPE_CHECKING:
@@ -581,16 +582,20 @@ def read_csv_source(
     def open_handle() -> FileHandle:
         return access.open_read(request)
 
-    return _read_csv_rows(
-        open_handle,
-        dialect,
-        table=table,
-        nrows=nrows,
-        chunksize=chunksize,
-        dtype=dtype,
-        columns=columns,
-        compression=csv_compression(path) if compression == "infer" else compression,
+    result = decoded(
+        table,
+        lambda: _read_csv_rows(
+            open_handle,
+            dialect,
+            table=table,
+            nrows=nrows,
+            chunksize=chunksize,
+            dtype=dtype,
+            columns=columns,
+            compression=csv_compression(path) if compression == "infer" else compression,
+        ),
     )
+    return result if isinstance(result, pd.DataFrame) else translating(table, result)
 
 
 def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") -> pd.DataFrame:
