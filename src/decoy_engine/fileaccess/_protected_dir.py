@@ -166,10 +166,6 @@ def _is_empty(path: str) -> bool:
     return not names
 
 
-def _remove(path: str) -> None:
-    remove_tree(path)
-
-
 # -- checking and creating ---------------------------------------------------------------------
 
 
@@ -210,7 +206,7 @@ def _create_level(path: str) -> None:
         try:
             _chmod_private(path)
         except ProtectedDirAclFailed:
-            _remove(path)  # no half-protected directory is left behind
+            remove_tree(path)  # no half-protected directory is left behind
             raise
     made = _lstat(path)
     if made is None:
@@ -218,7 +214,7 @@ def _create_level(path: str) -> None:
     try:
         _check(path, made, tighten=False)
     except ProtectedDirUnsafe:
-        _remove(path)
+        remove_tree(path)
         raise
 
 
@@ -273,6 +269,24 @@ def open_protected_dir(
     return Path(absolute)
 
 
+def create_protected_dir(path: str | os.PathLike[str]) -> Path:
+    """A new protected directory at ``path``, created exclusively: a name that already exists is
+    refused with `ProtectedDirUnsafe` and left untouched, so a caller removes only what it made.
+    The parent must exist. A caller path needs the ambient policy, as in `open_protected_dir`."""
+    raw = os.fspath(path)
+    absolute = os.path.abspath(raw)
+    root = _live_root(_key(absolute))
+    if root is None:
+        require_ambient(_WHAT)
+    else:
+        _vet_live(raw, absolute, root)
+    try:
+        _create_level(absolute)
+    except FileExistsError:
+        raise ProtectedDirUnsafe from None
+    return Path(absolute)
+
+
 @contextmanager
 def protected_scratch_dir(
     parent: str | os.PathLike[str] | None = None, prefix: str = "decoy-"
@@ -287,7 +301,7 @@ def protected_scratch_dir(
         yield Path(root)
     finally:
         _unregister(root)
-        _remove(root)
+        remove_tree(root)
 
 
 def scratch_root() -> Path:
@@ -315,7 +329,7 @@ def _takes_a_directory(base: str) -> bool:
     """Whether a protected directory can be made under ``base``; the probe is removed."""
     try:
         probe = _allocate(base, ".decoy-probe-")
-        _remove(probe)  # best effort; the check below is what counts
+        remove_tree(probe)  # best effort; the check below is what counts
     except (OSError, ProtectedDirUnsafe):
         return False
     # A parent that allows create but denies delete would gain one directory per call.

@@ -242,6 +242,32 @@ def test_sentry_flags_the_specific_sink(fixture_scan, name: str, sink: str) -> N
     assert sink in flagged, f"{name}: expected {sink}, flagged {sorted(flagged)}"
 
 
+@pytest.mark.parametrize("name", ["sink_remove_tree_public", "sink_remove_tree_internal"])
+def test_an_unregistered_remove_tree_call_fails_against_the_real_registry(
+    fixture_scan,  # type: ignore[no-untyped-def]
+    name: str,
+) -> None:
+    registry = registry_index(load_registry(REGISTRY_PATH))
+    violations, _ = classify(fixture_scan, FIXTURE_ROLES, registry)
+    assert any(v.site.module == f"fx/plain/{name}.py" for v in violations), name
+
+
+def test_the_protected_dir_module_has_exactly_the_registered_remove_tree_calls(engine_scan) -> None:  # type: ignore[no-untyped-def]
+    """The module has no forwarder: each call is registered under its own function."""
+    where = [
+        (s.function, s.ordinal)
+        for s in engine_scan
+        if s.module == "decoy_engine/fileaccess/_protected_dir.py"
+        and s.sink.endswith("remove_tree")
+    ]
+    assert sorted(where) == [
+        ("_create_level", 0),
+        ("_create_level", 1),
+        ("_takes_a_directory", 0),
+        ("protected_scratch_dir", 0),
+    ]
+
+
 @pytest.mark.parametrize("name", ["bad_str_param", "bad_module_constant"])
 def test_sentry_bites_on_a_bad_adapter(fixture_scan, name: str) -> None:  # type: ignore[no-untyped-def]
     by_file = _violations_by_file(fixture_scan, FIXTURE_ROLES)

@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 204 (asserted by the sentry).
+# Count: 207 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -1948,9 +1948,36 @@ reason = "ambient CLI semantics: the one policy that follows a caller path; neve
 
 [[entry]]
 module = "decoy_engine/fileaccess/_protected_dir.py"
-function = "_remove"
+function = "_create_level"
 sink = "decoy_engine.fileaccess._fdtree.remove_tree"
 ordinal = 0
-rule = "a path from `protected_scratch_dir` / `open_protected_dir`: a fresh engine-named child of the system temp directory or a parent that is a live issued root or the ambient policy named, or a caller path reached only after `require_ambient` refused every policy but the ambient one (an issued root runs under every policy)"
+rule = "a directory this call just created and found half-protected (the owner-only step failed) or failing its own check"
 owner = "cam"
-reason = "the allocator removes a directory it issued, or one it created that failed its own check"
+reason = "the allocator removes only a directory it created itself, so no half-protected directory is left behind"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_protected_dir.py"
+function = "_create_level"
+sink = "decoy_engine.fileaccess._fdtree.remove_tree"
+ordinal = 1
+rule = "a directory this call just created and found half-protected (the owner-only step failed) or failing its own check"
+owner = "cam"
+reason = "the allocator removes only a directory it created itself, so no half-protected directory is left behind"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_protected_dir.py"
+function = "protected_scratch_dir"
+sink = "decoy_engine.fileaccess._fdtree.remove_tree"
+ordinal = 0
+rule = "the fresh root this call allocated under the scratch root or a vetted parent, never a caller path"
+owner = "cam"
+reason = "the context manager removes the root it issued on every exit"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_protected_dir.py"
+function = "_takes_a_directory"
+sink = "decoy_engine.fileaccess._fdtree.remove_tree"
+ordinal = 0
+rule = "the probe directory this call just allocated under the base it is testing"
+owner = "cam"
+reason = "the probe is removed best-effort so a parent that denies delete is detected"

@@ -395,7 +395,13 @@ def _run_isolated(
         if pub is not None:
             attempt.failed_receipt_for(failed_receipt(pub.request))
         # The child stages into the publication stage beside `output_dir`, or into scratch.
-        staging_output_dir = pub.stage if pub is not None else work_root / "staging_output"
+        # Without an `output_dir` the scratch stage is created here, exclusively: an existing
+        # `staging_output` is refused, and only a stage this run made is ever removed.
+        staging_output_dir = (
+            pub.stage
+            if pub is not None
+            else fileaccess.create_protected_dir(work_root / "staging_output")
+        )
         payload_path = _write_payload(
             work_root,
             config,

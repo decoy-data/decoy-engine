@@ -64,6 +64,7 @@ from decoy_engine.fileaccess._private import write_private
 from decoy_engine.fileaccess._protected_dir import (
     ProtectedDirAclFailed,
     ProtectedDirUnsafe,
+    create_protected_dir,
     open_protected_dir,
     protected_scratch_dir,
     scratch_root,
@@ -204,6 +205,7 @@ __all__ = [
     "capture",
     "classified_failure",
     "config_relative",
+    "create_protected_dir",
     "current",
     "encode_field_key",
     "engine_dir_handle",
