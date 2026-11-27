@@ -22,9 +22,9 @@ def _frame_of(table: pa.Table) -> pd.DataFrame:
         return table_to_pandas(table)
     except (ValueError, OverflowError):
         columns = []
-        for column in table.columns:
-            try:
-                column.to_pandas()
+        for name, column in zip(table.column_names, table.columns, strict=True):
+            try:  # the shared conversion, so an admitted date dictionary is not mistaken for one
+                table_to_pandas(pa.Table.from_arrays([column], names=[name]))
             except (ValueError, OverflowError):
                 column = column.cast(pa.string())
             columns.append(column)

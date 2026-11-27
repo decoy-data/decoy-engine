@@ -31,7 +31,7 @@ runner; the runner imports it through the re-export shim at its old path.
 
 from __future__ import annotations
 
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -77,10 +77,8 @@ class RowCount:
 class ProfileSource(Protocol):
     """One source, readable as cheap metadata plus a bounded sample.
 
-    Separates the three things profiling needs so a large source is never
-    fully materialized just to be sampled. `to_frame()` is the explicit
-    opt-out (small-job / residency="full") full read.
-    """
+    The three things profiling needs stay apart, so a large source is never fully materialized
+    just to be sampled. `to_frame()` is the explicit full read (small jobs, residency="full")."""
 
     def row_count(self) -> RowCount:
         """Total rows, exact or estimated, from cheap metadata only."""
@@ -158,12 +156,27 @@ def footer_facts_of(parquet_file: pq.ParquetFile) -> FooterFacts:
     )
 
 
+def _gate_open(
+    handle: FileHandle, columns: Sequence[str] | None, table: str, **options: Any
+) -> pq.ParquetFile:
+    """Open `handle` as a Parquet file whose projected schema passed the type gate before any
+    decode: the one gate for every batch reader. A refusal closes the file, not the handle."""
+    parquet_file = arrow_adapter.parquet_file(handle, **options)
+    try:
+        check_source_schema(
+            arrow_adapter.projected_schema(handle, parquet_file, columns), table=table
+        )
+    except BaseException:
+        parquet_file.close()
+        raise
+    return parquet_file
+
+
 class OpenedLazyBatches:
     """One open Parquet handle: its footer facts, a batch iterator and the owner of the close.
 
-    `schema`, the facts and `batches` all come from the same handle, so what a caller
-    validates is what it reads. `close()` is idempotent and safe to call from a `finally`
-    on any exit, including one before the first batch."""
+    `schema`, the facts and `batches` come from the same handle. `close()` is idempotent and
+    safe from a `finally` on any exit, including one before the first batch."""
 
     def __init__(
         self,
@@ -179,9 +192,6 @@ class OpenedLazyBatches:
         self._handle = handle
         self._closed = False
         self.facts = footer_facts_of(parquet_file)
-        check_source_schema(
-            arrow_adapter.projected_schema(handle, parquet_file, columns), table=table
-        )
         # The projection narrows the batches only; `facts` stay the whole file's.
         self.batches = checked_batches(self._read(batch_rows, use_threads, columns), table=table)
 
@@ -255,19 +265,16 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
-        rows = check_batch_rows(batch_rows)
-        return checked_batches(self._iter_batches(rows, columns), table=self.table)
+        batches = self._iter_batches(check_batch_rows(batch_rows), columns)
+        return checked_batches(batches, table=self.table)
 
     @contextmanager
     def _gated(self, columns: Sequence[str] | None) -> Iterator[tuple[FileHandle, pq.ParquetFile]]:
-        """One open whose projected schema passed the type gate before any decode; it closes on
-        every exit, a refusal included."""
+        """One gated open (`_gate_open`); the file and handle close on every exit."""
         handle = self._handle()
         try:
-            parquet_file = arrow_adapter.parquet_file(handle)
+            parquet_file = _gate_open(handle, columns, self.table)
             try:
-                schema = arrow_adapter.projected_schema(handle, parquet_file, columns)
-                check_source_schema(schema, table=self.table)
                 yield handle, parquet_file
             finally:
                 parquet_file.close()
@@ -307,7 +314,7 @@ class LazySource:
             options["buffer_size"] = buffer_size
         handle = self._handle()
         try:
-            parquet_file = arrow_adapter.parquet_file(handle, **options)
+            parquet_file = _gate_open(handle, columns, self.table, **options)
         except BaseException:
             handle.close()
             raise
@@ -321,10 +328,8 @@ class LazySource:
             raise
 
     def footer_facts(self) -> FooterFacts:
-        """Schema, row count, footer null counts and row-group layout from ONE open handle.
-
-        The `schema`, `num_rows` and `column_null_counts` accessors each reopen the file; a
-        caller that needs the facts to agree with one another reads them here."""
+        """Schema, row count, footer null counts and row-group layout from ONE open handle (the
+        single accessors each reopen the file, so a caller needing them to agree reads here)."""
         handle = self._handle()
         try:
             parquet_file = arrow_adapter.parquet_file(handle)
@@ -359,10 +364,8 @@ class LazySource:
     def column_null_counts(self) -> dict[str, int | None]:
         """Exact null count per flat top-level column, from footer statistics only.
 
-        `None` when any row group lacks a null count for the column (statistics
-        written off), so the caller must not read it as "no nulls". A file with no
-        rows (no row groups, or only empty ones) has none. Nested columns have no single leaf and are omitted.
-        """
+        `None` when any row group lacks a null count for the column, so the caller must not
+        read it as "no nulls". Nested columns have no single leaf and are omitted."""
         handle = self._handle()
         try:
             return _footer_null_counts(arrow_adapter.read_metadata(handle))
@@ -371,14 +374,15 @@ class LazySource:
 
     def to_table(self, columns: list[str] | None = None) -> pa.Table:
         """Read the file (or just `columns`) into memory. Fallback for small jobs only."""
-        with ExitStack() as stack:
-            try:
-                handle, _ = stack.enter_context(self._gated(columns))
-            except (OSError, pa.ArrowException):  # unopenable: the read below raises its own text
-                handle = stack.enter_context(closing(self._handle()))
-            table = arrow_adapter.read_table(
-                handle, **({} if columns is None else {"columns": columns})
+        handle = self._handle()
+        try:
+            table = arrow_adapter.read_table_gated(
+                handle,
+                lambda schema: check_source_schema(schema, table=self.table),
+                **({} if columns is None else {"columns": columns}),
             )
+        finally:
+            handle.close()
         return check_source_dates(table, table=self.table)
 
 
@@ -427,10 +431,8 @@ class ParquetFileSource(_PolicyBound):
 class FixedWidthFileSource(_PolicyBound):
     """`ProfileSource` for a local fixed-width file.
 
-    Row count is exact and costs one framing pass of the shared record parser (no casts; blank
-    lines skipped, a missing final newline fine). The bounded sample reads only
-    the first `sample_rows` records.
-    """
+    Row count is exact and costs one framing pass of the shared record parser. The bounded
+    sample reads only the first `sample_rows` records."""
 
     path: Path
     layout: Any
@@ -535,10 +537,8 @@ def build_profile_source(
     """Build the `ProfileSource` for one validated source descriptor. A local file is
     read through the installed policy under `field_key`, the config position it came from.
 
-    Dispatches on `type` (file/s3/gcs) exactly as the old eager loader did.
-    Cloud readers are imported lazily so the boto3 / google-cloud SDKs stay
-    optional dependencies loaded only when a cloud source is actually used.
-    """
+    Dispatches on `type` (file/s3/gcs). Cloud readers import lazily, so the boto3 and
+    google-cloud SDKs stay optional."""
     src_type = descriptor.get("type")
     if src_type == "file":
         return _build_file_source(descriptor, field_key, table=table)

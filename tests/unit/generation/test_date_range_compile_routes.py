@@ -58,6 +58,10 @@ def test_statistical_compile_refuses_a_year_past_the_range_before_any_draw() -> 
         classify_window_table(cfg, "t", statistical_specs={("t", "c"): spec})
     assert caught.value.code == CODE
     assert "9999" not in str(caught.value)
+    # The refusal text states the rule the sampler's limits define: the literal cannot drift.
+    from decoy_engine.contracts.distribution_snapshot import SAMPLED_YEARS_RULE
+
+    assert SAMPLED_YEARS_RULE in str(caught.value)
 
 
 def test_a_config_distribution_column_never_reaches_the_fitted_datetime_sampler(
@@ -118,6 +122,11 @@ def test_window_admission_and_plan_compile_agree_on_a_far_live_year() -> None:
     with pytest.raises(GenerationAdmissionError) as window_error:
         classify_window_table(cfg, "t", statistical_specs={("t", "c"): spec})
     assert compile_error.value.code == window_error.value.code == CODE
+    from decoy_engine.contracts.distribution_snapshot import SAMPLED_YEARS_RULE
+
+    assert SAMPLED_YEARS_RULE in str(compile_error.value) and SAMPLED_YEARS_RULE in str(
+        window_error.value
+    )
 
 
 def test_a_zero_weight_far_year_is_not_live_on_either_route() -> None:

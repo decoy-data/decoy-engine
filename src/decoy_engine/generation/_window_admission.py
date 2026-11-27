@@ -26,8 +26,7 @@ import pandas as pd
 
 from decoy_engine import reasons as reason_codes
 from decoy_engine.contracts.distribution_snapshot import (
-    MAX_SAMPLED_YEAR,
-    MIN_YEAR,
+    SAMPLED_YEARS_RULE,
 )
 from decoy_engine.errors import DecoyError
 
@@ -137,7 +136,7 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             col,
             CODE_UNBOUNDED,
             "year_bins",
-            f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
+            SAMPLED_YEARS_RULE,
         )
     weights = [float(b.count) for b in buckets]
     parsed_bounds: dict[str, datetime] = {}

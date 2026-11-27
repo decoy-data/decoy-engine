@@ -30,6 +30,8 @@ ACCEPTED_SCHEMA_VERSIONS = (SCHEMA_VERSION_V1, SCHEMA_VERSION_V2)
 # is 9998. A multi-year range outside it is refused at decode whatever its count.
 MIN_YEAR = 1
 MAX_SAMPLED_YEAR = 9998
+# The one rendering of that rule, for every refusal that names it.
+SAMPLED_YEARS_RULE = f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}"
 
 
 @dataclass(frozen=True)

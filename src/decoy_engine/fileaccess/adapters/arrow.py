@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.dataset as ds
 import pyarrow.ipc
 import pyarrow.parquet as pq
 
@@ -60,6 +61,21 @@ def ipc_read_path(handle: FileHandle) -> pa.Table:
 
 def read_table(handle: FileHandle, **kwargs: Any) -> pa.Table:
     return guarded(handle.display, _strict(handle), pq.read_table, handle.library_path(), **kwargs)
+
+
+def read_table_gated(
+    handle: FileHandle, check: Callable[[pa.Schema], None], **kwargs: Any
+) -> pa.Table:
+    """`read_table`, after `check` has seen the schema that read returns, before any column
+    decodes. The schema comes from a dataset scanner given the same `columns`, so a dotted
+    column or a directory of files is projected exactly as the read projects it. Nothing is
+    read when `check` raises, and an unreadable path fails as `read_table` fails."""
+
+    strict = _strict(handle)
+    dataset = guarded(handle.display, strict, ds.dataset, handle.library_path(), format="parquet")
+    scanner = guarded(handle.display, strict, dataset.scanner, columns=kwargs.get("columns"))
+    check(scanner.projected_schema)
+    return read_table(handle, **kwargs)
 
 
 def parquet_file(handle: FileHandle, **kwargs: Any) -> pq.ParquetFile:

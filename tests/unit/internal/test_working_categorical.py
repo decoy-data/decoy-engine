@@ -181,10 +181,62 @@ def test_a_date_dictionary_with_no_chunk_converts_to_an_empty_categorical() -> N
     assert len(frame) == 0 and str(frame["d"].dtype) == "category"
 
 
-def test_a_nanosecond_entry_at_int64_min_is_a_category_not_a_missing_value() -> None:
-    entries = pa.array([_INT64_MIN, 1_000], pa.timestamp("ns"))
-    column = pa.DictionaryArray.from_arrays(pa.array([0, 1, 0], pa.int8()), entries)
+@pytest.mark.parametrize("tz", [None, "UTC", "America/New_York", "Asia/Kolkata"])
+def test_a_nanosecond_entry_at_the_bounds_keeps_its_exact_value_and_zone(tz: str | None) -> None:
+    """pandas reads INT64_MIN as NaT and raises, with the value in the text, when a zone shift
+    passes its bounds. The working categories keep the physical nanoseconds and the zone."""
+    import pandas as pd
+
+    from decoy_engine.internal.pandas_compat import WorkingInstant
+
+    top = 2**63 - 1
+    values = [_INT64_MIN, _INT64_MIN + 42, 5, top - 7]
+    entries = pa.array(values, pa.timestamp("ns", tz))
+    column = pa.DictionaryArray.from_arrays(pa.array([0, 1, None, 3, 2, 0], pa.int8()), entries)
     frame = table_to_pandas(pa.table({"d": column}))
-    assert not frame["d"].isna().any()
-    assert len(frame["d"].cat.categories) == 2
-    assert frame["d"].iloc[0] == frame["d"].iloc[2] != frame["d"].iloc[1]
+    categories = list(frame["d"].cat.categories)
+    assert categories == [WorkingInstant(v, tz) for v in values]
+    assert [None if pd.isna(c) else c.ns for c in frame["d"]] == [
+        _INT64_MIN,
+        _INT64_MIN + 42,
+        None,
+        top - 7,
+        5,
+        _INT64_MIN,
+    ]
+    assert frame["d"].isna().tolist() == [False, False, True, False, False, False]
+
+
+def test_a_null_dictionary_entry_beside_a_bound_entry_is_a_missing_row() -> None:
+    entries = pa.array([_INT64_MIN, None, 7], pa.timestamp("ns", "America/New_York"))
+    column = pa.DictionaryArray.from_arrays(pa.array([1, 0, 2], pa.int8()), entries)
+    frame = table_to_pandas(pa.table({"d": column}))
+    assert frame["d"].isna().tolist() == [True, False, False]
+    assert [c.ns for c in frame["d"].cat.categories] == [_INT64_MIN, 7]
+
+
+def test_an_unnamed_stored_date_index_is_restored_from_its_physical_field() -> None:
+    import datetime as dt
+
+    import pandas as pd
+
+    index = pd.CategoricalIndex([dt.date(2020, 1, 1), dt.date(2020, 1, 2)])  # no name
+    table = pa.Table.from_pandas(pd.DataFrame({"v": [1, 2]}, index=index))
+    assert table.schema.names[-1] == "__index_level_0__"
+    frame = table_to_pandas(table)
+    assert list(frame.columns) == ["v"] and frame.index.name is None
+    assert [x.isoformat() for x in frame.index] == ["2020-01-01", "2020-01-02"]
+
+
+def test_a_named_stored_date_index_that_shares_a_data_column_name_keeps_both() -> None:
+    import datetime as dt
+
+    import pandas as pd
+
+    index = pd.CategoricalIndex([dt.date(2020, 1, 1), dt.date(2020, 1, 2)], name="d")
+    table = pa.Table.from_pandas(pd.DataFrame({"d": [10, 20]}, index=index))
+    assert "__index_level_0__" in table.schema.names  # the physical field is not the display name
+    frame = table_to_pandas(table)
+    assert list(frame.columns) == ["d"] and frame["d"].tolist() == [10, 20]
+    assert frame.index.name == "d"
+    assert [x.isoformat() for x in frame.index] == ["2020-01-01", "2020-01-02"]

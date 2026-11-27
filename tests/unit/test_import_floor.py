@@ -1,11 +1,11 @@
 """AT-V11 (DATE-RANGE-SENTINEL S5, section 4.4b item 7): the engine imports on the declared
-pyarrow floor.
+pyarrow and pandas floors (pandas 1.5.3 cannot build a module-level timestamp past its bounds).
 
 The metadata rebuilder table named list-view predicates that pyarrow added after the floor, so
 `import decoy_engine` raised on pyarrow 14 before any checked read ran. This test starts a fresh
 interpreter outside the checkout and imports the installed engine. It uses nothing but the
 standard library, so it collects on any pyarrow; the floor leg sets `DECOY_FLOOR_PYARROW` to the
-exact version it expects the interpreter to report."""
+exact versions (`DECOY_FLOOR_PANDAS` likewise) it expects the interpreter to report."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 PROGRAM = (
-    "import pyarrow; print(pyarrow.__version__); "
+    "import pandas, pyarrow; print(pyarrow.__version__, pandas.__version__); "
     "import decoy_engine; from decoy_engine.io import check_source_dates; print('imported')"
 )
 
@@ -33,8 +33,9 @@ def test_the_installed_engine_imports_in_a_fresh_interpreter_outside_the_checkou
         check=False,
     )
     assert done.returncode == 0, done.stderr[-400:]
-    version, marker = done.stdout.split()
+    arrow_version, pandas_version, marker = done.stdout.split()
     assert marker == "imported"
-    expected = os.environ.get("DECOY_FLOOR_PYARROW")
-    if expected:
-        assert version == expected
+    for name, version in (("PYARROW", arrow_version), ("PANDAS", pandas_version)):
+        expected = os.environ.get(f"DECOY_FLOOR_{name}")
+        if expected:
+            assert version == expected
