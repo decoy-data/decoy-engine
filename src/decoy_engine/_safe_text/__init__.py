@@ -107,38 +107,43 @@ def _caller_code() -> tuple[tuple[CodeType, int] | None, _Site]:
 _NO_LITERAL: Final = object()
 
 
+_CALL_PREFIX: Final = ("PRECALL", "KW_NAMES")  # 3.11 and 3.12: call set-up before CALL
+
+
 @functools.lru_cache(maxsize=512)
 def _literal_at_call(code: CodeType, lasti: int) -> object:
     """The constant the call at ``lasti`` passes as its first positional argument, if it is one.
 
     Walks back from the call over the argument pushes until the first positional argument is
     reached. It is a literal only when that one instruction is ``LOAD_CONST`` and no branch jumps
-    into the span, so ``x if c else "lit"`` and ``x or "lit"`` never qualify.
+    into the span, so ``x if c else "lit"`` and ``x or "lit"`` never qualify. A branch inside a
+    later argument also withholds: the walk cannot count the stack there. Built from the bytecode
+    of 3.10 to 3.12 (``CALL_FUNCTION_KW`` on 3.10, ``KW_NAMES`` and ``PRECALL`` on 3.11).
     """
     try:
         ins = list(dis.get_instructions(code))
-        at = next(i for i, ins_ in enumerate(ins) if ins_.offset == lasti)
+        # f_lasti can point into the inline cache after the call, which dis hides: take the
+        # last instruction at or before it.
+        at = max(i for i, op in enumerate(ins) if op.offset <= lasti)
         call = ins[at]
         if not call.opname.startswith("CALL") or call.opname == "CALL_FUNCTION_EX":
             return _NO_LITERAL
         total = int(call.arg or 0)
         names = 0
         need = total
+        top = at  # first instruction of the call set-up; the argument pushes end before it
         if call.opname == "CALL_FUNCTION_KW":  # 3.10: the keyword names are a pushed tuple
             names, need = len(ins[at - 1].argval), total + 1
-        else:  # 3.11 and 3.12: KW_NAMES sits just before the call (and PRECALL)
-            k = at - 1
-            while k >= 0 and ins[k].opname in ("PRECALL", "CACHE"):
-                k -= 1
-            if k >= 0 and ins[k].opname == "KW_NAMES":
-                names = len(ins[k].argval)
+        else:
+            while top > 0 and ins[top - 1].opname in _CALL_PREFIX:
+                top -= 1
+                if ins[top].opname == "KW_NAMES":
+                    names = len(code.co_consts[int(ins[top].arg or 0)])
         if total - names < 1:  # no positional argument: keyword-only text is no proof
             return _NO_LITERAL
         acc = 0
-        for j in range(at - 1, -1, -1):
+        for j in range(top - 1, -1, -1):
             op = ins[j]
-            if op.opname in ("PRECALL", "KW_NAMES", "CACHE"):
-                continue
             acc += (
                 dis.stack_effect(op.opcode, op.arg, jump=False)
                 if op.opcode >= dis.HAVE_ARGUMENT
