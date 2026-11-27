@@ -59,5 +59,6 @@ def test_no_engine_module_builds_a_timestamp_when_it_is_imported() -> None:
 
 def test_the_scan_sees_a_module_level_timestamp() -> None:
     assert module_level_timestamp_calls('import pandas as pd\nX = pd.Timestamp("1677-09-21")\n')
-    assert module_level_timestamp_calls("class C:\n    X = pd.Timestamp(1)\n")
-    assert module_level_timestamp_calls("def f():\n    return pd.Timestamp(1)\n") == []
+    assert module_level_timestamp_calls('class C:\n    X = pd.Timestamp("1677-09-21")\n')
+    assert module_level_timestamp_calls('def f():\n    return pd.Timestamp("1677-09-21")\n') == []
+    assert module_level_timestamp_calls('X = pd.Timestamp("1700-01-01")\n') == []  # in range
