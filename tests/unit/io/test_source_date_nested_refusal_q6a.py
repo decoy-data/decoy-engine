@@ -10,10 +10,13 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
+from decoy_engine import reasons
 from tests.unit.io.test_source_date_type_gate import (
+    CODE,
     FAR_DAY,
     assert_refused_by_type,
     one,
+    refusal,
 )
 
 OFFSETS = pa.array([0, 1, 3], pa.int32())
@@ -84,3 +87,9 @@ def test_a_sliced_map_whose_far_row_is_outside_the_slice_is_refused_with_no_coun
         pa.array([0, 1, 2], pa.int32()), pa.array(["a", "b"]), _far([FAR_DAY, 3])
     ).slice(1, 1)
     assert_refused_by_type(one(column), "map")
+    exc = refusal(one(column))
+    assert exc is not None and not hasattr(exc, "count")
+    assert str(exc) == (
+        f"[{CODE}] {reasons.get('runtime', CODE).summary} Table 't', column 'n', type kind map. "
+        "Drop the column, select it out, or cast it to a plain date or text column before the run."
+    )
