@@ -49,8 +49,13 @@ count, so it stays honest as bindings are added (see `_registry.py`).
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
+import pyarrow as pa
+
+from decoy_engine import reasons
+from decoy_engine.generation.pool import ComputedDrawSpec, draw_kwargs, parse_computed_draw
 from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
 
 ProviderClass = Literal["pool_native", "computed_native", "python_only", "reject_large"]
@@ -111,4 +116,85 @@ def classify_provider(
     return "reject_large"
 
 
-__all__ = ["ProviderClass", "classify_provider"]
+@dataclass(frozen=True)
+class FakerVariant:
+    """How the live binding of a faker provider draws: from a `pool`, from a `computed` draw
+    with its `spec`, or `unsupported` (a computed binding the engine has no descriptor for)."""
+
+    kind: Literal["pool", "computed", "unsupported"]
+    spec: ComputedDrawSpec | None = None
+
+
+def resolve_faker_variant(
+    provider: object,
+    provider_config: Mapping[str, Any] | None,
+    registry: ProviderRegistry | None = None,
+) -> FakerVariant:
+    """The one decision of how a faker column draws, read from the live registry binding.
+
+    Every route calls it, so a rebound provider (`ProviderRegistry.override`) takes the same
+    variant everywhere: a `draw="computed"` capability with a descriptor is `computed`, one
+    without is `unsupported` (declined before any pool is prepared), and anything else is a
+    `pool` provider whose own admission rules apply. A name the registry does not know stays
+    `pool` and meets those rules."""
+    live = registry if registry is not None else get_default_registry()
+    if not isinstance(provider, str) or not live.has(provider):
+        return FakerVariant("pool")
+    if live.get_capabilities(provider).draw != "computed":
+        return FakerVariant("pool")
+    found = parse_computed_draw("mask", provider, draw_kwargs(provider_config))
+    if isinstance(found, ComputedDrawSpec):
+        return FakerVariant("computed", found)
+    return FakerVariant("unsupported")
+
+
+def computed_mask_spec(
+    provider: object,
+    provider_config: Mapping[str, Any] | None,
+    registry: ProviderRegistry | None = None,
+) -> ComputedDrawSpec | None:
+    """The masking draw of a computed binding, or None for a pool or unsupported one.
+
+    The one reader of a computed column's output type for every route: native admission, the
+    out-of-core schema and the route declines all take it from the returned spec."""
+    return resolve_faker_variant(provider, provider_config, registry).spec
+
+
+def computed_output_decline(
+    column: str,
+    provider: object,
+    provider_config: Mapping[str, Any] | None,
+    registry: ProviderRegistry | None = None,
+) -> str | None:
+    """The route decline reason (E11/E13) for a computed draw whose output is not exact `string`.
+
+    None for a pool provider and for an exact-string draw. The reason names the column and the
+    provider, never an argument value."""
+    spec = computed_mask_spec(provider, provider_config, registry)
+    if spec is None or spec.output_type == pa.string():
+        return None
+    return f"{reasons.route.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED}:{column}:{spec.provider}"
+
+
+def draws_computed_string(
+    provider: object,
+    provider_config: Mapping[str, Any] | None,
+    registry: ProviderRegistry | None = None,
+) -> bool:
+    """True when the live binding of `provider` is a computed draw whose output is exact `string`.
+
+    The degenerate-output pin reads it: such a column is typed `string` on every route, even
+    when every cell is null or the table is empty."""
+    spec = computed_mask_spec(provider, provider_config, registry)
+    return spec is not None and spec.output_type == pa.string()
+
+
+__all__ = [
+    "FakerVariant",
+    "ProviderClass",
+    "classify_provider",
+    "computed_mask_spec",
+    "computed_output_decline",
+    "draws_computed_string",
+    "resolve_faker_variant",
+]
