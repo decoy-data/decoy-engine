@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import re
 from pathlib import Path
 from typing import Any
 
@@ -523,3 +524,19 @@ def test_at_c18_the_fk_caller_still_skips_risk_columns() -> None:
     assert "risk_policy" not in inspect.getsource(signals.resolve_probe_recovery)
     assert 'risk_policy: Literal["skip", "measure"] = "skip"' in inspect.getsource(_probe)
     assert _probe.ProbeResult(conclusive=False, reason="x").uniqueness_risk is False
+
+
+def test_class9_the_full_frame_refusal_text_is_pinned_word_for_word() -> None:
+    """Characterization: the full-frame refusal text predates the shared
+    capacity formatter and must stay byte-identical through it. The literal is independent of
+    the registry and of the formatter, so a changed word in either one fails here."""
+    from decoy_engine.execution._errors import nonfk_full_frame_capacity_error
+
+    exc = nonfk_full_frame_capacity_error(needed_bytes=1, kill_ceiling_bytes=2)
+    expected = (
+        "A job with no foreign keys would hold more memory than this machine can give it. "
+        "The figure checked is 1 bytes and the memory ceiling is 2 bytes. "
+        "Run on a machine with more memory, or reduce the table's rows or columns."
+    )
+    assert re.fullmatch(re.escape(expected), exc.message)
+    assert str(exc) == f"[nonfk_full_frame_capacity_exceeded] {expected}"
