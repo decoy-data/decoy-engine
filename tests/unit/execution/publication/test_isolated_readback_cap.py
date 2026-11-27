@@ -402,6 +402,35 @@ def test_a9_a_failure_while_measuring_is_a_memory_result_and_publishes_nothing(
     run.nothing_left(True)
 
 
+def test_a9_nothing_the_result_needs_is_allocated_after_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch: Path
+) -> None:
+    """Once `publish_unit` has run, a memory failure in any figure code must not matter: the
+    figures were built in the guarded read, so the committed result is reported as it is."""
+    run = Run(tmp_path, monkeypatch, [ints("t1", 10)], ceiling=HUGE)
+    published: list[bool] = []
+    real_publish = sys.modules[COMMIT].publish_unit
+    real_bytes = lower_bound_bytes
+
+    def publish(*args: Any, **kwargs: Any) -> Any:
+        receipt = real_publish(*args, **kwargs)
+        published.append(True)
+        return receipt
+
+    def failing(specs: Any) -> int:
+        if published:
+            raise MemoryError("CANARY")
+        return real_bytes(specs)
+
+    monkeypatch.setattr(f"{COMMIT}.publish_unit", publish)
+    monkeypatch.setattr(f"{COMMIT}.lower_bound_bytes", failing)
+    result = run.go()
+    assert published
+    assert result.outcome == "completed"
+    assert result.extra["readback"]["tables_read"] == 1
+    assert run.out.exists()
+
+
 def test_a9_a_plain_interrupt_is_not_swallowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch: Path
 ) -> None:
