@@ -165,7 +165,7 @@ def reason_from_envelope(envelope: dict[str, Any]) -> ReasonRecord:
 
 def cleanup_state_of(staging: Path) -> CleanupState:
     """How cleanup of a refused stage ended, confirmed by looking."""
-    return CleanupState.FAILED if staging.exists() else CleanupState.CONFIRMED
+    return CleanupState.FAILED if staging.is_dir() else CleanupState.CONFIRMED
 
 
 def commit_reason(exc: BaseException, staging: Path) -> ReasonRecord:

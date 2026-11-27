@@ -57,7 +57,7 @@ reason = "process memory readout for the governor; no caller or config value rea
 [[entry]]
 module = "decoy_engine/execution/_isolated_reason.py"
 function = "cleanup_state_of"
-sink = "Path.exists"
+sink = "Path.is_dir"
 ordinal = 0
 rule = "the caller's staging_dir (or the engine-created staging under its temp_dir) that run_pipeline_isolated already refused under every policy but the ambient one (`_require_ambient_for_paths`, before any I/O)"
 owner = "cam"

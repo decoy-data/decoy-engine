@@ -21,6 +21,7 @@ from decoy_engine import fileaccess
 from decoy_engine.connectors import _postgres_session as ps_session
 from decoy_engine.connectors import postgres_snapshot as ps
 from decoy_engine.execution import _isolated_run
+from decoy_engine.execution._isolated_reason import Attempt
 from decoy_engine.execution.out_of_core import _runner, _scratch, run_fk_out_of_core
 from decoy_engine.fileaccess import ProtectedDirUnsafe
 from decoy_engine.providers_v2 import get_default_registry
@@ -103,6 +104,7 @@ def _run_isolated(staging_dir: Path | None, monkeypatch: pytest.MonkeyPatch) -> 
     result = _isolated_run._run_isolated(
         {},
         None,
+        Attempt(),
         mem_cap_bytes=None,
         rlimit_kind="data",
         staging_dir=staging_dir,
@@ -163,6 +165,7 @@ def test_isolated_work_root_is_removed_when_the_spawn_fails(
         _isolated_run._run_isolated(
             {},
             None,
+            Attempt(),
             mem_cap_bytes=None,
             rlimit_kind="data",
             staging_dir=None,
