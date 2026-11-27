@@ -103,7 +103,8 @@ def _callback_can_run(caps: Any, provider_config: Mapping[str, Any] | None) -> b
     if caps.backend_type == "faker":
         return True
     locale = (provider_config or {}).get("locale")
-    return isinstance(locale, str) and locale not in caps.supported_locales
+    # An empty locale means the adapter default, as in `MimesisAdapter._mimesis_locale`.
+    return bool(locale) and isinstance(locale, str) and locale not in caps.supported_locales
 
 
 def _binding_matches_stock(

@@ -180,6 +180,7 @@ class TestLiveVariant:
             ("faker", None, True),
             ("mimesis", None, False),
             ("mimesis", "en_US", False),
+            ("mimesis", "", False),
             ("mimesis", "xx_XX", True),
         ],
     )
@@ -191,7 +192,7 @@ class TestLiveVariant:
         caps = _DEFAULT.get_capabilities("person_email").model_copy(
             update={"backend_type": backend, "supported_locales": ("en_US",)}
         )
-        assert _callback_can_run(caps, {"locale": locale} if locale else {}) is runs
+        assert _callback_can_run(caps, {"locale": locale} if locale is not None else {}) is runs
 
     def test_the_out_of_core_route_refuses_an_integer_pool_and_auto_reroutes(
         self, tmp_path
