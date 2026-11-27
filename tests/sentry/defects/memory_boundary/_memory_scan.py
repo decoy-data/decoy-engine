@@ -11,7 +11,7 @@ the trace test share one definition.
 
 Known limits, not chased: an exception class bound to another name (`Broad = Exception`), a
 handler in a class body or at module level (only function bodies are scanned), and `except*`.
-A handler type that is a variable is a finding unless it is in `ALLOWED_VARIABLES`; a module
+A handler type that is a variable is a finding unless it is in `PARAMETER_TYPES`; a module
 constant tuple is expanded.
 """
 
@@ -58,8 +58,8 @@ CLASSIFIERS = {
 }
 EXPECTED_CLASSIFIERS = frozenset(CLASSIFIERS)
 
-# Handler types that are variables, not classes, and so cannot be resolved by name: (file, name).
-ALLOWED_VARIABLES = {
+# Handler types that are caller-supplied parameters, not classes, so they cannot be resolved by name: (file, name).
+PARAMETER_TYPES = {
     # The caller names its own parser error types, which the guard passes through unchanged.
     ("fileaccess/_errors.py", "parser_errors"),
 }
@@ -324,7 +324,7 @@ def file_findings(
             if isinstance(node, ast.Try):
                 for handler in node.handlers:
                     for name in variables(handler, names):
-                        if (rel, name) not in ALLOWED_VARIABLES:
+                        if (rel, name) not in PARAMETER_TYPES:
                             out.append(
                                 f"{where}: handler type `{name}` is a variable the scan cannot resolve"
                             )

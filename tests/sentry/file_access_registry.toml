@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 203 (asserted by the sentry).
+# Count: 198 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -96,36 +96,6 @@ reason = "process memory readout for the governor; no caller or config value rea
 module = "decoy_engine/execution/_isolated_run.py"
 function = "_spawn_and_classify"
 sink = "subprocess.Popen"
-ordinal = 0
-rule = "path derived from the caller's staging_dir, output_dir or temp_dir, or an engine-created `tempfile.mkdtemp`; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
-owner = "cam"
-reason = "the subprocess and scratch route cannot carry a strict policy (D6 fail-closed fallback), so a strict policy never gets here"
-ambient_only = true
-
-[[entry]]
-module = "decoy_engine/execution/_isolated_run.py"
-function = "_spawn_and_classify"
-sink = "shutil.rmtree"
-ordinal = 0
-rule = "path derived from the caller's staging_dir, output_dir or temp_dir, or an engine-created `tempfile.mkdtemp`; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
-owner = "cam"
-reason = "the subprocess and scratch route cannot carry a strict policy (D6 fail-closed fallback), so a strict policy never gets here"
-ambient_only = true
-
-[[entry]]
-module = "decoy_engine/execution/_isolated_run.py"
-function = "_spawn_and_classify"
-sink = "shutil.rmtree"
-ordinal = 1
-rule = "path derived from the caller's staging_dir, output_dir or temp_dir, or an engine-created `tempfile.mkdtemp`; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
-owner = "cam"
-reason = "the subprocess and scratch route cannot carry a strict policy (D6 fail-closed fallback), so a strict policy never gets here"
-ambient_only = true
-
-[[entry]]
-module = "decoy_engine/execution/_isolated_commit.py"
-function = "result_from_envelope"
-sink = "shutil.rmtree"
 ordinal = 0
 rule = "path derived from the caller's staging_dir, output_dir or temp_dir, or an engine-created `tempfile.mkdtemp`; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
 owner = "cam"
@@ -1006,15 +976,6 @@ reason = "ambient CLI semantics: the one policy that follows a caller path; neve
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
 function = "LocalOutputTxn.abort"
-sink = "shutil.rmtree"
-ordinal = 0
-rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
-owner = "cam"
-reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
-
-[[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn.abort"
 sink = "Path.unlink"
 ordinal = 0
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
@@ -1706,15 +1667,6 @@ owner = "cam"
 reason = "the allocator tightens an existing open directory only when it is empty"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_protected_dir.py"
-function = "_remove"
-sink = "shutil.rmtree"
-ordinal = 0
-rule = "a path from `protected_scratch_dir` / `open_protected_dir`: a fresh engine-named child of the system temp directory or a parent that is a live issued root or the ambient policy named, or a caller path reached only after `require_ambient` refused every policy but the ambient one (an issued root runs under every policy)"
-owner = "cam"
-reason = "the allocator removes a directory it issued, or one it created that failed its own check"
-
-[[entry]]
 module = "decoy_engine/publication/_members.py"
 function = "_digest"
 sink = "mmap.mmap"
@@ -1798,16 +1750,6 @@ disposition = "read"
 rule = "the publication stage this parent opened beside the caller's output_dir (`OutputTxn.local_stage_path()` of its own `begin`), or the engine-made staging under its work root, or a payload source file it just wrote there; `own_entry` itself calls `require_ambient` first, which refuses every policy but the ambient one"
 owner = "cam"
 reason = "F22 class 6 and V1-b: the parent repairs the mode of what it admits from the untrusted child through the entry's own descriptor (no link followed) and reads the admitted tables back; a strict policy never gets here"
-
-[[entry]]
-module = "decoy_engine/execution/_isolated_commit.py"
-function = "result_from_envelope"
-sink = "shutil.rmtree"
-ordinal = 1
-rule = "path derived from the caller's staging_dir, output_dir or temp_dir, or an engine-created `tempfile.mkdtemp`; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
-owner = "cam"
-reason = "the subprocess and scratch route cannot carry a strict policy (D6 fail-closed fallback), so a strict policy never gets here"
-ambient_only = true
 
 [[entry]]
 module = "decoy_engine/execution/_isolated_common.py"
@@ -1947,3 +1889,12 @@ disposition = "read"
 rule = "O_RDONLY|O_DIRECTORY|O_NOFOLLOW: a directory just listed under a held stage descriptor"
 owner = "cam"
 reason = "F26 G1(e): walks the stage tree by descriptor; a link is never followed"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "remove_tree"
+sink = "shutil.rmtree"
+ordinal = 0
+rule = "the one best-effort tree removal that keeps a MemoryError; its callers pass an engine-created stage or scratch root, a stage name beside a LocalFileAccess locator, or a caller staging_dir reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
+owner = "cam"
+reason = "one choke point for rmtree cleanup so a memory error is never swallowed on Python 3.10 and 3.11 (tests/sentry/defects/memory_boundary)"

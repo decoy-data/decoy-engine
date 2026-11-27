@@ -140,10 +140,10 @@ def remove_tree(path: str | os.PathLike[str]) -> None:
     `shutil.rmtree(..., ignore_errors=True)` swallows every `Exception` its helpers raise on
     Python 3.10 and 3.11, so a memory error during cleanup would end a run as a success. Ordinary
     filesystem errors stay ignored. Guarded by tests/sentry/defects/memory_boundary."""
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=_keep_memory_errors)
-    else:
-        shutil.rmtree(path, onerror=_keep_memory_errors)
+    hook: dict[str, Any] = {
+        "onexc" if sys.version_info >= (3, 12) else "onerror": _keep_memory_errors
+    }
+    shutil.rmtree(path, **hook)
 
 
 def _rmtree_fd(dir_fd: int) -> None:
