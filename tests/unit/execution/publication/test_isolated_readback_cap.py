@@ -231,9 +231,9 @@ def test_a4_a_bound_at_or_under_the_ceiling_runs_and_returns_what_main_does(
     t1, t2 = strings("t1", 500, "z" * 20), ints("t2", 700)
     held = sources(job(tmp_path, 3))
     # The largest bound any check sees: the sources, t1 as read, and t2 at its floor.
-    bound = bytes_of(held) + measured(tmp_path, t1) + floor_of([t2])
-    ceiling = bound if variant == "equal" else -(-bound * 10 // 9)
-    assert variant == "equal" or 0.85 * ceiling < bound <= ceiling
+    needed = bytes_of(held) + measured(tmp_path, t1) + floor_of([t2])
+    ceiling = needed if variant == "equal" else -(-needed * 10 // 9)
+    assert variant == "equal" or 0.85 * ceiling < needed <= ceiling
     run = Run(tmp_path, monkeypatch, [t1, t2], ceiling=ceiling)
     result = run.go(held=held)
     assert result.outcome == "completed"
@@ -489,12 +489,12 @@ def test_a4_a_streamed_out_of_core_child_reads_back_once_per_table(
     last = probe.outputs[names[-1]]
     # The largest bound any check sees: the caller's sources, every table but the last as read,
     # and the last one at its footer floor.
-    bound = (
+    needed = (
         bytes_of(held)
         + lower_bound_bytes(read[:-1])
         + lower_bound_bytes([lazy_spec(last.num_rows, last.schema, charge_pandas=False)])
     )
-    ceiling = bound if variant == "equal" else -(-bound * 10 // 9)
+    ceiling = needed if variant == "equal" else -(-needed * 10 // 9)
     monkeypatch.setattr(f"{COMMIT}.kill_ceiling", lambda: ceiling)
     decodes.names.clear()
     out = tmp_path / "pub" / "out"
