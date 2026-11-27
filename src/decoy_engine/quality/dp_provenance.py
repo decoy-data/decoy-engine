@@ -55,10 +55,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import io
 import platform
 import sys
 from collections.abc import Iterable
-from contextlib import ExitStack
 from pathlib import Path
 
 from packaging.utils import canonicalize_name
@@ -374,6 +374,11 @@ def _default_lock_path() -> Path:
     return Path(__file__).resolve().parents[3] / "uv.lock"
 
 
+def _read_lock_bytes(lock_file: fileaccess.FileHandle) -> bytes:
+    with lock_file.open_binary() as handle:
+        return handle.read()
+
+
 def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
     """Assert every installed distribution is a marker-selected ``uv.lock`` pin
     at the exact same version. This is the guard that the fingerprint is
@@ -412,15 +417,14 @@ def assert_lock_matches_installed(lock_path: str | Path | None = None) -> None:
     )
     at_lock = config_position("dp", "lock_path")
 
-    # The open sits inside the protected read (a missing file is a refusal, not a raw OSError);
-    # the stack closes the handle either way. No nested def: the parse stays on this function's
+    # The open, read and close all sit inside the protected read, so a failure at any of them is
+    # the coded refusal. The decode stays here (not in a helper) on this function's
     # snapshot-parse-single-owner entry.
-    with ExitStack() as stack:
-        lock = read_config(
-            lambda: toml_reader.load(stack.enter_context(lock_file.open_binary())),
-            at_lock,
-            lambda r: refusal_error(reasons.quality.DP_LOCK_PARSE_ERROR, r),
-        )
+    lock = read_config(
+        lambda: toml_reader.load(io.BytesIO(_read_lock_bytes(lock_file))),
+        at_lock,
+        lambda r: refusal_error(reasons.quality.DP_LOCK_PARSE_ERROR, r),
+    )
 
     packages = lock.get("package")
     if not isinstance(packages, list):

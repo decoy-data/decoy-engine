@@ -562,6 +562,33 @@ def test_validate_recorded_provenance_rejects_platform_fields_not_all_strings() 
     assert exc.value.code == "dp_provenance_record_malformed"
 
 
+def test_assert_lock_matches_installed_close_failure_is_a_value_free_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A failure while closing the lock stream is part of the protected read: it becomes the coded
+    # refusal, never a raw OSError whose text names the file.
+    import io
+
+    class _BadClose(io.BytesIO):
+        def close(self) -> None:
+            raise OSError("close-failure-marker")
+
+    class _Handle:
+        def open_binary(self) -> io.BytesIO:
+            return _BadClose(b"version = 1\n")
+
+    class _Capture:
+        def open_read(self, req: object) -> _Handle:
+            return _Handle()
+
+    monkeypatch.setattr(prov.fileaccess, "capture", lambda: _Capture())
+    with pytest.raises(ProvenanceError) as exc:
+        prov.assert_lock_matches_installed(lock_path="/any/uv.lock")
+    assert exc.value.code == "dp_lock_parse_error"
+    assert "close-failure-marker" not in str(exc.value)
+    assert exc.value.__context__ is None
+
+
 def test_assert_lock_matches_installed_no_package_array_is_parse_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
