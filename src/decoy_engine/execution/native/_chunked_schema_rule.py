@@ -315,15 +315,18 @@ def build_schema_rule(
 def _safe_cast(column: Any, target: pa.DataType, *, table: str, name: str, chunk_index: int) -> Any:
     try:
         return pc.cast(column, target, safe=True)
-    except (pa.ArrowInvalid, pa.ArrowNotImplementedError) as exc:
-        raise ExecutionError(
-            code=reasons.runtime.CHUNKED_SCHEMA_MISMATCH,
-            message=(
-                f"{table!r} chunk {chunk_index}: column {name!r} came back as "
-                f"{column.type} but every chunk of this call must be {target}, and the "
-                "values cannot be converted without loss"
-            ),
-        ) from exc
+    except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+        # Raised after the handler: pyarrow's text quotes the offending value, and a
+        # chained exception would carry it into any traceback.
+        pass
+    raise ExecutionError(
+        code=reasons.runtime.CHUNKED_SCHEMA_MISMATCH,
+        message=(
+            f"{table!r} chunk {chunk_index}: column {name!r} came back as "
+            f"{column.type} but every chunk of this call must be {target}, and the "
+            "values cannot be converted without loss"
+        ),
+    )
 
 
 def _narrow_passthrough(

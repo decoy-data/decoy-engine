@@ -350,6 +350,8 @@ recommended declaration changes typed output: `bucketize` under `lower` writes i
 
 **Pre-GA correction (BUCKET-TOPCODE-NATIVE S1a, 2026-11-24).** Three byte changes in the `bucketize` handler, on every route that runs it. With an integer width, a finite value of magnitude 2**53 or more (B2) and either infinity (B3) now give one `format_error` row error with the reason `value is out of range under bucketize` and a null cell; before, the label was rounded or the cast failed with no code. A valid NaN stays ordinary missing. With quarantine on the row leaves the main output; with the fail policy the job fails before it publishes. With a float width, an integer source of any pandas dtype is converted to float64 with round-to-nearest before the division (B4), so `int64[pyarrow]` gives the labels NumPy `int64` and nullable `Int64` already gave and no longer raises with the value in the message: 9007199254740993 at width 2.5 gives lower `9007199254740992.0`. Values below 2**53 and float sources are unchanged. No plan hash, seed protocol, route or reason code moves.
 
+**Pre-GA determinism golden re-record (TESTFLIGHT-GOLDENS, 2026-11-25).** Breaking for the committed testflight fingerprints of two jobs, no shim. PR #770 (UF-DOMAIN S1) writes a column no rule changes from the source Arrow column on every pandas route. In job `d_longitudinal_visits`, `clinic_stays.clinic_id` (a nullable integer) is now `int64` and was `double`; in job `e_hostile_edge_cases`, the zero-row `empty_table.seq_id` is now `string` and was `null`. Row counts, null counts and every other column are unchanged, and the output is the same across `PYTHONHASHSEED` values. `testflight/golden_fingerprints.json` is re-recorded for those two jobs on Linux; the other jobs keep their golden. The nightly `testflight` workflow was red from 2026-11-23 to 2026-11-25 until this re-record.
+
 **Pre-GA correction (COMPANION-REDS, 2026-11-23).** The physical `plan_hash` and `activation_hash` of an auto-routed
 no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, ships in 0.28.4), and its byte
 figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
@@ -956,13 +958,18 @@ only this site moves.
   base_row_offset=0, native_threads=1, route_evidence_sink=None,
   pool_cache=None)`: `config` and `chunks` are positional-or-keyword, everything
   after the `*` is keyword-only, and new parameters are additive. Its pinned
-  guarantees are value equality with `run_mask_pipeline_chunked` (one stated
-  exception: on the stock-adapter path, a passthrough column no `when:` predicate,
+  guarantees are value equality with `run_mask_pipeline_chunked` (stated
+  exceptions: on the stock-adapter path, a passthrough column no `when:` predicate,
   sibling-reading strategy or composite generator reads or writes is the source
-  column itself and never goes through pandas, so a value the oracle's round trip rounds or refuses, such as a
-  nullable integer above 2^53, comes back exact; a read passthrough column that
-  pandas refuses raises `chunked_passthrough_value_unrepresentable`, and a custom
-  or subclass adapter carries nothing), one output type per column per call (`string` for hash, truncate,
+  column itself and never goes through pandas. The oracle also writes an untouched column from the
+  source, so a nullable integer above 2^53 or a `timestamp[ns]` of `-2**63` is exact on both
+  entries. A value pandas refuses to convert, such as a `time64[ns]` with nanoseconds or a `date32`
+  outside pandas' range, raises on the oracle and comes back exact here; a read passthrough
+  column that pandas refuses raises `chunked_passthrough_value_unrepresentable`. An adapter that
+  is not exactly `PandasExecutionAdapter`, a subclass included, runs the oracle leg and carries
+  nothing (`reroute_reason="adapter_requested"` when the table would otherwise run natively;
+  an earlier reason such as `when_predicate_not_native:<col>` wins otherwise). The oracle types each chunk on its own,
+  so an all-null masked chunk can be `null` there), one output type per column per call (`string` for hash, truncate,
   string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
   that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see
   "Pass-through text width" in §3.4), no pandas

@@ -45,6 +45,7 @@ pub mod fpe;
 // gated behind the PyO3 boundary feature, like `arrow_ffi`.
 pub mod text_mask;
 pub mod text_redact;
+pub mod text_splice;
 pub mod threads;
 
 /// The ABI tag the core's loader checks on every load (`load_compiled_crypto_kernel`).
@@ -70,5 +71,6 @@ fn _kernel(m: &Bound<'_, PyModule>) -> PyResult<()> {
     arrow_ffi::register(m)?;
     text_redact::register(m)?;
     text_mask::register(m)?;
+    text_splice::register(m)?;
     Ok(())
 }
