@@ -14,12 +14,14 @@ import pytest
 from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
 from decoy_engine.errors import SourceDateUnrepresentableError
-from decoy_engine.execution import run_pipeline, run_pipeline_isolated
+from decoy_engine.execution import PandasExecutionAdapter, run_pipeline, run_pipeline_isolated
 from decoy_engine.execution._chunked import run_mask_pipeline_chunked
 from decoy_engine.execution.native._chunked_entry import run_mask_chunked as run_native_chunked
 from decoy_engine.execution.out_of_core import run_fk_out_of_core
 from decoy_engine.profile._readers import LazySource
+from decoy_engine.relationships._graph import OrphanPolicy
 from tests.native._chunked_entry_support import key_provider
+from tests.perf_fixtures.fk_relational import build_fk_relational
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _b6a_support as b6a
 
@@ -236,3 +238,24 @@ def test_a_clean_source_still_runs(tmp_path: Path) -> None:
     cfg, path, _ = _setup(tmp_path, bad_row=None)
     result = run_pipeline(cfg, sources={TABLE: LazySource(path, table=TABLE)}, **_kwargs())
     assert result.outputs[TABLE].num_rows == ROWS
+
+
+def test_the_adapter_run_sequential_checks_its_own_loader() -> None:
+    """`run_sequential` is also a public adapter entry that does not go through `run_pipeline`."""
+    fx = build_fk_relational(rows=50, width=2, orphan_frac=0.0)
+
+    def load(name: str) -> pa.Table:
+        table = fx.sources[name]
+        return table.append_column("far", pa.array([FAR_DAY] * table.num_rows, pa.date32()))
+
+    with pytest.raises(SourceDateUnrepresentableError) as caught:
+        PandasExecutionAdapter().run_sequential(
+            fx.plan,
+            load,
+            config={},
+            registry=fx.registry,
+            relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
+            namespace_registry=fx.namespace_registry,
+        )
+    assert caught.value.column == "far" and caught.value.code == CODE
+    assert "10183" not in str(caught.value)

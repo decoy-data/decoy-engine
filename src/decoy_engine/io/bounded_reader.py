@@ -424,10 +424,10 @@ def _calendar_ticks(unit_ticks_per_day: int) -> tuple[int | None, int | None]:
 def _count_outside(ints: Any, low: int | None, high: int | None) -> Any:
     """Row mask of cells below `low` or above `high`; a `None` bound is not tested."""
     mask = None
-    for bound, test in ((low, pc.less), (high, pc.greater)):
+    for bound, test in ((low, _pc.less), (high, _pc.greater)):
         if bound is not None:
             hit = test(ints, pa.scalar(bound, ints.type))
-            mask = hit if mask is None else pc.or_(mask, hit)
+            mask = hit if mask is None else _pc.or_(mask, hit)
     return mask
 
 
@@ -464,7 +464,7 @@ def _offending_rows(column: Any) -> int:
     else:
         return 0
     low, high = _calendar_ticks(ticks_per_day)
-    extrema = pc.min_max(ints).as_py() if (low is not None or high is not None) else None
+    extrema = _pc.min_max(ints).as_py() if (low is not None or high is not None) else None
     if not extrema or extrema["min"] is None:
         return 0
     margin = _ZONE_MARGIN_DAYS * ticks_per_day if zone else 0
@@ -481,14 +481,14 @@ def _offending_rows(column: Any) -> int:
     band = _count_outside(
         ints, None if low is None else low + margin, None if high is None else high - margin
     )
-    inside_instant = pc.invert(pc.fill_null(utc_outside, False))
-    near_edge = pc.and_(pc.fill_null(band, False), inside_instant)
-    local = pc.local_timestamp(column.filter(near_edge)).cast(pa.int64())
+    inside_instant = _pc.invert(pc.fill_null(utc_outside, False))
+    near_edge = _pc.and_(pc.fill_null(band, False), inside_instant)
+    local = _pc.local_timestamp(column.filter(near_edge)).cast(pa.int64())
     return _sum(utc_outside) + _sum(_count_outside(local, low, high))
 
 
 def _sum(mask: Any) -> int:
-    return 0 if mask is None else int(pc.sum(mask).as_py() or 0)
+    return 0 if mask is None else int(_pc.sum(mask).as_py() or 0)
 
 
 def check_source_dates(data: pa.Table | pa.RecordBatch, *, table: str) -> None:
