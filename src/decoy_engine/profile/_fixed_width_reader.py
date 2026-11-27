@@ -56,6 +56,7 @@ from dataclasses import dataclass
 from typing import Any, BinaryIO, NoReturn, cast
 
 import pandas as pd
+import pyarrow as pa
 from pydantic import ValidationError as PydanticValidationError
 
 from decoy_engine import fileaccess
@@ -70,6 +71,35 @@ _CASTERS: dict[str, type] = {
     "int": int,
     "float": float,
 }
+
+# The Arrow type of each layout type. Every reader of a layout takes its schema from here, so a
+# lazy read and a resident read of the same file give the same types, with or without records.
+LAYOUT_ARROW_TYPES: dict[str, pa.DataType] = {
+    "str": pa.string(),
+    "int": pa.int64(),
+    "float": pa.float64(),
+}
+
+
+def layout_arrow_schema(spec: FixedWidthLayout) -> pa.Schema:
+    """The Arrow schema a layout declares, in layout order."""
+    return pa.schema([(c.name, LAYOUT_ARROW_TYPES[c.type]) for c in spec.columns])
+
+
+def _empty_frame(spec: FixedWidthLayout) -> pd.DataFrame:
+    """The zero-record frame, typed by the layout.
+
+    With no value to infer from, an object column converts to Arrow `null` in
+    `pa.Table.from_pandas`, and an `int` field would lose its type too. Here a text field is
+    a pandas `string` column and a number field is `int64` or `float64`, so the converted
+    table has `layout_arrow_schema(spec)`.
+    """
+    text = pd.StringDtype("python")
+    return (
+        layout_arrow_schema(spec)
+        .empty_table()
+        .to_pandas(types_mapper=lambda t: text if t == pa.string() else None)
+    )
 
 
 def _strip_pad(raw: str, column: FixedWidthColumn) -> str:
@@ -179,6 +209,9 @@ def read_fixed_width(
         cast to its declared type. A wholly blank line (zero characters
         once the newline is stripped) is skipped -- it carries no data to
         lose, matching the blank-line convention of `pandas.read_csv`.
+        With no record, each column is still typed by the layout (a text
+        field is a pandas `string` column), so `pa.Table.from_pandas`
+        gives `layout_arrow_schema(layout)`, the schema of a lazy read.
 
     Raises:
         TypeError: `max_records` is not an `int` (a `bool` counts as not
@@ -380,6 +413,8 @@ def read_fixed_width_handle(
     if records is None:  # pragma: no cover - the collector returns one or the other
         raise RuntimeError("fixed-width parser returned neither records nor a failure")
 
+    if not records:
+        return _empty_frame(spec)
     column_names = [column.name for column in spec.columns]
     return pd.DataFrame.from_records(records, columns=column_names)
 
@@ -415,8 +450,10 @@ def _count_records(handle: FileHandle, spec: FixedWidthLayout) -> tuple[int | No
 
 
 __all__ = [
+    "LAYOUT_ARROW_TYPES",
     "RecordFailure",
     "count_fixed_width_records",
     "iter_fixed_width_records",
+    "layout_arrow_schema",
     "read_fixed_width",
 ]

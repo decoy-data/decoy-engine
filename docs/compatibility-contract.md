@@ -1508,6 +1508,11 @@ change in any release. The registry is `src/decoy_engine/contracts/stability.py`
   1,186 names.
 - An experimental surface becomes frozen by moving its registry row and dropping the marker in a minor release. A
   frozen name never goes back to experimental inside a major.
+- The CLI package's Python API is experimental too. Its list lives in the CLI repository's `docs/release/versioning.md`.
+- The CLI census reads this registry through one seam in `decoy_engine.contracts.stability`: the tier labels,
+  `EXPERIMENTAL_MARKER`, `is_experimental_export` and `tier_key`. Both censuses call the two functions and keep no
+  copy of the rule. `is_experimental_export` takes a third argument, a function from module name to source text, so the
+  caller does the file read and `contracts` does none. Renaming or moving any of these names needs a CLI repin in the same release train.
 
 The experimental names at 1.0, one per line (the sentry compares this list with the registry):
 
