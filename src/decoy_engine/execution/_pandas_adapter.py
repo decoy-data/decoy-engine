@@ -86,7 +86,6 @@ from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.instrumentation.timing import TimingCollector, timed_strategy, use_collector
-from decoy_engine.io import checked_loader
 from decoy_engine.keyprovider import require_mask_key
 from decoy_engine.plan._types import ColumnSeed
 
@@ -469,7 +468,7 @@ class PandasExecutionAdapter:
         return _run_sequential(
             self,
             plan,
-            checked_loader(source_loader) or source_loader,
+            source_loader,
             config=config,
             registry=registry,
             pool_cache=pool_cache,
