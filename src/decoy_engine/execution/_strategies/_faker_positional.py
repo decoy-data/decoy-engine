@@ -67,7 +67,7 @@ def positional_pool_indices(
     namespace: str,
     pool_size: int,
     gate_positions: np.ndarray[Any, Any] | None = None,
-    domain_code: str = _DOMAIN_CODE,
+    code: str = _DOMAIN_CODE,
 ) -> np.ndarray[Any, Any]:
     """One pool index per full-table row, in one batch call.
 
@@ -76,7 +76,7 @@ def positional_pool_indices(
     when the native companion is present and the byte-identical reference otherwise, as
     `PoolSampler` does."""
     try:
-        keys = positional_key_array(row_offset, n, code=domain_code, gate_positions=gate_positions)
+        keys = positional_key_array(row_offset, n, code=code, gate_positions=gate_positions)
         return derive_validated_indices(
             keys, mask_key=job_seed, namespace=namespace, pool_size=pool_size
         )
@@ -141,7 +141,7 @@ def computed_mask_draw(
                 namespace=keyed_ns,
                 pool_size=spec.count,
                 gate_positions=gate_positions,
-                domain_code=_COMPUTED_DOMAIN_CODE,
+                code=_COMPUTED_DOMAIN_CODE,
             )
         if spec.family == FAMILY_INT:
             drawn = int_from_index(idx, lo=spec.lo, step=spec.step)

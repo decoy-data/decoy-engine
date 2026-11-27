@@ -201,6 +201,15 @@ def self_maxes(name: str) -> Callable[[], dict[str, int]]:
     return maxes
 
 
+def config_refusal_census() -> dict[str, int]:
+    """Live refusal constructions outside the zero set that break S1: site key to count."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tests.sentry.defects._config_refusal_scan import baselined_counts, scan_tree
+
+    return baselined_counts(scan_tree(ROOT / "src" / "decoy_engine"))
+
+
 @dataclass(frozen=True)
 class Source:
     sentry_id: str
@@ -220,6 +229,12 @@ SOURCES: tuple[Source, ...] = (
         "safe_output/test_exception_text_copy.py",
         lambda: set(exception_text_copy_census()),
         maxes=exception_text_copy_census,
+    ),
+    Source(
+        "config-refusal-text",
+        "defects/test_config_refusal_text.py",
+        lambda: set(config_refusal_census()),
+        maxes=config_refusal_census,
     ),
     Source(
         "f29-reason-baseline",

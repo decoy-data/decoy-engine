@@ -32,6 +32,7 @@ from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.bucket_perturb import (
+    BUCKET_PERTURB_INVALID_CONFIG_TEXT,
     FORMAT_ERROR_REASON,
     VALID_BUCKETS,
     apply_bucket_perturb,
@@ -63,7 +64,7 @@ def _validated_config(
         raise StrategyError(
             code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
             strategy="bucket_perturb",
-            message=str(exc),
+            message=BUCKET_PERTURB_INVALID_CONFIG_TEXT,
         ) from exc
     date_format: str | None = cfg.get("date_format") or None
     try:
@@ -72,7 +73,7 @@ def _validated_config(
         raise StrategyError(
             code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
             strategy="bucket_perturb",
-            message=str(exc),
+            message=BUCKET_PERTURB_INVALID_CONFIG_TEXT,
         ) from exc
     return bucket, date_format, preserve
 

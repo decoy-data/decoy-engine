@@ -75,7 +75,7 @@ def run_preflight(
         for field in source.schema
     }
     compat = check_out_of_core_compatibility(
-        plan, work, relationship_graph, source_types=source_types
+        plan, work, relationship_graph, source_types=source_types, registry=registry
     )
     if not compat.accepted:
         raise ExecutionError(

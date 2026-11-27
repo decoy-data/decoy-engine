@@ -132,8 +132,6 @@ ALLOWLIST: dict[str, int] = {
     "src/decoy_engine/execution/_sequential.py": 680,
     # transactional publish hardening and row mask; split the publish cluster.
     "src/decoy_engine/quarantine.py": 658,
-    # corpus schema checks and verify_corpus; split into _codeset_verify.py when next touched.
-    "src/decoy_engine/transforms/_codeset_loader.py": 700,
     # one StreamFkJoiner lifecycle class (stage, orphan count, ordered and bounded-reorder joins, resolve); explain/optimizer helpers live in _stream_join_plan.py.
     "src/decoy_engine/execution/out_of_core/_stream_join.py": 665,
     # custom-provider registry snapshot for the shadow-parity gate; one cohesive module, no split identified.
