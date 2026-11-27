@@ -51,14 +51,7 @@ Nothing more is read, nothing is published, and the stage is removed. The bound 
 reality: tables already read count at their measured buffer bytes. A memory failure during the
 readback is a coded memory result, never a publication failure and never a raw exception. On an ordinary success, the caller gets the same outputs and publication receipt as on `main`.
 
-**Commit contract.** For a completed child's readback, the public result follows the publication decision.
-Before commit, any raised memory failure in readback or finalization yields `crashed` with
-`decoy.process_out_of_memory`. This attempt publishes nothing. Once the target binds, any
-`MemoryError` through the return from `run_pipeline_isolated` yields an already built
-`completed` result. It identifies the target and retains the decoded outputs and quarantine records.
-Optional figures without a complete measurement stay absent. A retry that the publisher verifies as
-`already_committed` has the same protection. CPython can raise even while returning or unwinding,
-so moving constructors alone cannot establish this contract.
+**Commit contract.** From readback setup through pre-call result preparation, a memory failure returns `crashed` with `decoy.process_out_of_memory` and NOT_PUBLISHED. Abort the stage. From immediately before the `publish_unit` call through final cleanup, a raised MemoryError returns the reserved memory result with UNKNOWN and same-operation-id confirmation advice. This includes a matching replay. CPython can raise between any two bytecodes, including after rename and before Python observes success. The guarantee is never a raw exception and never a false NOT_PUBLISHED once publishing may have started. A publishing run reports completion after it has a committed receipt and finishes result construction and cleanup.
 
 Only a strict lower bound can refuse, and only above the kill ceiling, so compatibility depends on the swap assumption below. That is the rule row 58b sets for quotas (no default limit that refuses 1.0
 runs that work) and the rule `_resident_fit` already applies (`RESIDENT_ADMISSION_FRACTION`,
@@ -134,14 +127,13 @@ CHUNK-PARALLEL brings an explicit memory budget, this ceiling becomes `min(H, bu
    (`_isolated_run.py:562`) maps it, through one builder in `_isolated_reason.py`, to
    `IsolatedRunResult(outcome="crashed", reason=ISOLATED_READBACK_CAPACITY_EXCEEDED,
    error=<fixed text with two integers and the readback remedy>, outputs=None, publication_receipt=failed_receipt(request)
-   when output_dir was given, else None)`, after cleanup. In `_result_from_envelope`, put `collect` in a `try` block.
+   when output_dir was given, else None)`, after cleanup. In `result_from_envelope`, start the scratch-stage cleanup try before target-string and row-error preparation, and include `collect`.
    In its `finally`, run the existing `shutil.rmtree(staging_output_dir, ignore_errors=True)`
    when `pub is None`. This also removes `staging_output/` when detection raises.
    Reason context: phase `FINALIZE`, publication `NOT_PUBLISHED`, cleanup confirmed by looking.
 5. Otherwise reopen the admitted file through the capability and read it with the existing `arrow_adapter.read_table(handle)`, so the frame,
    chunking and metadata are `main`'s, and step 3 repeats for the next table.
-6. After the last table, prepare both completed results and then publish under the boundary below.
-   Scratch-only runs finish under the pre-commit memory arm.
+6. After the last table, prepare the component names and publish under the boundary below. Build the completed result from the returned receipt. Scratch-only runs finish under the pre-call memory arm.
 7. A memory failure while reading (`is_memory_failure`,
    `src/decoy_engine/fileaccess/_errors.py:160`, the predicate the worker already uses) is caught
    before the `(OSError, ArrowException)` arm. `collect` returns a typed
@@ -162,59 +154,23 @@ CHUNK-PARALLEL brings an explicit memory budget, this ceiling becomes `min(H, bu
 9. When `H` cannot be detected (`kill_ceiling()` returns `None`), no check runs and the readback is
    `main`'s.
 
-`crashed` is the right outcome. Output size is the same on every route (the engine is seeded and
-deterministic, `_governor.py:26-30`), so a reroute cannot help, and the governor stops on `crashed`
-(`_governor.py:381-404`). The probe turns any non-completed run into an inconclusive probe
-(`_probe.py:292-300`), which routing already handles.
+**Retry behavior checked on `abc5998fd`.** Neither the governor nor the probe retries on `process_out_of_memory` or UNKNOWN. The governor tests route ineligibility first. This reason does not qualify. Its `crashed` branch records one terminal trip with no reroute and returns `exhausted` (`_governor.py:160,372-405`). With the governor off, it runs once (lines 545 to 556). The probe returns inconclusive on any non-completed sample and exits its fraction loop immediately (`_probe.py:283-301,413-428`). Neither uses publication state to schedule another attempt.
+
+For manual confirmation, rerun the same unit at the same destination with the original `PublicationRequest.operation_id`. Omitting the request generates a fresh id (`_isolated_commit.py:176-187`). Under the destination lock the publisher checks the stored result identity. A match verifies the vault and syncs before returning `already_committed`, without rebinding. Different content for that operation conflicts. An empty destination follows the ordinary first-bind path (`publication/_publish.py:255-256,291-309,339-366`).
 
 **Refuse or fall back.** Falling back to the out-of-core route does not help: the child may
 already be on it, and D2 is the driver reading the finished output. The only real fallback is to
-not read the output back, which is Q2 (b). This plan recommends the refusal for 1.0.
+not read the output back, as described in Q2. This plan recommends the refusal for 1.0.
 
 ### Commit boundary on `abc5998fd`
 
-`_isolated_run._run_isolated` owns the one decision about a memory failure after commit. It
-owns the transaction and scratch cleanup and is the last call on the public isolated route.
-Keep its memory guard around the whole readback, the publisher, and all enclosing cleanup,
-including `txn.abort()` and `scratch.close()` at lines 394 to 397. Nest cleanup so both run
-even if one raises. Callers return the selected object directly.
+The isolated driver owns one flag per attempt, initially false. Keep the outer memory guard in `_run_isolated` around readback setup, publication, result construction, evidence replacement and both finalizers. Pass the same attempt state to the existing call site in `_isolated_commit._publish`. Scratch-only runs leave the flag clear.
 
-- Reserve the per-attempt coded memory result when setting up the attempt, before entering readback.
-  Use the existing memory reason builder, fixed text and failed receipt when publishing. Leave
-  unknown figures absent and cleanup evidence conservative. On exhaustion, release the partial
-  tables and abort the stage. Returning the reserve needs no second constructor or exception text.
-- Start the existing pre-commit memory arm before the first readback allocation. Include request and
-  reader setup, the initial `extra` at `_isolated_commit.py:350`, `str(pub.target)` at line 426
-  and `row_errors_of` at line 427. Include admission, reads, measurement, component names, refusal
-  handling, receipt preparation, and both completed results. Classify memory before broad Arrow
-  and OS handlers, including the measurement handler in `publication/_publish.py:275`.
-- Make `collect` finish readback before publication. Build `Collected` if still needed, both empty
-  mapping defaults, and the normal and emergency `IsolatedRunResult` before calling the bind.
-  Share the decoded output mapping, target string, row errors and actual quality and kind mappings
-  within this attempt. Prepare sampling evidence here, with the current abnormal flag for child
-  crashes. Remove the completed route's later `evidence_of` and `replace` at `_isolated_run.py:522`.
-  The emergency result can omit the entire optional `readback` entry. Zero is a measured value.
-- The frozen results need real receipts. Split the existing publisher's locked preparation from
-  its bind so that preparation supplies the measured receipt candidates **before** the isolated
-  caller invokes `publish_unit` to commit. Keep one lock from the existing judge through bind.
-  Only the lock owner can consume a prepared bind, once, for its original transaction and destination.
-  Both the ordinary publication API and this prepared call use the same judge, descriptor,
-  receipt builder and bind. Expose preparation through the publication package API. Execution
-  never measures the descriptor again or predicts the outcome. Prepare completed results with
-  the corresponding receipts for a fresh bind or a verified replay, as selected under that lock.
-- Record the decision in pre-existing per-attempt slots shared with the outer guard. At the
-  successful rename, store the visible state before handle close or fsync can allocate
-  (`fileaccess/_local_chain.py:104`). For a memory fault during this interval, reserve a
-  completed result with a visible, non-durable `commit_uncertain` receipt for the measured unit.
-  On successful chain sync, select the prepared durable receipt and its results before releasing
-  the lock. For replay, select success only after the existing identity, vault and sync checks.
-  The binding primitive records each transition by a direct store, with no helper call or allocation
-  between the successful operation and the store. A prior target's existence proves nothing.
-  Preserve ordinary conflict, refusal, I/O and uncertain receipts, including failed fsync.
-- On the normal path, return the prepared full result. On `MemoryError`, the outer guard returns
-  the prepared fallback for the recorded decision, even when the publisher raised before returning
-  a receipt. Before any bind or verified replay it returns the coded memory result. There is no
-  post-commit retry, failure builder, telemetry update or logging call.
+- Before readback, reserve the coded `crashed` memory result and its UNKNOWN copy through the existing isolated reason builder. Both use `decoy.process_out_of_memory`, no outputs, conservative cleanup evidence and the same per-attempt `extra`. Keep the last complete `readback` figures there by replacing the entry after each successful measurement. Seed the reserves during attempt setup, independently of constructing the reader or its initial `asdict` snapshot. A fault at either site must find the pre-call reserve ready.
+- The pre-call reserve uses NOT_PUBLISHED and the usual failed receipt when a destination was requested. The UNKNOWN copy uses `PublicationState.UNKNOWN`, no receipt and the fixed error text “rerun with the same operation id to confirm”. Use `CleanupState.UNKNOWN` on reserves built before cleanup. A failed receipt would falsely report that the unit never bound.
+- Start the pre-call memory arm before request and reader setup. Cover the initial `extra` at `_isolated_commit.py:350`, the `committed` string and `row_errors_of` at lines 426 and 427, admission, readback, refusal construction and component names. Keep the existing readback memory classification ahead of generic OS and Arrow failure handling. Release partial tables and abort the stage on pre-call failure.
+- Set the flag immediately before the existing `publish_unit` call at `_isolated_commit.py:322`. Leave it set through return. Let a raised MemoryError reach the outer guard even inside the publisher or in `_check_vault` on a matching replay. Select the UNKNOWN reserve directly without inspecting the target, allocating a receipt or formatting the exception.
+- After a committed receipt returns, build the normal `completed` result with the actual receipt, decoded outputs and row errors. Protect that build and the evidence update at `_isolated_run.py:522`. Keep `txn.abort()` inside a try and `scratch.close()` in its finally (lines 394 to 397), both inside the guard. Either cleanup can select UNKNOWN once the flag is set.
 
 ### Design notes
 
@@ -231,8 +187,8 @@ refusal travels as a typed value (`ReadbackRefused`) instead of a flag argument.
 | Refusal with `output_dir` | `collect` aborts the transaction before `publish_unit` | same; receipt `failed` | receipt carries codes only | A8 |
 | `ArrowMemoryError` or `MemoryError` during a read | `collect`, `is_memory_failure` arm | `decoy.process_out_of_memory` | fixed text, no exception text | A9 |
 | `OSError(ENOMEM)` or a marker-matched memory message during a read (behaviour change: was `publication_failed`) | `collect`, `is_memory_failure` arm | `decoy.process_out_of_memory` | fixed text, no errno text | A9 |
-| Memory failure in setup or any preparation before bind | Pre-commit memory arm in the isolated finalization path | `decoy.process_out_of_memory`, nothing newly published | Fixed text | A9, A14 |
-| MemoryError after bind or verified replay, including publisher and caller unwind | `_run_isolated` reads the recorded decision | `completed`, visible target, receipt reflects confirmed durability | Missing figures omitted | A14, G14 |
+| Memory failure from setup through pre-call result preparation or scratch-only completion | Isolated memory arm, flag clear | `decoy.process_out_of_memory`, NOT_PUBLISHED, stage aborted | Fixed text | A9, A14 |
+| MemoryError raised inside `publish_unit`, including replay verification, or later in result building or cleanup | Outer guard, flag set | `decoy.process_out_of_memory`, UNKNOWN whether the target exists or not | Fixed same-id retry text | A14, G14 |
 | Swap on (Linux, macOS): floor over `H` but under RAM plus swap | `check_readback` | `decoy.isolated_readback_capacity_exceeded` (a refusal `main` would not make; accepted assumption) | fixed text | none (documented, V2-LOG) |
 | Windows: ceiling detection fails | `kill_ceiling()` returns `None` | none; cap inert, runs as `main` | n/a | A5 |
 | Kill ceiling not detectable | `kill_ceiling()` returns `None` | none; runs as `main` | n/a | A5 |
@@ -335,31 +291,12 @@ A4 requires one decode per staged table. A10, A11, A13 and class 9 are direct te
   no-exception-text checks, and the refusal error has `__cause__ is None and __context__ is None`
   where an error object exists. Mutation: build `error` from `str(exc)` in the memory arm.
 
-- **A14 result agrees with the target under allocation failure.** Run through
-  `run_pipeline_isolated` with the fake worker and a real destination. Use one fault per run.
-  - Before bind, inject once at each preparation site, starting with reader construction,
-    initial `Readback` and `asdict`, target string conversion and `row_errors_of`. Cover
-    every later allocating step in the boundary, including component creation, publisher
-    measurement and receipt construction, both result constructors, mapping defaults and evidence.
-    Patch the actual lookup or inject at the expression for literals. Assert the fault fired,
-    `crashed`, `process_out_of_memory`, fixed text, no outputs, no new target and stage cleanup.
-    Repeat applicable cases without publication. Include a failure that occurs before the reader exists.
-  - Arm constructor traps at bind for `Collected`, `IsolatedRunResult`, receipt construction,
-    mapping defaults, `replace` and evidence. Exercise empty and populated metadata. Assert
-    prebuilt identity and zero late constructions on normal success. Separately inject a real
-    `MemoryError` at each remaining post-bind operation, including before the publisher returns,
-    after its real return, at result handoff, and on lock, transaction and scratch cleanup.
-    Wrap real cleanup so it runs. For return-only sites use a one-shot trace fault inside the guard.
-    Assert each scheduled fault fired. A constructor trap that nobody calls cannot test the guard.
-  - Read the published Parquet and descriptor. Assert `completed`, the correct path, outputs,
-    quarantine records, receipt identity and visibility. Check confirmed durability after sync
-    and its absence for a fault between rename and sync. Optional figures must match the normal
-    result or be absent. Repeat after a verified replay. Seed a different existing target as a
-    negative control and require its conflict or refusal and unchanged contents. Exercise a
-    genuine fsync error separately to pin the existing uncertain outcome.
-  - **G14.** Remove only the post-commit branch of the memory guard. With all preparation intact,
-    the injected fault after real publication must now escape or yield the wrong outcome while
-    the target remains readable. Restore the guard and rerun A14 on the same final head.
+- **A14 memory errors across the publication call.** Add the new cases in `tests/unit/execution/publication/test_isolated_commit_memory.py`. Use the public isolated entry point, a fake child, real staging and one injected fault per run. Assert that each fault fired.
+  - Before the flag, inject at request and reader setup, initial `Readback` and `asdict`, `str(pub.target)`, `row_errors_of`, admission, decode, measurement, component creation and pre-call result preparation. Include refusal handling and the scratch-only result, mapping defaults and evidence. Patch the actual lookup or expression. Assert `crashed`, `process_out_of_memory`, NOT_PUBLISHED, fixed text, no outputs, stage removed and no new target. Repeat applicable cases without publication, including a fault before the reader exists.
+  - Raise inside `publish_unit` before it binds anything. In a separate run, call the real publisher and raise before its receipt reaches the caller. Assert UNKNOWN in both cases. Check the first target is absent and read the descriptor and Parquet from the second. On a matching rerun with a vault, inject in `_check_vault`. Expect UNKNOWN and unchanged target and vault. A fault-free confirmation with the same request returns `already_committed`.
+  - After a real committed receipt returns, fault the completed-result build, evidence replacement, transaction abort and scratch close in separate runs. For cleanup faults, wrap real cleanup and record both calls in order. Require the target to remain readable, and scratch close to run even when abort raises.
+  - At every post-flag fault assert the reserved `crashed` result, `decoy.process_out_of_memory`, UNKNOWN, the exact fixed retry text, last complete readback figures, no receipt, no outputs and no exception text. Check normal success still has its outputs, row errors and receipt.
+  - **G14.** Remove only the outer memory guard. Leave the flag, reserves and pre-call classification intact. A fault after the flag must now escape raw or report NOT_PUBLISHED. Require A14 to go red, restore the guard and rerun on the final head.
 
 Existing suites that must stay green: `tests/unit/execution/test_isolated_run.py`,
 `test_isolated_oom_classification.py`, `tests/unit/execution/publication/` (route outcome matrix,
@@ -373,19 +310,13 @@ marker corpus), `tests/integration/test_f29_isolation.py`, `tests/unit/execution
 | The one bound formula | `lower_bound_bytes`, `lazy_spec`, `resident_spec` (`_resident_bytes.py:50`, `:133`, `:173`) | the same callers | G2, G10 |
 | The one kill-ceiling source | Rename `_kill_ceiling` at `_resident_fit.py:219` to `kill_ceiling` and export it directly. It calls `out_of_core.detect_effective_memory_bytes` (`_budget.py:332`). | the same callers | G5 |
 | The one isolated readback | `collect` and `_read_staged` (`_isolated_commit.py:205`, `:231`); every readback of a child's stage goes through it, for the probe, the governor and direct callers | `_result_from_envelope` (`_isolated_run.py:573`) | G1, G8 |
-| Outcome after irreversible publication | `_isolated_run._run_isolated` uses the decision recorded by the publisher through final cleanup | `run_pipeline_isolated` | G14 |
+| Memory result through final cleanup | `_run_isolated` selects a reserve using the flag set at the single isolated `publish_unit` call | `run_pipeline_isolated` | G14 |
 | The capacity message | new `capacity_message(code, *, needed_bytes, kill_ceiling_bytes, remedy)` in `execution/_errors.py`. `nonfk_full_frame_capacity_error` (`src/decoy_engine/execution/_errors.py:87`) passes exactly "Run on a machine with more memory, or reduce the table's rows or columns." The formatter appends one space and the whole `remedy` sentence verbatim. Look up the summary in the supplied reason's namespace. The readback passes "Run on a machine with more memory, or write fewer or smaller output tables." | both refusals | G6 and class 9 |
 | The refusal result | new `readback_refused(...)` in `_isolated_reason.py`, beside `envelope_failure` (`:68`) and `commit_reason` (`:101`) | `_result_from_envelope` | G7 |
 | The memory predicate | `is_memory_failure` (already shared by the worker and `in_process_failure`) | `collect` (new) | G9 |
 | Capacity code list | `CAPACITY_REASON_CODES` (`errors.py:511`); the CLI derives exit 5 from it | registry walk test | G11 |
 
 ## Established solutions
-
-CPython reserves emergency objects and can return its last-resort memory error without a fresh
-allocation. Use that reserve pattern for the completed result. PostgreSQL reports a successful
-commit once the changes are durable and visible. A reporting fault cannot reverse that decision.
-[CPython memory error implementation](https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L3197-L3202)
-and [PostgreSQL COMMIT](https://www.postgresql.org/docs/current/sql-commit.html).
 
 Searches run (online): Spark configuration docs and SPARK-3466 for `spark.driver.maxResultSize`;
 the Databricks knowledge base article on the maxResultSize failure; Ray object spilling docs;
@@ -399,7 +330,7 @@ F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`
 | Option | What it gives | Decision |
 |---|---|---|
 | Spark `spark.driver.maxResultSize` (default 1g; SPARK-3466, <https://issues.apache.org/jira/browse/SPARK-3466>; Databricks KB <https://kb.databricks.com/jobs/job-fails-maxresultsize-exception.html>). An action whose results exceed the limit is aborted, because `collect` can OOM the driver | the same problem (worker results collected into the driver) answered by a refusal | followed for the shape: refuse at the driver before the data arrives. Not followed for the fixed default: a 1 GiB default would refuse 1.0 runs that work, against row 58b |
-| Spark guidance to write results to storage instead of `collect` (same KB article) | the result never enters driver memory | the answer behind Q2 option (b); changes the `outputs` contract; V2-LOG |
+| Spark guidance to write results to storage instead of `collect` (same KB article) | the result never enters driver memory | the answer behind Q2; changes the `outputs` contract; V2-LOG |
 | Ray object spilling; DuckDB `memory_limit` with `temp_directory` | spill to disk instead of failing | not applicable to D2: the data is already on disk. Rerouting the child out of core does not change output size |
 | PostgreSQL `temp_file_limit` | coded error when a query would pass a resource limit | same refusal pattern, for disk; disk stays with row 58b |
 | cgroup v2 `memory.max`, host RAM as fallback | the number the kernel OOM-kills against | used, through the existing `detect_effective_memory_bytes` |
@@ -416,11 +347,10 @@ F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`
 - New: `check_readback` refuses before a decode: `ReadbackRefused`, tables dropped, transaction aborted.
 - New: memory failure during a decode (incl. ENOMEM and marker-matched text): `ReadbackMemoryFailure`, process-out-of-memory result, transaction aborted.
 - `parquet_file` or `read_table` raises an Arrow or OS error: `failed_receipt` (unchanged, `:218`).
-- Any memory failure before bind or verified replay, including result setup, returns the coded memory result after cleanup.
-- After bind or verified replay, the outer guard returns the prepared completed result on a memory fault through final cleanup. A14 checks the target and receipt.
-- `publish_unit` does not commit: its receipt (`src/decoy_engine/execution/_isolated_commit.py:227`).
-- `_result_from_envelope` removes the stage when there is no `output_dir` or on failure (`src/decoy_engine/execution/_isolated_run.py:575`).
-- `_run_isolated` always aborts the transaction and closes the scratch work root (`src/decoy_engine/execution/_isolated_run.py:396-398`).
+- Through result preparation before the flag, a memory fault returns the NOT_PUBLISHED reserve. Abort any open stage. Scratch-only runs take this path through return.
+- Set the flag immediately before calling `publish_unit`. A raised MemoryError there, including in replay verification, or later while building the result or unwinding, returns UNKNOWN.
+- With an ordinary receipt, preserve existing handling. Build the completed result only after a committed receipt returns.
+- Remove scratch-only output in the envelope finalizer. Inside the outer guard, attempt transaction abort and always close scratch in its nested finally.
 
 ### Routes
 
@@ -443,7 +373,7 @@ relationship logic runs in the driver.
 - `error` the fixed capacity text; `outputs` `None`; `quality_metrics` and `table_kinds` `{}`.
 - `peak_rss_mb` the child's reported peak; `returncode` 0; `signal_number` `None`; `isolated` `True`.
 - `committed_output_dir` `None`; `row_errors` `()`; `publication_receipt` `failed_receipt` with `output_dir`, else `None`.
-- `extra["readback"]` the six numbers (`_isolated_common.py:407`), also on an ordinary completed run. The emergency result omits unavailable figures.
+- Both memory reserves retain the last complete `extra["readback"]` snapshot. UNKNOWN carries no receipt or committed path. The caller has no reliable visibility or durability report.
 
 `ResidentFit` (`src/decoy_engine/execution/pipeline/_resident_fit.py:52`): verdict, code, table
 count and byte figures, numbers and tokens only.
@@ -462,7 +392,7 @@ count and byte figures, numbers and tokens only.
 |---|---|---|---|---|
 | 1 | Value-bearing output | `capacity_message` builds the text from a registered summary and two integers; no name or value | A6 canary corpus over every surface | G6: add the table name to the text |
 | 2 | Cleanup missing on an exit path | refusal and memory arms abort the transaction and drop read tables; `_result_from_envelope` removes the stage; `_run_isolated` `finally` | A12 exit-path matrix with descriptor count | G12: move cleanup after collect |
-| 3 | State machine and concurrency | One publication decision under the destination lock determines which prepared result the driver returns | A14 fresh bind, verified replay and conflict | G14 |
+| 3 | State machine and concurrency | The isolated attempt sets its flag immediately before publication. The outer guard reads it through cleanup | A14 tests UNKNOWN with an absent target and a visible target | G14 |
 | 4 | Route parity and silent fallback | one readback for every isolated route; no fallback; the refusal has a registered reason | A1 to A3 use the fake worker. A4 and A7 cover both routes with real children | G1, G7 |
 | 5 | Referential integrity | N/A: per-table readback; no FK data is joined in the driver | n/a | n/a |
 | 6 | Untrusted producer (the child's staged files and footers) | admitted stage only; footer and body read through the capability and the guarded adapter; floor checked against measured bytes | A2, A10, A12 corrupt footer | G2, G10 |
@@ -514,26 +444,27 @@ New names: `check_readback`, `kill_ceiling`, `ReadbackRefused`, `ReadbackMemoryF
 - `nonfk_full_frame_capacity_error` text: byte-identical (its remedy is passed in).
 - Memory classification in the readback: changed on purpose for ENOMEM and marker-matched text
   (Behaviour step 7); release notes say so in the same `changelog.d/` fragment.
+- CHANGELOG line: “On the isolated route, a memory error once publication may have started reports an unknown publication state. Rerun with the same operation id to confirm.”
+- In `docs/publication.md`, explain UNKNOWN in the isolated result's reason context, the missing receipt on this path, and how to confirm with the same request and destination. Callers needing confirmation should supply and retain their operation id from the first attempt. Keep the existing publication exports, receipt outcomes and v1 descriptor.
 
 ## Placement and sizes
 
 | Path | Change | CODEMAP line | Beside | Lines now | Expected |
 |---|---|---|---|---|---|
-| `src/decoy_engine/execution/_isolated_commit.py` | guarded readback and preparation of completed results | `CODEMAP.md:271` | `_isolated_run.py` | 559 on abc5998fd | at most 600. If it would cross 600, move result construction to existing `_isolated_reason.py` beside the readback builders |
-| `src/decoy_engine/execution/_isolated_run.py` | own the outer memory guard and cleanup, pass sampling evidence into preparation | `CODEMAP.md:271` | `_isolated_commit.py` | 559 on abc5998fd | at most 600 |
-| `src/decoy_engine/publication/_publish.py`, `publication/__init__.py` | expose locked preparation, reuse existing receipt construction and bind | `CODEMAP.md:105` | `_types.py` | 474 in publisher | under 600 |
-| `src/decoy_engine/fileaccess/_local_chain.py`, `_local.py` | record bind and sync state at the ambient directory transaction used by isolation | `CODEMAP.md:35` | existing durable directory helpers | 600 in `_local.py` | keep orchestration at 600 by moving the existing durable-directory branch into `_local_chain.py` |
-| `src/decoy_engine/execution/_isolated_reason.py` | `readback_refused`, memory result | `CODEMAP.md:271` | `_isolated_common.py` | 112 | about 150 |
+| `src/decoy_engine/execution/_isolated_commit.py` | guard preparation and set the flag at the existing call | `CODEMAP.md:271` | `_isolated_run.py` | 560 on abc5998fd | at most 600 |
+| `src/decoy_engine/execution/_isolated_run.py` | own the attempt, outer guard and nested cleanup | `CODEMAP.md:271` | `_isolated_commit.py` | 559 | at most 600 |
+| `src/decoy_engine/execution/_isolated_reason.py` | build the two reserves with the existing memory result builder | `CODEMAP.md:271` | `_isolated_common.py` | 205 | under 600 |
 | `src/decoy_engine/execution/_errors.py` | `capacity_message` | `CODEMAP.md:271` | `_isolated_reason.py` | 140 | about 150 |
 | `src/decoy_engine/execution/pipeline/_resident_fit.py` | `check_readback`, public `kill_ceiling` | `CODEMAP.md:271` | `_resident_bytes.py` | 470 | about 505 |
 | `src/decoy_engine/execution/pipeline/__init__.py` | export both | `CODEMAP.md:271` | `_resident_fit.py` | 51 | 55 |
 | `src/decoy_engine/reasons/decoy/_core.py` | register the identity and add it to `__all__` | `CODEMAP.md:288` | `ISOLATED_WORKER_OUT_OF_MEMORY` | 288 | about 296 |
 | `src/decoy_engine/errors.py` | `CAPACITY_REASON_CODES` entry | `CODEMAP.md:262` | the `ISOLATED_WORKER_OUT_OF_MEMORY` entry | 599 | 600 |
-| `changelog.d/<fragment>` | names the new identity | release notes | other fragments | 0 | about 3 |
+| `changelog.d/g7-3-readback-cap.md` | CHANGELOG line for the registered reason and isolated UNKNOWN behavior, via the unreleased fragment | release notes | other fragments | existing fragment | a few lines |
+| `docs/publication.md` | add same-id confirmation advice beside isolated publication. Condense adjacent prose to fit | existing publication guide | receipt table | 601 on abc5998fd | at most 600 |
 | `tests/unit/execution/publication/_isolated_support.py` | ordered table-spec plant mode | existing shared publication test support | `test_isolated_parent_measures.py` | 136 | about 150 |
 | `tests/unit/execution/test_resident_fit_decision.py` | pin the full-frame refusal before the refactor | existing resident-fit tests | `test_resident_fit_transitions.py` | 525 | about 540 |
 | `tests/unit/reasons/test_capacity_reason_codes.py` | update A11's expected membership | existing registry tests | registry walk | 80 | 81 |
-| `tests/unit/execution/publication/test_isolated_readback_cap.py` (new) | A1 to A9, A12 | `CODEMAP.md:172` | `test_isolated_parent_measures.py`, `_isolated_support.py` | 0 | about 320 |
+| `tests/unit/execution/publication/test_isolated_readback_cap.py` | existing A1 to A9, A12. Shorten the A9 docstring to describe its actual check, no readback pricing after publish. Retain every assertion | `CODEMAP.md:172` | `_isolated_support.py` | 601 on abc5998fd | at most 600. All new cases go in the next file |
 | `tests/unit/execution/publication/test_isolated_commit_memory.py` (new) | A14 and G14 | `CODEMAP.md:172` | `test_isolated_readback_cap.py` | 0 | about 150 |
 | `tests/unit/execution/pipeline/test_resident_floor_reality.py` (new) | A10 | existing sub-package `tests/unit/execution/pipeline/` | `test_lifecycle_inputs.py` | 0 | about 120 |
 | `tests/unit/execution/test_isolated_safe_error.py` | A13 producers | `CODEMAP.md:271` | `test_isolated_run.py` | 418 | about 440 |
@@ -551,11 +482,7 @@ against 104, `CODEMAP.md:271`), and every change fits an existing module under 6
 
 ## Slices
 
-One slice, engine repo, branch `feat/f25-g7-3-readback-cap`: about +170 / -15 source lines and
-+480 test lines. First run the class 9 characterization against main. Run A10 next and fix any floor violation before using the floor. Add A1 to A9 and A11 to A14, then implement the cap. Tests: T0 and T1 per commit, T2 at each
-gate on the exact head. The reason registry is a frozen contract surface, which is a full-suite
-escalation trigger; the slice rides the next merge train for its one full suite against the
-stored baseline.
+The cap is built on `feat/f25-g7-3-readback-cap` at `abc5998fd`. The remaining slice adds the isolated guard, reserves, A14/G14 and documentation. Run A14 red on the built head, then run the acceptance suite and final-head mutations. Use T0 and T1 per commit and T2 at each gate. The registry change rides the next merge train for one full suite against the stored baseline.
 
 ## Pre-mortem
 
@@ -572,7 +499,7 @@ stored baseline.
   kill the driver as on `main`. Accepted; V2-LOG.
 - The spy patches the wrong name (a by-value import elsewhere): A4's per-table call count catches a
   spy that sees nothing.
-- `_isolated_run.py` goes over 600 lines: the Placement row names the move in advance.
+- If execution modules approach 600 lines, keep result construction with the existing reason builders and remove stale commentary. Check physical line counts and all existing ceilings.
 - A4 and A7 start real children. Keep those jobs below 1,000 rows. A7 stops after one rung.
 - The ceiling patch leaks into the child: it cannot (fresh interpreter), and A4 shows the child
   completes normally under the patched driver.
@@ -581,12 +508,17 @@ stored baseline.
 
 ## V2-LOG
 
+- Defer splitting publisher preparation from bind, exporting preparation, fileaccess decision slots and moving the local bind branch. The isolated flag is enough for V1.
+- Defer using `commit_uncertain` for memory faults. Today a bare `MemoryError` in `_sync_bound` escapes fileaccess because it is outside the `OSError` handler. The isolated guard catches it.
+- Defer memory classification inside the shared publisher's measurement handler (`publication/_publish.py:275`). It can turn Arrow or OS memory errors into a failed receipt before bind. Existing receipt handling still applies.
+- Defer guaranteed completed results for verified replay and pre-built completed results per receipt. The old A14 bind, rename, fsync and replay transition tests belong to that stronger guarantee.
+- The CPython emergency-object reserve and PostgreSQL durable-commit comparison described the deferred completed-result design. Neither can establish that a Python caller observed a bind.
 - Existing ceiling accessors include `execution/pipeline/_resident_fit.py:219`,
   `generation/__init__.py:59` and the third copy, `generation/_bounds.py:545`
   (`detected_memory_bytes()`). Cross-package consolidation is a follow-up.
 
 - Read back only on request: with `output_dir`, leave `outputs` unread or return lazy handles;
-  removes D2 (Q2 option (b) or (c)).
+  removes D2 (Q2).
 - Row-group granularity for the readback check, so one very large table is checked between row
   groups; needs a parity proof for chunk layout against `pq.read_table`.
 - A tighter floor for string and binary payloads from footer statistics or `total_byte_size`.
@@ -599,34 +531,13 @@ stored baseline.
 - When row 58b or CHUNK-PARALLEL brings an explicit memory budget, the readback ceiling becomes
   `min(H, budget)`.
 - A bounded footer read for child-staged files.
-- The probe reads back outputs it never uses; skip the readback for the probe once Q2 (b) exists.
+- The probe reads back outputs it never uses; skip the readback for the probe once the optional readback in Q2 exists.
 
-## Owner questions
+## Owner choices for 1.0
 
-**Q1. What may the cap refuse?**
-
-- (a) Only what a strict floor proves cannot fit under the detected kill ceiling. This accepts the documented swap exception and can miss string-heavy overruns. **Recommended** (matches row 58b's
-  no-default-limit rule and `_resident_fit`'s rule).
-- (b) An estimate (footer `total_byte_size`) against 85% of the ceiling. Catches more, but can
-  refuse runs that complete today.
-- (c) A fixed default cap in Spark's 1 GiB style. Simple, but refuses large runs that work.
-
-**Q2. With `output_dir` given, what happens at the cap?**
-
-- (a) Refuse the whole run and publish nothing; `outputs` keeps its contract (a dict on every
-  completed run). **Recommended for 1.0.**
-- (b) Publish the staged unit, return `completed` with `outputs=None` and a reason. Better for big
-  runs, but every caller of `IsolatedRunResult.outputs` must handle `None` on a completed run
-  (contract change). V2-LOG.
-- (c) Return lazy table handles instead of frames. Removes the readback entirely; the largest
-  contract change. V2-LOG.
-
-**Q3. Should callers be able to set the cap?**
-
-- (a) No parameter in 1.0; the ceiling is detected. **Recommended** (hardening only, no new
-  surface; 58b brings a configurable budget).
-- (b) An engine keyword on `run_pipeline_isolated` (`max_readback_bytes`). Useful for platform
-  tuning, but it is new public surface.
+Q1. Use the strict floor and the documented swap assumption. An estimate or fixed default can refuse runs that fit.
+Q2. Refuse before publishing when the floor exceeds the ceiling. Optional readback and lazy handles change the completed outputs contract and stay in V2-LOG.
+Q3. Detect the ceiling. A caller-set budget belongs with row 58b.
 
 ## Finding map (plan review rounds 1 and 2, and self-review)
 
@@ -651,6 +562,6 @@ stored baseline.
 | V1 self-review, caller sources missing from collect | Behaviour steps 1 to 3 carry resident source facts to the comparison. A3 isolates their contribution. |
 | V2-LOG self-review, test evidence | A4 reads published files. A10 covers intentional zero floors. A11 updates expected membership. G12 catches the cleanup regression even with the outer abort. |
 | V1 self-review, Arrow-only pricing | Behaviour step 3 prices shared buffers without interpreting pandas metadata. A4 checks the original schema and metadata. |
-| V1 repeated review, memory failure after irreversible publication | Guarantee, Commit boundary, Failure modes and Exit paths tie the public outcome to the actual bind. A14 and G14 exercise the guard. |
-| V1 unguarded preparation | Commit boundary and A14 cover initial figures, target string, row errors and all later result construction before commit. |
-| V1 self-review, receipt construction and caller unwind | Commit boundary and A14 cover the publisher before receipt return, verified replay, evidence replacement and outer cleanup. |
+| V1 setup and result preparation could raise raw memory errors | The pre-call arm and A14 include the first readback allocation, target string and row errors. |
+| V1 false NOT_PUBLISHED or raw memory error during publication, replay or cleanup | The per-attempt flag selects UNKNOWN through final cleanup. A14 checks both target states. G14 removes the outer guard. |
+| DESIGN unnecessary shared publication and fileaccess changes | The isolated caller owns the flag. The proposed shared mechanisms are in V2-LOG. |
