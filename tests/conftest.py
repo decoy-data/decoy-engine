@@ -114,6 +114,17 @@ def _refuse_unstable_ids(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _safe_text_strict():
+    """F31: a SafeText literal-check failure raises in tests; production withholds and logs."""
+    from decoy_engine import _safe_text
+
+    previous = _safe_text._set_strict(True)
+    _safe_text._warned.clear()
+    yield
+    _safe_text._set_strict(previous)
+
+
+@pytest.fixture(autouse=True)
 def _file_access_latch_reset():
     """Installing a strict policy latches the process into fail-closed mode; tests that do so
     must not change how later tests resolve the default policy."""
