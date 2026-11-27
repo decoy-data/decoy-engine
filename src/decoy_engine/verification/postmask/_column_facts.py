@@ -30,7 +30,8 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
-from decoy_engine.internal.canonical_cell import Null, canonical_cell
+from decoy_engine.internal.canonical_cell import Null, canonical_cell, contains_record
+from decoy_engine.internal.cell_text import RecordNotComparableError
 from decoy_engine.internal.pandas_compat import exact_int_types_mapper
 from decoy_engine.plan.column_access import (
     TableWrites,
@@ -288,6 +289,12 @@ def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
     else:
         src_o, out_o = canonical_cells(src), canonical_cells(out)
     present = src_o.notna() & out_o.notna()
+    if not _typed(src, out) and any(
+        contains_record(a) != contains_record(b)
+        for a, b in zip(src_o[present], out_o[present], strict=True)
+    ):
+        # No text of a record is predicted, so a record against another kind cannot be compared.
+        raise RecordNotComparableError
     return int(present.sum()), int((src_o[present] == out_o[present]).sum())
 
 

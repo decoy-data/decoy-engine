@@ -91,7 +91,7 @@ class Map:
     """A mapping, equal to another with the same pairs in any order. `entries` is the display:
     each key's `repr` in sorted order beside its canonical value."""
 
-    pairs: frozenset[object]
+    pairs: frozenset[tuple[object, object]]
     entries: tuple[tuple[str, object], ...] = field(default=(), compare=False)
 
 
@@ -105,12 +105,11 @@ class Members:
 
 @dataclass(frozen=True)
 class Record:
-    """A NumPy record scalar. It compares as the canonical forms of its fields in dtype order, so it
-    is hashable and unit-exact; `spelling` is the `repr` of its Python tuple, as an exporter writes
-    it. Field names stay out of the comparison."""
+    """A NumPy record scalar: the canonical forms of its fields in dtype order, so it is hashable
+    and unit-exact. Field names stay out of the comparison. Its key text is a fixed rendering of
+    these fields (`cell_text`), never NumPy's or Python's text for the record."""
 
-    fields: object
-    spelling: str = field(default="", compare=False)
+    fields: tuple[object, ...]
 
 
 class Blob(bytes):
@@ -264,28 +263,10 @@ def _leaf(value: object) -> object:
             # Each field through the walk, so a date or duration field is exact whatever its
             # unit. `.item()` would turn one unit into an int and another into a datetime.
             fields = tuple(canonical_cell(value[name]) for name in value.dtype.names)
-            return Record(fields, _record_spelling(value))
+            return Record(fields)
         if type(item) is not type(value):
             return canonical_cell(item)
     return value
-
-
-def _record_spelling(record: np.void) -> str:
-    """The `repr` of the record's Python tuple, except that a date or duration field reads as the
-    normalized pandas text, so the same instant in two units keys alike."""
-    parts = [_field_spelling(record[name]) for name in record.dtype.names or ()]
-    return f"({parts[0]},)" if len(parts) == 1 else f"({', '.join(parts)})"
-
-
-def _field_spelling(field_value: object) -> str:
-    if isinstance(field_value, np.void) and field_value.dtype.names:
-        return _record_spelling(field_value)
-    if isinstance(field_value, np.ndarray) and field_value.dtype.kind in "Mm":
-        return f"[{', '.join(_field_spelling(v) for v in field_value)}]"
-    if isinstance(field_value, (np.datetime64, np.timedelta64)):
-        form = canonical_cell(field_value)
-        return temporal_text(form, nested=True) if isinstance(form, TEMPORAL) else repr(form)
-    return repr(field_value.item() if isinstance(field_value, np.generic) else field_value)
 
 
 def _container(value: object) -> object:
@@ -300,6 +281,19 @@ def _container(value: object) -> object:
     if isinstance(value, (set, frozenset)):
         return Members(frozenset(canonical_cell(v) for v in value), repr(value))
     return value
+
+
+def contains_record(form: object) -> bool:
+    """True when `form` is a record or holds one at any depth."""
+    if isinstance(form, Record):
+        return True
+    if isinstance(form, Seq):
+        return any(contains_record(item) for item in form.items)
+    if isinstance(form, Members):
+        return any(contains_record(item) for item in form.items)
+    if isinstance(form, Map):
+        return any(contains_record(k) or contains_record(v) for k, v in form.pairs)
+    return False
 
 
 def temporal_text(form: Temporal, *, nested: bool = False) -> str:

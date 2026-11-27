@@ -553,3 +553,34 @@ N/A: no report field, log line or exit code changes.
 | V1 HIGH: K4 lost null and temporal spellings | Null and temporal forms retain non-comparing display data. E2 covers equal leaves with different spellings. T9 to T13 pin the base text and runner counts. Rendering every nested null as None turns T9 red. C9 guards normalized nested NumPy temporal repr. |
 | V1 self-review: nested other leaves and unordered containers could lose base repr | Preserve nested repr (including UUID, date and bytearray) and original set/frozenset display. Add K4 runner variants against their own text for `[date(2020, 1, 1)]`, `[bytearray(b"a")]` and `frozenset({1})`. |
 | V2-LOG LOW: missing dict insertion-order limit | Failure modes records the sorted dict key and insertion-ordered output string that already split on base. |
+
+## Record redesign (amendment, 2026-11-27)
+
+Four Codex findings in the record path (r3 ns vs us field; r4 case 1, an unchanged `M8[us]` record
+exported as `str(record.item())`; r4 case 2, a subarray of nested records after an inner unit
+change) came from one habit: predicting how NumPy or Python spells a record as text. Each spelling
+path (`str(item())`, `repr`, `Timestamp` against `datetime`, the unit inside `repr`) can split from
+identity. The walk stops predicting it.
+
+Rule:
+1. A NumPy record scalar is `Record(fields)`: the canonical forms of its fields in dtype order,
+   recursing into nested records and subarrays. Field names stay out of identity. Its key text is
+   one fixed rendering of those fields, `record(<field>, ...)`, built by `_canonical_text` in
+   `cell_text.py`. No record text comes from `item()`, `str()` or NumPy `repr`.
+2. A record, or a container holding one, facing a non-null cell that holds no record is not
+   comparable, in either direction. `identity_counts` raises `RecordNotComparableError` (a
+   `ComparisonNotPreservedError`, fixed text, class name only, same `check_error` classification).
+   The table is refused as for any comparison failure. It is never reported as "differs as
+   expected".
+3. Scope: table level, as the plan already has. One record column refuses the whole table.
+
+Removed: `Record.spelling`, `_record_spelling`, `_field_spelling`.
+Added: `RecordNotComparableError` (`internal/cell_text.py`), `contains_record`
+(`internal/canonical_cell.py`).
+
+Cases closed: r3 ns vs us (identity from fields); r4 case 1 (record to text is refused); r4 case 2
+(the subarray keys from fields, so the units cannot split it); text to record is refused the same
+way. Tests: the "records" sections of `tests/unit/internal/test_canonical_cell_keys.py`.
+
+V2-LOG: per-column refusal (only the record column, not the table) and a documented text export
+for records, if a customer needs a record column to be compared with text.

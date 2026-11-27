@@ -53,6 +53,15 @@ class ComparisonNotPreservedError(DecoyError):
         super().__init__("a column's text keys do not keep its cells' equality")
 
 
+class RecordNotComparableError(ComparisonNotPreservedError):
+    """A record cell faces a cell that is not a record. No spelling of a record is predicted, so
+    the pair is not comparable and the table is refused. The text is fixed, so no cell reaches the
+    report; the table fails with this class name."""
+
+    def __init__(self) -> None:
+        DecoyError.__init__(self, "a record cell cannot be compared with a cell of another kind")
+
+
 def cell_text(value: object) -> str:
     """`value` as text: bytes of any kind decoded as UTF-8, anything else as `str`."""
     if not isinstance(value, _BYTES):
@@ -325,8 +334,11 @@ def _canonical_text(form: object) -> str:
         return f"[{inner}]"
     if isinstance(form, Map):
         return "{" + ", ".join(f"{k}: {_canonical_text(v)}" for k, v in form.entries) + "}"
-    if isinstance(form, (Members, Record)):
+    if isinstance(form, Members):
         return form.spelling
+    if isinstance(form, Record):
+        inner = ", ".join(_canonical_text(f) for f in form.fields)
+        return f"record({inner},)" if len(form.fields) == 1 else f"record({inner})"
     return form.spelling if isinstance(form, Blob) else repr(form)
 
 

@@ -21,8 +21,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from decoy_engine.internal.canonical_cell import Null, canonical_cell
-from decoy_engine.internal.cell_text import detector_text, key_text
-from decoy_engine.verification.postmask import run_post_mask
+from decoy_engine.internal.cell_text import RecordNotComparableError, detector_text, key_text
+from decoy_engine.verification.postmask import post_scan_verdict, run_post_mask
 from decoy_engine.verification.postmask import runner as runner_module
 from decoy_engine.verification.postmask._column_facts import identity_counts
 from decoy_engine.verification.postmask.runner import _frame_tables
@@ -80,7 +80,11 @@ def run(src_cell: object, out_cell: object) -> Run:
         failed = _frame_tables({"t": src}, {"t": out})[2]
     # The output frame is converted first, then the source.
     keys = identity_counts(emitted[1], emitted[0]) if len(emitted) == 2 else None
-    return Run(failed, identity_counts(src["v"], out["v"]), keys)
+    try:
+        cells = identity_counts(src["v"], out["v"])
+    except RecordNotComparableError:
+        cells = (0, 0)
+    return Run(failed, cells, keys)
 
 
 class _P(NamedTuple):
@@ -503,14 +507,11 @@ def test_distinct_extreme_temporal_values_never_share_a_key() -> None:
     assert "NaT" not in keys
 
 
-def test_a_numpy_record_keys_as_its_python_export() -> None:
+def test_a_numpy_record_keys_from_its_fields_only() -> None:
     record = np.array([(np.array([1, 2], dtype=np.int32),)], dtype=[("samples", "i4", (2,))])[0]
-    text = str(record.item())
-    assert key(record) == key(text)
-    assert key([record]) == f"[{record.item()!r}]"
-    result = run(record, text)
-    assert result.failed == {}
-    assert result.keys == (2, 2)
+    assert key(record) == "record([1, 2],)"
+    assert key([record]) == "[record([1, 2],)]"
+    assert key((1, 2)) != key(np.array([(1, 2)], dtype=[("a", "i4"), ("b", "i4")])[0])
     assert run(record, record).failed == {}
 
 
@@ -574,3 +575,76 @@ def test_an_unchanged_record_column_in_another_unit_still_fails_the_hash_check(
     report = run_post_mask({"t": src}, {"t": out}, config=config)
     (finding,) = [f for f in report["policy_validation"] if f["column"] == "n"]
     assert finding["severity"] == "fail"
+
+
+# ----- a record against another kind is not comparable ------------------------------------------
+
+NOT_COMPARABLE = "RecordNotComparableError"
+
+
+def _flat(unit: str = "us") -> Any:
+    return _record("M", "flat", unit, 0)
+
+
+def test_r4_case_1_an_unchanged_record_exported_as_text_is_refused() -> None:
+    record = _flat("us")
+    assert run(record, str(record.item())).failed == {"t": NOT_COMPARABLE}
+    emails = [f"user{i}@realmail.com" for i in range(64)]
+    fake = [f"fake{i}@masked.example" for i in range(64)]
+    config = {
+        "version": 2,
+        "tables": [
+            {
+                "name": "t",
+                "columns": [
+                    {"name": "email", "strategy": "faker"},
+                    {"name": "n", "strategy": "hash"},
+                ],
+            }
+        ],
+    }
+    cells = [_record("M", "flat", "us", i % 2) for i in range(64)]
+    text = [str(c.item()) for c in cells]
+    src = pd.DataFrame({"email": emails, "n": _objects(*cells)})
+    out = pd.DataFrame({"email": fake, "n": _objects(*text)})
+    report = run_post_mask({"t": src}, {"t": out}, config=config)
+    errors = [f for f in report["residual_pii"] if f["severity"] == "error"]
+    assert errors
+    assert NOT_COMPARABLE in errors[0]["message"]
+    assert not any(
+        "differs from source" in f.get("message", "") for f in report["policy_validation"]
+    )
+    assert post_scan_verdict(report).blocking
+
+
+@pytest.mark.parametrize("other", ["text", "tuple", "number", "list-of-text"])
+def test_a_record_against_another_kind_is_refused_both_ways(other: str) -> None:
+    record = _flat("ns")
+    cell = {"text": "x", "tuple": (1,), "number": 5, "list-of-text": ["x"]}[other]
+    assert run(record, cell).failed == {"t": NOT_COMPARABLE}
+    assert run(cell, record).failed == {"t": NOT_COMPARABLE}
+    assert run([record], [cell]).failed == {"t": NOT_COMPARABLE}
+    with pytest.raises(RecordNotComparableError):
+        identity_counts(_objects(record), _objects(cell))
+
+
+def test_a_record_against_a_null_or_a_record_is_comparable() -> None:
+    assert run(_flat("ns"), None).failed == {}
+    assert run(_flat("ns"), _flat("us")).failed == {}
+    assert run([_flat("ns")], [_flat("us")]).failed == {}
+
+
+def _subarray_of_nested(unit: str) -> Any:
+    inner = [("u", f"M8[{unit}]")]
+    row = np.zeros(1, dtype=[("t", inner, (2,))])
+    row["t"]["u"][0] = np.array([5, 7], "M8[s]").astype(f"M8[{unit}]")
+    return row[0]
+
+
+def test_r4_case_2_a_subarray_of_nested_records_keys_alike_in_every_unit() -> None:
+    a, b = _subarray_of_nested("us"), _subarray_of_nested("ns")
+    assert canonical_cell(a) == canonical_cell(b)
+    assert key(a) == key(b)
+    result = run(a, b)
+    assert result.failed == {}
+    assert result.keys == (2, 2)
