@@ -94,7 +94,7 @@ def _load_sources(
             with capture().open_read(request) as handle:
                 sources[name] = ipc_read_path(handle)
         elif lazy:
-            sources[name] = LazySource(path)
+            sources[name] = LazySource(path, table=name)
         else:
             sources[name] = pq.read_table(path)  # type: ignore[no-untyped-call, unused-ignore]
     return sources

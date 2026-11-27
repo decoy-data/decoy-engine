@@ -42,6 +42,7 @@ import pyarrow.parquet as pq
 from decoy_engine import fileaccess
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.io import check_source_dates, checked_batches
 from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
@@ -172,6 +173,7 @@ class OpenedLazyBatches:
         use_threads: bool,
         handle: FileHandle | None = None,
         columns: Sequence[str] | None = None,
+        table: str = "source",
     ) -> None:
         self._parquet_file = parquet_file
         # The authorized handle lives as long as the batches do, through early failure and
@@ -180,7 +182,7 @@ class OpenedLazyBatches:
         self._closed = False
         self.facts = footer_facts_of(parquet_file)
         # The projection narrows the batches only; `facts` stay the whole file's.
-        self.batches = self._read(batch_rows, use_threads, columns)
+        self.batches = checked_batches(self._read(batch_rows, use_threads, columns), table=table)
 
     @property
     def schema(self) -> pa.Schema:
@@ -245,6 +247,8 @@ class LazySource:
     path: Path
     access: FileAccess | None = field(default=None, compare=False, repr=False)
     field_key: str = field(default="source.path", compare=False)
+    # Names the table in a refused read; never part of identity.
+    table: str = field(default="source", compare=False)
 
     def __post_init__(self) -> None:
         if self.access is None:
@@ -261,7 +265,9 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
-        return self._iter_batches(check_batch_rows(batch_rows), columns)
+        return checked_batches(
+            self._iter_batches(check_batch_rows(batch_rows), columns), table=self.table
+        )
 
     def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
         handle = self._handle()
@@ -308,7 +314,9 @@ class LazySource:
             handle.close()
             raise
         try:
-            return OpenedLazyBatches(parquet_file, batch_rows, use_threads, handle, columns)
+            return OpenedLazyBatches(
+                parquet_file, batch_rows, use_threads, handle, columns, self.table
+            )
         except BaseException:
             parquet_file.close()
             handle.close()
@@ -367,11 +375,13 @@ class LazySource:
         """Read the file (or just `columns`) into memory. Fallback for small jobs only."""
         handle = self._handle()
         try:
-            return arrow_adapter.read_table(
+            table = arrow_adapter.read_table(
                 handle, **({} if columns is None else {"columns": columns})
             )
         finally:
             handle.close()
+        check_source_dates(table, table=self.table)
+        return table
 
 
 @dataclass(frozen=True)
@@ -386,6 +396,7 @@ class ParquetFileSource(_PolicyBound):
     path: Path
     access: FileAccess | None = field(default=None, compare=False, repr=False)
     field_key: str = field(default="source.path", compare=False)
+    table: str = field(default="source", compare=False)
 
     def __post_init__(self) -> None:
         if self.access is None:
@@ -394,10 +405,10 @@ class ParquetFileSource(_PolicyBound):
     @classmethod
     def from_lazy(cls, lazy: LazySource) -> ParquetFileSource:
         """The reader for a file handle a caller supplied, under that handle's own policy."""
-        return cls(lazy.path, lazy.access, lazy.field_key)
+        return cls(lazy.path, lazy.access, lazy.field_key, lazy.table)
 
     def _lazy(self) -> LazySource:
-        return LazySource(self.path, self.access, self.field_key)
+        return LazySource(self.path, self.access, self.field_key, self.table)
 
     def row_count(self) -> RowCount:
         return RowCount(self._lazy().num_rows, exact=True)
@@ -407,7 +418,10 @@ class ParquetFileSource(_PolicyBound):
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
         return head_frame_from_batches(
-            self._lazy().iter_batches(sample_rows), sample_rows, self._lazy().schema
+            self._lazy().iter_batches(sample_rows),
+            sample_rows,
+            self._lazy().schema,
+            table=self.table,
         )
 
     def to_frame(self) -> pd.DataFrame:
@@ -475,7 +489,7 @@ def has_row_beyond(read_sample: Callable[[int], pd.DataFrame], n: int) -> bool:
 
 
 def head_frame_from_batches(
-    batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema
+    batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema, *, table: str = "source"
 ) -> pd.DataFrame:
     """Collect batches until `sample_rows` rows are gathered, as a DataFrame.
 
@@ -493,10 +507,11 @@ def head_frame_from_batches(
             break
     if not collected:
         return schema.empty_table().to_pandas()
-    table = pa.Table.from_batches(collected)
-    if table.num_rows > sample_rows:
-        table = table.slice(0, sample_rows)
-    return table.to_pandas()
+    head = pa.Table.from_batches(collected)
+    if head.num_rows > sample_rows:
+        head = head.slice(0, sample_rows)
+    check_source_dates(head, table=table)
+    return head.to_pandas()
 
 
 # ---------------------------------------------------------------------

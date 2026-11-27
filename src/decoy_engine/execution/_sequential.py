@@ -180,6 +180,7 @@ from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.instrumentation.timing import TimingCollector, use_collector
+from decoy_engine.io import checked_loader
 from decoy_engine.keyprovider import require_mask_key
 from decoy_engine.progress import get_active_channel
 from decoy_engine.quarantine import (
@@ -292,6 +293,7 @@ def run_sequential(
     """
     refuse_unchecked_route(config, "sequential")
     declared_route_guard("sequential", plan=plan, raise_on_decline=True)
+    source_loader = checked_loader(source_loader) or source_loader
     q_cfg: dict[str, Any] = quarantine_config or {}
     q_enabled = bool(q_cfg.get("enabled", False))
     q_triggers: list[str] = list(q_cfg.get("triggers") or [])

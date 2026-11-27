@@ -74,6 +74,7 @@ __all__ = [
     "SORT_ASCENDING_LENGTH_MISMATCH",
     "SORT_COLUMN_MISSING",
     "SORT_UNSUPPORTED_TYPE",
+    "SOURCE_DATE_UNREPRESENTABLE",
     "SPOOL_DISK_FULL",
     "SUBSET_CLOSURE_INVARIANT_VIOLATED",
     "SUBSET_CLOSURE_NONTERMINATION",
@@ -549,5 +550,24 @@ VALIDATOR_COLUMN_MISSING = _d(
 VALIDATOR_SPAN_REPEATED = _d(
     "validator_span_repeated",
     "A validator that can only read a table whole was given the table in several batches.",
+    since=UNRELEASED,
+)
+
+_d = _catalog.runtime("SourceDateUnrepresentableError")
+
+# Read before any strategy runs, so the phases cover the profile and the mask read alike. The
+# remedy is in the source: the column holds a date the Python calendar (years 1 to 9999) cannot.
+SOURCE_DATE_UNREPRESENTABLE = _d(
+    "source_date_unrepresentable",
+    "A source date or timestamp column holds a value outside the calendar years 1 to 9999.",
+    phases=(
+        Phase.RESOLVE,
+        Phase.COMPILE,
+        Phase.MASK,
+        Phase.GENERATE,
+        Phase.FINALIZE,
+        Phase.UNKNOWN,
+    ),
+    retry=RetryClass.NEVER,
     since=UNRELEASED,
 )

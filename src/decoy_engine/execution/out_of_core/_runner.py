@@ -88,6 +88,7 @@ from decoy_engine.execution.out_of_core._stream_driver_support import (  # noqa:
     _code_set_records_and_evidence_for_table,
 )
 from decoy_engine.fileaccess import FileAccess, ScratchArena, entry_point
+from decoy_engine.io import check_resident_sources
 from decoy_engine.progress import get_active_channel
 from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
 
@@ -189,6 +190,7 @@ def run_fk_out_of_core(
     """
     if sink is not None and vault_writer is not None:
         raise vault_requires_resident_output()
+    check_resident_sources(sources)
     refuse_unchecked_route(config, "out_of_core")
     declared_route_guard("out_of_core", plan=plan, raise_on_decline=True)
     if cast_run is not None and not _staged and cast_run.tables() & set(sources):

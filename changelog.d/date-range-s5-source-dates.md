@@ -1,0 +1,5 @@
+### Fixed (Checked source dates and fitted datetime range, DATE-RANGE-SENTINEL S5, 2026-11-27)
+
+The engine now checks Arrow date and timestamp columns when it reads a source: a resident table, a loader result, every lazy batch, every opened row group, the chunked entries and the profile head. A value outside the years 1 to 9999 used to fail inside pandas with `year 10183 is out of range`, which put the year in the error text. The new error names the table, the column and a count, and nothing else. Zoned timestamps are judged by their local calendar date.
+
+The fitted `distribution` datetime sampler now checks its snapshot before any draw. A `min`, `max` or live year bin outside the whole-day nanosecond range (1677-09-22 to 2262-04-10) used to fail inside pandas with a message that quoted a derived date, or was silently moved into the last year. It now raises the coded `plan/generation_unbounded_column`. The partial years 1677 and 2262 are sampled correctly. The range is defined once in `decoy_engine.contracts.calendar_range`.
