@@ -99,14 +99,19 @@ def detected_date_config(
     return {**choice.provider_config, "date_format": fmt}
 
 
-def format_needed(strategy: str, shape: ColumnShape) -> bool:
-    """Whether the starter must write the detected date format for a column of ``shape``.
+def format_needed(strategy: str, shape: ColumnShape) -> bool | None:
+    """Whether the starter writes the detected date format for a column of ``shape``.
 
-    Read from the shape table the plan check uses, so the starter never writes a format the
-    compiler would only warn about, and never omits one it would refuse the column for.
+    True for text and unknown shapes, False for a shape the strategy reads natively, and None
+    for a shape it does not admit at all: no config can make that strategy read the column, so
+    the starter picks another. Read from the shape table the plan check uses.
     """
     shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy)
-    return shaped is None or shape_declaration_needed(shaped, shape, config_only=False)
+    if shaped is None:
+        return True
+    if shape not in shaped.admitted:
+        return None
+    return shape_declaration_needed(shaped, shape, config_only=False)
 
 
 def _from_descriptor(
@@ -120,11 +125,15 @@ def _from_descriptor(
         return _FALLBACK
     provider_config: Mapping[str, Any] = choice.provider_config
     # A typed date is read natively and needs no format; text and `unknown` keep it (fail closed).
-    if choice.detected_date_format and format_needed(choice.strategy, shape):
-        detected = detected_date_config(choice, match)
-        if detected is None:
+    if choice.detected_date_format:
+        needed = format_needed(choice.strategy, shape)
+        if needed is None:
             return _FALLBACK
-        provider_config = MappingProxyType(detected)
+        if needed:
+            detected = detected_date_config(choice, match)
+            if detected is None:
+                return _FALLBACK
+            provider_config = MappingProxyType(detected)
     return StarterDecision(
         strategy=choice.strategy,
         provider=choice.provider,

@@ -4,4 +4,4 @@
 
 #### Changed: the starter writes date_format only for text dates
 
-The starter config writes `date_format` for a date column that is text or of unknown shape, as before. For a typed date (a Parquet date or zoned timestamp) it writes a `date_shift` with no `date_format`.
+The starter config writes `date_format` for a date column that is text or of unknown shape, as before. When a detector matches a typed date (a Parquet date or zoned timestamp), it writes a `date_shift` with no `date_format`. A column whose shape `date_shift` cannot read (integer, naive timestamp) gets the fallback strategy instead of a `date_shift` the compiler would refuse.

@@ -15,11 +15,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
-from decoy_engine.contracts.column_shape import NO_SOURCES
+from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import profile_source
 from decoy_engine.profiling import profile_columns, scan_sources
-from decoy_engine.profiling._starter_config import StarterConfig, starter_config
+from decoy_engine.profiling._starter_config import StarterConfig, detector_entry, starter_config
 from decoy_engine.profiling._starter_inference import infer_starter_strategy
 
 DATES = ["1990-01-02", "1985-06-30", "2001-12-25", "1999-03-04", "1972-11-11"] * 4
@@ -68,3 +68,16 @@ def test_unknown_shape_writes_format() -> None:
     got = infer_starter_strategy(profile.fields[0])
     assert got.strategy == "date_shift"
     assert got.provider_config["date_format"] == "%Y-%m-%d"
+
+
+@pytest.mark.parametrize("shape", [ColumnShape.INTEGER, ColumnShape.TIMESTAMP_NAIVE])
+def test_shape_the_strategy_cannot_read_gets_no_date_shift(shape: ColumnShape) -> None:
+    """A shape `date_shift` does not admit is never given a bare `date_shift` the compiler refuses."""
+    profile = profile_columns(pd.DataFrame({"dob": DATES}), "t", shapes={"dob": shape})
+    assert infer_starter_strategy(profile.fields[0]).strategy == "redact"
+
+
+@pytest.mark.parametrize("shape", [ColumnShape.INTEGER, ColumnShape.TIMESTAMP_NAIVE])
+def test_detector_entry_refuses_a_shape_the_strategy_cannot_read(shape: ColumnShape) -> None:
+    assert detector_entry("iso_date", "dob", date_format="%Y-%m-%d", shape=shape) is None
+    assert detector_entry("iso_date", "dob", shape=ColumnShape.DATE) is not None

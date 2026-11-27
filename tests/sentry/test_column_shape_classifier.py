@@ -1,9 +1,9 @@
 """Sentry: one classifier maps a type to a column shape, and only named files call it.
 
 `contracts/column_shape.py` owns `classify_column` (what the data is) and `declared_shape` (what an
-F06 declaration says). Two files may call them: the profile walk, which records the observed
-shape, and the plan's assembler, which joins config facts with the profile and the schemas. A
-third caller is a second place that decides what a type means, so it fails here. Within the plan,
+F06 declaration says). Three files may call them: the profile walk, which records the observed
+shape, the plan's assembler, which joins config facts with the profile and the schemas, and the
+scan, which records each column's shape for the starter. A fourth caller is a second place that decides what a type means, so it fails here. Within the plan,
 profile, strategy and declared-casting packages no other module tests an Arrow type for a date,
 timestamp or decimal: that test is a shape decision and goes through the classifier.
 """
