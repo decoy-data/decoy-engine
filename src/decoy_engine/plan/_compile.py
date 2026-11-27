@@ -32,6 +32,7 @@ from decoy_engine.config import (
     pre_scan_hash_input,
     refuse_fixed_width_output_types,
     refuse_unlisted_generate_families,
+    refuse_unreleased_delivery,
 )
 
 # Note: imports from decoy_engine.relationships are deferred inside
@@ -189,6 +190,7 @@ def compile_plan(
         check_orphan_fk_policy_completeness,
     )
 
+    refuse_unreleased_delivery(config)
     refuse_unapplied_subset(config)
     namespace_registry = build_namespace_registry(config, profile)
     check_unknown_provider(config)
