@@ -191,8 +191,8 @@ def run_fk_out_of_core(
     if sink is not None and vault_writer is not None:
         raise vault_requires_resident_output()
     refuse_unchecked_route(config, "out_of_core")
-    check_resident_sources(sources)
     declared_route_guard("out_of_core", plan=plan, raise_on_decline=True)
+    check_resident_sources(sources)
     if cast_run is not None and not _staged and cast_run.tables() & set(sources):
         # F06: declared sources are cast once into typed sources (see `run_staged`), then this
         # function runs again over them.

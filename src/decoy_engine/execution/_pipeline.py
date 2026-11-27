@@ -288,13 +288,13 @@ def run_pipeline(
     `resident_fallback`: a plain `auto` run reads whole each lazy source it cannot keep lazy.
     """
     _ctx.refuse_vault_with_sink(sink, vault_writer)  # B0, before any config read
-    check_resident_sources(sources)
     source_loader = checked_loader(source_loader)
     config, stage = resolve_subset(config, subset_request, source_loader)
     detectors = _dispatch.load_post_scan_detectors(config, file_access)
     stream_required = execution_mode == "stream"
     execution_mode = "auto" if stream_required else execution_mode
     require_optional_nonempty_str("quarantine_path", quarantine_path)
+    check_resident_sources(sources)  # after the knob checks: a bad knob refuses before any read
     # MG-5: a `tokenize` job's token vault reaches only the full-frame adapter, so under `auto`
     # it forces full-frame and disables auto-chunk; an explicit execution_mode is left alone.
     if token_vault_writer is not None and execution_mode == "auto":
