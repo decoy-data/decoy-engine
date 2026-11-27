@@ -288,10 +288,12 @@ def faker_callback_reachable(provider: str, adapter: BackendAdapter, locale: obj
     registered with `register_faker_provider_v2`.
 
     The one answer admission and dispatch share. Only a `FakerAdapter` consults the callback
-    table, so the walk follows the adapter's own locale resolution (`serving_adapter`, which a
-    Mimesis adapter answers with its default locale and its Faker fallback) until it reaches
-    one or runs out. An empty or omitted `locale` is resolved by the adapter, not here. A
-    locale that is not a string cannot be resolved without drawing, so it counts as reachable."""
+    table, so the walk follows each adapter's own locale resolution (`serving_adapter`: a Mimesis
+    adapter answers with its default locale and Faker fallback, a pool wrapper with the adapter it
+    wraps) until it reaches one. An empty or omitted `locale` is resolved by the adapter, not here.
+    The answer fails closed: an adapter that is not a `FakerAdapter` and does not say where it
+    draws, and a non-string locale, count as reachable. An adapter that draws the locale itself,
+    or refuses it for want of a fallback, reaches no callback."""
     if provider not in _V2_CUSTOM_PROVIDERS:
         return False
     if locale is not None and not isinstance(locale, str):
@@ -299,7 +301,9 @@ def faker_callback_reachable(provider: str, adapter: BackendAdapter, locale: obj
     serving: Any = adapter
     while not isinstance(serving, FakerAdapter):
         resolve = getattr(serving, "serving_adapter", None)
-        following = resolve(locale) if resolve is not None else None
+        if resolve is None:
+            return True
+        following = resolve(locale)
         if following is None or following is serving:
             return False
         serving = following

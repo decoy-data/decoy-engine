@@ -66,10 +66,26 @@ def _mimesis_nl(provider: str) -> ProviderRegistry:
     )
 
 
+def _mimesis_nl_pooled_fallback(provider: str) -> ProviderRegistry:
+    """As `_mimesis_nl`, but the Faker fallback sits behind a `PoolAdapter`, which forwards batches."""
+    from decoy_engine.generation.pool import PoolAdapter, PoolBuilder, PoolCache
+    from decoy_engine.providers_v2.mimesis import MimesisAdapter
+
+    pooled = PoolAdapter(
+        wrapped=FakerAdapter(), builder=PoolBuilder(_DEFAULT), cache=PoolCache(max_bytes=10_000_000)
+    )
+    return _override(provider, MimesisAdapter(locale="nl_NL", fallback=pooled))
+
+
 # case -> (provider, registry factory, locale kinds the live adapter serves without a callback)
 CASES: dict[str, tuple[str, Any, set[str]]] = {
     "stock_mimesis": ("person_email", lambda p: None, {"given_in_set", "empty", "omitted"}),
     "mimesis_nl_default_faker_fallback": ("person_email", _mimesis_nl, {"given_in_set"}),
+    "mimesis_nl_default_pooled_faker_fallback": (
+        "person_email",
+        _mimesis_nl_pooled_fallback,
+        {"given_in_set"},
+    ),
     "faker_backed_override": ("person_email", lambda p: _override(p, FakerAdapter()), set()),
     "stock_faker_backed": ("address_city", lambda p: None, set()),
 }
@@ -180,3 +196,31 @@ class TestOneResolverForAdmissionAndDispatch:
 
         adapter = MimesisAdapter(locale="nl_NL")
         assert faker_callback_reachable("person_email", adapter, None) is False
+
+    def test_a_wrapper_that_does_not_say_where_it_draws_is_reachable(self, callback) -> None:
+        """Fail closed: an adapter with no `serving_adapter` may forward to Faker, so it declines."""
+
+        class Opaque:
+            backend_type = "stub"
+
+        assert faker_callback_reachable("person_email", Opaque(), None) is True  # type: ignore[arg-type]
+        assert faker_callback_reachable("person_email", Opaque(), "de_DE") is True  # type: ignore[arg-type]
+
+    def test_a_pool_wrapper_answers_with_the_adapter_it_wraps(self, callback) -> None:
+        from decoy_engine.generation.pool import PoolAdapter, PoolBuilder, PoolCache
+
+        class Quiet:
+            """Draws its own locales and never reaches Faker."""
+
+            backend_type = "stub"
+
+            def serving_adapter(self, locale: str | None) -> Any:
+                return self
+
+        def pooled(inner: Any) -> Any:
+            return PoolAdapter(
+                wrapped=inner, builder=PoolBuilder(_DEFAULT), cache=PoolCache(max_bytes=1_000_000)
+            )
+
+        assert faker_callback_reachable("person_email", pooled(FakerAdapter()), None) is True
+        assert faker_callback_reachable("person_email", pooled(Quiet()), None) is False
