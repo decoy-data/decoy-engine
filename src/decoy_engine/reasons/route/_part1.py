@@ -28,6 +28,7 @@ __all__ = [
     "DISPATCHER_DISABLED",
     "ELIGIBLE",
     "EMPTY_INPUT",
+    "FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED",
     "FAKER_METADATA_NOT_ALLOWLISTED",
     "FAKER_PROVIDER_NOT_NATIVE",
     "FAKER_PROVIDER_OUTPUT_NOT_STRING",
@@ -114,6 +115,11 @@ _d = _catalog.route("RouteDeclineCode")
 ADAPTER_REQUESTED = _d("adapter_requested", "Adapter requested.")
 CRYPTO_EXT_UNAVAILABLE = _d("crypto_ext_unavailable", "Crypto extension unavailable.")
 EMPTY_INPUT = _d("empty_input", "Empty input.")
+FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED = _d(
+    "faker_computed_output_type_unsupported",
+    "Faker computed output type unsupported.",
+    since=UNRELEASED,
+)
 FAKER_METADATA_NOT_ALLOWLISTED = _d(
     "faker_metadata_not_allowlisted", "Faker metadata not allowlisted."
 )

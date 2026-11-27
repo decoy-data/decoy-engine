@@ -58,11 +58,7 @@ from decoy_engine.execution.native._operator_step import (
     sample_faker_array,
     sample_faker_array_positional,
 )
-from decoy_engine.execution.native._real_type_admission import (
-    C1_PROVIDER_ALLOWLIST,
-    string_source_type_rejection,
-)
-from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
+from decoy_engine.execution.native._real_type_admission import string_source_type_rejection
 from decoy_engine.execution.native._text_redact_kernel import load_text_redact_kernel
 from decoy_engine.execution.out_of_core._bucket_native import (
     decline_reason as bucket_decline_reason,
@@ -78,6 +74,7 @@ from decoy_engine.execution.out_of_core._hash_native import (
     decline_reason,
     native_hash_array,
 )
+from decoy_engine.execution.sequential import faker_admit
 
 if TYPE_CHECKING:
     from decoy_engine.generation.pool import ValuePool
@@ -406,25 +403,6 @@ def _date_shift_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) ->
     )
 
 
-def _faker_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) -> str | None:
-    """Why a faker column stays on Python, or None.
-
-    Composed from the predicates the chunked route already gates on: the provider allowlist,
-    the ColumnSeed-level deterministic-REUSE precondition, and the exact-`string` source. The
-    non-deterministic leg is the REUSE mode only; UNIQUE, MATCH and SCALE need whole-column
-    RNG state. A deterministic config the oracle rejects (no namespace) also declines, so the
-    handler raises its own coded error. The built pool's output type is a separate check, made
-    by the seam once the pool exists."""
-    if seed.provider not in C1_PROVIDER_ALLOWLIST:
-        return f"faker_provider_not_native:{column}:{seed.provider}"
-    if seed.deterministic:
-        if not faker_pool_precondition_met_seed(seed):
-            return f"faker_not_deterministic_reuse_variant:{column}"
-    elif seed.cardinality_mode != "reuse":
-        return f"faker_nondeterministic_mode_stays_python:{column}:{seed.cardinality_mode}"
-    return string_source_type_rejection(FAKER, column, pa.schema([pa.field(column, input_type)]))
-
-
 def _faker_apply(bound: BoundIndexKernel, values: pa.Array, call: FakerCall) -> NativeResult:
     if call.leg == FAKER_DETERMINISTIC:
         return NativeResult(
@@ -515,7 +493,7 @@ def bucket_perturb_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:
 
 
 def faker_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:
-    return NativeOp(FAKER, SEQ_FAKER_DISPOSITION_KEY, load_kernel, _faker_admit, _faker_apply)
+    return NativeOp(FAKER, SEQ_FAKER_DISPOSITION_KEY, load_kernel, faker_admit, _faker_apply)
 
 
 def categorical_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:

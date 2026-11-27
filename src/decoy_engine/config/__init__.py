@@ -35,7 +35,7 @@ ships the real binding).
 
 from __future__ import annotations
 
-from decoy_engine.config._delivery import DeliveryConfig
+from decoy_engine.config._delivery import DeliveryConfig, refuse_unreleased_delivery
 from decoy_engine.config._errors import PipelineConfigError
 from decoy_engine.config._fixed_width import FixedWidthColumn, FixedWidthLayout
 from decoy_engine.config._generate_option_catalog import (
@@ -248,6 +248,7 @@ __all__ = [
     "refuse_fixed_width_output_types",
     "refuse_namespace_placeholder",
     "refuse_unlisted_generate_families",
+    "refuse_unreleased_delivery",
     "relationship_shape_error",
     "same_batch_option",
     "self_reference_problems",

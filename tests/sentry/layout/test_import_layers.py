@@ -48,11 +48,12 @@ LAYERS: tuple[str, ...] = (
     " : keyprovider : relationships : providers_v2 : reference_tables : quality : subset",
     "profile : profiling : detection : internal : progress : context : config : determinism"
     " : contracts : connectors : expressions : validators : sdk : run_result : signed_evidence",
-    "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess",
+    "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess : _config_text",
     "errors : reason_adapter : validation_result : release : reasons : instrumentation"
     " : checksums : _opaque : _lexeme : _error_base : _progress_events : _reference_date"
     " : _capacity : codesets : _execution_error : _field_names : _value_free : _arrow_types"
     " : _canonical : _pandas_meta : _nested_json : _duckdb_read",
+    "_safe_text",
 )
 
 
@@ -217,6 +218,17 @@ def test_a_tier_six_module_importing_execution_is_red(scratch: Path, tmp_path: P
     assert not lint_scratch(tree)
 
 
+def test_the_safe_text_leaf_importing_errors_is_red(scratch: Path, tmp_path: Path) -> None:
+    """A19: the leaf sits in its own bottom tier, so even a sibling-tier import breaks it."""
+    tree = _tree(scratch, tmp_path)
+    leaf = tree / "src" / "decoy_engine" / "_safe_text" / "__init__.py"
+    leaf.write_text(
+        leaf.read_text(encoding="utf-8") + "\nfrom decoy_engine import errors\n",
+        encoding="utf-8",
+    )
+    assert not lint_scratch(tree)
+
+
 def test_the_facade_check_sees_a_package_ignore() -> None:
     text = "[c]\nignore_imports =\n    decoy_engine.generation._bounds -> decoy_engine.execution\n"
     assert facade_ignores(text, ROOT / "src") == [
@@ -302,7 +314,7 @@ def test_a_reviewed_new_package_goes_green_only_with_its_snapshot(
     text = cfg.read_text(encoding="utf-8")
     assert ignore_keys(text) == before
     assert not _snapshot_with(text, LAYERS), "a config edit without its snapshot must be red"
-    reviewed = (*LAYERS[:-1], LAYERS[-1] + " : _probe_leaf")
+    reviewed = (*LAYERS[:-2], LAYERS[-2] + " : _probe_leaf", LAYERS[-1])
     assert _snapshot_with(text, reviewed)
     row = (
         "| Probe leaf | `src/decoy_engine/_probe_leaf/` | `src/decoy_engine/_probe_leaf/__init__.py`"

@@ -16,11 +16,24 @@ from __future__ import annotations
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+
+
+class SelectableValues(Protocol):
+    """What a native selector reads of a pool: how many values, and the values.
+
+    A `ValuePool` satisfies it, and so does the element table of a computed `random_choice`
+    draw (`ComputedDrawSpec.choice_table`), which has no pool identity to carry."""
+
+    @property
+    def size(self) -> int: ...
+
+    @property
+    def values(self) -> np.ndarray[Any, Any]: ...
 
 
 @dataclass(frozen=True)

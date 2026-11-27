@@ -50,16 +50,24 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, NoReturn
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import reasons
+from decoy_engine._config_text import (
+    Expected,
+    Name,
+    Problem,
+    config_position,
+    config_refusal,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.determinism import derive, seed_bytes_to_int
 from decoy_engine.fileaccess import FileAccess, entry_point
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan import refusal_error
 from decoy_engine.reference_tables import ReferenceTable, load_table
 from decoy_engine.reference_tables._registry import JOINT_MASK_TABLES
 
@@ -79,6 +87,7 @@ _LOG = logging.getLogger(__name__)
 
 # Shipped table names that joint_mask can use out of the box (the shipped-table registry owns them).
 _KNOWN_TABLES = JOINT_MASK_TABLES
+_KNOWN_TABLE_NAMES: tuple[str, ...] = tuple(sorted(JOINT_MASK_TABLES))
 
 # Prefix that identifies a customer-provided reference table path (SP-08b).
 _CUSTOMER_PREFIX = "customer:"
@@ -137,20 +146,6 @@ class JointMaskConfig:
         return self._table
 
 
-def _raise_without_chain(err: PlanCompileError) -> NoReturn:
-    """Raise `err` with no cause or context. The rejected `load_table` error is still being
-    handled here, so a plain raise would attach it as `__context__` and its traceback would
-    carry the raw reference (X2). Caught, cleared and re-raised bare, mirroring the keyprovider's
-    `raise_clean`."""
-    try:
-        raise err
-    except PlanCompileError as fresh:
-        fresh.__cause__ = None
-        fresh.__context__ = None
-        fresh.__suppress_context__ = True
-        raise
-
-
 @entry_point
 def validate_joint_mask_config(
     cfg: dict[str, Any], *, file_access: FileAccess | None = None
@@ -173,77 +168,99 @@ def validate_joint_mask_config(
         PlanCompileError: Any validation failure.
     """
     if "columns" not in cfg or not cfg["columns"]:
-        raise PlanCompileError(
-            code=reasons.plan.JOINT_MASK_COLUMNS_MISSING,
-            path="joint_masks.columns",
-            message=(
-                "'columns' is required for joint_mask and must be a non-empty list. "
-                "Example: columns: [zip, city, state]"
-            ),
-        )
-
-    if "key_by" not in cfg:
-        raise PlanCompileError(
-            code=reasons.plan.JOINT_MASK_KEY_BY_MISSING,
-            path="joint_masks.key_by",
-            message=(
-                "'key_by' is required for joint_mask (the source column used for "
-                "HMAC-keyed row selection in mask mode). "
-                "Example: key_by: patient_id"
-            ),
-        )
-
-    ref_name = cfg.get("reference")
-    if not ref_name:
-        raise PlanCompileError(
-            code=reasons.plan.JOINT_MASK_REFERENCE_MISSING,
-            path="joint_masks.reference",
-            message=(
-                "'reference' is required for joint_mask and must name a shipped or "
-                "customer-provided reference table. "
-                "Example: reference: us_zip5_city_state"
-            ),
-        )
-
-    shown_ref = fileaccess.shown(ref_name, fileaccess.position_key("joint_mask.reference"))
-    try:
-        tbl = load_table(ref_name)
-    except FileNotFoundError:
-        # Clear the chain: the rejected `FileNotFoundError` names the config position under a
-        # strict policy, but its traceback would otherwise surface the raw reference as the
-        # PlanCompileError's `__context__` (X2). `from None` only suppresses display, so the
-        # context is nulled outright.
-        _raise_without_chain(
-            PlanCompileError(
-                code=reasons.plan.JOINT_MASK_REFERENCE_NOT_FOUND,
-                path="joint_masks.reference",
-                message=(
-                    f"reference table {shown_ref!r} not found. "
-                    f"Known shipped tables: {sorted(_KNOWN_TABLES)}. "
-                    "To use a customer-provided table, set reference: "
-                    "customer:/path/to/file.parquet."
+        raise_bare(
+            refusal_error(
+                reasons.plan.JOINT_MASK_COLUMNS_MISSING,
+                config_refusal(
+                    config_position("joint_masks", "columns"),
+                    Problem.MISSING,
+                    expected=Expected.NON_EMPTY_LIST,
+                    hint="Example: columns: [zip, city, state]",
                 ),
             )
         )
-    except ValueError as exc:
-        _raise_without_chain(
-            PlanCompileError(
-                code=reasons.plan.JOINT_MASK_REFERENCE_INVALID,
-                path="joint_masks.reference",
-                message=f"reference table {shown_ref!r} failed to load: {exc}",
+
+    if "key_by" not in cfg:
+        raise_bare(
+            refusal_error(
+                reasons.plan.JOINT_MASK_KEY_BY_MISSING,
+                config_refusal(
+                    config_position("joint_masks", "key_by"),
+                    Problem.MISSING,
+                    expected=Expected.NON_EMPTY_STRING,
+                    hint=(
+                        "key_by is the source column used for HMAC-keyed row selection in "
+                        "mask mode. Example: key_by: patient_id"
+                    ),
+                ),
+            )
+        )
+
+    at_reference = config_position("joint_masks", "reference")
+    ref_name = cfg.get("reference")
+    if not ref_name:
+        raise_bare(
+            refusal_error(
+                reasons.plan.JOINT_MASK_REFERENCE_MISSING,
+                config_refusal(at_reference, Problem.MISSING, expected=Expected.REFERENCE_TABLE),
+            )
+        )
+
+    # Inside a host's `at_position` the position carries the table and column, so two joint
+    # masks refuse distinguishably without the reference itself being rendered.
+    not_found = False
+    invalid = False
+    try:
+        tbl = load_table(ref_name)
+    except FileNotFoundError:
+        # The refusal is raised after this handler closes, with no chain: the rejected
+        # `FileNotFoundError` names the config position under a strict policy, and its traceback
+        # would otherwise surface the raw reference as `__context__` (X2).
+        not_found = True
+    except ValueError:
+        invalid = True
+    if not_found:
+        raise_bare(
+            refusal_error(
+                reasons.plan.JOINT_MASK_REFERENCE_NOT_FOUND,
+                config_refusal(
+                    at_reference,
+                    Problem.NOT_FOUND,
+                    choices=_KNOWN_TABLE_NAMES,
+                    hint=(
+                        "To use a customer-provided table, set reference: "
+                        "customer:/path/to/file.parquet"
+                    ),
+                ),
+            )
+        )
+    if invalid:
+        # The loader's text describes the file, so a fixed rule stands in.
+        raise_bare(
+            refusal_error(
+                reasons.plan.JOINT_MASK_REFERENCE_INVALID,
+                config_refusal(
+                    at_reference,
+                    Problem.UNREADABLE,
+                    expected=Expected.PARQUET_TABLE,
+                    code=reasons.plan.JOINT_MASK_REFERENCE_INVALID,
+                    hint="The reference must have an int64 'id' column",
+                ),
             )
         )
 
     ref_cols = set(tbl.column_names) - {"id"}
     for col in cfg["columns"]:
         if col not in ref_cols:
-            raise PlanCompileError(
-                code=reasons.plan.JOINT_MASK_COLUMN_NOT_IN_REFERENCE,
-                path=f"joint_masks.columns.{col}",
-                message=(
-                    f"column {col!r} is not in reference table {ref_name!r}. "
-                    f"Available columns: {sorted(ref_cols)}"
-                ),
+            raise_bare(
+                refusal_error(
+                    reasons.plan.JOINT_MASK_COLUMN_NOT_IN_REFERENCE,
+                    config_refusal(
+                        config_position("joint_masks", "columns", Name(col)),
+                        Problem.NOT_FOUND,
+                        hint="The column is not in the joint-mask reference table",
+                    ),
+                )
             )
 
 
@@ -318,7 +335,7 @@ def apply_joint_mask(
         elif mode == "gen":
             rows = _pick_rows_gen(len(df), config, job_seed, namespace=namespace, table=table)
         else:
-            raise ValueError(f"joint_mask: unsupported mode {mode!r}. Use 'mask' or 'gen'.")
+            raise ValueError("joint_mask: unsupported mode. Use 'mask' or 'gen'.")
 
         for col in config.columns:
             result[col] = [r.get(col) for r in rows]

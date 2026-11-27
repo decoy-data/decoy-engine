@@ -240,7 +240,7 @@ class TestCustomerProvidedTable:
 
     def test_customer_table_nonexistent_file_raises(self):
         """customer:/nonexistent.parquet must raise PlanCompileError."""
-        with pytest.raises(PlanCompileError, match="not found|customer"):
+        with pytest.raises(PlanCompileError, match="not found|reference invalid"):
             validate_joint_mask_config(
                 {
                     "columns": ["a", "b"],

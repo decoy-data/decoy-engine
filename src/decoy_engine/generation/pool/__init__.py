@@ -89,7 +89,11 @@ from decoy_engine.generation.pool._sampler import (
     derive_validated_indices,
 )
 from decoy_engine.generation.pool._validate import check_pool_capacity_pre_flight
-from decoy_engine.generation.pool._value_pool import ValuePool, pool_take
+from decoy_engine.generation.pool._value_pool import (
+    SelectableValues,
+    ValuePool,
+    pool_take,
+)
 
 __all__ = [
     "COMPUTED_NAMESPACE_MARKER",
@@ -110,6 +114,7 @@ __all__ = [
     "PoolResidentParts",
     "PoolSampler",
     "QualityWarning",
+    "SelectableValues",
     "ValuePool",
     "check_pool_capacity_pre_flight",
     "choice_from_index",
