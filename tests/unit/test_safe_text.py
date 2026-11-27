@@ -500,3 +500,14 @@ def test_set_strict_returns_the_effective_value_in_a_forked_child() -> None:
     with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
         # The child's effective strict is off, so save/restore must read False then True.
         assert pool.submit(_worker_set_strict_roundtrip).result() == (False, True, False)
+
+
+# Equal code objects must not share a proof: the check runs against the caller's own constants.
+def test_two_equal_compiled_callers_each_print_their_own_literal() -> None:
+    source = "def render():\n    return SafeText.const('ordinary fixed message')\n"
+    printed = []
+    for _ in range(2):
+        ns: dict[str, Any] = {"__name__": "someapp.render", "SafeText": SafeText}
+        exec(compile(source, "<render>", "exec"), ns)  # noqa: S102
+        printed.append(str(ns["render"]()))
+    assert printed == ["ordinary fixed message"] * 2

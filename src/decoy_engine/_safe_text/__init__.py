@@ -104,15 +104,18 @@ def _caller_code() -> tuple[tuple[CodeType, int] | None, _Site]:
     return None, ("unknown", "unknown", 0)
 
 
-_NO_LITERAL: Final = object()
+_NO_LITERAL: Final = -1
 
 
 _CALL_PREFIX: Final = ("PRECALL", "KW_NAMES")  # 3.11 and 3.12: call set-up before CALL
 
 
 @functools.lru_cache(maxsize=512)
-def _literal_at_call(code: CodeType, lasti: int) -> object:
-    """The constant the call at ``lasti`` passes as its first positional argument, if it is one.
+def _literal_index_at_call(code: CodeType, lasti: int) -> int:
+    """The ``co_consts`` index of the constant the call at ``lasti`` passes first, or -1.
+
+    The cache holds an index, never the string: equal code objects share a cache entry, and the
+    identity check must run against the caller's own constants.
 
     Walks back from the call over the argument pushes until the first positional argument is
     reached. It is a literal only when that one instruction is ``LOAD_CONST`` and no branch jumps
@@ -157,7 +160,7 @@ def _literal_at_call(code: CodeType, lasti: int) -> object:
             return _NO_LITERAL
         if any(x.is_jump_target for x in ins[j + 1 : at + 1]):
             return _NO_LITERAL
-        return ins[j].argval
+        return int(ins[j].arg or 0)
     except Exception:  # fail closed
         return _NO_LITERAL
 
@@ -166,7 +169,9 @@ def _is_constant(text: object, caller: tuple[CodeType, int] | None) -> bool:
     # Exact ``str`` first: a subclass's __len__ or a dead weakref proxy must not run or raise here.
     if caller is None or type(text) is not str or len(text) < _MIN_LEN:
         return False
-    return _literal_at_call(*caller) is text
+    code, lasti = caller
+    index = _literal_index_at_call(code, lasti)
+    return index >= 0 and code.co_consts[index] is text
 
 
 def _refuse(site: _Site) -> _Withheld:
