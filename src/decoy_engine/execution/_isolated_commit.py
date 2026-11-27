@@ -41,6 +41,7 @@ from decoy_engine import fileaccess
 from decoy_engine.errors import DecoyError
 from decoy_engine.execution._isolated_common import IsolatedRunResult, commit_error_text
 from decoy_engine.execution._isolated_reason import (
+    Attempt,
     commit_reason,
     envelope_failure,
     readback_memory_failure,
@@ -274,6 +275,7 @@ def collect(
     envelope: dict[str, Any],
     staging: Path,
     pub: Publication | None,
+    attempt: Attempt,
     sources: Mapping[str, pa.Table] | None = None,
 ) -> Collected | ReadbackRefused | ReadbackMemoryFailure | CommitReceipt:
     """Admit and read back the child's staged tables, then publish them when there is an
@@ -285,7 +287,7 @@ def collect(
     discarded. A refusal and a memory failure drop the tables read so far."""
     request = _request(pub.request if pub is not None else None)
     names = envelope.get("staged_tables")
-    reader = _Readback(staging, sources)
+    reader = _Readback(staging, sources, attempt.extra)
     admitted = False
     memory = False
     code: int | None = None
@@ -300,7 +302,7 @@ def collect(
         code = exc.errno if isinstance(exc, OSError) else None
         admitted = False
     if admitted and reader.refusal is None:
-        return _publish(reader, pub, request)
+        return _publish(reader, pub, request, attempt)
     reader.outputs.clear()
     if pub is not None:
         pub.txn.abort()
@@ -312,13 +314,14 @@ def collect(
 
 
 def _publish(
-    reader: _Readback, pub: Publication | None, request: PublicationRequest
+    reader: _Readback, pub: Publication | None, request: PublicationRequest, attempt: Attempt
 ) -> Collected | CommitReceipt:
     """Bind the read-back tables when there is an `output_dir`; the refusals are all before this."""
     outputs = reader.outputs
     if pub is None:
         return Collected(outputs, None, reader.extra)
     components = [f"{name}.parquet" for name in outputs]
+    attempt.publishing = True  # from here the target may exist: a memory failure is UNKNOWN
     receipt = publish_unit(pub.out, pub.txn, request, tables=components)
     return Collected(outputs, receipt, reader.extra) if receipt.outcome in COMMITTED else receipt
 
@@ -337,7 +340,9 @@ class _Readback:
     tables read so far at their measured bytes, and this table and the rest at their footer
     floor. Only a bound over the ceiling refuses; an undetectable ceiling checks nothing."""
 
-    def __init__(self, staging: Path, sources: Mapping[str, pa.Table] | None) -> None:
+    def __init__(
+        self, staging: Path, sources: Mapping[str, pa.Table] | None, extra: dict[str, Any]
+    ) -> None:
         self.outputs: dict[str, pa.Table] = {}
         self.refusal: ResidentFit | None = None
         self._staging = staging
@@ -347,7 +352,7 @@ class _Readback:
         self._read: list[TableBytesSpec] = []
         self._footers: list[TableBytesSpec] = []
         self._staged = 0
-        self.extra: dict[str, Any] = {"readback": asdict(Readback(None, 0, 0, 0, 0, 0))}
+        self.extra = extra
 
     def run(self, names: list[str]) -> None:
         self._staged = len(names)
@@ -380,7 +385,7 @@ class _Readback:
             tables_read=len(self._read),
             tables_staged=self._staged,
         )
-        self.extra = {"readback": asdict(figures)}
+        self.extra["readback"] = asdict(figures)
 
     def _footer(self, name: str) -> TableBytesSpec:
         """The rows and Arrow schema from the footer alone; nothing is decoded and the file is
@@ -410,10 +415,14 @@ def result_from_envelope(
     pub: Publication | None,
     pid: int,
     staging_output_dir: Path,
+    attempt: Attempt,
     sources: Mapping[str, pa.Table] | None = None,
 ) -> IsolatedRunResult:
     """The result of a child that reported an outcome: its failure, or its staged tables read
-    back and published. A readback the driver would not survive is a `crashed` result."""
+    back and published. A readback the driver would not survive is a `crashed` result.
+
+    A completed report reserves both memory results first (`Attempt.reserve`); the guard around
+    the attempt returns one if memory runs out before the result is built."""
     outcome = envelope["outcome"]
     peak = envelope.get("peak_rss_mb")
     if outcome != "completed":
@@ -421,14 +430,18 @@ def result_from_envelope(
         shutil.rmtree(staging_output_dir, ignore_errors=True)
         return envelope_failure(envelope, pid=pid)
 
-    # Everything the completed result needs that allocates is built before the readback, so
-    # nothing can fail with a memory error once the output is published.
+    attempt.reserve(
+        receipt=None if pub is None else failed_receipt(_request(pub.request)),
+        peak=peak,
+        pid=pid,
+    )
+    attempt.extra["readback"] = asdict(Readback(None, 0, 0, 0, 0, 0))
     committed = None if pub is None else str(pub.target)
     row_errors = row_errors_of(envelope)
     # Read back before publishing, so `outputs` is right with or without an `output_dir`. The
     # scratch stage goes on every exit, also when the ceiling check raises.
     try:
-        collected = collect(envelope, staging_output_dir, pub, sources)
+        collected = collect(envelope, staging_output_dir, pub, attempt, sources)
     finally:
         if pub is None:
             shutil.rmtree(staging_output_dir, ignore_errors=True)  # nothing to publish it to

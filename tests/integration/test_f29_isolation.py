@@ -21,6 +21,7 @@ from decoy_engine.execution import _governor as governor
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._isolated_commit import result_from_envelope
 from decoy_engine.execution._isolated_common import IsolatedRunResult, exception_error_text
+from decoy_engine.execution._isolated_reason import Attempt
 from decoy_engine.execution._isolated_run import run_pipeline_isolated
 from decoy_engine.keyprovider import MissingMaskSecret
 from decoy_engine.reason_adapter import reason_from_exception
@@ -123,7 +124,7 @@ def _envelope(**kw: Any) -> dict[str, Any]:
 
 
 def _from_envelope(envelope: dict[str, Any], tmp_path: Path) -> IsolatedRunResult:
-    return result_from_envelope(envelope, None, 1234, tmp_path / "staging")
+    return result_from_envelope(envelope, None, 1234, tmp_path / "staging", Attempt())
 
 
 def test_old_missing_corrupt_and_future_envelopes_degrade_safely(tmp_path: Path) -> None:

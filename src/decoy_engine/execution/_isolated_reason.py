@@ -7,6 +7,7 @@ spawned, committed or classified.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ from decoy_engine.reasons import decoy as _decoy
 from decoy_engine.verification.postmask import PostScanBlockedError
 
 __all__ = [
+    "Attempt",
     "cleanup_state_of",
     "commit_reason",
     "envelope_failure",
@@ -46,6 +48,80 @@ __all__ = [
 
 # The one remedy of both readback results: the output, not the input, is what is too large.
 _READBACK_REMEDY = "Run on a machine with more memory, or write fewer or smaller output tables."
+# The memory result once publishing may have started: the target may or may not exist.
+_UNKNOWN_REMEDY = "Rerun with the same operation id to confirm."
+
+
+@dataclass
+class Attempt:
+    """The memory contract of one isolated attempt, from the child's report through cleanup.
+
+    `reserve` builds both memory results before the readback allocates anything, so a memory
+    failure later only selects one of them. `publishing` is set just before `publish_unit`:
+    from then on the target may exist, so the reserve says UNKNOWN, never NOT_PUBLISHED.
+    `extra` is shared with both reserves; the readback replaces its entry after each
+    measurement, so they carry the last complete figures."""
+
+    publishing: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
+    _pre_call: IsolatedRunResult | None = None
+    _unknown: IsolatedRunResult | None = None
+
+    def reserve(self, *, receipt: CommitReceipt | None, peak: float | None, pid: int) -> None:
+        """Build both results; `receipt` is the failed receipt of a requested destination."""
+        code = _decoy.PROCESS_OUT_OF_MEMORY
+        summary = reasons.get(code.namespace, code).summary
+        self._pre_call = _memory_result(
+            f"{summary} {_READBACK_REMEDY}",
+            PublicationState.NOT_PUBLISHED,
+            receipt,
+            self.extra,
+            peak,
+            pid,
+        )
+        self._unknown = _memory_result(
+            f"{summary} {_UNKNOWN_REMEDY}", PublicationState.UNKNOWN, None, self.extra, peak, pid
+        )
+
+    def memory_result(self) -> IsolatedRunResult | None:
+        """The reserve for a memory failure now, or None when none was built yet."""
+        return self._unknown if self.publishing else self._pre_call
+
+
+def _memory_result(
+    fixed_text: str,
+    state: PublicationState,
+    receipt: CommitReceipt | None,
+    extra: dict[str, Any],
+    peak: float | None,
+    pid: int,
+) -> IsolatedRunResult:
+    """A reserved memory result: cleanup is not known when it is built, so it says so."""
+    reason = ReasonRecord.for_reason(
+        _decoy.PROCESS_OUT_OF_MEMORY,
+        phase=Phase.FINALIZE,
+        context=ReasonContext.build(
+            operation=Operation.READ,
+            storage_ref="output",
+            publication_state=state,
+            cleanup_state=CleanupState.UNKNOWN,
+        ),
+    )
+    return IsolatedRunResult(
+        outcome="crashed",
+        peak_rss_mb=peak,
+        outputs=None,
+        quality_metrics={},
+        table_kinds={},
+        returncode=0,
+        signal_number=None,
+        error=fixed_text,
+        isolated=True,
+        pid=pid,
+        extra=extra,
+        reason=reason,
+        publication_receipt=receipt,
+    )
 
 
 def _blocked_metrics(metrics: Any) -> dict[str, Any]:

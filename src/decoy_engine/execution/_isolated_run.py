@@ -100,6 +100,7 @@ from decoy_engine.execution._isolated_common import (
 )
 from decoy_engine.execution._isolated_memwatch import error_suffix, evidence_of, start_sampler
 from decoy_engine.execution._isolated_reason import (
+    Attempt,
     in_process_failure,
 )
 from decoy_engine.execution._pipeline import run_pipeline
@@ -262,18 +263,28 @@ def run_pipeline_isolated(
         output_dir_path = Path(output_dir) if output_dir is not None else None
         return _run_in_process(config, sources, run_pipeline_kwargs, output_dir_path, request)
 
-    return _run_isolated(
-        config,
-        sources,
-        mem_cap_bytes=mem_cap_bytes,
-        rlimit_kind=rlimit_kind,
-        staging_dir=staging_dir,
-        output_dir=output_dir,
-        on_spawn=on_spawn,
-        timeout_s=timeout_s,
-        run_pipeline_kwargs=run_pipeline_kwargs,
-        request=request,
-    )
+    attempt = Attempt()
+    try:
+        return _run_isolated(
+            config,
+            sources,
+            attempt,
+            mem_cap_bytes=mem_cap_bytes,
+            rlimit_kind=rlimit_kind,
+            staging_dir=staging_dir,
+            output_dir=output_dir,
+            on_spawn=on_spawn,
+            timeout_s=timeout_s,
+            run_pipeline_kwargs=run_pipeline_kwargs,
+            request=request,
+        )
+    except MemoryError:
+        # From the child's report through both finalizers: a coded result, never a raw error. The
+        # reserve says UNKNOWN once publishing began; none exists before the child reports.
+        reserved = attempt.memory_result()
+        if reserved is None:
+            raise
+        return reserved
 
 
 def _require_ambient_for_paths(*, spawns: bool, names_paths: bool) -> None:
@@ -349,6 +360,7 @@ def _run_in_process(
 def _run_isolated(
     config: dict[str, Any],
     sources: dict[str, pa.Table] | None,
+    attempt: Attempt,
     *,
     mem_cap_bytes: int | None,
     rlimit_kind: str,
@@ -386,15 +398,18 @@ def _run_isolated(
             staging_output_dir,
             pub,
             sources or {},
+            attempt,
             on_spawn=on_spawn,
             timeout_s=timeout_s,
             mem_cap_bytes=mem_cap_bytes,
             rlimit_kind=rlimit_kind,
         )
     finally:
-        if isinstance(pub, Publication):
-            pub.txn.abort()  # a no-op once bound
-        scratch.close()
+        try:
+            if isinstance(pub, Publication):
+                pub.txn.abort()  # a no-op once bound
+        finally:
+            scratch.close()
 
 
 def _write_payload(
@@ -437,6 +452,7 @@ def _spawn_and_classify(
     staging_output_dir: Path,
     pub: Publication | None,
     sources: dict[str, pa.Table],
+    attempt: Attempt,
     *,
     on_spawn: Callable[[int], None] | None,
     timeout_s: float | None,
@@ -514,7 +530,7 @@ def _spawn_and_classify(
         and envelope is not None
         and envelope.get("outcome") in ISOLATED_OUTCOMES
     ):
-        result = result_from_envelope(envelope, pub, proc.pid, staging_output_dir, sources)
+        result = result_from_envelope(envelope, pub, proc.pid, staging_output_dir, attempt, sources)
         # A self-reported `crashed` names an exception, not its cause. Native code at the cap
         # can surface exhaustion as an unrelated type (an Arrow cancellation reaches Python as
         # KeyboardInterrupt), so a crash that sat at its cap carries the pressure suspicion.
