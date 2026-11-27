@@ -9,7 +9,7 @@ becomes an identity value and a text key. Under the review ladder that is a rede
 plan replaces the two hand-tuned walks with one. It does not change the number key rule of
 `2026-11-25-pm1-number-keys-r5.md`; that plan stays in force for scalar numbers and numerals.
 Revised after plan review round 1 (Dennis, NO-GO, `~/scratch/dennis-pm1-plan-r1.md`); the
-"Review round 1" section maps each finding to its fix.
+review tables below record the fixes from rounds 1 and 2.
 
 Rules consulted: `README.md`, `00-universal.md`, `risk-and-exceptions.md`,
 `development-loop.md`, `bugfix.md`, `testing.md`.
@@ -28,6 +28,9 @@ Two functions walk a cell, and each was fixed for the other's last finding:
 `ComparisonNotPreservedError` when the keys split cells that identity holds equal, and the table
 fails. So every case where the two walks disagree is a false block, and every case where the
 key merges cells identity keeps apart counts a changed row as identical.
+
+The guard compares column totals. The fail-closed runner rows below isolate one split
+with an unchanged marker so another row cannot offset it.
 
 The key has a second job: a source value and an output cell that is that value's text must
 key alike. A CSV or JSON round trip, or a mixed column, gives the output side as text. Identity
@@ -112,21 +115,28 @@ canonicalizes arbitrary nested object cells; the walk is about 170 lines.
 
 Guarantee, for any two cells `a` and `b` of a text-keyed column:
 
-1. `canon(a) == canon(b)` implies `key(a) == key(b)`, with two declared exceptions, both of
+1. `canon(a) == canon(b)` implies `key(a) == key(b)`, with three spelling exceptions, each of
    which split the keys and so fail the table closed through `_require_preserved`, as on the
    base:
    - E1: aware instants that are equal but shown in different zones (UTC vs `Etc/GMT-1`). The
      key keeps each zone's text so that a value and its `str()` still match (K4).
-   - E2: nested numbers that are `==` but spell differently (`[1]` vs `[1.0]`, `[True]` vs
-     `[1]`). Nested numbers render as `str()` renders them, so a container and its `str()`
-     still match (K4).
+   - E2: equal leaves with different display spellings. At any nested position this includes
+     numbers, signed zeros, null variants, Python vs pandas temporals, and any other equal
+     leaves with different reprs. It also covers equal top-level temporals with different
+     source spellings, such as Python and pandas one-second durations. Equal unordered
+     containers may likewise retain different base reprs (set order or frozenset punctuation).
+   - E3: lists, tuples, namedtuples and arrays share sequence identity. A tuple or namedtuple
+     keeps tuple punctuation. An array or list uses brackets. The split preserves the base
+     table failure for a tuple returned as an array by Parquet (C30).
 2. Null agrees: identity treats a cell as null exactly when its key is `None`.
 3. The key merges cells that identity keeps apart only under four declared rules. K1 to K3 come
    from earlier rounds and are unchanged:
    - K1: a top-level numeral string keys as the number it spells.
    - K2: top-level numbers that round to one binary64 share a key.
    - K3: bytes key as their UTF-8 text.
-   - K4: any other cell keys as its text, so it shares a key with the string that spells it.
+   - K4: preserve every base match between a typed cell and its exported text. For cells
+     that keyed as their own `str()`, the string spelling that cell must still match. Base
+     container normalization (including sorted maps) defines the limits of this promise.
      That is the leak-direction match: a value that came back as text still counts as
      unchanged.
    Outside K1 to K4, `key(a) == key(b)` implies `canon(a) == canon(b)`. Every merge only adds
@@ -142,13 +152,17 @@ for the canary policy and never sees object cells (follow-up for V2-LOG: one wal
 ## The rule
 
 New module `src/decoy_engine/internal/canonical_cell.py`, one public function
-`canonical_cell(value) -> object`, a `NULL` sentinel, and the frozen dataclasses `Instant`,
+`canonical_cell(value) -> object`, a reference null form `NULL`, and the frozen dataclasses `Instant`,
 `Duration` and `Months`. It is the only walk for object cells. It imports only NumPy, pandas and
 the standard library. Order of checks:
 
 1. A 0-dim `np.ndarray` is replaced by `value[()]`, repeatedly, before anything else.
 2. Null: `None`, `pd.NA`, `pd.NaT`, a float NaN (Python or NumPy), and a `datetime64` or
-   `timedelta64` NaT of any unit give `NULL`. This applies at every depth.
+   `timedelta64` NaT of any unit give forms equal to `NULL` at every depth. Keep the existing scalar
+   missing-value semantics (including Decimal NaN and complex NaN). A frozen null form has
+   no comparing fields. Its nested spelling (`nan`, `NaT`, `None`, `<NA>`, etc.) is
+   `field(compare=False)`; NumPy temporal NaT displays as pandas NaT. Readers recognize the
+   null form by type, so different instances and spellings have one identity and hash.
 3. Temporal, checked before numbers because `np.timedelta64` subclasses `np.integer`. `AS` maps
    W, D, h, m, s, ms, us, ns, ps, fs, as to attoseconds (`as` is 1). `ticks` is
    `int(value.astype(np.int64))`.
@@ -160,7 +174,7 @@ the standard library. Order of checks:
 | `pd.Timestamp`, naive | `ts.asm8` through the `np.datetime64` row |
 | `pd.Timestamp`, aware | `ts.asm8` (the UTC instant) through the same row, `aware=True`, `zone=ts.tz` |
 | `datetime.datetime`, naive | `Instant(exact attoseconds from the epoch, aware=False)`, from the date's days, seconds and microseconds |
-| `datetime.datetime`, aware | the naive value of `dt - dt.utcoffset()`, as above, `aware=True`, `zone=dt.tzinfo` |
+| `datetime.datetime`, aware | the naive attosecond count minus the offset in attoseconds (Python integers), `aware=True`, `zone=dt.tzinfo` |
 | `np.timedelta64`, generic unit | the `int` it equals (`np.timedelta64(5) == 5`), then step 4 |
 | `np.timedelta64`, linear unit | `Duration(ticks * c * AS[u])` |
 | `np.timedelta64` in Y or M | `Months(ticks * c * (12 if Y else 1))` |
@@ -176,12 +190,15 @@ aware instant never compare equal (as in pandas), and the same instant in two zo
    `float32` and `float64` become `float` (exact widening); `np.longdouble`, `complex`,
    `Decimal`, `int`, `float` and `bool` stay as they are.
 5. `bytes`, `bytearray`, `memoryview` become `bytes`. `str` stays.
-6. Containers: a `dict` becomes `("map", frozenset((canon(k), canon(v)) ...))`. A `list` or
-   non-0-dim `ndarray` of any dtype becomes `("list", tuple(canon(v) for v in value))`. A
-   `tuple` (namedtuple included) becomes `("tuple", ...)` the same way: Python holds a list and
-   a tuple apart, and the tag keeps the base key `"(1, 2)"` for a tuple. A `set` or `frozenset` becomes
-   `("set", frozenset(canon(v) ...))`. The tag keeps a dict, a list of pairs and a set of pairs
-   apart.
+6. Containers: a frozen sequence form represents `("list", tuple(canon(v) for v in value))`
+   for lists, tuples, namedtuples and non-0-dim arrays. Only the children participate in
+   equality and hash. Carry the display style in `field(compare=False)`: parentheses for
+   tuples and namedtuples (including the singleton comma), brackets for lists and arrays.
+   Maps and sets retain their distinct identity tags and unordered frozensets of canonical
+   pairs or members. Preserve the base display separately wherever membership alone loses
+   spelling or multiplicity: maps render the original key reprs in repr-sorted order and
+   render their canonical values; sets and frozensets retain their Python container repr.
+   Display fields never enter equality or hash.
 7. Anything else is returned unchanged (an "other" leaf).
 
 Every form is hashable when its leaves are. A temporal form is its own dataclass, so it never
@@ -190,7 +207,16 @@ equals a number or a container.
 ### Temporal text
 
 `canonical_cell.py` also holds `temporal_text(form) -> str`, the one place a temporal form
-becomes text. It matches pandas `str()` of the value:
+becomes top-level text. Each temporal form carries a display field with `compare=False`.
+Keep the source kind and original Python or pandas value (including its actual tz object),
+so top-level text uses its `str` and nested text uses its `repr`. A Python timedelta thus
+keys as `"0:00:01"` and a nested Python datetime keeps its `datetime.datetime(...)` repr.
+A nested pandas Timestamp uses the original named zone directly. Never parse rendered text
+to recover a temporal object. Provide the nested spelling from the same temporal conversion.
+
+For NumPy temporals, derive both spellings from the exact normalized count below. Use
+`str` at the top level and the normalized pandas object's `repr` inside containers when
+pandas can represent it. Otherwise use the exact fallback spelling at either depth:
 
 - `Instant` with attoseconds a whole number of ns inside the ns range: `str(pd.Timestamp(ns))`,
   localized to `zone` when aware (`"2020-01-01 00:00:00"`, `"2020-01-01 01:00:00+01:00"`).
@@ -206,7 +232,7 @@ becomes text. It matches pandas `str()` of the value:
 ### Readers
 
 - Identity: `canonical_cells` (_column_facts.py:268) maps `canonical_cell` over the cells and
-  turns `NULL` into `None`; `_frozen` and `_MAPPING_TAG` are deleted. `identity_counts` walks
+  turns each top-level null form into `None`; `_frozen` and `_MAPPING_TAG` are deleted. `identity_counts` walks
   both sides unless they share one non-object dtype (then raw `==` is exact and the walk is
   skipped, as now for typed columns). `source_distinct` walks every dtype except bool, int,
   uint and float, which pass through (object, categorical, datetime, timedelta, string and
@@ -221,19 +247,21 @@ becomes text. It matches pandas `str()` of the value:
   - A top-level temporal form gives `_text_key(temporal_text(form))`.
   - A top-level container or other leaf gives `_text_key(_canonical_text(form))`, where
     `_canonical_text` renders the form the way `str()` renders the Python value: `"[a, b]"`
-    for a list form (lists and arrays alike, since identity holds them equal), `"(a, b)"` (and
-    `"(a,)"`) for a tuple form, namedtuples included,
-    `"{k: v, ...}"` with pairs sorted by their own text for a map, `"{a, b}"` sorted for a set,
-    `repr` for nested `str`, bytes and numbers, `None` for a nested `NULL`, `repr` of the
-    pandas object rebuilt from `temporal_text` for a nested temporal form
-    (`"Timestamp('2020-01-01 00:00:00')"`), and `cell_text(leaf)` for an other leaf.
+    for bracket-style sequences, `"(a, b)"` or `"(a,)"` for tuple style, and the display
+    rules in step 6 for maps and sets. Nested leaves use their base container repr, including
+    each null variant and the nested temporal spelling above. Use `repr` for other nested
+    leaves (e.g. UUID or date), and `cell_text` for a top-level other leaf. When widening a
+    leaf would erase its base nested spelling (e.g. bytearray to bytes), retain that spelling
+    as non-comparing display data. NumPy numbers retain the base Python scalar presentation.
   - So `[1]` keys `"[1]"`, `{"a": 1}` keys `"{'a': 1}"`, and `uuid.UUID(int=1)` keys its
     hyphenated text, all as on the base (K4). There is no prefix or escape.
   - `_key_ordered` is deleted. `_number_key` loses its `_python_scalar` call
     (cell_text.py:281): after the walk a number leaf is already a Python or NumPy number, and
     that call was the second temporal path. Non-UTF-8 bytes still raise `UnreadableCellError`.
 - Detector text: `detector_text` decides null from `canonical_cell` (so the three readers agree
-  on null rows) and renders a 0-dim array's payload. Otherwise unchanged; detectors read cells
+  on null rows) and renders a 0-dim array's payload. Top-level NumPy temporals use the
+  same exact conversion and fallback as the key, including generic counts and calendar months.
+  Other non-null cells keep their detector rendering; detectors read cells
   as written.
 - `_python_scalar` stays only for `_detector_cell`.
 
@@ -248,9 +276,9 @@ becomes text. It matches pandas `str()` of the value:
   in two places); a new leaf kind is one row in the step list, not a fix per reader.
 - Two forms of a cell, kept apart on purpose: the canonical form answers "same value?", the
   key text answers "same value or its text?". The key is built only from the canonical form,
-  so the two can differ only where this plan declares it (E1, E2, K1 to K4).
+  so the two can differ only where this plan declares it (E1 to E3, K1 to K4).
 - Attoseconds as Python `int` keep `datetime64[as]` and far dates exact.
-- A nested NaN is `NULL`, so `[nan]` equals `[nan]` on both sides and both key `"[None]"`.
+- A nested NaN is `NULL`, so `[nan]` equals `[nan]` on both sides and both key `"[nan]"`.
   Before, identity depended on whether the two NaN objects were the same object.
 - Nested numbers keep their `str()` spelling (E2) rather than the number key: a list source
   and its text output then match (leak direction), and `[1]` vs `[1.0]` fails closed as on the
@@ -296,13 +324,13 @@ comparable. "Fails closed" means `ComparisonNotPreservedError`.
 | C6 | `array([1], "m8[M]")` vs itself | canon `("list", (Months(1),))`, no raise, runner ok |
 | C7 | `array([1], "m8[Y]")` vs `array([12], "m8[M]")` | same canon and key |
 | C8 | `array([1], "m8[M]")` vs `array([30], "m8[D]")` | different canon and key, no raise |
-| C9 | `array([1], "M8[2s]")` vs `array([2], "M8[s]")` | same canon and key, runner ok |
+| C9 | `array([1], "M8[2s]")` vs `array([2], "M8[s]")` | same canon, both keys equal `str([pd.Timestamp("1970-01-01 00:00:02")])`, runner ok |
 | C10 | `array([1], "M8[fs]")` vs `array([2], "M8[fs]")` | different canon and key; identical is 0 |
 | C11 | `array([1], "M8[M]")` vs `array(["1970-02-01"], "M8[D]")` | same canon and key |
 | C12 | `np.array(True)` vs `True` | key `"1"` both, runner ok |
 | C13 | `np.array(np.datetime64("NaT"))` | `NULL`; `key_text` gives `None`; not comparable |
 | C14 | `[{"b": 2, "a": 1}]` (array cell) vs `[{"a": 1, "b": 2}]` | same key |
-| C15 | namedtuple `P(1, 2)` vs `(1, 2)` | same canon, same key `"(1, 2)"`; list `[1, 2]` has a different canon and key |
+| C15 | namedtuple `P(1, 2)` vs `(1, 2)` | same canon, same key `"(1, 2)"`; list `[1, 2]` has the same canon and hash but a bracketed key (E3) |
 | C16 | `{"id": 1}` vs `{("id", 1)}` | different canon and key |
 | C17 | aware `Timestamp("2020-01-01", tz="UTC")` vs the same instant at `Etc/GMT-1` | same canon, different key (E1), fails closed (green on base) |
 | C18 | naive vs aware `Timestamp("2020-01-01")` | different canon and key |
@@ -314,9 +342,10 @@ comparable. "Fails closed" means `ComparisonNotPreservedError`.
 | C24 | `np.timedelta64(5)` (generic) vs `5` | same canon `5`, key `"5"`, runner ok |
 | C25 | `datetime(2020, 1, 1, 1, tzinfo=+01:00)` vs `Timestamp("2020-01-01 01:00", tz="Etc/GMT-1")` | same canon and key, runner ok |
 | C26 | `datetime(2020, 1, 1, 1, tzinfo=+01:00)` vs `Timestamp("2020-01-01", tz="UTC")` | same canon, different key (E1), fails closed |
-| C27 | `array([1], "M8[fs]")` | key `"1970-01-01T00:00:00.000000000000001"`, no raise |
+| C27 | `array([1], "M8[fs]")` | leaf text `"1970-01-01T00:00:00.000000000000001"`; the array key encloses that text in brackets, no raise |
 | C28 | top-level `10001.0`, `10001`, `None`, `memoryview(b"a@x.com")` | keys unchanged (green on base) |
 | C29 | numeric-key regression set in `test_text_fallback_parity.py` | unchanged (green on base) |
+| C30 | `(1, 2)` vs `np.array([1, 2])`, second row the same text marker | same canon and hash, keys `"(1, 2)"` and `"[1, 2]"`; 2/2 identical by cells, 1/2 by keys; runner fails closed (E3, green on base) |
 
 K4 runner rows (leak direction): each source cell is typed, the output cell is the `str()` of
 the same value in a mixed column, expected identical equals comparable. All green on base.
@@ -331,6 +360,15 @@ the same value in a mixed column, expected identical equals comparable. All gree
 | T6 | `[1, "a"]` | `"[1, 'a']"` |
 | T7 | `{"a": 1}` | `"{'a': 1}"` |
 | T8 | `(1, "a")` | `"(1, 'a')"` |
+| T9 | `[float("nan"), 'a']` | `"[nan, 'a']"` |
+| T10 | `[pd.NaT, 'a']` | `"[NaT, 'a']"` |
+| T11 | `[datetime(2020, 1, 1), 'a']` | `"[datetime.datetime(2020, 1, 1, 0, 0), 'a']"` |
+| T12 | `timedelta(seconds=1)` | `"0:00:01"` |
+| T13 | `[pd.Timestamp("2020-01-01 01:00", tz="Etc/GMT-1"), 'a']` | `"[Timestamp('2020-01-01 01:00:00+0100', tz='Etc/GMT-1'), 'a']"` |
+
+For each T row, assert the literal against `str(source)`, both keys against that literal,
+and 2/2 identical by key through the runner with the common marker. Preserve object dtype
+on input. Dennis's round-2 probes and the base runner confirm T9–T13 are green. Run the additional K4 variants in the review table by the same procedure.
 
 Property tests (Hypothesis, already a dev dependency, fixed seed through the project profile;
 any failing example is pinned as a C row). Pairs are not drawn independently, since two
@@ -342,8 +380,8 @@ NumPy scalar for a Python number, an `asm8` round trip. Each test counts the cas
 `canon(a) == canon(b)` and fails unless that count is at least a quarter of the cases run
 (the counter lives in a module fixture; `hypothesis.event` records it for the report).
 
-- P1, all cells, no E1 or E2 transforms: `canon(a) == canon(b)` implies `key(a) == key(b)`,
-  and `canon(a) is NULL` exactly when `key(a) is None`. The strategy covers every leaf kind
+- P1, pairs outside E1–E3: `canon(a) == canon(b)` implies `key(a) == key(b)`,
+  and `canon(a)` is a null form exactly when `key(a) is None`. The strategy covers every leaf kind
   above, numeral strings, bytes, `Decimal`, ints past 2**53, every NumPy unit with counts 1
   and 2, tz-naive and aware timestamps in UTC, NaT of each kind, 0-dim boxing, and lists,
   tuples, typed and object arrays, dicts and sets nested to depth 3.
@@ -352,9 +390,10 @@ NumPy scalar for a Python number, an `asm8` round trip. Each test counts the cas
   place of `_frozen`. The strategy is P1's without the inputs where a declared rule applies:
   no strings at any depth (K1, K4), no bytes (K3), no `Decimal`, `np.longdouble` or `complex`,
   ints within 2**53 and floats as binary64 only (K2), no "other" leaves (their `==` can be
-  coarser or finer than their text), no aware instants outside UTC (E1), and no nested
-  numbers of mixed type (E2).
-- P3, runner level: for a generated cell `a` and `b = transform(a)`, a mixed column pair gives
+  coarser or finer than their text), no aware instants outside UTC (E1), and one display spelling per equal leaf (E2) and sequence (E3).
+  Apply exclusions to fresh pairs too, using the input forms independently of the renderer.
+  For unordered containers use matching base repr order and punctuation outside E2.
+- P3, runner level: for a generated cell `a` and a spelling-preserving `b = transform(a)` outside E1–E3, a mixed column pair gives
   no table error and identical equals comparable.
 
 ## Mutations (each must turn the named test red)
@@ -371,9 +410,10 @@ NumPy scalar for a Python number, an `asm8` round trip. Each test counts the cas
 | drop the `"map"` tag | C16 |
 | `identity_counts` passes raw cells through when the dtypes differ | C9 runner, P3 |
 | key a `pd.Timestamp` by UTC instant but drop the aware flag | C18 |
-| prefix top-level temporal, container and other keys (the round-1 `"\x1e"` design) | T1-T8, C22 |
-| render nested numbers with `_number_key` | T6 |
-| render a tuple form as a list | T8, C15 |
+| prefix top-level temporal, container and other keys (the round-1 `"\x1e"` design) | T1-T13, C22 |
+| render nested numbers with `_number_key` | C20 (use a nested float) |
+| give tuples their own canonical identity tag | C30 runner silently accepts the table |
+| render every nested null as `None` | T9 splits from its text and drops to 1/2 identical |
 | compare `Instant.zone` in `__eq__` | C17 canon assert, C26 |
 
 ## Failure modes
@@ -381,12 +421,14 @@ NumPy scalar for a Python number, an `asm8` round trip. Each test counts the cas
 - Leak direction: a typed value whose output came back in a text spelling that is not its
   `str()` (a JSON dict `'{"a": 1}'`, an ISO timestamp `"2020-01-01T00:00:00"`, an aware value
   printed in another zone) keys apart from the source and counts as changed. Same as the base;
-  K4 covers the `str()` spelling only. Recorded as a known limit.
+  K4 preserves the base spelling. In particular a dict inserted as `b` then `a` keys as
+  `"{'a': 1, 'b': 2}"`. Its insertion-ordered output string `"{'b': 2, 'a': 1}"` splits
+  from that key and counts as changed, just as on base.
 - Unhashable "other" leaf: `canonical_cells` raises `TypeError` as now; the column records it as
   `identity_error` and the table fails closed. Unchanged.
 - A cell nested past the recursion limit or containing itself: `RecursionError`, recorded the
   same way. Unchanged; no new limit.
-- E1 and E2: keys split values identity holds equal, and `_require_preserved` fails the table
+- E1, E2 and E3: keys split values identity holds equal, and `_require_preserved` fails the table
   closed. Same as the base. A false block, not a leak.
 - An "other" type whose `==` is coarser than its text (equal objects with different text): the
   key splits them, and `_require_preserved` fails the table closed. The guard stays as a
@@ -403,7 +445,7 @@ or pandas scalar). P1 and P2 run every kind in the strategy, so a missed kind sh
 property failure, not a one-off. A second likely cause is a reader that walks a cell itself
 again; the S2 hand-back carries a grep for `ndim == 0`, `tolist()`, `.value` and
 `_python_scalar` outside `canonical_cell.py` and `_detector_cell`. A third is a key that drifts
-from `str()`; T1 to T8 hold the leak direction. This plan follows three Codex fix rounds; a
+from `str()`; T1 to T13 hold the leak direction. This plan follows three Codex fix rounds; a
 fourth round of findings in this area goes to the owner, not to another fix round.
 
 ## Slices
@@ -419,7 +461,7 @@ On the PR #784 branch, in order, one builder:
    `CODEMAP.md`): `_canonical_key` and `_canonical_text` in `cell_text.py`; `key_text` and
    `detector_text` use the walk; `_number_key` drops `_python_scalar`; `canonical_cells`,
    `identity_counts` and `source_distinct` use the walk; delete `_frozen`, `_MAPPING_TAG` and
-   `_key_ordered`. Red-first: the key asserts of C1 to C29, the runner rows, T1 to T8, P1, P2
+   `_key_ordered`. Red-first: the key asserts of C1 to C30, the runner rows, T1 to T13, P1, P2
    and P3. Update any test that pins a container or temporal key string, and list each one in
    the hand-back with the old and new string. Commit
    `fix(postmask): read identity and keys through the canonical walk`.
@@ -452,7 +494,7 @@ On the PR #784 branch, in order, one builder:
   `UnreadableCellError` (unchanged).
 - `identity_counts` raises `TypeError` for an unhashable leaf (unchanged).
 - `_require_preserved` raises `ComparisonNotPreservedError` as now; after this plan it is
-  reached through the walks only by E1, E2 or an "other" leaf.
+  reached through the walks only by an E1–E3 spelling split or an "other" leaf.
 
 ### Routes
 
@@ -483,7 +525,7 @@ N/A: no report field, log line or exit code changes.
 | 3 | state | N/A: pure functions | | |
 | 4 | route | one walk; identity, key and detector null all read it | C13, P1, P3 | null check without unwrap; raw pass on differing dtypes |
 | 5 | referential | N/A: no FK or reference handling changes | | |
-| 6 | untrusted | keys stay `str()` text so a value returned as text still matches (K4) | T1-T8, C22 | prefix top-level keys |
+| 6 | untrusted | keys stay `str()` text so a value returned as text still matches (K4) | T1-T13, C22 | prefix top-level keys |
 | 7 | toctou | N/A: no check-then-use on files or state | | |
 | 8 | weak | runner-level asserts (identical equals comparable); property tests with derived pairs and a floor on equal pairs | P1-P3 | nested numbers via `_number_key` |
 | 9 | refactor | N/A: behavior change, no structure-only move | | |
@@ -502,3 +544,12 @@ N/A: no report field, log line or exit code changes.
 | 7 `_python_scalar` in `_number_key` | S2 drops it; hand-back grep names it |
 | 8 canary `canonical_cells` | named in Non-goals and Reuse, V2-LOG follow-up |
 | 9 `source_distinct` dtypes | walks every dtype except bool, int, uint, float |
+
+## Review round 2
+
+| Finding | Resolution and guard |
+|---|---|
+| V1 BLOCKER: tuple identity split after Parquet round trip | Step 6 shares sequence identity and keeps punctuation in a non-comparing field. E3, C15 and C30 preserve the runner rejection. Giving tuples a distinct tag turns C30 red. |
+| V1 HIGH: K4 lost null and temporal spellings | Null and temporal forms retain non-comparing display data. E2 covers equal leaves with different spellings. T9 to T13 pin the base text and runner counts. Rendering every nested null as None turns T9 red. C9 guards normalized nested NumPy temporal repr. |
+| V1 self-review: nested other leaves and unordered containers could lose base repr | Preserve nested repr (including UUID, date and bytearray) and original set/frozenset display. Add K4 runner variants against their own text for `[date(2020, 1, 1)]`, `[bytearray(b"a")]` and `frozenset({1})`. |
+| V2-LOG LOW: missing dict insertion-order limit | Failure modes records the sorted dict key and insertion-ordered output string that already split on base. |
