@@ -136,11 +136,30 @@ def test_the_adapter_classifier_is_checked_exactly(tmp_path: Path) -> None:
     assert _seeded(tmp_path, no_fallback, classifiers=registry)
 
 
+APPROVED = {
+    ("execution/_isolated_reason.py", "memory_boundary"): "arm",
+    ("reason_adapter.py", "reason_from_exception"): "adapter",
+    ("execution/_isolated_run.py", "_run_in_process"): "run",
+}
+
+
+def test_the_registry_is_the_three_approved_entries_pinned_here() -> None:
+    """Written out in this test, not read from `CLASSIFIERS`, so editing the registry alone
+    cannot widen or weaken it."""
+    assert ms.registry_problems(APPROVED) == []
+    assert ms.CLASSIFIERS == APPROVED
+
+
 def test_a_fourth_classifier_is_a_finding() -> None:
-    assert ms.registry_problems(ms.CLASSIFIERS) == []
-    assert ms.registry_problems({**ms.CLASSIFIERS, ("x.py", "f"): "arm"})
+    assert ms.registry_problems({**APPROVED, ("x.py", "f"): "arm"})
+    assert ms.registry_problems({k: v for k, v in APPROVED.items() if k[1] != "memory_boundary"})
+
+
+def test_a_role_downgrade_is_a_finding() -> None:
+    weaker = {**APPROVED, ("reason_adapter.py", "reason_from_exception"): "arm"}
+    assert ms.registry_problems(weaker)
     assert ms.registry_problems(
-        {k: v for k, v in ms.CLASSIFIERS.items() if k[1] != "memory_boundary"}
+        {**APPROVED, ("execution/_isolated_run.py", "_run_in_process"): "arm"}
     )
 
 
@@ -149,3 +168,10 @@ def test_ignoring_errors_is_a_finding_in_the_extra_cleanup_modules(tmp_path: Pat
     plain = "import shutil\ndef g(p):\n shutil.rmtree(p)\n"
     assert _seeded(tmp_path, "def f():\n pass\n", extra_source=ignoring)
     assert _seeded(tmp_path, "def f():\n pass\n", extra_source=plain) == []
+
+
+def test_the_positional_ignore_errors_spelling_is_a_finding(tmp_path: Path) -> None:
+    positional = "import shutil\ndef g(p):\n shutil.rmtree(p, True)\n"
+    assert _seeded(tmp_path, "def f():\n pass\n", extra_source=positional)
+    keyword_false = "import shutil\ndef g(p):\n shutil.rmtree(p, False)\n"
+    assert _seeded(tmp_path, "def f():\n pass\n", extra_source=keyword_false) == []

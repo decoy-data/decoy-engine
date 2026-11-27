@@ -213,6 +213,8 @@ SPECIFIC_SINKS = {
     "sink_pa_create_memory_map": "pyarrow.create_memory_map",
     "sink_pa_orc": "pyarrow.orc.read_table",
     "sink_np_loadtxt": "numpy.loadtxt",
+    "sink_remove_tree_public": "decoy_engine.fileaccess.remove_tree",
+    "sink_remove_tree_internal": "decoy_engine.fileaccess._fdtree.remove_tree",
     "sink_np_fromfile": "numpy.fromfile",
     "sink_np_memmap": "numpy.memmap",
     "sink_pd_hdfstore": "pandas.HDFStore",

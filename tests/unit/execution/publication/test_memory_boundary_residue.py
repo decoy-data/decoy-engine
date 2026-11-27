@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import errno
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import fileaccess
-from decoy_engine.fileaccess import _errors
+from decoy_engine.fileaccess import _errors, _local
 from tests.unit.execution.publication.test_isolated_commit_memory import CANARY
 from tests.unit.execution.publication.test_isolated_readback_cap import scratch  # noqa: F401
 from tests.unit.execution.publication.test_memory_boundary_routes import Route, raises_memory
@@ -31,18 +32,28 @@ STAGE = "._decoy_publication_pending_"
 
 
 def removal_fault(mp: pytest.MonkeyPatch, marker: str) -> list[str]:
-    """Raise `MemoryError` once from `os.lstat`, only when `rmtree` stats a path with `marker`."""
+    """Raise `MemoryError` once from `os.lstat` while a real `shutil.rmtree` runs on a path with
+    `marker`. The fault covers the whole call, so it does not depend on the helper's frame name,
+    which differs between Python versions."""
     fired: list[str] = []
-    real = os.lstat
+    inside: list[str] = []
+    real_lstat, real_rmtree = os.lstat, shutil.rmtree
 
     def lstat(path: Any, *args: Any, **kwargs: Any) -> Any:
-        caller = sys._getframe(1).f_code.co_name
-        if not fired and caller == "rmtree" and marker in str(path):
+        if inside and not fired and marker in str(path):
             fired.append(marker)
             raise MemoryError(CANARY)
-        return real(path, *args, **kwargs)
+        return real_lstat(path, *args, **kwargs)
+
+    def rmtree(path: Any, *args: Any, **kwargs: Any) -> Any:
+        inside.append(str(path))
+        try:
+            return real_rmtree(path, *args, **kwargs)
+        finally:
+            inside.pop()
 
     mp.setattr(os, "lstat", lstat)
+    mp.setattr(shutil, "rmtree", rmtree)
     return fired
 
 
@@ -57,6 +68,25 @@ def test_remove_tree_ignores_filesystem_errors_and_raises_memory_errors(
     fired = removal_fault(monkeypatch, "held")
     raises_memory(fileaccess.remove_tree, tmp_path / "held")
     assert fired
+
+
+def test_remove_tree_ignores_only_filesystem_errors() -> None:
+    """A NUL in the path raises `ValueError` from `os.lstat` on every Python version, not only
+    on 3.12."""
+    with pytest.raises(ValueError):
+        fileaccess.remove_tree("stage\0name")
+
+
+def test_a_failed_abort_removal_still_closes_the_held_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    txn = _local.LocalOutputTxn(tmp_path / "out", "dir", "exclusive", "publication")
+    assert txn._held.fd >= 0
+    fired = removal_fault(monkeypatch, STAGE)
+    raises_memory(txn.abort)
+    assert fired
+    assert txn._held.fd == -1  # closed before the error reached the caller
+    txn.abort()  # a second abort returns early and stays quiet
 
 
 def test_a_fault_in_the_scratch_stage_removal_is_not_a_completed_run(
