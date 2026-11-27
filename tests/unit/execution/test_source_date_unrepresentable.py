@@ -4,7 +4,6 @@ quoting the year. The bad cell sits in a later Parquet row group, past the profi
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ from decoy_engine.execution.out_of_core import run_fk_out_of_core
 from decoy_engine.profile._readers import LazySource
 from tests.native._chunked_entry_support import key_provider
 from tests.unit.execution import _auto_chunk_support as support
+from tests.unit.execution import _b6a_support as b6a
 
 TABLE = support.TABLE
 ROWS, GROUP, BAD_ROW = 12_000, 5_000, 10_000
@@ -60,7 +60,6 @@ def _kwargs(**extra: Any) -> dict[str, Any]:
 ROUTES = {
     "FF": {"execution_mode": "full_frame", "auto_chunk": False},
     "AUTO": {},
-    "OOC": {"execution_mode": "out_of_core"},
 }
 
 
@@ -85,7 +84,8 @@ def test_every_run_pipeline_route_refuses_the_far_date(
 
 
 @pytest.mark.parametrize("shape", ["lazy", "resident", "loader"])
-def test_the_sequential_route_refuses_the_far_date(shape: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["sequential", "out_of_core"])
+def test_the_relationship_routes_refuse_the_far_date(shape: str, mode: str, tmp_path: Path) -> None:
     child = _source()
     parent = pa.table({"id": pa.array([f"r{i}" for i in range(3)])})
     child = child.append_column("ref", pa.array([f"r{i % 3}" for i in range(ROWS)]))
@@ -122,7 +122,7 @@ def test_the_sequential_route_refuses_the_far_date(shape: str, tmp_path: Path) -
     }
     cfg = PipelineConfig.model_validate(raw).model_dump()
     tables = {"parent": parent, "t": child}
-    kwargs: dict[str, Any] = {"execution_mode": "sequential", "key_provider": key_provider()}
+    kwargs: dict[str, Any] = {"execution_mode": mode, "key_provider": key_provider()}
     if shape == "lazy":
         sources: dict[str, Any] | None = {n: LazySource(p, table=n) for n, p in paths.items()}
     elif shape == "resident":
@@ -148,25 +148,10 @@ def test_a_first_batch_profile_failure_is_the_same_coded_refusal(tmp_path: Path)
 
 def test_a_refused_run_publishes_nothing(tmp_path: Path) -> None:
     cfg, path, _ = _setup(tmp_path)
-    sink = _RecordingSink()
+    sink, target = b6a.real_sink(tmp_path, "out")
     with pytest.raises(SourceDateUnrepresentableError):
         run_pipeline(cfg, sources={TABLE: LazySource(path, table=TABLE)}, sink=sink, **_kwargs())
-    assert sink.committed is False
-
-
-class _RecordingSink:
-    """Enough of a TransactionalSink to tell whether anything was committed."""
-
-    committed = False
-
-    def __getattr__(self, name: str) -> Callable[..., Any]:
-        if name == "commit":
-
-            def commit(*args: Any, **kwargs: Any) -> None:
-                self.committed = True
-
-            return commit
-        return lambda *args, **kwargs: None
+    assert not Path(target).exists()
 
 
 def _chunks(table: pa.Table) -> list[pa.Table]:
@@ -235,7 +220,7 @@ def test_the_isolated_route_reports_the_code_without_the_year(tmp_path: Path) ->
     )
     assert result.outcome == "crashed"
     assert result.outputs is None
-    assert "source_date_unrepresentable" in (result.error or "")
+    assert "SourceDateUnrepresentableError" in (result.error or "")
     assert "10183" not in (result.error or "")
 
 
