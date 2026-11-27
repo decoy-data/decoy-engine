@@ -38,6 +38,7 @@ from decoy_engine.providers_v2._faker_draw_contracts import (
     faker_draw_adapter_defaults,
     faker_draw_method_view,
 )
+from decoy_engine.safe_output import safe_error_type
 
 # Semantic name -> Faker method name. Frozen; lookup table only.
 # Post-S6 (per spec §7): the 5 swap targets (synthetic_ssn / ein / npi /
@@ -163,7 +164,7 @@ class FakerAdapter:
             raise AdapterError(
                 code=reasons.provider.CAPABILITY_VIOLATION,
                 message=(
-                    f"FakerAdapter.generate({provider!r}) failed: {type(exc).__name__}: {exc}"
+                    f"FakerAdapter.generate({provider!r}) failed: {safe_error_type(exc).value}"
                 ),
             ) from exc
 

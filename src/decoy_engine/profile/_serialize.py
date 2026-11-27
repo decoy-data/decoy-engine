@@ -45,7 +45,9 @@ def profile_from_json(s: str) -> Profile:
     try:
         data = json.loads(s)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"profile_from_json: invalid JSON: {exc}") from exc
+        raise ValueError(
+            f"profile_from_json: invalid JSON at line {exc.lineno}, column {exc.colno}"
+        ) from exc
     return _profile_from_dict(data)
 
 

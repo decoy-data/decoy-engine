@@ -45,7 +45,7 @@ def test_at_e1_4_no_exception_chain_carries_file_content(raw: bytes) -> None:
 def test_at_e1_5_truncated_json_keeps_its_code_and_message_text() -> None:
     err = _refusal(TRUNCATED)
     assert err.code == UNREADABLE
-    assert "snapshot_file 's.json' could not be read: Expecting value" in str(err)
+    assert "s.json: could not be parsed at line 1, column 7" in str(err)
 
 
 def test_valid_json_parses() -> None:

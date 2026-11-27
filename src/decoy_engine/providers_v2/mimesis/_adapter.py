@@ -42,6 +42,7 @@ from decoy_engine.providers_v2._adapter import (
     ProviderSpec,
 )
 from decoy_engine.providers_v2._errors import AdapterError, ProviderError
+from decoy_engine.safe_output import safe_error_type
 
 if TYPE_CHECKING:
     from decoy_engine.generation.pool._events import QualityWarning
@@ -184,7 +185,7 @@ class MimesisAdapter:
         except Exception as exc:
             raise AdapterError(
                 code=reasons.provider.CAPABILITY_VIOLATION,
-                message=f"MimesisAdapter.generate({provider!r}) failed: {type(exc).__name__}: {exc}",
+                message=f"MimesisAdapter.generate({provider!r}) failed: {safe_error_type(exc).value}",
             ) from exc
 
     def _require_known(self, provider: str) -> None:

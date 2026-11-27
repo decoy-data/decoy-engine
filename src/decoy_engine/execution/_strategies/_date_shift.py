@@ -161,7 +161,7 @@ class DateShiftStrategyHandler:
             raise StrategyError(
                 code=reasons.runtime.DATE_SHIFT_INVALID_CONFIG,
                 strategy="date_shift",
-                message=f"date_shift column {column!r}: {exc}",
+                message=f"date_shift column {column!r}: provider_config.preserve_values is invalid.",
             ) from exc
         if preserve is not None and cfg.get("group_by"):
             raise StrategyError(

@@ -18,6 +18,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING, NoReturn
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Name
 from decoy_engine.contracts.distribution_snapshot import names_unsupported_year
 
 if TYPE_CHECKING:
@@ -26,7 +27,14 @@ if TYPE_CHECKING:
 _REFIT_HINT = "Refit, or use a larger epsilon if the snapshot was DP-noised."
 
 
-def refuse_degenerate(column: object, why: str) -> NoReturn:
+def column_label(column: object) -> str:
+    """What a message calls a statistical column: the name when it is a plain approvable string,
+    `<name>` for anything else (a list, a URL-shaped value), so a malformed name is never
+    rendered."""
+    return Name(column).shown()
+
+
+def refuse_degenerate(column: str, why: str) -> NoReturn:
     """Raise the one coded refusal for an unsampleable snapshot of `column`."""
     # Lazy: `_spec` imports the modules that import this one.
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
@@ -149,4 +157,4 @@ def check_degenerate(spec: StatisticalSpec) -> None:
     """Raise `STATISTICAL_STATS_DEGENERATE` when `spec`'s snapshot cannot be sampled."""
     finding = degenerate_finding(spec)
     if finding is not None:
-        refuse_degenerate(spec.column, f"{finding[1]}. {_REFIT_HINT}")
+        refuse_degenerate(column_label(spec.column), f"{finding[1]}. {_REFIT_HINT}")
