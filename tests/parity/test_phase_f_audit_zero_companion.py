@@ -38,7 +38,7 @@ from tests.parity import _f0_fixtures as fx
 from tests.parity import _f_audit_cells as cells
 from tests.parity._f_audit_witness import DeterministicIndexSpy
 from tests.parity._fr0_support import plan_of
-from tests.parity._pick_spy import install_pick_spy
+from tests.parity.support.pick_spy import install_pick_spy
 
 THRESHOLD = 90
 FORBIDDEN = "deterministic-index path"

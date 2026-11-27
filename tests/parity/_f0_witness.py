@@ -79,7 +79,7 @@ from decoy_engine.generation.pool import _sampler
 from decoy_engine.generation.pool._errors import GenerationError
 from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generators.columns import ColumnGenerator
-from tests.parity._pick_spy import install_pick_spy, picked_values
+from tests.parity.support.pick_spy import install_pick_spy, picked_values
 
 NUMPY_SELECTION = "numpy_selection"
 COMPILED_INDEX = "compiled_index_selection"

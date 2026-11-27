@@ -49,7 +49,7 @@ from decoy_engine.generation.pool._sampler import PoolSampler
 from tests.parity import _f0_fixtures as fx
 from tests.parity import _f0_witness as w
 from tests.parity._f0_canonical import table_fingerprint
-from tests.parity._pick_spy import count_picks
+from tests.parity.support.pick_spy import count_picks
 
 
 def _companion() -> Any | None:

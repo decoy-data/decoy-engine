@@ -459,7 +459,7 @@ class PooledSelector:
 
     # Every public method that draws indices. Observers and mutants of the pick read this list
     # instead of naming a method, so a new entry point is one edit and a sentry fails if it is
-    # missing (`tests/unit/generation/test_pick_methods.py`).
+    # missing (`tests/unit/generation/pool/test_pick_methods.py`).
     PICK_METHODS: ClassVar[tuple[str, ...]] = ("select", "take")
 
     def __init__(self, values: Any, selection_seed: bytes) -> None:

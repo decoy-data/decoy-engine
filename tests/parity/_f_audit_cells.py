@@ -399,8 +399,9 @@ _PICK_SUBSTITUTES: dict[str, Callable[[Any], Any]] = {
 }
 
 
-def _replace_every_pick(mp: pytest.MonkeyPatch) -> None:
-    for name in _faker_pool.PooledSelector.PICK_METHODS:
+def replace_picks(mp: pytest.MonkeyPatch, names: tuple[str, ...] | None = None) -> None:
+    """The audit's pick mutant: every entry in `PICK_METHODS` (or just `names`) is replaced."""
+    for name in names or _faker_pool.PooledSelector.PICK_METHODS:
         _outer(_faker_pool.PooledSelector, name, _PICK_SUBSTITUTES[name])(mp)
 
 
@@ -515,7 +516,7 @@ def mutants_for(row_id: str, unmarked_windowed: Callable[..., list[Any]]) -> tup
             fid: (
                 Mutant(
                     "recomputed-pool-index",
-                    _replace_every_pick,
+                    replace_picks,
                     "numpy-selected|sampler result",
                 ),
             )

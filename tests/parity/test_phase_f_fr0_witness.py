@@ -18,8 +18,9 @@ from decoy_engine.generation import _column_streams, _faker_pool
 from tests.parity import _f0_fixtures as fx
 from tests.parity import _f0_witness as w
 from tests.parity._f0_canonical import table_fingerprint
+from tests.parity._f_audit_cells import replace_picks
 from tests.parity._fr0_support import fingerprints, partition_from_cuts, run_resident
-from tests.parity._pick_spy import picked_values
+from tests.parity.support.pick_spy import picked_values
 
 _THRESHOLD = 90
 _ROWS = 100
@@ -229,14 +230,6 @@ def _list_route_config() -> dict[str, Any]:
     return fx.config([parent, child])
 
 
-def _recompute_pick(inner: Any) -> Any:
-    def pick(self: Any, size: int) -> Any:
-        out = inner(self, size)
-        return _like(out, [self._values[(i * 7) % len(self._values)] for i in range(size)])
-
-    return pick
-
-
 def test_a_list_route_column_is_not_reached_by_a_take_only_mutant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -244,7 +237,7 @@ def test_a_list_route_column_is_not_reached_by_a_take_only_mutant(
     witness green. That is why the mutants replace every entry in `PICK_METHODS`."""
     monkeypatch.setattr(_faker_pool, "N_THRESHOLD", _THRESHOLD)
     with w.end_to_end(monkeypatch, marking=True) as witness:
-        _outer(monkeypatch, _faker_pool.PooledSelector, "take", _recompute_pick)
+        replace_picks(monkeypatch, ("take",))
         tables = fx.run_generate_tables(_list_route_config())
     witness.classify(tables)
 
@@ -254,7 +247,7 @@ def test_a_list_route_column_is_reached_by_the_select_mutant(
 ) -> None:
     _trips(
         monkeypatch,
-        lambda mp: _every_pick(mp, _recompute_pick),
+        replace_picks,
         match="numpy-selected",
         marking=True,
         run=lambda: fx.run_generate_tables(_list_route_config()),

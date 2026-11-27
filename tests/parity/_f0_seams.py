@@ -27,7 +27,7 @@ import pytest
 
 from decoy_engine.generation import _faker_pool
 from tests.parity._f0_canonical import column_digest
-from tests.parity._pick_spy import install_pick_spy, picked_values
+from tests.parity.support.pick_spy import install_pick_spy, picked_values
 
 
 @dataclass
