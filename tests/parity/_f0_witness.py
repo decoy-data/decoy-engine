@@ -79,6 +79,7 @@ from decoy_engine.generation.pool import _sampler
 from decoy_engine.generation.pool._errors import GenerationError
 from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generators.columns import ColumnGenerator
+from tests.parity.support.pick_spy import install_pick_spy, picked_values
 
 NUMPY_SELECTION = "numpy_selection"
 COMPILED_INDEX = "compiled_index_selection"
@@ -216,6 +217,15 @@ class _Snapshot:
         self.last = list(values)
         return values
 
+    @property
+    def supports_array(self) -> bool:
+        return _column_streams.supports_array(self._inner)
+
+    def next_array(self, offset: int, size: int) -> pa.Array:
+        arr: pa.Array = self._inner.next_array(offset, size)
+        self.last = arr.to_pylist()
+        return arr
+
 
 class _ObservedStream:
     """A core column stream that attributes every event of a batch to its column."""
@@ -239,6 +249,27 @@ class _ObservedStream:
             values = _column_streams.draw_batch(self._inner, offset, size, siblings)
         finally:
             outer._current = None
+        self._keep(offset, values)
+        return values
+
+    @property
+    def supports_array(self) -> bool:
+        # Forwarded, or the assembler takes the list route for an Arrow-capable column and a
+        # broken Arrow output would pass unseen.
+        return _column_streams.supports_array(self._inner)
+
+    def next_array(self, offset: int, size: int) -> pa.Array:
+        outer = self._outer
+        outer._current = self._key
+        try:
+            arr: pa.Array = self._inner.next_array(offset, size)
+        finally:
+            outer._current = None
+        self._keep(offset, arr.to_pylist())
+        return arr
+
+    def _keep(self, offset: int, values: list[Any]) -> None:
+        outer = self._outer
         outer.final.setdefault(self._key, []).extend(values)
         if self._snapshot is not None:
             nulled = [
@@ -247,7 +278,6 @@ class _ObservedStream:
                 if after is None and before is not None
             ]
             outer._record(NULL_MASK, {"nulled": nulled}, self._key)
-        return values
 
 
 class EndToEndWitness:
@@ -362,23 +392,20 @@ class EndToEndWitness:
         mp.setattr(
             _faker_pool, "np", _NpProxy(lambda label, payload: outer._record(label, payload))
         )
-        real_select = _faker_pool.PooledSelector.select
 
-        def select(selector: _faker_pool.PooledSelector, size: int) -> Any:
-            out = real_select(selector, size)
+        def picked(_method: str, selector: _faker_pool.PooledSelector, size: int, out: Any) -> None:
             outer._record(
                 NUMPY_SELECTION,
                 {
                     "stage": "sample",
-                    "result": list(out),
+                    "result": picked_values(out),
                     "pool_size": len(selector._values),
                     "n": size,
                     "deterministic": False,
                 },
             )
-            return out
 
-        mp.setattr(_faker_pool.PooledSelector, "select", select)
+        install_pick_spy(mp, picked)
 
         # Pool construction (kept apart from selection) and optional marking.
         real_build = _faker_pool.build_pool_values

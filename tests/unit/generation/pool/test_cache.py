@@ -137,3 +137,100 @@ class TestLruOrdering:
         # a accessed-most-recently might survive depending on byte
         # accounting; sanity-check that evictions happened.
         assert cache.stats().evictions >= 1
+
+
+def test_the_cache_limit_counts_the_retained_arrow_buffers() -> None:
+    import pyarrow as pa
+
+    words = [f"w{i:05d}" for i in range(1_000)]
+    objects = np.array(words, dtype=object)
+    arrow = pa.array(words)
+
+    def pool(tag: str, *, retained: bool = True) -> ValuePool:
+        return ValuePool(
+            values=objects,
+            provider=tag,
+            locale="en_US",
+            config_hash="",
+            seed=b"\x01" * 8,
+            size=len(words),
+            build_time_ms=0.0,
+            backend_type="faker",
+            backend_version="x",
+            distinct_count=len(words),
+            arrow=arrow if retained else None,
+        )
+
+    one = measured_pool_bytes(pool("a"))
+    object_only = measured_pool_bytes(pool("a", retained=False))
+    assert one == object_only + arrow.get_total_buffer_size()
+    # Room for two pools if the Arrow form were free, but not once it is counted.
+    cache = PoolCache(max_bytes=2 * object_only + arrow.get_total_buffer_size())
+    cache.put(pool("a"))
+    cache.put(pool("b"))
+    assert cache.get(pool("a").identity) is None
+    assert cache.stats().bytes_used == one
+
+
+@pytest.mark.serial
+def test_a_one_value_slice_of_a_large_buffer_counts_the_buffer_it_keeps() -> None:
+    import pyarrow as pa
+
+    big = pa.array([f"{i:08d}" + "x" * 120 for i in range(10_000)])
+    sliced = big.slice(5, 1)
+    assert sliced.nbytes < 200  # the logical size the old measure used
+    pool = ValuePool(
+        values=np.array([sliced[0].as_py()], dtype=object),
+        provider="p",
+        locale="en_US",
+        config_hash="",
+        seed=b"\x01" * 8,
+        size=1,
+        build_time_ms=0.0,
+        backend_type="faker",
+        backend_version="x",
+        distinct_count=1,
+        arrow=sliced,
+    )
+    assert measured_pool_bytes(pool) > 1_000_000
+    cache = PoolCache(max_bytes=64 * 1024)
+    with pytest.raises(PoolCapacityError):
+        cache.put(pool)
+
+
+def test_an_ipc_read_pool_counts_the_message_body_it_keeps_alive() -> None:
+    """Codex V1-3: an IPC-read one-value column holds the whole record batch body, ~1 MB, while
+    its own buffers report a few bytes."""
+    import pyarrow as pa
+
+    batch = pa.record_batch(
+        {"v": pa.array(["a"]), "wide": pa.array([b"x" * (1 << 20)], type=pa.binary())}
+    )
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, batch.schema) as writer:
+        writer.write_batch(batch)
+    message = sink.getvalue()
+    arrow = pa.ipc.open_stream(message).read_next_batch().column("v")
+    assert arrow.get_total_buffer_size() < 1024
+    objects = np.array(["a"], dtype=object)
+
+    def pool(retained: bool) -> ValuePool:
+        return ValuePool(
+            values=objects,
+            provider="p",
+            locale="en_US",
+            config_hash="",
+            seed=b"\x01" * 8,
+            size=1,
+            build_time_ms=0.0,
+            backend_type="faker",
+            backend_version="x",
+            distinct_count=1,
+            arrow=arrow if retained else None,
+        )
+
+    object_only = measured_pool_bytes(pool(retained=False))
+    assert measured_pool_bytes(pool(retained=True)) >= object_only + (1 << 20)
+    # Room for the object form and the column's own buffers, not for the body behind them.
+    with pytest.raises(PoolCapacityError):
+        PoolCache(max_bytes=object_only + 64 * 1024).put(pool(retained=True))

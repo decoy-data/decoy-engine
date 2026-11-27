@@ -62,4 +62,4 @@ def test_f15_t9_the_bound_baseline_codes_are_pending_with_fixed_text(
 
 
 def test_f15_t9_the_registry_version_is_stamped_by_the_release() -> None:
-    assert reasons.REGISTRY_VERSION == "1.34.0"
+    assert reasons.REGISTRY_VERSION == "1.35.0"
