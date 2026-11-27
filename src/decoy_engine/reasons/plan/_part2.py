@@ -124,16 +124,16 @@ __all__ = [
 _d = _catalog.plan("PlanCompileError")
 
 COMPUTED_DRAW_ELEMENTS_INVALID = _d(
-    "computed_draw_elements_invalid", "Computed draw elements invalid.", since=UNRELEASED
+    "computed_draw_elements_invalid", "Computed draw elements invalid.", since="1.35.0"
 )
 COMPUTED_DRAW_MODE_UNSUPPORTED = _d(
-    "computed_draw_mode_unsupported", "Computed draw mode unsupported.", since=UNRELEASED
+    "computed_draw_mode_unsupported", "Computed draw mode unsupported.", since="1.35.0"
 )
 COMPUTED_DRAW_NAMESPACE_RESERVED = _d(
-    "computed_draw_namespace_reserved", "Computed draw namespace reserved.", since=UNRELEASED
+    "computed_draw_namespace_reserved", "Computed draw namespace reserved.", since="1.35.0"
 )
 COMPUTED_DRAW_RANGE_INVALID = _d(
-    "computed_draw_range_invalid", "Computed draw range invalid.", since=UNRELEASED
+    "computed_draw_range_invalid", "Computed draw range invalid.", since="1.35.0"
 )
 DERIVED_BOUNDS_INVERTED = _d("derived_bounds_inverted", "Derived bounds inverted.")
 DERIVED_CYCLIC_REFERENCE = _d("derived_cyclic_reference", "Derived cyclic reference.")
