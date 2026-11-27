@@ -83,6 +83,33 @@ def _mixed_reject_all(tmp_path: Path) -> tuple[Any, Any, Any, Any, Any]:
     return config, inputs, plan, ctx, capture_shadow_snapshot({"accounts": accounts})
 
 
+def test_run_has_no_way_to_skip_judgement() -> None:
+    """One way to defer judgement: the owner token. `run` takes no flag that skips it."""
+    import inspect
+
+    assert "validate_result" not in inspect.signature(ShadowCoordinator.run).parameters
+
+
+def test_the_stitched_mixed_result_is_judged_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution.physical import _shadow_generation as generation
+
+    judged: list[frozenset[str]] = []
+    real = generation.enforce_validators
+
+    def spy(ctx: Any, outputs: Any, sources: Any, **kwargs: Any) -> Any:
+        judged.append(frozenset(outputs))
+        return real(ctx, outputs, sources, **kwargs)
+
+    monkeypatch.setattr(generation, "enforce_validators", spy)
+    _, inputs, plan, ctx, snapshot = _mixed_reject_all(tmp_path)
+    with pytest.raises(ValidatorFailedError):
+        ShadowCoordinator(ctx=ctx, registry=inputs.registry).run(plan, snapshot)
+    assert len(judged) == 1, "the mask half and the stitched whole were each judged"
+    assert len(judged[0]) > 1, "the judged result was the mask half alone, not the stitched whole"
+
+
 def test_bound_session_is_fed_by_a_generation_result_and_fails(tmp_path: Path) -> None:
     config = _generate_config()
     config["validators"] = [

@@ -120,3 +120,38 @@ def test_session_construction_reports_a_bad_parameter_as_a_config_error() -> Non
     with pytest.raises(ConfigRuleError) as caught:
         ValidationSession(config)
     assert reason_from_exception(caught.value).code != "unexpected_error"
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [({"min_rows": "50"}, 50), ({"min_rows": " 7 "}, 7)],
+)
+def test_a_numeric_string_parameter_still_converts(params: dict[str, Any], expected: int) -> None:
+    from decoy_engine.validators._params import numeric_param
+
+    assert (
+        numeric_param(params, "min_rows", kind=int, default=1, validator="leak_check") == expected
+    )
+    assert (
+        numeric_param({"x": "0.25"}, "x", kind=float, default=0.0, validator="leak_check") == 0.25
+    )
+
+
+def test_a_numeric_string_min_rows_still_runs_through_validate() -> None:
+    outputs = {"t": pa.table({"col": [f"new{i}" for i in range(10)]})}
+    sources = {"t": pa.table({"col": [f"old{i}" for i in range(10)]})}
+    config: dict[str, Any] = {
+        "validators": [{"name": "leak_check", "params": {"min_rows": "50"}}],
+        "tables": [{"name": "t", "columns": [{"name": "col", "strategy": "hash"}]}],
+        "relationships": [],
+    }
+    (result,) = validate(outputs, config, sources=sources).results
+    assert result.skipped == (("t", "col", "leak_check_skip_below_min_rows"),)
+
+
+def test_a_non_numeric_string_parameter_is_refused_without_its_text() -> None:
+    from decoy_engine.validators._params import ParamError, numeric_param
+
+    with pytest.raises(ParamError) as caught:
+        numeric_param({"min_rows": URL}, "min_rows", kind=int, default=1, validator="leak_check")
+    _assert_value_free(caught.value)

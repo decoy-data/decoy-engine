@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -126,10 +127,31 @@ def _is_validator_name(name: str) -> bool:
     return name in _NAMES or name.startswith(_PREFIXES)
 
 
+def _string_constants(tree: ast.Module) -> dict[str, str]:
+    """Module-level ``NAME = "text"`` bindings, so a key held in a constant is still the key."""
+    found: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.target, ast.Name)
+        ):
+            targets = [node.target.id]
+        else:
+            continue
+        if isinstance(node.value.value, str):
+            found.update(dict.fromkeys(targets, node.value.value))
+    return found
+
+
 def violations(source: str) -> list[str]:
     """Every validator-list read in `source`, as `line: kind`."""
     found: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    consts = _string_constants(tree)
+    for node in ast.walk(tree):
         line = getattr(node, "lineno", 0)
         if isinstance(node, ast.Name) and _is_validator_name(node.id):
             found.append(f"{line}: name {node.id}")
@@ -139,9 +161,9 @@ def violations(source: str) -> list[str]:
             found.append(f"{line}: attribute {node.attr}")
         elif isinstance(node, ast.keyword) and node.arg and _is_validator_name(node.arg):
             found.append(f"{line}: keyword {node.arg}")
-        elif isinstance(node, ast.Subscript) and _constant(node.slice) == _KEY:
+        elif isinstance(node, ast.Subscript) and _constant(node.slice, consts) == _KEY:
             found.append(f"{line}: subscript")
-        elif isinstance(node, ast.Call) and _call_reads_key(node):
+        elif isinstance(node, ast.Call) and _call_reads_key(node, consts):
             found.append(f"{line}: get")
         elif (
             isinstance(node, ast.ImportFrom | ast.Import) and _private_validators_import(node)
@@ -150,16 +172,19 @@ def violations(source: str) -> list[str]:
     return found
 
 
-def _constant(node: ast.AST) -> object:
+def _constant(node: ast.AST, consts: dict[str, str]) -> object:
+    """A literal's value, or a module-level string constant's value when the node names one."""
+    if isinstance(node, ast.Name):
+        return consts.get(node.id)
     return node.value if isinstance(node, ast.Constant) else None
 
 
-def _call_reads_key(node: ast.Call) -> bool:
+def _call_reads_key(node: ast.Call, consts: dict[str, str]) -> bool:
     func = node.func
     if isinstance(func, ast.Attribute) and func.attr == "get" and node.args:
-        return _constant(node.args[0]) == _KEY
+        return _constant(node.args[0], consts) == _KEY
     if isinstance(func, ast.Name) and func.id == "getattr" and len(node.args) >= 2:
-        value = _constant(node.args[1])
+        value = _constant(node.args[1], consts)
         return isinstance(value, str) and _is_validator_name(value)
     return False
 
@@ -188,8 +213,11 @@ def _private_validators_import(node: ast.ImportFrom | ast.Import) -> bool:
     return False
 
 
-def sites(source: str) -> Counter[tuple[str, str]]:
-    """Each read in `source` as (kind, enclosing function), counted; `<module>` at top level."""
+def _located(
+    source: str, finder: Callable[[str], list[tuple[int, str]]]
+) -> Counter[tuple[str, str]]:
+    """The one scope scanner: each `(line, kind)` the finder reports in `source`, counted by
+    (kind, innermost enclosing function or class); `<module>` at top level."""
     tree = ast.parse(source)
     scopes = [
         (node.lineno, node.end_lineno or node.lineno, node.name)
@@ -197,22 +225,40 @@ def sites(source: str) -> Counter[tuple[str, str]]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     ]
     found: Counter[tuple[str, str]] = Counter()
-    for entry in violations(source):
-        line_text, kind = entry.split(": ", 1)
-        line = int(line_text)
+    for line, kind in finder(source):
         enclosing = [s for s in scopes if s[0] <= line <= s[1]]
         name = min(enclosing, key=lambda s: s[1] - s[0])[2] if enclosing else "<module>"
         found[(kind, name)] += 1
     return found
 
 
-def _scan() -> Counter[tuple[str, str, str]]:
+def _scan_execution(
+    count: Callable[[str], Counter[tuple[str, str]]],
+) -> Counter[tuple[str, str, str]]:
+    """`count` applied to every module under `execution/`, keyed by (module, kind, scope)."""
     hits: Counter[tuple[str, str, str]] = Counter()
     for path in sorted(EXECUTION.rglob("*.py")):
         rel = str(path.relative_to(EXECUTION))
-        for (kind, name), count in sites(path.read_text()).items():
-            hits[(rel, kind, name)] += count
+        for (kind, name), n in count(path.read_text()).items():
+            hits[(rel, kind, name)] += n
     return hits
+
+
+def _validator_reads(source: str) -> list[tuple[int, str]]:
+    found = []
+    for entry in violations(source):
+        line_text, kind = entry.split(": ", 1)
+        found.append((int(line_text), kind))
+    return found
+
+
+def sites(source: str) -> Counter[tuple[str, str]]:
+    """Each read in `source` as (kind, enclosing function), counted; `<module>` at top level."""
+    return _located(source, _validator_reads)
+
+
+def _scan() -> Counter[tuple[str, str, str]]:
+    return _scan_execution(sites)
 
 
 def test_no_read_beyond_the_pinned_sites() -> None:
@@ -255,6 +301,9 @@ def test_a_new_site_in_a_listed_function_fails() -> None:
         "from .validators import _registry",
         "from ..validators import _registry",
         'importlib.import_module("decoy_engine.' + 'validators._registry")',
+        'VALIDATORS_KEY = "validators"\nx = cfg.get(VALIDATORS_KEY)',
+        'KEY: str = "validators"\nx = cfg[KEY]',
+        'KEY = "validators"\nx = getattr(ctx, KEY)',
     ],
 )
 def test_the_scan_sees_each_seeded_spelling(snippet: str) -> None:
@@ -268,39 +317,27 @@ def test_the_scan_passes_the_public_import() -> None:
 # --- the carried judgement config is never a route input -----------------------------------------
 
 
-def judgement_sites(source: str) -> Counter[tuple[str, str]]:
-    """Each use of a judgement-config name in `source` as (kind, enclosing function)."""
-    tree = ast.parse(source)
-    scopes = [
-        (node.lineno, node.end_lineno or node.lineno, node.name)
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    ]
-    found: Counter[tuple[str, str]] = Counter()
-    for node in ast.walk(tree):
-        kind = None
+def _judgement_reads(source: str) -> list[tuple[int, str]]:
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Name) and node.id in _JUDGEMENT_NAMES:
-            kind = f"name {node.id}"
+            found.append((node.lineno, f"name {node.id}"))
         elif isinstance(node, ast.arg) and node.arg in _JUDGEMENT_NAMES:
-            kind = f"parameter {node.arg}"
+            found.append((node.lineno, f"parameter {node.arg}"))
         elif isinstance(node, ast.Attribute) and node.attr in _JUDGEMENT_NAMES:
-            kind = f"attribute {node.attr}"
+            found.append((node.lineno, f"attribute {node.attr}"))
         elif isinstance(node, ast.keyword) and node.arg in _JUDGEMENT_NAMES:
-            kind = f"keyword {node.arg}"
-        if kind is not None:
-            enclosing = [s for s in scopes if s[0] <= node.lineno <= s[1]]
-            name = min(enclosing, key=lambda s: s[1] - s[0])[2] if enclosing else "<module>"
-            found[(kind, name)] += 1
+            found.append((node.lineno, f"keyword {node.arg}"))
     return found
 
 
+def judgement_sites(source: str) -> Counter[tuple[str, str]]:
+    """Each use of a judgement-config name in `source` as (kind, enclosing function)."""
+    return _located(source, _judgement_reads)
+
+
 def _judgement_scan() -> Counter[tuple[str, str, str]]:
-    hits: Counter[tuple[str, str, str]] = Counter()
-    for path in sorted(EXECUTION.rglob("*.py")):
-        rel = str(path.relative_to(EXECUTION))
-        for (kind, name), count in judgement_sites(path.read_text()).items():
-            hits[(rel, kind, name)] += count
-    return hits
+    return _scan_execution(judgement_sites)
 
 
 def test_the_carried_judgement_config_is_read_only_at_the_pinned_sites() -> None:

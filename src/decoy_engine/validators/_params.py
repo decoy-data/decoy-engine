@@ -31,16 +31,30 @@ def numeric_param(
 ) -> Any:
     """Read ``params[name]`` as an int or a float, checked by type before any conversion.
 
+    A string that parses as the number is accepted, because quoted YAML (``min_rows: "50"``)
+    always worked.
+
     Raises:
-        ParamError: The value is a bool, or not an int (``kind=int``) or int/float
-            (``kind=float``). The message never carries the value.
+        ParamError: The value is a bool, a string that is not a number, or not an int
+            (``kind=int``) or int/float (``kind=float``). The message never carries the value.
     """
     if name not in params:
         return default
     value = params[name]
+    noun = "a number" if kind is float else "an integer"
+    if isinstance(value, str):
+        # `int()` and `float()` echo the text they reject, so the failure is raised after the
+        # handler with no exception context.
+        parsed: Any = None
+        try:
+            parsed = kind(value)
+        except ValueError:
+            pass
+        if parsed is None:
+            raise ParamError(f"{validator} validator: params.{name} must be {noun}.")
+        return parsed
     accepted = (int, float) if kind is float else (int,)
     if isinstance(value, bool) or not isinstance(value, accepted):
-        noun = "a number" if kind is float else "an integer"
         raise ParamError(f"{validator} validator: params.{name} must be {noun}.")
     return kind(value)
 

@@ -59,10 +59,16 @@ def bind_validation_session(
 
     ``key_state_budget`` resolves the keyed folds' ceiling; it runs only when a session opens.
     Opening validates every entry before any source is read, so a bad pattern or an unknown
-    validator name fails at the start of the run.
+    validator name fails at the start of the run. Either way the scope owns the binding: a
+    nested run (a provider that starts a job) never sees its caller's session, and the caller's
+    is back when the scope ends.
     """
     if not config.get("validators"):
-        yield None
+        token = _ACTIVE.set(None)
+        try:
+            yield None
+        finally:
+            _ACTIVE.reset(token)
         return
     session = ValidationSession(config, key_state_budget_bytes=key_state_budget())
     token = _ACTIVE.set(session)

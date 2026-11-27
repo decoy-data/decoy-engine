@@ -26,6 +26,7 @@ from decoy_engine.declared_casting._boundary import open_cast_run
 from decoy_engine.execution import _pipeline_route_exec as _route_exec
 from decoy_engine.execution import _pipeline_sources as _psrc
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
 from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run, current_duckdb_run
 from decoy_engine.execution.pipeline._post_scan import attach_cast_run, tee_reader
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "complete_resident_validation",
+    "deliver_resident_outputs",
     "emit_route",
     "execute_mixed_route",
     "execute_out_of_core_route",
@@ -103,6 +105,32 @@ def complete_resident_validation(
     return result
 
 
+def _plain_callable_sink(sink: object) -> bool:
+    """True for a bare ``Callable[[str, pa.Table], None]``: no write/commit/abort contract."""
+    return (
+        sink is not None
+        and callable(sink)
+        and not isinstance(sink, TransactionalSink)
+        and not callable(getattr(sink, "write", None))
+    )
+
+
+def deliver_resident_outputs(sink: object, result: ExecutionResult) -> None:
+    """Hand a plain callable each resident output once, after validation and settle.
+
+    A route that wrote through the sink (sequential, streamed) returns no outputs, so nothing
+    reaches it twice; a resident route returns its tables and never calls a bare callable.
+    """
+    if not result.outputs or not _plain_callable_sink(sink):
+        return
+    from decoy_engine.execution._transactional_sink import _CallableSinkAdapter
+
+    adapter = _CallableSinkAdapter(sink)
+    for name, table in result.outputs.items():
+        adapter.write(name, table)
+    adapter.commit()
+
+
 def execute_route(
     ctx: PipelineRunContext, decision: RouteDecision, refusals: dict[Any, Any]
 ) -> ExecutionResult:
@@ -145,6 +173,7 @@ def execute_route(
         if session is not None:
             result = complete_resident_validation(session, ctx, result)
         result = settle(gate, ctx, result)
+        deliver_resident_outputs(ctx.sink, result)
         execution_block = result.quality_metrics.setdefault("execution", {})
         execution_block["native_threads"] = {
             "count": ctx.native_threads,

@@ -210,6 +210,34 @@ def test_validators_do_not_change_what_a_callable_sink_receives(tmp_path: Path) 
     assert checked == plain, "a passing validator changed what the callable received"
 
 
+def _recording_callable() -> tuple[list[tuple[str, pa.Table]], Any]:
+    calls: list[tuple[str, pa.Table]] = []
+    return calls, lambda name, table: calls.append((name, table))
+
+
+@mixed.NEEDS_COMPANION
+def test_a_passing_mixed_job_delivers_each_table_to_a_callable_once(tmp_path: Path) -> None:
+    """S2: one sink call per table, after validation and settle, with the returned rows."""
+    config, child = _mixed_job(tmp_path, _MIXED_PASSING)
+    calls, sink = _recording_callable()
+    _, result = _routes(config, child, sink=sink)
+    assert sorted(name for name, _ in calls) == sorted(result.outputs)
+    assert len(calls) == len(result.outputs), "a table reached the callable more than once"
+    for name, table in calls:
+        assert table.equals(result.outputs[name]), name
+
+
+@mixed.NEEDS_COMPANION
+def test_a_mixed_job_without_validators_delivers_the_same_tables(tmp_path: Path) -> None:
+    config, child = _mixed_job(tmp_path, None)
+    plain, plain_sink = _recording_callable()
+    _routes(config, child, sink=plain_sink)
+    config_v, _ = _mixed_job(tmp_path, _MIXED_PASSING)
+    checked, checked_sink = _recording_callable()
+    _routes(config_v, child, sink=checked_sink)
+    assert sorted(n for n, _ in checked) == sorted(n for n, _ in plain)
+
+
 @mixed.NEEDS_COMPANION
 def test_callable_gets_nothing_when_a_validator_fails(tmp_path: Path) -> None:
     config, child = _mixed_job(tmp_path, _MIXED_FAILING)

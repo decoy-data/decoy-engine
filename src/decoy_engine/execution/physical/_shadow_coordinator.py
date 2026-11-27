@@ -153,19 +153,28 @@ class ShadowCoordinator:
         *,
         admitted_edges: tuple[RelationshipEdge, ...] = (),
         when_masks: Mapping[str, pa.Array] | None = None,
-        validate_result: bool = True,
     ) -> ShadowRunResult:
         """Run the plan and return its result, judged by the configured validators.
 
-        `validate_result=False` is for a caller that validates the finished result itself: the
-        mixed dispatch runs the mask half through here and validates the stitched whole.
+        A caller that judges the result itself says so with a ``validation_owner`` on the
+        context, never by skipping the boundary here.
         """
         result = self._dispatch(
             plan, snapshot, admitted_edges=admitted_edges, when_masks=when_masks
         )
-        if validate_result:
-            self._validated(plan, snapshot, result)
+        self._validated(plan, snapshot, result)
         return result
+
+    def run_mask_half(
+        self,
+        plan: PhysicalPlan,
+        snapshot: ShadowSnapshot,
+        *,
+        admitted_edges: tuple[RelationshipEdge, ...],
+    ) -> ShadowRunResult:
+        """The mask half of a mixed plan, left unjudged: `dispatch_mixed` judges the stitched
+        whole once, through `run`, and a half alone is not the job's output."""
+        return self._dispatch(plan, snapshot, admitted_edges=admitted_edges, when_masks=None)
 
     def _dispatch(
         self,
