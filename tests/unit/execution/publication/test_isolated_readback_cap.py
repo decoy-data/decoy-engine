@@ -16,6 +16,7 @@ out-of-core run and the governor.
 from __future__ import annotations
 
 import errno
+import gc
 import json
 import logging
 import os
@@ -437,6 +438,7 @@ def test_a12_every_exit_path_leaves_no_stage_and_no_open_file(
         }[scenario]
         assert result.outcome == "crashed" and result.outputs is None
         assert result.reason is not None and result.reason.code == expected
+    gc.collect()  # a failed read leaves frame cycles that hold a closed file until collected
     assert _open_under(tmp_path) == before
     _wholly_clean(run, output, staging, scratch)
 
