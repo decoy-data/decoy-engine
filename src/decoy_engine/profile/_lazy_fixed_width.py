@@ -31,6 +31,7 @@ from decoy_engine.profile._fixed_width_reader import (
     _resolve_layout,
     count_fixed_width_records,
     iter_fixed_width_records,
+    layout_arrow_schema,
 )
 from decoy_engine.profile._lazy_identity import LazyFileIdentity, check_batch_rows
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
@@ -39,12 +40,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from decoy_engine.fileaccess import FileAccess
-
-_ARROW_TYPES: dict[str, pa.DataType] = {
-    "str": pa.string(),
-    "int": pa.int64(),
-    "float": pa.float64(),
-}
 
 _TO_TABLE_ROWS = 65_536
 
@@ -132,7 +127,7 @@ class FixedWidthLazySource(LazyFileIdentity, LazySource):
 
     @property
     def schema(self) -> pa.Schema:
-        return pa.schema([(c.name, _ARROW_TYPES[c.type]) for c in self.layout.columns])
+        return layout_arrow_schema(self.layout)
 
     def _measure(self) -> FooterFacts:
         """One framing pass: no casts, one record in memory at a time."""
