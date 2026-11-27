@@ -157,6 +157,23 @@ class TestLiveVariant:
             is None
         )
 
+    def test_a_registered_callback_under_a_stock_name_is_not_a_string_guarantee(self) -> None:
+        from decoy_engine.providers_v2 import register_faker_provider_v2
+        from decoy_engine.providers_v2._faker_adapter import _unregister_faker_provider_v2
+
+        register_faker_provider_v2("lorem_text", lambda fake: 7)
+        try:
+            for registry in (None, _DEFAULT):
+                assert faker_provider_decline(
+                    "f", "lorem_text", {}, runs_computed=True, registry=registry, stock_only=True
+                ) == ("faker_provider_not_native:f:lorem_text", mock.ANY)
+        finally:
+            _unregister_faker_provider_v2("lorem_text")
+        assert (
+            faker_provider_decline("f", "lorem_text", {}, runs_computed=True, stock_only=True)
+            is None
+        )
+
     def test_the_out_of_core_route_refuses_an_integer_pool_and_auto_reroutes(
         self, tmp_path
     ) -> None:

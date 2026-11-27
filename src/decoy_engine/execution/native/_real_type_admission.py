@@ -54,7 +54,7 @@ from decoy_engine.execution.native._provider_class import (
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
 from decoy_engine.execution.native._route_decline_codes import CodedDecline, RouteDeclineCode, coded
-from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
+from decoy_engine.providers_v2 import ProviderRegistry, custom_provider_names, get_default_registry
 
 # The frozen C1 recipe's faker providers, from the operator registry (edit the registry). An
 # unset allowlist admits no provider, so a registry edit cannot widen admission by accident.
@@ -104,11 +104,17 @@ def _binding_matches_stock(
     registry: ProviderRegistry | None,
 ) -> bool:
     """True when the live binding draws as the stock one does: the same variant, and for a pool
-    the same adapter class, since the C1 allowlist's string-output guarantee belongs to the stock
+    the same adapter class and no registered callback, since the C1 allowlist's string-output guarantee belongs to the stock
     backends. A rebinding to an adapter that returns other types fails this check."""
     if variant != resolve_faker_variant(provider, provider_config):
         return False
-    if variant.kind != "pool" or registry is None:
+    if variant.kind != "pool":
+        return True
+    # A callback registered under the stock name replaces the string-returning method inside the
+    # stock adapter, so the adapter class alone does not prove the output type.
+    if isinstance(provider, str) and provider in custom_provider_names():
+        return False
+    if registry is None:
         return True
     stock = get_default_registry()
     if not (isinstance(provider, str) and registry.has(provider) and stock.has(provider)):
