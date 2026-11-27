@@ -13,6 +13,10 @@ internal.
 
 from __future__ import annotations
 
+import ast
+import functools
+import importlib
+from collections.abc import Callable
 from typing import Final
 
 FROZEN: Final = "frozen"
@@ -105,6 +109,54 @@ OPTIONAL_EXTRAS: Final[dict[str, str]] = {"providers_v2.mimesis": "mimesis"}
 def package_tier(module: str) -> str:
     """The tier a name exported by `module` gets when no other rule applies."""
     return PACKAGE_TIERS.get(module, INTERNAL)
+
+
+# The consumer seam (contract 3.6): the censuses of this repo and of the CLI call these two
+# functions instead of reading the tables above, so the identity rule exists once.
+
+
+@functools.cache
+def _assigned_constants(source: str) -> frozenset[str]:
+    """Names assigned at module level in `source`; empty source is an error, not "none"."""
+    out: set[str] = set()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign):
+            out |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            out.add(node.target.id)
+    if not out:
+        # Fail closed: an empty read must not turn every constant non-experimental.
+        raise ValueError("no module-level constants found in the experimental module source")
+    return frozenset(out)
+
+
+def _is_constant(obj: object) -> bool:
+    return not (isinstance(obj, type) or callable(obj))
+
+
+def tier_key(name: str, obj: object) -> object:
+    """One object has one key; a constant is keyed by its name too, as ints and strings repeat."""
+    return (name, id(obj)) if _is_constant(obj) else id(obj)
+
+
+def is_experimental_export(name: str, obj: object, read_source: Callable[[str], str]) -> bool:
+    """True when the export `name` is bound to an object the registry marks experimental.
+
+    A class or function by where it is defined, a constant by its name and object identity.
+    `read_source` maps a module name to its source text; the caller owns the file read, as
+    `contracts` does no file I/O.
+    """
+    if _is_constant(obj):
+        # Imported here so `contracts` keeps its rule of no execution imports.
+        sdk = importlib.import_module(EXPERIMENTAL_MODULE)
+        return (
+            name in _assigned_constants(read_source(EXPERIMENTAL_MODULE))
+            and getattr(sdk, name, None) is obj
+        )
+    module = getattr(obj, "__module__", None)
+    return module == EXPERIMENTAL_MODULE or (module, getattr(obj, "__qualname__", None)) in (
+        EXPERIMENTAL_OBJECTS
+    )
 
 
 # Every `"<name>/vN"` string or bytes constant under `src/` is one of four things (contract 3.1,
