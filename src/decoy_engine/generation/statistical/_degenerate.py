@@ -38,15 +38,18 @@ def column_label(column: object) -> str:
     return Name(column).shown()
 
 
-def refuse_degenerate(
-    column: str, why: str, code: str = reasons.plan.STATISTICAL_STATS_DEGENERATE
-) -> NoReturn:
-    """Raise the one coded refusal for an unsampleable snapshot of `column`."""
+def refuse_degenerate(column: str, why: str, *, unbounded: bool = False) -> NoReturn:
+    """Raise the one coded refusal for an unsampleable snapshot of `column`; `unbounded` names a
+    year the sampler cannot hold (`GENERATION_UNBOUNDED_COLUMN`) instead of a degenerate shape."""
     # Lazy: `_spec` imports the modules that import this one.
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
     raise StatisticalSpecError(
-        code=code,
+        code=(
+            reasons.plan.GENERATION_UNBOUNDED_COLUMN
+            if unbounded
+            else reasons.plan.STATISTICAL_STATS_DEGENERATE
+        ),
         message=f"statistical column {column!r}: {why}.",
     ) from None
 
@@ -177,7 +180,7 @@ def check_degenerate(spec: StatisticalSpec) -> None:
         refuse_degenerate(
             column_label(spec.column),
             f"year_bins: sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
-            reasons.plan.GENERATION_UNBOUNDED_COLUMN,
+            unbounded=True,
         )
     finding = degenerate_finding(spec)
     if finding is not None:

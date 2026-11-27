@@ -31,7 +31,6 @@ runner; the runner imports it through the re-export shim at its old path.
 
 from __future__ import annotations
 
-from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -415,10 +414,10 @@ class ParquetFileSource(_PolicyBound):
         return self._lazy().schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        with closing(self._lazy().open_batches(sample_rows)) as opened:
-            return head_frame_from_batches(
-                opened.batches, sample_rows, opened.schema, table=self.table
-            )
+        lazy = self._lazy()
+        return head_frame_from_batches(
+            lazy.iter_batches(sample_rows), sample_rows, lazy.schema, table=self.table
+        )
 
     def to_frame(self) -> pd.DataFrame:
         return table_to_pandas(self._lazy().to_table())
