@@ -52,6 +52,7 @@ from decoy_engine.providers_v2._faker_adapter import (
 )
 from decoy_engine.providers_v2._faker_adapter import (
     custom_provider_names,
+    faker_callback_reachable,
     register_faker_provider_v2,
 )
 from decoy_engine.providers_v2._faker_draw_contracts import (
@@ -80,6 +81,7 @@ __all__ = [
     "ProviderRegistry",
     "ProviderSpec",
     "custom_provider_names",
+    "faker_callback_reachable",
     "faker_draw_contract",
     "get_default_registry",
     "register_faker_provider_v2",

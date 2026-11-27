@@ -54,7 +54,11 @@ from decoy_engine.execution.native._provider_class import (
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
 from decoy_engine.execution.native._route_decline_codes import CodedDecline, RouteDeclineCode, coded
-from decoy_engine.providers_v2 import ProviderRegistry, custom_provider_names, get_default_registry
+from decoy_engine.providers_v2 import (
+    ProviderRegistry,
+    faker_callback_reachable,
+    get_default_registry,
+)
 
 # The frozen C1 recipe's faker providers, from the operator registry (edit the registry). An
 # unset allowlist admits no provider, so a registry edit cannot widen admission by accident.
@@ -97,16 +101,6 @@ def _column_values(config: dict[str, Any], table: str, key: str) -> dict[str, An
     return {}
 
 
-def _callback_can_run(caps: Any, provider_config: Mapping[str, Any] | None) -> bool:
-    """True when a registered Faker callback can draw this column: a Faker-backed binding always
-    calls it, and a Mimesis-backed one only when the configured locale falls back to Faker."""
-    if caps.backend_type == "faker":
-        return True
-    locale = (provider_config or {}).get("locale")
-    # An empty locale means the adapter default, as in `MimesisAdapter._mimesis_locale`.
-    return bool(locale) and isinstance(locale, str) and locale not in caps.supported_locales
-
-
 def _binding_matches_stock(
     provider: object,
     provider_config: Mapping[str, Any] | None,
@@ -114,27 +108,23 @@ def _binding_matches_stock(
     registry: ProviderRegistry | None,
 ) -> bool:
     """True when the live binding draws as the stock one does: the same variant, and for a pool
-    the same adapter class and no registered callback, since the C1 allowlist's string-output guarantee belongs to the stock
+    the same adapter class and no registered Faker callback that the live adapter can reach for
+    this column's locale, since the C1 allowlist's string-output guarantee belongs to the stock
     backends. A rebinding to an adapter that returns other types fails this check."""
     if variant != resolve_faker_variant(provider, provider_config):
         return False
     if variant.kind != "pool":
         return True
-    # A callback registered under the stock name replaces the string-returning method inside the
-    # stock adapter, so the adapter class alone does not prove the output type.
-    stock = get_default_registry()
-    if (
-        isinstance(provider, str)
-        and provider in custom_provider_names()
-        and stock.has(provider)
-        and _callback_can_run(stock.get_capabilities(provider), provider_config)
-    ):
+    live = registry if registry is not None else get_default_registry()
+    if not (isinstance(provider, str) and live.has(provider)):
+        return True
+    adapter = live.get_adapter(provider)
+    # A callback registered under the stock name replaces the string-returning method inside a
+    # Faker-backed adapter. The live adapter alone says whether this column's locale reaches it.
+    if faker_callback_reachable(provider, adapter, (provider_config or {}).get("locale")):
         return False
-    if registry is None:
-        return True
-    if not (isinstance(provider, str) and registry.has(provider) and stock.has(provider)):
-        return True
-    return type(registry.get_adapter(provider)) is type(stock.get_adapter(provider))
+    stock = get_default_registry()
+    return not stock.has(provider) or type(adapter) is type(stock.get_adapter(provider))
 
 
 def faker_provider_decline(

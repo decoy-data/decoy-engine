@@ -29,6 +29,7 @@ import faker as faker_module
 
 from decoy_engine import reasons
 from decoy_engine.providers_v2._adapter import (
+    BackendAdapter,
     CapabilityMatrix,
     ProviderSpec,
 )
@@ -280,3 +281,26 @@ def _unregister_faker_provider_v2(name: str) -> None:
 def custom_provider_names() -> frozenset[str]:
     """Snapshot of the V2 custom-provider names; the one public reader of that process-global table."""
     return frozenset(_V2_CUSTOM_PROVIDERS.keys())
+
+
+def faker_callback_reachable(provider: str, adapter: BackendAdapter, locale: object) -> bool:
+    """True when drawing `provider` through the live `adapter` for `locale` can run a callback
+    registered with `register_faker_provider_v2`.
+
+    The one answer admission and dispatch share. Only a `FakerAdapter` consults the callback
+    table, so the walk follows the adapter's own locale resolution (`serving_adapter`, which a
+    Mimesis adapter answers with its default locale and its Faker fallback) until it reaches
+    one or runs out. An empty or omitted `locale` is resolved by the adapter, not here. A
+    locale that is not a string cannot be resolved without drawing, so it counts as reachable."""
+    if provider not in _V2_CUSTOM_PROVIDERS:
+        return False
+    if locale is not None and not isinstance(locale, str):
+        return True
+    serving: Any = adapter
+    while not isinstance(serving, FakerAdapter):
+        resolve = getattr(serving, "serving_adapter", None)
+        following = resolve(locale) if resolve is not None else None
+        if following is None or following is serving:
+            return False
+        serving = following
+    return True

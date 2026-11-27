@@ -102,6 +102,19 @@ def lorem_as_int_pool() -> Any:
     return _DEFAULT.override("lorem_text", _IntPoolAdapter(), caps)
 
 
+class _CoversEnUs:
+    """A stand-in for a Mimesis binding: it draws en_US itself (its default) and sends any other
+    locale to its fallback, as `MimesisAdapter.serving_adapter` does."""
+
+    backend_type = "stub"
+
+    def __init__(self, fallback: Any) -> None:
+        self._fallback = fallback
+
+    def serving_adapter(self, locale: str | None) -> Any:
+        return self if (locale or "en_US") == "en_US" else self._fallback
+
+
 class _Routes(TestRelationshipRoutes):
     """The relationship fixture, with the source column replaceable."""
 
@@ -187,12 +200,22 @@ class TestLiveVariant:
     def test_a_callback_runs_only_where_the_binding_can_reach_faker(
         self, backend: str, locale: str | None, runs: bool
     ) -> None:
-        from decoy_engine.execution.native._real_type_admission import _callback_can_run
-
-        caps = _DEFAULT.get_capabilities("person_email").model_copy(
-            update={"backend_type": backend, "supported_locales": ("en_US",)}
+        from decoy_engine.providers_v2 import (
+            faker_callback_reachable,
+            register_faker_provider_v2,
         )
-        assert _callback_can_run(caps, {"locale": locale} if locale is not None else {}) is runs
+        from decoy_engine.providers_v2._faker_adapter import (
+            FakerAdapter,
+            _unregister_faker_provider_v2,
+        )
+
+        faker = FakerAdapter()
+        adapter = faker if backend == "faker" else _CoversEnUs(fallback=faker)
+        register_faker_provider_v2("person_email", lambda fake: 7)
+        try:
+            assert faker_callback_reachable("person_email", adapter, locale) is runs
+        finally:
+            _unregister_faker_provider_v2("person_email")
 
     def test_the_out_of_core_route_refuses_an_integer_pool_and_auto_reroutes(
         self, tmp_path
