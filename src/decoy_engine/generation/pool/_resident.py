@@ -17,6 +17,7 @@ from decoy_engine.config import generate_columns_of
 from decoy_engine.internal.faker_locale import (
     DEFAULT_GENERATE_LOCALE,
     effective_locale,
+    faker_keys,
     locale_entries,
 )
 
@@ -142,11 +143,10 @@ def run_faker_footprint(
         for table in config.get("tables") or []:
             for col in generate_columns_of(table):
                 if _opens_faker(col):
-                    entries = locale_entries(
-                        effective_locale(col.get("locale"), instance_default_locale)
-                    )
-                    found |= set(entries)
-                    instances += len(entries)
+                    locale = effective_locale(col.get("locale"), instance_default_locale)
+                    found |= set(locale_entries(locale))
+                    # Faker builds one instance per proxy key, even when two keys share a locale.
+                    instances += len(faker_keys(locale))
     except (AttributeError, TypeError, ValueError):
         return frozenset(), 0
     if not found:

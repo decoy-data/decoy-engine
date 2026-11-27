@@ -22,6 +22,7 @@ from decoy_engine.generation._budget_ledger import (
 from decoy_engine.generation._column_streams import PerRowFakerStream
 from decoy_engine.generation.pool import run_faker_footprint
 from decoy_engine.internal.faker_locale import effective_locale, locale_entries
+from decoy_engine.internal.faker_setup import make_faker
 from decoy_engine.plan.checks import _generate_columns
 from tests.parity import _f0_fixtures as fx
 from tests.parity._fr0_support import prepared_config
@@ -231,6 +232,16 @@ def test_a_per_row_stream_opens_the_locales_of_the_shared_rule(
 
 def _with(col: dict[str, Any]) -> dict[str, Any]:
     return fx.config([fx.table("t", 1, [col])])
+
+
+@pytest.mark.parametrize(
+    "locale", [["", "en_US"], ["en_US", ""], ["en", "en_US"], ["it", "it_IT"], "it", [""]], ids=repr
+)
+def test_the_instance_charge_counts_every_factory_faker_builds(locale: Any) -> None:
+    """Admission charges one instance per proxy key, plus the default Faker."""
+    col = {"name": "v", "type": "faker", "faker_type": "prefix", "locale": locale}
+    _, instances = run_faker_footprint(prepared_config(_with(col)), None)
+    assert instances == len(make_faker(locale).factories) + 1
 
 
 def test_the_locale_rule_normalizes_and_defaults() -> None:
