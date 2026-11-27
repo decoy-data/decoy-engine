@@ -84,7 +84,7 @@ TARGET_SHARED_DESTINATION = _d(
 STARTER_HEADER_SUSPECT = _d(
     "starter_header_suspect",
     "A scanned table looks like it has no header row; its column names may be data.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 COLUMN_DUPLICATE = _d(
     "column_duplicate",
@@ -307,7 +307,7 @@ DELIVERY_BEST_EFFORT_UNRELEASED = _d(
     "delivery_best_effort_unreleased",
     "Delivery mode best_effort is planned for 1.x; this release delivers strict only. "
     "Remove the delivery block or write mode: strict.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 
 _d = _catalog.config("ConfigError")
