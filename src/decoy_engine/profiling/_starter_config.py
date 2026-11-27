@@ -259,11 +259,11 @@ def detector_entry(
 ) -> dict[str, Any] | None:
     """The column entry the starter writes for a column `detector_id` flagged, or None.
 
-    None when the detector has no starter choice, when its strategy cannot read `shape`, or when
-    its choice needs the detected date format and `date_format` is not given: the descriptor holds
-    no format, so it never builds a `date_shift` the plan would refuse. A typed date `shape` needs
-    no format and gets none. The namespace follows the same registry rule as `starter_config`, so
-    a review that takes a detector's default writes what a scan would.
+    None when the detector has no starter choice, when its date-format choice cannot read `shape`,
+    or when its choice needs the detected date format and `date_format` is not given: the
+    descriptor holds no format, so it never builds a `date_shift` the plan would refuse. A typed
+    date `shape` needs no format and gets none. The namespace follows the same registry rule as
+    `starter_config`, so a review that takes a detector's default writes what a scan would.
     """
     choice = recommendations.starter_choice(detector_id)
     if choice is None:

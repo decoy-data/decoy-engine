@@ -38,6 +38,9 @@ ALLOWED_CALLERS: dict[str, dict[str, str]] = {
 
 
 SHAPE_PACKAGES = ("plan", "profile", "execution/_strategies", "declared_casting")
+# A caller outside those packages gets the same guard: the scan may call the classifier, never
+# decide a shape from an Arrow predicate itself.
+SHAPE_FILES = ("profiling/scan_set.py",)
 SHAPE_PREDICATE = re.compile(r"^is_(date|timestamp|decimal)")
 
 
@@ -83,17 +86,18 @@ def _call_sites(root: Path, name: str) -> set[str]:
 
 
 def _predicate_uses(root: Path) -> list[str]:
+    paths = [p for package in SHAPE_PACKAGES for p in sorted((root / package).rglob("*.py"))]
+    paths += [root / f for f in SHAPE_FILES if (root / f).exists()]
     found: list[str] = []
-    for package in SHAPE_PACKAGES:
-        for path in sorted((root / package).rglob("*.py")):
-            rel = path.relative_to(root).as_posix()
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, ast.Attribute) and SHAPE_PREDICATE.match(node.attr):
-                    found.append(f"{rel}:{node.lineno}")
-                elif isinstance(node, ast.ImportFrom):
-                    found += [
-                        f"{rel}:{node.lineno}" for a in node.names if SHAPE_PREDICATE.match(a.name)
-                    ]
+    for path in paths:
+        rel = path.relative_to(root).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Attribute) and SHAPE_PREDICATE.match(node.attr):
+                found.append(f"{rel}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                found += [
+                    f"{rel}:{node.lineno}" for a in node.names if SHAPE_PREDICATE.match(a.name)
+                ]
     return found
 
 
@@ -158,3 +162,10 @@ def test_the_sentry_catches_a_planted_predicate(tmp_path: Path) -> None:
     probe.parent.mkdir(parents=True)
     probe.write_text("import pyarrow as pa\nx = pa.types.is_date32(t)\n", encoding="utf-8")
     assert _predicate_uses(tmp_path) == ["plan/checks/_required_settings.py:2"]
+
+
+def test_the_sentry_catches_a_planted_predicate_in_the_scan(tmp_path: Path) -> None:
+    probe = tmp_path / "profiling" / "scan_set.py"
+    probe.parent.mkdir()
+    probe.write_text("import pyarrow as pa\nx = pa.types.is_date32(t)\n", encoding="utf-8")
+    assert _predicate_uses(tmp_path) == ["profiling/scan_set.py:2"]
