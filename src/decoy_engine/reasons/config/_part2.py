@@ -48,6 +48,7 @@ __all__ = [
     "POLICY_UNKNOWN_STRATEGY",
     "REMOTE_URI_INVALID",
     "SCAN_BASELINE_UNBOUND",
+    "STARTER_HEADER_SUSPECT",
     "TABLE_DUPLICATE",
     "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
@@ -78,6 +79,11 @@ TARGET_SHARED_DESTINATION = _d(
     "target_shared_destination",
     "Two or more targets write to one destination. Give each table its own target.",
     since="1.28.0",
+)
+STARTER_HEADER_SUSPECT = _d(
+    "starter_header_suspect",
+    "A scanned table looks like it has no header row; its column names may be data.",
+    since=UNRELEASED,
 )
 COLUMN_DUPLICATE = _d(
     "column_duplicate",
