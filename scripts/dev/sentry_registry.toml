@@ -296,6 +296,8 @@ id = "engine-exception-text-copies"
 baseline = "tests/sentry/baselines/engine-exception-text-copies.json"
 approved_growth = [
   { key = "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign", decision = "owner 2026-11-24 re-home of is_memory_failure after #792 moved it; same site, max 1" },
+  { key = "extra::_config_text/_read.py::_yaml_mark::getattr(exc.context_mark)::return", decision = "owner 2026-11-27 approved two moved keys (1:1 re-home of the old yaml_error_text keys, count unchanged), question F31-AUDIT--AE5-keys" },
+  { key = "extra::_config_text/_read.py::_yaml_mark::getattr(exc.problem_mark)::return", decision = "owner 2026-11-27 approved two moved keys (1:1 re-home of the old yaml_error_text keys, count unchanged), question F31-AUDIT--AE5-keys" },
 ]
 
 # Owner decisions, each `"<id or path>" = "owner YYYY-MM-DD <reason of 15+ chars>"`. Printed by
