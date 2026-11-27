@@ -48,7 +48,7 @@ LAYERS: tuple[str, ...] = (
     " : keyprovider : relationships : providers_v2 : reference_tables : quality : subset",
     "profile : profiling : detection : internal : progress : context : config : determinism"
     " : contracts : connectors : expressions : validators : sdk : run_result : signed_evidence",
-    "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess",
+    "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess : _config_text",
     "errors : reason_adapter : validation_result : release : reasons : instrumentation"
     " : checksums : _opaque : _lexeme : _error_base : _progress_events : _reference_date"
     " : _capacity : codesets : _execution_error : _field_names : _value_free : _arrow_types"

@@ -57,7 +57,7 @@ from decoy_engine.generation.statistical._cell_format import (
     format_numeric,
     is_integer_dtype,
 )
-from decoy_engine.generation.statistical._degenerate import check_degenerate
+from decoy_engine.generation.statistical._degenerate import check_degenerate, column_label
 from decoy_engine.generation.statistical._numeric_shape import (
     NumericShape,
     decode_numeric_shape,
@@ -440,7 +440,7 @@ def sample_column(
     null_rate = _null_rate(fmt)
 
     if spec.kind == "numeric":
-        shape = decode_numeric_shape(spec.column, spec.stats, spec.carrier)
+        shape = decode_numeric_shape(column_label(spec.column), spec.stats, spec.carrier)
         if shape is not None:
             return _sample_shape(spec, shape, n, rng, col_seed=col_seed, start=start)
         edges = [float(e) for e in spec.stats.get("bin_edges") or []]
