@@ -5,9 +5,8 @@ Public API (the contract CLI and platform code depend on):
     PipelineConfig    strict pipeline-config schema; validate once at the choke-point
                       (PipelineConfig.model_validate(yaml).model_dump()) then hand the
                       dict to compile_plan / profile_source (decoy_engine.config)
-    ExecutionContext  caller-provided runtime context (logger + telemetry)
+    ExecutionContext  caller-provided runtime context (logger)
     Logger            Protocol satisfied by stdlib loggers and Rich/DB-backed loggers
-    TelemetryClient   Protocol for optional telemetry sinks
     compile_plan      compile a validated config + Profile into a frozen Plan
                       (decoy_engine.plan)
     ExecutionAdapter / PandasExecutionAdapter /
@@ -60,7 +59,6 @@ from decoy_engine.context import (
     ExecutionContext,
     Logger,
     StructuredEvents,
-    TelemetryClient,
     emit_fidelity,
     emit_lineage,
     emit_quarantine,
@@ -104,7 +102,6 @@ from decoy_engine.execution import (
     CapacityVerdict,
     ExecutionAdapter,
     ExecutionError,
-    ExecutionEvent,
     ExecutionResult,
     JobEstimate,
     PandasExecutionAdapter,
@@ -128,16 +125,13 @@ from decoy_engine.execution.pipeline import detect_usable_cpus, route_summary
 from decoy_engine.fileaccess import open_protected_dir, protected_scratch_dir
 from decoy_engine.generation import generated_table_to_pandas
 from decoy_engine.generation.composite import (
-    BundlePool,
     CompositeAdapter,
-    CompositeAddress,
     CompositeCustom,
     CompositeError,
     CompositeGenerator,
     CompositePerson,
     CompositeProvider,
     composite_address,
-    composite_city_state_zip,
     composite_custom,
     composite_name_email,
     composite_person,
@@ -148,7 +142,6 @@ from decoy_engine.generation.pool import (
     GenerationError,
     PoolAdapter,
     PoolBuilder,
-    PoolCache,
     PoolCapacityError,
     PoolSampler,
     QualityWarning,
@@ -221,7 +214,6 @@ from decoy_engine.progress import (
     TerminalEvent,
     WarningEvent,
     event_to_dict,
-    event_to_legacy_dict,
 )
 from decoy_engine.providers import (
     atomic_swap_db_providers,
@@ -240,29 +232,6 @@ from decoy_engine.providers_v2 import (
     ProviderSpec,
     get_default_registry,
     register_faker_provider_v2,
-)
-
-# F9: these identifier families are no longer in decoy_engine.__all__ (use the
-# decoy_engine.identifiers sub-import). The bindings are kept here for
-# backward-compatible attribute access; see _F9_KEPT_BINDINGS below.
-from decoy_engine.providers_v2.identifiers import (
-    EinAdapter,
-    EinDomain,
-    EinValidator,
-    IdentifierError,
-    IdentifierFormatError,
-    MrnAdapter,
-    MrnDomain,
-    MrnValidator,
-    NdcAdapter,
-    NdcDomain,
-    NdcValidator,
-    NpiAdapter,
-    NpiDomain,
-    NpiValidator,
-    SsnAdapter,
-    SsnDomain,
-    SsnValidator,
 )
 from decoy_engine.reason_adapter import reason_from_exception, reasons_from_report
 from decoy_engine.reasons import ReasonContext, ReasonRecord
@@ -328,33 +297,6 @@ from decoy_engine.vault import VaultError, VaultWriter, load_vault, vault_writer
 from decoy_engine.verification.postmask._blocked import PostScanBlockedError
 from decoy_engine.verification.postmask._route_guard import PostScanRouteError
 
-# F9: names trimmed from __all__ but kept as module bindings so attribute access
-# (decoy_engine.EinValidator, ...) stays non-breaking; anchoring them here marks the
-# imports as intentional re-exports. Canonical home: decoy_engine.identifiers.
-_F9_KEPT_BINDINGS = (
-    BundlePool,
-    CompositeAddress,
-    PoolCache,
-    composite_city_state_zip,
-    EinAdapter,
-    EinDomain,
-    EinValidator,
-    IdentifierError,
-    IdentifierFormatError,
-    MrnAdapter,
-    MrnDomain,
-    MrnValidator,
-    NdcAdapter,
-    NdcDomain,
-    NdcValidator,
-    NpiAdapter,
-    NpiDomain,
-    NpiValidator,
-    SsnAdapter,
-    SsnDomain,
-    SsnValidator,
-)
-
 __all__ = [
     "CAP_DRY_RUN",
     "CAP_INTROSPECTION",
@@ -405,7 +347,6 @@ __all__ = [
     "ExecutionAdapter",
     "ExecutionContext",
     "ExecutionError",
-    "ExecutionEvent",
     "ExecutionResult",
     "FieldStats",
     "FileMeta",
@@ -487,7 +428,6 @@ __all__ = [
     "StructuredEvents",
     "StructuredEventsSink",
     "TableScan",
-    "TelemetryClient",
     "TerminalEvent",
     "TransientError",
     "UnmaskColumnReport",
@@ -531,7 +471,6 @@ __all__ = [
     "estimate_job",
     "estimate_job_capacity",
     "event_to_dict",
-    "event_to_legacy_dict",
     "generate_tables",
     "generated_table_to_pandas",
     "get_default_pool_cache",

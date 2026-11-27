@@ -364,7 +364,6 @@ class CODES:
     # node (a -> b, b -> a). Mask + non-generate kinds are inert (no
     # two-pass mechanism); FK_SELF_REF_INERT rejects those instead of
     # the engine silently ignoring the entry at run time.
-    FK_SELF_REFERENCE = reasons.config.FK_SELF_REFERENCE  # legacy: kept for back-compat (now a warning when child.column != parent.column; previously a hard error)
     FK_SELF_CYCLE = (
         reasons.config.FK_SELF_CYCLE  # validation, error (cycle within one node's column relationships)
     )

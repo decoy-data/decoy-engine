@@ -2,7 +2,7 @@
 Pluggable runtime context for engine execution.
 
 The engine accepts an ExecutionContext from its caller (CLI or platform)
-to receive a logger and telemetry client. This lets the CLI surface logs
+to receive a logger. This lets the CLI surface logs
 through Rich and the platform surface them through structured logging to
 a database -- without the engine knowing which.
 
@@ -226,13 +226,6 @@ def emit_throughput_sample(logger: Logger | None, rows_per_sec: float) -> None:
         pass
 
 
-@runtime_checkable
-class TelemetryClient(Protocol):
-    """Optional telemetry sink. Published for forward compatibility; unused today."""
-
-    def emit(self, event: str, properties: dict[str, Any] | None = None) -> None: ...
-
-
 class ExecutionContext:
     """Caller-provided runtime context for engine execution.
 
@@ -244,7 +237,6 @@ class ExecutionContext:
     def __init__(
         self,
         logger: Logger | None = None,
-        telemetry: TelemetryClient | None = None,
         resolve_connector: Callable[[int], str] | None = None,
         derive_key: Callable[[str], bytes] | None = None,
         pipeline_derive_key: Callable[[str], bytes] | None = None,
@@ -254,7 +246,6 @@ class ExecutionContext:
         instance_default_locale: str | None = None,
     ) -> None:
         self.logger = logger
-        self.telemetry = telemetry
         # Used by graph ops `source.db` / `target.db` to turn a platform
         # connector_id into a DSN string. Platform passes a closure over its
         # connector store; CLI leaves it None and users supply inline `dsn:`.
