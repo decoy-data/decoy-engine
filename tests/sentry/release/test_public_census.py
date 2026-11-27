@@ -8,6 +8,7 @@ must get the same tier in both.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 import textwrap
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 import decoy_engine
+import decoy_engine.sdk as sdk_module
 from decoy_engine.contracts import stability as st
 from tests.sentry.layout import section
 from tests.sentry.release import _census as census
@@ -54,13 +56,15 @@ def test_everything_sdk_defines_is_experimental(walk) -> None:
     """H2: derived from where the object is defined, so a new sdk name cannot dodge the tier."""
     exports, tiers, _ = walk
     sdk = [e for e in exports if e.module == "decoy_engine.sdk" and e.obj is not None]
-    defined = census.assigned_constants("decoy_engine.sdk")
+    tree = ast.parse(Path(sdk_module.__file__ or "").read_text(encoding="utf-8"))
+    defined = {
+        t.id
+        for n in tree.body
+        for t in (n.targets if isinstance(n, ast.Assign) else [getattr(n, "target", None)])
+        if isinstance(t, ast.Name) and isinstance(n, (ast.Assign, ast.AnnAssign))
+    }
     for e in sdk:
-        owns = (
-            e.name in defined
-            if census.is_constant(e.obj)
-            else e.obj.__module__ == "decoy_engine.sdk"
-        )
+        owns = e.name in defined if not callable(e.obj) else e.obj.__module__ == "decoy_engine.sdk"
         assert (tiers[(e.module, e.name)] == st.EXPERIMENTAL) == owns, e.name
     assert sum(1 for e in sdk if tiers[(e.module, e.name)] == st.EXPERIMENTAL) >= 15
 
@@ -224,3 +228,122 @@ def test_a_second_tier_for_one_object_is_refused(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(st, "TIER_EXCEPTIONS", rows)
     with pytest.raises(AssertionError, match="one object, two tiers"):
         census.classify(exports)
+
+
+SEAM_NAMES = (
+    "FROZEN",
+    "EXPERIMENTAL",
+    "INTERNAL",
+    "TIERS",
+    "EXPERIMENTAL_MARKER",
+    "is_experimental_export",
+    "tier_key",
+)
+
+
+def test_the_consumer_seam_names_import_from_the_stability_module() -> None:
+    """AT-10: the CLI census imports these names; a rename fails here before it fails a repin."""
+    namespace: dict[str, object] = {}
+    exec(  # noqa: S102 - a fixed import statement, no input
+        f"from decoy_engine.contracts.stability import {', '.join(SEAM_NAMES)}", namespace
+    )
+    assert set(SEAM_NAMES) <= namespace.keys()
+    assert namespace["TIERS"] == (st.FROZEN, st.EXPERIMENTAL, st.INTERNAL)
+    assert namespace["EXPERIMENTAL_MARKER"] == "Experimental:"
+
+
+def test_the_seam_predicate_decides_the_sdk_cases() -> None:
+    """AT-10: a constant, a class and a frozen `errors` object that `sdk` re-exports."""
+    assert st.is_experimental_export("SDK_VERSION", sdk_module.SDK_VERSION, census.seam_source)
+    assert st.is_experimental_export("FileSource", sdk_module.FileSource, census.seam_source)
+    assert not st.is_experimental_export("ConfigError", sdk_module.ConfigError, census.seam_source)
+    assert st.is_experimental_export(
+        "register_faker_provider", decoy_engine.register_faker_provider, census.seam_source
+    )
+
+
+def test_the_seam_matches_a_constant_by_name_and_identity() -> None:
+    """A constant `sdk` assigns is experimental under its own name and object only."""
+    assert not st.is_experimental_export("OTHER_NAME", sdk_module.SDK_VERSION, census.seam_source)
+    assert not st.is_experimental_export("SDK_VERSION", object(), census.seam_source)
+    assert not st.is_experimental_export(
+        "SEED_PROTOCOL_VERSION", decoy_engine.SEED_PROTOCOL_VERSION, census.seam_source
+    )
+
+
+def test_the_tier_key_is_the_object_or_the_name_and_the_object() -> None:
+    """A callable is keyed by identity; a constant also by name, as small ints are shared."""
+    assert st.tier_key("a", decoy_engine.run_pipeline) == st.tier_key(
+        "b", decoy_engine.run_pipeline
+    )
+    assert st.tier_key("A", 7) != st.tier_key("B", 7)
+    assert st.tier_key("A", 7) == st.tier_key("A", 7)
+    assert st.tier_key("FileSource", sdk_module.FileSource) == st.tier_key(
+        "FileSource", decoy_engine.FileSource
+    )
+
+
+@pytest.mark.parametrize("source", ["", "import os\n\ndef f(): ...\n"])
+def test_the_seam_fails_closed_when_the_sdk_source_names_no_constants(source: str) -> None:
+    """A constant is never called non-experimental because the source it was given was empty."""
+    with pytest.raises(ValueError, match="no module-level constants"):
+        st.is_experimental_export("SDK_VERSION", sdk_module.SDK_VERSION, lambda _module: source)
+
+
+def test_the_seam_does_no_file_io() -> None:
+    """The `contracts` package reads no file; the caller supplies a source reader."""
+    tree = ast.parse(Path(st.__file__).read_text(encoding="utf-8"))
+    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    assert not attrs & {"read_text", "read_bytes", "open", "find_spec"}
+    assert not names & {"open", "Path"}
+
+
+CENSUS_SOURCE = Path(census.__file__)
+_TABLE_NAMES = {"EXPERIMENTAL_MODULE", "EXPERIMENTAL_OBJECTS"}
+_DUNDERS = {"__module__", "__qualname__"}
+
+
+def second_rule_problems(source: str, filename: str) -> list[str]:
+    """E13: a census that names the experimental tables, reads an object's origin or calls
+    `id()` decides a tier itself instead of calling the seam. Matches AST nodes, not text."""
+    problems = []
+    for node in ast.walk(ast.parse(source)):
+        hit = (
+            (isinstance(node, ast.Name) and node.id in _TABLE_NAMES)
+            or (isinstance(node, ast.Attribute) and node.attr in _TABLE_NAMES | _DUNDERS)
+            or (isinstance(node, ast.alias) and node.name in _TABLE_NAMES)
+            or (isinstance(node, ast.Constant) and node.value in _TABLE_NAMES | _DUNDERS)
+            or (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "id"
+            )
+        )
+        if hit:
+            line = getattr(node, "lineno", 0)
+            problems.append(f"second engine tier rule in {filename}:{line}")
+    return problems
+
+
+def test_the_census_has_no_second_experimental_rule() -> None:
+    """E13: the engine census calls the seam; it does not read the tables or object origins."""
+    assert second_rule_problems(CENSUS_SOURCE.read_text(encoding="utf-8"), "_census.py") == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "x = st.EXPERIMENTAL_OBJECTS",
+        "x = EXPERIMENTAL_MODULE",
+        "from decoy_engine.contracts.stability import EXPERIMENTAL_OBJECTS as T",
+        "x = obj.__module__",
+        "x = getattr(obj, '__qualname__')",
+        "x = id(obj)",
+    ],
+)
+def test_the_second_rule_guard_sees_each_seeded_spelling(line: str) -> None:
+    """E13: a guard that cannot see a seeded violation proves nothing."""
+    assert second_rule_problems(f"\n{line}\n", "seed.py") == [
+        "second engine tier rule in seed.py:2"
+    ]
