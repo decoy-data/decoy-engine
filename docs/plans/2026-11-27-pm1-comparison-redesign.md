@@ -1,85 +1,23 @@
 # PM-1 comparison authority redesign
 
-Status: plan
+Status: revision 2 plan. Reviewed against branch `0a0547fec` and main `9812da814`.
+The revision 2 rows are implementation requirements. The earlier review IDs stay for traceability.
 
-Date: 2026-11-27. PR #784 (POSTMASK-FAIL-CLOSED), branch `fix/postmask-fail-closed`, head
-eaf160db3. Risk: R2 (value-leak check). This plan replaces the comparison parts of
-`2026-11-25-pm1-number-keys-r5.md` and `2026-11-27-pm1-canonical-cell-walk.md`. Those plans
-stay as history. The rest of the PR (PM-1a, the writer query) is kept as built.
+PR #784, branch `fix/postmask-fail-closed`. Risk R2 covers the value-leak check.
+This plan replaces the comparison parts of the November 25 number-key and November 27
+canonical-cell plans. Keep the PM-1a writer query.
 
-Rules consulted: `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md`,
-`bugfix.md`, `testing.md`, `cross-cutting-concerns.md`, `architecture.md`, `reuse-first.md`,
-`proportionality.md`, `catalogs/recurring-defects.md`.
+## Why comparison moves before conversion
 
-Why a redesign: Claude fixed rounds 1 to 3 and Codex fixed round 4. Each round found new V1
-cases in the same area (records, sets, units, spellings, number keys). The owner rule is to
-change the plan, not patch again, when one class of finding repeats.
+The branch compares frame cells, converted Arrow arrays and text keys. The canonical walk
+at `canonical_cell.py:130` can see any of the three. Standalone policy uses pandas equality
+at `policy_validation.py:133`. Conversion loses set order semantics, nested units and absent
+struct fields. The totals check at `runner.py:251` can miss offsetting row errors.
+Compare the source and output at the same position while both still have their original types.
 
-## The class of defect
-
-All open findings share one class: **two representations of one cell disagree, and the
-verdict reads the wrong one.** The code already names the symptom "comparison not preserved".
-
-Today a source cell and an output cell can be compared through four representations:
-
-1. the pandas cell in the caller's frame;
-2. the Arrow array that `_native` builds (`runner.py:186`), read back with `to_pandas`;
-3. the text key that `key_text` builds (`cell_text.py:87`) for a column Arrow refuses;
-4. the canonical form that `canonical_cell` builds (`canonical_cell.py:130`) from 1, 2 or 3.
-
-A fifth path still exists: `check_policy_validation` compares with
-`Series.astype(object).equals` (`policy_validation.py:133`).
-
-Each round found a cell where two of these disagree:
-
-- Arrow loses set equality (CX-2) and the unit in `list<timestamp>` (DN-D2-pre-a).
-- `Series.equals` and the canonical form disagree on nested dicts (CX-1).
-- A dtype shortcut skips the record check for a categorical (CX-3).
-- The text key must spell a value as its own `str()` export, so that a value which came back as
-  text still matches (K4). It must also give one key to equal values of other types and units.
-  These two jobs conflict. Every new kind (record, subarray, unit, complex NaN, namedtuple,
-  0-dim box) needs a spelling that serves both jobs, and each fix broke another case (PC2-1,
-  PC3D-1, PC4-1, PC4-2, O3 to O5, F1 to F4, B1, R3).
-- `_require_preserved` (`runner.py:251`) is a backstop that compares key counts with cell
-  counts. It compares column totals, so offsetting errors pass (PC1-2). Its diversity half
-  blocks whole tables on harmless spellings (F4).
-
-Why the design keeps producing it: identity is computed **after** conversion, on a derived
-array that must be hashable and spelled the same across rows. The positional comparison does
-not need that. Row i of the source is only compared with row i of the output. A key that must
-agree across all rows is a much harder problem than a predicate on one pair of cells.
-
-## Established solutions
-
-Searched (online and in the codebase): the datacompy source (`datacompy/pandas.py`
-`columns_equal`, the comparators in `datacompy/comparator/`), the reladiff driver guide
-(`normalize_number`, `normalize_timestamp`), the Python docs on numeric comparison and hashing
-(`stdtypes`, "Hashing of numeric types") and on `decimal` (`FloatOperation`), pandas
-`Series.equals` and `hash_array`, Arrow `compute.equal` and `Array.equals`, SQL
-`IS NOT DISTINCT FROM`. Found:
-
-- **datacompy** compares two columns row by row. It runs an ordered list of typed comparators
-  (boolean, numeric with tolerance, string, array-like). The first one that applies gives a
-  boolean Series. Two nulls match; a null and a value do not. A mixed-type column falls back to
-  "not equal". We follow the comparator pattern. We invert the fallback: for a leak check "not
-  equal" is the unsafe answer, so a cell that no rule handles refuses the column.
-- **reladiff (data-diff)** normalizes each column by its declared type to a common precision,
-  then hashes. It needs keys because it diffs across databases. We hold both rows in one
-  process, so we do not need keys.
-- **Python numeric tower.** `==` between `int`, `float`, `Decimal` and `Fraction` is exact, and
-  equal numbers hash equal across those types. Under a `FloatOperation` trap, equality stays
-  silent. This replaces the binary64 key, the bands and the bounded `int()` work of round 5 for
-  number-to-number identity.
-- **pandas `hash_array`** hashes a mixed object array by the `str()` of each value. That is the
-  text-key pattern of rounds 4 and 5, and it depends on spelling by design.
-- **Arrow** `compute.equal` needs one common type, and `Array.equals` is type-strict. Neither
-  compares a Python set or a NumPy record.
-- **SQL `IS NOT DISTINCT FROM`** is null-safe equality: two nulls are not distinct.
-
-Custom code that remains: the value forms for NumPy and pandas temporals and containers (kept
-from the reviewed canonical walk; no library gives attosecond-exact identity across units), and
-a closed list of export spellings for the text match (K4). No library predicts how a value was
-exported to text.
+Reuse typed comparators, null-safe equality and Python's exact numeric comparisons.
+Arrow kernels handle common typed arrays. The existing temporal conversion handles exact
+units. A closed list of spellings covers whole-cell text exports. Refuse unsupported cells.
 
 ## The design: one comparison authority
 
@@ -88,15 +26,15 @@ exported to text.
 New module `src/decoy_engine/internal/cell_identity.py`. It is the only place that decides
 whether a source cell and an output cell are the same value. Public names:
 
-- `identity_facts(src: pd.Series, out: pd.Series) -> IdentityFacts`. Positional. Returns
+- `identity_facts(src: Column, out: Column) -> IdentityFacts`. Here `Column` means a pandas Series or a typed Arrow array. Compare by position. Return
   `comparable` (both non-null), `identical` (same value) and `all_same` (every row is the same
   value or both null). `IdentityFacts.merge` folds batches.
-- `distinct_values(series: pd.Series) -> int`. The non-null distinct count on the value forms.
-- `is_null(value) -> bool`. The one null decision. The detectors read it too.
+- `distinct_values(column: Column) -> int`. The non-null distinct count on the value forms.
+- Both readers import `cell_atoms.is_null`. It unboxes and calls the shared scalar predicate.
 - `CellNotComparableError(DecoyError)`. Fixed text, no value, raised with no context
   (recurring class 3).
 
-Every reader calls these and nothing else:
+Each reader uses the authority through the following calls.
 
 | Reader | Calls |
 |---|---|
@@ -114,7 +52,7 @@ null pairing on its own.
 
 For row i, with source cell `a` and output cell `b`:
 
-1. **Unbox.** A 0-dim array is its payload. `np.ma.masked` is null. A box that holds itself
+1. **Unbox.** A 0-dim array is its payload. `np.ma.masked` is null. A cycle on the active walk path
    raises `CellNotComparableError`.
 2. **Refuse records.** A NumPy structured value (`np.void` with fields, a structured ndarray)
    anywhere in either cell, at any depth (sequence item, set member, map key or value), raises
@@ -124,7 +62,7 @@ For row i, with source cell `a` and output cell `b`:
 4. **Text against non-text.** If exactly one side is text (a `str`, or bytes, which decode as
    strict UTF-8 by the existing `cell_text` rule), the row is SAME when the text is one of the
    export spellings of the other cell (below). Else it is DIFFERENT.
-5. **Otherwise** the row is SAME when `value_form(a) == value_form(b)`. Text against text is
+5. **Otherwise** the row is SAME when the authority matches their value forms recursively (R2-V6 and R2-V7). Text against text is
    exact string equality, as on main.
 
 `value_form` is the value half of today's `canonical_cell`, with every spelling field removed:
@@ -135,16 +73,17 @@ For row i, with source cell `a` and output cell `b`:
 | int, `np.integer` | `int` |
 | float, `np.floating` up to 64 bits | `float` |
 | wider float (`g`) | `Fraction(as_integer_ratio())`, exact |
-| complex | `complex`; `clongdouble` as a pair of exact `Fraction` |
+| complex | exact real and imaginary components across widths (R2-V6) |
 | `Decimal` | itself (exact `==` and hash against int and float) |
-| `np.datetime64`, `pd.Timestamp`, `datetime` | `Instant(attoseconds, aware)`; Y and M units as `Months` |
+| `np.datetime64`, `pd.Timestamp`, `datetime` | `Instant(attoseconds, aware)`; Y and M instants at the first midnight of their period |
 | `np.timedelta64`, `pd.Timedelta`, `timedelta` | `Duration(attoseconds)`; Y and M as `Months`; generic unit as `int` |
 | NaT, NaN, None, `pd.NA` | `NULL` at any depth |
 | list, tuple, namedtuple, ndarray of any rank | `Seq(items)` |
-| dict, Arrow map (list of pairs from `to_pandas`) | `Map(frozenset of pairs)` |
+| dict, Arrow map identified by its Arrow type | unordered key/value pairs with unique keys (R2-V7) |
 | set, frozenset | `Members(frozenset)` |
 | bytes, bytearray, memoryview | `bytes` (top-level bytes are text, step 4) |
-| other hashable object (`UUID`, `date`, `Period`, `Interval`) | itself, compared by its own `==` |
+| `date` | naive midnight instant |
+| other hashable object (`UUID`, `Period`, `Interval`) | itself, compared by its own `==` |
 | other unhashable object | `CellNotComparableError` |
 
 The temporal rows keep the reviewed fixes: `asm8` reads, never `.value` (DN-P1-2); the reserved
@@ -157,10 +96,10 @@ Numbers compare by the Python numeric tower, so `int(2**53 + 1) != float(2**53)`
 ### Export spellings (K4)
 
 A non-text cell `x` matches the text `t` when any of these holds. `x` is the original cell, and
-`x'` is its Python-native form (`.item()` for a NumPy scalar, `.tolist()` for an ndarray).
+`x'` is its recursive Python-native form, including NumPy leaves inside Python containers. R2-V4 and R2-V5 define the renderings.
 
 1. `t` is `str(x)`, `repr(x)`, `str(x')` or `repr(x')`.
-2. `x` is a number (bool included) and `t` matches the numeral grammar (kept from round 5:
+2. `x` is a real number (bool included) and `t` matches the numeral grammar (kept from round 5:
    ASCII, optional `-`, digits, fraction, exponent, `inf`). Then `t` matches when its exact value
    equals the exact value of `x`. When `x` is a float of at most 64 bits, `t` also matches when
    `float(t) == x`, so any text that rounds to the float matches (`"0.1"`, `"1e+23"`,
@@ -178,51 +117,23 @@ nothing. An extra spelling can only add SAME rows. That fails closed (a block, n
 
 ### Fast path
 
-When both series share one NumPy dtype of kind `b`, `i`, `u` or `f` (or `M`/`m` with one unit),
-the verdicts come from a vectorized `==` with NaN as null. Such a column cannot hold a record
-or text. Every other dtype (object, categorical, Arrow, string, mixed) takes the per-row rule on
-`astype(object)` cells. A categorical is compared by its values, so its categories are never a
-shortcut (CX-3).
+Use the typed kernels in revision 1 item 3 with the masks and bounds in R2-V3 and R2-V6.
+For K4 use the eligibility and fallback rules in R2-V4. Resolve categorical codes to their values.
 
 ### What the frame path carries
 
-The frame path computes identity on the frames, before any Arrow conversion, for every paired
-column. It hands the result to `column_facts` in a new keyword
-`identity: Mapping[str, IdentityFacts | IdentityFailure]` (revision 1, item 12).
-`column_facts` uses that entry and does not compare that column's batches. On the batch path
-(`run_post_mask_tables`) the keyword is absent, and `column_facts` folds `identity_facts` over
-the aligned batches. Both routes call the one authority.
-
-Arrow conversion stays for the detectors, the DuckDB distinct counts and the value tally. A
-column that Arrow refuses is carried as its `detector_text` (same null mask), not as a key.
-There is no key, so `_require_preserved` and `ComparisonNotPreservedError` go.
+Before conversion, compute identity on aligned frame columns. Pass the typed result by name through
+`identity=`. Store each present side's distinct count and error in its existing `CellView`.
+Do this for every requested frame count, including unpaired columns. See R2-V1 and R2-V7.
+Batch readers pass typed arrays directly. Detectors can still use a pandas view.
+Use detector text only where the healthy frame column needs a text fallback.
+Remove the comparison keys, `_require_preserved` and `ComparisonNotPreservedError`.
 
 ### The sentry
 
-`tests/sentry/test_cell_identity_choke_point.py` parses the syntax tree of
-`src/decoy_engine/verification/postmask/`, `src/decoy_engine/internal/cell_text.py` and
-`src/decoy_engine/detection/`. It fails on:
-
-- a call to `.equals`, `.eq`, `.ne`, `.compare`, `np.array_equal` or `pd.testing.*`;
-- a `Compare` node with `==` or `!=` where an operand is a name bound from `_series`, a frame
-  column (`df[...]`, `.iloc`), `astype(object)` or `to_pandas`;
-- a call to `nunique` outside `cell_identity.py`;
-- anywhere in `src/`: an import of `canonical_cell`, or a definition named `identity_counts`,
-  `canonical_cells`, `_compared`, `_frozen` or `key_text`.
-
-The allowlist is a ratchet (it may only shrink) with one entry:
-`verification/canary/_canonical.py`, the Arrow-side canary walk that predates this PR
-(DN-F-V2-3). Its follow-up row moves the canary onto `cell_identity`.
-
-Seeded proof (cross-cutting rule): the sentry test carries one seeded source string per form
-above and asserts each one is flagged.
-
-Behavioral guard: `test_identity_routes.py` runs every corpus pair through four public routes
-(`run_post_mask`, `run_post_mask_tables` over the same tables staged natively,
-`check_residual_pii` and `check_policy_validation`). It asserts that each route's comparable,
-identical and `bytes_identical` equal `identity_facts` on the pair. The one mutation that must
-turn it red: replace the `identity_facts` call in `residual_pii._frame_column_facts` with
-`(src == out).sum()`.
+Use the scoped AST guard in revision 1 item 7 and the seeded cases in R2-D2.
+Use the public route matrix in R2-D3. Compare each route's observable findings to the expected
+facts. Mutate the residual reader to use `(src == out).sum()`. Its parity case must fail.
 
 ## Guarantee and non-goals
 
@@ -235,8 +146,8 @@ Guarantee, on every post-mask route:
 - `bytes_identical`, `comparable` and `identical` come from one verdict vector, so they cannot
   disagree.
 - Identity never reads an Arrow conversion of a frame, a text key, or a column total.
-- Comparison raises only `CellNotComparableError` (recorded by class name) or an error that
-  passes through. No error text carries a value.
+- Refusal and decode errors have fixed text and empty exception context. Propagate coded
+  pass-through errors. Record other failures by class alone.
 - No result depends on `sys.set_int_max_str_digits` or on the decimal context.
 
 Non-goals (recorded as follow-ups, not blockers):
@@ -263,6 +174,7 @@ Non-goals (recorded as follow-ups, not blockers):
    value forms read units exactly.
 3. A record column gives a column `error` finding.
 4. A set column compares as sets.
+5. For an unchanged hash column, the constant exception requires two successful counts of at most one. R6 pins a constant source exported in two forms.
 
 ## Failure modes
 
@@ -275,7 +187,7 @@ Non-goals (recorded as follow-ups, not blockers):
 | A new cell kind | either | Hashable: its own `==`. Unhashable: refused. A-K1 goes red on a new typecode |
 | A reader compares on its own | either | Sentry plus the route parity test |
 | The fast path disagrees with the per-row rule | either | Property test P3 per fast dtype |
-| Spelling work on a large column | slow | Only rows with text on one side build spellings; at most 10 strings per row |
+| Spelling work on a large column | slow | Build candidates lazily for eligible mixed pairs. See R2-D3 for the timed gate |
 | A cycle or the masked constant | hang | Step 1 guard; test PC1-1 with a 5 s timeout |
 
 ## What to keep and what to delete
@@ -289,11 +201,8 @@ tests (`test_value_free_check_errors.py`, `test_gate_fail_closed.py`,
 `test_writer_ownership_findings.py`, `test_postmask_writer_ownership.py`, the detector cases in
 `test_residual_pii_source_compare.py`, `test_order_free_facts.py`).
 
-Move: the value half of `canonical_cell.py` (the forms, `unboxed`, `is_null`, the temporal
-conversions and their fixes) goes into `cell_identity.py`. `temporal_text` and the numeral
-grammar (`_NUMERAL`, `_reduced`, the exponent bound) stay in `cell_text.py`, and
-`cell_identity` imports the grammar (one direction only). Rule: `cell_identity` holds no
-spelling except the K4 list, and `cell_text` holds no identity.
+Move the shared temporal conversion and numeral primitives to `cell_atoms.py` (R2-D1).
+Keep detector formatting in `cell_text.py`. Only `cell_identity.py` owns pair semantics and dispatch for distinct counts.
 
 Delete: `canonical_cell.py`; every `compare=False` spelling field; `Record` and `Blob`;
 `contains_record` and `contains_members`; `key_text` and the number-key code (`_binary64_key`,
@@ -310,8 +219,8 @@ expectations given there.
 ## Acceptance tests (written first, slice S1)
 
 Files: `tests/unit/internal/test_cell_identity.py` (the pair table) and
-`tests/unit/detection_verification/postscan/test_identity_routes.py` (route parity and runs).
-Each pair row runs through `identity_facts` and through all four routes. Synthetic values only.
+`tests/unit/detection_verification/postscan/identity/test_identity_routes.py` (route parity and runs).
+Each pair runs through the authority. Run each public route that preserves the fixture type (R2-D3). Synthetic values only.
 Rows marked "now green" pass on eaf160db3 and must stay green.
 
 ### Open at eaf160db3 (Codex `codex-pm1-r1.out`, Dennis delta 2)
@@ -410,33 +319,31 @@ Rows marked "now green" pass on eaf160db3 and must stay green.
 | `residual_pii` compares with `==` | route parity |
 | the frame path reads identity from the Arrow table | CX-2, DN-D2-pre-a |
 
-## Slices
-
-Replaced by "Slices (revision 1)" in the revision section below.
+The implementation schedule is in revision 1 item 9.
 
 ## Placement and sizes
 
 | File | Directory | CODEMAP line | Beside | Size after |
 |---|---|---|---|---|
 | `cell_identity.py` (new) | `src/decoy_engine/internal/` | the `internal/canonical_cell.py` row, renamed | `fk_tokens.py`, `cell_text.py` | about 560 |
-| `cell_atoms.py` (new, revision 1 item 4) | `src/decoy_engine/internal/` | a new `internal/` row: the numeral grammar and the cell null rule | `pandas_missing.py` | about 120 |
+| `cell_atoms.py` (new, revision 1 item 4) | `src/decoy_engine/internal/` | a new `internal/` row: the shared temporal forms, unboxing and number primitives | `pandas_missing.py` | about 250 |
 | `cell_text.py` | same | existing | | about 240 (from 383) |
 | `_column_facts.py` | `verification/postmask/` | existing | | about 470 (from 534) |
 | `runner.py` | same | existing | | about 450 (from 517) |
 | `residual_pii.py`, `policy_validation.py` | same | existing | | under 600 each |
-| `test_cell_identity.py` (new) | `tests/unit/internal/` | tests beside the module | | about 500 |
-| `test_identity_routes.py` (new) | `tests/unit/detection_verification/postscan/` | existing test directory | | about 300 |
-| `test_cell_identity_choke_point.py` (new) | `tests/sentry/` | sentry directory | `test_cell_text_choke_point.py` | about 150 |
+| `test_cell_identity.py` (new) | `tests/unit/internal/` | tests beside the module | | about 420 |
+| `test_cell_identity_exports.py` (new) | `tests/unit/internal/` | behavior of the same internal module | K4 and property rows | about 410 |
+| `test_identity_routes.py` (new) | `tests/unit/detection_verification/postscan/identity/` | new test package with empty `__init__.py` | route and timing rows | about 420 |
+| `test_cell_identity_choke_point.py` (new) | `tests/sentry/post_scan/` | post-scan guards | `test_post_scan_choke_points.py` | about 150 |
 
-Every module stays at or under the repo GOAL of 600 lines (`tests/sentry/test_module_size.py`),
-so also under the 800 cap. `internal/` gains one module and loses one, so its fan-out does not
-change. If `cell_identity.py` passes 600, the temporal forms move to
-`internal/_cell_temporal.py` in the same slice (a reason to change of their own).
+The size goal is 600 lines per module. Count setup and fixture lines in each estimate.
+The two new internal modules replace one. The package grows from 14 Python files to 15.
+Split test work by the concerns in the table. Put route tests under the named identity package.
 
 ## Compatibility
 
 - `post-scan-integrity/v3` keeps its shape. Its semantics change before GA, as listed in
-  "Behavior changes against main". Add these lines to the PM-1a entry in
+  "Behavior changes against main". Replace superseded claims in the PM-1a entry in
   `docs/compatibility-contract.md` and to `changelog.d/postmask-fail-closed.md`.
 - The signatures of `run_post_mask` and `run_post_mask_tables` do not change. `column_facts`
   (internal) gains `identity=`.
@@ -448,10 +355,7 @@ change. If `cell_identity.py` passes 600, the temporal forms move to
 
 ## Frozen contracts
 
-`post-scan-integrity/v3` is the only frozen surface near this change. Its fields and shape do
-not change; its identical counts and `bytes_identical` change meaning as listed in "Behavior
-changes against main", recorded in the compat entry. `ColumnFacts` fields are unchanged.
-`decoy-run-result/v1` is untouched. No cell value reaches a report, log or error.
+See R2-L2 for each frozen owning path, its compatibility decision and its gate.
 
 ## Reuse inventory
 
@@ -511,12 +415,8 @@ N/A: no report or `ColumnFacts` field is added or removed. `CellView` loses `det
 
 ## Pre-mortem
 
-If a review finds a new case, the likely cause is one of three. A kind with no `value_form` row:
-A-K1 enumerates every NumPy typecode and nesting, so it shows as a red row, and an unhashable
-kind is refused, never passed. A missing export spelling: the list is pinned, and a spelling
-outside it is a non-goal, not a new round. A reader that compares on its own: the sentry and the
-route parity test fail. A finding outside the guarantee becomes a follow-up row. A fourth
-round of findings inside the guarantee goes to the owner, not to another fix round.
+Use A-K1 to detect a missing kind, the K4 rows to detect a missing spelling and route parity
+to detect a second comparator. Escalate another round of findings inside the guarantee to the owner.
 
 ## Class table
 
@@ -559,8 +459,7 @@ to DIFFERENT (their column then reads `info` where A reads `fail`):
 ## Revision 1, Dennis plan review
 
 Dennis reviewed 4d78ab441: GO-WITH-FIXES (2 V1, 6 DESIGN, 4 LOW). He agrees the plan removes the
-root cause. Each item is answered below by its number. Where this section differs from the body
-above, this section holds.
+root cause. Each item is answered below by its number. Revision 2 incorporates the later Codex corrections.
 
 ### 1 (V1). `datetime.date` splits from the same day as a NumPy or pandas value
 
@@ -581,7 +480,7 @@ fails closed. New rows:
 Fix: the null rule is "`x != x` is true", applied to scalars only (an array-like is a container),
 as `pandas_missing.is_null_cell` does today. Before that test, a `Decimal` sNaN is caught with
 `is_snan()`, since comparing it signals `InvalidOperation`. For a wider float (`g`) and
-`clongdouble`, `np.isfinite` runs before `Fraction`: NaN is null, and an infinity maps to
+`clongdouble`, test each component before forming a ratio (R2-V6). NaN is null. Each infinite component maps to
 `float("inf")` with its sign, so it equals a float infinity. New rows:
 
 | Id | Case | Expected |
@@ -595,17 +494,9 @@ as `pandas_missing.is_null_cell` does today. Before that test, a `Decimal` sNaN 
 
 ### 3. Vectorized fast paths and throughput
 
-Fix: the fast path widens. Per-row work is only for cells no vectorized rule decides.
-
-- Arrow (batch path): two arrays of one primitive or string type use `pyarrow.compute.equal`
-  with an explicit null mask (`is_null` on both). Only `cell_identity.py` may call it.
-- pandas masked dtypes (`Int64`, `Float64`, `boolean`) and `string` dtypes: compare on the
-  values with the mask. `pd.NA` is null.
-- `M` and `m` of different units: cast both to the finer unit, then compare. A cast that
-  overflows falls back to the per-row rule for the column.
-- K4: when one side is a text column, a vectorized `astype(str)` match of the other side runs
-  first. Rows it matches are SAME. Only unmatched rows with a text cell that fits the numeral
-  grammar or a temporal shape go to the per-row rule.
+Compare native NumPy, pandas masked, string and Arrow columns in the authority.
+Use the same two null masks for counts and equality (R2-V3). Prove cross-unit casts fit (R2-V6).
+Use the exact scalar fallback for unresolved pairs. Apply R2-V4 before any K4 shortcut.
 
 New throughput rows, one per kind, 1M rows each, run on the Mac node (never on the devbox). Each
 must exceed the 20k rows/s floor (owner enterprise-readiness floor):
@@ -623,22 +514,13 @@ must exceed the 20k rows/s floor (owner enterprise-readiness floor):
 
 ### 4. Import cycle
 
-Fix: the numeral grammar (`_NUMERAL`, `_reduced`, the exponent bound) and the cell null rule
-(unbox, masked constant, then `pandas_missing.is_null_cell`) move to one new leaf module,
-`internal/cell_atoms.py`. It imports only `internal/pandas_missing.py`, NumPy, pandas and the
-standard library. Import order inside `internal`: `cell_identity` may import `cell_text` and
-`cell_atoms`; `cell_text` may import `cell_atoms`; `cell_atoms` imports neither.
-
-New import-linter contract in `.importlinter` (type `layers`, container
-`decoy_engine.internal`): `cell_identity : cell_text : cell_atoms : pandas_missing`. Mutation:
-import `cell_identity` from `cell_text`; `test_import_layers.py` goes red.
+Share the numeral grammar and temporal converter below both readers. R2-D1 specifies the layer contract and mutation.
 
 ### 5. One null rule for the masker and the verifier
 
-Fix: extend `internal/pandas_missing.is_null_cell` with the sNaN guard (item 2). The masking
-kernels, `derived`, `_formula` and the verifier all read it. `cell_atoms.is_null` adds only the
-unboxing and the masked constant, then calls it. `transforms/windowed_date._is_null_cell` is a
-third copy; it moves onto `is_null_cell` in a follow-up row, not in this PR. Row:
+Extend `pandas_missing.is_null_cell` for masked constants and Decimal sNaN. Unbox through
+`cell_atoms` before testing a boxed cell. Keep the existing masker on the shared scalar predicate.
+Track the older windowed-date copy in R2-L3.
 
 | Id | Case | Expected |
 |---|---|---|
@@ -646,17 +528,11 @@ third copy; it moves onto `is_null_cell` in a follow-up row, not in this PR. Row
 
 ### 6. Distinct counts
 
-Fix: every distinct count in the post-mask package goes through `distinct_values`, with one
-exception that is proven by parity. `policy_validation` (`nunique` at policy_validation.py:106
-and :107) calls `distinct_values`. The DuckDB `column_distinct` (_column_facts.py:395) stays for
-native Arrow columns on the batch path, because it counts in bounded memory. It is allowed only
-for primitive, string and same-unit temporal types; any other type (list, struct, map, binary,
-mixed units) goes to `distinct_values` over batches, or records `distinct_error` when the column
-is too large for memory. Row:
+Use the original frame counts in R2-V1. For batch counts use the closed allowlist and fallback in R2-V2.
 
 | Id | Case | Expected |
 |---|---|---|
-| DN-R1-6 | per DuckDB-allowed type (int, float with NaN, string, `timestamp[us]`, bool, nulls) | `column_distinct` equals `distinct_values` on the same column |
+| DN-R1-6 | each DuckDB type listed in R2-V2, with nulls | `column_distinct` equals `distinct_values` on the same column |
 | DN-R1-6b | a list column on the batch path | counted by `distinct_values`, never DuckDB |
 
 ### 7. Sentry scope and calls
@@ -672,7 +548,7 @@ Fix: the sentry scans all of `src/decoy_engine/verification/`, the post-scan mod
 - `==` and `!=` where an operand is a cell name: a `_series` result, `df[...]`, `.iloc`,
   `astype(object)`, `to_pandas`, or a loop or comprehension variable over any of those
   (`for a, b in zip(src, out): a == b`);
-- the definitions and the import listed in the body.
+- imports of the retired canonical module and local comparator definitions in the comparison paths (R2-D2).
 
 Each form has a seeded source string that the sentry test asserts is flagged. The canary entry
 stays the only allowlist row. Mutation: drop the loop-variable rule; its seeded case goes red.
@@ -693,25 +569,24 @@ fails closed). Rows:
 
 ### 9. Red-first rows and slice sizes
 
-Fix: every acceptance row lands in S1 as `pytest.mark.xfail(strict=True)`. A strict xfail that
-passes fails the run, so no row can go green unseen. Each slice removes the marker from the rows
-it turns green, and its review checks that the removed markers are exactly the rows of that
-slice. The test files are larger than one 400-line slice, so S1 is split.
+S1 records each existing route result on the test node. Keep passing rows active. Mark only
+observed failing parameters with strict xfail and the specific expected failure. Exercise new
+API cases through a function-local import. Scope any expected missing-module failure to that
+module. Once the API exists, remove that marker and check the expected result.
 
-### Slices (revision 1)
-
-| Slice | Content | Size |
+| Slice | Deliverable and marker removal | Budget |
 |---|---|---|
-| S1a | `test_cell_identity.py`: the pair table for value forms, nulls, temporals, records (all rows strict xfail). | about 390 test lines |
-| S1b | `test_cell_identity.py`: K4 and number rows, property tests P1 to P3, edge rows E-1 to E-14 (strict xfail). | about 380 test lines |
-| S1c | `test_identity_routes.py`: route parity, run rows, distinct parity, throughput rows (strict xfail; throughput marked `slow`). | about 360 test lines |
-| S2 | `internal/cell_atoms.py` (grammar and null rule moved), the `is_null_cell` sNaN guard, the import-linter contract, `internal/cell_identity.py` value forms with record refusal and `CellNotComparableError`. Removes the xfail on the form, null and record rows. | about 390 changed |
-| S3 | Row verdicts, all fast paths, K4 with its vectorized first pass, `identity_facts`, `IdentityFacts.merge`, `IdentityFailure`. Removes the xfail on the K4, number, property and edge rows. | about 360 changed |
-| S4 | Wiring as in the body, plus `policy_validation` and DuckDB distinct counts on `distinct_values` (item 6). Removes the xfail on the route, run and distinct rows. | about 390 changed |
-| S5 | Deletions as in the body, the widened sentry (item 7) with its seeded cases, CODEMAP, changelog, compat entry. Throughput rows run on the Mac node. Mutation table on the final head. | about 350 changed, plus about 1100 deleted test lines |
+| S1a | Value forms, nulls and record cases in `test_cell_identity.py` | 390 lines |
+| S1b | Export and property cases in `test_cell_identity_exports.py` | 380 lines |
+| S1c | Route, distinct and slow Mac timing cases in the identity test package | 360 lines |
+| S2 | Shared atoms, missing predicate, layers, forms and refusal. Move both temporal consumers together. Activate their rows | 390 lines |
+| S3 | Identity, merge, kernels and exports. Activate pair and property rows | split into increments under 400 changed lines |
+| S4 | Frame facts, typed batches, projections and public readers. Activate route and count rows | split by boundary under 400 changed lines |
+| S5a | Replace the retired production paths. Land the guard, CODEMAP and compatibility edits | increments under 400 changed lines |
+| S5b | Delete retired key tests after their run-level replacements pass | three deletion batches of at most 400 lines |
+| S5c | Remove remaining throughput xfails. Run the full timing matrix on the Mac. Record final-head mutations and gates | test-node evidence |
 
-S2 to S3 have no production caller until S4 (proportionality exception; S4 lands before the
-row closes).
+Count additions and deletions in each slice. S2 and S3 gain their production callers in S4.
 
 ### 10. Missing id rows
 
@@ -750,3 +625,229 @@ Fix: `IdentityFailure` is a frozen dataclass with one field, `error: str` (the c
 `identity=` keyword of `column_facts` takes `IdentityFacts | IdentityFailure`, so a bare string
 cannot be mistaken for a count. `column_facts` sets `identity_error` from `failure.error`.
 Mypy checks the union at each caller.
+
+## Revision 2, Codex plan fixes
+
+The review used branch `0a0547fec`. The main comparison is `9812da814`.
+The rows below specify gates for implementation on the test nodes.
+
+### V1 findings
+
+**R2-V1. Count original frame cells.** In `runner.py:231`, Arrow can fill a missing struct
+field with null. An unchanged diverse source then looks constant to `policy_validation.py:242`.
+Before conversion, call `cells_distinct_or_error` once per selected column on each present side.
+Save the result in that side's `CellView`, even for a column that converts successfully.
+Both `column_facts` and `distinct_counts` read it through `_distinct_or_error` at
+`_column_facts.py:384`. Preserve identity separately. A failed source count sets
+`source_distinct_failed`. A failed output count sets the count error without setting that flag.
+Grade using the existing error path. A failed count cannot establish a constant source.
+In the shared policy grader `_decide`, apply the constant exception only when both counts
+are at most one. R6 has one source instant and two output forms. Its four matching rows must block.
+
+| Test | Input and boundary | Required result |
+|---|---|---|
+| R2-V1a | Call `run_post_mask` on unchanged hash rows `[{"k": None}, {}]` | Source and output distinct counts are 2. Both rows match. Policy gives a blocking fail. |
+| R2-V1b | Inject an uncoded count failure on each side separately with a healthy neighbor | Preserve the other count and identity. Record the class alone. Only source failure sets the source flag. Still grade the neighbor. |
+| R2-V1c | Run R6 and a control with the same single instant on both sides | R6 counts 1 and 2, matches 4 and fails. The control counts 1 and 1 and gets constant-source info. |
+
+**R2-V2. Count batches without losing precision.** Keep one dispatch for post-mask counts.
+The DuckDB path at `profiling/_scan_integrity.py:552` accepts bool, signed and unsigned integers,
+float32/64 and UTF-8 strings after parity checks. Include ordinary and large UTF-8 in those checks.
+Use exact counting for all temporal types. Read timestamp and duration ticks in their declared
+unit, including timezone metadata. Avoid a Python datetime conversion that truncates nanoseconds.
+For other types, feed exact distinct forms into one state for the entire column and side.
+Use the caller's memory limit. Refuse the count with a count error before exceeding its budget.
+Discard partial counts. Keep stream length verification and coded-error propagation.
+
+| Test | Input and boundary | Required result |
+|---|---|---|
+| R2-V2a | Arrow `timestamp[ns, UTC]` and `duration[ns]`, ticks 1 and 2, unchanged hash | Exact count 2 on each side for each type. Policy fails. Neither column enters DuckDB. |
+| R2-V2b | List rows `[1], [2], [1]` at batch sizes 1, 2 and 3 | Count 2 each time. A forced budget failure gives unknown diversity. |
+| R2-V2c | Each allowed type with duplicates, null and boundary values. Include NaN for floats | DuckDB equals the authority's exact count. A new type defaults to exact counting. |
+
+**R2-V3. Share missing-value semantics.** In `pandas_missing.py:8`, recognize
+`np.ma.masked` by identity and Decimal signaling NaN before scalar comparison.
+Keep containers out of scalar self-comparison. Reuse this predicate after unboxing.
+For each side of an Arrow floating pair, combine physical nulls with valid NaNs.
+Use the validity mask plus NaN in valid payloads for pandas masked floating arrays too.
+Apply equality only to rows valid on both sides. Count those rows as comparable.
+Count equal comparable rows as identical. Both-missing rows also preserve `all_same`.
+
+| Test | Input and boundary | Required result |
+|---|---|---|
+| R2-V3a | Compare valid NaN, physical null, 1 and 2 with themselves and with the two missing forms swapped. Use Arrow and pandas FloatingArray with explicit masks | Comparable 2, identical 2, all same, distinct 2. Replace one missing output with 3 and all same becomes false. |
+| R2-V3b | Send masked constant and Decimal sNaN through the masking kernel and the authority | Both treat each cell as missing. No trap fires. |
+
+**R2-V4. A shortcut proves only a positive match.** Resolve categorical values first.
+Validate both cells for cycles and records before the null and export rules.
+A primitive dtype can prove the record check for a whole array. Decode a byte operand through
+the existing strict UTF-8 reader. Compare two text operands literally after decoding.
+For exactly one text operand, apply the selected A or B kind rule. A typed shortcut may accept
+a match only if its rendering is one of the specified stable spellings. Every eligible miss
+tries the entire scalar list for that kind. Recurse through Python containers when building
+the native export form. Preserve container order and representation where the spelling needs it.
+Skip a JSON candidate if that export cannot represent the value, then try the other candidates.
+
+| Test | Compare shortcut enabled and forced scalar in both directions | Required result |
+|---|---|---|
+| R2-V4a | Original and native str and repr, Decimal repr, PC1-3, default and sorted JSON of a dict with reversed keys | Each listed spelling matches under A. Under B the numeric matches remain. The container matches flip. |
+| R2-V4b | Decimal repr as UTF-8 bytes, invalid UTF-8, numeric exponent, pandas temporal string, ISO and NumPy temporal strings | Match each listed valid spelling under A and B. Invalid bytes give the fixed column error. |
+| R2-V4c | Compact JSON `"[1,2]"` vs list, a null vs its printed name, record vs its printed value | DIFFERENT, ONE_NULL, column error. Every shortcut result equals the scalar result. |
+
+**R2-V5. Make export spellings independent of interpreter settings.** Use the digit routine
+at `cell_text.py:236` for Python integers of any size. It reads the digits from an exact
+Decimal tuple. Keep the sign. Build Decimal str and repr from sign, digits and exponent.
+Accept both exponent letter cases that the listed exporters produce. Preserve scale and repr
+quoting. Use the same numeric leaf renderers inside original, native and JSON spellings.
+For nested Decimal values, match the whole rendering under each fixed capitals choice.
+For JSON, preserve Python's quoting, separators, order and supported key conversions.
+A nested integer must still be an unquoted JSON number. Use the stable tokens before rendering
+a container, including arrays and mapping keys. Never pass a limit-sensitive value or its
+container to bulk string conversion, ordinary int formatting or the default JSON encoder.
+Keep the exact parser bounded. Use the existing ASCII grammar with `fullmatch`.
+Do not change the process digit limit or the caller's Decimal context to make a match.
+
+| Test | Fixed text across settings | Required result |
+|---|---|---|
+| R2-V5a | Compare `10**700` to `"1" + "0"*700`, and the negative case. Under A also embed each as a list element and dict value in fixed JSON | SAME at integer limits 640, 4300 and 0. A one-digit change differs. Test both directions and both dispatch paths. |
+| R2-V5b | Use literal outputs `"[Decimal('1E+8')]"` and `"[Decimal('1e+8')]"` against the same list. Also test top-level Decimal repr | Same answers at capitals 0 and 1, including the R4 trapping context. Both list spellings match under A and differ under B. Decimal repr matches under both. |
+| R2-V5c | Combine the two settings matrices. Compare a dict with a huge int and Decimal to its fixed default JSON export under A | SAME in all six settings. No exception, rounded value or setting change. |
+
+**R2-V6. Use exact temporal and complex forms.** Keep the first-of-month converter at
+`canonical_cell.py:198`. A calendar instant starts at midnight on day one.
+A calendar duration has a month count. For fixed units, compare tick multipliers using
+Python integers. Before a vector cast, check the non-null extrema of both arrays in the
+target unit. Exclude the NaT sentinel and check exact representability. Use the exact
+scalar path when bounds or units preclude a safe cast.
+
+Compare every complex width as two real components. A NaN in either component makes the
+cell null. Keep each finite component's exact ratio and each infinity's sign and position.
+Compare real numeric operands as having imaginary part zero. Distinct forms must hash equal
+for equal numeric values across widths. Apply the aware/naive rule at every instant leaf.
+Keep UTC ticks and the original local wall time for pair comparison. Keep the awareness tag
+and UTC ticks for distinct counting. Mixed-awareness matching can be non-transitive.
+Use positional recursion for sequences. For unordered collections require a one-to-one pairing
+of recursively matching members or key/value pairs. Use a complete matching when ambiguous.
+
+| Test | Pairs in both directions | Required result |
+|---|---|---|
+| R2-V6a | January 2020 in Y and M instant units vs January 1 midnight. Compare one month duration to 31 days | Instants SAME. Durations DIFFERENT. |
+| R2-V6b | Year 2500 in microseconds vs its wrapped nanosecond cast. Also compare the original with a representable coarser equivalent | DIFFERENT for the wrapped value. SAME for the equivalent. Test the NaT boundary and the last safe tick. |
+| R2-V6c | Python complex vs clongdouble at (1.5, 2), (+inf, 2), (1, -inf). Change only the other component. Compare (1.5, 0) to real 1.5 | Equal pairs match and count once. Changed components differ. A NaN component is null. |
+| R2-V6d | Put DN-R1-8a through 8c in a list, a map value and a set. Include an unordered pair with two possible partners for one member | UTC and local matches hold at depth. The unrelated instant differs. Reordering leaves the verdict intact. |
+
+**R2-V7. Preserve map origin and contain cycles.** Pass Arrow arrays with their schema
+into the authority. Retain child types in the walk, including maps inside lists or structs.
+Read pandas Arrow extension columns with their Arrow type. A plain Python list of pairs
+is a sequence. Arrow maps and Python dicts with unique exact-form keys compare as maps.
+Refuse an Arrow map with duplicate exact keys before any conversion to dict or frozenset.
+Use the same validated walk for identity, counting and export eligibility.
+Track container and box identities on the active recursion path. Remove each on return.
+A shared child reached from a sibling is valid. A back edge gives the fixed column error.
+
+Validate frame columns before any Arrow call, including unpaired or unaligned columns.
+On refusal keep the column name, row count and failure. Tag the refused side with its typed failure. Use a length-matched null placeholder
+where the internal table needs a physical column. Skip conversion, detector rendering and value
+tallies for the refused data. Every consuming check must observe the failure before using that
+placeholder. Keep the configured check error visible to the blocking verdict. Continue with the other columns.
+
+| Test | Input and boundary | Required result |
+|---|---|---|
+| R2-V7a | Reorder a typed Arrow map, a nested Arrow map and an ordinary frame list of pairs | Maps SAME, list DIFFERENT. A changed map value differs. A map with duplicate keys gives a column error. |
+| R2-V7b | Self-linked list, dict and 0-D box, plus one child shared twice without a cycle | Each cycle gives a fixed error within 5 seconds. Shared child matches. |
+| R2-V7c | Put each cycle beside a diverse unchanged hash column at `run_post_mask`. Also run standalone residual | No Arrow or detector call sees the cyclic cell. The column gives an error. The healthy neighbor retains its expected finding. |
+
+**R2-V8. Isolate standalone failures and select first positions.** Move first-position lookup
+from `runner.py:212` into the common post-mask input code. Use it for both sides before
+pandas lookup, Arrow schema lookup, projection or conversion. Use `iloc` for frame columns
+and field indices for Arrow. Resolve duplicate names before name-only lazy or staged projection.
+If the reader only projects by name, read physical fields without name projection and select
+the first indices before exposing a batch. Share the same resolution in cast and gate projections.
+Keep the first schema field, its type and its values together. Export this selector via
+`verification.postmask` for pipeline callers.
+
+In `policy_validation.py:103`, route each count through `cells_distinct_or_error`.
+Use the same per-column failure handling for identity and both counts as the rest of post-mask.
+Preserve missing-column and length findings. On aligned input, check the typed failure or count
+error before calling `_decide`. Propagate coded pass-through errors. Record other errors by
+class alone. Standalone residual must handle a refused cell before invoking its detectors.
+
+| Test | Public reader inputs | Required result |
+|---|---|---|
+| R2-V8a | Record column first, diverse unchanged hash column second. Run standalone policy, residual and frame runner | Record has a column error. The second column gets its normal finding. No table abort or cell text. |
+| R2-V8b | Duplicate labels with different types and conflicting verdicts. Vary the second field and reverse field order | Each frame reader and `run_post_mask_tables` grades the first physical field on each side. One policy finding per configured column. No ambiguous Arrow lookup. |
+| R2-V8c | Inject count-only failures and a coded pass-through in standalone policy | Uncoded failure gives a column error and preserves neighbor grading. The coded exception propagates unchanged. |
+
+### DESIGN findings
+
+**R2-D1. Put common conversions below both consumers.** Move the temporal classes and exact
+converter at `internal/canonical_cell.py:179` through line 240 into `internal/cell_atoms.py`.
+The detector at `internal/cell_text.py:357` uses that converter and the retained temporal formatter
+from `canonical_cell.py:310`. Identity uses the same converter. Keep the formatter in `cell_text`.
+Share the numeral grammar, reduction, exact digit extraction and unboxing through `cell_atoms`.
+Keep scalar missing-value decisions in `pandas_missing`. Give the new layers contract its own
+section in `.importlinter`, with container `decoy_engine.internal` and these ordered layers.
+
+```ini
+layers =
+    cell_identity
+    cell_text
+    cell_atoms
+    pandas_missing
+```
+
+| Test | Gate | Required result |
+|---|---|---|
+| R2-D1a | Inspect the actual contract and run the isolated layers gate. Seed an import of identity in cell_text | Clean dependency direction passes. The reverse edge fails import-linter. No new ignore entry. |
+| R2-D1b | Run retained detector text rows D2/D3/D7. Feed the detector and identity the same sub-nanosecond and calendar-unit temporal fixtures | Retained detector expectations and exact identity pass. Both consumers use the one temporal converter. |
+
+**R2-D2. Normalize imports in the scoped guard.** Put the sentry in
+`tests/sentry/post_scan/test_cell_identity_choke_point.py`. Resolve qualified calls through
+module aliases and direct imported aliases. Follow column bindings through assignments, indexing
+and loops. Flag the listed operators and methods when applied to comparison inputs.
+Scope retired definition names to the comparison modules. Include `identity_counts`,
+`canonical_cells`, `_compared`, `_frozen` and `key_text`. Restrict the canary exception to
+its existing helper. Scan production imports of the retired module. Check every guard exception
+by its file and symbol. Keep legitimate detector frequency counts outside the comparison rule.
+
+| Test | Seed | Required result |
+|---|---|---|
+| R2-D2a | `from numpy import equal as eq` then `eq(src, out)`, a qualified alias, and a loop over paired column values | Each comparison is flagged. Removing alias normalization or loop tracking fails its seed. |
+| R2-D2b | Comparator-local `_frozen`, provider helper at `providers_v2/_faker_draw_contracts.py:54`, unrelated metadata comparison | Only the comparator-local copy is flagged. Run the guard on actual source as well as seeds. |
+
+**R2-D3. Measure the production routes.** Replace the identity-side `_series` call at
+`verification/postmask/_column_facts.py:439` with positional extraction of each aligned Arrow
+array. Pass the typed arrays straight to `identity_facts`. Keep pandas conversion for detector
+consumers. On the Mac test node use one worker and one thread for native libraries and DuckDB.
+Use one million rows per measured run. Warm up once. Record elapsed time and rows/s for three
+repeats by dtype and route, on the final head. Time the public call through its verdict, including
+projection, conversion, counts and grading. For staging, prepare the input fixture outside the
+timer and time the native pre-commit gate including its staged read and decision.
+
+| Test | Route and fixtures | Required result |
+|---|---|---|
+| R2-D3a | `run_post_mask` on all DN-R1-3a to 3g frame fixtures | Each repeat exceeds 20k rows/s. Assert expected findings and counts. |
+| R2-D3b | `run_post_mask_tables` on out-of-core batches and the actual native staged pre-commit gate at `execution/pipeline/_post_scan.py:338`. Run integer, nullable integer, float with valid NaN, string and exact cross-unit timestamp cases on each | Each route and kind exceeds 20k rows/s per repeat. Grade equals the scalar fixture oracle. Inspect staged schema and values to confirm the tested representation. |
+| R2-D3c | Instrument the scalar pair comparator on the same common typed columns in a separate untimed run | Zero scalar pair calls on each route. Batch and staged identity receive Arrow arrays. No input-side pandas materialization for comparison. |
+| R2-D3d | Route parity for native-safe pairs. Test sets, records and cycles at original-frame entry points | Each reader agrees on the facts it exposes or the resulting finding. Native tests use fixtures that survive staging with the intended type. |
+
+### V2-LOG plan notes
+
+| Finding | Plan decision | Acceptance row |
+|---|---|---|
+| R2-L1. Test scheduling and size | Split the pair suites and deletion batches as shown in Placement and S1 to S5c. Retained green rows run from S1. | Collect S1 on the node with the future module absent. Verify each strict xfail against its observed failure. In S5c verify zero throughput xfails and record the Mac runs. |
+| R2-L2. Frozen owning paths | `profiling/scan_set.py` changes exception classification for scan-set/v1. Its wire fields and reader stay compatible. `reason_adapter.py` and `reasons/runtime/_part3.py` touch public reason translation and the registry. Retain the additive unreleased `cell_unreadable` reason. Reuse the registered check-error reason for comparison refusal. `verification/postmask/_blocked.py` owns the public blocked error. Preserve its public type and the documented gate behavior. The post-scan v3 counts change as listed above. | Run scan-set round trips, registry baseline, public API and exception hierarchy checks, blocked-error tests and the mapped v3 post-mask runner and v2 reader tests on the node. Verify the existing tags and reason pins. Replace the obsolete key, band and comparison-error claims in the changelog and compatibility entry. |
+| R2-L3. Windowed-date helper | `transforms/windowed_date.py:302` predates PM-1. Track migration to the shared predicate for V2. | At migration, compare the helper and shared predicate on the DN-R1-5 missing cells. R2-V3b separately gates the shared masker's masked-constant behavior in V1. |
+
+**V2-LOG size note.** This revision retains the earlier acceptance tables and review IDs.
+Log the plan in the 800 to 900 line cleanup band.
+
+### Final plan self-review
+
+All eight V1 findings and three change-created DESIGN findings have acceptance rows.
+The three review notes have implementation or follow-up checks. The recurring-defect review
+adds a strict typed failure handoff, fixed exceptions raised outside handlers, full-string
+numeral matching, alias-aware guard seeds and final-head mutation evidence. Keep existing
+wire types, reader versions and pins. Run the gates on test nodes with failures visible.
+
+GO for the plan. The owner still chooses A or B. Implementation and test-node evidence remain.
