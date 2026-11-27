@@ -14,10 +14,13 @@ the version separately for audit).
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 
 
 class SelectableValues(Protocol):
@@ -56,6 +59,11 @@ class ValuePool:
     backend_type: str
     backend_version: str
     distinct_count: int
+    # The same values as one Arrow array, for the vectorized take (`pool_take`). Set only by
+    # generation's faker pool, which holds both forms on purpose: the frozen object array stays
+    # for the keyed and bundle paths that gather one value at a time.
+    # Keyword-only so a subclass's positional field (`BundlePool.output_columns`) keeps its place.
+    arrow: pa.Array[Any] | None = field(default=None, repr=False, compare=False, kw_only=True)
 
     @property
     def identity(self) -> tuple[str, str, str, bytes, int]:
@@ -101,11 +109,75 @@ def measured_pool_bytes(pool: ValuePool) -> int:
     The one pool-byte function: `PoolCache` budgets with it and the out-of-core run reserves
     with it, so a pool that fits one ledger fits the other. A character-count estimate measured
     from 0.5x to 2.6x off the real size depending on string length, which let the two ledgers
-    disagree."""
+    disagree. A pool that retains its Arrow form counts the root buffers it keeps alive."""
     values = pool.values
+    arrow_bytes = 0 if pool.arrow is None else _arrow_retained_bytes(pool.arrow)
     if values.dtype != object:
-        return int(values.nbytes)
-    return sum(sys.getsizeof(v) for v in values) + 8 * len(values)
+        return int(values.nbytes) + arrow_bytes
+    return sum(sys.getsizeof(v) for v in values) + 8 * len(values) + arrow_bytes
+
+
+def _arrow_retained_bytes(array: pa.Array[Any]) -> int:
+    """Bytes of every distinct root buffer ``array`` keeps alive.
+
+    A sliced or IPC-read buffer is a zero-copy view that holds its parent (Arrow's memory model,
+    `pyarrow.Buffer.parent`), so a one-value view of a large message body keeps the whole body.
+    """
+    roots: dict[tuple[int, int], int] = {}
+    _collect_arrow_roots(array, roots)
+    return sum(roots.values())
+
+
+# Accessors pyarrow gives a nested array for its child arrays. `Array.buffers()` already flattens
+# every child's buffers but skips a dictionary, so the walk exists to find dictionaries, wherever
+# they sit. A layout pyarrow adds later is covered by its accessor name or by `field(i)`, and the
+# type-parametrized test in test_value_pool.py fails when one is not.
+_CHILD_ACCESSORS = ("dictionary", "storage", "values", "run_ends", "keys", "items")
+
+
+def _array_buffers(array: pa.Array[Any]) -> list[pa.Buffer | None]:
+    """The flattened buffers of ``array``: one seam so a test can count the slots returned."""
+    return list(array.buffers())
+
+
+def _child_arrays(array: pa.Array[Any]) -> Iterator[tuple[pa.Array[Any], bool]]:
+    """Each child array of ``array`` with whether it is a dictionary (Arrow's buffers() omits those)."""
+    is_map = pa.types.is_map(array.type)
+    for name in _CHILD_ACCESSORS:
+        if is_map and name == "values":
+            continue  # a map's entries struct repeats its keys and items: walking it doubles each level
+        try:
+            child = getattr(array, name)
+        except (AttributeError, NotImplementedError, pa.ArrowException):
+            continue
+        if isinstance(child, pa.Array):
+            yield child, name == "dictionary"
+    for i in range(getattr(array.type, "num_fields", 0)):
+        try:
+            child = array.field(i)
+        except (AttributeError, NotImplementedError, TypeError, pa.ArrowException):
+            continue
+        if isinstance(child, pa.Array):
+            yield child, False
+
+
+def _collect_arrow_roots(
+    array: pa.Array[Any], roots: dict[tuple[int, int], int], *, flatten: bool = True
+) -> None:
+    """Add every root buffer of ``array`` and of everything nested under it to ``roots``.
+
+    A shared root counts once, whichever path reaches it. `buffers()` flattens a whole subtree, so
+    it is read only at the top and at each dictionary (which it skips); every other node is
+    visited just to find dictionaries below it. Buffer work is linear in the number of arrays."""
+    if flatten:
+        for buf in _array_buffers(array):
+            if buf is None:
+                continue
+            while buf.parent is not None:
+                buf = buf.parent
+            roots[(buf.address, buf.size)] = buf.size
+    for child, is_dictionary in _child_arrays(array):
+        _collect_arrow_roots(child, roots, flatten=is_dictionary)
 
 
 def construction_floor(size: int, *, strings: bool) -> int:
@@ -119,6 +191,40 @@ def construction_floor(size: int, *, strings: bool) -> int:
     return size * (BUILD_HELD_BYTES_PER_VALUE if strings else BUILD_HELD_BYTES_PER_VALUE_ANY)
 
 
+def pool_take(pool: pa.Array[Any], indices: np.ndarray[Any, Any]) -> pa.Array[Any]:
+    """Gather `pool[indices]` as an Arrow array: the one pooled pick.
+
+    Arrow's `take` is the documented gather for an index array over a value array (the dictionary
+    decode pattern). A null in the pool stays null in the output. `PooledSelector.take` and the
+    REUSE sampler both pick through this, so a later change to the pick is one edit.
+    """
+    return pc.take(pool, indices)  # type: ignore[no-untyped-call, unused-ignore]
+
+
+def _arrow_gather_is_exact(arrow: pa.Array[Any]) -> bool:
+    """True when `to_numpy` returns the pool's values and nulls unchanged.
+
+    Only string arrays qualify: they convert to `str` objects with `None` for a null. An integer
+    array with a null converts to float64 (rounding values past 2**53, null becomes NaN), and
+    temporal types convert to numpy datetimes, so those gather from the object array instead.
+    """
+    return bool(pa.types.is_string(arrow.type) or pa.types.is_large_string(arrow.type))
+
+
+def pool_pick(pool: ValuePool, indices: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """The REUSE gather of a built pool as a numpy object array.
+
+    A string pool that carries its Arrow form picks through `pool_take`; any other pool (every
+    pool built by `PoolBuilder`, and non-string Arrow forms whose numpy conversion would change
+    values or nulls) gathers from the frozen object array. Both give the same values.
+    """
+    if pool.arrow is not None and _arrow_gather_is_exact(pool.arrow):
+        picked: np.ndarray[Any, Any] = pool_take(pool.arrow, indices).to_numpy(zero_copy_only=False)
+        return picked
+    gathered: np.ndarray[Any, Any] = pool.values[indices]
+    return gathered
+
+
 __all__ = [
     "BUILD_HELD_BYTES_PER_VALUE",
     "BUILD_HELD_BYTES_PER_VALUE_ANY",
@@ -127,6 +233,8 @@ __all__ = [
     "_freeze_array",
     "construction_floor",
     "measured_pool_bytes",
+    "pool_pick",
+    "pool_take",
 ]
 
 

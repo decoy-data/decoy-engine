@@ -55,6 +55,7 @@ __all__ = [
     "parent_lookup_keys",
     "problem_details",
     "refuse_unlisted_generate_families",
+    "same_batch_option",
 ]
 
 _TYPE = str(reasons.config.GENERATE_OPTION_TYPE)
@@ -85,12 +86,14 @@ class OptionSpec:
     drawn, so a same-table input must be generated earlier) or ``post_fill`` (read after the
     source table is complete). The plan check refuses an input that is missing or not ready: a
     column read before it exists is a null, an empty aggregate or a single group.
+    ``same_batch`` marks the one option a streamed row reads from an earlier column's batch.
     """
 
     check: Check | None = None
     ref_kind: str | None = None
     ref_context_key: str | None = None
     ref_phase: str = "inline"
+    same_batch: bool = False
 
 
 @dataclass(frozen=True)
@@ -296,7 +299,7 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
             "categories": OptionSpec(_categories),
             "weights": OptionSpec(weights_list),
             # An earlier column whose value picks the `by` entry the row draws from.
-            "condition_on": OptionSpec(_str, ref_kind="column"),
+            "condition_on": OptionSpec(_str, ref_kind="column", same_batch=True),
             "by": OptionSpec(by_entries),
         },
         required=("categories",),
@@ -332,7 +335,7 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
             "high_cardinality": _B,
             "allow_real_categories": _B,
             "other_mode": _S,
-            "condition_on": OptionSpec(_str, ref_kind="column"),
+            "condition_on": OptionSpec(_str, ref_kind="column", same_batch=True),
         },
         required=("snapshot_file",),
     ),
@@ -369,7 +372,7 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
     "windowed_date": TypeOptions(
         {
             "anchor": OptionSpec(
-                _str, ref_kind="column_via_reference", ref_context_key="anchor_via"
+                _str, ref_kind="column_via_reference", ref_context_key="anchor_via", same_batch=True
             ),
             # An earlier `reference` column of this table: `anchor` is then its parent's column.
             "anchor_via": OptionSpec(_str, ref_kind="column"),
@@ -540,6 +543,12 @@ def parent_lookup_keys(type_: Any) -> tuple[str, ...]:
         for o in options
         if o.ref_kind == "column_via_reference" and o.ref_context_key is not None
     )
+
+
+def same_batch_option(type_: Any) -> str | None:
+    """The option of generate type `type_` naming the earlier column a streamed row reads."""
+    spec = GENERATE_OPTIONS.get(type_) if isinstance(type_, str) else None
+    return next((k for k, o in (spec.keys.items() if spec else ()) if o.same_batch), None)
 
 
 def problem_details(

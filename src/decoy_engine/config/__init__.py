@@ -42,7 +42,10 @@ from decoy_engine.config._generate_option_catalog import (
     GenerateTypeOptions,
     generate_option_catalog,
 )
-from decoy_engine.config._generate_options import refuse_unlisted_generate_families
+from decoy_engine.config._generate_options import (
+    refuse_unlisted_generate_families,
+    same_batch_option,
+)
 from decoy_engine.config._generate_relational import (
     GenerateInputRef,
     aggregate_problems,
@@ -247,6 +250,7 @@ __all__ = [
     "refuse_unlisted_generate_families",
     "refuse_unreleased_delivery",
     "relationship_shape_error",
+    "same_batch_option",
     "self_reference_problems",
     "value_key",
 ]

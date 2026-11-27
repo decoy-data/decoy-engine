@@ -74,6 +74,15 @@ from decoy_engine.generation.pool._events import (
 )
 from decoy_engine.generation.pool._identity import effective_pool_size
 from decoy_engine.generation.pool._pool_adapter import PoolAdapter
+from decoy_engine.generation.pool._resident import (
+    STR_OBJECT_OVERHEAD_BYTES,
+    PoolResidentParts,
+    faker_pool_resident_bytes,
+    faker_pool_resident_parts,
+    provider_init_bound,
+    provider_init_bytes,
+    run_faker_footprint,
+)
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import (
     PoolSampler,
@@ -81,13 +90,18 @@ from decoy_engine.generation.pool._sampler import (
     derive_validated_indices,
 )
 from decoy_engine.generation.pool._validate import check_pool_capacity_pre_flight
-from decoy_engine.generation.pool._value_pool import SelectableValues, ValuePool
+from decoy_engine.generation.pool._value_pool import (
+    SelectableValues,
+    ValuePool,
+    pool_take,
+)
 
 __all__ = [
     "COMPUTED_NAMESPACE_MARKER",
     "DEFAULT_POOL_SIZE",
     "INT64_MAX",
     "INT64_MIN",
+    "STR_OBJECT_OVERHEAD_BYTES",
     "CacheStats",
     "CardinalityMode",
     "ComputedDrawSpec",
@@ -98,6 +112,7 @@ __all__ = [
     "PoolBuilder",
     "PoolCache",
     "PoolCapacityError",
+    "PoolResidentParts",
     "PoolSampler",
     "QualityWarning",
     "SelectableValues",
@@ -111,11 +126,17 @@ __all__ = [
     "draw_kwargs",
     "effective_pool_size",
     "emit_generation_warning",
+    "faker_pool_resident_bytes",
+    "faker_pool_resident_parts",
     "get_default_pool_cache",
     "int_from_index",
     "native_type_not_admitted_error",
     "parse_computed_draw",
+    "pool_take",
+    "provider_init_bound",
+    "provider_init_bytes",
     "raise_uniqueness_impossible",
+    "run_faker_footprint",
     "unique_capacity_ok",
     "uuid_from_bits",
     "uuid_from_hex",
