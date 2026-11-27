@@ -127,10 +127,10 @@ def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> s
 
 
 def _keep_memory_errors(function: Any, path: str, error: Any) -> None:
-    """`rmtree`'s error hook: an ordinary failure is ignored, a `MemoryError` is raised. The hook
-    receives an exception on 3.12 and later and an `exc_info` tuple before that."""
+    """`rmtree`'s error hook: a filesystem error (`OSError`) is ignored, anything else is raised.
+    The hook receives an exception on 3.12 and later and an `exc_info` tuple before that."""
     exc = error[1] if isinstance(error, tuple) else error
-    if isinstance(exc, MemoryError):
+    if not isinstance(exc, OSError):
         raise exc
 
 

@@ -481,10 +481,12 @@ class LocalOutputTxn(_LocalStageDir):
         if self._life.finished:
             return
         self._life.end()
-        if self._stage is not None:
-            remove_tree(self._stage)
-            self._stage = None
-        self._held.close()  # after the stage is gone: the lock outlives the name
+        try:
+            if self._stage is not None:
+                remove_tree(self._stage)
+                self._stage = None
+        finally:
+            self._held.close()  # after the stage is gone: the lock outlives the name
         if self._label in _durable.FD_STAGED_LABELS:
             self._unlink_stage()
             self._close_parent()

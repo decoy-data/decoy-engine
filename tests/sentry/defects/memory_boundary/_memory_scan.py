@@ -56,7 +56,12 @@ CLASSIFIERS = {
     ("reason_adapter.py", "reason_from_exception"): "adapter",
     ("execution/_isolated_run.py", "_run_in_process"): "run",
 }
-EXPECTED_CLASSIFIERS = frozenset(CLASSIFIERS)
+# The approved registry, written out so a change to `CLASSIFIERS` alone cannot widen or weaken it.
+EXPECTED_CLASSIFIERS = {
+    ("execution/_isolated_reason.py", "memory_boundary"): "arm",
+    ("reason_adapter.py", "reason_from_exception"): "adapter",
+    ("execution/_isolated_run.py", "_run_in_process"): "run",
+}
 
 # Handler types that are caller-supplied parameters, not classes, so they cannot be resolved by name: (file, name).
 PARAMETER_TYPES = {
@@ -350,6 +355,9 @@ def rmtree_findings(tree: ast.Module, rel: str, names: Names, *, any_call: bool)
             k.arg == "ignore_errors"
             and not (isinstance(k.value, ast.Constant) and not k.value.value)
             for k in node.keywords
+        ) or (
+            len(node.args) > 1
+            and not (isinstance(node.args[1], ast.Constant) and not node.args[1].value)
         )
         if ignoring or any_call:
             out.append(
@@ -360,10 +368,10 @@ def rmtree_findings(tree: ast.Module, rel: str, names: Names, *, any_call: bool)
 
 def registry_problems(registry: dict[tuple[str, str], str]) -> list[str]:
     """The classifier registry is exactly the three approved handlers."""
-    if frozenset(registry) == EXPECTED_CLASSIFIERS:
+    if registry == EXPECTED_CLASSIFIERS:
         return []
     return [
-        f"classifier registry differs from the approved three: {sorted(set(registry) ^ EXPECTED_CLASSIFIERS)}"
+        f"classifier registry differs from the approved three: {sorted(set(registry.items()) ^ set(EXPECTED_CLASSIFIERS.items()))}"
     ]
 
 

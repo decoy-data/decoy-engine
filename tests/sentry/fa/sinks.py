@@ -110,6 +110,9 @@ EXACT: frozenset[str] = frozenset(
         "os.popen",
         "multiprocessing.Process",
         "concurrent.futures.ProcessPoolExecutor",
+        # The one cleanup helper: it removes a path tree, so each caller is registered.
+        "decoy_engine.fileaccess.remove_tree",
+        "decoy_engine.fileaccess._fdtree.remove_tree",
     }
 )
 
