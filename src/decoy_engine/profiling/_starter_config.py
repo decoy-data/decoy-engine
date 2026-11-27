@@ -4,13 +4,14 @@ Modeled on the CLI's `decoy init` scaffold (scan, suggest per column, leave each
 to a REVIEW note) generalized to many tables. Foreign keys are never inferred. A declared
 relationship's key columns all hash under one shared namespace, the keyed-pseudonym join rule
 of SDV's HMA1 (same key in, same token out across tables) and of the namespace registry's
-same-FK same-mask check. The per-column decision is `_starter_inference`'s; this module reads
-the descriptors and holds no detector table.
+same-FK same-mask check. `_starter_inference` makes the per-column decision; this module
+reads the descriptors and holds no detector table.
 
 The builder validates the config it returns (`PipelineConfig`) and the shape of each declared
 relationship. It does not run `compile_plan`: `plan` sits above `profiling` in the import layers,
 so the compile check lives in the tests and in the CLI. Which strategies need a namespace comes
-from the shared requirement registry, never a list kept here. Output carries detector ids, strategy names, counts and fixed copy, never a cell value.
+from the shared requirement registry, never a list kept here. Output carries detector ids,
+strategy names, counts and fixed copy, never a cell value.
 """
 
 from __future__ import annotations
@@ -102,10 +103,8 @@ class ColumnSuggestion:
     Identity is `(table, column, source, detector_id)`; `detector_id` is empty when no detector
     decided (the fallback, or the integer-key rule). `model` and `band` are for a classifier
     suggestion and stay `None` for a regex one. `entry` is the column entry `starter_config`
-    built; every entry is written to the config. `live` says a deterministic rule decided it
-    (regex, declared key, integer-unique hash, fallback), and is false when a model chose the
-    entry. Only a suggestion with `source == "regex"` is live, which every deterministic rule
-    uses. `decided_by` names the rule.
+    wrote to the config. `live` says a deterministic rule decided it (regex, declared key,
+    integer-unique hash, fallback), and is false when a model chose it. `decided_by` names the rule.
     """
 
     table: str
@@ -178,7 +177,7 @@ def starter_config(
 
     `relationships` are the user's declared `RelationshipConfig` dicts, copied unchanged; the
     scan does not carry them. `targets` maps a table to a full target descriptor that replaces
-    the default. A placeholder namespace is written where a declared relationship names none.
+    the default. A declared relationship with no namespace gets a placeholder.
     """
     if baseline_sha256 is not None and baseline_path is None:
         raise ValueError("baseline_sha256 needs baseline_path")
@@ -258,7 +257,6 @@ def declared_key_namespaces(
 
 def _refuse_header_suspect(scan: ScanSet) -> None:
     """Refuse a scan whose first row the scan guard read as data: its column names may be values.
-
     The message names no table, column or path; the location is the table's position.
     """
     flagged = reasons.warning.SCAN_HEADER_SUSPECT.spec.ref
@@ -283,7 +281,6 @@ def _decide(
     hits: Sequence[ModelHit],
 ) -> tuple[ColumnSuggestion, str]:
     """The suggestion for one column and the lead sentence of its note.
-
     Order: a declared key, then a confident regex match, then the first high-band classifier hit
     whose detector has a starter entry, then the regex fallback. NER hits and review-band hits
     add evidence to the note only.
@@ -316,9 +313,9 @@ def _classifier_suggestion(
 ) -> tuple[ColumnSuggestion, str] | None:
     """The suggestion a high-band classifier hit writes, or None when it writes nothing.
 
-    `hit.detector_id` is already the detector the label maps to (`_model_pass`), so it is used as
-    it is. A date detector needs a complete format from a regex match of the same detector, so
-    a column the scan could not read as one format stays `redact`.
+    `hit.detector_id` is already the detector the label maps to (`_model_pass`). A date detector
+    needs a complete format from a regex match of the same detector, so a column the scan could
+    not read as one format stays `redact`.
     """
     if hit.source != "classifier" or hit.band != "high":
         return None
@@ -372,11 +369,10 @@ def detector_entry(
     detector_id: str, column: str, *, date_format: str | None = None
 ) -> dict[str, Any] | None:
     """The column entry the starter writes for a column `detector_id` flagged, or None.
-
     None when the detector has no starter choice, or when its choice needs the detected date
     format and `date_format` is not given: the descriptor holds no format, so it never builds a
-    `date_shift` the plan would refuse. The namespace follows the same registry rule as
-    `starter_config`, so a review that takes a detector's default writes what a scan would.
+    `date_shift` the plan would refuse. The namespace follows the registry rule `starter_config`
+    uses, so a review that takes a detector's default writes what a scan would.
     """
     choice = recommendations.starter_choice(detector_id)
     if choice is None:
@@ -417,8 +413,8 @@ def build_entry(
 
     `column_fields` are the top-level `ColumnConfig` members (`provider`, `deterministic`),
     `provider_config` the free-form mapping. It checks nothing about the strategy: the starter
-    passes the settings a detector descriptor chose, and `column_entry` (the review's entry
-    point) checks the settings an operator typed against the strategy catalog before calling it.
+    passes what a detector descriptor chose, and `column_entry` (the review's entry point)
+    checks what an operator typed against the strategy catalog before calling it.
     """
     fields = dict(column_fields or {})
     entry: dict[str, Any] = {"name": column, "strategy": strategy}
@@ -470,8 +466,8 @@ def _note(
 def _evidence(stats: Any, hits: Sequence[ModelHit], *, declared_key: bool = False) -> str:
     """One line naming each model hit: ids, versions, bands and buckets, never a value.
 
-    A hit that names a detector other than the confident regex match says the regex was kept,
-    except on a declared key, where the declaration decided and the line only lists both views.
+    A hit naming a detector other than the confident regex match says the regex was kept,
+    except on a declared key, where the line only lists both views.
     """
     confident = confident_matches(stats)
     regex_id = getattr(confident[0], "detector_id", "") if confident else ""
