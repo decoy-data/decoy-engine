@@ -36,9 +36,9 @@ from decoy_engine.execution.native._crypto_ext import (
 from decoy_engine.execution.native._fpe_ext import load_compiled_fpe_kernel
 from decoy_engine.execution.native._index_ext import (
     load_compiled_index_kernel,
-    reference_index_derivation,
 )
 from decoy_engine.execution.native._text_redact_kernel import load_text_redact_kernel
+from decoy_engine.execution.native.draw import BoundFakerKernel
 from decoy_engine.execution.out_of_core._bucket_native import (
     NativeBucket,
     TableBucketPlan,
@@ -51,7 +51,6 @@ from decoy_engine.execution.out_of_core._categorical_native import (
     decide_table,
 )
 from decoy_engine.execution.out_of_core._faker_native import (
-    BoundFakerKernel,
     NativeFaker,
     TableFakerPlan,
 )
@@ -295,12 +294,10 @@ class OocHashRun:
         bound = self._faker_bound
         if bound is None:
             index = self._index_kernel()
-            bound = (
-                BoundFakerKernel(index.kernel, index.native_threads, compiled=True)
-                if index is not None
-                else BoundFakerKernel(
-                    reference_index_derivation(), self._native_threads, compiled=False
-                )
+            hashed = self._kernel()  # a `uuid` draw runs the hash kernel; None runs the reference
+            hash_kernel = hashed.kernel if hashed is not None else None
+            bound = BoundFakerKernel.bind(
+                index.kernel if index is not None else None, self._native_threads, hash_kernel
             )
             self._faker_bound = bound
         return bound

@@ -183,7 +183,7 @@ def compile_declared_casting_contract(config: Mapping[str, Any]) -> DeclaredCast
             try:
                 contract = C.build_contract(fields)
             except C.DeclaredCastContractError as exc:
-                raise _fail(exc.code, path, exc.message) from None
+                raise _fail(exc.code, path, reasons.lookup(exc.code)[0].summary) from None
             _check_column(path, col, contract)
             _check_source(tname, cname, contract, sources.get(tname))
             _check_target(tname, cname, contract, targets.get(tname))

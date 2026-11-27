@@ -38,6 +38,7 @@ from decoy_engine.execution.native._operator_params import (
     is_positional_faker_seed,
 )
 from decoy_engine.execution.native._operator_step import run_kernel_step, run_kernel_step_masked
+from decoy_engine.execution.native._provider_class import resolve_faker_variant
 from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
 from decoy_engine.generation.pool import PoolBuilder, PoolCache, ValuePool
 from decoy_engine.generation.pool._identity import resolve_faker_pool_identity
@@ -365,7 +366,7 @@ def reject_nonstring_deterministic_pools(state: Any, *, config: dict[str, Any], 
     """
     from decoy_engine.execution._faker_degenerate_pin import deterministic_faker_pin_columns
 
-    pin = deterministic_faker_pin_columns(config, table, state.first.schema)
+    pin = deterministic_faker_pin_columns(config, table, state.first.schema, state.registry)
     if not pin:
         return
     envelope = state.plan.seed_envelope
@@ -414,12 +415,16 @@ def _resolve_faker_pools(
             if col_seed.strategy != "faker":
                 continue
             provider = col_seed.provider
+            cfg = provider_config_to_dict(col_seed.provider_config)
+            if resolve_faker_variant(provider, cfg, registry).kind != "pool":
+                # A computed draw has no pool to build or type-check; its string schema pin
+                # stays with the caller.
+                continue
             if provider is None:  # pragma: no cover - admission requires a provider
                 raise AssertionError(
                     f"native route admitted faker column {name!r} with no provider; "
                     "admission should have excluded this."
                 )
-            cfg = provider_config_to_dict(col_seed.provider_config)
             pool_size, locale, build_config, identity = resolve_faker_pool_identity(
                 builder=builder,
                 provider=provider,

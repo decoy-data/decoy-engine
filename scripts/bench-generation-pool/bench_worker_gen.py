@@ -144,15 +144,24 @@ def install_vacuity_guards() -> tuple[dict[str, bool], Any]:
     # The unified generation core builds and samples through the persistent selector, not
     # `build_and_sample`; the legacy whole-table path still uses the pair above.
     original_open = _faker_pool.open_pooled_selector
-    original_select = _faker_pool.PooledSelector.select
+    # Every pick entry point (`select` for list consumers, `take` for Arrow), read from the engine
+    # so a new one is guarded as soon as it is listed. The flag is a boolean, so a pick that calls
+    # another counts once without a re-entrancy check.
+    original_picks = {
+        name: getattr(_faker_pool.PooledSelector, name)
+        for name in _faker_pool.PooledSelector.PICK_METHODS
+    }
 
     def _wrapped_open(*args: Any, **kwargs: Any) -> Any:
         fired["build_and_sample"] = True
         return original_open(*args, **kwargs)
 
-    def _wrapped_select(self: Any, *args: Any, **kwargs: Any) -> Any:
-        fired["pool_sample"] = True
-        return original_select(self, *args, **kwargs)
+    def _wrap_pick(original: Any) -> Any:
+        def _wrapped_pick(self: Any, *args: Any, **kwargs: Any) -> Any:
+            fired["pool_sample"] = True
+            return original(self, *args, **kwargs)
+
+        return _wrapped_pick
 
     def _wrapped_build_and_sample(*args: Any, **kwargs: Any) -> Any:
         fired["build_and_sample"] = True
@@ -165,13 +174,15 @@ def install_vacuity_guards() -> tuple[dict[str, bool], Any]:
     _faker_pool.build_and_sample = _wrapped_build_and_sample
     _pool_sampler.PoolSampler.sample = _wrapped_pool_sample  # type: ignore[method-assign]
     _faker_pool.open_pooled_selector = _wrapped_open
-    _faker_pool.PooledSelector.select = _wrapped_select  # type: ignore[method-assign]
+    for name, original in original_picks.items():
+        setattr(_faker_pool.PooledSelector, name, _wrap_pick(original))
 
     def _restore() -> None:
         _faker_pool.build_and_sample = original_build_and_sample
         _pool_sampler.PoolSampler.sample = original_pool_sample  # type: ignore[method-assign]
         _faker_pool.open_pooled_selector = original_open
-        _faker_pool.PooledSelector.select = original_select  # type: ignore[method-assign]
+        for name, original in original_picks.items():
+            setattr(_faker_pool.PooledSelector, name, original)
 
     return fired, _restore
 

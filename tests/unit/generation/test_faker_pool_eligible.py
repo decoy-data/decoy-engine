@@ -132,6 +132,28 @@ class TestPoolEligibleLegacyTypesUnaffected:
         assert _faker_pool.pool_eligible(faker_type, None, _faker_pool.N_THRESHOLD, opted_out=False)
 
 
+class TestEmptyRunDefaultStaysPerRow:
+    """An empty `instance_default_locale` is a string no certified pair names, so the column
+    draws per row. Reading it as "no locale" would pool it and change the seeded output."""
+
+    def test_the_requested_locale_keeps_the_raw_run_default(self) -> None:
+        from decoy_engine.internal.faker_locale import requested_locale
+
+        assert requested_locale(None, "") == ""
+        assert requested_locale("", None) is None
+        assert requested_locale("de_DE", "it_IT") == "de_DE"
+
+    def test_try_pool_declines_an_empty_run_default(self) -> None:
+        col = with_table({"name": "v", "type": "faker", "faker_type": "first_name_female"}, "t")
+        args = (col, _faker_pool.N_THRESHOLD, 7, None)
+        assert _faker_pool.try_pool(*args, "", {}) is None  # type: ignore[arg-type]
+
+    def test_try_pool_still_pools_an_absent_run_default(self) -> None:
+        col = with_table({"name": "v", "type": "faker", "faker_type": "first_name_female"}, "t")
+        args = (col, _faker_pool.N_THRESHOLD, 7, None)
+        assert _faker_pool.try_pool(*args, None, {}) is not None  # type: ignore[arg-type]
+
+
 def test_pool_eligible_locale_pairs_matches_harness_filtered_new_set() -> None:
     """Codex-3: the embedded literal must be EXACTLY the harness's certified
     pairs with `kwargs != {}` and the 10 legacy types filtered out -- not a

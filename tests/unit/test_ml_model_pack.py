@@ -147,7 +147,7 @@ def test_missing_weights_raises(tmp_path: Path) -> None:
 def test_corrupt_manifest_raises(tmp_path: Path) -> None:
     pack_dir = _write_minimal_pack(tmp_path)
     (pack_dir / "manifest.json").write_text("NOT JSON }{", encoding="utf-8")
-    with pytest.raises(ModelPackLoadError, match="Corrupt manifest"):
+    with pytest.raises(ModelPackLoadError, match="manifest.json: could not be parsed"):
         ModelPackLoader(pack_dir).load()
 
 
@@ -165,7 +165,7 @@ def test_wrong_feature_schema_version_raises(tmp_path: Path) -> None:
     raw = json.loads((pack_dir / "manifest.json").read_text())
     raw["feature_schema_version"] = "ml99-v99"
     (pack_dir / "manifest.json").write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ModelPackLoadError, match="Feature schema mismatch"):
+    with pytest.raises(ModelPackLoadError, match="feature_schema_version: does not match"):
         ModelPackLoader(pack_dir).load()
 
 
@@ -173,7 +173,9 @@ def test_sha256_mismatch_raises(tmp_path: Path) -> None:
     pack_dir = _write_minimal_pack(tmp_path)
     # Tamper with the weights file
     (pack_dir / "model.joblib").write_bytes(b"tampered bytes")
-    with pytest.raises(ModelPackLoadError, match="SHA-256 mismatch"):
+    with pytest.raises(
+        ModelPackLoadError, match="model.joblib: does not match; expected a sha256 digest"
+    ):
         ModelPackLoader(pack_dir).load()
 
 
@@ -182,7 +184,7 @@ def test_empty_sha256_in_manifest_raises(tmp_path: Path) -> None:
     raw = json.loads((pack_dir / "manifest.json").read_text())
     raw["sha256"] = ""
     (pack_dir / "manifest.json").write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ModelPackLoadError, match="sha256 field is empty"):
+    with pytest.raises(ModelPackLoadError, match="manifest.json.sha256: empty"):
         ModelPackLoader(pack_dir).load()
 
 
@@ -257,3 +259,53 @@ def test_manifest_ignores_unknown_keys() -> None:
     m = ModelPackManifest.from_dict(d)
     assert m.pack_id == "x"
     assert not hasattr(m, "unknown_future_field")
+
+
+# ── F31 AE5: manifest values stay out of load errors and fallback logs ──────
+
+
+def _rewrite_manifest(pack_dir: Path, **fields: str) -> None:
+    raw = json.loads((pack_dir / "manifest.json").read_text())
+    raw.update(fields)
+    (pack_dir / "manifest.json").write_text(json.dumps(raw), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"format_version": "PRIVATE_FORMAT"},
+        {"feature_schema_version": "PRIVATE_SCHEMA"},
+        {"sha256": "PRIVATE_SHA"},
+    ],
+)
+def test_manifest_values_are_not_echoed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, fields: dict[str, str]
+) -> None:
+    pack_dir = _write_minimal_pack(tmp_path)
+    _rewrite_manifest(pack_dir, **fields)
+    weights_sha = hashlib.sha256((pack_dir / "model.joblib").read_bytes()).hexdigest()
+    with pytest.raises(ModelPackLoadError) as exc:
+        ModelPackLoader(pack_dir).load()
+    assert "PRIVATE" not in str(exc.value)
+    assert weights_sha not in str(exc.value)
+    with caplog.at_level("WARNING"):
+        assert ModelPackLoader(pack_dir).load_with_fallback() is None
+    assert caplog.records
+    assert "PRIVATE" not in caplog.text
+    assert weights_sha not in caplog.text
+
+
+def test_unexpected_fallback_error_logs_type_only(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack_dir = _write_minimal_pack(tmp_path)
+    loader = ModelPackLoader(pack_dir)
+
+    def _boom() -> None:
+        raise RuntimeError("PRIVATE_DETAIL")
+
+    monkeypatch.setattr(loader, "load", _boom)
+    with caplog.at_level("WARNING"):
+        assert loader.load_with_fallback() is None
+    assert "RuntimeError" in caplog.text
+    assert "PRIVATE_DETAIL" not in caplog.text
