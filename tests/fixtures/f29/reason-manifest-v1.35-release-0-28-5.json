@@ -1,0 +1,713 @@
+{
+  "entries": [
+    {
+      "code": "delivery_best_effort_unreleased",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "Delivery mode best_effort is planned for 1.x; this release delivers strict only. Remove the delivery block or write mode: strict.",
+      "symbol": "DELIVERY_BEST_EFFORT_UNRELEASED"
+    },
+    {
+      "code": "starter_header_suspect",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "A scanned table looks like it has no header row; its column names may be data.",
+      "symbol": "STARTER_HEADER_SUSPECT"
+    },
+    {
+      "code": "computed_draw_elements_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "Computed draw elements invalid.",
+      "symbol": "COMPUTED_DRAW_ELEMENTS_INVALID"
+    },
+    {
+      "code": "computed_draw_mode_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "Computed draw mode unsupported.",
+      "symbol": "COMPUTED_DRAW_MODE_UNSUPPORTED"
+    },
+    {
+      "code": "computed_draw_namespace_reserved",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "Computed draw namespace reserved.",
+      "symbol": "COMPUTED_DRAW_NAMESPACE_RESERVED"
+    },
+    {
+      "code": "computed_draw_range_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "Computed draw range invalid.",
+      "symbol": "COMPUTED_DRAW_RANGE_INVALID"
+    },
+    {
+      "code": "computed_draw_position_out_of_domain",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "decoy_engine.execution._strategies._faker_positional",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "Computed draw position out of domain.",
+      "symbol": "COMPUTED_DRAW_POSITION_OUT_OF_DOMAIN"
+    },
+    {
+      "code": "parquet_fixed_list_null",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ParquetFixedListNullError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "publish",
+          "retry": "never",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "Parquet cannot store a null fixed-size list cell.",
+      "symbol": "PARQUET_FIXED_LIST_NULL"
+    },
+    {
+      "code": "scratch_root_unusable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ScratchRootUnusable",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "mask",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "finalize",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "The directory a temp variable names cannot hold scratch files.",
+      "symbol": "SCRATCH_ROOT_UNUSABLE"
+    },
+    {
+      "code": "validator_column_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ValidatorStateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "A validator needs a parent key or window column that the parent table does not have.",
+      "symbol": "VALIDATOR_COLUMN_MISSING"
+    },
+    {
+      "code": "validator_key_state_over_budget",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ValidatorStateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "A keyed validator would hold more state than its validation budget allows.",
+      "symbol": "VALIDATOR_KEY_STATE_OVER_BUDGET"
+    },
+    {
+      "code": "validator_source_pairing_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ValidatorStateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "The source rows read for a leak check do not line up with the published rows.",
+      "symbol": "VALIDATOR_SOURCE_PAIRING_MISMATCH"
+    },
+    {
+      "code": "validator_span_repeated",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ValidatorStateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "A validator that can only read a table whole was given the table in several batches.",
+      "symbol": "VALIDATOR_SPAN_REPEATED"
+    },
+    {
+      "code": "leak_check_column_not_checked",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "A column that leak_check names was not checked, so the check says nothing about it.",
+      "symbol": "LEAK_CHECK_COLUMN_NOT_CHECKED"
+    },
+    {
+      "code": "leak_check_skip_below_min_rows",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "leak_check skipped a column with fewer non-null cells than min_rows.",
+      "symbol": "LEAK_CHECK_SKIP_BELOW_MIN_ROWS"
+    },
+    {
+      "code": "leak_check_skip_exempt",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "leak_check skipped a column the validator lists under params.exempt.",
+      "symbol": "LEAK_CHECK_SKIP_EXEMPT"
+    },
+    {
+      "code": "leak_check_skip_fk_child",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "leak_check skipped a foreign-key child column; its values come from the parent.",
+      "symbol": "LEAK_CHECK_SKIP_FK_CHILD"
+    },
+    {
+      "code": "leak_check_skip_missing_column",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "leak_check skipped a column that is missing from the output or the source.",
+      "symbol": "LEAK_CHECK_SKIP_MISSING_COLUMN"
+    },
+    {
+      "code": "leak_check_skip_passthrough",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "leak_check skipped a column that keeps its source values by design.",
+      "symbol": "LEAK_CHECK_SKIP_PASSTHROUGH"
+    },
+    {
+      "code": "leak_check_skip_table_not_produced",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "leak_check skipped a table that this run did not produce.",
+      "symbol": "LEAK_CHECK_SKIP_TABLE_NOT_PRODUCED"
+    },
+    {
+      "code": "leak_check_skip_when",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "leak_check skipped a column that carries a when predicate.",
+      "symbol": "LEAK_CHECK_SKIP_WHEN"
+    },
+    {
+      "code": "validator_skip_missing_column",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "A validator skipped a column that is missing from the table.",
+      "symbol": "VALIDATOR_SKIP_MISSING_COLUMN"
+    },
+    {
+      "code": "validator_skip_missing_table",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.35.0",
+      "summary": "A validator skipped a table that this run did not produce.",
+      "symbol": "VALIDATOR_SKIP_MISSING_TABLE"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.35.0"
+}
