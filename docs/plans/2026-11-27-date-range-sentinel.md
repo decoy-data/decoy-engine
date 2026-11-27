@@ -164,6 +164,33 @@ At admission pass only ordinary stats to the existing range checks, including wi
 
 For date32, date64 and timestamps, compare non-null Arrow extrema as physical integers in their native units to the inclusive Python calendar bounds. Decode dictionary-encoded date columns on the Arrow side for this check, counting referenced rows, not unused dictionary entries. Intersect with the unit's storage range before making comparison scalars. Preserve valid sub-day timestamps through the end of year 9999. For zoned columns also check local calendar representability before conversion, including offset crossings. Only on failure count the offending rows with an Arrow mask. Raise `SourceDateUnrepresentableError` outside any exception handler with table, column and batch count only. The AT-V1 source-boundary guard traces resident returns, caller loaders and lazy yields to the checked read. Bypassing a later batch or a resident return must fail AT-V1. Run the import-layer and reason-adapter tests, including isolated classification.
 
+### 4.4a Existing tests the S5 source check changes
+
+Found by the S5 full suite on 2026-11-27 (236 new failures, all one class). The source check in 4.4 applies to every
+source column on every route, including passthrough and carried columns. So a source date outside the Python
+calendar (year 1 to 9999) is now refused at the reader with `source_date_unrepresentable`, before any strategy runs.
+This follows the non-goal in section 3 ("masking dates beyond year 9999: S5 only refuses them"). Row N stays true for
+far dates inside the calendar, such as `9999-12-31`, which passthrough still returns exactly.
+
+Some tests fed out-of-calendar values through passthrough and asserted the old behavior. S5 changes them as follows,
+and each change keeps the test's own claim:
+- `tests/native/test_chunked_entry_rev9_shapes.py`: the shapes `timestamp_{s,ms}_min` (int64 minimum) and
+  `date32_far`. Every test parametrized over them asserts something about carried passthrough: exact return on both
+  routes, equal tables, oracle unchanged, min int64 kept, row-error sink, and no carried column reaching pandas. For
+  each one, use the in-calendar extreme for the same unit instead (the first and last representable instant of years
+  1 and 9999), so the claim is still checked at the edge. Add one test per route that the int64-minimum shapes are
+  refused with `source_date_unrepresentable`, value-free, naming the table and column.
+- `tests/native/test_unconfigured_passthrough_read.py::test_sibling_reading_strategy_keeps_its_listing_and_coded_error`:
+  if the bad shape is an out-of-calendar date, swap it for a non-date bad shape of the same family, so the sibling
+  listing and coded error are still checked. Add an assertion that the date shape is refused at the source.
+- `tests/unit/execution/test_full_frame_value_unrepresentable.py::test_far_date_raises_coded_error_naming_the_column`:
+  year 12921 is now refused at the source. Assert `source_date_unrepresentable`, naming the column and table.
+  `full_frame_value_unrepresentable` stays tested by the time64 sub-microsecond case in the same file. If no date
+  shape can reach `full_frame_value_unrepresentable` any more, write that down as a V2-LOG note. Do not remove the code.
+
+Any other test that S5 turns red must fit this class (an out-of-calendar source date fed through a value-agnostic
+column) to be changed this way. Anything else is a real regression: fix the code, not the test.
+
 ### 4.5 Placement
 
 | Item | Place | Why |
