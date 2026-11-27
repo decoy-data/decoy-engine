@@ -10,6 +10,7 @@ __all__ = [
     "COLUMN_DUPLICATE",
     "CONFIG_VALUE_NOT_JSON",
     "DECLARED_TABLE_DROPPED",
+    "DELIVERY_BEST_EFFORT_UNRELEASED",
     "ENTRY_INVALID",
     "ENV_FLAG_INVALID",
     "GENERATE_AGGREGATE_INPUT_NOT_NUMERIC",
@@ -298,6 +299,15 @@ SCAN_BASELINE_UNBOUND = _d(
     "scan_baseline_unbound",
     "scan_baseline.on_drift: fail needs scan_baseline.sha256, so the baseline is bound.",
     since="1.30.0",
+)
+
+# Row 61b lifts this refusal when best-effort delivery ships. The summary names config keywords
+# only, never a submitted value.
+DELIVERY_BEST_EFFORT_UNRELEASED = _d(
+    "delivery_best_effort_unreleased",
+    "Delivery mode best_effort is planned for 1.x; this release delivers strict only. "
+    "Remove the delivery block or write mode: strict.",
+    since=UNRELEASED,
 )
 
 _d = _catalog.config("ConfigError")
