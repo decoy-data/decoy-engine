@@ -7,7 +7,7 @@ spawned, committed or classified.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -71,57 +71,35 @@ class Attempt:
         """Build both results; `receipt` is the failed receipt of a requested destination."""
         code = _decoy.PROCESS_OUT_OF_MEMORY
         summary = reasons.get(code.namespace, code).summary
-        self._pre_call = _memory_result(
+        unknown = CleanupState.UNKNOWN  # nothing is cleaned up yet when these are built
+        self._pre_call = _readback_result(
+            code,
             f"{summary} {_READBACK_REMEDY}",
-            PublicationState.NOT_PUBLISHED,
+            (PublicationState.NOT_PUBLISHED, unknown),
             receipt,
             self.extra,
             peak,
             pid,
         )
-        self._unknown = _memory_result(
-            f"{summary} {_UNKNOWN_REMEDY}", PublicationState.UNKNOWN, None, self.extra, peak, pid
+        self._unknown = _readback_result(
+            code,
+            f"{summary} {_UNKNOWN_REMEDY}",
+            (PublicationState.UNKNOWN, unknown),
+            None,
+            self.extra,
+            peak,
+            pid,
         )
+
+    def failed_receipt_for(self, receipt: CommitReceipt) -> None:
+        """Add the failed receipt of a requested destination to the pre-call reserve. If this
+        allocation fails the receipt-less reserve already stands."""
+        if self._pre_call is not None:
+            self._pre_call = replace(self._pre_call, publication_receipt=receipt)
 
     def memory_result(self) -> IsolatedRunResult | None:
         """The reserve for a memory failure now, or None when none was built yet."""
         return self._unknown if self.publishing else self._pre_call
-
-
-def _memory_result(
-    fixed_text: str,
-    state: PublicationState,
-    receipt: CommitReceipt | None,
-    extra: dict[str, Any],
-    peak: float | None,
-    pid: int,
-) -> IsolatedRunResult:
-    """A reserved memory result: cleanup is not known when it is built, so it says so."""
-    reason = ReasonRecord.for_reason(
-        _decoy.PROCESS_OUT_OF_MEMORY,
-        phase=Phase.FINALIZE,
-        context=ReasonContext.build(
-            operation=Operation.READ,
-            storage_ref="output",
-            publication_state=state,
-            cleanup_state=CleanupState.UNKNOWN,
-        ),
-    )
-    return IsolatedRunResult(
-        outcome="crashed",
-        peak_rss_mb=peak,
-        outputs=None,
-        quality_metrics={},
-        table_kinds={},
-        returncode=0,
-        signal_number=None,
-        error=fixed_text,
-        isolated=True,
-        pid=pid,
-        extra=extra,
-        reason=reason,
-        publication_receipt=receipt,
-    )
 
 
 def _blocked_metrics(metrics: Any) -> dict[str, Any]:
@@ -204,6 +182,11 @@ def commit_reason(exc: BaseException, staging: Path) -> ReasonRecord:
     )
 
 
+def _not_published(staging: Path) -> tuple[PublicationState, CleanupState]:
+    """Nothing was published; cleanup is confirmed by looking, as for a failed commit."""
+    return PublicationState.NOT_PUBLISHED, cleanup_state_of(staging)
+
+
 def readback_refused(
     fit: ResidentFit,
     *,
@@ -225,7 +208,7 @@ def readback_refused(
         kill_ceiling_bytes=fit.kill_ceiling_bytes,
         remedy=_READBACK_REMEDY,
     )
-    return _readback_result(code, fixed_text, staging, receipt, extra, peak, pid)
+    return _readback_result(code, fixed_text, _not_published(staging), receipt, extra, peak, pid)
 
 
 def readback_memory_failure(
@@ -241,27 +224,27 @@ def readback_memory_failure(
     Built from the registry, never from the exception: its message can carry sizes and names."""
     code = _decoy.PROCESS_OUT_OF_MEMORY
     fixed_text = f"{reasons.get(code.namespace, code).summary} {_READBACK_REMEDY}"
-    return _readback_result(code, fixed_text, staging, receipt, extra, peak, pid)
+    return _readback_result(code, fixed_text, _not_published(staging), receipt, extra, peak, pid)
 
 
 def _readback_result(
     code: ReasonCode,
     fixed_text: str,
-    staging: Path,
+    states: tuple[PublicationState, CleanupState],
     receipt: CommitReceipt | None,
     extra: dict[str, Any],
     peak: float | None,
     pid: int,
 ) -> IsolatedRunResult:
-    """Nothing was published; cleanup is confirmed by looking, as for a failed commit."""
+    """A crashed readback result with the given publication and cleanup states."""
     reason = ReasonRecord.for_reason(
         code,
         phase=Phase.FINALIZE,
         context=ReasonContext.build(
             operation=Operation.READ,
             storage_ref="output",
-            publication_state=PublicationState.NOT_PUBLISHED,
-            cleanup_state=cleanup_state_of(staging),
+            publication_state=states[0],
+            cleanup_state=states[1],
         ),
     )
     return IsolatedRunResult(

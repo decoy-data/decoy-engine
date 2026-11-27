@@ -105,6 +105,22 @@ def test_a14_a_fault_before_the_flag_is_not_published(
     run.nothing_left(output)
 
 
+def test_a14_a_fault_building_the_failed_receipt_keeps_the_reserve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scratch: Path,  # noqa: F811
+) -> None:
+    """The failed receipt is added to a reserve that already stands; losing it loses only the
+    receipt."""
+    run = a_run(tmp_path, monkeypatch)
+    fired: list[str] = []
+    once(monkeypatch, f"{COMMIT}.failed_receipt", fired)
+    result = run.go()
+    assert fired
+    memory(result, PublicationState.NOT_PUBLISHED, BEFORE_TEXT)
+    run.nothing_left(True)
+
+
 def test_a14_a_fault_in_the_reader_setup_is_not_published(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

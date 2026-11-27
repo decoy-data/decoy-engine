@@ -430,11 +430,9 @@ def result_from_envelope(
         shutil.rmtree(staging_output_dir, ignore_errors=True)
         return envelope_failure(envelope, pid=pid)
 
-    attempt.reserve(
-        receipt=None if pub is None else failed_receipt(_request(pub.request)),
-        peak=peak,
-        pid=pid,
-    )
+    attempt.reserve(receipt=None, peak=peak, pid=pid)
+    if pub is not None:
+        attempt.failed_receipt_for(failed_receipt(_request(pub.request)))
     attempt.extra["readback"] = asdict(Readback(None, 0, 0, 0, 0, 0))
     committed = None if pub is None else str(pub.target)
     row_errors = row_errors_of(envelope)
