@@ -253,62 +253,119 @@ The contract:
 1. Read: a plain `date32`, `date64` or `timestamp` column (any unit, with or without a zone), checked as in section
    4.4; and a top-level dictionary whose value type is one of those, checked by casting the column to its value type,
    which counts referenced rows only. No other column that holds a date is read.
-2. Type gate, first, on the schema. `_holds_dates(type)` walks the type tree generically. A temporal leaf holds dates.
-   Any other type holds dates when a child reached through `num_fields` and `field(i)`, `DictionaryType.value_type` or
-   `ExtensionType.storage_type` does. There is no list of container kinds to keep in step with pyarrow. A column that
-   holds dates and is not a shape in item 1 is refused with the new reason `runtime/source_date_type_unsupported`,
-   raised as `SourceDateTypeUnsupportedError` beside `SourceDateUnrepresentableError` in `io/bounded_reader.py`, with
-   a `_CODED` row for that module. The message names the table, the column and one container kind from a closed set
-   (`list`, `large_list`, `fixed_size_list`, `list_view`, `large_list_view`, `map`, `struct`, `union`,
-   `run_end_encoded`, `dictionary`, `extension`, `other`). It says to drop the column, select it out, or cast it to a
-   plain date or text column before the run. It holds no value, no count, no child field name and no exception
-   context. The gate reads the type only, so every route refuses at the first schema the reader sees (a lazy source
-   at open, before the profile head), whether the dates are inside the calendar or not, and an empty table refuses the
-   same way.
-3. No physical accessor in the check. `source_dates.py` never uses `.values`, `.keys`, `.items`, `.field(`,
-   `.offsets`, `.buffers(`, `.children` or `.flatten(` on data. An `ast` test fails on any of them (AT-V9); the one
-   allowance is `.field(` inside `_holds_dates`, where it is called on a `DataType`, not on data. The read shapes
-   need none: a plain column is checked with `min_max` and masks over its own slice (nulls ignored), and a top-level
-   dictionary with the cast in item 1.
-4. Top-level dictionary repair. Once a dictionary column passes, any out-of-calendar entry is unused. Drop only those
-   entries, chunk by chunk, with `filter` and a remap through `cumulative_sum` and `take`. The surviving entries keep
-   their order, unused in-calendar entries and null entries stay, and the index type and the `ordered` flag stay. A
-   column with no bad entry comes back as the same object. There is no re-encode.
+2. Type gate, first, on the schema. A date leaf is `date32`, `date64` or `timestamp` (the existing `_is_temporal`,
+   `source_dates.py:52`), not `pa.types.is_temporal`, which also takes `time64`, `duration` and
+   `month_day_nano_interval`. `_holds_dates(t)` is `any(is_date_leaf(n) for n in type_nodes(t))`. `type_nodes` and
+   `type_children` are the existing type walker from `fileaccess/adapters/arrow.py:150-169` ("the one place the type
+   checks learn Arrow's nesting rules"), moved to the bottom-tier `decoy_engine/_arrow_types.py` and used from both
+   places, so there is one copy. It follows `pa.BaseExtensionType` to its storage type (so `opaque`, `uuid`, `json`
+   and `fixed_shape_tensor` are seen, not only `pa.ExtensionType` subclasses), a dictionary to its value type, a map to
+   its entries struct, structs and unions through `num_fields` and `field(i)`, and list kinds, list views and
+   run-end-encoded types through `value_type`. There is no list of container kinds to keep in step with pyarrow.
+   Probe on pyarrow 14.0.2 (the floor, scratch venv) and 24.0.0: the walker finds the date in list, large list,
+   fixed-size list, map, struct, dense and sparse union, run-end-encoded, dictionary and `fixed_shape_tensor(timestamp)`
+   on both, and in list view, large list view and `opaque(date32)` on 24; pyarrow 14 has no list view, `opaque`,
+   `uuid` or `json` type, so there is nothing more to walk there. A column that holds dates and is not a shape in item 1
+   is refused with the new reason `runtime/source_date_type_unsupported`, raised as `SourceDateTypeUnsupportedError`
+   beside `SourceDateUnrepresentableError` in `io/bounded_reader.py`, with a `_CODED` row for that module. The message
+   names the table, the column and the kind of the outermost type of the column, from a closed set (`list`,
+   `large_list`, `fixed_size_list`, `list_view`, `large_list_view`, `map`, `struct`, `union`, `run_end_encoded`,
+   `dictionary`, `extension`, `other`). It says to drop the column, select it out, or cast it to a plain date or text
+   column before the run. It holds no value, no count, no child field name and no exception context. The gate reads the
+   type only, so it refuses whether the dates are inside the calendar or not.
+   Wiring: `check_source_schema(schema, *, table)` is the gate. `check_source_dates` calls it first on every table and
+   batch (so a resident or loaded table refuses even when it has no rows), and `checked_batches` and `checked_chunks`
+   call it eagerly on the source schema before the first batch: `LazySource.iter_batches`, `open_batches` and
+   `to_table` pass the Parquet footer schema, and the `_FixedSchemaChunks` path passes its `source_schema`. So a lazy
+   source refuses at open, before the profile head, and an empty Parquet file refuses (AT-V3 empty-file case). A plain
+   chunk iterable with no known schema is gated at its first chunk; an empty one has nothing to check.
+3. Closed vocabulary in the check. `source_dates.py` may call only an allowlist of `pc` functions (`min_max`, `less`,
+   `greater`, `or_`, `and_`, `invert`, `fill_null`, `sum`, `local_timestamp`, `cumulative_sum`, `subtract`, `take`)
+   and an allowlist of attributes and methods (the type and schema accessors, `.cast`, `.filter`, `.chunks`,
+   `.dictionary`, `.indices`, `.column`, `.num_columns`, `.from_arrays`); the builder records the final list in the
+   test. An `ast` test fails on any other `pc.` call or attribute, so `pc.list_flatten`, `struct_field`,
+   `list_value_length`, `list_parent_indices`, `run_end_decode`, `dictionary_decode`, `.values`, `.keys`, `.items`,
+   `.field`, `.storage`, `.sizes`, `.run_ends`, `.value_lengths`, `.value_parent_indices`, `.offsets`, `.buffers`,
+   `.children` and `.flatten` all fail it (AT-V9). The test also fails when `source_dates.py` imports a module other
+   than `pyarrow`, `pyarrow.compute`, `decoy_engine._arrow_types`, `decoy_engine.io.bounded_reader` and the standard
+   library, so a walk moved into a helper module is caught. The type walk calls `field(i)` on types in
+   `_arrow_types.py`, so `source_dates.py` needs no allowance. Runtime invariant: the counting function raises an
+   internal error on any type that is not a date leaf or a dictionary of one, so a gate that lets a container through
+   fails loudly instead of counting (M-25).
+4. One outside-calendar mask, then the dictionary repair. `_outside_mask(values)` returns the per-cell boolean mask of
+   cells outside years 1 to 9999, including the zoned local-time band (`source_dates.py:127-135`). The count uses it,
+   and so does the repair: for a top-level dictionary, the mask over the dictionary entries. Once a dictionary column
+   passes, any outside entry is unused. Build `keep = fill_null(invert(mask), True)` (a null entry is kept), compute
+   `cumulative_sum` in `int64`, take the remap by the indices and cast back to the index type (signed or unsigned).
+   Do this chunk by chunk with `filter` and `take`. The surviving entries keep their order, unused in-calendar entries
+   and null entries stay, and the index type and the `ordered` flag stay. A column with no outside entry comes back as
+   the same object. There is no re-encode. Probe: entries `[D, null, FAR, D2]` with `uint8` indices `[0, 1, 3]` give
+   entries `[D, null, D2]` and indices `[0, 1, 2]`, so a row that points after a null entry keeps its value.
 5. Not covered: bytes under a null slot of a plain leaf. Arrow leaves them undefined, no conversion reads them (probe),
    and the Parquet and CSV writers do not write them. Arrow IPC copies buffers as they are, so a caller that passes
    such bytes in gets its own bytes back in an Arrow return. Follow-up G-9, not a V1 item.
 
 **Table name (finding 7).** The table name in a refusal is the name the caller gave the source: the key of the
 `sources` mapping, or the configured table on the single-source chunked entries. `check_resident_sources` binds each
-lazy source to its key with `dataclasses.replace(source, table=name)` and the run reads the bound copy. A lazy source
-is a frozen dataclass and `replace` keeps the subclass, so the CSV and fixed-width lazy sources bind too. A source
-built with another `table=` is rebound to the key. `io` must not import `profile`, so `io` types the argument with a
-small `Protocol` that has a `table` field; `profile/_readers.py` gets no new method. The tests build `LazySource(path)`
-with no `table=`, so a missing binding cannot hide behind the fixture.
+lazy source to its key with `dataclasses.replace(source, table=name)`, only when `dataclasses.is_dataclass(source)`
+and `table` is one of `dataclasses.fields(source)`; anything else passes through as today. The run reads the bound
+copy. A lazy source is a frozen dataclass and `replace` keeps the subclass, so the CSV and fixed-width lazy sources bind
+too. A source built with another `table=` is rebound to the key. `io` must not import `profile`, so `io` types the
+argument with a small `Protocol` that has a `table` field; `profile/_readers.py` gets no new method. The tests build
+`LazySource(path)` with no `table=`, so a missing binding cannot hide behind the fixture.
+
+Where the binding runs on each route, traced at `2fab8cb9f`:
+- FF, AUTO, SEQ and OOC through `run_pipeline`: `check_resident_sources` runs at `execution/_pipeline.py:298`, before
+  `build_run_context` and every route dispatch, so every route reads the bound sources. Only `resolve_subset` and the
+  checked loader come earlier (`:291-292`), and they read through `source_loader`, not `sources`. SEQ gets its loader
+  from `run_pipeline` after that line (`_pipeline_route_exec.py:152`), so a lazy source it materializes carries the
+  bound name. A direct `run_sequential` call takes only a `source_loader`, which `checked_loader` names per table.
+- `run_fk_out_of_core` and `PandasExecutionAdapter.run` call `check_resident_sources` at their own entry (the
+  `_SELF_CHECKED` rows).
+- ISO: `run_pipeline_isolated` takes resident tables only (`_isolated_run.py:147`), stages them to Parquet or IPC
+  (`_isolated_commit.py:159`) without converting them, and the child rebuilds each lazy source as
+  `LazySource(path, table=name)` from the manifest key (`_isolated_worker.py:97`) and calls `run_pipeline`, which
+  binds again at `:298`. So the parent does not bind before dispatch: the name crosses the process boundary as the
+  manifest key, and the child binds. With `isolate=False` the in-process path calls `run_pipeline` directly
+  (`_isolated_run.py:322`). AT-V7 runs the ISO cell both ways.
 
 **AT-V1 guard (DESIGN finding).** Move the static guard to `tests/sentry/test_source_date_read_guard.py` and make
 every allowance per function:
 - `_DOWNSTREAM_FUNCTIONS: dict[tuple[str, str], str]`, keyed by file and qualified function name and holding a reason,
   replaces `_DOWNSTREAM_FILES`. No file-level exemption remains.
-- A function is a sink site when it calls `to_pandas` or `to_pandas_fk_safe`, or calls a function named in
-  `_DOWNSTREAM_FUNCTIONS` (it forwards data to a conversion). Names match by simple name, so a name collision fails
-  closed. A function that calls a check from `_ANY_CHECK` and is in `_SELF_CHECKED` is not a sink.
+- A function is a sink site when it calls `to_pandas`, `to_pandas_fk_safe` or a name in the closed set
+  `_CONVERSION_HELPERS`: the conversion wrappers in `internal/pandas_compat.py` (today `table_to_pandas_exact_ints`).
+  The rule is not transitive: being listed in `_DOWNSTREAM_FUNCTIONS` does not make a function's callers sinks. A
+  transitive rule by simple name reaches about 3,477 functions (Dennis's simulation), which no one can review; the
+  closed set gives about 28 entries. A new wrapper in `internal/pandas_compat.py` that calls `to_pandas` is itself a
+  sink site, so it must be listed, and listing it as a conversion wrapper adds it to `_CONVERSION_HELPERS`.
 - Every sink site is in `_SELF_CHECKED` (and still calls its checks) or in `_DOWNSTREAM_FUNCTIONS`. Every entry still
   exists and is still a sink site, so stale entries fail.
+- A check result must be used. Anywhere in `src/decoy_engine`, a call to a name in `_ANY_CHECK` used as a bare
+  expression statement fails the guard, because `check_source_dates` returns the repaired data and a caller that
+  drops it converts the unrepaired table. Passing the result as an argument (`_chunked.py:459`) or assigning it is
+  fine.
 - The scan takes the module texts as an argument (default: the repository files), so a test can seed code in memory.
 - Seeded bypasses: (1) `def _seeded_entry(source): return source.to_pandas()` appended to
   `execution/_pandas_adapter.py`, a file exempt as a whole today; (2) a new module with
   `def run_seeded(chunks): return [table_to_pandas_exact_ints(c) for c in chunks]`, which forwards raw chunks to the
-  existing helper in `internal/pandas_compat.py`. The guard must name both.
-- If the first full `_DOWNSTREAM_FUNCTIONS` listing passes 80 entries, stop and report. How big an allowlist can be
+  existing helper in `internal/pandas_compat.py`; (3) a `_SELF_CHECKED` function seeded with `check_source_dates(t,
+  table=n)` as a bare statement followed by `t.to_pandas()`. The guard must name all three.
+- If the first full `_DOWNSTREAM_FUNCTIONS` listing passes 40 entries, stop and report. How big an allowlist can be
   reviewed is a design question, not one to work around.
 
-**Module size.** `io/source_dates.py` is 243 lines. It loses the hand walk (`_children`, the nested recursion, the
-re-encode) and gains the type gate and the repair, so it stays near 250, under GOAL 600 with no census entry.
-`execution/native/_chunked_entry.py` (689 lines, ceiling 689, MAX 700) gets no lines from 4.4b: the chunked entries
-already pass their table name to `checked_chunks`. `profile/_readers.py` (598) gets no lines: the binding lives in
-`io`. `io/bounded_reader.py` (434) gains the new error class, about 20 lines. No cap, ceiling or ratchet is raised. A
-file that would need a higher pin is a stop.
+**Module size.** No cap, ceiling or ratchet is raised; a file that would need a higher pin is a stop.
+
+| File | Lines at `2fab8cb9f` | After 4.4b | Rule |
+|---|---|---|---|
+| `io/source_dates.py` | 243 | about 240: loses the hand walk (`_children`, `_holds_dates` recursion, the re-encode), gains the schema gate, the shared mask and the repair | under GOAL 600, no entry |
+| `_arrow_types.py` | 259 | about 285: gains `type_children` and `type_nodes` | under GOAL 600 |
+| `fileaccess/adapters/arrow.py` | 333 | about 315: the walker moves out, its callers import it | under GOAL 600 |
+| `io/bounded_reader.py` | 434 | about 455: the new error class | under GOAL 600 |
+| `reasons/runtime/_part3.py` | 573 | about 588: the new reason | under GOAL 600; if it passes 600 it takes a census entry per `tests/sentry/test_module_size.py` (ceiling at most loc + 20, never above 700) |
+| `execution/native/_chunked_entry.py` | 689 (ceiling 689, MAX 700) | 689: no lines; the chunked entries already pass their table name and schema to `checked_chunks` | unchanged pin |
+| `execution/_chunked_input.py` | small | a few lines for the eager schema gate in `checked_chunks` | under GOAL 600 |
+| `profile/_readers.py` | 598 | at most 600: the binding lives in `io`; passing the footer schema to `checked_batches` edits existing calls, and any added line is offset in the same file | must stay at or under GOAL 600 |
 
 **Why the six cases are right by construction.**
 
@@ -332,7 +389,8 @@ output: either decode to a canonical type (output types change) or rebuild each 
 | `DateDomain`, `DatePartition`, `DateRangeError`, range table | `transforms/date_preserve.py` (275 lines today, about 400 after) | `transforms/` is at its fan-out limit (CODEMAP "Transforms" row); the matching code it extends is already here |
 | New reason | `reasons/runtime/_part3.py`, new `_catalog.runtime("DateRangeError")` binding | runtime reason home; `_part3.py` is 553 lines |
 | Coded family row | `reason_adapter.py:44-70` `_CODED`: `("decoy_engine.transforms.date_preserve", "DateRangeError", "runtime")`, the defining module | without it the adapter and isolated-child classification report the refusal uncoded; `tests/unit/test_reason_registry.py:198-218` already checks every row resolves and gains a case that `reason_from_exception(DateRangeError(...))` returns the new code |
-| S5 source boundary | Existing `io/bounded_reader.py` (CODEMAP.md:129), public checked Arrow reader API exported by `decoy_engine.io`. Error in `errors.py`, code in `reasons/runtime/_part3.py`, adapter row `("decoy_engine.errors", "SourceDateUnrepresentableError", "runtime")` | Profile and run readers may both import io and errors under `.importlinter:22-25` |
+| S5 source boundary | Existing `io/bounded_reader.py` (CODEMAP.md:129), public checked Arrow reader API exported by `decoy_engine.io`. Error `SourceDateUnrepresentableError` in `io/bounded_reader.py:106`, code in `reasons/runtime/_part3.py`, adapter row `("decoy_engine.io.bounded_reader", "SourceDateUnrepresentableError", "runtime")` at `reason_adapter.py:57` | Profile and run readers may both import io under `.importlinter:22-25` |
+| S5 shared type walker (4.4b) | `type_children` and `type_nodes` move from `fileaccess/adapters/arrow.py:150-169` to the bottom-tier `decoy_engine/_arrow_types.py` (259 lines), which `io/source_dates.py` already imports; `fileaccess/adapters/arrow.py` imports them back | one copy of Arrow's nesting rules for the file-access type checks and the date gate; `io` cannot import `fileaccess`, both can import the bottom tier |
 | S5 type gate (4.4b) | `SourceDateTypeUnsupportedError` beside `SourceDateUnrepresentableError` in `io/bounded_reader.py`; reason in `reasons/runtime/_part3.py`; adapter row `("decoy_engine.io.bounded_reader", "SourceDateTypeUnsupportedError", "runtime")`; gate, repair and lazy binding in `io/source_dates.py` | the existing error and check live there; no new module |
 | S5 read guard (4.4b) | `tests/sentry/test_source_date_read_guard.py` (moved from `tests/unit/execution/test_source_date_unrepresentable.py`) | beside the other choke-point sentries |
 | S5 type tests (4.4b) | `tests/unit/io/test_checked_source_dates.py` for the unit cases; route cases in `tests/unit/execution/test_source_date_unrepresentable.py` | the existing S5 test homes |
@@ -456,13 +514,13 @@ Parity check (part of AT-R1, AT-R2): for every route pair the output table diges
 
 Section 4.4b tests. Each is red at `2fab8cb9f` (the S5 branch head that Codex round 2 reviewed) and is written before the fix. Value-free means: no year, day number, count of nested cells or child field name in `str`, `repr`, the log or an isolated child result, and empty cause and context.
 
-- AT-V3 (findings 1, 2 and 6). One column each: `list<date32>`, `large_list<timestamp[us]>`, `fixed_size_list<date32>`, `struct<date32>`, `map<string, date32>`, `list<dictionary<date32>>` with an unused far child entry, `dictionary<struct<date32>>`, and a struct and a list with a far date under a null parent. Referenced dates are all in the calendar. Run CH and NCH, and FF and AUTO with a resident source; repeat the Parquet-storable ones as a `LazySource` file. Each refuses `runtime/source_date_type_unsupported` naming table, column and kind, value-free, with nothing published and nothing returned. No `ArrowNotImplementedError` and no `ValueError` reaches the caller. Red: both chunked APIs succeed and return the far child entry (finding 1), the public oracle raises `ValueError: year 10183 is out of range` (finding 2), and the dictionary of structs raises `ArrowNotImplementedError` (finding 6).
-- AT-V4 (finding 3). `list_view<date32>` and `run_end_encoded<int32, date32>`, each with a far date and with in-calendar dates only, plus an extension type over `date32` and a dense union with a `date32` member: each refused with its kind, value-free. The list view cases skip when `pa.list_view` is missing (pyarrow floor 14); the others always run. Red: list view and REE pass the check and native returns the far value.
+- AT-V3 (findings 1, 2 and 6). One column each: `list<date32>`, `large_list<timestamp[us]>`, `fixed_size_list<date32>`, `struct<date32>`, `map<string, date32>`, `list<dictionary<date32>>` with an unused far child entry, `dictionary<struct<date32>>`, and a struct and a list with a far date under a null parent. Referenced dates are all in the calendar. Run CH and NCH, and FF and AUTO with a resident source; repeat the Parquet-storable ones as a `LazySource` file. Add an empty Parquet file and an empty resident table with a `list<date32>` column: both refuse the same way, the lazy one before the profile head reads a batch. Each refuses `runtime/source_date_type_unsupported` naming table, column and the outermost kind, value-free, with nothing published and nothing returned. No `ArrowNotImplementedError` and no `ValueError` reaches the caller. Red: both chunked APIs succeed and return the far child entry (finding 1), the public oracle raises `ValueError: year 10183 is out of range` (finding 2), and the dictionary of structs raises `ArrowNotImplementedError` (finding 6).
+- AT-V4 (finding 3). `list_view<date32>` and `run_end_encoded<int32, date32>`, each with a far date and with in-calendar dates only, plus a `pa.ExtensionType` subclass over `date32`, `opaque(date32)` with a far date, `fixed_shape_tensor(timestamp[us], [2])` with a far date, and a dense union with a `date32` member: each refused with its kind, value-free. The list view and `opaque` cases skip when `pa.list_view` or `pa.opaque` is missing (pyarrow 14 has neither); the others always run. A plain `time64`, a plain `duration`, `list<time64>` and `struct<duration>` pass the gate unchanged (no date leaf). Red: list view and REE pass the check and native returns the far value.
 - AT-V5 (finding 4). A `map<string, date32>` sliced so that the row with a far date is outside the slice and an in-calendar row stays: refused with `source_date_type_unsupported`, kind `map`, and no count. Red: the S5 head reports `source_date_unrepresentable` with count 1. The refusal of this valid-looking job is the Q6 contract; if the owner picks Q6 (B), this test becomes "passes, and the output holds no far value".
-- AT-V6 (finding 5). An ordered `dictionary<int8, date32>` with entries `[D2, FAR, D1, D3]` and indices `[2, 0, null, 2]` (rows reference D1 before D2, the reverse of entry order; D3 is valid and unused). After the check: entries `[D2, D1, D3]`, indices `[1, 0, null, 1]`, `ordered=True`, index type `int8`, logical values equal to the input's; the pandas categorical has categories `[D2, D1, D3]`, is ordered, and its minimum is D2. Repeat as a two-chunk column with different dictionaries and as a record batch. End to end through NCH and FF, the output column has the source type and entry order. Red: the S5 head re-encodes in row order (`[D1, D2]`) and drops D3.
+- AT-V6 (finding 5). An ordered `dictionary<int8, date32>` with entries `[D2, FAR, D1, D3]` and indices `[2, 0, null, 2]` (rows reference D1 before D2, the reverse of entry order; D3 is valid and unused). After the check: entries `[D2, D1, D3]`, indices `[1, 0, null, 1]`, `ordered=True`, index type `int8`, logical values equal to the input's; the pandas categorical has categories `[D2, D1, D3]`, is ordered, and its minimum is D2. Repeat as a two-chunk column with different dictionaries and as a record batch. Add entries `[D, null, FAR, D2]` with `uint8` indices `[0, 1, 3]` (a referenced null entry before FAR and a row after it): entries `[D, null, D2]`, indices `[0, 1, 2]`, no row turned null. Add a zoned `timestamp[us, tz=Pacific/Kiritimati]` dictionary whose unused entry is inside year 9999 in UTC but in year 10000 in local time: it is dropped like FAR, and the count of a referenced copy of it is 1. End to end through NCH and FF, the output column has the source type and entry order. Red: the S5 head re-encodes in row order (`[D1, D2]`) and drops D3.
 - AT-V7 (finding 7). `sources={"t": LazySource(path)}`, no `table=`, with a far date after the profile sample: FF, AUTO, SEQ (parent and child), OOC and ISO refuse with table `t`. `LazySource(path, table="other")` under key `t` reports `t`. Repeat once with a CSV lazy source. Red: the S5 head reports `source`.
-- AT-V8 (DESIGN finding). In `tests/sentry/test_source_date_read_guard.py`: the two seeded bypasses of section 4.4b are each named by the guard; a seeded stale `_DOWNSTREAM_FUNCTIONS` entry fails; the repository as it is passes. Red: the file-level guard at the S5 head passes both seeds.
-- AT-V9 (rule 3 of 4.4b). An `ast` test over `io/source_dates.py` fails on a physical accessor on data, with only the `_holds_dates` type-walk allowance. Red: the S5 head uses `.keys`, `.items` and `.flatten()`.
+- AT-V8 (DESIGN finding). In `tests/sentry/test_source_date_read_guard.py`: the three seeded bypasses of section 4.4b (direct conversion, forwarding to `table_to_pandas_exact_ints`, a dropped check result) are each named by the guard; a seeded stale `_DOWNSTREAM_FUNCTIONS` entry fails; the repository as it is passes. Red: the file-level guard at the S5 head passes all three seeds.
+- AT-V9 (rule 3 of 4.4b). An `ast` test over `io/source_dates.py` fails on any `pc.` call or attribute outside the allowlist and on any import outside the allowed modules; a seeded `pc.list_flatten(column)` and a seeded `.storage` each fail it. A unit test calls the counting function with a `list<date32>` column and expects the internal error. Red: the S5 head uses `.keys`, `.items`, `.flatten()` and `pc.list_flatten`, and counts the list instead of raising.
 - Locks, green at the S5 head: in-calendar plain and top-level dictionary date columns come back as the same object; columns with no date inside (`struct<a: int64>`, `list<int64>`, `dictionary<struct<a: int64>>`, `map<string, int64>`) pass unchanged on every route.
 
 ### 6.8 Generation (S7)
@@ -512,7 +570,11 @@ Each runs on the final head (catalog class 9) and must turn the named test red.
 | M-22 | S5: the dictionary repair re-encodes instead of filtering and remapping | AT-V6 |
 | M-23 | S5: `check_resident_sources` skips the lazy-source binding | AT-V7 |
 | M-24 | S5: the read guard exempts `execution/_pandas_adapter.py` as a whole file again | AT-V8 seed 1 |
-| M-25 | S5: the type gate lets `struct` through to a nested count | AT-V3, AT-V5 |
+| M-25 | S5: the type gate lets `struct` through to the counting function | AT-V3 (the internal error), AT-V9 runtime case |
+| M-26 | S5: the type walker follows `pa.ExtensionType` instead of `pa.BaseExtensionType` | AT-V4 `opaque` and `fixed_shape_tensor` cases |
+| M-27 | S5: the date leaf test is `pa.types.is_temporal`, so `time64` counts as a date | AT-V4 `time64` and `duration` pass cases |
+| M-28 | S5: the repair builds `keep` without `fill_null`, or runs `cumulative_sum` in the index type | AT-V6 null-entry and `uint8` cases |
+| M-29 | S5: the read guard stops flagging a bare check-call statement | AT-V8 seed 3 |
 
 ## 8. Frozen contracts and byte changes
 
@@ -706,6 +768,28 @@ Dennis R1 (`/home/cam/scratch/dennis-drs-plan-r1.md`, on `37cafb29e`): NO-GO, 2 
 | M4 | V2-LOG | The transforms table reads the contract constants. The decoder keeps its existing downward-only dependency. |
 | L1 | V2-LOG | Section 4.2 refuses deep copy and pickle. The section 4.4 sentry covers deepcopy. |
 | L2 | V2-LOG | The native ns invariant covers text and tz only. AT-R7 explicitly forces and verifies chunking. |
+
+### 17.1 Review of section 4.4b, round 1
+
+Dennis on `6e9e65664` (`~/scratch/dennis-s5-plan-4-4b-r1.md`): GO-WITH-FIXES, 2 high, 6 medium, 5 low.
+
+| Finding | Fix in 4.4b |
+|---|---|
+| H1 gate follows `pa.ExtensionType` only | shared walker follows `pa.BaseExtensionType`; AT-V4 `opaque` and `fixed_shape_tensor` cases; M-26 |
+| H2 transitive forwarding rule cannot be listed | sink set closed to `to_pandas`, `to_pandas_fk_safe` and `_CONVERSION_HELPERS`, not transitive; stop at 40 entries |
+| M1 second copy of the type walker | walker moved to `_arrow_types.py` and shared; Placement and size rows |
+| M2 date leaf too wide | date leaf is `date32`, `date64` or `timestamp`; AT-V4 pass cases; M-27 |
+| M3 repair nulls rows after a null entry | one outside mask for count and repair, `fill_null` keep, `int64` cumsum; AT-V6 cases; M-28 |
+| M4 denylist misses compute walks | allowlist of `pc` functions, attributes and imports; runtime invariant; AT-V9; M-25 |
+| M5 "at open" and empty-table claims unwired | `check_source_schema` wired into `check_source_dates`, `checked_batches` and `checked_chunks`; AT-V3 empty cases |
+| M6 dropped check result | guard fails on a bare check-call statement; AT-V8 seed 3; M-29 |
+| L1 M-25 cites AT-V5 | cites AT-V3 and AT-V9 |
+| L2 wrong error home in 4.5 | row points at `io/bounded_reader.py:106` and `reason_adapter.py:57` |
+| L3 `_part3.py` missing from the size list | added with the census rule |
+| L4 which kind is reported | the outermost kind |
+| L5 binding precondition | `is_dataclass` and a `table` field |
+| Not verified: pyarrow 14 walker | probed on 14.0.2 (4.4b item 2) |
+| Not verified: ISO, SEQ and isolated-dispatch binding | traced in 4.4b "Where the binding runs" |
 
 ## 18. Follow-ups (not in this row)
 
