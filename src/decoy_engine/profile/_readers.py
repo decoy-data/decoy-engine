@@ -247,8 +247,7 @@ class LazySource:
     path: Path
     access: FileAccess | None = field(default=None, compare=False, repr=False)
     field_key: str = field(default="source.path", compare=False)
-    # Names the table in a refused read; never part of identity.
-    table: str = field(default="source", compare=False)
+    table: str = field(default="source", compare=False)  # names a refused read
 
     def __post_init__(self) -> None:
         if self.access is None:
@@ -265,9 +264,8 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
-        return checked_batches(
-            self._iter_batches(check_batch_rows(batch_rows), columns), table=self.table
-        )
+        rows = check_batch_rows(batch_rows)
+        return checked_batches(self._iter_batches(rows, columns), table=self.table)
 
     def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
         handle = self._handle()
@@ -417,11 +415,9 @@ class ParquetFileSource(_PolicyBound):
         return self._lazy().schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
+        lazy = self._lazy()
         return head_frame_from_batches(
-            self._lazy().iter_batches(sample_rows),
-            sample_rows,
-            self._lazy().schema,
-            table=self.table,
+            lazy.iter_batches(sample_rows), sample_rows, lazy.schema, table=self.table
         )
 
     def to_frame(self) -> pd.DataFrame:
@@ -507,9 +503,7 @@ def head_frame_from_batches(
             break
     if not collected:
         return schema.empty_table().to_pandas()
-    head = pa.Table.from_batches(collected)
-    if head.num_rows > sample_rows:
-        head = head.slice(0, sample_rows)
+    head = pa.Table.from_batches(collected).slice(0, sample_rows)
     check_source_dates(head, table=table)
     return head.to_pandas()
 

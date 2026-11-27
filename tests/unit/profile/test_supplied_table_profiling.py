@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
-from decoy_engine.errors import SourceDateUnrepresentableError
+from decoy_engine.io import SourceDateUnrepresentableError
 from decoy_engine.profile import _readers_resident, _source, profile_source
 from decoy_engine.profile._readers import LazySource, ParquetFileSource
 from decoy_engine.profile._readers_resident import ResidentTableSource

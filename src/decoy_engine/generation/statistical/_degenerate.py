@@ -132,6 +132,17 @@ def _datetime_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     return None
 
 
+def _names_far_year(spec: StatisticalSpec) -> bool:
+    """True when a live year bin lies outside the sampled years (a zero-weight bin is never drawn)."""
+    buckets = spec.datetime_buckets
+    if buckets is None:
+        return names_unsupported_year(spec.stats)
+    return any(
+        b.count > 0 and not (b.start_year >= MIN_YEAR and b.end_year <= MAX_SAMPLED_YEAR)
+        for b in buckets
+    )
+
+
 def _unparseable_bound(spec: StatisticalSpec) -> str | None:
     """`min` or `max` when its text is not an ISO datetime this interpreter reads, else None.
 
@@ -166,11 +177,7 @@ def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
 def check_degenerate(spec: StatisticalSpec) -> None:
     """Raise `STATISTICAL_STATS_DEGENERATE` when `spec`'s snapshot cannot be sampled, or
     `GENERATION_UNBOUNDED_COLUMN` when a datetime snapshot names a year the sampler cannot hold."""
-    if (
-        spec.kind == "datetime"
-        and spec.datetime_buckets is None
-        and names_unsupported_year(spec.stats)
-    ):
+    if spec.kind == "datetime" and _names_far_year(spec):
         from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
         raise StatisticalSpecError(

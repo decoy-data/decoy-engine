@@ -482,26 +482,6 @@ class ParquetFixedListNullError(DecoyError):
     code: str = reasons.runtime.PARQUET_FIXED_LIST_NULL
 
 
-class SourceDateUnrepresentableError(DecoyError):
-    """A source date or timestamp column holds a value outside the calendar years 1 to 9999.
-
-    The checked source read raises it before the value can reach pandas or a strategy, so no
-    exception text quotes the date. The message names the table, the column and how many cells of
-    the checked batch are outside the calendar, and nothing else.
-    """
-
-    code: str = reasons.runtime.SOURCE_DATE_UNREPRESENTABLE
-
-    def __init__(self, *, table: str, column: str, count: int) -> None:
-        self.table = table
-        self.column = column
-        self.count = count
-        super().__init__(
-            f"[{self.code}] {reasons.get('runtime', self.code).summary} "
-            f"Table {table!r}, column {column!r}, {count} cell(s)."
-        )
-
-
 class FixedWidthWriteError(DecoyError):
     """Raised when a value cannot be written to a fixed-width file such that
     it reads back unchanged against its `FixedWidthLayout` column-spec
@@ -612,7 +592,6 @@ __all__ = [
     "ParquetFixedListNullError",
     "PipelineValidationError",
     "RowErrorsFailedError",
-    "SourceDateUnrepresentableError",
     "UnknownFKColumnError",
     "ValidationError",
     "ValidatorFailedError",

@@ -89,11 +89,6 @@ def ceiling_for(loc: int) -> int:
 # One-line rationale per entry; the per-file growth history lives in
 # docs/decisions/module-size-census-history.md.
 ALLOWLIST: dict[str, int] = {
-    # one error class per coded failure, with its value-free message; split by family next.
-    "src/decoy_engine/errors.py": 620,
-    # LazySource, OpenedLazyBatches and the head readers carry the source-date check; the table
-    # name rides every reader, so a split would only move the check away from its readers.
-    "src/decoy_engine/profile/_readers.py": 606,
     # F06: one declared-casting route guard per route owner (the sentry in test_f06_declared_casting
     # inventories them) and the cast_run threaded through the sequential and out-of-core executors;
     # no casting logic of its own lives in these routers.

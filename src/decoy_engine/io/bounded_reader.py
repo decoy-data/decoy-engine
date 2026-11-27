@@ -30,7 +30,7 @@ import pyarrow.csv as pa_csv
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine._arrow_types import CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER
-from decoy_engine.errors import DecoyError, SourceDateUnrepresentableError
+from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileAccess, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.io import csv_framer as framer
@@ -103,6 +103,26 @@ class CsvMalformed(BoundedReadError):  # noqa: N818 - coded condition
 
 class UnsupportedColumnType(BoundedReadError):  # noqa: N818 - coded condition
     code = reasons.connector.UNSUPPORTED_COLUMN_TYPE
+
+
+class SourceDateUnrepresentableError(DecoyError):
+    """A source date or timestamp column holds a value outside the calendar years 1 to 9999.
+
+    The checked source read raises it before the value can reach pandas or a strategy, so no
+    exception text quotes the date. The message names the table, the column and how many cells of
+    the checked batch are outside the calendar, and nothing else.
+    """
+
+    code: str = reasons.runtime.SOURCE_DATE_UNREPRESENTABLE
+
+    def __init__(self, *, table: str, column: str, count: int) -> None:
+        self.table = table
+        self.column = column
+        self.count = count
+        super().__init__(
+            f"[{self.code}] {reasons.get('runtime', self.code).summary} "
+            f"Table {table!r}, column {column!r}, {count} cell(s)."
+        )
 
 
 @dataclass(frozen=True)
@@ -537,6 +557,7 @@ __all__ = [
     "CsvMalformed",
     "CsvRecordExceedsMaxRowBytes",
     "RowExceedsMaxRowBytes",
+    "SourceDateUnrepresentableError",
     "UnsupportedColumnType",
     "check_resident_sources",
     "check_source_dates",

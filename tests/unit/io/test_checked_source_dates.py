@@ -7,8 +7,12 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine.errors import SourceDateUnrepresentableError
-from decoy_engine.io import check_source_dates, checked_batches, checked_loader
+from decoy_engine.io import (
+    SourceDateUnrepresentableError,
+    check_source_dates,
+    checked_batches,
+    checked_loader,
+)
 
 DAY = 86_400
 FIRST_DAY, LAST_DAY = -719_162, 2_932_896

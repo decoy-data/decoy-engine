@@ -13,11 +13,11 @@ import pytest
 
 from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
-from decoy_engine.errors import SourceDateUnrepresentableError
 from decoy_engine.execution import PandasExecutionAdapter, run_pipeline, run_pipeline_isolated
 from decoy_engine.execution._chunked import run_mask_pipeline_chunked
 from decoy_engine.execution.native._chunked_entry import run_mask_chunked as run_native_chunked
 from decoy_engine.execution.out_of_core import run_fk_out_of_core
+from decoy_engine.io import SourceDateUnrepresentableError
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.relationships._graph import OrphanPolicy
 from tests.native._chunked_entry_support import key_provider
