@@ -440,6 +440,15 @@ def _detect_date_format(text: str) -> str | None:
     return None
 
 
+def _shift_within_calendar(dt: datetime, days: int) -> datetime | None:
+    """`dt` plus `days`, or None past years 1 to 9999 (returned outside the handler: no context)."""
+    try:
+        return dt + timedelta(days=days)
+    except OverflowError:
+        pass
+    return None
+
+
 def _mask_date_shift(
     matched_text: str,
     span_key: bytes,
@@ -455,7 +464,8 @@ def _mask_date_shift(
     "YYYY-MM-DD"; "01/15/1990" reformats to "MM/DD/YYYY".
 
     A span that does not parse (an unrecognised format, or a date such as 2024-02-30) comes
-    back as ``token``, never as its real text.
+    back as ``token``, never as its real text. So does a span the shift would carry past
+    year 1 or 9999: free text holds dates nobody declared, so one edge date must not stop a run.
     """
     try:
         fmt = _detect_date_format(matched_text)
@@ -465,7 +475,9 @@ def _mask_date_shift(
         range_size = max_days - min_days + 1
         offset_seed = int.from_bytes(span_key[:8], "big")
         shift = min_days + (offset_seed % range_size)
-        shifted = dt + timedelta(days=shift)
+        shifted = _shift_within_calendar(dt, shift)
+        if shifted is None:
+            return token
         return shifted.strftime(fmt)
     except BaseException:
         del span_key

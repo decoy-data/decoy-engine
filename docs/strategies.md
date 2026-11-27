@@ -549,6 +549,9 @@ clinical notes or support tickets.
   unmatched policy and for per-span `redact` dispatch.
 - `min_days` / `max_days` (int, defaults -365 / 365): date-shift offset range
   for spans dispatched to `date_shift`.
+  A date span the shift would carry past year 1 or year 9999 (for example `9999-12-31`
+  with a positive offset) is replaced by `token`, as an unparseable date span is. The run
+  does not stop, and the output holds no part of the source date.
 - `sub_floor_span` (str, `"redact"` or `"synthetic"`, no default): required
   whenever the configured detectors can produce an `fpe`-dispatched span
   below FF1's minimum admissible domain (a bare 5-digit ZIP match is the
