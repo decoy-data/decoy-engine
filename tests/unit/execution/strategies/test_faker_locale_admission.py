@@ -213,6 +213,7 @@ class TestOneResolverForAdmissionAndDispatch:
             """Draws its own locales and never reaches Faker."""
 
             backend_type = "stub"
+            backend_version = "1"
 
             def serving_adapter(self, locale: str | None) -> Any:
                 return self
