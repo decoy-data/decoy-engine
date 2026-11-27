@@ -1392,6 +1392,13 @@ nothing is coerced. While `name` is unset the config dump and
 excluded from the plan hash because it is data binding, not masking semantics.
 `tests/unit/config/test_pipeline_name.py` pins all of this.
 
+`PipelineConfig` refuses `delivery.mode: best_effort` with `config.delivery_best_effort_unreleased` (DELIV BE0-E,
+registry `since` stamped at release), at the location `delivery`. The mode was accepted before and no run
+implemented it, so the narrowing is pre-GA. `compile_plan` refuses the same value on a raw mapping through
+`decoy_engine.config.refuse_unreleased_delivery`. `DeliveryConfig`, `plan_delivery` and the frozen
+`pipeline-config.schema.json` keep `best_effort`, so row 61b lifts the refusal without a schema change and the
+lift is additive under §4.1. `tests/unit/config/test_delivery_config.py` pins it.
+
 **Declaration gate on the run, isolated and profile routes (CONFIG-EXPLICIT E2c).** `prepare_declared_sources`
 (`DeclarationRequest.for_run`, `for_descriptors`) is the one boundary. `profile_source` calls it first, or accepts the
 `PreparedDeclaredSources` that `build_run_context` already made for the same config object (`declared=`; a capability
