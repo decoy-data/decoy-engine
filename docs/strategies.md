@@ -400,9 +400,17 @@ calendar date decides: a cell at the last instant of year 9999 UTC is refused in
 UTC, because its local date is in year 10000. A date outside the calendar cannot be listed in
 `preserve_values`; fix or drop it in the source.
 
-A date nested in a list, map or struct column is checked too. A dictionary-encoded date column
-is checked by the rows that use each entry, so an out-of-calendar entry that no row uses does not
-stop the run. The read drops that entry before the column goes on, so no later step converts it.
+The read covers plain `date` and `timestamp` columns, and a dictionary-encoded column of either.
+A dictionary column is checked by the rows that use each entry, so an out-of-calendar entry that no
+row uses does not stop the run. The read drops that entry, keeps the other entries in their order,
+and the column goes on with its index type and ordered flag unchanged.
+
+A column that holds a date inside a list, map, struct, union, run-end-encoded, extension or nested
+dictionary type is not read. The run stops with `runtime/source_date_type_unsupported` before any
+row is read, whether the dates are inside the calendar or not. The message names the table, the
+column and the kind of the column's outermost type. To continue, drop the column, select it out of
+the source, or cast it to a plain date or text column before the run. A column of `time` or
+`duration` values holds no date and is read as before.
 
 The same limit applies to a generator column fitted from a datetime snapshot (the legacy
 `ColumnGenerator` `distribution` sampler; the V2 config `type: distribution` is the parametric

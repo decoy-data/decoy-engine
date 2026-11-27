@@ -17,7 +17,7 @@ from decoy_engine.execution import PandasExecutionAdapter, run_pipeline, run_pip
 from decoy_engine.execution._chunked import run_mask_pipeline_chunked
 from decoy_engine.execution.native._chunked_entry import run_mask_chunked as run_native_chunked
 from decoy_engine.execution.out_of_core import run_fk_out_of_core
-from decoy_engine.io import SourceDateUnrepresentableError
+from decoy_engine.io import SourceDateTypeUnsupportedError, SourceDateUnrepresentableError
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.relationships._graph import OrphanPolicy
 from tests.native._chunked_entry_support import key_provider
@@ -61,6 +61,10 @@ def _assert_value_free(exc: BaseException) -> None:
     text = str(exc) + repr(exc)
     assert "10183" not in text and str(FAR_DAY) not in text
     assert exc.__cause__ is None and exc.__context__ is None
+    # Names only: no year, no count of cells (the count is on the exception object).
+    assert str(exc) == (
+        f"[{CODE}] {reasons.get('runtime', CODE).summary} Table {TABLE!r}, column 'd'."
+    )
 
 
 def _kwargs(**extra: Any) -> dict[str, Any]:
@@ -81,7 +85,7 @@ def test_every_run_pipeline_route_refuses_the_far_date(
     cfg, path, table = _setup(tmp_path)
     extra = dict(ROUTES[route])
     if shape == "lazy":
-        extra["sources"] = {TABLE: LazySource(path, table=TABLE)}
+        extra["sources"] = {TABLE: LazySource(path)}
     elif shape == "resident":
         extra["sources"] = {TABLE: table}
     else:
@@ -134,7 +138,7 @@ def test_the_relationship_routes_refuse_the_far_date(shape: str, mode: str, tmp_
     tables = {"parent": parent, "t": child}
     kwargs: dict[str, Any] = {"execution_mode": mode, "key_provider": key_provider()}
     if shape == "lazy":
-        sources: dict[str, Any] | None = {n: LazySource(p, table=n) for n, p in paths.items()}
+        sources: dict[str, Any] | None = {n: LazySource(p) for n, p in paths.items()}
     elif shape == "resident":
         sources = tables
     else:
@@ -152,7 +156,7 @@ def test_the_relationship_routes_refuse_the_far_date(shape: str, mode: str, tmp_
 def test_a_first_batch_profile_failure_is_the_same_coded_refusal(tmp_path: Path) -> None:
     cfg, path, _ = _setup(tmp_path, bad_row=3, config_reads_bad=True)
     with pytest.raises(SourceDateUnrepresentableError) as caught:
-        run_pipeline(cfg, sources={TABLE: LazySource(path, table=TABLE)}, **_kwargs())
+        run_pipeline(cfg, sources={TABLE: LazySource(path)}, **_kwargs())
     _assert_value_free(caught.value)
 
 
@@ -160,7 +164,7 @@ def test_a_refused_run_publishes_nothing(tmp_path: Path) -> None:
     cfg, path, _ = _setup(tmp_path)
     sink, target = b6a.real_sink(tmp_path, "out")
     with pytest.raises(SourceDateUnrepresentableError):
-        run_pipeline(cfg, sources={TABLE: LazySource(path, table=TABLE)}, sink=sink, **_kwargs())
+        run_pipeline(cfg, sources={TABLE: LazySource(path)}, sink=sink, **_kwargs())
     assert not Path(target).exists()
 
 
@@ -212,7 +216,7 @@ def test_the_direct_out_of_core_entry_checks_resident_sources_first(tmp_path: Pa
 
 def test_opened_row_group_batches_are_checked(tmp_path: Path) -> None:
     _, path, _ = _setup(tmp_path)
-    opened = LazySource(path, table=TABLE).open_batches(GROUP)
+    opened = LazySource(path).open_batches(GROUP)
     try:
         with pytest.raises(SourceDateUnrepresentableError) as caught:
             list(opened.batches)
@@ -236,7 +240,7 @@ def test_the_isolated_route_reports_the_code_without_the_year(tmp_path: Path) ->
 
 def test_a_clean_source_still_runs(tmp_path: Path) -> None:
     cfg, path, _ = _setup(tmp_path, bad_row=None)
-    result = run_pipeline(cfg, sources={TABLE: LazySource(path, table=TABLE)}, **_kwargs())
+    result = run_pipeline(cfg, sources={TABLE: LazySource(path)}, **_kwargs())
     assert result.outputs[TABLE].num_rows == ROWS
 
 
@@ -339,9 +343,10 @@ def _nested(shape: str) -> pa.Array:
 
 @pytest.mark.parametrize("shape", ["list", "struct"])
 @pytest.mark.parametrize("route", ["oracle", "native"])
-def test_a_far_date_nested_in_a_list_or_struct_is_refused_on_both_chunked_routes(
+def test_a_date_in_a_list_or_struct_is_refused_by_type_on_both_chunked_routes(
     shape: str, route: str, tmp_path: Path
 ) -> None:
+    """Owner question Q6 answer A: refused by type, whether the nested date is far or not."""
     ids, days = pa.array([0, 1, 2]), pa.array([0, 1, 2], pa.date32())
     chunk = pa.table({"id": ids, "d": days, "n": _nested(shape)})
     path = tmp_path / "nested.parquet"
@@ -359,7 +364,9 @@ def test_a_far_date_nested_in_a_list_or_struct_is_refused_on_both_chunked_routes
         )
     else:
         exc = _outcome(lambda: list(run_native_chunked(cfg, iter([chunk]), **kwargs)))
-    _assert_refused(exc, column="n")
+    assert isinstance(exc, SourceDateTypeUnsupportedError), repr(type(exc))
+    assert (exc.table, exc.column, exc.kind) == (TABLE, "n", shape)
+    assert exc.code == reasons.runtime.SOURCE_DATE_TYPE_UNSUPPORTED
 
 
 @pytest.mark.parametrize("route", ["oracle", "native"])
@@ -386,143 +393,50 @@ def test_an_unused_far_dictionary_entry_does_not_refuse_the_job_or_reach_pandas(
     assert [t.num_rows for t in out] == [4]
 
 
-# ---------------------------------------------------------------------------
-# The source-boundary guard. The checked read in `decoy_engine.io` is the one date check; this
-# test fails when a path hands Arrow data to pandas without it (a new entry like the exported
-# native chunked entry or the adapter's resident `run`, which the first S5 build missed).
-# ---------------------------------------------------------------------------
-
-import ast  # noqa: E402
-
-import decoy_engine  # noqa: E402
-
-_SRC = Path(decoy_engine.__file__).parent
-_SINKS = {"to_pandas", "to_pandas_fk_safe"}
-_ANY_CHECK = {
-    "check_source_dates",
-    "checked_batches",
-    "check_resident_sources",
-    "checked_loader",
-    "checked_chunks",
-}
-
-# A function that takes caller data and converts it, or hands it to the route that does, must
-# call its check itself: (file, qualified name) -> the checks it must call (all of them).
-_SELF_CHECKED: dict[tuple[str, str], set[str]] = {
-    ("execution/_pipeline.py", "run_pipeline"): {"check_resident_sources", "checked_loader"},
-    ("execution/_pandas_adapter.py", "PandasExecutionAdapter.run"): {"check_resident_sources"},
-    ("execution/_sequential.py", "run_sequential"): {"checked_loader"},
-    ("execution/out_of_core/_runner.py", "run_fk_out_of_core"): {"check_resident_sources"},
-    ("execution/native/_chunked_entry.py", "_run_chunked"): {"checked_chunks"},
-    ("execution/_chunked.py", "run_mask_pipeline_chunked"): {"checked_chunks"},
-    ("profile/_readers.py", "LazySource.iter_batches"): {"checked_batches"},
-    ("profile/_readers.py", "LazySource.to_table"): {"check_source_dates"},
-    ("profile/_readers.py", "head_frame_from_batches"): {"check_source_dates"},
-    ("profile/_cloud_readers.py", "_checked_frame"): {"check_source_dates"},
-    ("profile/_readers_resident.py", "ResidentTableSource.sample_frame"): {"check_source_dates"},
-    ("profile/_readers_resident.py", "ResidentTableSource.to_frame"): {"check_source_dates"},
-}
-
-# Files whose conversions run on data one of the entries above already checked, or hold no source
-# data. A new conversion in any other file fails until it is checked or listed here with a reason.
-_DOWNSTREAM_FILES: dict[str, str] = {
-    "execution/_chunked_carry.py": "carried column of a checked chunk",
-    "execution/_chunked_profile.py": "profiles the first chunk, already checked on entry",
-    "execution/_mixed_fk_bridge.py": "frames built from checked run inputs",
-    "execution/_pandas_adapter.py": "`run` is the checked sink; the rest never converts",
-    "execution/_pipeline_finalize.py": "fidelity reports over checked inputs",
-    "execution/_pipeline_full_frame.py": "diagnoses a source `run` already checked",
-    "execution/_sequential.py": "`run_sequential` is the checked sink",
-    "execution/_transforms_table.py": "transform frame of a checked resident table",
-    "execution/_unified_slice_admission.py": "admission over a checked source",
-    "execution/_unified_slice_evidence.py": "output shaped from a checked source",
-    "execution/native/_bucket_perturb_ext.py": "kernel helper over a checked chunk",
-    "execution/native/_date_shift_ext.py": "kernel helper over a checked chunk",
-    "execution/native/_faker_null_mask.py": "kernel helper over a checked chunk",
-    "execution/native/_group_key_kernel.py": "kernel helper over a checked chunk",
-    "execution/native/_operator_step.py": "kernel helper over a checked chunk",
-    "execution/native/_when_mask.py": "kernel helper over a checked chunk",
-    "execution/out_of_core/_bucket_native.py": "out-of-core batch from a checked reader",
-    "execution/out_of_core/_mask_group_c.py": "out-of-core batch from a checked reader",
-    "execution/pipeline/_post_scan.py": "post-scan over checked inputs",
-    "execution/pipeline/_source_types.py": "index of a checked source",
-    "internal/pandas_compat.py": "the conversion helper; callers pass checked tables",
-    "profile/_fixed_width_reader.py": "builds an empty frame",
-    "profile/_readers.py": "`LazySource`/`head_frame_from_batches` carry their own checks",
-    "profile/_readers_resident.py": "`_frame_of` receives data its caller checked",
-    "profile/_cloud_readers.py": "`_checked_frame` is the checked sink",
-    "verification/postmask/_column_facts.py": "post-mask facts of masked output",
-}
+# --- AT-V7: the refusal names the table the caller gave -----------------------------------------
 
 
-def _functions(tree: ast.AST) -> dict[str, ast.AST]:
-    found: dict[str, ast.AST] = {}
-
-    def walk(node: ast.AST, prefix: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
-                name = f"{prefix}{child.name}"
-                found[name] = child
-                walk(child, f"{name}.")
-            else:
-                walk(child, prefix)
-
-    walk(tree, "")
-    return found
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_stale_lazy_source_name_is_rebound_to_the_mapping_key(route: str, tmp_path: Path) -> None:
+    cfg, path, _ = _setup(tmp_path)
+    sources = {TABLE: LazySource(path, table="other")}
+    with pytest.raises(SourceDateUnrepresentableError) as caught:
+        run_pipeline(cfg, sources=sources, **_kwargs(**ROUTES[route]))
+    _assert_value_free(caught.value)
 
 
-def _called(node: ast.AST) -> set[str]:
-    names = set()
-    for call in ast.walk(node):
-        if isinstance(call, ast.Call):
-            func = call.func
-            names.add(func.id if isinstance(func, ast.Name) else getattr(func, "attr", ""))
-    return names
+def test_check_resident_sources_binds_a_copy_and_keeps_the_original_name(tmp_path: Path) -> None:
+    from decoy_engine.io import check_resident_sources
+    from decoy_engine.profile._lazy_csv import CsvLazySource
+
+    _, path, _ = _setup(tmp_path)
+    csv = tmp_path / "t.csv"
+    csv.write_text("id,d\n1,2020-01-01\n")
+    originals = {"parquet": LazySource(path, table="other"), "csv": CsvLazySource(csv)}
+    bound = check_resident_sources({"a": originals["parquet"], "b": originals["csv"]})
+    assert (bound["a"].table, bound["b"].table) == ("a", "b")
+    assert type(bound["a"]) is LazySource and type(bound["b"]) is CsvLazySource
+    assert bound["a"].path == path and bound["b"].path == csv
+    assert bound["a"] is not originals["parquet"] and originals["parquet"].table == "other"
+    assert originals["csv"].table == "source"
 
 
-def _sink_sites() -> dict[tuple[str, str], int]:
-    sites: dict[tuple[str, str], int] = {}
-    for path in sorted(_SRC.rglob("*.py")):
-        rel = path.relative_to(_SRC).as_posix()
-        tree = ast.parse(path.read_text())
-        for name, func in _functions(tree).items():
-            if isinstance(func, ast.ClassDef):
-                continue
-            own = [
-                n
-                for n in ast.walk(func)
-                if isinstance(n, ast.Call)
-                and (getattr(n.func, "id", None) or getattr(n.func, "attr", None)) in _SINKS
-            ]
-            if own:
-                sites[(rel, name)] = len(own)
-    return sites
+def test_an_object_that_is_not_a_lazy_dataclass_passes_through_unbound() -> None:
+    from decoy_engine.io import check_resident_sources
+
+    marker = object()
+    assert check_resident_sources({"t": marker})["t"] is marker
 
 
-def test_every_listed_entry_still_calls_its_check() -> None:
-    for (rel, qualname), required in _SELF_CHECKED.items():
-        tree = ast.parse((_SRC / rel).read_text())
-        func = _functions(tree).get(qualname)
-        assert func is not None, f"{rel}::{qualname} is gone; update the guard"
-        missing = required - _called(func)
-        assert not missing, f"{rel}::{qualname} no longer calls {sorted(missing)}"
+def test_the_isolated_manifest_loader_names_the_mapping_key(tmp_path: Path) -> None:
+    from decoy_engine.execution import _isolated_worker
 
-
-def test_no_path_converts_source_data_without_a_check() -> None:
-    unchecked = [
-        f"{rel}::{name}"
-        for (rel, name) in _sink_sites()
-        if (rel, name) not in _SELF_CHECKED and rel not in _DOWNSTREAM_FILES
-    ]
-    assert not unchecked, (
-        "Arrow data reaches pandas here without `decoy_engine.io.check_source_dates`: "
-        f"call the checked read, or list the file in _DOWNSTREAM_FILES with the reason: {unchecked}"
+    _, path, _ = _setup(tmp_path)
+    loaded = _isolated_worker._load_sources(
+        {"key": {"path": str(path), "format": "parquet"}}, lazy=True
     )
-
-
-def test_the_guard_lists_name_real_files_and_sinks() -> None:
-    sites = _sink_sites()
-    sink_files = {rel for rel, _ in sites}
-    stale = [rel for rel in _DOWNSTREAM_FILES if rel not in sink_files]
-    assert not stale, f"no conversion left in {stale}; drop them from _DOWNSTREAM_FILES"
-    assert set().union(*_SELF_CHECKED.values()) <= _ANY_CHECK
+    source = loaded["key"]
+    assert isinstance(source, LazySource) and source.table == "key"
+    with pytest.raises(SourceDateUnrepresentableError) as caught:
+        list(source.iter_batches(GROUP))
+    assert caught.value.table == "key"
