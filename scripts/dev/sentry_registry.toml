@@ -259,6 +259,9 @@ baseline = "tests/sentry/baselines/group-by-single-reader.json"
 [[sentry]]
 id = "lossless-int-columns"
 baseline = "tests/sentry/baselines/lossless-int-columns.json"
+approved_growth = [
+  { key = "adapter_fk_safe_columns::execution/chunked/_oracle_step.py::oracle_chunk_step", decision = "owner 2026-11-27 standing go-with-recommended authority (orchestrator applied, pending owner confirmation): PER-COLUMN-ROUTING S0 plan section 5 (slice S0) moves the oracle masked call to oracle_chunk_step; same call, new path, the old key leaves the baseline" },
+]
 
 [[sentry]]
 id = "column-shape-classifier"
