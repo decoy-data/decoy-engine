@@ -188,7 +188,7 @@ shortcut (CX-3).
 
 The frame path computes identity on the frames, before any Arrow conversion, for every paired
 column. It hands the result to `column_facts` in a new keyword
-`identity: Mapping[str, IdentityFacts | str]` (a class name for a comparison that raised).
+`identity: Mapping[str, IdentityFacts | IdentityFailure]` (revision 1, item 12).
 `column_facts` uses that entry and does not compare that column's batches. On the batch path
 (`run_post_mask_tables`) the keyword is absent, and `column_facts` folds `identity_facts` over
 the aligned batches. Both routes call the one authority.
@@ -412,26 +412,14 @@ Rows marked "now green" pass on eaf160db3 and must stay green.
 
 ## Slices
 
-Each slice is one commit of under about 400 changed lines. Whole deleted test files do not
-count; they are listed for review instead.
-
-| Slice | Content | Size |
-|---|---|---|
-| S1 | The acceptance files: `test_cell_identity.py` against the planned API (red: the import fails) and the run rows of `test_identity_routes.py` on the public entry points (the open rows red on this head). | about 380 test lines |
-| S2 | `internal/cell_identity.py`: the value forms moved from `canonical_cell.py` without spelling fields, the record refusal, the unbox guard, `value_form`, `is_null`, `distinct_values`, `CellNotComparableError` and its reason row. The form rows go green. | about 330 source lines |
-| S3 | Row verdicts, the fast path, the K4 spellings, the numeral match, `identity_facts`, `IdentityFacts.merge`. Every `test_cell_identity.py` row and P1 to P3 go green. | about 250 source, 60 test |
-| S4 | Wiring: `column_facts` takes `identity=` and folds `identity_facts`; `runner._frame_tables` computes identity on the frames and carries `detector_text`; `residual_pii`, `policy_validation` and `source_distinct` call the authority; delete `_require_preserved`, `_text`, the `_native` set check, `_compared`, `_has_record`, `_typed`, `canonical_cells` and `identity_counts`; `CellView` keeps `distinct` and `distinct_error`. `test_identity_routes.py` goes green. | about 380 changed |
-| S5 | Delete `canonical_cell.py`, `key_text` and the number-key code, `ComparisonNotPreservedError` and `RecordNotComparableError`; move `temporal_text` into `cell_text.py`; add the sentry; update `cell-text-names.json`, CODEMAP, the changelog fragment and the compat entry; delete the key-pinning tests. Run the mutation table. | about 300 changed, plus about 1100 deleted test lines |
-
-S1 lands before S2. A builder must not weaken an S1 row. A row the builder thinks is wrong goes
-back to the planner. S2 and S3 have no production caller until S4; the proportionality
-exception applies, and S4 lands before the row closes.
+Replaced by "Slices (revision 1)" in the revision section below.
 
 ## Placement and sizes
 
 | File | Directory | CODEMAP line | Beside | Size after |
 |---|---|---|---|---|
 | `cell_identity.py` (new) | `src/decoy_engine/internal/` | the `internal/canonical_cell.py` row, renamed | `fk_tokens.py`, `cell_text.py` | about 560 |
+| `cell_atoms.py` (new, revision 1 item 4) | `src/decoy_engine/internal/` | a new `internal/` row: the numeral grammar and the cell null rule | `pandas_missing.py` | about 120 |
 | `cell_text.py` | same | existing | | about 240 (from 383) |
 | `_column_facts.py` | `verification/postmask/` | existing | | about 470 (from 534) |
 | `runner.py` | same | existing | | about 450 (from 517) |
@@ -549,4 +537,216 @@ round of findings inside the guarantee goes to the owner, not to another fix rou
 
 Behavior change 1 makes an int, `Decimal`, list or dict exported as its text count as unchanged,
 so the check blocks more than main does. This follows the K4 intent already in the changelog.
-Confirm that it applies to all non-text kinds, not only to numbers and dates.
+The question to the owner: should K4 apply to all non-text kinds (answer A) or only to numbers
+and dates (answer B)? Still open.
+
+This plan is written for answer A, which the Architect and Dennis both recommend.
+
+If the owner answers B, the edit is: delete spelling rules 1 and 4 for containers and "other"
+leaves (keep rule 1 for numbers and temporals, and rules 2 and 3), and flip these rows from SAME
+to DIFFERENT (their column then reads `info` where A reads `fail`):
+
+- DN-D2-6, the list and dict cells (the `Decimal` and int cells stay SAME);
+- DN-P1-1, the `UUID` and `[1]` cells (`Timestamp` and `date` stay SAME);
+- DN-P2-2, `[nan, 'a']`, `[pd.NaT, 'a']` and `[datetime(2020,1,1), 'a']` (the `timedelta` and
+  nested Timestamp cells are containers too, so they flip; the top-level `timedelta` stays);
+- DN-P2-3;
+- PC1-2, the `"[3]"` row (identical becomes 1 of 2);
+- PC1-3;
+- A-K1, the `str` export of container and `V`/`O` cells;
+- E-9 (revision 1), the `UUID` row.
+
+## Revision 1, Dennis plan review
+
+Dennis reviewed 4d78ab441: GO-WITH-FIXES (2 V1, 6 DESIGN, 4 LOW). He agrees the plan removes the
+root cause. Each item is answered below by its number. Where this section differs from the body
+above, this section holds.
+
+### 1 (V1). `datetime.date` splits from the same day as a NumPy or pandas value
+
+Fix: a `datetime.date` (not a `datetime`) maps to `Instant(attoseconds of that day at naive
+midnight, aware=False)`. Python's own `date == datetime` is False; here they are SAME. That merge
+fails closed. New rows:
+
+| Id | Case | Expected |
+|---|---|---|
+| DN-R1-1a | `date(2020, 1, 1)` vs `np.datetime64("2020-01-01", "D")` | SAME |
+| DN-R1-1b | `date(2020, 1, 1)` vs `np.datetime64("2020-01-01T00:00", "ns")` | SAME |
+| DN-R1-1c | `date(2020, 1, 1)` vs `pd.Timestamp("2020-01-01")` | SAME |
+| DN-R1-1d | `date(2020, 1, 1)` vs `pd.Timestamp("2020-01-01 00:00:01")` | DIFFERENT |
+| DN-R1-1e | `date(2020, 1, 1)` vs `pd.Timestamp("2020-01-01", tz="UTC")` | SAME by item 8 |
+
+### 2 (V1). NaN forms and wide floats
+
+Fix: the null rule is "`x != x` is true", applied to scalars only (an array-like is a container),
+as `pandas_missing.is_null_cell` does today. Before that test, a `Decimal` sNaN is caught with
+`is_snan()`, since comparing it signals `InvalidOperation`. For a wider float (`g`) and
+`clongdouble`, `np.isfinite` runs before `Fraction`: NaN is null, and an infinity maps to
+`float("inf")` with its sign, so it equals a float infinity. New rows:
+
+| Id | Case | Expected |
+|---|---|---|
+| DN-R1-2a | `float("nan")`, `np.float32("nan")`, `np.longdouble("nan")`, `Decimal("NaN")`, `complex("nan+0j")` | null each |
+| DN-R1-2b | `Decimal("sNaN")`, default and trapping contexts | null, no raise |
+| DN-R1-2c | `np.longdouble("inf")` vs `float("inf")`; `-inf` vs `-inf`; `inf` vs `-inf` | SAME; SAME; DIFFERENT |
+| DN-R1-2d | `np.clongdouble("inf+0j")` vs `complex("inf+0j")` | SAME, no raise |
+| DN-R1-2e | `np.longdouble("inf")` vs text `"inf"` | SAME (rule 2) |
+| DN-R1-2f | `[float("nan")]` vs `[None]` | SAME (one NULL at depth) |
+
+### 3. Vectorized fast paths and throughput
+
+Fix: the fast path widens. Per-row work is only for cells no vectorized rule decides.
+
+- Arrow (batch path): two arrays of one primitive or string type use `pyarrow.compute.equal`
+  with an explicit null mask (`is_null` on both). Only `cell_identity.py` may call it.
+- pandas masked dtypes (`Int64`, `Float64`, `boolean`) and `string` dtypes: compare on the
+  values with the mask. `pd.NA` is null.
+- `M` and `m` of different units: cast both to the finer unit, then compare. A cast that
+  overflows falls back to the per-row rule for the column.
+- K4: when one side is a text column, a vectorized `astype(str)` match of the other side runs
+  first. Rows it matches are SAME. Only unmatched rows with a text cell that fits the numeral
+  grammar or a temporal shape go to the per-row rule.
+
+New throughput rows, one per kind, 1M rows each, run on the Mac node (never on the devbox). Each
+must exceed the 20k rows/s floor (owner enterprise-readiness floor):
+
+| Id | Kind | Floor |
+|---|---|---|
+| DN-R1-3a | int64 vs int64 (NumPy) | 20k rows/s |
+| DN-R1-3b | `Int64` masked vs `Int64` | 20k rows/s |
+| DN-R1-3c | `string` vs `string` | 20k rows/s |
+| DN-R1-3d | `M8[us]` vs `M8[ns]` | 20k rows/s |
+| DN-R1-3e | object int vs text of the int (K4) | 20k rows/s |
+| DN-R1-3f | object mixed int and text, half changed | 20k rows/s |
+| DN-R1-3g | list cells vs list cells | 20k rows/s |
+| DN-R1-3h | Arrow string arrays on the batch path | 20k rows/s |
+
+### 4. Import cycle
+
+Fix: the numeral grammar (`_NUMERAL`, `_reduced`, the exponent bound) and the cell null rule
+(unbox, masked constant, then `pandas_missing.is_null_cell`) move to one new leaf module,
+`internal/cell_atoms.py`. It imports only `internal/pandas_missing.py`, NumPy, pandas and the
+standard library. Import order inside `internal`: `cell_identity` may import `cell_text` and
+`cell_atoms`; `cell_text` may import `cell_atoms`; `cell_atoms` imports neither.
+
+New import-linter contract in `.importlinter` (type `layers`, container
+`decoy_engine.internal`): `cell_identity : cell_text : cell_atoms : pandas_missing`. Mutation:
+import `cell_identity` from `cell_text`; `test_import_layers.py` goes red.
+
+### 5. One null rule for the masker and the verifier
+
+Fix: extend `internal/pandas_missing.is_null_cell` with the sNaN guard (item 2). The masking
+kernels, `derived`, `_formula` and the verifier all read it. `cell_atoms.is_null` adds only the
+unboxing and the masked constant, then calls it. `transforms/windowed_date._is_null_cell` is a
+third copy; it moves onto `is_null_cell` in a follow-up row, not in this PR. Row:
+
+| Id | Case | Expected |
+|---|---|---|
+| DN-R1-5 | for each cell of DN-R1-2a, 2b, `None`, `pd.NA`, `pd.NaT`, `np.datetime64("NaT")` | `is_null_cell` and `cell_atoms.is_null` agree; a masking kernel treats it as missing |
+
+### 6. Distinct counts
+
+Fix: every distinct count in the post-mask package goes through `distinct_values`, with one
+exception that is proven by parity. `policy_validation` (`nunique` at policy_validation.py:106
+and :107) calls `distinct_values`. The DuckDB `column_distinct` (_column_facts.py:395) stays for
+native Arrow columns on the batch path, because it counts in bounded memory. It is allowed only
+for primitive, string and same-unit temporal types; any other type (list, struct, map, binary,
+mixed units) goes to `distinct_values` over batches, or records `distinct_error` when the column
+is too large for memory. Row:
+
+| Id | Case | Expected |
+|---|---|---|
+| DN-R1-6 | per DuckDB-allowed type (int, float with NaN, string, `timestamp[us]`, bool, nulls) | `column_distinct` equals `distinct_values` on the same column |
+| DN-R1-6b | a list column on the batch path | counted by `distinct_values`, never DuckDB |
+
+### 7. Sentry scope and calls
+
+Fix: the sentry scans all of `src/decoy_engine/verification/`, the post-scan modules in
+`src/decoy_engine/execution/pipeline/` (`_post_scan.py`, `_post_scan_suite.py`), `detection/` and
+`internal/cell_text.py`. It flags, outside `cell_identity.py`:
+
+- the calls `.equals`, `.eq`, `.ne`, `.compare`, `.isin`, `.duplicated`, `.drop_duplicates`,
+  `.unique`, `.value_counts`, `nunique`, `np.equal`, `np.not_equal`, `np.array_equal`,
+  `np.array_equiv`, `pc.equal`, `pc.not_equal`, `pa.Array.equals`, `pd.testing.*`,
+  `hash_pandas_object`, `hash_array`, `factorize`;
+- `==` and `!=` where an operand is a cell name: a `_series` result, `df[...]`, `.iloc`,
+  `astype(object)`, `to_pandas`, or a loop or comprehension variable over any of those
+  (`for a, b in zip(src, out): a == b`);
+- the definitions and the import listed in the body.
+
+Each form has a seeded source string that the sentry test asserts is flagged. The canary entry
+stays the only allowlist row. Mutation: drop the loop-variable rule; its seeded case goes red.
+
+### 8. Aware against naive
+
+Fix: an aware instant and a naive instant are SAME when the naive one equals the aware one's UTC
+wall clock, or its own zone's wall clock. Two aware instants compare as UTC instants. Two naive
+instants compare as wall clocks. `distinct_values` keeps the aware flag (an over-count, which
+fails closed). Rows:
+
+| Id | Case | Expected |
+|---|---|---|
+| DN-R1-8a | `Timestamp("2020-01-01 05:00", tz="America/New_York")` vs naive `"2020-01-01 10:00"` | SAME (UTC wall clock) |
+| DN-R1-8b | the same aware value vs naive `"2020-01-01 05:00"` | SAME (zone wall clock) |
+| DN-R1-8c | the same aware value vs naive `"2020-01-01 07:00"` | DIFFERENT |
+| DN-R1-8d | `datetime(..., tzinfo=+01:00)` vs `np.datetime64` naive of its UTC time | SAME |
+
+### 9. Red-first rows and slice sizes
+
+Fix: every acceptance row lands in S1 as `pytest.mark.xfail(strict=True)`. A strict xfail that
+passes fails the run, so no row can go green unseen. Each slice removes the marker from the rows
+it turns green, and its review checks that the removed markers are exactly the rows of that
+slice. The test files are larger than one 400-line slice, so S1 is split.
+
+### Slices (revision 1)
+
+| Slice | Content | Size |
+|---|---|---|
+| S1a | `test_cell_identity.py`: the pair table for value forms, nulls, temporals, records (all rows strict xfail). | about 390 test lines |
+| S1b | `test_cell_identity.py`: K4 and number rows, property tests P1 to P3, edge rows E-1 to E-14 (strict xfail). | about 380 test lines |
+| S1c | `test_identity_routes.py`: route parity, run rows, distinct parity, throughput rows (strict xfail; throughput marked `slow`). | about 360 test lines |
+| S2 | `internal/cell_atoms.py` (grammar and null rule moved), the `is_null_cell` sNaN guard, the import-linter contract, `internal/cell_identity.py` value forms with record refusal and `CellNotComparableError`. Removes the xfail on the form, null and record rows. | about 390 changed |
+| S3 | Row verdicts, all fast paths, K4 with its vectorized first pass, `identity_facts`, `IdentityFacts.merge`, `IdentityFailure`. Removes the xfail on the K4, number, property and edge rows. | about 360 changed |
+| S4 | Wiring as in the body, plus `policy_validation` and DuckDB distinct counts on `distinct_values` (item 6). Removes the xfail on the route, run and distinct rows. | about 390 changed |
+| S5 | Deletions as in the body, the widened sentry (item 7) with its seeded cases, CODEMAP, changelog, compat entry. Throughput rows run on the Mac node. Mutation table on the final head. | about 350 changed, plus about 1100 deleted test lines |
+
+S2 to S3 have no production caller until S4 (proportionality exception; S4 lands before the
+row closes).
+
+### 10. Missing id rows
+
+| Id | Case | Expected |
+|---|---|---|
+| A1f (r5) | two texted columns, `batch_rows=2`, nulls early, detector hits late | same rates and verdict at `batch_rows=2` and one batch |
+| D2, D3, D7 (r5) | integral `Decimal` detector text; numeral text length; non-integral `Decimal` under `capitals=0` | as in r5 (kept with `detector_text`) |
+| D5 (r5) | a source distinct count that raises | `source_distinct_failed` set; graded unknown diversity |
+| DN-P1-3 | P1 draws paired cells | floor on SAME pairs enforced (P1) |
+| DN-P1-9 | `ArrowDtype` and `string` columns | take the item 3 fast path; parity with the per-row rule |
+| DN-F-LOW-2 | a map key `np.int64(1)` vs key `1` | SAME |
+| DN-D2-2 | the 84 writable records in a set or dict key | N/A: cannot be built (TypeError at construction) |
+
+### 11. Edge-case rows
+
+| Id | Case | Expected |
+|---|---|---|
+| E-1 | empty source and output | comparable 0, `all_same` true, no raise |
+| E-2 | both columns all null | comparable 0, `all_same` true |
+| E-3 | source null, output value, every row | comparable 0, `all_same` false |
+| E-4 | lengths differ | `identity_facts` is never called; the existing row-count finding stands |
+| E-5 | source and output with different index labels, same order | compared by position |
+| E-6 | duplicate column names | first position, as now |
+| E-7 | `0.0` vs `-0.0` | SAME |
+| E-8 | `True` vs `np.bool_(True)` vs `1` | SAME |
+| E-9 | `uuid.UUID(int=1)` vs its `str` and its `.hex` | SAME; DIFFERENT (`.hex` is not listed) |
+| E-10 | `[]`, `set()`, `{}`, `()` against each other | `[]` and `()` SAME; the rest DIFFERENT |
+| E-11 | `b"ab"` vs `"ab"`; `b"\xff"` vs `"x"` | SAME; `UnreadableCellError` recorded for the column |
+| E-12 | object int `10**30` vs `Decimal(10**30)` vs `"1e30"` | SAME all three |
+| E-13 | categorical with unused categories, codes reordered | compared by values; unused categories ignored |
+| E-14 | `pd.NA` in a `string` column vs `None` in an object column | both null |
+
+### 12. Failure type
+
+Fix: `IdentityFailure` is a frozen dataclass with one field, `error: str` (the class name). The
+`identity=` keyword of `column_facts` takes `IdentityFacts | IdentityFailure`, so a bare string
+cannot be mistaken for a count. `column_facts` sets `identity_error` from `failure.error`.
+Mypy checks the union at each caller.
