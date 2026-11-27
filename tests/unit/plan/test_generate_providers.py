@@ -207,7 +207,7 @@ def test_the_instance_default_locale_is_checked_at_every_choke_point(
     _compile(config, instance_default_locale=DEFERRED)  # a plan generated later
     plan = _plan(config)
     monkeypatch.setattr(
-        "decoy_engine.generation._streamed.GenerationBudgetLedger",
+        "decoy_engine.generation._streamed._run_admitted",  # the run's first generating step
         lambda *a, **k: pytest.fail("generation started"),
     )
     with pytest.raises(PlanCompileError) as info:
