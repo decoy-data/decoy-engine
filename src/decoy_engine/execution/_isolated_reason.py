@@ -133,7 +133,7 @@ def readback_refused(
     *,
     staging: Path,
     receipt: CommitReceipt | None,
-    readback: dict[str, int | None],
+    extra: dict[str, Any],
     peak: float | None,
     pid: int,
 ) -> IsolatedRunResult:
@@ -149,14 +149,14 @@ def readback_refused(
         kill_ceiling_bytes=fit.kill_ceiling_bytes,
         remedy=_READBACK_REMEDY,
     )
-    return _readback_result(code, fixed_text, staging, receipt, readback, peak, pid)
+    return _readback_result(code, fixed_text, staging, receipt, extra, peak, pid)
 
 
 def readback_memory_failure(
     *,
     staging: Path,
     receipt: CommitReceipt | None,
-    readback: dict[str, int | None],
+    extra: dict[str, Any],
     peak: float | None,
     pid: int,
 ) -> IsolatedRunResult:
@@ -165,7 +165,7 @@ def readback_memory_failure(
     Built from the registry, never from the exception: its message can carry sizes and names."""
     code = _decoy.PROCESS_OUT_OF_MEMORY
     fixed_text = f"{reasons.get(code.namespace, code).summary} {_READBACK_REMEDY}"
-    return _readback_result(code, fixed_text, staging, receipt, readback, peak, pid)
+    return _readback_result(code, fixed_text, staging, receipt, extra, peak, pid)
 
 
 def _readback_result(
@@ -173,7 +173,7 @@ def _readback_result(
     fixed_text: str,
     staging: Path,
     receipt: CommitReceipt | None,
-    readback: dict[str, int | None],
+    extra: dict[str, Any],
     peak: float | None,
     pid: int,
 ) -> IsolatedRunResult:
@@ -199,7 +199,7 @@ def _readback_result(
         error=fixed_text,
         isolated=True,
         pid=pid,
-        extra={"readback": readback},
+        extra=extra,
         reason=reason,
         publication_receipt=receipt,
     )

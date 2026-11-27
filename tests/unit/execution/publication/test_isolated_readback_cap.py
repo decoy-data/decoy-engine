@@ -378,18 +378,27 @@ def _wholly_clean(run: Run, output: bool, staging: Path | None, scratch: Path) -
         assert staging.is_dir() and not (staging / "staging_output").exists()
 
 
+@pytest.mark.parametrize("fail_at", [1, 4], ids=["first_measure", "after_the_last_decode"])
 def test_a9_a_failure_while_measuring_is_a_memory_result_and_publishes_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch: Path, fail_at: int
 ) -> None:
+    """The figures are taken in the guarded read: the last measure runs after the final decode
+    and before `publish_unit`, so an allocation failure there publishes nothing."""
     run = Run(tmp_path, monkeypatch, [ints("t1", 10)], ceiling=HUGE)
+    real = lower_bound_bytes
+    calls: list[int] = []
 
-    def failing(*args: Any, **kwargs: Any) -> int:
-        raise MemoryError("CANARY")
+    def failing(specs: Any) -> int:
+        calls.append(1)
+        if len(calls) == fail_at:  # each measure makes three calls
+            raise MemoryError("CANARY")
+        return real(specs)
 
     monkeypatch.setattr(f"{COMMIT}.lower_bound_bytes", failing)
     result = run.go()
     assert result.reason is not None and result.reason.code == "process_out_of_memory"
     assert "CANARY" not in result.error + repr(result)
+    assert run.decodes.names == ([] if fail_at == 1 else ["t1.parquet"])
     run.nothing_left(True)
 
 
@@ -464,6 +473,7 @@ def test_a12_every_exit_path_leaves_no_stage_and_no_open_file(
                 )
             ),
         )
+    gc.collect()
     before = _open_under(tmp_path)
     if scenario == "detection_error":  # detection raises another coded error: it propagates
         with pytest.raises(ExecutionError) as raised:
@@ -479,7 +489,6 @@ def test_a12_every_exit_path_leaves_no_stage_and_no_open_file(
         }[scenario]
         assert result.outcome == "crashed" and result.outputs is None
         assert result.reason is not None and result.reason.code == expected
-    gc.collect()  # a failed read leaves frame cycles that hold a closed file until collected
     assert _open_under(tmp_path) == before
     _wholly_clean(run, output, staging, scratch)
 

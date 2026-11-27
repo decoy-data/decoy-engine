@@ -80,7 +80,7 @@
     "decoy_engine/execution/_fk_keys.py::fk_columns_for_table::update::1": {
       "reason": "set.update on a local set of names"
     },
-    "decoy_engine/execution/_isolated_reason.py::commit_reason::exists::0": {
+    "decoy_engine/execution/_isolated_reason.py::cleanup_state_of::exists::0": {
       "reason": "pathlib Path.exists on a local path"
     },
     "decoy_engine/execution/_output_projection.py::known_output_columns::update::0": {

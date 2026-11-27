@@ -144,9 +144,6 @@ class Readback:
     tables_read: int
     tables_staged: int
 
-    def as_extra(self) -> dict[str, int | None]:
-        return asdict(self)
-
 
 @dataclass(frozen=True)
 class Collected:
@@ -154,7 +151,7 @@ class Collected:
 
     outputs: dict[str, pa.Table]
     receipt: CommitReceipt | None
-    readback: Readback
+    extra: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -164,7 +161,7 @@ class ReadbackRefused:
 
     fit: ResidentFit
     receipt: CommitReceipt | None
-    readback: Readback
+    extra: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -173,7 +170,7 @@ class ReadbackMemoryFailure:
     exception's text can name sizes and values."""
 
     receipt: CommitReceipt | None
-    readback: Readback
+    extra: dict[str, Any]
 
 
 def _request(request: PublicationRequest | None) -> PublicationRequest:
@@ -310,8 +307,8 @@ def collect(
     failed = failed_receipt(request, os_errno=code)
     shown = failed if pub is not None else None
     if reader.refusal is not None:
-        return ReadbackRefused(reader.refusal, shown, reader.readback)
-    return ReadbackMemoryFailure(shown, reader.readback) if memory else failed
+        return ReadbackRefused(reader.refusal, shown, reader.extra)
+    return ReadbackMemoryFailure(shown, reader.extra) if memory else failed
 
 
 def _publish(
@@ -320,10 +317,10 @@ def _publish(
     """Bind the read-back tables when there is an `output_dir`; the refusals are all before this."""
     outputs = reader.outputs
     if pub is None:
-        return Collected(outputs, None, reader.readback)
+        return Collected(outputs, None, reader.extra)
     components = [f"{name}.parquet" for name in outputs]
     receipt = publish_unit(pub.out, pub.txn, request, tables=components)
-    return Collected(outputs, receipt, reader.readback) if receipt.outcome in COMMITTED else receipt
+    return Collected(outputs, receipt, reader.extra) if receipt.outcome in COMMITTED else receipt
 
 
 def _priced(table: pa.Table) -> TableBytesSpec:
@@ -350,7 +347,7 @@ class _Readback:
         self._read: list[TableBytesSpec] = []
         self._footers: list[TableBytesSpec] = []
         self._staged = 0
-        self.readback = Readback(None, 0, 0, 0, 0, 0)
+        self.extra: dict[str, Any] = {"readback": asdict(Readback(None, 0, 0, 0, 0, 0))}
 
     def run(self, names: list[str]) -> None:
         self._staged = len(names)
@@ -374,8 +371,8 @@ class _Readback:
 
     def _measure(self) -> None:
         """Take the figures after each step, inside the guarded readback, so the result that
-        reports them never allocates again after a failure or a publication."""
-        self.readback = Readback(
+        reports them allocates nothing after a failure or a publication."""
+        figures = Readback(
             kill_ceiling_bytes=self._ceiling,
             sources_bytes=lower_bound_bytes(self._held),
             floor_bytes=lower_bound_bytes(self._footers),
@@ -383,6 +380,7 @@ class _Readback:
             tables_read=len(self._read),
             tables_staged=self._staged,
         )
+        self.extra = {"readback": asdict(figures)}
 
     def _footer(self, name: str) -> TableBytesSpec:
         """The rows and Arrow schema from the footer alone; nothing is decoded and the file is
@@ -423,6 +421,10 @@ def result_from_envelope(
         shutil.rmtree(staging_output_dir, ignore_errors=True)
         return envelope_failure(envelope, pid=pid)
 
+    # Everything the completed result needs that allocates is built before the readback, so
+    # nothing can fail with a memory error once the output is published.
+    committed = None if pub is None else str(pub.target)
+    row_errors = row_errors_of(envelope)
     # Read back before publishing, so `outputs` is right with or without an `output_dir`. The
     # scratch stage goes on every exit, also when the ceiling check raises.
     try:
@@ -434,13 +436,12 @@ def result_from_envelope(
         # MED-1: a refused stage or a publication that did not commit is a classified result.
         fields = {"peak_rss_mb": peak, "returncode": 0, "isolated": True, "pid": pid}
         return failed_publication(collected, staging_output_dir, **fields)
-    figures = collected.readback.as_extra()
     if isinstance(collected, ReadbackRefused):
         return readback_refused(
             collected.fit,
             staging=staging_output_dir,
             receipt=collected.receipt,
-            readback=figures,
+            extra=collected.extra,
             peak=peak,
             pid=pid,
         )
@@ -448,7 +449,7 @@ def result_from_envelope(
         return readback_memory_failure(
             staging=staging_output_dir,
             receipt=collected.receipt,
-            readback=figures,
+            extra=collected.extra,
             peak=peak,
             pid=pid,
         )
@@ -463,9 +464,9 @@ def result_from_envelope(
         error=None,
         isolated=True,
         pid=pid,
-        committed_output_dir=None if pub is None else str(pub.target),
-        row_errors=row_errors_of(envelope),
-        extra={"readback": figures},
+        committed_output_dir=committed,
+        row_errors=row_errors,
+        extra=collected.extra,
         publication_receipt=collected.receipt,
     )
 
