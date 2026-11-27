@@ -68,6 +68,18 @@ def _count_outside(ints: Any, low: int | None, high: int | None) -> Any:
     return mask
 
 
+def _fixed_offset_seconds(tz: str) -> int | None:
+    """Seconds east of UTC for a numeric zone such as `+05:30` or `-0800`, else `None` (a named
+    zone). pyarrow 14 cannot look a numeric zone up in `local_timestamp`, so it is shifted by hand."""
+    if len(tz) not in (5, 6) or tz[0] not in "+-":
+        return None
+    digits = tz[1:].replace(":", "", 1)
+    if len(digits) != 4 or any(c not in "0123456789" for c in digits):
+        return None
+    seconds = int(digits[:2]) * 3_600 + int(digits[2:]) * 60
+    return -seconds if tz[0] == "-" else seconds
+
+
 def _holds_dates(arrow_type: pa.DataType) -> bool:
     """Whether a value of this type can contain a date or timestamp, at any depth."""
     return any(is_date_leaf(node) for node in type_nodes(arrow_type))
@@ -121,7 +133,17 @@ def _outside_mask(values: Any) -> Any:
     utc_outside = _count_outside(ints, low, high)
     if not zone:
         return utc_outside
-    local = _count_outside(_pc.local_timestamp(values).cast(pa.int64()), low, high)
+    offset = _fixed_offset_seconds(arrow_type.tz)
+    if offset is not None:
+        # local = instant + shift, so the local test is the instant against shifted bounds.
+        shift = offset * _TICKS_PER_SECOND[arrow_type.unit]
+        local = _count_outside(
+            ints,
+            None if low is None else low - shift,
+            None if high is None else high - shift,
+        )
+    else:
+        local = _count_outside(_pc.local_timestamp(values).cast(pa.int64()), low, high)
     if local is None or utc_outside is None:
         return local if utc_outside is None else utc_outside
     return _pc.or_(utc_outside, local)
