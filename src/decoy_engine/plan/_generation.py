@@ -23,17 +23,28 @@ import base64
 import binascii
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import fileaccess, reasons, safe_output
+from decoy_engine._config_text import (
+    Expected,
+    Name,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+    passthrough,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.contracts.distribution_snapshot import ACCEPTED_SCHEMA_VERSIONS
 from decoy_engine.fileaccess import FileRole
 from decoy_engine.plan._checks_dp import verify_dp_snapshots
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import refusal_error
 from decoy_engine.plan._types import (
     DpVerification,
     GenerationPlan,
@@ -120,26 +131,42 @@ def snapshot_schema_failure(parsed: Any, shown: str) -> Any:
 
     if isinstance(parsed, dict) and parsed.get("schema_version") in ACCEPTED_SCHEMA_VERSIONS:
         return None
+    refusal = config_refusal(
+        config_position(Name(shown), "schema_version"),
+        Problem.MISMATCH,
+        expected=Expected.SCHEMA_VERSION,
+        hint="This engine consumes only the accepted schema versions",
+    )
     return StatisticalSpecError(
-        code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
-        message=(
-            f"snapshot_file {shown!r} does not declare 'schema_version' "
-            f"{' or '.join(ACCEPTED_SCHEMA_VERSIONS)}; this engine consumes only those versions."
-        ),
+        code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH, message=refusal.text
     )
 
 
-def _unreadable_message(
-    shown: str, locator: str, declared: str, base_dir: str | Path | None, cause: str
-) -> str:
-    """The unreadable-snapshot text. With a `base_dir` and a relative value it names where the
-    read went and the rule; the resolved path is displayed through `fileaccess.shown`."""
-    if locator == declared:
-        return f"snapshot_file {shown!r} could not be read: {cause}"
-    where = fileaccess.shown(locator, "snapshot_file")
-    return (
-        f"snapshot_file {shown!r} could not be read at {where!r} "
-        f"(a relative path is read from the config file's folder): {cause}"
+def statistical_refusal(code: str, declared: str, table_name: object, col_name: object) -> Refusal:
+    """The refusal of a statistical column at compile: the registry summary of `code`, so no
+    exception text reaches it. An unreadable snapshot gets a fixed phrase and, for a relative
+    value, the fixed rule hint; the declared value and the resolved path are config-derived and
+    stay out. The key is the column's position."""
+    at_column = config_position("tables", Name(table_name), "generate_columns", Name(col_name))
+    if code == reasons.plan.REFERENCE_FANOUT_MISSING:
+        return config_refusal(
+            at_column,
+            Problem.NOT_ALLOWED,
+            code=code,
+            hint="Run `decoy fit <source> --fanout <column>` to add the per-parent counts",
+        )
+    if code != reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE:
+        return config_refusal(at_column, Problem.NOT_ALLOWED, code=code)
+    if os.path.isabs(declared):
+        return config_refusal(
+            at_column,
+            Problem.SNAPSHOT_UNREADABLE,
+            hint="Check that the file exists and that the process can read it",
+        )
+    return config_refusal(
+        at_column,
+        Problem.SNAPSHOT_UNREADABLE,
+        hint="Relative snapshot_file paths resolve against the config file's folder",
     )
 
 
@@ -147,13 +174,12 @@ def _unreadable_message(
 class PinnedRead:
     """One artifact read: its bytes and digest, or (`raw` is None) why it could not be read.
 
-    `cause` is the error text a snapshot report carries (the locator redacted under a strict
-    policy); `cause_type` is the exception class name alone, for a report that must carry no text.
+    `cause_type` is the exception class name alone: the exception text can name the file or hold
+    file content, so no report carries it.
     """
 
     raw: bytes | None
     sha256: str = ""
-    cause: str = ""
     cause_type: str = ""
     # Byte size of a file over the cap (then `raw` is None and nothing was kept).
     oversize: int = 0
@@ -169,26 +195,28 @@ def read_pinned_artifact(
     """Read one declared file once under `role`: the one read step snapshots and lookups share.
 
     Resolves a relative path from `base_dir`, reads through the file policy, and keeps the
-    strict/ambient failure split (a strict policy's own errors propagate; the failure is recorded
+    failure split (a strict policy's own errors propagate; the failure class is recorded
     after the handler closes so no library error is attached). A file over `cap` comes back with
     `oversize` set and is not kept: the caller raises its own coded refusal. Nothing is truncated.
     """
-    shown = fileaccess.shown(declared, field_key)
     locator = fileaccess.config_relative(declared, base_dir)
-    failure: tuple[str, str] | None = None
+    failure_type: str | None = None
+    fresh: BaseException | None = None
     try:
         raw = fileaccess.read_all(role, locator, field_key)
-    except OSError as exc:
-        if fileaccess.keeps_class(exc):
+    except Exception as exc:
+        # The same rule `read_config` applies: a strict policy keeps the class of a disk, quota or
+        # memory failure but rebuilds it without the text the library put there.
+        outcome = passthrough(exc)
+        if outcome is exc:
             raise
-        if fileaccess.is_ambient():
-            return PinnedRead(None, cause=str(exc), cause_type=type(exc).__name__)
-        failure = (
-            fileaccess.redact_locators(str(exc), [(declared, shown), (locator, shown)]),
-            type(exc).__name__,
-        )
-    if failure is not None:
-        return PinnedRead(None, cause=failure[0], cause_type=failure[1])
+        fresh = outcome
+        if fresh is None:
+            failure_type = safe_output.safe_error_type(exc).value
+    if fresh is not None:
+        raise_bare(fresh)
+    if failure_type is not None:
+        return PinnedRead(None, cause_type=failure_type)
     if len(raw) > cap:
         return PinnedRead(None, oversize=len(raw))
     return PinnedRead(raw, sha256=hashlib.sha256(raw).hexdigest())
@@ -264,8 +292,6 @@ def read_and_pin_snapshots(
     pinned: dict[str, ReadSnapshot] = {}
     failures: dict[str, Any] = {}
     for path, field_key in _snapshot_field_keys(config).items():
-        shown = fileaccess.shown(path, field_key)
-        locator = fileaccess.config_relative(path, base_dir)
         read = read_pinned_artifact(
             FileRole.SNAPSHOT,
             path,
@@ -273,31 +299,41 @@ def read_and_pin_snapshots(
             base_dir,
             EMBEDDED_SNAPSHOT_MAX_BYTES,
         )
+        at_snapshot = config_position(Name(field_key))
         if read.oversize:
-            raise PlanCompileError(
-                code=reasons.plan.DP_SNAPSHOT_EMBEDDED_ARTIFACT_TOO_LARGE,
-                path=f"<snapshot_file={shown}>",
-                message=oversize_message(
-                    "snapshot_file", shown, read.oversize, EMBEDDED_SNAPSHOT_MAX_BYTES
+            too_large = config_refusal(
+                at_snapshot,
+                Problem.TOO_LARGE,
+                hint=(
+                    "The embedded-artifact cap is 16 MiB (HC-5 high-cardinality precedent, "
+                    "quality/snapshot.py). Pinning the full artifact bytes into the Plan is "
+                    "required for generation to never reopen a path; a bounded format change "
+                    "is a separate, reviewed escalation, not a silent truncation or a runtime "
+                    "path-read fallback"
                 ),
             )
+            raise_bare(
+                refusal_error(reasons.plan.DP_SNAPSHOT_EMBEDDED_ARTIFACT_TOO_LARGE, too_large)
+            )
         if read.raw is None:
+            unreadable = config_refusal(
+                at_snapshot, Problem.UNREADABLE, expected=Expected.SNAPSHOT_FILE
+            )
             failures[path] = StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=_unreadable_message(shown, locator, path, base_dir, read.cause),
+                code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE, message=unreadable.text
             )
             continue
         raw = read.raw
         digest = read.sha256
         try:
-            parsed = parse_snapshot_json(raw, shown=shown)
+            parsed = parse_snapshot_json(raw, shown=field_key)
         except StatisticalSpecError as exc:
             failures[path] = exc
             continue
         guard = snapshot_content_guard.get()
         if guard is not None:
             guard(parsed)
-        mismatch = snapshot_schema_failure(parsed, shown)
+        mismatch = snapshot_schema_failure(parsed, field_key)
         if mismatch is not None:
             failures[path] = mismatch
             continue
@@ -332,16 +368,18 @@ def resolve_pinned_snapshot(
     if failures is not None:
         failure = failures.get(snapshot_file)
         if failure is None:
-            failure = StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=(
-                    f"snapshot_file {fileaccess.shown(snapshot_file, 'snapshot_file')!r} has no "
-                    "pinned content and no "
-                    "recorded read failure from this compile's read-once pass; "
-                    "refusing rather than reopening the path."
+            missing = config_refusal(
+                config_position("snapshot_file"),
+                Problem.MISSING,
+                hint=(
+                    "No pinned content and no recorded read failure from this compile's "
+                    "read-once pass; refusing rather than reopening the path"
                 ),
             )
-        raise failure
+            failure = StatisticalSpecError(
+                code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE, message=missing.text
+            )
+        raise_bare(failure)
     return _load_snapshot(snapshot_file)[1]
 
 
@@ -436,20 +474,21 @@ def check_fitted_references(
             if col.get("distribution") != "fitted":
                 continue
             name = col.get("name", "?")
-            where = f"tables.{table_name}.generate_columns.{name}"
             snapshot_file = col.get("snapshot_file")
             if not snapshot_file:
-                raise PlanCompileError(
-                    code=reasons.plan.REFERENCE_FANOUT_MISSING,
-                    path=f"{where}.snapshot_file",
-                    message=(
-                        f"reference column {name!r} uses distribution: fitted and needs "
-                        "`snapshot_file`. Run `decoy fit <source> --fanout <column>`, or use "
-                        "distribution: random."
+                missing = config_refusal(
+                    config_position(
+                        "tables", Name(table_name), "generate_columns", Name(name), "snapshot_file"
+                    ),
+                    Problem.MISSING,
+                    hint=(
+                        "The column uses distribution: fitted and needs `snapshot_file`. Run "
+                        "`decoy fit <source> --fanout <column>`, or use distribution: random"
                     ),
                 )
+                raise_bare(refusal_error(reasons.plan.REFERENCE_FANOUT_MISSING, missing))
             snapshot_file = str(snapshot_file)
-            outcome: tuple[str, str] | None = None
+            spec_code: str | None = None
             try:
                 # `{}` rather than None: a fitted check never falls back to reading the path.
                 snap = resolve_pinned_snapshot(
@@ -457,19 +496,29 @@ def check_fitted_references(
                 )
                 conflict = [k for k in _FITTED_CONFLICT_KEYS if col.get(k) is not None]
                 if conflict:
-                    outcome = (
-                        reasons.plan.REFERENCE_FANOUT_CONFLICT,
-                        f"reference column {name!r} sets {conflict[0]!r} with distribution: "
-                        "fitted, which already fixes the per-parent counts. Remove it, or use "
-                        "another distribution.",
+                    clash = config_refusal(
+                        config_position(
+                            "tables",
+                            Name(table_name),
+                            "generate_columns",
+                            Name(name),
+                            Name(conflict[0]),
+                        ),
+                        Problem.NOT_ALLOWED,
+                        hint=(
+                            "This key is set with distribution: fitted, which already fixes "
+                            "the per-parent counts. Remove it, or use another distribution"
+                        ),
                     )
-                else:
-                    source = str(col.get("source_column") or name)
-                    fanout_spec_from_snapshot(snap, source, digest=pinned[snapshot_file].sha256)
+                    raise_bare(refusal_error(reasons.plan.REFERENCE_FANOUT_CONFLICT, clash))
+                source = str(col.get("source_column") or name)
+                fanout_spec_from_snapshot(snap, source, digest=pinned[snapshot_file].sha256)
             except StatisticalSpecError as exc:
-                outcome = (exc.code, exc.message)
-            if outcome is not None:
-                raise PlanCompileError(code=outcome[0], path=where, message=outcome[1])
+                spec_code = exc.code
+            if spec_code is not None:
+                # The statistical column's refusal rule: an unreadable snapshot keeps its own text.
+                failed = statistical_refusal(spec_code, snapshot_file, table_name, name)
+                raise_bare(refusal_error(spec_code, failed))
 
 
 def check_generate_snapshot_columns(

@@ -1058,7 +1058,10 @@ class TestCorruptSourceTypeName:
         with pytest.raises(ExecutionError) as ei:
             estimate_job_capacity(config, tmp_path)
         assert ei.value.code == "capacity_source_unprofilable"
-        # The real pyarrow reader class name is interpolated into the message;
-        # mut_33 (`type(None).__name__`) would report "NoneType" instead.
-        assert "ArrowInvalid" in ei.value.message
+        # The message carries the closed exception label, never the reader's text or the
+        # pyarrow class name; mut_33 (`type(None).__name__`) would report "NoneType".
+        assert "(Exception)" in ei.value.message
         assert "NoneType" not in ei.value.message
+        assert "ArrowInvalid" not in ei.value.message
+        assert "NOT_A_PARQUET_FILE_corrupt" not in ei.value.message
+        assert "child.parquet" not in ei.value.message

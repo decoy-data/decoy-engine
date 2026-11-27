@@ -80,7 +80,9 @@ def out_of_core_admission(
     from decoy_engine.execution.out_of_core._compat import check_out_of_core_compatibility
 
     work = order_work(build_work_list(plan, registry), graph)
-    compat = check_out_of_core_compatibility(plan, work, graph, source_types=source_types)
+    compat = check_out_of_core_compatibility(
+        plan, work, graph, source_types=source_types, registry=registry
+    )
     return compat.accepted, compat.primary_code
 
 

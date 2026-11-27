@@ -46,7 +46,10 @@ from decoy_engine.execution._adapter import (
     option,
     provider_config_to_dict,
 )
-from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
+from decoy_engine.execution._errors import (
+    text_mask_fail_closed_error,
+    text_mask_unsupported_pair_error,
+)
 from decoy_engine.execution._strategies._ner_config import (
     NER_WIZARD_OPTIONS,
     enforce_ner_model_version,
@@ -251,14 +254,7 @@ class TextMaskHandler:
                 raise
             unsupported = True
         except FpeUnencryptableError as exc:
-            raise StrategyError(
-                code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
-                strategy="text_mask",
-                message=(
-                    f"column {column!r}: {exc}. The engine fails closed rather than "
-                    "silently choose a sub_floor_span fallback."
-                ),
-            ) from exc
+            raise text_mask_fail_closed_error(column) from exc
         if unsupported:
             # Raised after the catch closed, so no cause or context carries the span.
             raise text_mask_unsupported_pair_error(column)
