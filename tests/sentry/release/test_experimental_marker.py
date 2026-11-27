@@ -30,7 +30,7 @@ def test_every_callable_marker_matches_its_tier(tiered) -> None:
 def test_every_experimental_constant_is_named_in_its_module_docstring(tiered) -> None:
     """The constants `sdk.py` assigns are named in its module docstring, which has the marker."""
     names = sorted(
-        {e.name for e, tier in tiered if tier == st.EXPERIMENTAL and census.is_constant(e.obj)}
+        {e.name for e, tier in tiered if tier == st.EXPERIMENTAL and not callable(e.obj)}
     )
     assert len(names) >= 7, "the experimental constants were not found"
     doc = (importlib.import_module(st.EXPERIMENTAL_MODULE).__doc__ or "").lstrip()
