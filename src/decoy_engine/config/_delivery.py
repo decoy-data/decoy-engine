@@ -15,6 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Problem, config_position, config_refusal
 from decoy_engine.errors import PipelineValidationError
 
 DeliveryMode = Literal["strict", "best_effort"]
@@ -33,7 +34,7 @@ def is_unreleased_delivery_mode(mode: object) -> bool:
 
 
 def best_effort_text() -> str:
-    """The registry summary, so the validator and the raw guard print one text."""
+    """The registry summary the validator prints; the raw guard builds its text from the same code."""
     return reasons.get("config", reasons.config.DELIVERY_BEST_EFFORT_UNRELEASED).summary
 
 
@@ -44,9 +45,14 @@ def refuse_unreleased_delivery(config: Mapping[str, Any]) -> None:
     """
     block = config.get("delivery")
     if isinstance(block, Mapping) and is_unreleased_delivery_mode(block.get("mode")):
+        refusal = config_refusal(
+            config_position("delivery"),
+            Problem.NOT_ALLOWED,
+            code=reasons.config.DELIVERY_BEST_EFFORT_UNRELEASED,
+        )
         raise PipelineValidationError(
-            best_effort_text(),
-            path="delivery",
+            refusal.text,
+            path=refusal.key,
             code=reasons.config.DELIVERY_BEST_EFFORT_UNRELEASED,
         )
 
