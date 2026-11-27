@@ -858,7 +858,8 @@ class TestCorpusProvenance:
             _get_corpus_record("icd10", path, is_shipped=True)
         assert exc_info.value.code == "code_set_corpus_provenance_identity_mismatch"
         assert "icd10" in exc_info.value.message
-        assert "mcc" in exc_info.value.message
+        # The embedded corpus id is read from the file, so it is not echoed (F31).
+        assert "mcc" not in exc_info.value.message
 
     def _complete_shipped_meta(self, **overrides: bytes) -> dict[bytes, bytes]:
         """A shipped stamp with all four REQUIRED fields + matching identity.
@@ -1448,8 +1449,10 @@ class TestCorpusSourceVersionPin:
         with pytest.raises(PlanCompileError) as exc_info:
             apply_code_set("I10", cfg, mode="mask", job_seed=_JOB_SEED)
         assert exc_info.value.code == "code_set_corpus_version_mismatch"
-        assert "FY2023" in exc_info.value.message
-        assert "FY2024" in exc_info.value.message
+        # The field is named; neither the pinned nor the embedded version is echoed (F31).
+        assert "corpus_source_version" in exc_info.value.message
+        assert "FY2023" not in exc_info.value.message
+        assert "FY2024" not in exc_info.value.message
 
     def test_matching_customer_version_loads(self, tmp_path: pathlib.Path):
         tbl = pa.table(

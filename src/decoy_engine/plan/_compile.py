@@ -32,6 +32,7 @@ from decoy_engine.config import (
     pre_scan_hash_input,
     refuse_fixed_width_output_types,
     refuse_unlisted_generate_families,
+    refuse_unreleased_delivery,
 )
 
 # Note: imports from decoy_engine.relationships are deferred inside
@@ -165,7 +166,6 @@ def compile_plan(
     # Lazy import: see the module-level comment for cycle rationale.
     # Run the always-on checks. Each raises PlanCompileError on fail;
     # silence on pass means the check went into checks_passed.
-    #
     # S2 wiring (per spec §4): namespace_ambiguity check moves into
     # build_namespace_registry; fk_plan_ordering check moves into
     # build_relationship_graph; orphan_fk_policy_completeness lands new at
@@ -175,9 +175,8 @@ def compile_plan(
     # S5 wiring (per spec §6): pool_capacity_pre_flight (row 7) lives in
     # decoy_engine.generation.pool._validate. Lazy import same rationale
     # as the relationships block above.
-    # S6 wiring (per spec §6): deterministic_namespace_completeness (row 9)
-    # lives in decoy_engine.providers_v2.identifiers._validate. Lazy
-    # import for symmetry with rows 6 + 7.
+    # S6 wiring (per spec §6): deterministic_namespace_completeness (row 9) lives in
+    # decoy_engine.providers_v2.identifiers._validate, imported lazily like rows 6 and 7.
     from decoy_engine.generation.composite import composite_wiring_consistent
     from decoy_engine.generation.pool import check_pool_capacity_pre_flight
     from decoy_engine.providers_v2.identifiers import (
@@ -189,6 +188,7 @@ def compile_plan(
         check_orphan_fk_policy_completeness,
     )
 
+    refuse_unreleased_delivery(config)
     refuse_unapplied_subset(config)
     namespace_registry = build_namespace_registry(config, profile)
     check_unknown_provider(config)

@@ -109,6 +109,7 @@ from decoy_engine.profile import DeclarationRequest
 from decoy_engine.publication import CommitReceipt, PublicationRequest, check_request
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.reasons import decoy as _decoy_reasons
+from decoy_engine.safe_output import safe_error_type
 
 __all__ = ["run_pipeline_isolated"]
 
@@ -436,7 +437,8 @@ def _write_payload(
         serialized = json.dumps(payload)
     except TypeError as exc:
         raise ValueError(
-            f"config / run_pipeline_kwargs must be JSON-serializable for isolated execution: {exc}"
+            "config / run_pipeline_kwargs must be JSON-serializable for isolated execution "
+            f"({safe_error_type(exc).value})"
         ) from exc
     # The payload may carry DSNs with credentials: write_private makes it 0600 at
     # creation (no umask window, no late chmod) and publishes it atomically.

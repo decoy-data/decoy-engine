@@ -17,7 +17,13 @@ import pandas as pd
 import pytest
 
 from decoy_engine.detection import DetectorRun, ModelRef, ModelUnavailableError, ner
-from decoy_engine.profiling import ScanSourceError, scan_set_to_dict, scan_sources, starter_config
+from decoy_engine.profiling import (
+    ScanSourceError,
+    detector_entry,
+    scan_set_to_dict,
+    scan_sources,
+    starter_config,
+)
 from tests._ml import require_ml_stack
 from tests._ner import needs_ner
 from tests.unit.detection_verification import _scanml_m4_support as m4
@@ -96,31 +102,43 @@ def test_a_scan_without_pre_scan_runs_no_model(
     assert all(t.model_hits == {} for t in scan.tables)
 
 
-def test_the_starter_config_ignores_model_hits(tmp_path: Path) -> None:
-    # M-M3a2: a `high` classifier hit turned into an entry changes this config.
+def _by_column(got: Any) -> dict[str, Any]:
+    return {x.column: x for x in got.suggestions}
+
+
+def test_the_starter_config_reads_high_classifier_hits(tmp_path: Path) -> None:
+    # INIT-SCAN-SCAFFOLD E2 reverses M3a: a `high` hit now writes its detector's entry. The
+    # columns no hit touches keep the entries and notes a regex-only scan gives.
     sources = s.source(tmp_path, "customers", s.customers())
     plain = starter_config(scan_sources(sources))
     with_models = scan_sources(sources, pre_scan=s.pre_scan("classifier"))
     email_hits = s.hits(with_models, "customers", "email")
-    assert any(h.band == "high" for h in email_hits), "no `high` hit for M-M3a2 to act on"
+    assert any(h.band == "high" for h in email_hits), "no `high` hit for the starter to act on"
     got = starter_config(with_models)
-    assert got.config == plain.config
-    assert got.notes == plain.notes
-    assert got.suggestions == plain.suggestions
+    email = _by_column(got)["email"]
+    assert (email.source, email.band, email.live, email.decided_by) == (
+        "classifier",
+        "high",
+        False,
+        "classifier",
+    )
+    assert email.entry == detector_entry("email", "email")
+    assert "classifier lgbm-v1 0.1.0: email (band high)" in got.notes[("customers", "email")]
+    for column in ("notes", "names"):
+        assert _by_column(got)[column] == _by_column(plain)[column]
+        assert got.notes[("customers", column)] == plain.notes[("customers", column)]
 
 
 @needs_ner
-def test_the_starter_config_ignores_every_detector_at_once(tmp_path: Path) -> None:
+def test_the_starter_config_names_ner_hits_and_never_acts_on_them(tmp_path: Path) -> None:
     sources = s.source(tmp_path, "customers", s.customers())
     plain = starter_config(scan_sources(sources))
     everything = scan_sources(sources, pre_scan=s.pre_scan("classifier", "ner"))
-    assert s.hits(everything, "customers", "notes"), "the pass produced no NER hit to ignore"
+    assert s.hits(everything, "customers", "notes"), "the pass produced no NER hit to name"
     got = starter_config(everything)
-    assert (got.config, got.notes, got.suggestions) == (
-        plain.config,
-        plain.notes,
-        plain.suggestions,
-    )
+    assert _by_column(got)["notes"] == _by_column(plain)["notes"]
+    assert "ner " in got.notes[("customers", "notes")]
+    assert "person_name" in got.notes[("customers", "notes")]
 
 
 @needs_ner

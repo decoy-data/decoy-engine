@@ -37,6 +37,7 @@ from decoy_engine import fileaccess
 from decoy_engine._canonical import seed_fingerprint_bytes
 from decoy_engine.determinism import SEED_PROTOCOL_VERSION
 from decoy_engine.fileaccess import FileAccess, FileRole, entry_point
+from decoy_engine.safe_output import safe_error_type
 
 # Fields that are intentionally excluded from the fingerprint. ``name``
 # is the rename surface R3.10 is severing. ``null_probability`` is a
@@ -129,7 +130,7 @@ _NO_DIGEST = (
 )
 
 _UNREADABLE = (
-    "strategy_config_fingerprint: snapshot_file {!r} is missing or unreadable ({}); cannot "
+    "strategy_config_fingerprint: snapshot_file is missing or unreadable ({}); cannot "
     "derive a stable content-based seed. Fix the path or file rather than falling back "
     "to the path string (which would silently change synthetic output)."
 )
@@ -146,7 +147,6 @@ def _snapshot_content_digest(
     which would reintroduce the path-coupling bug.
     """
     key = fileaccess.position_key(field_key)
-    shown = fileaccess.shown(path, key)
     failure: str | None = None
     try:
         data = fileaccess.read_all(role, path, key)
@@ -154,12 +154,12 @@ def _snapshot_content_digest(
         if fileaccess.keeps_class(exc):
             raise
         if fileaccess.is_ambient():
-            raise RuntimeError(_UNREADABLE.format(shown, f"{type(exc).__name__}: {exc}")) from exc
-        failure = f"{type(exc).__name__}: {fileaccess.redact_locators(str(exc), [(path, shown)])}"
+            raise RuntimeError(_UNREADABLE.format(safe_error_type(exc).value)) from exc
+        failure = safe_error_type(exc).value
     if failure is not None:
         # Strict: raised after the handler closes, so the library error is neither cause nor
         # context (its text can name the file).
-        raise RuntimeError(_UNREADABLE.format(shown, failure))
+        raise RuntimeError(_UNREADABLE.format(failure))
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 

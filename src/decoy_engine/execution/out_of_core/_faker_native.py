@@ -26,6 +26,11 @@ inside the route. Two things keep that safe:
   never leaked even if a non-string column slips past both gates; the runner's
   all-or-nothing publish then aborts any sink and releases spill.
 
+A computed draw (`uuid`, exact-string `random_choice`; GEN-NONFAKER-DRAWS) takes the same
+admission shape and builds no pool: the decision carries its `ComputedDrawSpec`, and each batch is
+keyed straight from the source value by the shared kernel entries. A computed output that is not
+exact `string` is declined before the run (`out_of_core_faker_computed_output_type_unsupported`).
+
 Reason codes carry the strategy outcome, the column name and the Arrow type
 only, never a cell, key, or generated value.
 """
@@ -39,41 +44,36 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._opaque import OpaqueBox
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution._operator_registry import PYTHON_SCALAR, RUST_POOL_SELECT
+from decoy_engine.execution._operator_registry import (
+    PYTHON_SCALAR,
+    RUST_POOL_SELECT,
+)
 from decoy_engine.execution.native._operator_step import sample_faker_array
+from decoy_engine.execution.native._provider_class import computed_mask_spec
 from decoy_engine.execution.native._real_type_admission import (
-    C1_PROVIDER_ALLOWLIST,
+    faker_provider_decline,
     string_source_type_rejection,
 )
 from decoy_engine.execution.native._requirements import faker_pool_precondition_met_seed
+from decoy_engine.execution.native.draw import BoundFakerKernel, deterministic_computed_array
+from decoy_engine.generation.pool import ComputedDrawSpec
 
 if TYPE_CHECKING:
-    from decoy_engine.execution.native._index_ext import IndexDerivationKernel
     from decoy_engine.execution.out_of_core._faker_pool import OocFakerPoolContext
     from decoy_engine.generation.pool._value_pool import ValuePool
     from decoy_engine.plan._types import ColumnSeed
+    from decoy_engine.providers_v2 import ProviderRegistry
 
 _NO_BACKEND_RAN = "none"
 _REASON_NO_SELECT_CALLS = reasons.route.NO_NATIVE_KERNEL_CALLS
 
 
-@dataclass(frozen=True)
-class BoundFakerKernel:
-    """The index kernel one run selects faker pools with, and the thread budget.
-
-    `compiled` is True for the Rust companion and False for the pure-Python
-    reference (`reference_index_derivation`); both derive byte-identical indices
-    (INDEX_KAT), so the flag changes only the recorded backend, never the output.
-    """
-
-    kernel: IndexDerivationKernel
-    native_threads: int | None
-    compiled: bool
-
-
-def decline_reason(column: str, schema: pa.Schema, seed: ColumnSeed) -> str | None:
+def decline_reason(
+    column: str, schema: pa.Schema, seed: ColumnSeed, registry: ProviderRegistry | None = None
+) -> str | None:
     """None when `column` can run the deterministic-REUSE native faker payload, else a reason.
 
     The admitted subset is the exact one the sequential and chunked routes gate
@@ -83,8 +83,16 @@ def decline_reason(column: str, schema: pa.Schema, seed: ColumnSeed) -> str | No
     (positional) REUSE leg needs the global row offset and is out of this slice's
     scope; UNIQUE/MATCH/SCALE need whole-column RNG state. Those all decline here.
     """
-    if seed.provider not in C1_PROVIDER_ALLOWLIST:
-        return f"faker_provider_not_native:{column}:{seed.provider}"
+    provider_decline = faker_provider_decline(
+        column,
+        seed.provider,
+        provider_config_to_dict(seed.provider_config),
+        runs_computed=True,
+        registry=registry,
+        stock_only=True,
+    )
+    if provider_decline is not None:
+        return provider_decline[0]
     if not faker_pool_precondition_met_seed(seed):
         return f"faker_not_deterministic_reuse:{column}"
     return string_source_type_rejection("faker", column, schema)
@@ -95,7 +103,8 @@ class FakerColumnDecision:
     """The backend one faker column takes for the whole run, and what it executed.
 
     `pinned_type` is the source Arrow type a native column is held to. `pool` is
-    the ONE pool built for this column, reused across every batch. `select_calls`
+    the ONE pool built for this column, reused across every batch; a computed draw has
+    no pool and carries its `spec` instead. `select_calls`
     counts the index-kernel invocations over the WHOLE column: an empty batch
     makes none and must not erase an earlier one.
     """
@@ -107,12 +116,13 @@ class FakerColumnDecision:
     pinned_type: pa.DataType
     namespace: str | None = None
     pool: ValuePool | None = None
+    spec: ComputedDrawSpec | None = None
     rows: int = 0
     select_calls: int = 0
 
     @property
     def native(self) -> bool:
-        return self.pool is not None
+        return self.pool is not None or self.spec is not None
 
     def entry(self) -> dict[str, Any]:
         ran = self.select_calls > 0
@@ -209,7 +219,11 @@ def decide_table(
     decisions: dict[str, FakerColumnDecision] = {}
     for column, seed in seeds.items():
         pinned_type = schema.field(column).type
-        if bound is None or faker_pool is None:
+        registry = faker_pool.registry if faker_pool is not None else None
+        computed = computed_mask_spec(
+            seed.provider, provider_config_to_dict(seed.provider_config), registry
+        )
+        if bound is None or (faker_pool is None and computed is None):
             raise ExecutionError(
                 code=reasons.runtime.OUT_OF_CORE_FAKER_POOL_UNSUPPORTED,
                 message=(
@@ -217,7 +231,7 @@ def decide_table(
                     "mask planner without a pool context or index kernel; the run is aborted."
                 ),
             )
-        reason = decline_reason(column, schema, seed)
+        reason = decline_reason(column, schema, seed, registry)
         if reason is not None:
             raise ExecutionError(
                 code=reasons.runtime.OUT_OF_CORE_FAKER_SOURCE_TYPE_UNSUPPORTED,
@@ -228,6 +242,19 @@ def decide_table(
                     "than leaking the raw source value."
                 ),
             )
+        if computed is not None:
+            decisions[column] = FakerColumnDecision(
+                table=table_name,
+                column=column,
+                backend=bound.backend(computed),
+                reason=None,
+                pinned_type=pinned_type,
+                namespace=seed.namespace,
+                spec=computed,
+            )
+            continue
+        if faker_pool is None:  # pragma: no cover - the check above names this case
+            raise AssertionError("a pool provider reached the out-of-core planner without a pool")
         # decline_reason returned None, so the provider is on the allowlist and
         # therefore not None (a None provider is never in the allowlist). Narrow
         # it with a fail-closed guard rather than an assert that `-O` could strip.
@@ -263,7 +290,7 @@ def native_faker_array(
     mask_key: bytes,
     namespace: str,
 ) -> pa.Array:
-    """Select one column slice's faker values from the prepared pool.
+    """Select one column slice's faker values from the prepared pool, or draw its computed values.
 
     There is no fallback: a kernel fault propagates and aborts the run, so a
     column never ends up half native and half something else. An empty slice is
@@ -275,6 +302,18 @@ def native_faker_array(
         n = len(values)
         if n == 0:
             return pa.array([], type=pa.string())
+        spec = native.decision.spec
+        if spec is not None:
+            native.decision.select_calls += 1
+            return deterministic_computed_array(
+                values,
+                spec,
+                column_namespace=namespace,
+                mask_key=OpaqueBox(mask_key),
+                index_kernel=native.bound.kernel,
+                hash_kernel=native.bound.hash_kernel,
+                native_threads=native.bound.native_threads,
+            )
         pool = native.decision.pool
         if pool is None:  # pragma: no cover - a native decision always carries its pool
             raise ExecutionError(
@@ -296,7 +335,6 @@ def native_faker_array(
 
 
 __all__ = [
-    "BoundFakerKernel",
     "FakerColumnDecision",
     "NativeFaker",
     "TableFakerPlan",

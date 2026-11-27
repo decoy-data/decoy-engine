@@ -262,6 +262,7 @@ def test_group_key_sibling_types_and_provider_allowlist() -> None:
                 "synthetic_account_number",
                 "synthetic_member_id",
                 "synthetic_plan_id",
+                "lorem_text",
             }
         )
         == C1_PROVIDER_ALLOWLIST

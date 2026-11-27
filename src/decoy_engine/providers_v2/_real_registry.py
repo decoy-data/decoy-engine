@@ -88,8 +88,9 @@ _CATALOG: tuple[CapabilityMatrix, ...] = (
     _faker_cap("address_zip", poolable=True),
     _faker_cap("address_full", poolable=False),
     # Generic (4) -- not PII-shaped. uuid and the random_* draws are computed from the keyed bits
-    # (`draw="computed"`), so no pool is built for them; lorem_text has neither.
-    _faker_cap("lorem_text", poolable=False),
+    # (`draw="computed"`), so no pool is built for them. lorem_text has no identity to protect, so
+    # a pool of Faker paragraphs is enough (GEN-NONFAKER-DRAWS, owner decision 2026-11-23).
+    _faker_cap("lorem_text", poolable=True),
     _faker_cap("uuid", poolable=False, draw="computed"),
     _faker_cap("random_int_range", poolable=False, draw="computed"),
     _faker_cap("random_choice", poolable=False, draw="computed"),

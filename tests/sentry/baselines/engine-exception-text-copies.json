@@ -30,21 +30,9 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::detection/name_hints/loader.py::_read_yaml::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::execution/_chunked_carry.py::_same_failure::str(exc)::return": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 2
-  },
-  "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::execution/_isolated_run.py::_write_payload::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
   },
   "audit::execution/_mixed_static.py::admit_mixed_static::exc.detail::return": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
@@ -58,35 +46,11 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::execution/_strategies/_bucket_perturb.py::_validated_config::str(exc)::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 2
-  },
-  "audit::execution/_strategies/_date_shift.py::DateShiftStrategyHandler.run::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::execution/_strategies/_derived.py::DerivedStrategyHandler.run::str(exc)::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::execution/_strategies/_fpe.py::FpeStrategyHandler.run::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 3
-  },
-  "audit::execution/_strategies/_text_mask.py::TextMaskHandler.run::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::execution/capacity.py::estimate_job_capacity::exc.message::return": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::execution/capacity.py::estimate_job_capacity::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::execution/native/_chunked_schema_rule.py::_safe_cast::f{exc}::raise": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
@@ -106,33 +70,9 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::execution/native/_text_mask_route.py::text_mask_fail_closed_error::f{exc}::return": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::execution/out_of_core/_capacity_eval.py::evaluate_capacity::exc.message::return": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 2
-  },
-  "audit::execution/out_of_core/_mask_group_b.py::_fpe_charset::str(exc)::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::execution/out_of_core/_mask_group_b.py::fpe_array::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 2
-  },
-  "audit::execution/out_of_core/_mask_group_c.py::_bucket_perturb_array::str(exc)::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::execution/out_of_core/_mask_group_c.py::_text_mask_array::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::execution/out_of_core/_mask_group_c.py::group_c_output_type::str(exc)::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
   },
   "audit::execution/physical/_shadow_diff_codes.py::PoolBuildFailed.__init__::repr(exc)::other": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
@@ -146,11 +86,7 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::expressions/_lark_parser.py::_validate_string_escapes::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::expressions/_lark_parser.py::compile_expr::f{exc}::raise": {
+  "audit::fileaccess/_errors.py::is_memory_failure::str(exc)::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
@@ -159,26 +95,6 @@
    "max": 1
   },
   "audit::generation/_window_admission.py::_refuse_degenerate::exc.message::other": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::generation/statistical/_snapshot_io.py::parse_snapshot_json::str(exc)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::generation/statistical/_spec.py::_load_snapshot::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::generation/statistical/_spec.py::_load_snapshot::str(exc)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::generators/derivation.py::_snapshot_content_digest::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::generators/derivation.py::_snapshot_content_digest::str(exc)::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
@@ -194,43 +110,11 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::plan/_checks.py::check_statistical_columns::exc.message::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::plan/_checks_declared_casting.py::compile_declared_casting_contract::exc.message::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::plan/_checks_dp.py::verify_dp_snapshots::exc.message::other": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::plan/_checks_fpe.py::check_fpe_charset_config::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 2
-  },
   "audit::plan/_checks_when.py::_when_refusal_error::exc.raw_message::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::plan/_generation.py::_unreadable_message::f{exc}::return": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 2
-  },
-  "audit::plan/_generation.py::check_fitted_references::exc.message::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::plan/_generation.py::read_pinned_artifact::str(exc)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::plan/_generation.py::read_pinned_artifact::str(exc)::return": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::plan/_serialize_declared.py::declared_casting_from_dict::exc.message::raise": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
@@ -242,91 +126,7 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 2
   },
-  "audit::profile/_serialize.py::profile_from_json::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::profiling/model_pack/loader.py::ModelPackLoader._deserialise::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::profiling/model_pack/loader.py::ModelPackLoader._load_manifest::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::profiling/model_pack/loader.py::ModelPackLoader._read_weights::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::profiling/model_pack/provenance.py::sign_pack::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::providers_v2/_faker_adapter.py::FakerAdapter._faker_call::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::providers_v2/mimesis/_adapter.py::MimesisAdapter._call::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::quality/dp_provenance.py::_coerce_platform::exc.args::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::quality/dp_provenance.py::_coerce_recorded::exc.args::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::quality/dp_provenance.py::assert_lock_matches_installed::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::quality/dp_session.py::OpenDpReleaseSession._certify_schedule::str(exc)::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::reference_tables/_loader.py::load_table::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::subset/_edges.py::relationships_from_config::str(exc)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::subset/_edges.py::relationships_from_config::str(exc)::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::transforms/_codeset_loader.py::_get_corpus_record::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::transforms/_codeset_loader.py::_read_corpus_record::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::transforms/_codeset_loader.py::verify_corpus::exc.message::return": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::transforms/bucket_perturb.py::_report_failed::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::transforms/fpe.py::_permute::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::transforms/joint_mask.py::validate_joint_mask_config::f{exc}::other": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::unmask.py::_decrypt_column::f{exc}::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "audit::unmask.py::unmask_pipeline::exc.message::raise": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
@@ -338,11 +138,15 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::validators/_generic.py::RegexMatchFold.__init__::f{exc}::raise": {
+  "audit::verification/postmask/policy_validation.py::_compare_failed::f{exc}::return": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::verification/postmask/policy_validation.py::_compare_failed::f{exc}::return": {
+  "extra::_config_text/_read.py::_yaml_mark::getattr(exc.context_mark)::return": {
+   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
+   "max": 1
+  },
+  "extra::_config_text/_read.py::_yaml_mark::getattr(exc.problem_mark)::return": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
@@ -355,14 +159,6 @@
    "max": 1
   },
   "extra::plan/_checks.py::_check_ner_available_for_strategy::exc.message::raise": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "extra::safe_output/_validation.py::yaml_error_text::getattr(exc.context_mark)::assign": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
-  "extra::safe_output/_validation.py::yaml_error_text::getattr(exc.problem_mark)::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
