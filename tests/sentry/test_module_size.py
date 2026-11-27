@@ -138,7 +138,7 @@ ALLOWLIST: dict[str, int] = {
     # custom-provider registry snapshot for the shadow-parity gate; one cohesive module, no split identified.
     "src/decoy_engine/internal/faker_setup.py": 688,
     # FF1 span path and sub-floor policy (synthetic values split to _text_mask_synthetic.py).
-    "src/decoy_engine/transforms/text_mask.py": 680,
+    "src/decoy_engine/transforms/text_mask.py": 670,
     # scripts/: pre-existing one-off tooling, recorded when the sentry started scanning scripts/.
     # Legacy (> MAX) entries may only shrink; split each into sibling modules when next touched.
     "scripts/audit/probe.py": 775,
