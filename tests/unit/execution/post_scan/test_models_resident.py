@@ -19,6 +19,7 @@ from decoy_engine.execution import ExecutionError, _unified_slice, run_pipeline
 from decoy_engine.execution._chunked_output_sink import decide_output_mode
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution._transforms_gate import post_scan_resident_for
+from decoy_engine.execution.pipeline import post_scan as _post_scan_pkg
 from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.verification.postmask import PostScanBlockedError
@@ -220,7 +221,7 @@ def test_the_unified_slice_takes_regex_integrity_and_runs_the_gate_on_its_return
         ran_before_settle.append(gate.ran)
         return real(gate, ctx, result)
 
-    monkeypatch.setattr(_post_scan, "settle", settle)
+    monkeypatch.setattr(_post_scan_pkg, "settle", settle)
     monkeypatch.delenv("DECOY_SUBSTRATE", raising=False)
     cfg, sources = _single_column_job(tmp_path, "hash")
     cfg["post_scan"] = {"integrity": True}

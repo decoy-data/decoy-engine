@@ -81,6 +81,7 @@ __all__ = [
     "attach_cast_run",
     "bind_gate",
     "note_quarantined",
+    "publish_after_gate",
     "settle",
     "tee_reader",
 ]

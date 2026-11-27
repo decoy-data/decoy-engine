@@ -453,8 +453,10 @@ def column_facts(
             output_distinct=distinct[1],
             detectors=_fired(t),
             identity_error=t.error,
-            distinct_error=distinct_failed
-            or (_NOT_INSPECTABLE_CODE if t.not_inspectable else None),
+            # The inspection code wins over a failed distinct count: the gate keys its
+            # unconditional residual-PII finding on it.
+            distinct_error=(_NOT_INSPECTABLE_CODE if t.not_inspectable else None)
+            or distinct_failed,
             source_distinct_failed=source_failed,
             output_values=t.values.done() if t.values is not None else None,
         )

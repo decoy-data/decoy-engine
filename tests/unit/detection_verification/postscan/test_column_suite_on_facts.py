@@ -628,6 +628,43 @@ def test_an_unreadable_output_date_before_the_source_ends_stays_reported(tmp_pat
     )
 
 
+def test_a_failed_distinct_count_does_not_hide_the_inspection_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # All three failures land on one column: an unreadable output value, a source that ends
+    # early, and an uncoded error from the distinct count. The inspection code must win on the
+    # facts, so the gate still raises its unconditional error.
+    from decoy_engine import reasons
+    from decoy_engine.verification.postmask import _column_facts
+
+    monkeypatch.setattr(_column_facts, "_distinct_or_error", lambda *a, **k: (0, "RuntimeError"))
+    src = pa.table({"d": pa.array([19000, 19001, 19002], pa.date32())})
+    out = pa.table({"d": pa.array([2_932_897, 19001, 19002], pa.date32())})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["d"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )["d"]
+    assert facts.identity_error == reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
+    assert facts.distinct_error == reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+    report = run_post_mask_tables(
+        {"t": _short_source(src)},
+        {"t": from_table("t", out)},
+        config=_cfg(("d", "hash")),
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    assert any(
+        f["column"] == "d"
+        and f["severity"] == "error"
+        and reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE in f["message"]
+        for f in report["residual_pii"]
+    )
+
+
 def test_a_source_that_reads_short_marks_identity_unavailable(tmp_path: Path):
     src = pa.table({"e": ["a@x.com", "b@x.com"]})
     out = pa.table({"e": ["a@x.com", "c@x.com"]})

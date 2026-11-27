@@ -60,7 +60,7 @@ from decoy_engine.execution._mixed_static import MixedStaticPlan, write_order
 from decoy_engine.execution._stitch import stitch_generate_mask_outputs
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
 from decoy_engine.execution.pipeline import store_resident_fit
-from decoy_engine.execution.pipeline.post_scan._gate import attach_cast_run
+from decoy_engine.execution.pipeline.post_scan import attach_cast_run
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:

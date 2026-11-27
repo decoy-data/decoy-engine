@@ -26,7 +26,7 @@ from decoy_engine.execution import _pipeline_sources as _psrc
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._stitch import stitch_generate_mask_outputs
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
-from decoy_engine.execution.pipeline.post_scan._gate import active_gate
+from decoy_engine.execution.pipeline.post_scan import active_gate
 from decoy_engine.generation.pool import PoolCache
 
 if TYPE_CHECKING:

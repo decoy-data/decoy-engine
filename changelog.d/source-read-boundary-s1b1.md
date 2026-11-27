@@ -19,3 +19,7 @@ chunk does. Callers that caught the raw exception should catch `ExecutionError` 
 
 Experimental: `arrow_to_frame`, `arrow_to_series` and `arrow_to_frame_pair` are exported as experimental names.
 Each takes a required `on_unrepresentable(column)` callback that must raise.
+
+When the distinct count of such a column also fails with an uncoded error, the column keeps
+`runtime/postmask_column_not_inspectable`, so the error finding is still raised. Code outside
+`execution/pipeline/post_scan` imports the gate functions from the package, not from `_gate`.

@@ -22,6 +22,7 @@ from decoy_engine import reasons, run_pipeline
 from decoy_engine.execution._chunked_input import capture_source_facts
 from decoy_engine.execution._publication_observer import observed_commit
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+from decoy_engine.execution.pipeline import post_scan as _post_scan_pkg
 from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.reason_adapter import reason_from_exception
@@ -337,7 +338,7 @@ def test_the_gate_is_bound_for_the_run_and_unbound_after(
         seen.append(_post_scan.active_gate())
         return real(gate, *args)
 
-    monkeypatch.setattr(_post_scan, "settle", spy)
+    monkeypatch.setattr(_post_scan_pkg, "settle", spy)
     _run(_config(tmp_path), "full_frame")
     assert len(seen) == 1 and seen[0] is not None and seen[0].ran
     assert _post_scan.active_gate() is None
