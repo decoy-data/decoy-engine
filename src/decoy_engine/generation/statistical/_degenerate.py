@@ -132,7 +132,7 @@ def _datetime_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     return None
 
 
-def _names_far_year(spec: StatisticalSpec) -> bool:
+def names_far_year(spec: StatisticalSpec) -> bool:
     """True when a live year bin lies outside the sampled years (a zero-weight bin is never drawn)."""
     buckets = spec.datetime_buckets
     if buckets is None:
@@ -141,20 +141,6 @@ def _names_far_year(spec: StatisticalSpec) -> bool:
         b.count > 0 and not (b.start_year >= MIN_YEAR and b.end_year <= MAX_SAMPLED_YEAR)
         for b in buckets
     )
-
-
-def _unparseable_bound(spec: StatisticalSpec) -> str | None:
-    """`min` or `max` when its text is not an ISO datetime this interpreter reads, else None.
-
-    The sampler parses these with `datetime.fromisoformat`, which reads nine fractional digits
-    only from Python 3.11, so a bound that parses on one interpreter must not crash another at
-    the first draw."""
-    for bound in ("min", "max"):
-        try:
-            datetime.fromisoformat(str(spec.stats[bound]))
-        except (KeyError, ValueError, TypeError):
-            return bound
-    return None
 
 
 def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
@@ -177,7 +163,7 @@ def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
 def check_degenerate(spec: StatisticalSpec) -> None:
     """Raise `STATISTICAL_STATS_DEGENERATE` when `spec`'s snapshot cannot be sampled, or
     `GENERATION_UNBOUNDED_COLUMN` when a datetime snapshot names a year the sampler cannot hold."""
-    if spec.kind == "datetime" and _names_far_year(spec):
+    if spec.kind == "datetime" and names_far_year(spec):
         from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
         raise StatisticalSpecError(
@@ -187,16 +173,6 @@ def check_degenerate(spec: StatisticalSpec) -> None:
                 f"{MIN_YEAR}..{MAX_SAMPLED_YEAR}."
             ),
         ) from None
-    if spec.kind == "datetime" and spec.datetime_buckets is not None:
-        bad_bound = _unparseable_bound(spec)
-        if bad_bound is not None:
-            from decoy_engine.generation.statistical._spec import StatisticalSpecError
-
-            # Raised outside the parse handler: the bound is a data value, so nothing may chain it.
-            raise StatisticalSpecError(
-                code=reasons.plan.GENERATION_UNBOUNDED_COLUMN,
-                message=f"statistical column {spec.column!r}: {bad_bound}: datetime is missing or unparseable.",
-            )
     finding = degenerate_finding(spec)
     if finding is not None:
         refuse_degenerate(spec.column, f"{finding[1]}. {_REFIT_HINT}")

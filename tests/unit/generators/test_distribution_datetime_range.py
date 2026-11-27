@@ -119,3 +119,21 @@ def test_a_malformed_clock_or_offset_stays_unparseable_not_shifted(bound: str) -
     snap = _snap(bound, bound, [(2020, 5)])
     out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
     assert out.isna().all()
+
+
+def test_a_date_with_a_zone_and_no_time_stays_unparseable() -> None:
+    snap = _snap("2020-01-01+02:00", "2020-01-01+02:00", [(2020, 5)])
+    out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
+    assert out.isna().all()
+
+
+def test_a_basic_format_date_is_still_read() -> None:
+    snap = _snap("20200101", "20200101", [(2020, 5)])
+    out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
+    assert not out.isna().any() and set(out) == {pd.Timestamp("2020-01-01")}
+
+
+def test_a_bound_pandas_reads_beyond_the_domain_is_refused_not_nulled() -> None:
+    snap = _snap("2020-01-01", "Dec 31 9999", [(2020, 5)])
+    with pytest.raises(FittedRangeError):
+        ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)

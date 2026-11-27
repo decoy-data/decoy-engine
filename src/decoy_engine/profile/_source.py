@@ -176,7 +176,7 @@ def profile_source(
         if given is None:
             reader = build_declared_source(table_name, sources[table_name])
         elif isinstance(given, LazySource):
-            reader = ParquetFileSource.from_lazy(given)
+            reader = ParquetFileSource.from_lazy(given, table_name)
         else:
             reader = ResidentTableSource(given, table_name)
         fmt = source_format_for(sources, table_name, resident=supplied)

@@ -112,3 +112,16 @@ def test_a_date_pandas_cannot_hold_is_refused_without_the_year(tmp_path: Path) -
             )
         assert "Table 's', column 'd'" in str(caught.value)
         assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def test_a_supplied_lazy_source_is_named_by_its_table_key(tmp_path: Path) -> None:
+    far = pa.table({"d": pa.array([4_000_000], pa.date32()), "n": [1]})
+    path = tmp_path / "far.parquet"
+    pq.write_table(far, str(path))
+    with pytest.raises(SourceDateUnrepresentableError) as caught:
+        profile_source(
+            _config(tmp_path),
+            seed=1,
+            supplied_sources={"s": LazySource(path)},
+        )
+    assert caught.value.table == "s"

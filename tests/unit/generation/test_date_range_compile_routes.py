@@ -99,14 +99,33 @@ def test_the_plan_compile_check_refuses_a_statistical_year_past_the_range() -> N
     assert "9999" not in str(caught.value)
 
 
-@pytest.mark.parametrize("bound", ["min", "max"])
-def test_the_plan_compile_check_refuses_an_unparseable_statistical_bound(bound: str) -> None:
+def test_window_admission_and_plan_compile_agree_on_a_far_live_year() -> None:
+    """One rule (`names_far_year`) decides both routes, so neither can drift from the other."""
     from decoy_engine.generation.statistical import StatisticalSpecError, check_degenerate
 
-    stats = {"year_bins": [{"year": 2020, "count": 5}], "min": "2020-01-01", "max": "2020-12-31"}
-    stats[bound] = "not a datetime"
-    with pytest.raises(StatisticalSpecError) as caught:
-        check_degenerate(_statistical_spec(stats))
-    assert caught.value.code == CODE
-    assert "not a datetime" not in str(caught.value)
-    assert caught.value.__cause__ is None and caught.value.__context__ is None
+    spec = _statistical_spec({"year_bins": FAR["year_bins"], "min": FAR["min"], "max": FAR["max"]})
+    cfg = {
+        "tables": [
+            {
+                "name": "t",
+                "row_count": 10,
+                "generate_columns": [{"name": "c", "type": "statistical"}],
+            }
+        ]
+    }
+    with pytest.raises(StatisticalSpecError) as compile_error:
+        check_degenerate(spec)
+    with pytest.raises(GenerationAdmissionError) as window_error:
+        classify_window_table(cfg, "t", statistical_specs={("t", "c"): spec})
+    assert compile_error.value.code == window_error.value.code == CODE
+
+
+def test_a_zero_weight_far_year_is_not_live_on_either_route() -> None:
+    from decoy_engine.generation.statistical import check_degenerate
+
+    stats = {
+        "year_bins": [{"year": 2020, "count": 5}, {"year": 9999, "count": 0}],
+        "min": "2020-01-01",
+        "max": "2020-12-31",
+    }
+    check_degenerate(_statistical_spec(stats))

@@ -401,9 +401,9 @@ class ParquetFileSource(_PolicyBound):
             object.__setattr__(self, "access", fileaccess.capture())
 
     @classmethod
-    def from_lazy(cls, lazy: LazySource) -> ParquetFileSource:
+    def from_lazy(cls, lazy: LazySource, table: str | None = None) -> ParquetFileSource:
         """The reader for a file handle a caller supplied, under that handle's own policy."""
-        return cls(lazy.path, lazy.access, lazy.field_key, lazy.table)
+        return cls(lazy.path, lazy.access, lazy.field_key, table or lazy.table)
 
     def _lazy(self) -> LazySource:
         return LazySource(self.path, self.access, self.field_key, self.table)

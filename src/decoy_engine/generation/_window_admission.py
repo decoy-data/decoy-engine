@@ -126,8 +126,12 @@ def _check_histogram(
 
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
+    from decoy_engine.generation.statistical._degenerate import names_far_year
+
     buckets = spec.datetime_buckets
-    if buckets is None:  # `_refuse_degenerate` passed, so the stats name a year outside the range
+    # `_refuse_degenerate` passed, so a missing decode means the stats name a year outside the range.
+    # The live-year rule is the one plan compile applies, so the two routes cannot drift.
+    if buckets is None or names_far_year(spec):
         _refuse(
             table,
             col,
@@ -136,23 +140,6 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
         )
     weights = [float(b.count) for b in buckets]
-    bad = sorted(
-        {
-            y
-            for b, w in zip(buckets, weights, strict=True)
-            if w > 0
-            for y in (b.start_year, b.end_year)
-            if not MIN_YEAR <= y <= MAX_SAMPLED_YEAR
-        }
-    )
-    if bad:
-        _refuse(
-            table,
-            col,
-            CODE_UNBOUNDED,
-            "year_bins",
-            f"a sampled year is outside {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
-        )
     parsed_bounds: dict[str, datetime] = {}
     for bound in ("min", "max"):
         try:

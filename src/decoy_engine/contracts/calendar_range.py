@@ -17,6 +17,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+import pandas as pd
+from pandas.errors import OutOfBoundsDatetime
+
 from decoy_engine import reasons
 from decoy_engine._arrow_types import CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER
 from decoy_engine.errors import DecoyError
@@ -62,21 +65,26 @@ class NsDatetimeAdmission:
 
 _ISO = re.compile(
     r"(\d{4})-(\d{2})-(\d{2})"
-    r"(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?"
-    r"(Z|[+-]\d{2}:?\d{2})?"
+    r"(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:?\d{2})?)?"
 )
 
 
 def _ns_since_epoch(text: str) -> int:
-    """Nanoseconds since the epoch, in UTC, of an ISO date or datetime text.
+    """Nanoseconds since the epoch, in UTC, of a datetime text.
 
-    Read with integers on the Python calendar so the same text gives the same answer on every
-    interpreter: all nine fractional digits count, and a zone offset at year 1 or 9999 cannot
-    overflow. A naive text is UTC. Text that is not ISO raises `ValueError`.
+    The usual ISO forms are read with integers on the Python calendar so the same text gives the
+    same answer on every interpreter: all nine fractional digits count, and a zone offset at year
+    1 or 9999 cannot overflow. A naive text is UTC. A date with a zone (no time) is not ISO and
+    falls through, with every other form, to the pandas parser the sampler always used. Text no
+    parser reads raises `ValueError`; a value pandas reads but cannot hold in nanoseconds raises
+    `OverflowError`, which the caller reports as out of range.
     """
     match = _ISO.fullmatch(text.strip())
     if match is None:
-        raise ValueError("not an ISO date or datetime")
+        stamp = pd.Timestamp(text)
+        if stamp.tzinfo is not None:
+            stamp = stamp.tz_convert("UTC")
+        return int(stamp.as_unit("ns").value)
     year, month, day, hour, minute, second, fraction, zone = match.groups()
     days = (date(int(year), int(month), int(day)) - _EPOCH).days
     if int(hour or 0) > 23 or int(minute or 0) > 59 or int(second or 0) > 59:
@@ -98,13 +106,19 @@ def admit_ns_datetime_snapshot(
 ) -> NsDatetimeAdmission:
     """Check a fitted datetime's bounds and live years against the whole-day nanosecond domain.
 
-    `min_iso` and `max_iso` are ISO text. Text that does not parse raises `ValueError` (the
+    `min_iso` and `max_iso` are datetime text. Text that does not parse raises `ValueError` (the
     caller's own unparseable path); text that parses outside the domain raises `FittedRangeError`.
     """
     first, end = NS_FIRST_DAY_NUMBER * NS_PER_DAY, NS_END_DAY_NUMBER * NS_PER_DAY
-    bounds = {"min": _ns_since_epoch(str(min_iso)), "max": _ns_since_epoch(str(max_iso))}
-    for prop, value in bounds.items():
-        if not first <= value < end:
+    bounds: dict[str, int] = {}
+    for prop, text in (("min", min_iso), ("max", max_iso)):
+        too_far = False
+        try:
+            bounds[prop] = _ns_since_epoch(str(text))
+        except (OutOfBoundsDatetime, OverflowError):
+            too_far = True
+        # Raised outside the handler: the bound is a data value, so nothing may chain it.
+        if too_far or not first <= bounds[prop] < end:
             raise FittedRangeError(prop=prop)
     if any(not NS_FIRST_DAY.year <= year <= NS_LAST_DAY.year for year in live_years):
         raise FittedRangeError(prop="year_bins")
