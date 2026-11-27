@@ -169,7 +169,7 @@ For date32, date64 and timestamps, compare non-null Arrow extrema as physical in
 Found by the S5 full suite on 2026-11-27 (236 new failures, all one class). The source check in 4.4 applies to every
 source column on every route, including passthrough and carried columns. So a source date outside the Python
 calendar (year 1 to 9999) is now refused at the reader with `source_date_unrepresentable`, before any strategy runs.
-This follows the non-goal in section 3 ("masking dates beyond year 9999: S5 only refuses them"). Row N stays true for
+This follows the non-goal in section 4.1 ("masking dates beyond year 9999: S5 only refuses them"). Row N stays true for
 far dates inside the calendar, such as `9999-12-31`, which passthrough still returns exactly.
 
 Some tests fed out-of-calendar values through passthrough and asserted the old behavior. S5 changes them as follows,
