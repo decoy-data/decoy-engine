@@ -9,7 +9,10 @@ and a `return`, `break` or `continue` in a `finally` are findings too, since eac
 in-flight memory error. `A19` imports `SCOPE` and `risky_functions` from here, so the guard and
 the trace test share one definition.
 
-Known limit, not chased: an exception class bound to another name (`Broad = Exception`).
+Known limits, not chased: an exception class bound to another name (`Broad = Exception`), a
+handler in a class body or at module level (only function bodies are scanned), and `except*`.
+A handler type that is a variable is a finding unless it is in `ALLOWED_VARIABLES`; a module
+constant tuple is expanded.
 """
 
 from __future__ import annotations
@@ -39,14 +42,26 @@ SCOPE = (
     "internal/crypto.py",
 )
 
+# Also scanned, for `rmtree(..., ignore_errors=True)` only: the modules that remove a stage or a
+# scratch root on the window's exit paths.
+CLEANUP_EXTRA = ("fileaccess/_protected_dir.py", "fileaccess/_local.py")
+
 # The only handlers that may turn a `MemoryError` into something else: (path, function, kind).
 # "arm": one `except MemoryError` that converts (a result or a record), and any broad handler of
-# the same try must come after it. "run": the resident run's own failure handler, whose
-# protected body is the `run_pipeline` call alone.
+# the same try must come after it. "adapter": an arm that returns the prebuilt `_OUT_OF_MEMORY`
+# record, followed in the same try by `except Exception`. "run": the resident run's own failure
+# handler, whose protected body is the `run_pipeline` call alone. Exactly these three.
 CLASSIFIERS = {
     ("execution/_isolated_reason.py", "memory_boundary"): "arm",
-    ("reason_adapter.py", "reason_from_exception"): "arm",
+    ("reason_adapter.py", "reason_from_exception"): "adapter",
     ("execution/_isolated_run.py", "_run_in_process"): "run",
+}
+EXPECTED_CLASSIFIERS = frozenset(CLASSIFIERS)
+
+# Handler types that are variables, not classes, and so cannot be resolved by name: (file, name).
+ALLOWED_VARIABLES = {
+    # The caller names its own parser error types, which the guard passes through unchanged.
+    ("fileaccess/_errors.py", "parser_errors"),
 }
 
 _MEMORY_NAMES = frozenset(
@@ -61,12 +76,18 @@ class Names:
 
     names: dict[str, str]
     modules: dict[str, str]
+    consts: dict[str, ast.expr]  # module-level assignments, also those imported by name
 
 
 def names_of(index: scan.ModuleIndex, mod: str) -> Names:
+    consts = {n: e for (m, n), e in index.const_exprs.items() if m == mod}
+    for (m, local), (base, original) in index.imports.items():
+        if m == mod and (base, original) in index.const_exprs:
+            consts[local] = index.const_exprs[(base, original)]
     return Names(
         {local: name for (m, local), (_b, name) in index.imports.items() if m == mod},
         {local: dotted for (m, local), dotted in index.module_aliases.items() if m == mod},
+        consts,
     )
 
 
@@ -81,14 +102,27 @@ def scope_paths(index: scan.ModuleIndex, scope: tuple[str, ...] = SCOPE) -> dict
     return found
 
 
-def _named(node: ast.expr, names: Names) -> Iterator[str]:
+def _named(node: ast.expr, names: Names, depth: int = 0) -> Iterator[str]:
     if isinstance(node, ast.Tuple):
         for element in node.elts:
-            yield from _named(element, names)
+            yield from _named(element, names, depth)
     elif isinstance(node, ast.Name):
-        yield names.names.get(node.id, node.id)
+        if node.id in names.consts and depth < 4:
+            yield from _named(names.consts[node.id], names, depth + 1)
+        else:
+            yield names.names.get(node.id, node.id)
     elif isinstance(node, ast.Attribute):
         yield node.attr
+
+
+def variables(handler: ast.ExceptHandler, names: Names) -> list[str]:
+    """Names in the handler's type that are neither a class (CamelCase) nor a module constant the
+    scan could expand: a parameter or local, which can hold anything."""
+    if handler.type is None:
+        return []
+    return [
+        n for n in _named(handler.type, names) if not n.lstrip("_")[:1].isupper() or n.isupper()
+    ]
 
 
 def catches_memory(handler: ast.ExceptHandler, names: Names) -> bool:
@@ -197,6 +231,25 @@ def _tries(function: ast.AST) -> Iterator[ast.Try]:
             yield node
 
 
+def _adapter_problems(converting: list[tuple[ast.Try, ast.ExceptHandler]]) -> list[str]:
+    """The adapter's arm returns the prebuilt record, and the ordinary fallback follows it."""
+    problems: list[str] = []
+    for try_node, handler in converting:
+        body = handler.body
+        exact = (
+            len(body) == 1
+            and isinstance(body[0], ast.Return)
+            and isinstance(body[0].value, ast.Name)
+            and body[0].value.id == "_OUT_OF_MEMORY"
+        )
+        if not exact:
+            problems.append("the MemoryError arm must return exactly `_OUT_OF_MEMORY`")
+        after = try_node.handlers[try_node.handlers.index(handler) + 1 :]
+        if not any(isinstance(h.type, ast.Name) and h.type.id == "Exception" for h in after):
+            problems.append("`except Exception` must follow the MemoryError arm in the same try")
+    return problems
+
+
 def classifier_problems(function: ast.FunctionDef, kind: str, names: Names) -> list[str]:
     """The registered classifier's own rule: one converting arm, in order, over the right body."""
     problems: list[str] = []
@@ -206,7 +259,7 @@ def classifier_problems(function: ast.FunctionDef, kind: str, names: Names) -> l
         for handler in try_node.handlers
         if catches_memory(handler, names) and not is_clause(handler)
     ]
-    if kind == "arm":
+    if kind in ("arm", "adapter"):
         converting = [
             (t, h) for t, h in arms if isinstance(h.type, ast.Name) and h.type.id == "MemoryError"
         ]
@@ -218,6 +271,8 @@ def classifier_problems(function: ast.FunctionDef, kind: str, names: Names) -> l
             earlier = try_node.handlers[: try_node.handlers.index(handler)]
             if not any(h in [c[1] for c in converting] for h in earlier):
                 problems.append("a broad handler precedes the MemoryError arm")
+        if kind == "adapter":
+            problems += _adapter_problems(converting)
     else:
         if len(arms) != 1:
             problems.append(f"needs exactly one run handler, found {len(arms)}")
@@ -266,25 +321,72 @@ def file_findings(
                     out.append(f"{where}: a return, break or continue in finally")
             elif isinstance(node, ast.With) and suppresses_memory(node, names):
                 out.append(f"{where}: contextlib.suppress names a memory-catching type")
+            if isinstance(node, ast.Try):
+                for handler in node.handlers:
+                    for name in variables(handler, names):
+                        if (rel, name) not in ALLOWED_VARIABLES:
+                            out.append(
+                                f"{where}: handler type `{name}` is a variable the scan cannot resolve"
+                            )
         if kind is not None and isinstance(function, ast.FunctionDef):
             out += [f"{rel} {qualified}: {p}" for p in classifier_problems(function, kind, names)]
     return out
+
+
+def rmtree_findings(tree: ast.Module, rel: str, names: Names, *, any_call: bool) -> list[str]:
+    """`rmtree(..., ignore_errors=True)` swallows a `MemoryError` on Python 3.10 and 3.11, and any
+    other `rmtree` call in a scope file bypasses `fileaccess.remove_tree`."""
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        called = names.names.get(func.id, func.id) if isinstance(func, ast.Name) else None
+        if isinstance(func, ast.Attribute):
+            called = func.attr
+        if called != "rmtree":
+            continue
+        ignoring = any(
+            k.arg == "ignore_errors"
+            and not (isinstance(k.value, ast.Constant) and not k.value.value)
+            for k in node.keywords
+        )
+        if ignoring or any_call:
+            out.append(
+                f"{rel}:{node.lineno}: rmtree here can hide a MemoryError; use fileaccess.remove_tree"
+            )
+    return out
+
+
+def registry_problems(registry: dict[tuple[str, str], str]) -> list[str]:
+    """The classifier registry is exactly the three approved handlers."""
+    if frozenset(registry) == EXPECTED_CLASSIFIERS:
+        return []
+    return [
+        f"classifier registry differs from the approved three: {sorted(set(registry) ^ EXPECTED_CLASSIFIERS)}"
+    ]
 
 
 def scan_scope(
     index: scan.ModuleIndex,
     scope: tuple[str, ...] = SCOPE,
     classifiers: dict[tuple[str, str], str] | None = None,
+    extra: tuple[str, ...] = CLEANUP_EXTRA,
 ) -> list[str]:
-    """The findings over every file of `scope`, plus a registered classifier that is gone."""
+    """The findings over every file of `scope`, plus a registered classifier that is gone, a
+    registry that is not the approved three, and `rmtree` calls that can hide a memory error."""
     registry = CLASSIFIERS if classifiers is None else classifiers
-    out: list[str] = []
+    out: list[str] = registry_problems(registry) if classifiers is None else []
     seen: set[tuple[str, str]] = set()
     for path, rel in scope_paths(index, scope).items():
         tree = index.trees[path]
-        mod = scan.module_name(path, index.src)
-        out += file_findings(tree, rel, names_of(index, mod), registry)
+        names = names_of(index, scan.module_name(path, index.src))
+        out += file_findings(tree, rel, names, registry)
+        out += rmtree_findings(tree, rel, names, any_call=True)
         seen |= {(rel, q) for q, _f in _walk_functions(tree)}
+    for path, rel in scope_paths(index, extra).items():
+        names = names_of(index, scan.module_name(path, index.src))
+        out += rmtree_findings(index.trees[path], rel, names, any_call=False)
     out += [
         f"{p}: registered classifier {q} no longer exists"
         for p, q in registry

@@ -48,6 +48,7 @@ from decoy_engine.fileaccess._fdtree import (
     DESCRIPTOR_NAME,
     RESERVED_MEMBER_NAMES,
     STAGE_MARKER,
+    remove_tree,
     stage_entries,
 )
 from decoy_engine.fileaccess._local import (
@@ -227,6 +228,7 @@ __all__ = [
     "read_text",
     "reclaim_stages",
     "redact_locators",
+    "remove_tree",
     "require_ambient",
     "reset_for_tests",
     "run_in_context",

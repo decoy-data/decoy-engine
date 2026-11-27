@@ -62,7 +62,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -219,8 +218,8 @@ def run_pipeline_isolated(
             known kind, or `config`/`run_pipeline_kwargs` is not
             JSON-serializable. Always raised BEFORE any subprocess is
             spawned.
-        TypeError, NotImplementedError: `request` is not a `PublicationRequest`, or carries a
-            vault (`publication.check_request`). Raised before any I/O.
+        TypeError: `request` is not a `PublicationRequest`, or its vault writer is not a
+            `VaultWriter` (`publication.check_request`). Raised before any I/O.
     """
     _reject_unserializable_kwargs(run_pipeline_kwargs)
     if mem_cap_bytes is not None and rlimit_kind not in RLIMIT_KINDS:
@@ -511,7 +510,7 @@ def _spawn_and_classify(
         proc.kill()
         _stdout, _stderr = proc.communicate()
         finished = sampler.finish() if sampler else None
-        shutil.rmtree(staging_output_dir, ignore_errors=True)
+        fileaccess.remove_tree(staging_output_dir)
         return IsolatedRunResult(
             outcome="crashed",
             peak_rss_mb=None,
@@ -559,7 +558,7 @@ def _spawn_and_classify(
     # simulation teeth). Classify from the outside; nothing was ever
     # committed to output_dir, so discard whatever the child may have
     # started staging.
-    shutil.rmtree(staging_output_dir, ignore_errors=True)
+    fileaccess.remove_tree(staging_output_dir)
     outcome = classify_abnormal_exit(proc.returncode, stderr)
     signal_number = -proc.returncode if proc.returncode < 0 else None
     signal_name = _signal_name(signal_number)

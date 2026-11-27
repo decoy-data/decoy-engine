@@ -17,7 +17,9 @@ import contextlib
 import errno
 import os
 import re
+import shutil
 import stat
+import sys
 from typing import Any
 
 from decoy_engine.fileaccess import _osflags
@@ -122,6 +124,26 @@ def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> s
         found = re.fullmatch(pattern, data)
         return found.group(1).decode("ascii") if found else None
     return None
+
+
+def _keep_memory_errors(function: Any, path: str, error: Any) -> None:
+    """`rmtree`'s error hook: an ordinary failure is ignored, a `MemoryError` is raised. The hook
+    receives an exception on 3.12 and later and an `exc_info` tuple before that."""
+    exc = error[1] if isinstance(error, tuple) else error
+    if isinstance(exc, MemoryError):
+        raise exc
+
+
+def remove_tree(path: str | os.PathLike[str]) -> None:
+    """Best-effort removal of a directory tree that never hides a `MemoryError`.
+
+    `shutil.rmtree(..., ignore_errors=True)` swallows every `Exception` its helpers raise on
+    Python 3.10 and 3.11, so a memory error during cleanup would end a run as a success. Ordinary
+    filesystem errors stay ignored. Guarded by tests/sentry/defects/memory_boundary."""
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_keep_memory_errors)
+    else:
+        shutil.rmtree(path, onerror=_keep_memory_errors)
 
 
 def _rmtree_fd(dir_fd: int) -> None:

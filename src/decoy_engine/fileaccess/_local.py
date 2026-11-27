@@ -29,6 +29,7 @@ from typing import BinaryIO, Literal, TextIO
 from decoy_engine.fileaccess import _durable, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
+from decoy_engine.fileaccess._fdtree import remove_tree
 from decoy_engine.fileaccess._local_chain import (
     HeldStage,
     _ensure_dirs,
@@ -482,7 +483,7 @@ class LocalOutputTxn(_LocalStageDir):
             return
         self._life.end()
         if self._stage is not None:
-            shutil.rmtree(self._stage, ignore_errors=True)
+            remove_tree(self._stage)
             self._stage = None
         self._held.close()  # after the stage is gone: the lock outlives the name
         if self._label in _durable.FD_STAGED_LABELS:

@@ -26,7 +26,6 @@ so the cleanup of a refused stage is confirmed by looking (F29).
 from __future__ import annotations
 
 import json
-import shutil
 import signal
 import sys
 import uuid
@@ -429,7 +428,7 @@ def result_from_envelope(
     peak = envelope.get("peak_rss_mb")
     if outcome != "completed":
         # A self-reported failure may have staged part of its output; nothing commits it.
-        shutil.rmtree(staging_output_dir, ignore_errors=True)
+        fileaccess.remove_tree(staging_output_dir)
         return envelope_failure(envelope, pid=pid)
 
     # The scratch stage goes on every exit from here, also when setup raises: a stage left in a
@@ -443,7 +442,7 @@ def result_from_envelope(
         collected = collect(envelope, staging_output_dir, pub, attempt, sources)
     finally:
         if pub is None:
-            shutil.rmtree(staging_output_dir, ignore_errors=True)  # nothing to publish it to
+            fileaccess.remove_tree(staging_output_dir)  # nothing to publish it to
     if isinstance(collected, CommitReceipt):
         # MED-1: a refused stage or a publication that did not commit is a classified result.
         fields = {"peak_rss_mb": peak, "returncode": 0, "isolated": True, "pid": pid}

@@ -536,14 +536,14 @@ files are `0600` and unit directories `0700`.
   `<table>.parquet`, owner-only from creation, and nothing else: no descriptor, no lock file, no
   rename, no nested unit. Its row errors travel in its result envelope. When the child reports
   `completed`, the parent decides what is staged: the envelope's table names must each be one path
-  component, and the stage must hold exactly those files, each a regular file, besides the reserved
-  `.decoy-publication-stage` marker the parent wrote. A child-written `_decoy_publication.json`, an
-  extra file, a directory, a link or a missing table is refused (`failed`, `publication_failed`) and
-  nothing is bound. The parent sets the stage to `0700` and each admitted file to `0600` through the
-  entry's own descriptor (no link followed) before reading it; a file its owner cannot read is
-  refused, not repaired. `publish_unit` then measures every size, SHA-256 and row count and writes
-  the descriptor. The payload's source copies are owner-only from creation, so the route works under
-  a umask that strips owner bits (`0o477`).
+  component (no separator, no `..`, no repeat), and the stage must hold exactly those files, each a
+  regular file, besides the reserved `.decoy-publication-stage` marker the parent wrote. A
+  child-written `_decoy_publication.json`, an extra file, a directory, a link or a missing table is
+  refused (`failed`, `publication_failed`) and nothing is bound. The parent sets the stage to `0700`
+  and each admitted file to `0600` through the entry's own descriptor (no link followed) before
+  reading it; a file its owner cannot read is refused, not repaired. `publish_unit` then measures
+  every size, SHA-256 and row count and writes the descriptor. The payload's source copies are
+  owner-only from creation, so the route works under a umask that strips owner bits (`0o477`).
 - **In-process fallback (`isolate=False`).** The tables are staged as `<table>.parquet` in a
   `publication` stage beside `output_dir` and bound by `publish_unit`, as `publish_tables` does.
 

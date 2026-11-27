@@ -29,12 +29,20 @@ def test_the_scope_names_files_that_exist() -> None:
 
 
 def _seeded(
-    tmp_path: Path, source: str, *, classifiers: dict[tuple[str, str], str] | None = None
+    tmp_path: Path,
+    source: str,
+    *,
+    classifiers: dict[tuple[str, str], str] | None = None,
+    extra_source: str | None = None,
 ) -> list[str]:
     pkg = tmp_path / "decoy_engine"
     pkg.mkdir(exist_ok=True)
     (pkg / "x.py").write_text(source)
-    return ms.scan_scope(scan.ModuleIndex(pkg), ("x.py",), classifiers or {})
+    extra = ()
+    if extra_source is not None:
+        (pkg / "y.py").write_text(extra_source)
+        extra = ("y.py",)
+    return ms.scan_scope(scan.ModuleIndex(pkg), ("x.py",), classifiers or {}, extra)
 
 
 IMPORTS = "from pyarrow import ArrowException as AE\nimport contextlib as cl\nfrom contextlib import suppress as ignore\n"
@@ -58,6 +66,12 @@ BYPASSES = {
     "suppress_name_alias": IMPORTS + "def f():\n with ignore(Exception):\n  g()\n",
     "return_in_finally": "def f():\n try:\n  g()\n finally:\n  return 1\n",
     "break_in_finally": "def f():\n for i in x:\n  try:\n   g()\n  finally:\n   break\n",
+    "rmtree_ignoring_errors": "import shutil\ndef f():\n shutil.rmtree(p, ignore_errors=True)\n",
+    "rmtree_bare": "import shutil\ndef f():\n shutil.rmtree(p)\n",
+    "rmtree_from_alias": "from shutil import rmtree as rm\ndef f():\n rm(p)\n",
+    "rmtree_module_alias": "import shutil as sh\ndef f():\n sh.rmtree(p)\n",
+    "module_constant_tuple": "ERRS = (OSError, Exception)\ndef f():\n try:\n  g()\n except ERRS:\n  return None\n",
+    "unresolved_variable": "def f(errs):\n try:\n  g()\n except errs:\n  pass\n",
     "classifier_shape_unregistered": "def f():\n try:\n  g()\n except MemoryError:\n  return RESERVED\n",
 }
 
@@ -108,3 +122,30 @@ def test_a_scope_entry_that_matches_nothing_fails(tmp_path: Path) -> None:
     pkg.mkdir()
     with pytest.raises(AssertionError, match="matches no file"):
         ms.scan_scope(scan.ModuleIndex(pkg), ("gone.py",), {})
+
+
+ADAPTER = "def f():\n try:\n  return g()\n except MemoryError:\n  return _OUT_OF_MEMORY\n except Exception:\n  return OTHER\n"
+
+
+def test_the_adapter_classifier_is_checked_exactly(tmp_path: Path) -> None:
+    registry = {("x.py", "f"): "adapter"}
+    assert _seeded(tmp_path, ADAPTER, classifiers=registry) == []
+    wrong_record = ADAPTER.replace("return _OUT_OF_MEMORY", "return _OTHER_RECORD")
+    no_fallback = ADAPTER.replace(" except Exception:\n  return OTHER\n", "")
+    assert _seeded(tmp_path, wrong_record, classifiers=registry)
+    assert _seeded(tmp_path, no_fallback, classifiers=registry)
+
+
+def test_a_fourth_classifier_is_a_finding() -> None:
+    assert ms.registry_problems(ms.CLASSIFIERS) == []
+    assert ms.registry_problems({**ms.CLASSIFIERS, ("x.py", "f"): "arm"})
+    assert ms.registry_problems(
+        {k: v for k, v in ms.CLASSIFIERS.items() if k[1] != "memory_boundary"}
+    )
+
+
+def test_ignoring_errors_is_a_finding_in_the_extra_cleanup_modules(tmp_path: Path) -> None:
+    ignoring = "import shutil\ndef g(p):\n shutil.rmtree(p, ignore_errors=True)\n"
+    plain = "import shutil\ndef g(p):\n shutil.rmtree(p)\n"
+    assert _seeded(tmp_path, "def f():\n pass\n", extra_source=ignoring)
+    assert _seeded(tmp_path, "def f():\n pass\n", extra_source=plain) == []

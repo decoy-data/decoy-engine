@@ -307,12 +307,17 @@ def guarded_with_parser_errors(
     except Exception as exc:
         caught = exc
     # Rebuilt outside the handler: a rebuild fault then carries no library error as its context.
-    resurfaced = _resurface(caught)
-    if resurfaced is caught:
-        raise caught
-    if resurfaced is not None:
-        raise resurfaced from None
-    raise read_error(display) from None
+    # `caught` is deleted on every exit, so no frame of the error raised here keeps the library
+    # error, which can carry a cell value.
+    try:
+        resurfaced = _resurface(caught)
+        if resurfaced is caught:
+            raise caught
+        if resurfaced is not None:
+            raise resurfaced from None
+        raise read_error(display) from None
+    finally:
+        del caught
 
 
 def read_error(field_key: str) -> FileAccessReadError:

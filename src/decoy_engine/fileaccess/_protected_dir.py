@@ -26,7 +26,6 @@ import errno
 import os
 import re
 import secrets
-import shutil
 import stat
 import sys
 import tempfile
@@ -39,7 +38,7 @@ from decoy_engine import reasons
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._entry import require_ambient
-from decoy_engine.fileaccess._fdtree import _owned
+from decoy_engine.fileaccess._fdtree import _owned, remove_tree
 from decoy_engine.fileaccess._types import FileAccessUnavailable
 
 _MODE = 0o700
@@ -168,7 +167,7 @@ def _is_empty(path: str) -> bool:
 
 
 def _remove(path: str) -> None:
-    shutil.rmtree(path, ignore_errors=True)
+    remove_tree(path)
 
 
 # -- checking and creating ---------------------------------------------------------------------
