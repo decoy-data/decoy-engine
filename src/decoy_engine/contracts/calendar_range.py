@@ -84,7 +84,7 @@ def _ns_since_epoch(text: str) -> int:
         stamp = pd.Timestamp(text)
         if stamp.tzinfo is not None:
             stamp = stamp.tz_convert("UTC")
-        return int(stamp.as_unit("ns").value)
+        return int(stamp.value)
     year, month, day, hour, minute, second, fraction, zone = match.groups()
     days = (date(int(year), int(month), int(day)) - _EPOCH).days
     if int(hour or 0) > 23 or int(minute or 0) > 59 or int(second or 0) > 59:

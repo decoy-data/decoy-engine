@@ -126,7 +126,7 @@ def _check_histogram(
 
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
-    from decoy_engine.generation.statistical._degenerate import names_far_year
+    from decoy_engine.generation.statistical import names_far_year
 
     buckets = spec.datetime_buckets
     # `_refuse_degenerate` passed, so a missing decode means the stats name a year outside the range.

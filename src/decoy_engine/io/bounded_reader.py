@@ -21,7 +21,7 @@ import io
 import math
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, TypeVar, overload
 
 import numpy as np
 import pyarrow as pa
@@ -535,6 +535,14 @@ def check_resident_sources(sources: Mapping[str, Any] | None) -> None:
     for name, source in (sources or {}).items():
         if isinstance(source, pa.Table):
             check_source_dates(source, table=name)
+
+
+@overload
+def checked_loader(loader: Callable[[str], pa.Table]) -> Callable[[str], pa.Table]: ...
+
+
+@overload
+def checked_loader(loader: None) -> None: ...
 
 
 def checked_loader(loader: Callable[[str], pa.Table] | None) -> Callable[[str], pa.Table] | None:

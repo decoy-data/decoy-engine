@@ -291,7 +291,7 @@ def run_sequential(
     """
     refuse_unchecked_route(config, "sequential")
     declared_route_guard("sequential", plan=plan, raise_on_decline=True)
-    source_loader = checked_loader(source_loader) or source_loader
+    source_loader = checked_loader(source_loader)
     q_cfg: dict[str, Any] = quarantine_config or {}
     q_enabled = bool(q_cfg.get("enabled", False))
     q_triggers: list[str] = list(q_cfg.get("triggers") or [])
