@@ -97,3 +97,16 @@ def test_the_same_seed_gives_the_same_draw() -> None:
     a = ColumnGenerator(seed=1)._generate_distribution_datetime(50, snap, SEED)
     b = ColumnGenerator(seed=1)._generate_distribution_datetime(50, snap, SEED)
     assert a.equals(b)
+
+
+def test_a_fitted_bound_that_overflows_when_normalized_is_a_coded_refusal() -> None:
+    snap = _snap("0001-01-01T00:00:00+01:00", "2020-12-31T00:00:00", [(2020, 5)])
+    with pytest.raises(FittedRangeError):
+        ColumnGenerator(seed=1)._generate_distribution_datetime(5, snap, SEED)
+
+
+def test_nine_fractional_digits_are_kept_on_every_interpreter() -> None:
+    stamp = "2020-06-01T12:00:00.123456789"
+    snap = _snap(stamp, stamp, [(2020, 5)])
+    out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
+    assert {int(v.value) for v in out} == {pd.Timestamp(stamp).value}

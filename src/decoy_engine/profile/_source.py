@@ -178,7 +178,7 @@ def profile_source(
         elif isinstance(given, LazySource):
             reader = ParquetFileSource.from_lazy(given)
         else:
-            reader = ResidentTableSource(given)
+            reader = ResidentTableSource(given, table_name)
         fmt = source_format_for(sources, table_name, resident=supplied)
         tables.append(_profile_one_source(reader, residency=residency, source_format=fmt, **walk))
 

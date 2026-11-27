@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
+from decoy_engine.io import check_source_dates
 from decoy_engine.profile._readers import RowCount
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ class ResidentTableSource:
     """
 
     table: pa.Table
+    name: str = "source"
 
     def row_count(self) -> RowCount:
         return RowCount(self.table.num_rows, exact=True)
@@ -46,7 +48,10 @@ class ResidentTableSource:
         return self.table.schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return _frame_of(self.table.slice(0, sample_rows))
+        head = self.table.slice(0, sample_rows)
+        check_source_dates(head, table=self.name)
+        return _frame_of(head)
 
     def to_frame(self) -> pd.DataFrame:
+        check_source_dates(self.table, table=self.name)
         return _frame_of(self.table)

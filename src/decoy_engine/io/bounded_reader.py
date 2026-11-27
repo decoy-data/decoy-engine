@@ -398,9 +398,12 @@ def iter_csv_chunks(
             yield flush()
 
 
-# Calendar years 1 to 9999 as physical day counts since 1970-01-01 (date32) and as seconds.
-_FIRST_DAY = -719_162
-_LAST_DAY = 2_932_896
+# Calendar years 1 to 9999 as day counts since 1970-01-01 (the date32 value). The one definition:
+# the date contracts derive their calendar dates from these.
+CALENDAR_FIRST_DAY_NUMBER = -719_162
+CALENDAR_LAST_DAY_NUMBER = 2_932_896
+_FIRST_DAY = CALENDAR_FIRST_DAY_NUMBER
+_LAST_DAY = CALENDAR_LAST_DAY_NUMBER
 _SECONDS_PER_DAY = 86_400
 _TICKS_PER_SECOND = {"s": 1, "ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
 # Larger than any zone offset in the tz database, so a row this far inside the calendar edge
@@ -428,11 +431,27 @@ def _count_outside(ints: Any, low: int | None, high: int | None) -> Any:
     return mask
 
 
+def _is_temporal(arrow_type: pa.DataType) -> bool:
+    return (
+        pa.types.is_date32(arrow_type)
+        or pa.types.is_date64(arrow_type)
+        or pa.types.is_timestamp(arrow_type)
+    )
+
+
 def _offending_rows(column: Any) -> int:
     """How many cells of one column are outside calendar years 1 to 9999, 0 when the type
-    cannot hold such a cell. Dictionary columns are decoded first so only referenced rows count."""
+    cannot hold such a cell. A dictionary column counts the rows that reference a bad entry; one
+    that references none but still holds a bad entry counts those entries, because pandas
+    converts the whole dictionary."""
     if pa.types.is_dictionary(column.type):
-        column = column.cast(column.type.value_type)
+        if not _is_temporal(column.type.value_type):
+            return 0
+        referenced = _offending_rows(column.cast(column.type.value_type))
+        if referenced:
+            return referenced
+        chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
+        return sum(_offending_rows(chunk.dictionary) for chunk in chunks)
     arrow_type = column.type
     zone = False
     if pa.types.is_date32(arrow_type):
@@ -454,19 +473,18 @@ def _offending_rows(column: Any) -> int:
         or (high is not None and extrema["max"] > high - margin)
     ):
         return 0
+    utc_outside = _count_outside(ints, low, high)
     if not zone:
-        return _sum(_count_outside(ints, low, high))
-    # A zoned cell is judged by its local calendar date. Far outside an edge is out in any zone;
-    # only the band within the margin of an edge needs the local wall-clock conversion.
-    far_low = None if low is None else low - margin
-    far_high = None if high is None else high + margin
-    total = _sum(_count_outside(ints, far_low, far_high))
+        return _sum(utc_outside)
+    # A zoned cell must fit the calendar as an instant and as a local date. The cells inside the
+    # instant range but within the margin of an edge need the local wall-clock conversion.
     band = _count_outside(
         ints, None if low is None else low + margin, None if high is None else high - margin
     )
-    band = pc.and_(band, pc.invert(pc.fill_null(_count_outside(ints, far_low, far_high), False)))
-    local = pc.local_timestamp(column.filter(band)).cast(pa.int64())
-    return total + _sum(_count_outside(local, low, high))
+    inside_instant = pc.invert(pc.fill_null(utc_outside, False))
+    near_edge = pc.and_(pc.fill_null(band, False), inside_instant)
+    local = pc.local_timestamp(column.filter(near_edge)).cast(pa.int64())
+    return _sum(utc_outside) + _sum(_count_outside(local, low, high))
 
 
 def _sum(mask: Any) -> int:
@@ -516,6 +534,8 @@ def checked_loader(loader: Callable[[str], pa.Table] | None) -> Callable[[str], 
 
 
 __all__ = [
+    "CALENDAR_FIRST_DAY_NUMBER",
+    "CALENDAR_LAST_DAY_NUMBER",
     "PANDAS_DEFAULT_NA_VALUES",
     "BoundedReadError",
     "ChunkBudget",

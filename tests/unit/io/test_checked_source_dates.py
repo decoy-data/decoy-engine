@@ -82,10 +82,8 @@ def test_zoned_timestamp_is_judged_by_its_local_calendar_date() -> None:
     check_source_dates(_table(pa.array([first + 10 * 3600 * 10**6], new_york)), table="orders")
 
 
-def test_dictionary_columns_count_referenced_rows_only() -> None:
+def test_dictionary_columns_count_referenced_rows() -> None:
     dictionary = pa.array([0, FAR_DAY], pa.date32())
-    unused = pa.DictionaryArray.from_arrays(pa.array([0, 0, None], pa.int8()), dictionary)
-    check_source_dates(_table(unused), table="orders")
     used = pa.DictionaryArray.from_arrays(pa.array([0, 1, 1], pa.int8()), dictionary)
     assert _refused(_table(used)).count == 2
 
@@ -132,3 +130,46 @@ def test_checked_loader_checks_what_the_loader_returns() -> None:
         load("customers")
     assert caught.value.table == "customers"
     assert checked_loader(None) is None
+
+
+def test_a_dictionary_of_something_else_is_left_alone() -> None:
+    values = pa.array([{"a": 1}, {"a": 2}], pa.struct([("a", pa.int64())]))
+    column = pa.DictionaryArray.from_arrays(pa.array([0, 1, 0], pa.int8()), values)
+    check_source_dates(_table(column), table="orders")
+
+
+def test_an_unused_bad_dictionary_entry_is_refused_because_pandas_converts_it() -> None:
+    dictionary = pa.array([0, FAR_DAY], pa.date32())
+    column = pa.DictionaryArray.from_arrays(pa.array([0, 0], pa.int8()), dictionary)
+    assert _refused(_table(column)).count == 1
+
+
+def test_a_zoned_instant_past_year_9999_is_refused_even_when_its_local_date_fits() -> None:
+    year_10000_utc = (
+        (LAST_DAY + 1) * DAY * 10**6
+    )  # 10000-01-01T00:00 UTC, 9999-12-31 19:00 in New York
+    new_york = pa.timestamp("us", "America/New_York")
+    assert _refused(_table(pa.array([year_10000_utc], new_york))).count == 1
+
+
+def test_a_resident_profile_source_refuses_the_far_date() -> None:
+    from decoy_engine.profile._readers_resident import ResidentTableSource
+
+    source = ResidentTableSource(_table(pa.array([FAR_DAY], pa.date32())), "orders")
+    for read in (lambda: source.sample_frame(10), source.to_frame):
+        with pytest.raises(SourceDateUnrepresentableError) as caught:
+            read()
+        assert caught.value.table == "orders"
+
+
+def test_a_cloud_parquet_object_is_checked_before_pandas_reads_it() -> None:
+    import io as bytes_io
+
+    import pyarrow.parquet as pq
+
+    from decoy_engine.profile._cloud_readers import _checked_frame
+
+    buffer = bytes_io.BytesIO()
+    pq.write_table(_table(pa.array([FAR_DAY], pa.date32())), buffer)
+    with pytest.raises(SourceDateUnrepresentableError):
+        _checked_frame(buffer.getvalue())
