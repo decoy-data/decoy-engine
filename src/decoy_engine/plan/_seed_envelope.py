@@ -70,7 +70,6 @@ def _build_seed_envelope(
     """
     # Deferred import: see module-level cycle comment.
     from decoy_engine.providers_v2 import get_default_registry
-    from decoy_engine.providers_v2._errors import ProviderError as _ProviderError
 
     registry = get_default_registry()
     warnings: list[str] = []
@@ -119,16 +118,8 @@ def _build_seed_envelope(
                 # scalar columns have no provider, so reg_caps stays None -> fallback
                 # stamp). User-supplied YAML fields are ignored for the stamp; if they
                 # contradict the registry, emit a warning.
-                reg_caps = None
-                if provider:
-                    try:
-                        reg_caps = registry.get_capabilities(provider)
-                    except _ProviderError:
-                        # check_unknown_provider should have caught this earlier
-                        # in compile_plan; defensively fall back to the legacy
-                        # behavior here so a bug in the check-runner doesn't
-                        # crash the planner.
-                        reg_caps = None
+                # check_unknown_provider runs first in compile_plan, so a provider here is known.
+                reg_caps = registry.get_capabilities(provider) if provider else None
                 if reg_caps is not None:
                     backend_type = reg_caps.backend_type
                     backend_version = reg_caps.backend_version

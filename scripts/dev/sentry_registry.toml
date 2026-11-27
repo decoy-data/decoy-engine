@@ -127,6 +127,10 @@ id = "exception-context"
 baseline = "tests/sentry/baselines/exception-context.json"
 
 [[sentry]]
+id = "swallowed-broad-except"
+baseline = "tests/sentry/baselines/swallowed-broad-except.json"
+
+[[sentry]]
 id = "validation-name-messages"
 baseline = "tests/sentry/baselines/validation-name-messages.json"
 

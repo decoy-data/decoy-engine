@@ -494,27 +494,3 @@ class _FakeMeasurement:
         if self.released_fn is not None:
             return self.released_fn(values)
         return self.released
-
-
-# `OpenDpReleaseSession` was split into `dp_session.py` on a size-cap crossing
-# (CLAUDE.md's ~600-LOC cap). Re-export it here so the documented
-# `decoy_engine.quality.dp_budget.OpenDpReleaseSession` path (`quality/dp.py`,
-# the DP test suite) resolves unchanged.
-if TYPE_CHECKING:
-    pass
-
-
-def __getattr__(name: str) -> Any:
-    # Lazy re-export, NOT an eager bottom-of-module import: `dp_session` imports
-    # the backend/protocols/calibration primitives defined ABOVE from this
-    # module, so importing `dp_session` FIRST re-enters `dp_budget` and an eager
-    # `dp_session.OpenDpReleaseSession` read here would touch a still-initializing
-    # module (AttributeError, masked whenever `dp_budget` happens to import
-    # first). Defer the import to first attribute access, by which point
-    # `dp_session` is fully initialized regardless of which module was imported
-    # first, breaking the cycle.
-    if name == "OpenDpReleaseSession":
-        from decoy_engine.quality.dp_session import OpenDpReleaseSession
-
-        return OpenDpReleaseSession
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

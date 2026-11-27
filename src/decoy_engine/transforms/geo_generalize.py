@@ -60,6 +60,7 @@ from typing import Any
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.reference_tables import load_table
 
@@ -272,14 +273,20 @@ def _zip5_to_zip3(zip5: str) -> str:
 def _build_state_map() -> dict[str, str]:
     """Build a zip5 -> state-abbreviation map from a ZIP reference table column.
 
-    Looks up via the shipped us_zip5_city_state table. Falls back to an empty
-    string if the ZIP5 is not in the reference table (unknown/synthetic ZIP).
+    Looks up via the shipped us_zip5_city_state table. A ZIP5 that is not in the table
+    (unknown/synthetic ZIP) maps to an empty string. A table that cannot load refuses the run:
+    an empty map would blank every state and over-suppress the output.
     """
     try:
         tbl = load_table("us_zip5_city_state")
-    except Exception:
-        _LOG.warning("geo_generalize: could not load us_zip5_city_state; state fallback disabled.")
-        return {}
+    except (OSError, ValueError):
+        tbl = None
+    # Raised after the handler closes so the error carries no cause or context (a path or OS text).
+    if tbl is None:
+        raise ExecutionError(
+            code=reasons.runtime.REFERENCE_TABLE_UNAVAILABLE,
+            message="reference table 'us_zip5_city_state' could not be loaded.",
+        )
 
     state_map: dict[str, str] = {}
     for i in range(tbl.row_count):
@@ -342,7 +349,8 @@ def cascade_zip_column(
         zip3_counts[z3] = zip3_counts.get(z3, 0) + 1
 
     # State-level map (zip5 -> state abbreviation).
-    state_map = _build_state_map()
+    # Loaded only when the cascade asks for state, so a run without it never needs the table.
+    state_map = _build_state_map() if "state" in config.cascade else {}
     state_values = [state_map.get(z5, "") for z5 in zip5_values]
     state_counts: dict[str, int] = {}
     for s in state_values:

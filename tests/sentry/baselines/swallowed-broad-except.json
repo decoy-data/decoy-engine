@@ -1,0 +1,318 @@
+{
+ "sentry_id": "swallowed-broad-except",
+ "created_in": "PROP-FALLBACK-E-F1",
+ "entries": {
+  "src/decoy_engine/_progress_events.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/config/_generate_relational/__init__.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/connectors/_clients.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 2
+  },
+  "src/decoy_engine/connectors/_postgres_session.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 2
+  },
+  "src/decoy_engine/connectors/gcs.py": {
+   "reason": "reports a broken install; this command's job is to describe the failure",
+   "max": 2
+  },
+  "src/decoy_engine/connectors/s3.py": {
+   "reason": "reports a broken install; this command's job is to describe the failure",
+   "max": 2
+  },
+  "src/decoy_engine/connectors/sftp.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 7
+  },
+  "src/decoy_engine/context.py": {
+   "reason": "observation boundary: a telemetry or logger failure must not fail the run",
+   "max": 6
+  },
+  "src/decoy_engine/declared_casting/_boundary.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 1
+  },
+  "src/decoy_engine/declared_casting/_cleanup.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 2
+  },
+  "src/decoy_engine/declared_casting/_quarantine_local.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 5
+  },
+  "src/decoy_engine/detection/ner.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/disguises/loader.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/execution/_chunked_carry.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/execution/_chunked_fk_dtype_safety.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 4
+  },
+  "src/decoy_engine/execution/_column_access.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/execution/_isolated_commit.py": {
+   "reason": "returns the caught exception as a value for the caller to report",
+   "max": 1
+  },
+  "src/decoy_engine/execution/_isolated_memwatch.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/execution/_isolated_run.py": {
+   "reason": "returns the caught exception as a value for the caller to report",
+   "max": 1
+  },
+  "src/decoy_engine/execution/_isolated_worker.py": {
+   "reason": "returns the caught exception as a value for the caller to report",
+   "max": 2
+  },
+  "src/decoy_engine/execution/_job_estimate.py": {
+   "reason": "advisory output: the failure is recorded as a note and never fails the run",
+   "max": 3
+  },
+  "src/decoy_engine/execution/_pipeline_full_frame.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/execution/_publication_observer.py": {
+   "reason": "observation boundary: a telemetry or logger failure must not fail the run",
+   "max": 4
+  },
+  "src/decoy_engine/execution/_strategies/_tokenize.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 3
+  },
+  "src/decoy_engine/execution/_transactional_sink.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 2
+  },
+  "src/decoy_engine/execution/_unified_slice.py": {
+   "reason": "reroutes any exception to the pandas oracle; PROP-FALLBACK E-F2 (A5) narrows it",
+   "max": 1
+  },
+  "src/decoy_engine/execution/_unified_slice_admission.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/execution/_when_gate.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/execution/native/_companion_status.py": {
+   "reason": "reports a broken install; this command's job is to describe the failure",
+   "max": 12
+  },
+  "src/decoy_engine/execution/native/_text_mask_native_fpe.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/execution/native/_text_mask_native_splice.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/execution/native/_text_redact_kernel.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/execution/out_of_core/_stream_driver.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 4
+  },
+  "src/decoy_engine/execution/pipeline/_host.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py": {
+   "reason": "advisory output: the failure is recorded as a note and never fails the run",
+   "max": 1
+  },
+  "src/decoy_engine/execution/pipeline/_native_notice.py": {
+   "reason": "advisory output: the failure is recorded as a note and never fails the run",
+   "max": 1
+  },
+  "src/decoy_engine/execution/pipeline/_resident_fit.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/fileaccess/_entry.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/fileaccess/_errors.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 3
+  },
+  "src/decoy_engine/fileaccess/_private.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 1
+  },
+  "src/decoy_engine/generation/_numeric_derived.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 1
+  },
+  "src/decoy_engine/generation/kinds/_provider.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 1
+  },
+  "src/decoy_engine/generation/pool/_builder.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/generators/_formula.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 2
+  },
+  "src/decoy_engine/internal/fk_tokens.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/internal/memory.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 3
+  },
+  "src/decoy_engine/internal/pandas_missing.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/kernel/_scalar.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/phase.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 1
+  },
+  "src/decoy_engine/plan/_checks.py": {
+   "reason": "skips an expression that fails to compile; PROP-FALLBACK E-F2 narrows it to the named error",
+   "max": 1
+  },
+  "src/decoy_engine/plan/checks/_generate_columns.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 1
+  },
+  "src/decoy_engine/profiling/_classification.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/profiling/_key_loading.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/profiling/model_pack/_detectors.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/profiling/model_pack/classify.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/profiling/scan_set_read.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 1
+  },
+  "src/decoy_engine/profiling/sentinels.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/progress.py": {
+   "reason": "observation boundary: a telemetry or logger failure must not fail the run",
+   "max": 2
+  },
+  "src/decoy_engine/quality/_attacks.py": {
+   "reason": "advisory output: the failure is recorded as a note and never fails the run",
+   "max": 1
+  },
+  "src/decoy_engine/quality/carrier_adapter.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 2
+  },
+  "src/decoy_engine/quality/carriers.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 3
+  },
+  "src/decoy_engine/quality/dp_provenance.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 1
+  },
+  "src/decoy_engine/quarantine.py": {
+   "reason": "best-effort cleanup after the primary error is already raised or recorded",
+   "max": 1
+  },
+  "src/decoy_engine/reason_adapter.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 5
+  },
+  "src/decoy_engine/run_result/_collect.py": {
+   "reason": "observation boundary: a telemetry or logger failure must not fail the run",
+   "max": 1
+  },
+  "src/decoy_engine/secret_providers/_buffer.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/secret_providers/_errors.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 1
+  },
+  "src/decoy_engine/secret_providers/_preflight.py": {
+   "reason": "returns the caught exception as a value for the caller to report",
+   "max": 1
+  },
+  "src/decoy_engine/secret_providers/_requirements.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 2
+  },
+  "src/decoy_engine/secret_providers/_types.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 1
+  },
+  "src/decoy_engine/signed_evidence/_boundary.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 1
+  },
+  "src/decoy_engine/subset/_scope.py": {
+   "reason": "records the failure in a flag and raises a coded error after the handler closes",
+   "max": 1
+  },
+  "src/decoy_engine/support/_probe.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  },
+  "src/decoy_engine/telemetry/_recorder.py": {
+   "reason": "observation boundary: a telemetry or logger failure must not fail the run",
+   "max": 1
+  },
+  "src/decoy_engine/transforms/windowed_date.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 2
+  },
+  "src/decoy_engine/validation/post/_runner.py": {
+   "reason": "returns the caught exception as a value for the caller to report",
+   "max": 1
+  },
+  "src/decoy_engine/verification/postmask/policy_validation.py": {
+   "reason": "fail closed: the handler returns the refusing value",
+   "max": 1
+  },
+  "src/decoy_engine/verification/postmask/residual_pii.py": {
+   "reason": "unclassified catch-all with no named failure; open 24zi follow-up",
+   "max": 1
+  }
+ }
+}

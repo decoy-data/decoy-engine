@@ -97,6 +97,7 @@ __all__ = [
     "RAW_HEX_BATCH_UNEXPECTED_NULL",
     "REFERENCE_BOUNDS_UNSATISFIED",
     "REFERENCE_PARENT_POOL_EMPTY",
+    "REFERENCE_TABLE_UNAVAILABLE",
     "REFERENCE_WEIGHTS_LENGTH_MISMATCH",
     "RELATIONSHIP_CYCLE",
     "ROW_EXCEEDS_MAX_ROW_BYTES",
@@ -266,6 +267,11 @@ SPLIT_SINK_NEEDS_ALL_DISPATCHED = _d(
 )
 STREAMING_UNAVAILABLE = _d(
     "streaming_unavailable", "No streaming route applies to this job.", since="1.18.0"
+)
+REFERENCE_TABLE_UNAVAILABLE = _d(
+    "reference_table_unavailable",
+    "A reference table that ships with the engine could not be loaded. Reinstall the engine.",
+    since=UNRELEASED,
 )
 TRANSFORM_SOURCE_MISSING = _d("transform_source_missing", "Transform source missing.")
 UNDECLARED_OUTPUT_COLUMNS = _d("undeclared_output_columns", "Undeclared output columns.")

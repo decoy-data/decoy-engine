@@ -178,11 +178,16 @@ def test_e12b_the_same_parent_segment_text_twice_is_still_refused() -> None:
     assert _locs(exc) == [("targets", "a", "path"), ("targets", "b", "path")]
 
 
-def test_e13_only_targets_naming_a_declared_table_take_part() -> None:
-    PipelineConfig.model_validate(
-        _config({"a": _file("x"), "u1": _file("y"), "u2": _file("y")}, names=["a"])
-    )
-    PipelineConfig.model_validate(_config({"a": _file("x"), "unused": _file("x")}, names=["a"]))
+def test_e13_targets_naming_no_table_are_refused_not_compared() -> None:
+    """A8a reverses the old rule that writers skip a key naming no table: such a key is refused
+    as `target_table_unknown`, and it takes no part in the shared-destination comparison."""
+    exc = _refusal(_config({"a": _file("x"), "u1": _file("y"), "u2": _file("y")}, names=["a"]))
+    assert [e["loc"] for e in exc.errors() if e["type"] == "target_table_unknown"] == [
+        ("targets", "u1"),
+        ("targets", "u2"),
+    ]
+    assert _locs(exc) == []
+    PipelineConfig.model_validate(_config({"a": _file("x")}, names=["a"]))
 
 
 def test_e14_s3_endpoint_is_part_of_the_address() -> None:

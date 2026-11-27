@@ -93,9 +93,9 @@ from decoy_engine.quality.dp import (
     _validate_fit_params,
     fit_dp_snapshot,
 )
-from decoy_engine.quality.dp_budget import OpenDpReleaseSession
 from decoy_engine.quality.dp_provenance import ProvenanceError
 from decoy_engine.quality.dp_schedule import Schedule
+from decoy_engine.quality.dp_session import OpenDpReleaseSession
 
 # Match the pilot property suite's audit profile (see
 # `tests/property/test_ri_graph_invariants.py`): more examples than the

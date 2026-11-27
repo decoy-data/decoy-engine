@@ -1025,9 +1025,9 @@ class TestArtifactShape:
         directly (patching `certificate_count` to disagree with the
         schedule) and asserts the typed error the guard raises -- deleting
         the guard would make this pass cleanly instead of raising."""
-        from decoy_engine.quality import dp_budget
+        from decoy_engine.quality import dp_session
 
-        monkeypatch.setattr(dp_budget.OpenDpReleaseSession, "certificate_count", lambda self: 999)
+        monkeypatch.setattr(dp_session.OpenDpReleaseSession, "certificate_count", lambda self: 999)
         with pytest.raises(DpBudgetError) as exc:
             fit_dp_snapshot(
                 _mixed_df(),
@@ -1562,8 +1562,8 @@ class TestUnseededStatisticalMechanism:
         inside the slack factor below while still catching an
         order-of-magnitude regression in release probability.
         """
-        from decoy_engine.quality.dp_budget import OpenDpReleaseSession
         from decoy_engine.quality.dp_schedule import CategoricalQuerySpec, Schedule
+        from decoy_engine.quality.dp_session import OpenDpReleaseSession
 
         schedule = Schedule(
             row_count_name="rc",

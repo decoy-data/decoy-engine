@@ -22,12 +22,12 @@ from decoy_engine.quality.dp_budget import (
     _DP_EPSILON_CEILING,
     _EPS_Q_FLOOR,
     DpBudgetError,
-    OpenDpReleaseSession,
     _FakeMeasurement,
     check_epsilon_supported,
 )
 from decoy_engine.quality.dp_ledger import ReleaseLedger
 from decoy_engine.quality.dp_schedule import CategoricalQuerySpec, NumericQuerySpec, Schedule
+from decoy_engine.quality.dp_session import OpenDpReleaseSession
 
 
 @dataclass
@@ -268,8 +268,8 @@ class TestOpenDpReleaseSession:
         allocation policy and makes categorical releases nearly useless,
         even though it under-spends (fails safe on privacy) rather than
         over-spends."""
-        from decoy_engine.quality.dp_budget import OpenDpReleaseSession
         from decoy_engine.quality.dp_schedule import CategoricalQuerySpec, Schedule
+        from decoy_engine.quality.dp_session import OpenDpReleaseSession
 
         schedule = Schedule(
             row_count_name="rc", numeric=(), categorical=(CategoricalQuerySpec("g", "t"),)
