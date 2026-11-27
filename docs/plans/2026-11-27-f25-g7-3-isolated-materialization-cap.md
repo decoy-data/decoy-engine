@@ -58,6 +58,22 @@ runs that work) and the rule `_resident_fit` already applies (`RESIDENT_ADMISSIO
 `src/decoy_engine/execution/pipeline/_resident_fit.py:44-46`: it "can prove a fit, never a
 refusal").
 
+**Assumption: swap is not counted.** `H` leaves swap out on purpose
+(`src/decoy_engine/execution/out_of_core/_budget.py:154-160`), so it can be lower than the point
+where the kernel really kills. Where swap is on, a run whose floor is over `H` but under RAM plus
+swap completes on `main` by swapping, and this cap refuses it. The guarantee above holds only on
+hosts without swap, or where the cgroup limit is the binding one. This is the same assumption
+engine #777 (`check_pre_read`) already makes, and it is kept here on purpose: a run that needs
+swap to hold its own output is already degraded. Known cases:
+
+- Linux with swap on: a run that fits only with swap is refused.
+- macOS: `H` is host RAM, and the memory compressor plus dynamic swap let runs well past RAM
+  complete. This is the worst case for wrong refusals.
+- Windows: no `os.sysconf` page counts and no `/proc/meminfo`, so detection fails
+  (`_budget.py:195-215`), `H` is unknown, and the cap does nothing (the A5 path).
+
+A swap-aware refusal ceiling is V2-LOG.
+
 **The cap, in one line.** Size: the kill ceiling `H` from `out_of_core.detect_effective_memory_bytes`
 (cgroup `memory.max`, else host RAM). Default: that detected value; there is no new knob. Relation
 to row 58: the scratch manager owns disk bytes and this cap owns driver memory, so they share no
@@ -86,33 +102,49 @@ CHUNK-PARALLEL brings an explicit memory budget, this ceiling becomes `min(H, bu
 1. `collect` admits the stage as today (`_names_ok`, `_admit`).
 2. For each admitted table, in envelope order, it opens the file once through the file-access
    capability (as `_read_staged` does) and reads the footer row count and Arrow schema
-   (`arrow_adapter.parquet_file(handle).metadata.num_rows`, `.schema_arrow`). Nothing is decoded yet.
-3. Before each decode it calls the one comparison, new `check_readback` in `_resident_fit.py`:
+   inside `with arrow_adapter.parquet_file(handle) as pf:` (`pf.metadata.num_rows`,
+   `pf.schema_arrow`), so the footer file is closed before the decode, as
+   `src/decoy_engine/profile/_readers.py:339` does. Nothing is decoded yet.
+3. Before each decode it calls the one comparison, new
+   `check_readback(held, pending, *, kill_ceiling_bytes: int | None) -> ResidentFit | None` in
+   `_resident_fit.py`. It returns `None` when `kill_ceiling_bytes` is `None` (ceiling unknown,
+   no check), and never re-detects the ceiling itself:
    `bound = lower_bound_bytes(held + pending)`, all with `charge_pandas=False`. `held` is
    `resident_spec` of the caller's resident `sources` and of each output already read (measured
    buffer bytes, union of buffer ranges). `pending` is `lazy_spec(rows, schema)` of this table and
    every table not yet read (the footer floor). The verdict comes from `resident_fit_verdict`
    (`_resident_fit.py:104`) through `_lower_bound_verdict`, so the rule is the existing one:
-   refused only when `bound > H`. `H` is `_kill_ceiling()` (`_resident_fit.py:219`), read once per
-   `collect`.
+   refused only when `bound > H`. `H` comes from a new public `kill_ceiling()` exported from
+   `decoy_engine.execution.pipeline`, a thin public name over the existing `_kill_ceiling()`
+   (`_resident_fit.py:219`). `collect` calls it once per readback, so it never imports the
+   private name.
 4. On refusal: tables read so far are dropped, the publication transaction is aborted, and
    `collect` returns `ReadbackRefused(fit, receipt)`. `_result_from_envelope`
    (`_isolated_run.py:562`) maps it, through one builder in `_isolated_reason.py`, to
    `IsolatedRunResult(outcome="crashed", reason=ISOLATED_READBACK_CAPACITY_EXCEEDED,
-   error=<fixed text with two integers>, outputs=None, publication_receipt=failed_receipt(request)
+   error=<fixed text with two integers and the readback remedy>, outputs=None, publication_receipt=failed_receipt(request)
    when output_dir was given, else None)`, and removes the stage as the other failure paths do.
    Reason context: phase `FINALIZE`, publication `NOT_PUBLISHED`, cleanup confirmed by looking.
 5. Otherwise the table is read with the unchanged `arrow_adapter.read_table(handle)`, so the frame,
    chunking and metadata are `main`'s, and step 3 repeats for the next table.
 6. After the last table, `publish_unit` runs as today. A refusal can only happen before it.
-7. A memory failure while reading (`is_memory_failure`, the predicate the worker already uses) is
-   caught before the `(OSError, ArrowException)` arm. It becomes `outcome="crashed"`,
-   `reason=decoy.process_out_of_memory`, fixed text, with the same abort and cleanup.
+7. A memory failure while reading (`is_memory_failure`,
+   `src/decoy_engine/fileaccess/_errors.py:160`, the predicate the worker already uses) is caught
+   before the `(OSError, ArrowException)` arm. `collect` returns a typed
+   `ReadbackMemoryFailure(receipt)` value, and `_result_from_envelope` maps it to
+   `outcome="crashed"`, `reason=decoy.process_out_of_memory` (built with
+   `ReasonRecord.for_reason`, never from the exception), fixed text, with the same abort and
+   cleanup. **Behaviour change:** `is_memory_failure` also matches `OSError` with `errno.ENOMEM`
+   (`fileaccess/_errors.py:107-111`) and messages that carry a known memory marker or pattern
+   (`:170-173`). These reach `publication_failed` with the errno today; after this slice they are
+   `process_out_of_memory`. A9 pins the ENOMEM case.
 8. Every completed or refused readback records `extra["readback"] = {"kill_ceiling_bytes",
-   "floor_bytes", "held_bytes", "tables_read", "tables_staged"}` (ints, or `None` for an unknown
-   ceiling). This is how the estimate is checked against reality: `floor_bytes` is the footer floor
-   of everything staged, `held_bytes` the measured bytes actually held, and A4 and A10 assert
-   `floor_bytes <= held_bytes`.
+   "sources_bytes", "floor_bytes", "held_bytes", "tables_read", "tables_staged"}` (ints, or `None`
+   for an unknown ceiling). `sources_bytes` is the measured bytes of the caller's resident sources.
+   `floor_bytes` is the footer floor of the staged outputs only. `held_bytes` is the measured bytes
+   of the outputs read only. This is how the estimate is checked against reality: on a completed
+   run A4 asserts `floor_bytes <= held_bytes` over the same outputs, and A10 asserts the same per
+   type.
 9. When `H` cannot be detected (`_kill_ceiling()` returns `None`), no check runs and the readback is
    `main`'s.
 
@@ -140,6 +172,9 @@ refusal travels as a typed value (`ReadbackRefused`) instead of a flag argument.
 | Measured bytes of tables read plus floor of the rest over `H` | `check_readback`, before the next decode | `decoy.isolated_readback_capacity_exceeded` | same | A2 |
 | Refusal with `output_dir` | `collect` aborts the transaction before `publish_unit` | same; receipt `failed` | receipt carries codes only | A8 |
 | `ArrowMemoryError` or `MemoryError` during a read | `collect`, `is_memory_failure` arm | `decoy.process_out_of_memory` | fixed text, no exception text | A9 |
+| `OSError(ENOMEM)` or a marker-matched memory message during a read (behaviour change: was `publication_failed`) | `collect`, `is_memory_failure` arm | `decoy.process_out_of_memory` | fixed text, no errno text | A9 |
+| Swap on (Linux, macOS): floor over `H` but under RAM plus swap | `check_readback` | `decoy.isolated_readback_capacity_exceeded` (a refusal `main` would not make; accepted assumption) | fixed text | none (documented, V2-LOG) |
+| Windows: ceiling detection fails | `_kill_ceiling()` returns `None` | none; cap inert, runs as `main` | n/a | A5 |
 | Kill ceiling not detectable | `_kill_ceiling()` returns `None` | none; runs as `main` | n/a | A5 |
 | Ceiling detection raises another `ExecutionError` | `_kill_ceiling()` re-raises (`_resident_fit.py:224-229`) | that error's code; stage aborted by `_run_isolated`'s `finally` (`_isolated_run.py:396-398`) | its own fixed text | A12 |
 | Corrupt staged footer or body | `parquet_file` or `read_table`, unchanged `(OSError, ArrowException)` arm | `decoy.publication_failed` (unchanged) | receipt codes only | A12 |
@@ -148,11 +183,14 @@ refusal travels as a typed value (`ReadbackRefused`) instead of a flag argument.
 
 ## Acceptance tests, red first
 
-All cases except A10 run the real `run_pipeline_isolated` with a real child on small tables, and
-patch only the driver's kill ceiling (`_resident_fit._kill_ceiling`); the child is a fresh
-interpreter and is untouched. A spy on `arrow_adapter.read_table`, as `_isolated_commit` sees it,
-records each decode. A4 asserts one spy call per staged table, so the spy is proven wired. Each
-case names the guard mutation that must turn it red.
+All cases except A10 run the real `run_pipeline_isolated` and patch only the driver's kill
+ceiling (`_resident_fit._kill_ceiling`, which the public `kill_ceiling()` calls). Most cases plant
+staged outputs through `install_fake_worker`
+(`tests/unit/execution/publication/_isolated_support.py:86`) for speed. A4 and A7 use a real
+child, once with a resident full-frame output and once with a streamed out-of-core output, so
+each route is covered by a real child at least once. A spy on `arrow_adapter.read_table`, as
+`_isolated_commit` sees it, records each decode. A4 asserts one spy call per staged table, so the
+spy is proven wired. Each case names the guard mutation that must turn it red.
 
 - **A1 pre-read refusal.** Ceiling below the outputs' floor. Outcome `crashed`, reason
   `isolated_readback_capacity_exceeded`, `outputs is None`, zero decodes, stage and work root
@@ -167,7 +205,10 @@ case names the guard mutation that must turn it red.
 - **A4 no refusal at or under the ceiling.** Ceiling equal to the final bound; also a ceiling with
   the bound between `0.85 * H` and `H`. The run completes; `outputs` equal `pq.read_table` of each
   staged file (schema, metadata and `assert_frame_equal` on `to_pandas()`). `extra["readback"]`
-  has exact `int` values, `floor_bytes <= held_bytes`, `tables_read == tables_staged`. G4: compare
+  has exact `int` values; `floor_bytes` and `held_bytes` both cover the outputs only (the run has
+  non-empty caller sources, so a `held_bytes` that wrongly includes them shows as a mismatch with
+  the sum of `resident_spec` over `outputs`); `held_bytes` equals that sum;
+  `floor_bytes <= held_bytes`; `tables_read == tables_staged`. G4: compare
   against `admission_ceiling_bytes(H)` instead of `H`; the second variant is refused.
 - **A5 ceiling unknown.** `_kill_ceiling` returns `None`: completes as `main`,
   `extra["readback"]["kill_ceiling_bytes"] is None`. G5: treat `None` as `0`; refused.
@@ -183,10 +224,11 @@ case names the guard mutation that must turn it red.
 - **A8 nothing published on refusal.** With `output_dir`: the target does not exist afterwards, no
   publication stage remains beside it (listing of the parent), receipt outcome `failed`. G8: move
   `publish_unit` before the readback loop; the target exists.
-- **A9 memory failure classified.** The spy raises `pa.ArrowMemoryError` on the second decode; in a
-  second run, a bare `MemoryError`. Outcome `crashed`, reason `process_out_of_memory` (not
-  `publication_failed`), no exception text in `error`, nothing published, stage removed. G9:
-  delete the memory arm; the first variant reports `publication_failed` and the second raises.
+- **A9 memory failure classified.** The spy raises, on the second decode, `pa.ArrowMemoryError`;
+  then in further runs a bare `MemoryError` and `OSError(errno.ENOMEM, "x")`. Outcome `crashed`,
+  reason `process_out_of_memory` (not `publication_failed`), no exception or errno text in
+  `error`, nothing published, stage removed. G9: delete the memory arm; the Arrow and ENOMEM
+  variants report `publication_failed` and the bare `MemoryError` raises.
 - **A10 floor is never above reality.** For a type corpus written through `StagedParquetWriter`
   (int8 to int64, uint, float16/32/64, bool, decimal128, date32, timestamp with and without tz,
   duration, string, large_string, binary, large_binary, fixed_size_binary, dictionary with int8,
@@ -201,9 +243,12 @@ case names the guard mutation that must turn it red.
   reasons doc and release-pin tests pass with `since=UNRELEASED` and a `changelog.d/` fragment.
   G11: drop the code from `CAPACITY_REASON_CODES`; the registry walk goes red.
 - **A12 exit-path matrix.** {pre-read refusal, mid-read refusal, memory failure, corrupt footer,
-  detection error} x {with `output_dir`, without}. After each: no stage, no work root, no open
-  descriptor left by the readback (`/proc/self/fd` count before and after; Linux only, skipped
-  elsewhere with that reason), and the result or raised error matches the failure-mode table.
+  detection error} x {with `output_dir`, without} x {engine-made work root, caller `staging_dir`}.
+  After each: no publication stage; an engine-made work root is removed; a caller-named
+  `staging_dir` still exists, as designed (`_isolated_run.py:364-368`), with no staged output left
+  in it; no open descriptor left by the readback, including the footer `ParquetFile`
+  (`/proc/self/fd` count before and after; Linux only, skipped elsewhere with that reason); and the
+  result or raised error matches the failure-mode table.
   G12: skip `pub.txn.abort()` on the refusal path; a stage remains.
 - **A13 safe-error producers.** `tests/unit/execution/test_isolated_safe_error.py` gains the refusal
   and the memory result as producers of `IsolatedRunResult.error`; both pass its existing
@@ -218,11 +263,11 @@ marker corpus), `tests/integration/test_f29_isolation.py`, `tests/unit/execution
 
 | Choke point | Where | Callers | Guard mutation |
 |---|---|---|---|
-| The one ceiling comparison | `resident_fit_verdict`, reached through new `check_readback(held, pending, *, kill_ceiling_bytes=None) -> ResidentFit` in `execution/pipeline/_resident_fit.py`, exported from `execution/pipeline/__init__.py` | `check_pre_read`, `check_pre_transform` (existing), `_isolated_commit.collect` (new) | G4 |
+| The one ceiling comparison | `resident_fit_verdict`, reached through new `check_readback(held, pending, *, kill_ceiling_bytes: int \| None) -> ResidentFit \| None` in `execution/pipeline/_resident_fit.py`, exported from `execution/pipeline/__init__.py` | `check_pre_read`, `check_pre_transform` (existing), `_isolated_commit.collect` (new) | G4 |
 | The one bound formula | `lower_bound_bytes`, `lazy_spec`, `resident_spec` (`_resident_bytes.py:50`, `:133`, `:173`) | the same callers | G2, G10 |
-| The one kill-ceiling source | `_kill_ceiling` (`_resident_fit.py:219`) over `detect_effective_memory_bytes` (`src/decoy_engine/execution/out_of_core/_budget.py:332`) | the same callers | G5 |
+| The one kill-ceiling source | `_kill_ceiling` (`_resident_fit.py:219`) over `detect_effective_memory_bytes` (`src/decoy_engine/execution/out_of_core/_budget.py:332`); new public `kill_ceiling()` exported from `execution/pipeline` for callers outside the package | the same callers; `collect` through `kill_ceiling()` | G5 |
 | The one isolated readback | `collect` and `_read_staged` (`_isolated_commit.py:205`, `:231`); every readback of a child's stage goes through it, for the probe, the governor and direct callers | `_result_from_envelope` (`_isolated_run.py:573`) | G1, G8 |
-| The capacity message | new `capacity_message(code, *, needed_bytes, kill_ceiling_bytes)` in `execution/_errors.py`; `nonfk_full_frame_capacity_error` (`src/decoy_engine/execution/_errors.py:87`) is rewritten to use it, so both refusals share one text | both refusals | G6 |
+| The capacity message | new `capacity_message(code, *, needed_bytes, kill_ceiling_bytes, remedy)` in `execution/_errors.py`. `nonfk_full_frame_capacity_error` (`src/decoy_engine/execution/_errors.py:87`) passes its current remedy ("reduce the table's rows or columns"), so its text stays byte-identical. The readback passes its own remedy: "Run on a machine with more memory, or write fewer or smaller output tables." | both refusals | G6 |
 | The refusal result | new `readback_refused(...)` in `_isolated_reason.py`, beside `envelope_failure` (`:68`) and `commit_reason` (`:101`) | `_result_from_envelope` | G7 |
 | The memory predicate | `is_memory_failure` (already shared by the worker and `in_process_failure`) | `collect` (new) | G9 |
 | Capacity code list | `CAPACITY_REASON_CODES` (`errors.py:511`); the CLI derives exit 5 from it | registry walk test | G11 |
@@ -256,7 +301,7 @@ F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`
 - `_names_ok` refuses the envelope names: `failed_receipt`, transaction aborted (`src/decoy_engine/execution/_isolated_commit.py:216`).
 - `_admit` refuses the stage or raises `OSError`: `failed_receipt` (`src/decoy_engine/execution/_isolated_commit.py:187`, `:218`).
 - New: `check_readback` refuses before a decode: `ReadbackRefused`, tables dropped, transaction aborted.
-- New: memory failure during a decode: process-out-of-memory result, transaction aborted.
+- New: memory failure during a decode (incl. ENOMEM and marker-matched text): `ReadbackMemoryFailure`, process-out-of-memory result, transaction aborted.
 - `parquet_file` or `read_table` raises an Arrow or OS error: `failed_receipt` (unchanged, `:218`).
 - `publish_unit` does not commit: its receipt (`src/decoy_engine/execution/_isolated_commit.py:227`).
 - `_result_from_envelope` removes the stage when there is no `output_dir` or on failure (`src/decoy_engine/execution/_isolated_run.py:575`).
@@ -264,6 +309,7 @@ F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`
 
 ### Routes
 
+- Windows: ceiling detection fails (`src/decoy_engine/execution/out_of_core/_budget.py:195-215`), so the cap is inert on every route there (A5 path).
 - Isolated subprocess, child on any route (full frame, out of core, sequential, auto-chunk lane, multi-table split), resident or streamed outputs: the readback runs and the cap applies (`src/decoy_engine/execution/_isolated_worker.py:160`).
 - Probe (`src/decoy_engine/execution/_probe.py:283`): forced full frame on a downscaled job; the cap applies; a refusal is an inconclusive probe.
 - Governor (`src/decoy_engine/execution/_governor.py:381`): every rung; a refusal ends the ladder.
@@ -282,7 +328,7 @@ relationship logic runs in the driver.
 - `error` the fixed capacity text; `outputs` `None`; `quality_metrics` and `table_kinds` `{}`.
 - `peak_rss_mb` the child's reported peak; `returncode` 0; `signal_number` `None`; `isolated` `True`.
 - `committed_output_dir` `None`; `row_errors` `()`; `publication_receipt` `failed_receipt` with `output_dir`, else `None`.
-- `extra["readback"]` the five numbers (`_isolated_common.py:407`), also on a completed run.
+- `extra["readback"]` the six numbers (`_isolated_common.py:407`), also on a completed run.
 
 `ResidentFit` (`src/decoy_engine/execution/pipeline/_resident_fit.py:52`): verdict, code, table
 count and byte figures, numbers and tokens only.
@@ -305,7 +351,7 @@ count and byte figures, numbers and tokens only.
 | 4 | Route parity and silent fallback | one readback for every isolated route; no fallback; the refusal has a registered reason | A1 to A4 on a streamed and a resident child; A7 | G1, G7 |
 | 5 | Referential integrity | N/A: per-table readback; no FK data is joined in the driver | n/a | n/a |
 | 6 | Untrusted producer (the child's staged files and footers) | admitted stage only; footer and body read through the capability and the guarded adapter; floor checked against measured bytes | A2, A10, A12 corrupt footer | G2, G10 |
-| 7 | Check then use (TOCTOU) | footer and data read from one capability handle per table, after `_admit` made the stage 0700 and files 0600; the child has exited | A12 descriptor count | open a second handle by path for the decode: A12's descriptor and spy assertions go red |
+| 7 | Check then use (TOCTOU) | N/A: this slice adds no new check-then-use window. pyarrow reopens the path for the footer and for the body (`src/decoy_engine/fileaccess/adapters/arrow.py:61`, `:65`), as the readback does today; both opens follow the unchanged `_admit` step and happen after the child exited. That sequence is covered by the existing `test_isolated_marker_corpus.py` | n/a | n/a |
 | 8 | Weak tests and overclaimed evidence | real child in every route case; spy non-vacuity in A4; A10 non-vacuity per type family | A4, A10 | remove A4's spy-count assertion: a broken spy no longer fails |
 | 9 | Behavior-preserving refactor drift | `read_table` call unchanged; `nonfk_full_frame_capacity_error` text unchanged through `capacity_message` | A4 parity; existing resident-fit text asserts | change one word of the shared text: those asserts go red |
 | 10 | Frozen contract drift | reason registry additive (`since=UNRELEASED`); `IsolatedRunResult` fields and `IsolatedRunOutcome` unchanged | A11, release-pin tests | drop the changelog fragment: release-pin test red |
@@ -336,8 +382,8 @@ count and byte figures, numbers and tokens only.
 - `nonfk_full_frame_capacity_error`'s text, moved into the shared `capacity_message`.
 - Test support: `tests/unit/execution/test_isolated_run.py` helpers and `tests/unit/execution/publication/` support modules.
 
-New names: `check_readback`, `ReadbackRefused`, `readback_refused`, `capacity_message`,
-`ISOLATED_READBACK_CAPACITY_EXCEEDED`. Each has a production caller in this slice.
+New names: `check_readback`, `kill_ceiling`, `ReadbackRefused`, `ReadbackMemoryFailure`,
+`readback_refused`, `capacity_message`, `ISOLATED_READBACK_CAPACITY_EXCEEDED`. Each has a production caller in this slice.
 
 ## Frozen contracts
 
@@ -347,26 +393,37 @@ New names: `check_readback`, `ReadbackRefused`, `readback_refused`, `capacity_me
 - `CAPACITY_REASON_CODES`: additive. The CLI derives exit 5 and its rule-code census from the
   engine, so no CLI edit.
 - `IsolatedRunResult`: no field added, removed or reordered; `extra` gains the `readback` key.
+- `decoy_engine.execution.pipeline` exports: additive (`check_readback`, `kill_ceiling`).
 - `IsolatedRunOutcome`: unchanged (`crashed` is reused).
 - `run_pipeline_isolated` and `run_job_with_governor` signatures: unchanged.
-- `nonfk_full_frame_capacity_error` text: unchanged.
+- `nonfk_full_frame_capacity_error` text: byte-identical (its remedy is passed in).
+- Memory classification in the readback: changed on purpose for ENOMEM and marker-matched text
+  (Behaviour step 7); release notes say so in the same `changelog.d/` fragment.
 
 ## Placement and sizes
 
 | Path | Change | CODEMAP line | Beside | Lines now | Expected |
 |---|---|---|---|---|---|
-| `src/decoy_engine/execution/_isolated_commit.py` | footer read, check loop, memory arm, `ReadbackRefused`, `extra` numbers | `CODEMAP.md:271` | `_isolated_run.py` | 324 | about 385 |
-| `src/decoy_engine/execution/_isolated_run.py` | `_result_from_envelope` maps `ReadbackRefused` | `CODEMAP.md:271` | `_isolated_commit.py` | 595 | at most 600; if more, `_result_from_envelope` moves to `_isolated_commit.py` with its two file-access registry rows, row count unchanged |
+| `src/decoy_engine/execution/_isolated_commit.py` | footer read, check loop, memory arm, `ReadbackRefused`, `ReadbackMemoryFailure`, `extra` numbers | `CODEMAP.md:271` | `_isolated_run.py` | 324 | about 385 |
+| `src/decoy_engine/execution/_isolated_run.py` | `_result_from_envelope` maps both values | `CODEMAP.md:271` | `_isolated_commit.py` | 595 | at most 600; if more, `_result_from_envelope` moves to `_isolated_commit.py` with its two file-access registry rows, row count unchanged |
 | `src/decoy_engine/execution/_isolated_reason.py` | `readback_refused`, memory result | `CODEMAP.md:271` | `_isolated_common.py` | 112 | about 150 |
 | `src/decoy_engine/execution/_errors.py` | `capacity_message` | `CODEMAP.md:271` | `_isolated_reason.py` | 140 | about 150 |
-| `src/decoy_engine/execution/pipeline/_resident_fit.py` | `check_readback` | `CODEMAP.md:271` | `_resident_bytes.py` | 470 | about 500 |
-| `src/decoy_engine/execution/pipeline/__init__.py` | export `check_readback` | `CODEMAP.md:271` | `_resident_fit.py` | 51 | 53 |
+| `src/decoy_engine/execution/pipeline/_resident_fit.py` | `check_readback`, public `kill_ceiling` | `CODEMAP.md:271` | `_resident_bytes.py` | 470 | about 505 |
+| `src/decoy_engine/execution/pipeline/__init__.py` | export both | `CODEMAP.md:271` | `_resident_fit.py` | 51 | 55 |
 | `src/decoy_engine/reasons/decoy/_core.py` | new identity | `CODEMAP.md:288` | `ISOLATED_WORKER_OUT_OF_MEMORY` | 288 | about 296 |
 | `src/decoy_engine/errors.py` | `CAPACITY_REASON_CODES` entry | `CODEMAP.md:262` | the `ISOLATED_WORKER_OUT_OF_MEMORY` entry | 599 | 600 |
 | `changelog.d/<fragment>` | names the new identity | release notes | other fragments | 0 | about 3 |
-| `tests/unit/execution/test_isolated_readback_cap.py` (new) | A1 to A9, A12 | `CODEMAP.md:271` | `test_isolated_run.py` (877, not grown) | 0 | about 320 |
-| `tests/unit/execution/test_resident_floor_reality.py` (new) | A10 | `CODEMAP.md:271` | `test_resident_fit.py` | 0 | about 120 |
+| `tests/unit/execution/publication/test_isolated_readback_cap.py` (new) | A1 to A9, A12 | `CODEMAP.md:172` | `test_isolated_parent_measures.py`, `_isolated_support.py` | 0 | about 320 |
+| `tests/unit/execution/pipeline/test_resident_floor_reality.py` (new) | A10 | existing sub-package `tests/unit/execution/pipeline/` | `test_lifecycle_inputs.py` | 0 | about 120 |
 | `tests/unit/execution/test_isolated_safe_error.py` | A13 producers | `CODEMAP.md:271` | `test_isolated_run.py` | 418 | about 440 |
+
+Test placement: no new file goes in the flat `tests/unit/execution/` directory (`CODEMAP.md:171`).
+The readback cases go in `tests/unit/execution/publication/` rather than a new `isolated/`
+sub-package: the readback is the step that admits and publishes the child's stage, that
+directory already holds the isolated publication tests (`test_isolated_parent_measures.py`,
+`test_isolated_marker_corpus.py`), and it has `install_fake_worker`, so no new sub-package or
+CODEMAP row is needed. A10 tests the shared floor formula of `execution/pipeline/`, so it goes in
+`tests/unit/execution/pipeline/`.
 
 No new source module and no new package: `execution/` is over its fan-out freeze (109 entries
 against 104, `CODEMAP.md:271`), and every change fits an existing module under 600 lines.
@@ -382,10 +439,17 @@ stored baseline.
 
 ## Pre-mortem
 
-- A10 finds a type whose floor is above reality. Suspect: Arrow reads Parquet dictionary indices
-  back as int32, so a stored int64 index makes an 8-byte floor too high. The fix goes in
-  `_lazy_column_bytes` (`_resident_bytes.py:183`), which also corrects `check_pre_read`, and lands
-  in this slice before the cap.
+- A10 finds a type whose floor is above reality. Plan review ran the floor against
+  `resident_spec(pq.read_table(...))` on pyarrow 24 for the riskiest types (dictionary int8 and
+  int64 indexes, duration, float16, decimal128, date64, time32, struct of list) with no violation,
+  so this is unlikely; A10 still pins it. If it goes red, the fix goes in `_lazy_column_bytes`
+  (`_resident_bytes.py:183`), which also corrects `check_pre_read`, and lands before the cap.
+- Swap makes the cap refuse a run that `main` completes. On Linux with swap on and on macOS
+  (compressor and dynamic swap, `H` is host RAM), a run whose output fits only with swap is
+  refused. This is the accepted #777 assumption (Guarantee). If a real run reports it, the
+  swap-aware ceiling in V2-LOG is the fix, not a lower floor.
+- On Windows the cap does nothing because ceiling detection fails; a large readback can still
+  kill the driver as on `main`. Accepted; V2-LOG.
 - The spy patches the wrong name (a by-value import elsewhere): A4's per-table call count catches a
   spy that sees nothing.
 - `_isolated_run.py` goes over 600 lines: the Placement row names the move in advance.
@@ -404,6 +468,9 @@ stored baseline.
   groups; needs a parity proof for chunk layout against `pq.read_table`.
 - A tighter floor for string and binary payloads from footer statistics or `total_byte_size`.
 - Bound the result-envelope read (`read_envelope`) and the `row_errors` it carries.
+- Bound the child's stdout and stderr: `proc.communicate()` (`src/decoy_engine/execution/_isolated_run.py:477`) holds both in driver memory without a cap.
+- A swap-aware refusal ceiling: add `SwapTotal` (host) or `memory.swap.max` / `memory.memsw.limit_in_bytes` (cgroup) to `H` for refusals only, leaving the admission and budget ceilings unchanged.
+- Ceiling detection on Windows (for example `GlobalMemoryStatusEx` through `ctypes`), so the cap is not inert there.
 - The child's resident-fit checks read the `RLIMIT` as their kill ceiling, with the governor taught
   to reroute on that refusal.
 - When row 58b or CHUNK-PARALLEL brings an explicit memory budget, the readback ceiling becomes
@@ -438,3 +505,19 @@ stored baseline.
   surface; 58b brings a configurable budget).
 - (b) An engine keyword on `run_pipeline_isolated` (`max_readback_bytes`). Useful for platform
   tuning, but it is new public surface.
+
+## Finding map (plan review round 1)
+
+| Finding | Where addressed |
+|---|---|
+| V1 test placement in flat `tests/unit/execution/` | Placement and sizes: A1 to A9, A12 in `publication/`; A10 in `pipeline/`; reason stated |
+| DESIGN swap overclaim | Guarantee "Assumption: swap is not counted"; failure-modes rows; Pre-mortem; V2-LOG swap-aware ceiling |
+| `check_readback` return and ceiling accessor | Behaviour step 3; Choke points; `ResidentFit \| None`, public `kill_ceiling()` |
+| ENOMEM and text-matched reclassification; memory value; reason builder | Behaviour step 7 (`ReadbackMemoryFailure`, `ReasonRecord.for_reason`); failure-modes row; A9 ENOMEM variant; Frozen contracts |
+| Class 7 one-handle claim; footer `ParquetFile` left open | Class table row 7 now N/A with reason; Behaviour step 2 `with` block; A12 descriptor check includes the footer |
+| A4 floor vs held vacuous | Behaviour step 8 and A4: both over outputs only, `sources_bytes` separate |
+| A12 work-root claim with caller `staging_dir` | A12 matrix adds the caller `staging_dir` axis |
+| `capacity_message` remedy | Choke points: `remedy` argument; full-frame text byte-identical; readback remedy |
+| Windows detection inert | Guarantee assumption; Routes; failure-modes row; Pre-mortem; V2-LOG |
+| `proc.communicate()` unbounded | V2-LOG |
+| Fake worker for speed | Acceptance preamble: `install_fake_worker` for most cases, real child per route in A4 and A7 |
