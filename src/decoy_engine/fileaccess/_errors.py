@@ -176,7 +176,8 @@ def is_memory_failure(exc: BaseException) -> bool:
     stays `crashed`. Imports nothing, so it is safe at the memory cap."""
     if typed_memory_member(exc) is not None:
         return True
-    return _memory_text(str(exc))
+    message = str(exc)
+    return _memory_text(message)
 
 
 def passes_by_type(exc: Exception) -> bool:
@@ -198,7 +199,8 @@ def resurface_scrubbed(exc: Exception) -> Exception | None:
     conversion error that names the cell and also the OpenSSL marker), and no redaction of the
     original text can be proven to catch every shape. A typed memory error elsewhere in the
     chain does not make the outer message one."""
-    if not _memory_text(str(exc)):
+    message = str(exc)
+    if not _memory_text(message):
         return None
     rebuilt = _fixed_text_rebuild(exc)
     return rebuilt if isinstance(rebuilt, Exception) else None
