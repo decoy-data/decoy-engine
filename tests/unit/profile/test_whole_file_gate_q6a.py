@@ -56,3 +56,34 @@ def test_the_cloud_whole_object_read_refuses_before_it_decodes(tmp_path: Path) -
     with pytest.raises(Exception) as caught:
         _checked_frame(data, "t")
     _assert_refused(caught.value)
+
+
+def test_a_directory_source_is_gated_before_it_decodes(tmp_path: Path) -> None:
+    """`read_table` opens a directory as a dataset, so the gate reads the schema that same way."""
+    directory = tmp_path / "dataset"
+    directory.mkdir()
+    _write(directory / "part.parquet")
+    with pytest.raises(Exception) as caught:
+        LazySource(directory, table="t").to_table()
+    _assert_refused(caught.value)
+
+
+def test_a_dotted_projection_to_a_date_leaf_reads_as_the_whole_file_api_returns_it(
+    tmp_path: Path,
+) -> None:
+    """`columns=["s.when"]` yields a top-level `when: date32` from `read_table`. The gate sees
+    that projected schema, not a struct, so a plain date leaf under a struct still reads."""
+    day = dt.date(2020, 1, 1)
+    path = tmp_path / "s.parquet"
+    pq.write_table(
+        pa.table({"id": [1, 2], "s": pa.array([{"when": day}, {"when": day}])}), str(path)
+    )
+    table = LazySource(path, table="t").to_table(["s.when"])
+    assert table.column_names == ["when"] and table.schema.field("when").type == pa.date32()
+    assert table.column("when").to_pylist() == [day, day]
+
+
+def test_a_dotted_projection_to_a_date_free_child_still_reads(tmp_path: Path) -> None:
+    path = tmp_path / "s.parquet"
+    pq.write_table(pa.table({"s": pa.array([{"when": dt.date(2020, 1, 1), "n": 5}])}), str(path))
+    assert LazySource(path, table="t").to_table(["s.n"]).column("n").to_pylist() == [5]
