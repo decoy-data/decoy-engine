@@ -14,7 +14,7 @@ expression text, paths beyond the declared table name, or `str(exc)`
 (observability rule: where and how much, never what).
 
 Schema versions. Events written before F29 are legacy version 0: the keys of
-`event_to_legacy_dict`. Version 1 (`event_to_dict`) is a strict additive
+`_LEGACY_FIELDS`. Version 1 (`event_to_dict`) is a strict additive
 superset of those keys: it adds the schema and registry versions, a stream-local
 `sequence`, an explicit `phase` and `object_ref`, byte counters with their basis,
 and the optional `reason`, `retry`, `checkpoint` and `publication` groups. Every
@@ -53,7 +53,6 @@ from decoy_engine._progress_events import (
     TerminalEvent,
     WarningEvent,
     event_to_dict,
-    event_to_legacy_dict,
     safe_error_class,
     safe_registered_code,
 )
@@ -556,7 +555,6 @@ __all__ = [
     "TerminalEvent",
     "WarningEvent",
     "event_to_dict",
-    "event_to_legacy_dict",
     "get_active_channel",
     "safe_error_class",
     "safe_registered_code",
