@@ -3,7 +3,7 @@
 Status: plan
 
 Rules consulted: 00-universal, risk-and-exceptions, development-loop, profiles/local-operations,
-feature-dev, testing, security, cross-cutting-concerns, proportionality, reuse-first,
+feature-dev, testing, security, cross-cutting-concerns, architecture, proportionality, reuse-first,
 catalogs/recurring-defects.
 
 Risk: R2. Repo: engine. Row 58 (F25) 1.0 acceptance, finding G7 (CLI repo
@@ -51,7 +51,7 @@ Nothing more is read, nothing is published, and the stage is removed. The bound 
 reality: tables already read count at their measured buffer bytes. A memory failure during the
 readback is a coded memory result, never a publication failure and never a raw exception. On an ordinary success, the caller gets the same outputs and publication receipt as on `main`.
 
-**Commit contract.** From readback setup through pre-call result preparation, a memory failure returns `crashed` with `decoy.process_out_of_memory` and NOT_PUBLISHED. Abort the stage. From immediately before the `publish_unit` call through final cleanup, a raised MemoryError returns the reserved memory result with UNKNOWN and same-operation-id confirmation advice. This includes a matching replay. CPython can raise between any two bytecodes, including after rename and before Python observes success. The guarantee is never a raw exception and never a false NOT_PUBLISHED once publishing may have started. A publishing run reports completion after it has a committed receipt and finishes result construction and cleanup.
+**Commit contract.** It holds on both routes of `run_pipeline_isolated`, through one boundary (section "Memory boundary"). On the isolated route, from readback setup through pre-call result preparation, a memory failure returns `crashed` with `decoy.process_out_of_memory` and NOT_PUBLISHED, and the stage is aborted. From immediately before the `publish_unit` call through final cleanup, a raised MemoryError returns the reserved memory result with UNKNOWN, no receipt and same-operation-id confirmation advice. This includes a matching replay. On the resident route (`isolate=False`) the same UNKNOWN result covers the span from immediately before `publish_resident` through the returned result, and NOT_PUBLISHED covers the completed result when there is no `output_dir`. CPython can raise between any two bytecodes, including after rename and before Python observes success. The guarantee is never a raw exception and never a false NOT_PUBLISHED once publishing may have started. A memory error caught inside the window is never turned into another verdict: inner handlers let it pass, and the one adapter that classifies it reports `process_out_of_memory`. A publishing run reports completion after it has a committed receipt and finishes result construction and cleanup. Before the window (staging, spawn, `run_pipeline` itself) memory errors behave as on `main`.
 
 Only a strict lower bound can refuse, and only above the kill ceiling, so compatibility depends on the swap assumption below. That is the rule row 58b sets for quotas (no default limit that refuses 1.0
 runs that work) and the rule `_resident_fit` already applies (`RESIDENT_ADMISSION_FRACTION`,
@@ -140,7 +140,9 @@ CHUNK-PARALLEL brings an explicit memory budget, this ceiling becomes `min(H, bu
    `ReadbackMemoryFailure(receipt)` value, and `_result_from_envelope` maps it to
    `outcome="crashed"`, `reason=decoy.process_out_of_memory` (built with
    `ReasonRecord.for_reason`, never from the exception), fixed text, with the same abort and
-   cleanup. **Behaviour change:** `is_memory_failure` also matches `OSError` with `errno.ENOMEM`
+   cleanup. A `MemoryError` instance (Arrow's included) is not caught there: it passes the
+   handler through the `except MemoryError: raise` clause and `guarded` returns the pre-call
+   reserve, which has the same code, state, text, receipt and figures. **Behaviour change:** `is_memory_failure` also matches `OSError` with `errno.ENOMEM`
    (`fileaccess/_errors.py:107-111`) and messages that carry a known memory marker or pattern
    (`:170-173`). These reach `publication_failed` with the errno today; after this slice they are
    `process_out_of_memory`. A9 pins the ENOMEM case.
@@ -162,19 +164,180 @@ For manual confirmation, rerun the same unit at the same destination with the or
 already be on it, and D2 is the driver reading the finished output. The only real fallback is to
 not read the output back, as described in Q2. This plan recommends the refusal for 1.0.
 
-### Commit boundary on `abc5998fd`
+### Memory boundary (section b, revised after Codex rounds 4 to 6)
 
-The isolated driver owns one flag per attempt, initially false. Keep the outer memory guard in `_run_isolated` around readback setup, publication, result construction, evidence replacement and both finalizers. Pass the same attempt state to the existing call site in `_isolated_commit._publish`. Scratch-only runs leave the flag clear.
+Rounds 4, 5 and 6 each found the same class at a new site. A memory error raised after the
+window opened was caught by a broad handler (`except Exception`, `except ArrowException`, `except
+BaseException`) and turned into a data verdict: a refusal receipt, a malformed vault segment,
+`unexpected_error`, or a raw escape on the route that had no reserve. The `c2b81ef1f` fix put
+`fileaccess.reraise_memory(exc)` into three handlers. That is a per-site rule, so the next
+unlisted handler fails the same way. This section replaces the per-site rule with one boundary
+and one rule for inner handlers, both checked by construction.
 
-- Before readback, reserve the coded `crashed` memory result and its UNKNOWN copy through the existing isolated reason builder. Both use `decoy.process_out_of_memory`, no outputs, conservative cleanup evidence and the same per-attempt `extra`. Keep the last complete `readback` figures there by replacing the entry after each successful measurement. Seed the reserves during attempt setup, independently of constructing the reader or its initial `asdict` snapshot. A fault at either site must find the pre-call reserve ready.
-- The pre-call reserve uses NOT_PUBLISHED and the usual failed receipt when a destination was requested. The UNKNOWN copy uses `PublicationState.UNKNOWN`, no receipt and the fixed error text “rerun with the same operation id to confirm”. Use `CleanupState.UNKNOWN` on reserves built before cleanup. A failed receipt would falsely report that the unit never bound.
-- Start the pre-call memory arm before request and reader setup. Cover the initial `extra` at `_isolated_commit.py:350`, the `committed` string and `row_errors_of` at lines 426 and 427, admission, readback, refusal construction and component names. Keep the existing readback memory classification ahead of generic OS and Arrow failure handling. Release partial tables and abort the stage on pre-call failure.
-- Set the flag immediately before the existing `publish_unit` call at `_isolated_commit.py:322`. Leave it set through return. Let a raised MemoryError reach the outer guard even inside the publisher or in `_check_vault` on a matching replay. Select the UNKNOWN reserve directly without inspecting the target, allocating a receipt or formatting the exception.
-- After a committed receipt returns, build the normal `completed` result with the actual receipt, decoded outputs and row errors. Protect that build and the evidence update at `_isolated_run.py:522`. Keep `txn.abort()` inside a try and `scratch.close()` in its finally (lines 394 to 397), both inside the guard. Either cleanup can select UNKNOWN once the flag is set.
+**Survey at `c2b81ef1f`.** Broad handlers that the window runs through, found by an AST scan of
+`publication/`, `vault/`, `fileaccess/`, `reasons/`, `reason_adapter.py`, `execution/_isolated_*.py`
+and the modules they call:
+
+| Site | Catches | What a memory error becomes today |
+|---|---|---|
+| `publication/_publish.py:276`, measurement | `(OSError, ArrowException)` | propagates (the `reraise_memory` call added in `c2b81ef1f`); a raw error on `isolate=False` (R6-2) |
+| `vault/_format.py:276`, `_decode_rows` | `(ArrowException, KeyError, ValueError)` | propagates (`reraise_memory`); before that, a vault mismatch refusal (R5-1) |
+| `execution/_isolated_commit.py:491`, `_typed_error` | `Exception` | propagates (`reraise_memory`); before that, NOT_PUBLISHED with the refusal receipt (R5-2) |
+| `execution/_isolated_commit.py:299`, `collect` | `(OSError, ArrowException, MemoryError, KeyboardInterrupt)` | classified by `is_memory_failure` into `ReadbackMemoryFailure` |
+| `reason_adapter.py:291`, `reason_from_exception` | `Exception` | `unexpected_error`, so NOT_PUBLISHED with the refusal receipt (R6-1) |
+| `reason_adapter.py:330`, `:341`, `:483`, `:491` (`_identified_reason`, `_read_code`, `_lookup_captured`, `_remember`) | `Exception` | `unregistered_reason`, no code, not remembered: a wrong reason with no memory trace |
+| `execution/_isolated_run.py:281`, the guard | `MemoryError` | the reserve, or a raw re-raise when `_pre_call` is unset (R6-3) |
+| `execution/_isolated_run.py:332`, `_run_in_process` | `BaseException` | the run's own failure, `in_process_failure` (`oom_killed`); unchanged on purpose |
+| `fileaccess/_errors.py:206`, `:216`, `:225`; `fileaccess/_entry.py:266` (`__del__`); `internal/memory.py:53`, `:91`, `:115` | `Exception` | a missing value or a fallback object; in the window only if A19 traces them |
+
+How the resident route reports errors today: `_run_in_process` (`_isolated_run.py:323`) catches
+every failure of `run_pipeline` and returns `in_process_failure(exc)` (memory is `oom_killed`).
+`publish_resident` then runs outside any handler. A non-committed receipt becomes
+`failed_publication(..., isolated=False)`. Nothing owns a reserve, so any `MemoryError` in
+publication or in building the result escapes `run_pipeline_isolated` raw. On `main` this
+already happens for a bare `MemoryError`. An `ArrowMemoryError` in measurement used to become a
+failed receipt only because the handler swallowed it.
+
+**Options considered.**
+
+- (a) The reason adapter as the one place that maps `MemoryError`, given the phase. Rejected as
+  the whole answer. Two of the five reproduced faults never reach the adapter: the vault decoder
+  returns a mismatch verdict and the publisher returns a failed receipt, both with no exception
+  left to classify. And the adapter builds a `ReasonRecord`, while the contract needs a different
+  `IsolatedRunResult` (no receipt, no outputs, the same-id text). The adapter keeps one job in
+  the design below: it never hides a memory error behind another code.
+- (b) A phase-aware outer boundary per public entry. Chosen, with two additions that make it
+  hold by construction: inner handlers are memory-transparent in one exact syntactic shape that
+  a sentry checks, and the boundary normalizes a memory-coded result by phase.
+- (c) Observe every raised `MemoryError` at runtime (`sys.monitoring` `RAISE` and
+  `EXCEPTION_HANDLED`, PEP 669) and let the boundary consult a latch. Rejected: Python 3.12 and
+  later only, and the engine supports 3.10 to 3.12. `sys.settrace` on 3.10 and 3.11 would take
+  over the slot that coverage and debuggers use. A10's corpus and the mutation runs need coverage.
+
+**Design.** Three parts, one fact each.
+
+1. **One boundary, both routes.** `guarded(attempt, body)` in `_isolated_reason.py` is the only
+   handler that turns a `MemoryError` into a result. `run_pipeline_isolated` calls it on both
+   branches: `guarded(attempt, lambda: _run_isolated(...))` and
+   `guarded(attempt, lambda: _run_in_process(...))`. The old `except MemoryError` in
+   `run_pipeline_isolated` (`_isolated_run.py:281`) moves into it.
+
+   ```python
+   def guarded(attempt: Attempt, body: Callable[[], IsolatedRunResult]) -> IsolatedRunResult:
+       try:
+           return attempt.settle(body())
+       except MemoryError:
+           reserved = attempt.memory_result()
+           if reserved is None:  # Window.BEFORE: nothing has started that a result could describe
+               raise
+           return reserved
+   ```
+
+   `Attempt` holds one `Window` value (replacing the `publishing` flag): `BEFORE`, `PRE_CALL`,
+   `PUBLISHING`. It is built by `Attempt.isolated()` or `Attempt.resident()`. **Both reserves are
+   built in the constructor**, before the route stages, spawns or runs anything, with
+   `peak=None` and `pid=None`. Nothing inside a window builds a reserve. `memory_result()`
+   returns `None` only in `BEFORE`, `_pre_call` in `PRE_CALL`, `_unknown` in `PUBLISHING`.
+   Selecting a reserve allocates nothing beyond the method call.
+
+   - `enter_readback(pid, peak)`: sets `PRE_CALL` first, then replaces `pid` and `peak` in both
+     reserves. If that replacement fails, the earlier reserves (with `None` figures) stand.
+   - `enter_publishing()`: sets `PUBLISHING`. It replaces `attempt.publishing = True` at the
+     single isolated `publish_unit` call (`_isolated_commit.py:325`).
+   - `failed_receipt_for(receipt)`: unchanged, but called in `_run_isolated` right after
+     `begin_publication` (still `BEFORE`, before the spawn), not inside the readback.
+   - `settle(result)`: in `PUBLISHING`, a non-completed result whose `reason.code` is
+     `process_out_of_memory` is replaced by `_unknown`. Every other result is returned as built.
+     In `BEFORE` and `PRE_CALL` it changes nothing, so `in_process_failure`'s `oom_killed` and the
+     readback memory result keep their current shape. `settle` compares two strings and
+     allocates nothing.
+
+   Windows per route:
+
+   | Route | `BEFORE` (raw, as on `main`) | `PRE_CALL` (NOT_PUBLISHED reserve) | `PUBLISHING` (UNKNOWN reserve) |
+   |---|---|---|---|
+   | isolated | staging, spawn, envelope read, a failed child's result | from the first statement of `result_from_envelope`'s completed branch (`enter_readback`, the statement that opens its cleanup `try`) to `publish_unit` | from immediately before `publish_unit` through `scratch.close()` |
+   | resident (`isolate=False`) | `run_pipeline` and `in_process_failure` (its own classification, unchanged) | from `run_pipeline`'s return through the completed result when there is no `output_dir` | from immediately before `publish_resident` through the returned result |
+
+   The resident reserves come from the same builder (`_readback_result`, name kept)
+   with `isolated=False`, `returncode=None`, operation `COMMIT`, and no receipt. With an
+   `output_dir` the resident window goes to `PUBLISHING` before any publication code runs, so a
+   pre-call receipt would never be used. The texts are the existing two: the summary plus the
+   readback remedy, and the summary plus "Rerun with the same operation id to confirm."
+   The isolated reserves keep their current fields.
+
+2. **Inner handlers are memory-transparent.** In every module the window runs through, a handler
+   that can catch a `MemoryError` takes one of three shapes:
+
+   - It is preceded, in the same `try`, by a handler of exactly `except MemoryError:` whose whole
+     body is a bare `raise`. Python's own clause ordering then sends every `MemoryError`, Arrow's
+     included, past the broad handler. No call can be skipped by a condition. `ArrowMemoryError`
+     subclasses `MemoryError` (`pyarrow/error.pxi`), so one clause covers both.
+   - Its last top-level statement is a bare `raise` (cleanup handlers such as
+     `publish_tables`'s `except BaseException: txn.abort(); raise`).
+   - It is one of the three registered classifiers (the choke point, not a debt list):
+     `_isolated_reason.guarded` (the boundary), `reason_adapter.reason_from_exception` (the
+     adapter, part 3) and `_isolated_run._run_in_process`'s run handler (the run's own failure,
+     outside every window, unchanged from `main`).
+
+   `fileaccess.reraise_memory` is **removed**, with its export and its three calls. The call
+   becomes the clause at the same three sites: `publication/_publish.py:276`,
+   `vault/_format.py:276` and `_isolated_commit._typed_error`. `collect` gets the clause ahead
+   of its handler and drops `MemoryError` from that tuple. A real `MemoryError` in the readback
+   now reaches the boundary and returns the pre-call reserve (same code, state, text, receipt
+   and figures as `ReadbackMemoryFailure`). The handler keeps `is_memory_failure` for the shapes
+   that are not `MemoryError`: `OSError(ENOMEM)`, marker-matched Arrow text, and a
+   `KeyboardInterrupt` with a memory cause. The adapter's inner handlers at `:330`, `:341`,
+   `:483` and `:491` get the clause. Their memory error then reaches the one classifier.
+
+   **The publisher change stays**, in the clause shape. Without it a measurement `MemoryError` on
+   a matching replay becomes a failed receipt that says NOT_PUBLISHED about a target that exists
+   (Codex round 5, V2-LOG item 2). It no longer breaks `isolate=False`, because that route now
+   runs under the same boundary (part 1). Its effect on the other `publish_unit` callers is
+   stated and pinned in A20: `ParquetTransactionalSink.commit` and `DeliveryStage` raise the
+   `ArrowMemoryError`, as they already raise a bare `MemoryError` on `main`, instead of returning
+   a failed receipt. The vault decoder's clause has the same effect on vault readers: memory
+   pressure is raised, never reported as a malformed segment.
+
+3. **The adapter never hides a memory error and never raises.** `reason_from_exception` moves
+   `_lookup_captured` inside its `try` and gets one clause ahead of `except Exception`:
+
+   ```python
+   except MemoryError:
+       return _OUT_OF_MEMORY
+   ```
+
+   `_OUT_OF_MEMORY` is a module-level `ReasonRecord.for_reason(PROCESS_OUT_OF_MEMORY)` built at
+   import, so the handler allocates nothing. It drops the caller's phase and context. The code is
+   what a consumer acts on, and a memory failure while classifying is rare. Every other caller
+   keeps the documented never-raises behavior and now gets `process_out_of_memory` instead of
+   `unexpected_error` or `unregistered_reason` when classification runs out of memory. On the
+   isolated and resident routes that record reaches `settle`, which selects the UNKNOWN reserve
+   once publishing has started. This is the only adapter change. It needs no phase input and
+   no new public name.
+
+**Why each finding closes without a per-site edit.**
+
+| Finding | Closed by |
+|---|---|
+| R6-1: `MemoryError` in `_classify` while building the refusal returns `unexpected_error`, NOT_PUBLISHED | Part 3 returns `process_out_of_memory` for any memory error inside classification. Part 1's `settle` turns any memory-coded result in `PUBLISHING` into the UNKNOWN reserve. A future memory error in any builder that goes through the adapter lands the same way, on either route. |
+| R6-2: raw `ArrowMemoryError` on `isolate=False` | The resident route runs under `guarded` with reserves built at entry and `PUBLISHING` set before `publish_resident`. A raw error from publication or result building has a reserve to select. |
+| R6-3: a fault building the first reserve escapes raw after the child ran | Reserves are built in the `Attempt` constructor, before any stage, spawn or run. Inside a window nothing builds a reserve, so `memory_result()` cannot be `None` there. A fault in the constructor raises before any side effect, which is the same as the caller's own allocation failing before the call (A18). |
+| R6 DESIGN: the guard accepts a conditional call and a tuple with `MemoryError`, and omits `reason_adapter.py` | The guard accepts only the exact clause, a final bare `raise`, or a registered classifier. Calls do not count, and a tuple that contains `MemoryError` is a finding. The scope is checked against a trace of the window on both routes (A19), so a module the window runs through cannot be left out. |
+| R5-1: vault decoder turns `ArrowMemoryError` into a mismatch | The clause in `_decode_rows`, required by the guard because A19 traces it on a matching replay. |
+| R5-2: `_typed_error` catches `MemoryError` from `raise_for_outcome` | The clause, required by the guard. Also covered by part 3 and `settle`: a returned `MemoryError` is classified `process_out_of_memory` and normalized to UNKNOWN. |
+| R5-3: a pre-call fault leaves `staging_output/` in a caller `staging_dir` | Unchanged from `c2b81ef1f`. The scratch-stage `finally` opens at the same statement that enters `PRE_CALL`, so a window and its cleanup start together. |
+
+**What the contract still does not cover** (non-goals, V2-LOG): a memory error in `BEFORE` on
+either route (as on `main`); `OSError(ENOMEM)` and marker-text memory failures inside the shared
+publisher, which stay ordinary failed receipts; a `KeyboardInterrupt` with a memory cause after
+the flag; and the publication state the transactional sink records for a memory error during a
+matching replay. CPython can still fail to allocate the frame for `memory_result()` itself; no
+Python-level boundary can rule that out.
 
 ### Design notes
 
-The cap adds one caller to the existing resident-fit comparison. One fact, one place: the bound formula stays in `_resident_bytes.py`, the ceiling in
+The cap adds one caller to the existing resident-fit comparison. The memory boundary follows the Java split of `Error` from `Exception`: inner handlers are transparent to out-of-memory by construction, and one top-level handler per attempt turns it into a result (one place for the window, one for the reserves, one for the classification). One fact, one place: the bound formula stays in `_resident_bytes.py`, the ceiling in
 `kill_ceiling`, the comparison in `resident_fit_verdict`, the capacity text in `_errors.py`. The
 refusal travels as a typed value (`ReadbackRefused`) instead of a flag argument.
 
@@ -187,8 +350,11 @@ refusal travels as a typed value (`ReadbackRefused`) instead of a flag argument.
 | Refusal with `output_dir` | `collect` aborts the transaction before `publish_unit` | same; receipt `failed` | receipt carries codes only | A8 |
 | `ArrowMemoryError` or `MemoryError` during a read | `collect`, `is_memory_failure` arm | `decoy.process_out_of_memory` | fixed text, no exception text | A9 |
 | `OSError(ENOMEM)` or a marker-matched memory message during a read (behaviour change: was `publication_failed`) | `collect`, `is_memory_failure` arm | `decoy.process_out_of_memory` | fixed text, no errno text | A9 |
-| Memory failure from setup through pre-call result preparation or scratch-only completion | Isolated memory arm, flag clear | `decoy.process_out_of_memory`, NOT_PUBLISHED, stage aborted | Fixed text | A9, A14 |
-| MemoryError raised inside `publish_unit`, including replay verification, or later in result building or cleanup | Outer guard, flag set | `decoy.process_out_of_memory`, UNKNOWN whether the target exists or not | Fixed same-id retry text | A14, G14 |
+| Memory failure from setup through pre-call result preparation or scratch-only completion | `guarded`, window `PRE_CALL` (both routes) | `decoy.process_out_of_memory`, NOT_PUBLISHED, stage aborted | Fixed text | A9, A14, A18 |
+| MemoryError raised inside `publish_unit` or `publish_resident`, including measurement and replay verification, or later in result building or cleanup | `guarded`, window `PUBLISHING` (both routes) | `decoy.process_out_of_memory`, UNKNOWN whether the target exists or not, no receipt | Fixed same-id retry text | A14, A15, A17, G14 |
+| MemoryError while the reason adapter classifies a refusal after the flag | adapter clause returns `process_out_of_memory`; `settle` selects UNKNOWN | same as the row above | Fixed same-id retry text | A16, G15, G20 |
+| MemoryError while building the reserves | `Attempt` constructor, before any stage, spawn or run | none: raised before any side effect, as on `main` | n/a | A18, G17 |
+| `ArrowMemoryError` in measurement through the transactional sink or `DeliveryStage` (behaviour change: was a failed receipt) | publisher clause | raised `MemoryError`; the sink captures `process_out_of_memory` | no text added | A20, G19 |
 | Swap on (Linux, macOS): floor over `H` but under RAM plus swap | `check_readback` | `decoy.isolated_readback_capacity_exceeded` (a refusal `main` would not make; accepted assumption) | fixed text | none (documented, V2-LOG) |
 | Windows: ceiling detection fails | `kill_ceiling()` returns `None` | none; cap inert, runs as `main` | n/a | A5 |
 | Kill ceiling not detectable | `kill_ceiling()` returns `None` | none; runs as `main` | n/a | A5 |
@@ -298,9 +464,100 @@ A4 requires one decode per staged table. A10, A11, A13 and class 9 are direct te
   - At every post-flag fault assert the reserved `crashed` result, `decoy.process_out_of_memory`, UNKNOWN, the exact fixed retry text, last complete readback figures, no receipt, no outputs and no exception text. Check normal success still has its outputs, row errors and receipt.
   - **G14.** Remove only the outer memory guard. Leave the flag, reserves and pre-call classification intact. A fault after the flag must now escape raw or report NOT_PUBLISHED. Require A14 to go red, restore the guard and rerun on the final head.
 
+- **A15 round 5 cases (on the branch).** The `test_a15_*` cases in `test_isolated_commit_memory.py`
+  stay as they are: replay measurement, vault segment decode, refusal error build, the caller
+  `staging_dir` setup fault and `scratch.close()`. A15's vault-decode and refusal-build cases also
+  run on `isolate=False` in the new file below (both routes, same assertions, `isolated is False`).
+
+New cases go in `tests/unit/execution/publication/test_memory_boundary_routes.py`. Each runs on
+both routes through the public `run_pipeline_isolated`: `isolate=True` with the fake child, and
+`isolate=False`, which runs `run_pipeline` in process on the same two-row job. Reuse `once`,
+`memory` and `UNKNOWN_TEXT` from `test_isolated_commit_memory.py`. Each case asserts its fault
+fired. A16 to A18 must fail on `c2b81ef1f`, at least on the route their finding names, before the
+change. Record the red run's failing ids. A19, A20 and the guard are proven by their mutations.
+
+- **A16 memory error while classifying a refusal (R6-1).** Occupied destination: a different
+  result already bound at the target. Inject a one-shot `MemoryError` into
+  `decoy_engine.reason_adapter._classify`. Expect `crashed`, `process_out_of_memory`, UNKNOWN,
+  `publication_receipt is None`, `outputs is None`, `error == UNKNOWN_TEXT`, no canary, and the
+  bound target unchanged (descriptor bytes equal). Red on `c2b81ef1f`: `unexpected_error`,
+  NOT_PUBLISHED. Direct adapter cases in the same file: with `_classify`, `_read_code`,
+  `_identified_reason` or `_lookup_captured` raising `MemoryError`, `reason_from_exception`
+  returns `process_out_of_memory` and does not raise. With `_classify` raising `RuntimeError` it
+  still returns `unexpected_error`.
+- **A17 measurement memory error (R6-2).** `ArrowMemoryError` from the publisher's `_measure`
+  (patched at `decoy_engine.publication._publish._measure`), first on a fresh destination, then
+  on a matching replay. Expect the UNKNOWN reserve on both routes and no raw exception. The fresh
+  target is absent. The replay target is unchanged, and a fault-free rerun with the same request
+  returns `already_committed`. Red on `c2b81ef1f` for `isolate=False`: the raw `ArrowMemoryError`
+  escapes. Controls on both routes: `ArrowInvalid` and `OSError(EIO)` measurement faults still
+  return `publication_failed` with a failed receipt and NOT_PUBLISHED.
+- **A18 reserve faults (R6-3).** (i) A `MemoryError` on the first call of the reserve builder
+  (`_isolated_reason._readback_result`). Expect `MemoryError` raised from `run_pipeline_isolated`.
+  On the isolated route, `on_spawn` is never called, no `decoy-isolated-run-*` work root exists
+  under the scratch root, and no publication stage or target exists beside `output_dir`. On the
+  resident route, a spy on `run_pipeline` sees no call. Red on `c2b81ef1f`: the child has already
+  run when the raw error appears. (ii) A `MemoryError` inside `enter_readback`'s reserve refresh,
+  isolated only. Expect the pre-call reserve with `pid is None` and `peak_rss_mb is None`,
+  NOT_PUBLISHED, and the stage removed.
+- **A19 the guard's scope is the window's.** Run the scenario matrix under `sys.setprofile`:
+  scratch-only success; `output_dir` publish without and with a vault; matching replay with a
+  vault; occupied refusal; operation conflict. Use both routes. Recording starts when
+  `enter_readback` or the resident window entry is called (spied). It then adds every frame on the
+  stack at that moment, plus every later `call` event whose code file is under
+  `src/decoy_engine/`, until the entry returns. Map each code object to its `def` by file and
+  first line (the first decorator's line for a decorated function). Every recorded function that
+  contains a handler able to catch `MemoryError` must be in a file in the guard's `SCOPE`. The
+  failure message names the file and function. G18: remove `reason_adapter.py` from `SCOPE`; A19
+  goes red naming `reason_from_exception`.
+- **A20 the raising `publish_unit` callers.** `ArrowMemoryError` in measurement through
+  `ParquetTransactionalSink.commit` and through `DeliveryStage`'s bind. Each raises
+  `MemoryError` (`isinstance`), binds nothing (target absent), and leaves no stage. For the sink,
+  the captured reason is `process_out_of_memory`. This pins the stated behavior change. G19:
+  remove the publisher clause; the sink raises `PublicationFailed` instead and A20 goes red.
+
+**The guard.** `tests/sentry/defects/test_memory_errors_reach_the_boundary.py`, with its scanner
+in `tests/sentry/defects/_memory_scan.py`. A19 imports `SCOPE` and the handler predicate from the
+scanner, so there is one definition of both. `CODEMAP.md:298` places recurring-defect class
+rules in `tests/sentry/defects/`. Delete `tests/sentry/test_commit_path_memory_rule.py`.
+
+- `SCOPE`: `publication/*.py`, `vault/*.py`, `reason_adapter.py`, `execution/_isolated_commit.py`,
+  `execution/_isolated_reason.py`, `execution/_isolated_run.py`, `execution/_isolated_common.py`,
+  and each file A19 adds when it first runs red.
+- A handler can catch `MemoryError` when its type is bare, or names (as a `Name` or the last
+  `Attribute` part, inside a tuple or not) `Exception`, `BaseException`, `ArrowException`,
+  `MemoryError` or `ArrowMemoryError`.
+- It passes only in the three shapes of part 2. The memory clause must be exactly
+  `except MemoryError:` (not a tuple, not `ArrowMemoryError`) with the body `[Raise(exc=None)]`,
+  and it must come before the broad handler in the same `try`. A final bare `raise` must be the
+  handler's last top-level statement. Classifiers are matched by module and qualified function
+  name, and each must hold exactly one memory-catching handler. A classifier name that no longer
+  exists fails the test, and so does a fourth one.
+- `__del__` bodies are skipped: Python discards exceptions raised in a finalizer, so a clause
+  there changes nothing.
+- Seeded bypasses, each a finding: an `isinstance` check before `raise` inside
+  `except Exception`; `except (Exception, MemoryError): return None`; `except MemoryError:
+  return None` outside the classifiers; the clause after the broad handler; `except
+  ArrowMemoryError: raise` ahead of `except Exception` (Arrow's subclass only); a
+  `reraise_memory(exc)` call alone; `except BaseException: cleanup()` followed by
+  `if flag: raise`; a bare `except:`; `except pa.lib.ArrowException`; the classifier shape copied
+  into a function that is not registered. Accepted seeds: the clause before `except Exception`;
+  `except BaseException: cleanup(); raise`; `except (OSError, ValueError): pass`.
+- Known limit, recorded and not chased (development-loop "guard tests prove the realistic case"):
+  an exception class bound to another name (`Broad = Exception`) is not resolved.
+
+**Mutations, run on the final head and recorded.** G14 as before. G15: delete the adapter's
+memory clause; A16's direct cases and both routes go red. G16: on the resident route, drop
+`enter_publishing()` before `publish_resident`; A17 resident goes red (NOT_PUBLISHED reserve).
+G16b: call `_run_in_process` outside `guarded`; A17 resident goes red (raw). G17: build the
+reserves in `enter_readback` instead of the constructor; A18 (i) goes red. G18 and G19 as above.
+G20: make `settle` return its argument unchanged; A16 goes red on both routes. G21: delete the
+vault decoder's clause; the A15 vault case goes red, and so does the guard.
+
 Existing suites that must stay green: `tests/unit/execution/test_isolated_run.py`,
 `test_isolated_oom_classification.py`, `tests/unit/execution/publication/` (route outcome matrix,
-marker corpus), `tests/integration/test_f29_isolation.py`, `tests/unit/execution/test_resident_fit*.py`.
+marker corpus), `tests/integration/test_f29_isolation.py`, `tests/unit/execution/test_resident_fit*.py`,
+`tests/unit/test_vault*.py`, the transactional-sink and delivery-stage publication tests, and the reason-adapter tests.
 
 ## Choke points
 
@@ -310,7 +567,9 @@ marker corpus), `tests/integration/test_f29_isolation.py`, `tests/unit/execution
 | The one bound formula | `lower_bound_bytes`, `lazy_spec`, `resident_spec` (`_resident_bytes.py:50`, `:133`, `:173`) | the same callers | G2, G10 |
 | The one kill-ceiling source | Rename `_kill_ceiling` at `_resident_fit.py:219` to `kill_ceiling` and export it directly. It calls `out_of_core.detect_effective_memory_bytes` (`_budget.py:332`). | the same callers | G5 |
 | The one isolated readback | `collect` and `_read_staged` (`_isolated_commit.py:205`, `:231`); every readback of a child's stage goes through it, for the probe, the governor and direct callers | `_result_from_envelope` (`_isolated_run.py:573`) | G1, G8 |
-| Memory result through final cleanup | `_run_isolated` selects a reserve using the flag set at the single isolated `publish_unit` call | `run_pipeline_isolated` | G14 |
+| Memory result through final cleanup | `guarded(attempt, body)` in `_isolated_reason.py`, the only handler that turns a `MemoryError` into a result; `Attempt.settle` normalizes a memory-coded result by window | both branches of `run_pipeline_isolated` | G14, G16, G16b, G20 |
+| Memory transparency of inner handlers | the exact `except MemoryError: raise` clause, checked by `tests/sentry/defects/test_memory_errors_reach_the_boundary.py` over a scope A19 checks against a trace | every handler in the window | seeded bypasses, G18, G21 |
+| Memory during classification | `reason_from_exception`'s one clause returns the pre-built `_OUT_OF_MEMORY` | every adapter caller | G15 |
 | The capacity message | new `capacity_message(code, *, needed_bytes, kill_ceiling_bytes, remedy)` in `execution/_errors.py`. `nonfk_full_frame_capacity_error` (`src/decoy_engine/execution/_errors.py:87`) passes exactly "Run on a machine with more memory, or reduce the table's rows or columns." The formatter appends one space and the whole `remedy` sentence verbatim. Look up the summary in the supplied reason's namespace. The readback passes "Run on a machine with more memory, or write fewer or smaller output tables." | both refusals | G6 and class 9 |
 | The refusal result | new `readback_refused(...)` in `_isolated_reason.py`, beside `envelope_failure` (`:68`) and `commit_reason` (`:101`) | `_result_from_envelope` | G7 |
 | The memory predicate | `is_memory_failure` (already shared by the worker and `in_process_failure`) | `collect` (new) | G9 |
@@ -323,6 +582,8 @@ the Databricks knowledge base article on the maxResultSize failure; Ray object s
 DuckDB memory management docs (already cited in `out_of_core/_budget.py:1-16`); PostgreSQL
 `temp_file_limit` docs; Linux cgroup v2 `memory.max` docs; the Parquet format metadata spec
 (`RowGroup.total_byte_size`); `pyarrow/error.pxi` for the `ArrowMemoryError` class tree.
+Memory boundary search (2026-11-27): JLS and SEI CERT on `OutOfMemoryError`, Microsoft Learn on
+corrupted-state exceptions and CA2153, PEP 669 and the `sys.monitoring` docs.
 Codebase: `detect_effective_memory_bytes`, `check_pre_read`, `lower_bound_bytes`,
 `ArrowMemoryError`, consumers of `IsolatedRunResult.outputs` (probe, governor, platform), and the
 F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`, rows T11, T12).
@@ -336,6 +597,9 @@ F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`
 | cgroup v2 `memory.max`, host RAM as fallback | the number the kernel OOM-kills against | used, through the existing `detect_effective_memory_bytes` |
 | Parquet `RowGroup.total_byte_size` as the estimate | a closer size for string columns | not used to refuse: it is not a floor on decoded Arrow bytes (dictionary columns read back as dictionaries can be smaller). V2-LOG as a tighter string floor |
 | `pyarrow/error.pxi`: `class ArrowMemoryError(MemoryError, ArrowException)` | why the current `except` misfiles memory failures | the memory arm is ordered before the Arrow arm |
+| Java `OutOfMemoryError extends VirtualMachineError extends Error`, outside `Exception` (JLS 11.1.1; SEI CERT ERR08-J and ERR53-J) | `catch (Exception e)` never sees an out-of-memory condition; only a deliberate top-level handler does | followed: Python puts `MemoryError` under `Exception`, so the exact `except MemoryError: raise` clause gives each broad handler the Java hierarchy's effect, and `guarded` is the one deliberate top-level handler |
+| .NET 4+ corrupted-state exceptions are not delivered to `catch` blocks; analyzer CA2153 flags handlers that catch them (Microsoft Learn, `HandleProcessCorruptedStateExceptionsAttribute`, CA2153) | a runtime rule plus a static rule against swallowing process-state failures | followed for the static half: an AST sentry over the window's modules |
+| PEP 669 `sys.monitoring` `RAISE` and `EXCEPTION_HANDLED` (Python 3.12+) | observe every raised or handled exception without touching handlers | rejected for runtime use: the engine supports 3.10 to 3.12, and `sys.settrace` on older versions takes the coverage slot. `sys.setprofile` is used only in A19 to measure the guard's scope |
 | In-repo `_resident_fit.check_pre_read` (engine #777): footer floor against the kill ceiling before a lazy source is read whole | the exact rule this slice needs, already reviewed | reused: same formula, same ceiling, same verdict ladder. No custom estimator is written |
 
 ## Enumerations
@@ -347,8 +611,9 @@ F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`
 - New: `check_readback` refuses before a decode: `ReadbackRefused`, tables dropped, transaction aborted.
 - New: memory failure during a decode (incl. ENOMEM and marker-matched text): `ReadbackMemoryFailure`, process-out-of-memory result, transaction aborted.
 - `parquet_file` or `read_table` raises an Arrow or OS error: `failed_receipt` (unchanged, `:218`).
-- Through result preparation before the flag, a memory fault returns the NOT_PUBLISHED reserve. Abort any open stage. Scratch-only runs take this path through return.
-- Set the flag immediately before calling `publish_unit`. A raised MemoryError there, including in replay verification, or later while building the result or unwinding, returns UNKNOWN.
+- Through result preparation before the flag (window `PRE_CALL`), a memory fault returns the NOT_PUBLISHED reserve through `guarded`. Abort any open stage. Scratch-only runs take this path through return. A real `MemoryError` in the readback now takes this path too; `ReadbackMemoryFailure` remains for ENOMEM, marker text and a memory-caused interrupt.
+- `enter_publishing()` immediately before calling `publish_unit`. A raised MemoryError there, including in measurement and replay verification, or later while building the result or unwinding, returns UNKNOWN. A memory-coded result built after it (the adapter's clause) is replaced by UNKNOWN in `settle`.
+- A memory error while the `Attempt` constructor builds the reserves raises before staging or spawn.
 - With an ordinary receipt, preserve existing handling. Build the completed result only after a committed receipt returns.
 - Remove scratch-only output in the envelope finalizer. Inside the outer guard, attempt transaction abort and always close scratch in its nested finally.
 
@@ -358,7 +623,8 @@ F25 scratch plan (`docs/plans/2026-10-29-f25-protected-scratch-quotas-orphan.md`
 - Isolated subprocess, child on any route (full frame, out of core, sequential, auto-chunk lane, multi-table split), resident or streamed outputs: the readback runs and the cap applies (`src/decoy_engine/execution/_isolated_worker.py:160`).
 - Probe (`src/decoy_engine/execution/_probe.py:283`): forced full frame on a downscaled job; the cap applies; a refusal is an inconclusive probe.
 - Governor (`src/decoy_engine/execution/_governor.py:381`): every rung; a refusal ends the ladder.
-- In-process fallback, `isolate=False` and re-entry (`src/decoy_engine/execution/_isolated_run.py:314`): no readback; outputs are already in memory; unchanged.
+- In-process fallback, `isolate=False` and re-entry (`src/decoy_engine/execution/_isolated_run.py:246`): no readback; outputs are already in memory. The route now runs under `guarded` with its own reserves: `PRE_CALL` from `run_pipeline`'s return, `PUBLISHING` from immediately before `publish_resident` (A16, A17, A18).
+- Other `publish_unit` callers (`ParquetTransactionalSink`, `DeliveryStage`): no boundary of their own; an `ArrowMemoryError` in measurement or vault decoding is raised as a bare `MemoryError` already is on `main` (A20).
 
 ### FK shapes
 
@@ -392,7 +658,7 @@ count and byte figures, numbers and tokens only.
 |---|---|---|---|---|
 | 1 | Value-bearing output | `capacity_message` builds the text from a registered summary and two integers; no name or value | A6 canary corpus over every surface | G6: add the table name to the text |
 | 2 | Cleanup missing on an exit path | refusal and memory arms abort the transaction and drop read tables; `_result_from_envelope` removes the stage; `_run_isolated` `finally` | A12 exit-path matrix with descriptor count | G12: move cleanup after collect |
-| 3 | State machine and concurrency | The isolated attempt sets its flag immediately before publication. The outer guard reads it through cleanup | A14 tests UNKNOWN with an absent target and a visible target | G14 |
+| 3 | State machine and concurrency | One `Window` per attempt on both routes (`BEFORE`, `PRE_CALL`, `PUBLISHING`); reserves exist before the first window opens; `guarded` reads the window through cleanup | A14 to A18 on both routes, absent and visible targets | G14, G16, G17, G20 |
 | 4 | Route parity and silent fallback | one readback for every isolated route; no fallback; the refusal has a registered reason | A1 to A3 use the fake worker. A4 and A7 cover both routes with real children | G1, G7 |
 | 5 | Referential integrity | N/A: per-table readback; no FK data is joined in the driver | n/a | n/a |
 | 6 | Untrusted producer (the child's staged files and footers) | admitted stage only; footer and body read through the capability and the guarded adapter; floor checked against measured bytes | A2, A10, A12 corrupt footer | G2, G10 |
@@ -413,9 +679,9 @@ count and byte figures, numbers and tokens only.
 | 6 no private-module imports | `_isolated_commit` imports `check_readback`, `lazy_spec`, `resident_spec` from `decoy_engine.execution.pipeline` |
 | 7 no hidden CI failures | A12 Linux skip states its reason; the gate records a Linux pass on the final head |
 | 8 one trust class per entry point | n/a: one trust class (the child's stage) |
-| 9 mutations on the final head | G1 to G12, G14 and the class 9 one-word mutation rerun on the final head and recorded |
+| 9 mutations on the final head | G1 to G12, G14 to G21 (with G16b), the guard's seeded bypasses and the class 9 one-word mutation rerun on the final head and recorded |
 | 10 allowlisted helpers are still checked | no new file-access registry row; the readback stays on the capability path |
-| 11 no raised caps | no module-size ceiling raised; `_isolated_run.py` stays at or under 600 |
+| 11 no raised caps | no module-size ceiling raised and no baseline row added; every touched module stays at or under 600 lines (Placement) |
 
 ## Reuse inventory
 
@@ -451,9 +717,14 @@ New names: `check_readback`, `kill_ceiling`, `ReadbackRefused`, `ReadbackMemoryF
 
 | Path | Change | CODEMAP line | Beside | Lines now | Expected |
 |---|---|---|---|---|---|
-| `src/decoy_engine/execution/_isolated_commit.py` | guard preparation and set the flag at the existing call | `CODEMAP.md:271` | `_isolated_run.py` | 560 on abc5998fd | at most 600 |
-| `src/decoy_engine/execution/_isolated_run.py` | own the attempt, outer guard and nested cleanup | `CODEMAP.md:271` | `_isolated_commit.py` | 559 | at most 600 |
-| `src/decoy_engine/execution/_isolated_reason.py` | build the two reserves with the existing memory result builder | `CODEMAP.md:271` | `_isolated_common.py` | 205 | under 600 |
+| `src/decoy_engine/execution/_isolated_commit.py` | `enter_readback` and `enter_publishing` calls; the clause in `collect` and `_typed_error`; drop `reraise_memory` | `CODEMAP.md:271` | `_isolated_run.py` | 574 on c2b81ef1f | at most 580 |
+| `src/decoy_engine/execution/_isolated_run.py` | both branches through `guarded`; the old guard moves out; `failed_receipt_for` after `begin_publication`; resident window entries | `CODEMAP.md:271` | `_isolated_commit.py` | 575 on c2b81ef1f | at most 580 |
+| `src/decoy_engine/execution/_isolated_reason.py` | `Window`, `Attempt.isolated()` and `.resident()`, `enter_readback`, `enter_publishing`, `settle`, `guarded`; the builder takes `isolated`, `returncode` and the operation | `CODEMAP.md:271` | `_isolated_common.py` | 264 on c2b81ef1f | about 330 |
+| `src/decoy_engine/reason_adapter.py` | `_OUT_OF_MEMORY`, the classifier clause, `_lookup_captured` inside the `try`, the transparent clause at four inner handlers | `CODEMAP.md` Foundation row | `reasons/` | 580 on c2b81ef1f | at most 600; shorten docstring prose if needed, no census row |
+| `src/decoy_engine/publication/_publish.py` | `reraise_memory` call becomes the clause | `CODEMAP.md` Publication row | `_members.py` | 476 | 477 |
+| `src/decoy_engine/vault/_format.py` | `reraise_memory` call becomes the clause | `CODEMAP.md` Token vault row | `_writer.py` | 307 | 308 |
+| `src/decoy_engine/fileaccess/_errors.py`, `fileaccess/__init__.py` | remove `reraise_memory` and its export (added on this branch, never released) | `CODEMAP.md` file access row | `is_memory_failure` | 342, 244 | about 331, 242 |
+| files A19 adds to the guard's scope | the clause at each traced handler | their own rows | n/a | n/a | at most 2 lines per handler. If A19 adds more than three source files, or a handler where the clause would change a non-memory verdict, stop and report |
 | `src/decoy_engine/execution/_errors.py` | `capacity_message` | `CODEMAP.md:271` | `_isolated_reason.py` | 140 | about 150 |
 | `src/decoy_engine/execution/pipeline/_resident_fit.py` | `check_readback`, public `kill_ceiling` | `CODEMAP.md:271` | `_resident_bytes.py` | 470 | about 505 |
 | `src/decoy_engine/execution/pipeline/__init__.py` | export both | `CODEMAP.md:271` | `_resident_fit.py` | 51 | 55 |
@@ -465,7 +736,12 @@ New names: `check_readback`, `kill_ceiling`, `ReadbackRefused`, `ReadbackMemoryF
 | `tests/unit/execution/test_resident_fit_decision.py` | pin the full-frame refusal before the refactor | existing resident-fit tests | `test_resident_fit_transitions.py` | 525 | about 540 |
 | `tests/unit/reasons/test_capacity_reason_codes.py` | update A11's expected membership | existing registry tests | registry walk | 80 | 81 |
 | `tests/unit/execution/publication/test_isolated_readback_cap.py` | existing A1 to A9, A12. Shorten the A9 docstring to describe its actual check, no readback pricing after publish. Retain every assertion | `CODEMAP.md:172` | `_isolated_support.py` | 601 on abc5998fd | at most 600. All new cases go in the next file |
-| `tests/unit/execution/publication/test_isolated_commit_memory.py` (new) | A14 and G14 | `CODEMAP.md:172` | `test_isolated_readback_cap.py` | 0 | about 150 |
+| `tests/unit/execution/publication/test_isolated_commit_memory.py` | A14, A15 (on the branch); A9-style exact `MemoryError` readback case now expects the reserve | `CODEMAP.md:172` | `test_isolated_readback_cap.py` | 364 on c2b81ef1f | at most 380 |
+| `tests/unit/execution/publication/test_memory_boundary_routes.py` (new) | A16 to A20, both routes | `CODEMAP.md:172` | `test_isolated_commit_memory.py` | 0 | about 320 |
+| `tests/sentry/defects/_memory_scan.py` (new) | `SCOPE`, the handler predicate, the three shapes, `CLASSIFIERS` | `CODEMAP.md:298` (recurring-defect class rules in `tests/sentry/defects/`) | `_defect_scan.py` | 0 | about 110 |
+| `tests/sentry/defects/test_memory_errors_reach_the_boundary.py` (new) | the guard and its seeded bypasses | `CODEMAP.md:298` | `test_exception_context.py` | 0 | about 130 |
+| `tests/sentry/test_commit_path_memory_rule.py` | deleted; replaced by the two files above | n/a | n/a | 106 | 0 |
+| `changelog.d/g7-3-readback-cap.md` | add: `ArrowMemoryError` during publication measurement or vault decoding is raised like any `MemoryError`, not reported as a failed receipt or a malformed segment; `isolate=False` returns the same UNKNOWN memory result; the reason adapter reports `process_out_of_memory` when classification runs out of memory | release notes | other fragments | existing | a few lines |
 | `tests/unit/execution/pipeline/test_resident_floor_reality.py` (new) | A10 | existing sub-package `tests/unit/execution/pipeline/` | `test_lifecycle_inputs.py` | 0 | about 120 |
 | `tests/unit/execution/test_isolated_safe_error.py` | A13 producers | `CODEMAP.md:271` | `test_isolated_run.py` | 418 | about 440 |
 
@@ -482,7 +758,7 @@ against 104, `CODEMAP.md:271`), and every change fits an existing module under 6
 
 ## Slices
 
-The cap is built on `feat/f25-g7-3-readback-cap` at `abc5998fd`. The remaining slice adds the isolated guard, reserves, A14/G14 and documentation. Run A14 red on the built head, then run the acceptance suite and final-head mutations. Use T0 and T1 per commit and T2 at each gate. The registry change rides the next merge train for one full suite against the stored baseline.
+The cap, the reserves and A14 and A15 are built on `feat/f25-g7-3-readback-cap` at `c2b81ef1f`. The remaining slice replaces the per-site `reraise_memory` rule with the memory boundary: write A16 to A18 and run them red on `c2b81ef1f`; then `Attempt` windows and `guarded` on both routes; the clause at every in-scope handler; the adapter clause; the guard in `tests/sentry/defects/` and A19, letting A19's first red run name any file the scope misses; A20 and the changelog lines. Run the acceptance suite and final-head mutations (G1 to G21). Use T0 and T1 per commit and T2 at each gate. The registry change rides the next merge train for one full suite against the stored baseline. Expected size: about 10 source and test files changed, three test files added, one deleted; new names `Window`, `guarded`, `Attempt.isolated`, `Attempt.resident`, `enter_readback`, `enter_publishing`, `settle`, `_OUT_OF_MEMORY`; one name removed, `fileaccess.reraise_memory`. No new public API.
 
 ## Pre-mortem
 
@@ -510,7 +786,10 @@ The cap is built on `feat/f25-g7-3-readback-cap` at `abc5998fd`. The remaining s
 
 - Defer splitting publisher preparation from bind, exporting preparation, fileaccess decision slots and moving the local bind branch. The isolated flag is enough for V1.
 - Defer using `commit_uncertain` for memory faults. Today a bare `MemoryError` in `_sync_bound` escapes fileaccess because it is outside the `OSError` handler. The isolated guard catches it.
-- Defer memory classification inside the shared publisher's measurement handler (`publication/_publish.py:275`). It can turn Arrow or OS memory errors into a failed receipt before bind. Existing receipt handling still applies.
+- `OSError(ENOMEM)` and marker-text memory failures inside the shared publisher stay failed receipts; only `MemoryError` instances pass its handlers.
+- A memory boundary for `ParquetTransactionalSink` and `DeliveryStage`, and the publication state the sink records for a memory error during a matching replay.
+- A `KeyboardInterrupt` with a memory cause after the flag; memory errors in `BEFORE` on either route.
+- The guard does not resolve an exception class bound to another name.
 - Defer guaranteed completed results for verified replay and pre-built completed results per receipt. The old A14 bind, rename, fsync and replay transition tests belong to that stronger guarantee.
 - The CPython emergency-object reserve and PostgreSQL durable-commit comparison described the deferred completed-result design. Neither can establish that a Python caller observed a bind.
 - Existing ceiling accessors include `execution/pipeline/_resident_fit.py:219`,
@@ -565,3 +844,11 @@ Q3. Detect the ceiling. A caller-set budget belongs with row 58b.
 | V1 setup and result preparation could raise raw memory errors | The pre-call arm and A14 include the first readback allocation, target string and row errors. |
 | V1 false NOT_PUBLISHED or raw memory error during publication, replay or cleanup | The per-attempt flag selects UNKNOWN through final cleanup. A14 checks both target states. G14 removes the outer guard. |
 | DESIGN unnecessary shared publication and fileaccess changes | The isolated caller owns the flag. The proposed shared mechanisms are in V2-LOG. |
+| Codex R5-1 vault decoder turns `ArrowMemoryError` into a mismatch | Section "Memory boundary" part 2: the clause, required by the guard; A15 |
+| Codex R5-2 `_typed_error` swallows a `MemoryError` | Part 2 clause; part 3 and `settle` cover it even without the clause; A15 |
+| Codex R5-3 setup fault leaves `staging_output/` | Unchanged fix; the cleanup `try` opens with `enter_readback` |
+| Codex R6-1 memory error in `_classify` gives `unexpected_error`, NOT_PUBLISHED | Part 3 adapter clause plus `settle`; A16, G15, G20 |
+| Codex R6-2 raw `ArrowMemoryError` on `isolate=False` | Part 1: the resident route under `guarded` with its own reserves; publisher clause kept; A17, G16, G16b, A20 |
+| Codex R6-3 first reserve fault escapes raw | Part 1: reserves built in the `Attempt` constructor before any side effect; A18, G17 |
+| Codex R6 DESIGN guard accepts conditional calls and tuples, omits `reason_adapter.py` | Exact clause shape, seeded bypasses, `tests/sentry/defects/`, scope checked by the A19 trace; G18 |
+| Planner, per-site `reraise_memory` rule | Removed; replaced by the clause, one boundary and one classifier |
