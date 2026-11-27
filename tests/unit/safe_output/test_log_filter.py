@@ -30,6 +30,7 @@ from tests.unit.safe_output.log_filter_support import (  # noqa: F401
     _caught_record,
     _engine_handler,
     _host_handler,
+    _JsonFormatter,
     _lone,
     _message_only,
     _raise_canary,
@@ -462,13 +463,6 @@ def test_numeric_extra_key_is_blanked_when_the_scrub_fails(
     assert record.msg == _log_filter._UNRENDERABLE
     assert record.__dict__[7] == _log_filter._UNRENDERABLE
     assert _CANARY not in repr(vars(record))
-
-
-class _JsonFormatter(logging.Formatter):
-    """The shape of common JSON log formatters: it dumps the record's own attributes."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        return json.dumps(record.__dict__, default=str)
 
 
 def _json_handlers() -> list[tuple[str, logging.Handler, io.StringIO]]:

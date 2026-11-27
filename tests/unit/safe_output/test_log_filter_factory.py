@@ -14,12 +14,7 @@ from contextlib import contextmanager
 import pytest
 
 from decoy_engine.safe_output import _log_filter
-from tests.unit.safe_output.log_filter_support import _CANARY
-
-
-class _JsonFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        return json.dumps(record.__dict__, default=str)
+from tests.unit.safe_output.log_filter_support import _CANARY, _JsonFormatter
 
 
 def _fresh_filter_module() -> types.ModuleType:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import gc
 import io
 import itertools
+import json
 import logging
 import pathlib
 import sys
@@ -22,6 +23,13 @@ from decoy_engine.internal.logging import _new_engine_handler
 
 _CANARY = "".join(("DECOY_CANARY", "_F31_7Q4Z"))
 _FMT = logging.Formatter("%(levelname)s %(message)s")
+
+
+class _JsonFormatter(logging.Formatter):
+    """The shape of common JSON log formatters: it dumps the record's own attributes."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps(record.__dict__, default=str)
 
 
 def _engine_handler() -> tuple[logging.Handler, io.StringIO]:
