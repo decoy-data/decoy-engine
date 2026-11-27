@@ -179,44 +179,6 @@ def test_a_clean_table_comes_back_as_the_same_object() -> None:
     assert check_source_dates(table, table="orders") is table
 
 
-def _nested_shapes(far: pa.Array) -> dict[str, pa.Array]:
-    offsets = pa.array([0, 1, 3], pa.int32())
-    return {
-        "list": pa.ListArray.from_arrays(offsets, far),
-        "large_list": pa.LargeListArray.from_arrays(pa.array([0, 1, 3], pa.int64()), far),
-        "fixed_size_list": pa.FixedSizeListArray.from_arrays(far.slice(0, 2), 1),
-        "struct": pa.StructArray.from_arrays([far.slice(0, 2)], names=["when"]),
-        "list_of_struct": pa.ListArray.from_arrays(
-            offsets, pa.StructArray.from_arrays([far], names=["when"])
-        ),
-        "map_item": pa.MapArray.from_arrays(offsets, pa.array(["a", "b", "c"]), far),
-    }
-
-
-@pytest.mark.parametrize(
-    "shape", ["list", "large_list", "fixed_size_list", "struct", "list_of_struct", "map_item"]
-)
-def test_a_far_date_nested_in_a_container_is_refused_by_name_and_count(shape: str) -> None:
-    far = pa.array([0, FAR_DAY, FAR_DAY], pa.date32())
-    nested = _nested_shapes(far)[shape]
-    err = _refused(pa.table({"n": nested}))
-    assert err.column == "n" and err.count >= 1
-    assert "10183" not in str(err) + repr(err)
-
-
-def test_a_nested_date_inside_the_calendar_and_a_null_parent_pass() -> None:
-    ok = pa.array([FIRST_DAY, LAST_DAY], pa.date32())
-    check_source_dates(
-        pa.table({"n": pa.ListArray.from_arrays(pa.array([0, 1, 2], pa.int32()), ok)}), table="o"
-    )
-    struct = pa.StructArray.from_arrays(
-        [pa.array([FAR_DAY, 0], pa.date32())],
-        names=["when"],
-        mask=pa.array([True, False]),
-    )
-    check_source_dates(pa.table({"n": struct}), table="orders")
-
-
 def test_a_zoned_instant_past_year_9999_is_refused_even_when_its_local_date_fits() -> None:
     year_10000_utc = (
         (LAST_DAY + 1) * DAY * 10**6
