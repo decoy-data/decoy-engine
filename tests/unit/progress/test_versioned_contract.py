@@ -13,8 +13,10 @@ import math
 
 import pyarrow as pa
 import pytest
+from tests.unit.progress.test_consumer_contract import v0_projection
 
 from decoy_engine import progress, reasons
+from decoy_engine._progress_events import _LEGACY_FIELDS
 from decoy_engine.errors import ValidationError
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.progress import (
@@ -100,11 +102,11 @@ def _one_of_each() -> list[progress.ProgressEvent]:
 )
 def test_schema_and_legacy_projection(event: progress.ProgressEvent) -> None:
     v1 = progress.event_to_dict(event)
-    v0 = progress.event_to_legacy_dict(event)
+    v0 = v0_projection(event)
     assert set(v1) == V1_KEYS[event.kind]
+    assert set(_LEGACY_FIELDS[type(event)]) == V0_KEYS[event.kind]
     assert set(v0) == V0_KEYS[event.kind]
     assert set(v0) <= set(v1)  # v1 is a strict additive superset of v0
-    assert all(v1[k] == v0[k] for k in v0)  # ...with the same values
     assert v1["event_schema_version"] == 1
     assert v1["registry_version"] == reasons.REGISTRY_VERSION
     assert "event_schema_version" not in v0
