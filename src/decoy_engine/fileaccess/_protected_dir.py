@@ -280,10 +280,13 @@ def create_protected_dir(path: str | os.PathLike[str]) -> Path:
         require_ambient(_WHAT)
     else:
         _vet_live(raw, absolute, root)
+    taken = False
     try:
         _create_level(absolute)
     except FileExistsError:
-        raise ProtectedDirUnsafe from None
+        taken = True
+    if taken:
+        raise ProtectedDirUnsafe
     return Path(absolute)
 
 
