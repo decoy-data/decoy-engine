@@ -74,7 +74,7 @@ from decoy_engine.execution.out_of_core._hash_native import (
     decline_reason,
     native_hash_array,
 )
-from decoy_engine.execution.sequential._faker_admission import faker_admit
+from decoy_engine.execution.sequential import faker_admit
 
 if TYPE_CHECKING:
     from decoy_engine.generation.pool import ValuePool

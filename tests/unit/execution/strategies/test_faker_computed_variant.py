@@ -83,6 +83,25 @@ def lorem_as_computed() -> Any:
     return _rebound("lorem_text", "uuid")
 
 
+class _IntPoolAdapter:
+    """A poolable adapter that draws integers: the binding is a pool, but not a string pool."""
+
+    backend_type = "test_int"
+    backend_version = "1"
+
+    def generate(self, provider: str, *, spec: Any, source_value: bytes | None = None) -> Any:
+        return 7
+
+    def generate_batch(self, provider: str, *, spec: Any, count: int) -> list[int]:
+        return list(range(100, 100 + count))
+
+
+def lorem_as_int_pool() -> Any:
+    """`lorem_text` rebound to another poolable adapter whose draws are integers."""
+    caps = _DEFAULT.get_capabilities("lorem_text")
+    return _DEFAULT.override("lorem_text", _IntPoolAdapter(), caps)
+
+
 class _Routes(TestRelationshipRoutes):
     """The relationship fixture, with the source column replaceable."""
 
@@ -122,6 +141,35 @@ class TestLiveVariant:
         assert faker_provider_decline(
             "f", "uuid", {}, runs_computed=True, registry=uuid_as_pool(), stock_only=True
         )
+
+    def test_a_stock_only_route_declines_a_pool_binding_with_no_string_guarantee(self) -> None:
+        """pool to pool: the variant is unchanged, but the binding is no longer the string one."""
+        assert resolve_faker_variant("lorem_text", {}, lorem_as_int_pool()).kind == "pool"
+        decline = faker_provider_decline(
+            "f", "lorem_text", {}, runs_computed=True, registry=lorem_as_int_pool(), stock_only=True
+        )
+        assert decline == ("faker_provider_not_native:f:lorem_text", mock.ANY)
+        # A route that reads no stock schema keeps its own runtime string check.
+        assert (
+            faker_provider_decline(
+                "f", "lorem_text", {}, runs_computed=True, registry=lorem_as_int_pool()
+            )
+            is None
+        )
+
+    def test_the_out_of_core_route_refuses_an_integer_pool_and_auto_reroutes(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("lorem_text", {"pool_size": 50}, deterministic=True)
+        registry = lorem_as_int_pool()
+        with pytest.raises(ConfigError, match=OOC_POOL):
+            helper.run(tmp_path, column, registry=registry, execution_mode="out_of_core")
+        auto = helper.run(tmp_path, column, registry=registry)
+        whole = helper.run(
+            tmp_path, column, registry=registry, execution_mode="full_frame", auto_chunk=False
+        )
+        assert auto.outputs["t"].equals(whole.outputs["t"])
 
     def test_the_sequential_run_reads_the_rebinding(self, tmp_path) -> None:
         """`uuid` rebound to a pool provider masks with pool values on full-frame and sequential

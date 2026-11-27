@@ -48,12 +48,13 @@ from decoy_engine.execution.native._operator_config_rejections import (
     group_key_sibling_type_admitted,
 )
 from decoy_engine.execution.native._provider_class import (
+    FakerVariant,
     computed_output_decline,
     resolve_faker_variant,
 )
 from decoy_engine.execution.native._requirements import hash_config_rejection
 from decoy_engine.execution.native._route_decline_codes import CodedDecline, RouteDeclineCode, coded
-from decoy_engine.providers_v2 import ProviderRegistry
+from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
 
 # The frozen C1 recipe's faker providers, from the operator registry (edit the registry). An
 # unset allowlist admits no provider, so a registry edit cannot widen admission by accident.
@@ -96,6 +97,25 @@ def _column_values(config: dict[str, Any], table: str, key: str) -> dict[str, An
     return {}
 
 
+def _binding_matches_stock(
+    provider: object,
+    provider_config: Mapping[str, Any] | None,
+    variant: FakerVariant,
+    registry: ProviderRegistry | None,
+) -> bool:
+    """True when the live binding draws as the stock one does: the same variant, and for a pool
+    the same adapter class, since the C1 allowlist's string-output guarantee belongs to the stock
+    backends. A rebinding to an adapter that returns other types fails this check."""
+    if variant != resolve_faker_variant(provider, provider_config):
+        return False
+    if variant.kind != "pool" or registry is None:
+        return True
+    stock = get_default_registry()
+    if not (isinstance(provider, str) and registry.has(provider) and stock.has(provider)):
+        return True
+    return type(registry.get_adapter(provider)) is type(stock.get_adapter(provider))
+
+
 def faker_provider_decline(
     column: str,
     provider: object,
@@ -113,9 +133,11 @@ def faker_provider_decline(
     A route that does not run computed draws yet declines an exact-string one, and a computed
     binding with no descriptor, as not native. `stock_only` is for a route whose schema is read
     from the stock binding (out-of-core): a rebound provider that resolves to another variant than
-    the stock registry's is declined, so the schema and the draw cannot disagree."""
+    the stock registry's is declined, and so is a pool binding on another adapter class than the stock
+    one, because only the stock pool bindings guarantee string output. The schema and the draw
+    cannot then disagree."""
     variant = resolve_faker_variant(provider, provider_config, registry)
-    if stock_only and variant != resolve_faker_variant(provider, provider_config):
+    if stock_only and not _binding_matches_stock(provider, provider_config, variant, registry):
         return (
             f"faker_provider_not_native:{column}:{provider}",
             RouteDeclineCode.FAKER_PROVIDER_NOT_NATIVE,

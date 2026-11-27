@@ -109,7 +109,7 @@ from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
 from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core._categorical_native import BoundIndexKernel
 from decoy_engine.execution.out_of_core._hash_native import BoundHashKernel
-from decoy_engine.execution.sequential._faker_admission import bound_decline, load_faker_kernels
+from decoy_engine.execution.sequential import bound_decline, load_faker_kernels
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import StrategyContext
