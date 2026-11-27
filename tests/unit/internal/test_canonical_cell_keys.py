@@ -507,4 +507,7 @@ def test_a_numpy_record_keys_as_its_python_export() -> None:
     text = str(record.item())
     assert key(record) == key(text)
     assert key([record]) == f"[{record.item()!r}]"
-    assert run(record, text).keys == (2, 2)
+    result = run(record, text)
+    assert result.failed == {}
+    assert result.keys == (2, 2)
+    assert run(record, record).failed == {}

@@ -105,10 +105,10 @@ class Members:
 
 @dataclass(frozen=True)
 class Record:
-    """A NumPy record scalar. It compares as the record; `spelling` is the `repr` of the Python
-    tuple it holds, as an exporter writes it."""
+    """A NumPy record scalar. It compares as the canonical form of the Python tuple it holds, so it
+    is hashable; `spelling` is that tuple's `repr`, as an exporter writes it."""
 
-    value: object
+    fields: object
     spelling: str = field(default="", compare=False)
 
 
@@ -260,7 +260,7 @@ def _leaf(value: object) -> object:
         # Any other NumPy scalar (a void, a record) as the Python value it holds.
         item = value.item()
         if isinstance(value, np.void) and value.dtype.names:
-            return Record(value, repr(item))
+            return Record(canonical_cell(item), repr(item))
         if type(item) is not type(value):
             return canonical_cell(item)
     return value
