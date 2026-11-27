@@ -28,11 +28,9 @@ class TestNonPoolableProviderWithPoolBackend:
         assert exc.value.code == "non_poolable_provider_with_pool_backend"
         assert "home" in exc.value.message
 
-    def test_faker_lorem_text_rejected_until_it_pools(self):
+    def test_faker_lorem_text_pools_so_it_is_not_refused(self):
         cfg = _cfg([{"name": "notes", "strategy": "faker", "provider": "lorem_text"}])
-        with pytest.raises(PlanCompileError) as exc:
-            check_non_poolable_provider_with_pool_backend(cfg)
-        assert exc.value.code == "non_poolable_provider_with_pool_backend"
+        check_non_poolable_provider_with_pool_backend(cfg)  # no raise
 
     @pytest.mark.parametrize("provider", ["uuid", "random_int_range", "random_choice"])
     def test_faker_computed_draw_is_not_a_pool_refusal(self, provider):

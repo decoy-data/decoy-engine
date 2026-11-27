@@ -75,7 +75,7 @@ class CellFormat:
         return self.row_count - self.null_count
 
 
-def _invalid(column: object, member: str, why: str) -> NoReturn:
+def _invalid(column: str, member: str, why: str) -> NoReturn:
     # Lazy: `_spec` imports this module for `CellFormat`. The message names the member, never its value.
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
@@ -85,14 +85,14 @@ def _invalid(column: object, member: str, why: str) -> NoReturn:
     )
 
 
-def _check_counts(column: object, null_count: object, row_count: object) -> None:
+def _check_counts(column: str, null_count: object, row_count: object) -> None:
     if type(null_count) is not int or type(row_count) is not int:
         _invalid(column, "null_count", "counts must be integers")
     if not 0 <= null_count <= row_count:
         _invalid(column, "null_count", "must lie between 0 and the row count")
 
 
-def _check_members(column: object, kind: str, members: Mapping[str, object]) -> None:
+def _check_members(column: str, kind: str, members: Mapping[str, object]) -> None:
     for member, value in members.items():
         if not cell_format_member_ok(kind, member, value):
             _invalid(
@@ -106,7 +106,11 @@ _ALL_MEMBERS: Final = frozenset(m for ms in CELL_FORMAT_MEMBERS.values() for m i
 
 
 def _check_blank_count(
-    column: object, blank_count: int, non_null_count: int, first_edge: object, first_bin: object
+    column: str,
+    blank_count: int,
+    non_null_count: int,
+    first_edge: object,
+    first_bin: object,
 ) -> None:
     if blank_count > non_null_count:
         _invalid(column, "blank_count", "exceeds the non-null cells")
@@ -117,7 +121,7 @@ def _check_blank_count(
 
 
 def decode_cell_format(
-    column: object,
+    column: str,
     kind: str,
     entry: Mapping[str, Any],
     *,
@@ -165,7 +169,7 @@ _FIELDS: Final = frozenset(CellFormat.__dataclass_fields__)
 _OPTIONAL_FIELDS: Final = frozenset({"char_class"})
 
 
-def cell_format_from_dict(column: object, kind: str, data: object) -> CellFormat | None:
+def cell_format_from_dict(column: str, kind: str, data: object) -> CellFormat | None:
     """Rebuild a `CellFormat` from its stored form: six required members plus an optional `char_class`.
 
     Same rules as the snapshot reader.

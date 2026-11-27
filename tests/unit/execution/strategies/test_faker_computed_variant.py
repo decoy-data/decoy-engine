@@ -1,0 +1,580 @@
+"""GEN-NONFAKER-DRAWS S2 review fixes: one live variant decision, one output type, one kernel rule.
+
+Each class pins one finding of the first review of the S2 PR:
+
+- `TestLiveVariant`: every route reads the same variant from the live registry, so a rebound
+  provider (`ProviderRegistry.override`) takes the same draw everywhere.
+- `TestAllNullSchema`: an all-null computed column is Arrow `string` on every route.
+- `TestKernelBinding`: admission binds and self-tests the kernel the resolved variant runs, so a
+  broken hash kernel never fails a run that its index kernel admitted.
+- `TestOneDeterministicDraw`: the two native routes share one deterministic batch operation.
+"""
+
+from __future__ import annotations
+
+import copy
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+from unittest import mock
+
+import pyarrow as pa
+import pytest
+
+from decoy_engine import ConfigError
+from decoy_engine.execution import _faker_degenerate_pin as pin
+from decoy_engine.execution._operator_registry import PYTHON_SCALAR, RUST_COMPANION
+from decoy_engine.execution.native._crypto_ext import (
+    CryptoExtensionUnavailableError,
+    load_compiled_crypto_kernel,
+)
+from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
+from decoy_engine.execution.native._provider_class import (
+    computed_mask_spec,
+    resolve_faker_variant,
+)
+from decoy_engine.execution.native._real_type_admission import faker_provider_decline
+from decoy_engine.providers_v2 import get_default_registry
+from tests.native._chunked_entry_support import COMPANION_PRESENT
+from tests.unit.execution.strategies.test_faker_computed import (
+    CHOICE_KW,
+    TestRelationshipRoutes,
+)
+from tests.unit.execution.strategies.test_faker_computed_routes import (
+    _column,
+    _seed,
+)
+
+_DEFAULT = get_default_registry()
+
+
+def _companion_usable() -> bool:
+    """True when the installed companion loads: right ABI and both kernels pass their self-test."""
+    if not COMPANION_PRESENT:
+        return False
+    try:
+        load_compiled_crypto_kernel()
+        load_compiled_index_kernel()
+    except CryptoExtensionUnavailableError:
+        return False
+    return True
+
+
+needs_companion = pytest.mark.skipif(
+    not _companion_usable(), reason="needs a native companion with a compatible ABI"
+)
+OOC_POOL = "out_of_core_faker_pool_unsupported"
+
+
+def _rebound(provider: str, like: str, *, adapter_of: str | None = None) -> Any:
+    """The default registry with `provider` rebound to `like`'s capabilities and adapter."""
+    caps = _DEFAULT.get_capabilities(like).model_copy(update={"provider": provider})
+    return _DEFAULT.override(provider, _DEFAULT.get_adapter(adapter_of or like), caps)
+
+
+def uuid_as_pool() -> Any:
+    """`uuid` rebound to a poolable string provider: the name says computed, the binding says pool."""
+    return _rebound("uuid", "person_first_name")
+
+
+def lorem_as_computed() -> Any:
+    """`lorem_text` rebound to a computed capability the engine has no descriptor for."""
+    return _rebound("lorem_text", "uuid")
+
+
+class _IntPoolAdapter:
+    """A poolable adapter that draws integers: the binding is a pool, but not a string pool."""
+
+    backend_type = "test_int"
+    backend_version = "1"
+
+    def generate(self, provider: str, *, spec: Any, source_value: bytes | None = None) -> Any:
+        return 7
+
+    def generate_batch(self, provider: str, *, spec: Any, count: int) -> list[int]:
+        return list(range(100, 100 + count))
+
+
+def lorem_as_int_pool() -> Any:
+    """`lorem_text` rebound to another poolable adapter whose draws are integers."""
+    caps = _DEFAULT.get_capabilities("lorem_text")
+    return _DEFAULT.override("lorem_text", _IntPoolAdapter(), caps)
+
+
+class _CoversEnUs:
+    """A stand-in for a Mimesis binding: it draws en_US itself (its default) and sends any other
+    locale to its fallback, as `MimesisAdapter.serving_adapter` does."""
+
+    backend_type = "stub"
+
+    def __init__(self, fallback: Any) -> None:
+        self._fallback = fallback
+
+    def serving_adapter(self, locale: str | None) -> Any:
+        return self if (locale or "en_US") == "en_US" else self._fallback
+
+
+class _Routes(TestRelationshipRoutes):
+    """The relationship fixture, with the source column replaceable."""
+
+    def run(self, tmp_path: Path, column: dict[str, Any], **kw: Any) -> Any:
+        cfg = self._config(tmp_path, key_provider_name=None, column=column)
+        return self._run(copy.deepcopy(cfg), **kw)
+
+
+class TestLiveVariant:
+    """Finding 1: the variant comes from the live binding, not the provider name."""
+
+    def test_the_stock_registry_resolves_by_capability(self) -> None:
+        assert resolve_faker_variant("uuid", {}).kind == "computed"
+        assert resolve_faker_variant("random_choice", CHOICE_KW).kind == "computed"
+        assert resolve_faker_variant("person_email", {}).kind == "pool"
+        assert resolve_faker_variant("lorem_text", {}).kind == "pool"
+
+    def test_a_pool_rebinding_of_a_computed_name_is_a_pool(self) -> None:
+        assert resolve_faker_variant("uuid", {}, uuid_as_pool()).kind == "pool"
+        assert computed_mask_spec("uuid", {}, uuid_as_pool()) is None
+
+    def test_a_computed_rebinding_without_a_descriptor_is_unsupported(self) -> None:
+        variant = resolve_faker_variant("lorem_text", {}, lorem_as_computed())
+        assert variant.kind == "unsupported" and variant.spec is None
+
+    def test_every_route_verdict_follows_the_rebinding(self) -> None:
+        for runs_computed in (True, False):
+            assert faker_provider_decline(
+                "f", "uuid", {}, runs_computed=runs_computed, registry=uuid_as_pool()
+            ) == ("faker_provider_not_native:f:uuid", mock.ANY)
+            assert faker_provider_decline(
+                "f", "lorem_text", {}, runs_computed=runs_computed, registry=lorem_as_computed()
+            ) == ("faker_provider_not_native:f:lorem_text", mock.ANY)
+
+    def test_a_stock_only_route_declines_any_rebinding_that_changes_the_variant(self) -> None:
+        assert faker_provider_decline("f", "uuid", {}, runs_computed=True, stock_only=True) is None
+        assert faker_provider_decline(
+            "f", "uuid", {}, runs_computed=True, registry=uuid_as_pool(), stock_only=True
+        )
+
+    def test_a_stock_only_route_declines_a_pool_binding_with_no_string_guarantee(self) -> None:
+        """pool to pool: the variant is unchanged, but the binding is no longer the string one."""
+        assert resolve_faker_variant("lorem_text", {}, lorem_as_int_pool()).kind == "pool"
+        decline = faker_provider_decline(
+            "f", "lorem_text", {}, runs_computed=True, registry=lorem_as_int_pool(), stock_only=True
+        )
+        assert decline == ("faker_provider_not_native:f:lorem_text", mock.ANY)
+        # A route that reads no stock schema keeps its own runtime string check.
+        assert (
+            faker_provider_decline(
+                "f", "lorem_text", {}, runs_computed=True, registry=lorem_as_int_pool()
+            )
+            is None
+        )
+
+    def test_a_registered_callback_under_a_stock_name_is_not_a_string_guarantee(self) -> None:
+        from decoy_engine.providers_v2 import register_faker_provider_v2
+        from decoy_engine.providers_v2._faker_adapter import _unregister_faker_provider_v2
+
+        register_faker_provider_v2("lorem_text", lambda fake: 7)
+        try:
+            for registry in (None, _DEFAULT):
+                assert faker_provider_decline(
+                    "f", "lorem_text", {}, runs_computed=True, registry=registry, stock_only=True
+                ) == ("faker_provider_not_native:f:lorem_text", mock.ANY)
+        finally:
+            _unregister_faker_provider_v2("lorem_text")
+        assert (
+            faker_provider_decline("f", "lorem_text", {}, runs_computed=True, stock_only=True)
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        ("backend", "locale", "runs"),
+        [
+            ("faker", None, True),
+            ("mimesis", None, False),
+            ("mimesis", "en_US", False),
+            ("mimesis", "", False),
+            ("mimesis", "xx_XX", True),
+        ],
+    )
+    def test_a_callback_runs_only_where_the_binding_can_reach_faker(
+        self, backend: str, locale: str | None, runs: bool
+    ) -> None:
+        from decoy_engine.providers_v2 import (
+            faker_callback_reachable,
+            register_faker_provider_v2,
+        )
+        from decoy_engine.providers_v2._faker_adapter import (
+            FakerAdapter,
+            _unregister_faker_provider_v2,
+        )
+
+        faker = FakerAdapter()
+        adapter = faker if backend == "faker" else _CoversEnUs(fallback=faker)
+        register_faker_provider_v2("person_email", lambda fake: 7)
+        try:
+            assert faker_callback_reachable("person_email", adapter, locale) is runs
+        finally:
+            _unregister_faker_provider_v2("person_email")
+
+    def test_the_out_of_core_route_refuses_an_integer_pool_and_auto_reroutes(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("lorem_text", {"pool_size": 50}, deterministic=True)
+        registry = lorem_as_int_pool()
+        with pytest.raises(ConfigError, match=OOC_POOL):
+            helper.run(tmp_path, column, registry=registry, execution_mode="out_of_core")
+        auto = helper.run(tmp_path, column, registry=registry)
+        whole = helper.run(
+            tmp_path, column, registry=registry, execution_mode="full_frame", auto_chunk=False
+        )
+        assert auto.outputs["t"].equals(whole.outputs["t"])
+
+    def test_the_sequential_run_reads_the_rebinding(self, tmp_path) -> None:
+        """`uuid` rebound to a pool provider masks with pool values on full-frame and sequential
+        alike, and the sequential kernels run the pool leg."""
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=True)
+        whole = helper.run(
+            tmp_path, column, registry=uuid_as_pool(), execution_mode="full_frame", auto_chunk=False
+        )
+        seq = helper.run(tmp_path, column, registry=uuid_as_pool(), execution_mode="sequential")
+        assert seq.outputs["t"].equals(whole.outputs["t"])
+        stock = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        # The rebinding draws from a pool; the stock `uuid` keys its value from the source.
+        assert not seq.outputs["t"].equals(stock.outputs["t"])
+
+    def test_the_out_of_core_route_declines_a_rebinding_instead_of_drawing_uuids(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=True)
+        with pytest.raises(ConfigError, match=OOC_POOL):
+            helper.run(tmp_path, column, registry=uuid_as_pool(), execution_mode="out_of_core")
+
+    def test_a_computed_rebinding_without_a_descriptor_fails_alike_on_every_route(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("lorem_text", {"pool_size": 50}, deterministic=True)
+        registry = lorem_as_computed()
+        errors = []
+        for mode in ("full_frame", "sequential"):
+            with pytest.raises(Exception) as exc:
+                helper.run(tmp_path, column, registry=registry, execution_mode=mode)
+            errors.append(type(exc.value))
+        assert errors[0] is errors[1]
+        with pytest.raises(ConfigError, match=OOC_POOL):
+            helper.run(tmp_path, column, registry=registry, execution_mode="out_of_core")
+
+
+class _AllNull(_Routes):
+    @classmethod
+    def _tables(cls) -> tuple[pa.Table, pa.Table]:
+        parent, child = super()._tables()
+        nulls = pa.array([None] * parent.num_rows, pa.string())
+        return parent.set_column(parent.schema.get_field_index("f"), "f", nulls), child
+
+
+class TestAllNullSchema:
+    """Finding 2: the draw owns the output type, so a column of nulls is still `string`."""
+
+    @pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+    @pytest.mark.parametrize(("provider", "config"), [("uuid", {}), ("random_choice", CHOICE_KW)])
+    def test_the_schema_is_equal_on_every_route(
+        self, provider, config, deterministic, tmp_path
+    ) -> None:
+        helper = _AllNull()
+        column = _column(provider, config, deterministic=deterministic)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        seq = helper.run(tmp_path, column, execution_mode="sequential")
+        assert whole.outputs["t"].schema.field("f").type == pa.string()
+        assert seq.outputs["t"].schema == whole.outputs["t"].schema
+        assert seq.outputs["t"].column("f").null_count == whole.outputs["t"].num_rows
+        if deterministic:
+            forced = helper.run(tmp_path, column, execution_mode="out_of_core")
+            assert forced.outputs["t"].schema == whole.outputs["t"].schema
+
+    def test_the_pin_covers_a_computed_string_draw_over_any_source(self) -> None:
+        schema = pa.schema([("f", pa.string()), ("n", pa.int64())])
+        config = {
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [
+                        {"name": "f", "strategy": "faker", "provider": "uuid"},
+                        {
+                            "name": "n",
+                            "strategy": "faker",
+                            "provider": "random_int_range",
+                            "provider_config": {"min": 1, "max": 9},
+                        },
+                    ],
+                }
+            ]
+        }
+        assert pin.deterministic_faker_pin_columns(config, "t", schema) == {"f"}
+
+
+def uuid_as_int() -> Any:
+    """`uuid` rebound to a pool binding whose adapter draws integers: the name says a string
+    computed draw, the live binding says an integer pool."""
+    return _rebound("uuid", "person_first_name", adapter_of="random_int_range")
+
+
+class TestLiveRegistryPin:
+    """The degenerate-output pin reads the run's registry, never the stock binding."""
+
+    CONFIG = {
+        "tables": [
+            {"name": "t", "columns": [{"name": "f", "strategy": "faker", "provider": "uuid"}]}
+        ]
+    }
+
+    def test_a_rebound_provider_is_not_pinned_by_its_stock_binding(self) -> None:
+        schema = pa.schema([("f", pa.string())])
+        assert pin.deterministic_faker_pin_columns(self.CONFIG, "t", schema) == {"f"}
+        assert pin.deterministic_faker_pin_columns(self.CONFIG, "t", schema, uuid_as_int()) == set()
+        assert pin.deterministic_faker_pin_columns(self.CONFIG, "t", schema, _DEFAULT) == {"f"}
+
+    @pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+    def test_an_all_null_column_keeps_the_rebound_providers_type_on_both_routes(
+        self, deterministic, tmp_path
+    ) -> None:
+        helper = _AllNull()
+        column = _column("uuid", {}, deterministic=deterministic)
+        registry = uuid_as_int()
+        whole = helper.run(
+            tmp_path, column, registry=registry, execution_mode="full_frame", auto_chunk=False
+        )
+        seq = helper.run(tmp_path, column, registry=registry, execution_mode="sequential")
+        assert whole.outputs["t"].schema.field("f").type != pa.string()
+        assert seq.outputs["t"].schema == whole.outputs["t"].schema
+
+
+@contextmanager
+def _hash_kernel_fails() -> Iterator[None]:
+    """The compiled hash kernel fails its self-test; the index kernel is untouched."""
+    boom = CryptoExtensionUnavailableError("injected self-test failure")
+    with (
+        mock.patch(
+            "decoy_engine.execution._sequential_native.load_compiled_crypto_kernel",
+            side_effect=boom,
+        ),
+        mock.patch(
+            "decoy_engine.execution.out_of_core._hash_run.load_compiled_crypto_kernel",
+            side_effect=boom,
+        ),
+        mock.patch(
+            "decoy_engine.execution.native._kernels_keyed.load_compiled_crypto_kernel",
+            side_effect=boom,
+        ),
+    ):
+        yield
+
+
+class TestKernelBinding:
+    """Finding 3: a column is admitted on the kernel its variant runs, not on a sibling kernel."""
+
+    def test_a_uuid_declines_at_sequential_admission_when_the_hash_kernel_is_missing(self) -> None:
+        from decoy_engine.execution.native.draw import BoundFakerKernel
+        from decoy_engine.execution.sequential._faker_admission import faker_admit
+
+        index = mock.sentinel.index
+        bound = BoundFakerKernel(index, None, True, None)
+        seed = _seed("uuid", {})
+        assert faker_admit("f", pa.string(), seed, bound=bound) == "crypto_extension_unavailable"
+        assert (
+            faker_admit(
+                "f", pa.string(), seed, bound=BoundFakerKernel(index, None, True, mock.Mock())
+            )
+            is None
+        )
+        choice = _seed("random_choice", CHOICE_KW)
+        assert faker_admit("f", pa.string(), choice, bound=bound) is None
+
+    @needs_companion
+    @pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+    def test_the_sequential_run_survives_a_failing_hash_kernel(
+        self, deterministic, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=deterministic)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _hash_kernel_fails():
+            seq = helper.run(tmp_path, column, execution_mode="sequential")
+        assert seq.outputs["t"].equals(whole.outputs["t"])
+        [entry] = [e for e in seq.quality_metrics["sequential_faker"] if e["column"] == "f"]
+        assert entry["executed_backend"] == PYTHON_SCALAR and entry["native_calls"] == 0, entry
+
+    @needs_companion
+    def test_a_choice_column_keeps_its_index_kernel_when_the_hash_kernel_fails(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("random_choice", CHOICE_KW, deterministic=True)
+        with _hash_kernel_fails():
+            seq = helper.run(tmp_path, column, execution_mode="sequential")
+        [entry] = [e for e in seq.quality_metrics["sequential_faker"] if e["column"] == "f"]
+        assert entry["executed_backend"] == RUST_COMPANION, entry
+
+    @needs_companion
+    def test_the_out_of_core_run_survives_a_failing_hash_kernel(self, tmp_path) -> None:
+        """The reference hash is byte-identical, so the run completes with the same values and
+        records the backend that ran."""
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=True)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _hash_kernel_fails():
+            forced = helper.run(tmp_path, column, execution_mode="out_of_core")
+        assert forced.outputs["t"].equals(whole.outputs["t"])
+        entries = [e for e in forced.quality_metrics["out_of_core_faker"] if e["column"] == "f"]
+        assert entries and all(e["executed_backend"] == PYTHON_SCALAR for e in entries), entries
+
+
+@contextmanager
+def _index_kernel_fails() -> Iterator[None]:
+    """The compiled index kernel fails to load; the hash kernel is untouched."""
+    boom = CryptoExtensionUnavailableError("injected index load failure")
+    with (
+        mock.patch(
+            "decoy_engine.execution._sequential_native.load_compiled_index_kernel",
+            side_effect=boom,
+        ),
+        mock.patch(
+            "decoy_engine.execution.out_of_core._hash_run.load_compiled_index_kernel",
+            side_effect=boom,
+        ),
+    ):
+        yield
+
+
+class TestBackendFollowsTheBoundKernel:
+    """Finding 3 reciprocal: the reported backend is the one the variant's own kernel ran on."""
+
+    @pytest.mark.parametrize(
+        ("compiled", "hash_bound", "uuid_backend", "choice_backend"),
+        [
+            (True, True, RUST_COMPANION, RUST_COMPANION),
+            (True, False, PYTHON_SCALAR, RUST_COMPANION),
+            (False, True, RUST_COMPANION, PYTHON_SCALAR),
+            (False, False, PYTHON_SCALAR, PYTHON_SCALAR),
+        ],
+    )
+    def test_the_record_names_the_kernel_each_variant_uses(
+        self, compiled, hash_bound, uuid_backend, choice_backend
+    ) -> None:
+        from decoy_engine.execution.native.draw import BoundFakerKernel
+
+        bound = BoundFakerKernel(
+            mock.sentinel.index, None, compiled, mock.Mock() if hash_bound else None
+        )
+        uuid = computed_mask_spec("uuid", {})
+        choice = computed_mask_spec("random_choice", CHOICE_KW)
+        assert bound.backend(uuid) == uuid_backend and bound.ready(uuid) == hash_bound
+        assert bound.backend(choice) == choice_backend and bound.ready(choice) == compiled
+
+    @needs_companion
+    def test_out_of_core_reports_the_compiled_hash_when_only_the_index_kernel_is_down(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=True)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _index_kernel_fails():
+            forced = helper.run(tmp_path, column, execution_mode="out_of_core")
+        assert forced.outputs["t"].equals(whole.outputs["t"])
+        entries = [e for e in forced.quality_metrics["out_of_core_faker"] if e["column"] == "f"]
+        assert entries and all(e["executed_backend"] == RUST_COMPANION for e in entries), entries
+
+    @needs_companion
+    def test_out_of_core_reports_the_reference_for_a_choice_when_the_index_kernel_is_down(
+        self, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("random_choice", CHOICE_KW, deterministic=True)
+        with _index_kernel_fails():
+            forced = helper.run(tmp_path, column, execution_mode="out_of_core")
+        entries = [e for e in forced.quality_metrics["out_of_core_faker"] if e["column"] == "f"]
+        assert entries and all(e["executed_backend"] == PYTHON_SCALAR for e in entries), entries
+
+    @needs_companion
+    @pytest.mark.parametrize("deterministic", [True, False], ids=["deterministic", "positional"])
+    def test_sequential_keeps_the_healthy_hash_kernel_when_the_index_kernel_is_down(
+        self, deterministic, tmp_path
+    ) -> None:
+        helper = _Routes()
+        column = _column("uuid", {}, deterministic=deterministic)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _index_kernel_fails():
+            seq = helper.run(tmp_path, column, execution_mode="sequential")
+        assert seq.outputs["t"].equals(whole.outputs["t"])
+        [entry] = [e for e in seq.quality_metrics["sequential_faker"] if e["column"] == "f"]
+        assert entry["executed_backend"] == RUST_COMPANION and entry["native_calls"] > 0, entry
+
+    @needs_companion
+    def test_sequential_declines_a_choice_when_the_index_kernel_is_down(self, tmp_path) -> None:
+        helper = _Routes()
+        column = _column("random_choice", CHOICE_KW, deterministic=True)
+        whole = helper.run(tmp_path, column, execution_mode="full_frame", auto_chunk=False)
+        with _index_kernel_fails():
+            seq = helper.run(tmp_path, column, execution_mode="sequential")
+        assert seq.outputs["t"].equals(whole.outputs["t"])
+        [entry] = [e for e in seq.quality_metrics["sequential_faker"] if e["column"] == "f"]
+        assert entry["executed_backend"] == PYTHON_SCALAR and entry["native_calls"] == 0, entry
+
+
+class TestOneDeterministicDraw:
+    """Finding 4: the namespace, the uuid-or-choice branch and the hash width live in one place."""
+
+    ROOT = Path(__file__).resolve().parents[4] / "src" / "decoy_engine" / "execution"
+
+    @pytest.mark.parametrize(
+        "route", ["sequential/_computed_faker.py", "out_of_core/_faker_native.py"]
+    )
+    def test_a_route_calls_the_shared_operation_and_keeps_no_copy(self, route) -> None:
+        text = (self.ROOT / route).read_text()
+        assert "deterministic_computed_array" in text
+        for private in ("uuid_from_hex", "hash_array", "native_keyed_hash", "UUID_HEX"):
+            assert private not in text.replace("keyed_uuid_array", ""), (route, private)
+
+    def test_the_shared_operation_is_reached_through_a_package_api(self) -> None:
+        text = (self.ROOT / "sequential/_computed_faker.py").read_text()
+        assert "execution.native.draw import" in text
+        strategy = (self.ROOT / "_strategies/_faker.py").read_text()
+        assert "execution.sequential import computed_faker_column" in strategy
+        assert "sequential._computed_faker" not in strategy
+
+    def test_the_two_routes_draw_equal_bytes(self, tmp_path) -> None:
+        helper = _Routes()
+        for provider, config in (("uuid", {}), ("random_choice", CHOICE_KW)):
+            column = _column(provider, config, deterministic=True)
+            seq = helper.run(tmp_path, column, execution_mode="sequential")
+            forced = helper.run(tmp_path, column, execution_mode="out_of_core")
+            assert forced.outputs["t"].equals(seq.outputs["t"]), provider
+
+
+class TestMissingIndexKernelBinding:
+    """Both routes bind a missing index kernel through `BoundFakerKernel.bind`: same status."""
+
+    def test_both_routes_report_the_same_status_without_the_index_kernel(self) -> None:
+        from decoy_engine.execution import _sequential_native
+        from decoy_engine.execution.out_of_core import _hash_run
+
+        def missing(*_a: Any, **_k: Any) -> Any:
+            raise CryptoExtensionUnavailableError("index kernel absent")
+
+        with (
+            mock.patch.object(_sequential_native, "load_compiled_index_kernel", missing),
+            mock.patch.object(_hash_run, "load_compiled_index_kernel", missing),
+            mock.patch.object(_hash_run, "load_compiled_crypto_kernel", missing),
+            mock.patch.object(_sequential_native, "load_compiled_crypto_kernel", missing),
+        ):
+            seq = _sequential_native._OPS[_sequential_native.FAKER].load_kernel(None)
+            ooc = _hash_run.OocHashRun()._faker_kernel()
+        assert seq.compiled is False and ooc.compiled is False
+        assert seq.hash_kernel is None and ooc.hash_kernel is None
+        assert type(seq.kernel) is type(ooc.kernel)
+        for spec in (None, computed_mask_spec("uuid", {})):
+            assert seq.backend(spec) == ooc.backend(spec) == PYTHON_SCALAR

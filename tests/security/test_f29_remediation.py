@@ -24,7 +24,6 @@ from decoy_engine.progress import (
     TerminalEvent,
     WarningEvent,
     event_to_dict,
-    event_to_legacy_dict,
 )
 from decoy_engine.reason_adapter import capture_failure, reason_from_exception
 from decoy_engine.reasons import Phase, ReasonContext, ReasonRecord
@@ -136,16 +135,15 @@ def test_legacy_name_fields_never_carry_a_connection_string_or_path() -> None:
         CheckpointEvent(table="x\x00y", checkpoint=reasons_checkpoint()),
     ]
     for event in events:
-        for wire in (event_to_dict(event), event_to_legacy_dict(event)):
-            text = json.dumps(wire)
-            assert "postgres" not in text and "passwd" not in text and "a=b" not in text, text
+        text = json.dumps(event_to_dict(event))
+        assert "postgres" not in text and "passwd" not in text and "a=b" not in text, text
 
 
 def test_ordinary_table_and_column_names_pass_through_unchanged() -> None:
     event = WarningEvent("missing_mask_secret", table="public.my table", column="Åge")
     assert (event.table, event.column) == ("public.my table", "Åge")
     assert PhaseEvent("mask", "start", table="orders").table == "orders"
-    route = event_to_legacy_dict(RouteEvent("full_frame", lane="native"))
+    route = event_to_dict(RouteEvent("full_frame", lane="native"))
     assert (route["route"], route["lane"]) == ("full_frame", "native")
 
 
@@ -322,25 +320,23 @@ _STR_FIELDS = (
 )  # fmt: skip
 
 
-def test_forged_event_fields_never_reach_either_projection() -> None:
+def test_forged_event_fields_never_reach_the_projection() -> None:
     for event in _valid_events():
         for name in _STR_FIELDS:
             if not hasattr(event, name):
                 continue
             original = getattr(event, name)
             _forge(event, **{name: CONN})
-            for wire in (event_to_dict(event), event_to_legacy_dict(event)):
-                assert CONN not in json.dumps(wire), (type(event).__name__, name)
+            assert CONN not in json.dumps(event_to_dict(event)), (type(event).__name__, name)
             _forge(event, **{name: original})
 
 
-def test_forged_numeric_event_fields_never_reach_either_projection() -> None:
+def test_forged_numeric_event_fields_never_reach_the_projection() -> None:
     for event in _valid_events():
         for name in ("sequence", "bytes_done", "rows_in", "rows_done", "elapsed_s", "ts"):
             if hasattr(event, name):
                 _forge(event, **{name: CONN})
-                for wire in (event_to_dict(event), event_to_legacy_dict(event)):
-                    assert CONN not in json.dumps(wire), (type(event).__name__, name)
+                assert CONN not in json.dumps(event_to_dict(event)), (type(event).__name__, name)
 
 
 def test_forged_group_fields_are_omitted_and_a_forged_reason_is_the_fixed_diagnostic() -> None:

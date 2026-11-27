@@ -69,6 +69,7 @@ __all__ = [
     "OUT_OF_CORE_CODE_SET_SHAPE_UNSUPPORTED",
     "OUT_OF_CORE_CONCURRENCY_INVALID",
     "OUT_OF_CORE_FAKER_COLUMN_MISSING",
+    "OUT_OF_CORE_FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED",
     "OUT_OF_CORE_FAKER_INDEX_UNAVAILABLE",
     "OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED",
     "OUT_OF_CORE_FAKER_POOL_BUDGET_INVALID",
@@ -304,6 +305,11 @@ OUT_OF_CORE_FAKER_POOL_BUDGET_INVALID = _d(
 )
 OUT_OF_CORE_FAKER_POOL_SIZE_INVALID = _d(
     "out_of_core_faker_pool_size_invalid", "Out of core Faker pool size invalid."
+)
+OUT_OF_CORE_FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED = _d(
+    "out_of_core_faker_computed_output_type_unsupported",
+    "Out of core Faker computed output type unsupported.",
+    since=UNRELEASED,
 )
 OUT_OF_CORE_FAKER_POOL_UNSUPPORTED = _d(
     "out_of_core_faker_pool_unsupported", "Out of core Faker pool unsupported."

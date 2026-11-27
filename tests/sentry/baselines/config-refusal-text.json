@@ -1,0 +1,994 @@
+{
+  "sentry_id": "config-refusal-text",
+  "created_in": "AE5",
+  "entries": {
+    "config/_csv_dialect.py::CsvDialect.__post_init__::f4c4943cf5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_fixed_width.py::FixedWidthLayout._validate_column_order::03e989208f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_fixed_width.py::FixedWidthLayout._validate_column_order::815aac9a8d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_generate_options.py::refuse_unlisted_generate_families::56c7aa7ffe": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 2
+    },
+    "config/_generate_type_checks.py::refuse_fixed_width_output_types::658eecabdc": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._per_table_kind_consistency::0cd28ab36a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._per_table_kind_consistency::90f5ac1576": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._reference_graph_valid::44520f5943": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._reference_graph_valid::514d85d8bc": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._reference_graph_valid::684318ebb4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._reference_graph_valid::bc05a0ed66": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._reference_graph_valid::c6b4aa99bf": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._subset_stage_constraints::052e3b80a5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_pipeline.py::PipelineConfig._subset_stage_constraints::5005b8970d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_sources.py::FileSource._validate_delimited_params::00de9a68c9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_sources.py::FileSource._validate_layout_matches_format::c0802e88f3": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_subset.py::SubsetSeedConfig._mode_consistency::52ff1ad1a0": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_subset.py::SubsetSeedConfig._mode_consistency::57e61865a4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_subset.py::SubsetSeedConfig._mode_consistency::7778952aeb": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_subset.py::SubsetSeedConfig._mode_consistency::acbfa7acd8": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_subset.py::SubsetSeedConfig._mode_consistency::b314741f59": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_subset_run.py::refuse_subset_source_loader::944ce0215b": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_subset_run.py::refuse_unapplied_subset::ef404bd565": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_tables.py::TableConfig._mask_xor_generate::0a642e9c2c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_tables.py::TableConfig._mask_xor_generate::1f4f23487a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_tables.py::TableConfig._mask_xor_generate::26035d419b": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_tables.py::TableConfig._mask_xor_generate::87a007646d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_tables.py::TableConfig._mask_xor_generate::a05c0a521f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_targets.py::FileTarget._validate_layout_matches_format::45521f91c8": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "config/_validators.py::QuarantineConfig._fail_closed_when_enabled::58448ec226": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked.py::check_chunked_compatibility::1a615bc7f9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked.py::check_chunked_compatibility::34a6d929f9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked.py::check_chunked_compatibility::7d49e7fdab": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked.py::check_chunked_compatibility::b44fbed79f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_bucket_perturb.py::reject_bucket_perturb_fk_keys::d67c2d2360": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_bucket_perturb.py::reject_bucket_perturb_when::a6febb48d4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_bucket_perturb.py::reject_unsafe_bucket_perturb_chunk_schema::1a00ffb33a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_categorical.py::reject_nondeterministic::227fa5006e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_categorical.py::reject_nondeterministic_when::9bfd900566": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_code_set.py::reject_code_set_fk_keys::19fcf77e90": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_code_set.py::reject_code_set_when::083d948bb3": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_code_set.py::reject_unsafe_code_set_chunk_schema::0071fdde7c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_dgrn.py::reject_windowed_date_when::28a687998d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_config_mismatch::00c7a53934": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_key_dtype_mismatch::2d21137dab": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_key_dtype_unprovable::c4ac1d9e49": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_namespace_mismatch::505426fe2a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_namespace_missing::7b3255d969": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_provider_not_scalar::70e6ac4b94": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_strategy_mismatch::49aa8a215c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_strategy_missing::fa96633d2a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_child_when_unsupported::040cb0a6c4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_composite_unsupported::809fa89cf0": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_dtype_not_cross_adapter_safe::7dac396920": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_orphan_policy_not_remap::7125a9ca24": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_parent_namespace_mismatch::3e2ef4ef1e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_parent_namespace_missing::28ada9bee8": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_parent_not_root::7d971d4435": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_parent_provider_not_scalar::451a4c5c0d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_parent_strategy_not_self_mask_safe::dd374c0072": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_fk_edge_checks.py::_parent_when_unsupported::6a9a121a18": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_group_key.py::reject_group_key_when::6e1bd51113": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_group_key.py::reject_unsafe_group_key_group_by_dtype::dea7f797b9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_text_mask.py::reject_text_mask_when::55523d5e90": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_text_mask.py::reject_unsafe_text_mask_chunk_schema::0b75761140": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_chunked_when_guard.py::PositionalWhenGuard.check_schema::af6277fa43": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_errors.py::declared_table_dropped::e7a8c17f56": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_errors.py::loader_table_undeclared::e7a8c17f56": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_errors.py::ooc_ineligible::6f9b9af3cd": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_errors.py::seq_ineligible::6f9b9af3cd": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/_transforms_gate.py::reject_per_table_transforms::4af02ddd5e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "execution/native/_faker_positional_admission.py::reject_nondeterministic_faker_when::779f58e6e4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/_fidelity_gate.py::score_generated_fidelity::e89c81504a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/_statistical_column.py::statistical_generate::1fffe2f3cb": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/_statistical_column.py::statistical_generate::60bd108538": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/_synthesize_derived.py::_fitted_reference::5165383c43": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/composite/_validate.py::composite_wiring_consistent::16d9f41ccf": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/composite/_validate.py::composite_wiring_consistent::41a6d438d9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/composite/_validate.py::composite_wiring_consistent::8dcabf2043": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/composite/_validate.py::composite_wiring_consistent::be5482f186": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/composite/_validate.py::composite_wiring_consistent::d9c343d4f9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_cell_format.py::_invalid::69eae54dba": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_degenerate.py::refuse_degenerate::d33061b11c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_fanout.py::_invalid::bd8ba5039d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_fanout.py::fanout_spec_from_snapshot::29def9429c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_fanout.py::fanout_spec_from_snapshot::44e9a3044c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_sample.py::_decode_flag_token::0033a7e536": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_sample.py::sample_column::284deafa62": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "generation/statistical/_sample.py::sample_column::510664d182": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::_check_ner_available_for_strategy::1a4c72a19c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_basic_uniqueness_pre_flight::1426afd889": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_composite_columns_length_match::9de4ad2d98": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_derived_column_refs::02d55a90b6": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_derived_column_refs::93da4e063f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_fpe_checksum_scheme::306ac36803": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_fpe_checksum_scheme::778eca3d99": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_fpe_checksum_scheme::d315c6c179": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_non_poolable_provider_with_pool_backend::244a3afadd": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_null_bearing_int_unsupported::2c842a8038": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_statistical_columns::b9a9af139e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_statistical_columns::bc233622c6": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks.py::check_unknown_provider::45330c829f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_bucket_perturb.py::_reject_if_unwritable::8571c05fb5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_bucket_perturb.py::_reject_if_unwritable::b787f49754": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_bucketize.py::check_bucketize_config::057db99e15": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_bucketize.py::check_bucketize_config::234f3cf292": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_categorical.py::check_categorical_categories::0b76b19a3e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_categorical.py::check_categorical_categories::ff7e934a0a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_correctness.py::check_vault_columns::47227caa55": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_correctness.py::check_vault_columns::617a7c71f5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_correctness.py::check_vault_columns::aa93905bb3": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_correctness.py::check_vault_columns::c83490456c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_correctness.py::check_when_string_output_on_numeric_unsupported::4cd7244838": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_preserve_values::9b774f1c08": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_preserve_values::ad408c5f5f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_preserve_values::f2ded4b521": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_shift_group_by_refs::3244fc8c4b": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_shift_group_by_refs::439b7c7163": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_shift_group_by_refs::7fec0901ff": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_shift_group_by_refs::967ae55799": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_shift_group_by_refs::dfa99bcdc7": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_date_shift.py::check_date_shift_window::ce931c76a1": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_declared_casting.py::_fail::deb8b8d186": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_derived_aggregate.py::check_derived_aggregate_refs::adc4b03258": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_derived_aggregate.py::check_derived_aggregate_refs::d79d332174": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_derived_aggregate.py::check_derived_aggregate_refs::fa31e2c2b5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::_raise::387dbb5ce7": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::check_dp_generate_contract::0cc3d7d095": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::check_dp_generate_contract::51ee49ac9e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::check_dp_generate_contract::8b0f569548": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::check_dp_generate_contract::dff2730681": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::parse_dp_ceiling::3814da750c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::parse_dp_ceiling::c5b0065a93": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp.py::verify_dp_snapshots::60a56c049b": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp_carrier.py::check_flag_tokens_canonical::0c2e20fa65": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp_carrier.py::check_numeric_release_shape::75d86a2404": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp_carrier.py::check_numeric_release_shape::c5ce141a1c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 2
+    },
+    "plan/_checks_dp_carrier.py::check_release_compatibility::553096dffe": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_dp_carrier.py::check_release_compatibility::eddf72b040": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_faker.py::check_faker_requires_provider::bfca1239b8": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_fpe.py::check_fpe_charset_config::a73ea70898": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_fpe_join.py::check_fpe_join_groups::54303d0e02": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_fpe_join.py::check_fpe_join_groups::58546e766c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_fpe_join.py::check_fpe_join_groups::7200316817": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_fpe_join.py::check_fpe_join_groups::f135d98130": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_group_key.py::check_group_key_refs::91edde9a3e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_group_key.py::check_group_key_refs::9ea19aebe5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_grouped_series.py::_check_ref::6df8411bee": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_grouped_series.py::check_grouped_series_refs::65c1767c22": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_grouped_series.py::check_grouped_series_refs::cd5f6f8acc": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::_reject_unusable_bound::3f62b0b833": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::_reject_unusable_bound::4022c11eaf": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::_reject_unusable_bound::4c54d5b0c5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::check_top_code_config::34d926f3a6": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::check_top_code_config::3fe78bfe4c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::check_top_code_config::52a0e5ab39": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::check_top_code_config::766fa2e77e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::check_top_code_config::8c62c8d8cc": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::check_top_code_config::8e48b8eac8": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_top_code.py::check_top_code_config::98479b75db": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_truncate.py::check_truncate_config::ac405fec5e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_truncate.py::check_truncate_config::dd1301c7f4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_truncate.py::check_truncate_config::fac6cb8b74": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_when.py::_when_refusal_error::11d5f8e8a6": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_when.py::_when_refusal_error::e52b47d608": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_when.py::check_when_grammar::d2522a9581": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_when.py::check_when_with_coherent_with::d5fbad2a7d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_windowed_date.py::check_windowed_date_refs::159e7bb808": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_windowed_date.py::check_windowed_date_refs::5298426d55": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_checks_windowed_date.py::check_windowed_date_refs::97bbdd9242": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_pool_size.py::resolve_pool_size::45f08a7e55": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_seed.py::_normalize_job_seed_int::04ece94642": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_seed.py::_normalize_job_seed_int::10d7e3ccda": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_seed.py::_normalize_job_seed_int::7e50d907e4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_seed.py::_normalize_job_seed_int::a3b017fbab": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_seed_envelope.py::_build_seed_envelope::0e86090ec4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_seed_envelope.py::_build_seed_envelope::705f5892c1": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_seed_envelope.py::_build_seed_envelope::cce6947c6c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize.py::_pinned_snapshot_from_dict::4ef72b5cc4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize.py::_pinned_snapshot_from_dict::c5485508e6": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize.py::_pinned_snapshot_from_dict::c79cbb51a7": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize.py::_require_statistical_snapshots_pinned::5ed24025e3": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize_declared.py::_bad_shapes::803e625ae3": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize_declared.py::check_plan_version::5d1e99de1f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize_declared.py::check_plan_version::7d5bb32609": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize_declared.py::check_plan_version::b592af193d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/_serialize_declared.py::declared_casting_from_dict::eed9f5affc": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/checks/_config_json.py::canonical_config_bytes::b57f625b05": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/checks/_generate_columns.py::_located::f9d47484a5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/checks/_lookup_tables.py::_lookup_refusal::0c44443aa4": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/checks/_lookup_tables.py::pinned_lookup_from_dict::c79cbb51a7": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/checks/_relationship_keys.py::check_generated_parent_keys::691ee731a9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/checks/_required_settings.py::_shape_mismatch::32656c964a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "plan/checks/_required_settings.py::check_required_strategy_settings::af42b0b041": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "profile/_csv_reader.py::resolve_csv_dialect::f4c4943cf5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "profile/_csv_reader.py::source_refusal::c02e36b407": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "profile/_fixed_width_reader.py::_resolve_layout::0ee8321261": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "providers_v2/identifiers/_validate.py::deterministic_namespace_completeness::4049973413": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_graph.py::build_relationship_graph::88d227918c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_graph.py::build_relationship_graph::8afdf99fc5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_graph.py::build_relationship_graph::dc4eafb824": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_graph.py::check_orphan_fk_policy_completeness::c86fd8b1eb": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_graph.py::normalize_orphan_policy_lookup::3006aca67e": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_graph.py::normalize_orphan_policy_lookup::7c62601492": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_graph.py::normalize_orphan_policy_lookup::d742ad73df": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_namespace.py::NamespaceRegistry.for_relationship::201d74f84d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_namespace.py::_raise_ambiguity::d0bb3c346d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "relationships/_namespace.py::build_namespace_registry::4830068438": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "run_result/_model.py::_check.validate::a7413dd47a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/code_set.py::_apply_chapter_preserve::2bc1450538": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/code_set.py::_apply_chapter_preserve::5316d0a464": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/code_set.py::_apply_chapter_preserve::985b583c1c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/code_set.py::_apply_chapter_preserve::f8651ffe4f": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/code_set.py::_pick_mask::a391a1aa28": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/code_set.py::apply_code_set::2bc1450538": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/date_shift.py::shift_window::c8ea77cc34": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/derived.py::DerivedConfig.from_dict::05bcd0c074": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/derived.py::DerivedConfig.from_dict::07c21e0936": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/derived.py::DerivedConfig.from_dict::672cd3d0c7": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/derived.py::DerivedConfig.from_dict::94ba60060a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/derived_aggregate.py::DerivedAggregateConfig.from_dict::049fa62b8c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/derived_aggregate.py::DerivedAggregateConfig.from_dict::3902fa9e4d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/derived_aggregate.py::DerivedAggregateConfig.from_dict::b148ee1077": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/geo_generalize.py::validate_geo_generalize_config::1c38770fdd": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/geo_generalize.py::validate_geo_generalize_config::33e96b7278": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/geo_generalize.py::validate_geo_generalize_config::5c1198b440": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/geo_generalize.py::validate_geo_generalize_config::9ae91622f9": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/group_key.py::GroupKeyConfig.from_dict::1b95be05bc": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/group_key.py::GroupKeyConfig.from_dict::2dfe1b2893": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/group_key.py::GroupKeyConfig.from_dict::ecd0a3cf50": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/grouped_series.py::GroupedSeriesConfig.from_dict::685fa7ec82": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/grouped_series.py::GroupedSeriesConfig.from_dict::9978c52dc3": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/grouped_series.py::GroupedSeriesConfig.from_dict::b0e912e852": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/grouped_series.py::GroupedSeriesConfig.from_dict::e359ccac3c": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/grouped_series.py::GroupedSeriesConfig.from_dict::fd5fc651f8": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/text_mask.py::_mask_span::c4acddc564": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/windowed_date.py::WindowedDateConfig.from_dict::2ce9149a0a": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/windowed_date.py::WindowedDateConfig.from_dict::368aa66df5": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/windowed_date.py::WindowedDateConfig.from_dict::947a378f68": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/windowed_date.py::WindowedDateConfig.from_dict::b247443884": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "transforms/windowed_date.py::WindowedDateConfig.from_dict::de3a8e5236": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "validation/_config.py::_load_config::1954db24cb": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "validation/_config.py::_load_config::81a8f66d27": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "validation/_config.py::_load_config::8c992f97b0": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "validation/_config.py::_load_config::94ccb52b3d": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "validation/_config.py::_select_validator::67b44241fe": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    },
+    "validation/_config.py::_select_validator::6f9b9af3cd": {
+      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
+      "max": 1
+    }
+  }
+}
