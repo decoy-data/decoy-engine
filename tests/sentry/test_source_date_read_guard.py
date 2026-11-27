@@ -329,7 +329,9 @@ def test_every_listed_entry_still_exists_still_calls_its_check_and_is_still_a_si
         missing = required - _called_names(func)
         assert not missing, f"{rel}::{qualname} no longer calls {sorted(missing)}"
     for site in _DOWNSTREAM_FUNCTIONS:
-        assert site in trees.get(site[0], {}), f"{site} is gone; drop it from _DOWNSTREAM_FUNCTIONS"
+        assert site[1] in trees.get(site[0], {}), (
+            f"{site} is gone; drop it from _DOWNSTREAM_FUNCTIONS"
+        )
     for helper, callers in _RAW_HELPER_CALLERS.items():
         assert helper in {(r, q) for r, f in trees.items() for q in f}, f"{helper} is gone"
         for caller in callers:

@@ -236,11 +236,13 @@ class _NamedSource(Protocol):
 
 def _bound(source: Any, name: str) -> Any:
     """A lazy source rebound to the `sources` mapping key, so a refusal names the table the
-    caller gave. A frozen dataclass copy keeps its subclass; any other object passes through."""
+    caller gave. A frozen dataclass copy keeps its subclass; a source that already carries the
+    key, and any other object, passes through as it is."""
     if (
         dataclasses.is_dataclass(source)
         and not isinstance(source, type)
         and any(field.name == "table" for field in dataclasses.fields(source))
+        and getattr(source, "table", name) != name
     ):
         return dataclasses.replace(source, table=name)
     return source

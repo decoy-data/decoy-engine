@@ -31,6 +31,7 @@ runner; the runner imports it through the re-export shim at its old path.
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -172,7 +173,7 @@ class OpenedLazyBatches:
         parquet_file: pq.ParquetFile,
         batch_rows: int,
         use_threads: bool,
-        handle: FileHandle | None = None,
+        handle: FileHandle,
         columns: Sequence[str] | None = None,
         table: str = "source",
     ) -> None:
@@ -182,7 +183,6 @@ class OpenedLazyBatches:
         self._handle = handle
         self._closed = False
         self.facts = footer_facts_of(parquet_file)
-        # Gate the projected schema before the first batch; selected-out columns never refuse.
         check_source_schema(
             arrow_adapter.projected_schema(handle, parquet_file, columns), table=table
         )
@@ -213,18 +213,13 @@ class OpenedLazyBatches:
         # `RuntimeError: generator raised StopIteration` on Python 3.10 for an empty file:
         # the iterator's StopIteration escapes the consuming generator frame (PEP 479).
         projection = {} if columns is None else {"columns": list(columns)}
-        if self._handle is not None:
-            yield from arrow_adapter.iter_batches(
-                self._handle,
-                self._parquet_file,
-                batch_size=batch_rows,
-                use_threads=use_threads,
-                **projection,
-            )
-        else:
-            yield from self._parquet_file.iter_batches(
-                batch_size=batch_rows, use_threads=use_threads, **projection
-            )
+        yield from arrow_adapter.iter_batches(
+            self._handle,
+            self._parquet_file,
+            batch_size=batch_rows,
+            use_threads=use_threads,
+            **projection,
+        )
 
     def close(self) -> None:
         if not self._closed:
@@ -232,8 +227,7 @@ class OpenedLazyBatches:
             try:
                 self._parquet_file.close()
             finally:
-                if self._handle is not None:
-                    self._handle.close()
+                self._handle.close()
 
 
 @dataclass(frozen=True)
@@ -269,14 +263,23 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
-        return self._stream(check_batch_rows(batch_rows), columns)
+        rows = check_batch_rows(batch_rows)
+        return checked_batches(self._iter_batches(rows, columns), table=self.table)
 
-    def _stream(self, rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
-        opened = self.open_batches(rows, columns=columns)
+    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
+        handle = self._handle()
         try:
-            yield from opened.batches
+            parquet_file = arrow_adapter.parquet_file(handle)
+            schema = arrow_adapter.projected_schema(handle, parquet_file, columns)
+            check_source_schema(schema, table=self.table)
+            yield from arrow_adapter.iter_batches(
+                handle,
+                parquet_file,
+                batch_size=batch_rows,
+                **({} if columns is None else {"columns": columns}),
+            )
         finally:
-            opened.close()
+            handle.close()
 
     def open_batches(
         self,
@@ -412,13 +415,10 @@ class ParquetFileSource(_PolicyBound):
         return self._lazy().schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        opened = self._lazy().open_batches(sample_rows)
-        try:
+        with closing(self._lazy().open_batches(sample_rows)) as opened:
             return head_frame_from_batches(
                 opened.batches, sample_rows, opened.schema, table=self.table
             )
-        finally:
-            opened.close()
 
     def to_frame(self) -> pd.DataFrame:
         return table_to_pandas(self._lazy().to_table())

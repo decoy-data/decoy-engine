@@ -38,13 +38,15 @@ def column_label(column: object) -> str:
     return Name(column).shown()
 
 
-def refuse_degenerate(column: str, why: str) -> NoReturn:
+def refuse_degenerate(
+    column: str, why: str, code: str = reasons.plan.STATISTICAL_STATS_DEGENERATE
+) -> NoReturn:
     """Raise the one coded refusal for an unsampleable snapshot of `column`."""
     # Lazy: `_spec` imports the modules that import this one.
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
     raise StatisticalSpecError(
-        code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
+        code=code,
         message=f"statistical column {column!r}: {why}.",
     ) from None
 
@@ -172,15 +174,11 @@ def check_degenerate(spec: StatisticalSpec) -> None:
     """Raise `STATISTICAL_STATS_DEGENERATE` when `spec`'s snapshot cannot be sampled, or
     `GENERATION_UNBOUNDED_COLUMN` when a datetime snapshot names a year the sampler cannot hold."""
     if spec.kind == "datetime" and names_far_year(spec):
-        from decoy_engine.generation.statistical._spec import StatisticalSpecError
-
-        raise StatisticalSpecError(
-            code=reasons.plan.GENERATION_UNBOUNDED_COLUMN,
-            message=(
-                f"statistical column {column_label(spec.column)!r}: year_bins: sampled years must lie in "
-                f"{MIN_YEAR}..{MAX_SAMPLED_YEAR}."
-            ),
-        ) from None
+        refuse_degenerate(
+            column_label(spec.column),
+            f"year_bins: sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
+            reasons.plan.GENERATION_UNBOUNDED_COLUMN,
+        )
     finding = degenerate_finding(spec)
     if finding is not None:
         refuse_degenerate(column_label(spec.column), f"{finding[1]}. {_REFIT_HINT}")

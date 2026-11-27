@@ -216,7 +216,7 @@ def test_the_direct_out_of_core_entry_checks_resident_sources_first(tmp_path: Pa
 
 def test_opened_row_group_batches_are_checked(tmp_path: Path) -> None:
     _, path, _ = _setup(tmp_path)
-    opened = LazySource(path).open_batches(GROUP)
+    opened = LazySource(path, table=TABLE).open_batches(GROUP)  # no mapping key to bind from
     try:
         with pytest.raises(SourceDateUnrepresentableError) as caught:
             list(opened.batches)

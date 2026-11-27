@@ -367,7 +367,7 @@ def test_a_safe_lazy_table_stays_lazy(tmp_path: Path, monkeypatch: pytest.Monkey
     cfg, lazy = rs.single_table_job(tmp_path, rs.two_column_table(50))
     seen = _spy_context(monkeypatch)
     _run(cfg, {"t": lazy}, resident_fallback=True)
-    assert seen["sources"]["t"] is lazy
+    assert seen["sources"]["t"] == lazy  # bound to its key: a copy, equal by path
 
 
 def _forbid_pre_pass(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -395,7 +395,7 @@ def test_the_default_runs_no_pre_pass(tmp_path: Path, monkeypatch: pytest.Monkey
     seen = _spy_context(monkeypatch)
     _run(cfg, {"t": lazy}, auto_chunk=False)
     assert calls == []
-    assert seen["sources"]["t"] is lazy
+    assert seen["sources"]["t"] == lazy  # bound to its key: a copy, equal by path
 
 
 def test_stream_skips_the_pre_pass_and_reads_no_whole_table(
@@ -472,8 +472,8 @@ def test_a_mixed_job_is_routed_over_every_source(
     assert rejected == frozenset()
     seen = _spy_context(monkeypatch)
     _run(cfg, sources, resident_fallback=True)
-    assert seen["sources"]["child"] is sources["child"]
-    assert seen["sources"]["parent"] is sources["parent"]
+    assert seen["sources"]["child"] == sources["child"]
+    assert seen["sources"]["parent"] == sources["parent"]
     assert calls[-1][0] == calls[0][0]
 
 
