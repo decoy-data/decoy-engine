@@ -129,7 +129,7 @@ except Exception as exc:
 
 ## Versioned progress events
 
-`event_to_dict(event)` is version 1 and is a strict additive superset of the version 0 keys that `event_to_legacy_dict(event)` keeps emitting. Version 1 adds `event_schema_version`, `registry_version`, a stream-local `sequence`, `phase`, `object_ref`, byte counters with their basis, and the optional `reason`, `retry`, `checkpoint` and `publication` groups. Existing positional constructors are unchanged: every new field is keyword-only.
+`event_to_dict(event)` is version 1 and is a strict additive superset of the version 0 keys (the pre-F29 event fields). Version 1 adds `event_schema_version`, `registry_version`, a stream-local `sequence`, `phase`, `object_ref`, byte counters with their basis, and the optional `reason`, `retry`, `checkpoint` and `publication` groups. Existing positional constructors are unchanged: every new field is keyword-only.
 
 | Field group | Contract |
 |---|---|
