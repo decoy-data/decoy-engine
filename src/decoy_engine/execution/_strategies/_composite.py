@@ -18,15 +18,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import WorkNode
-from decoy_engine.generation.composite import (
-    CompositeGenerator,
-    composite_address,
-    composite_city_state_zip,
-    composite_custom,
-    composite_name_email,
-    composite_person,
-    composite_provider,
-)
+from decoy_engine.generation.composite import COMPOSITES
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.providers_v2._adapter import ProviderSpec
@@ -59,43 +51,19 @@ class CompositeHandler:
                 message=f"composite node {node.columns} has no ColumnSeed plan slice.",
             )
 
-        generator: CompositeGenerator
-        if node.provider == "composite_name_email":
-            generator = composite_name_email(
-                coherent_namespace=coherent_namespace, registry=ctx.registry
+        descriptor = COMPOSITES.get(node.provider or "")
+        if descriptor is None:
+            raise ExecutionError(
+                code=reasons.runtime.UNSUPPORTED_STRATEGY,
+                message=f"unknown composite provider {node.provider!r}.",
             )
-        elif node.provider == "composite_city_state_zip":
-            generator = composite_city_state_zip(coherent_namespace=coherent_namespace)
-        elif node.provider == "composite_person":
-            # MG-4 (2026-05-31): 4-output coherent person bundle.
-            generator = composite_person(
-                coherent_namespace=coherent_namespace, registry=ctx.registry
-            )
-        elif node.provider == "composite_address":
-            # MG-4 (2026-05-31): 4-output coherent address bundle.
-            generator = composite_address(
-                coherent_namespace=coherent_namespace, registry=ctx.registry
-            )
-        elif node.provider == "composite_provider":
-            # MG-4 (2026-05-31): 3-output coherent provider bundle
-            # (NPI + provider_name + practice_address).
-            generator = composite_provider(
-                coherent_namespace=coherent_namespace, registry=ctx.registry
-            )
-        elif node.provider == "composite_custom":
-            # MG-4 (2026-05-31): generic 1-4 column bundle; the bundle
-            # declaration rides in provider_config["bundle"] as a list
-            # of {column, provider, optional config} dicts. Plan-compile
-            # has already validated the wiring; we trust the shape here
-            # and let CompositeCustom.__init__ raise on a malformed
-            # bundle (the typed CompositeError surfaces to the runner).
-            cfg = dict(col_seed.provider_config)
-            # QA-3 F10 (2026-05-31): renamed from `bundle` to
-            # `bundle_decl` to disambiguate from the generated
-            # output bundle below (line 121). The two values are
-            # different shapes (declaration list vs generated dict)
-            # and the shadow was a readability hazard.
-            bundle_decl = cfg.get("bundle") or []
+        provider_config = dict(col_seed.provider_config)
+        if descriptor.variable_output:
+            # The bundle declaration (a list of {column, provider, optional config} dicts) rides
+            # in provider_config["bundle"]. Plan-compile has validated the wiring and the
+            # generator's own constructor rejects a malformed bundle; only the container type is
+            # checked here, because generation must not raise execution errors.
+            bundle_decl = provider_config.get("bundle") or []
             if not isinstance(bundle_decl, list):
                 raise ExecutionError(
                     code=reasons.runtime.COMPOSITE_CUSTOM_BUNDLE_SHAPE,
@@ -104,16 +72,7 @@ class CompositeHandler:
                         f"must be a list, got {type(bundle_decl).__name__}."
                     ),
                 )
-            generator = composite_custom(
-                coherent_namespace=coherent_namespace,
-                bundle=bundle_decl,
-                registry=ctx.registry,
-            )
-        else:
-            raise ExecutionError(
-                code=reasons.runtime.UNSUPPORTED_STRATEGY,
-                message=f"unknown composite provider {node.provider!r}.",
-            )
+        generator = descriptor.factory(coherent_namespace, ctx.registry, provider_config)
 
         deterministic = col_seed.deterministic
         # DE-02 seam: a deterministic composite maps a real source value to a

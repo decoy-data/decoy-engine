@@ -22,6 +22,11 @@ from tests.unit.generation.kinds.test_provider import (
     all_scalars,
     generate,
 )
+from tests.unit.generation.kinds.test_provider_group import (
+    FAKER_FREE,
+    composite_config,
+)
+from tests.unit.generation.kinds.test_provider_group import digests as composite_digests
 
 FAKER_SCALARS = [p for p in SCALARS if p not in NATIVE_SCALARS]
 
@@ -60,3 +65,32 @@ def test_every_faker_backed_provider_matches_its_committed_digest() -> None:
     if os.environ.get("PRINT_FAKER_PROVIDER_DIGESTS") == "1":
         print(json.dumps(got, indent=4, sort_keys=True))
     assert got == COMMITTED
+
+
+# The composite outputs that draw names and dates from Faker (GEN-PROVIDERS E2), as one table.
+COMPOSITE_COMMITTED = {
+    "composite_address.street_address": "ba7b9e29fd9e7224fc49f6eb1c5ae6a4ff8e172000918124a31e01993306b907",
+    "composite_name_email.email": "827a6736531cf7dac01fa51db52f15b271a05d098d9fdf13370079e145505816",
+    "composite_name_email.first_name": "89cbe8d7b15fe95b3b1d6ec0223a5cf2a11120332414b948eb3ae8d9813685b6",
+    "composite_name_email.last_name": "0bd90db873ac06413dedfbcf8ece0f9decda00c65a04a888f02c03b08b27f98d",
+    "composite_person.dob": "3aae31c6f08a0c9efe65fc35f734f4af5a29cdfab7823025f0ee91361026dcdf",
+    "composite_person.email": "eff07ec2196477eba9443eacee46e532c5308e7d2bdc05acc1dab6cb9e6fa149",
+    "composite_person.first_name": "624d37a958fdec8f84f5c8629634d2a63f7d0ee5a5232266945c44981d46538d",
+    "composite_person.last_name": "88272b838916e9991cfed8373be4575ed2c2856860c1e046931a0c0d7ec41c66",
+    "composite_provider.provider_name": "39eda716e1758c2bd2158f353a59acc80d2bd3c6d3ea54a11157496ede4574b1",
+}
+
+
+def test_the_composite_table_names_exactly_the_faker_backed_outputs() -> None:
+    """Structural only: every composite output is pinned here or in the default loop."""
+    full = composite_digests(generate(composite_config(5))["t"])
+    assert sorted(COMPOSITE_COMMITTED) == sorted(set(full) - FAKER_FREE)
+
+
+@pytest.mark.faker_output_lock
+def test_every_faker_backed_composite_output_matches_its_committed_digest() -> None:
+    got = composite_digests(generate(composite_config())["t"])
+    got = {k: v for k, v in got.items() if k not in FAKER_FREE}
+    if os.environ.get("PRINT_FAKER_PROVIDER_DIGESTS") == "1":
+        print(json.dumps(got, indent=4, sort_keys=True))
+    assert got == COMPOSITE_COMMITTED

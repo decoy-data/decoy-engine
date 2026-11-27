@@ -405,3 +405,48 @@ def test_a_value_whose_str_raises_becomes_the_value_free_error(monkeypatch) -> N
     exc = info.value
     assert exc.__cause__ is None and exc.__context__ is None
     assert "SECRET-CELL" not in str(exc)
+
+
+# ---- public entry points ---------------------------------------------------------------------
+
+
+def test_provider_column_values_keeps_its_scalar_five_argument_form() -> None:
+    from decoy_engine.generation.kinds import provider_column_values
+
+    col = with_table(prov("synthetic_ssn", "c"), "t")
+    ctx = GenDeriveContext.for_column(derive_key=None, column_config=col, fallback_seed=SEED)
+    values = provider_column_values(col, 5, ctx, REGISTRY, None)
+    assert values == provider_generate(col, 5, ctx, REGISTRY, "en_US")
+    assert len(values) == 5
+
+
+def test_scalar_keyed_and_group_draws_share_one_spec_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from decoy_engine.generation.kinds import _provider, _provider_group
+
+    calls: list[str] = []
+    real = _provider.keyed_draw
+
+    def spy(gen_ctx: Any, locale: str, namespace: str, draw: Any) -> Any:
+        calls.append(namespace)
+        return real(gen_ctx, locale, namespace, draw)
+
+    monkeypatch.setattr(_provider, "keyed_draw", spy)
+    monkeypatch.setattr(_provider_group, "keyed_draw", spy)
+    scalar = with_table(prov("synthetic_ssn", "c"), "t")
+    ctx = GenDeriveContext.for_column(derive_key=None, column_config=scalar, fallback_seed=SEED)
+    provider_generate(scalar, 2, ctx, REGISTRY, "en_US")
+    member = with_table(
+        {"name": "m", "type": "provider", "provider": "composite_person", "field": "first_name"},
+        "t",
+    )
+    _provider_group.provider_group_values(member, 2, SEED, None, REGISTRY, "en_US", {})
+    assert calls == ["gen-provider/t/c", "gen-provider/t/composite_person"]
+
+
+def test_group_of_returns_the_full_provider_group_key() -> None:
+    from decoy_engine.generation.kinds import group_of
+
+    assert group_of({"provider": "composite_person"}) == ("composite_person", "composite_person")
+    assert group_of({"provider": "composite_person", "group": "g"}) == ("composite_person", "g")

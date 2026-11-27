@@ -238,19 +238,12 @@ def get_default_registry() -> ProviderRegistry:
         # composites write coherent bundles via CompositeGenerator.generate_bundle.
         # poolable=True, so S9 routing wraps them in the bundle pool path.
         from decoy_engine.generation.composite import (
+            COMPOSITES,
             CompositeAdapter,
             composite_capability,
         )
 
-        for composite_name in (
-            "composite_name_email",
-            "composite_city_state_zip",
-            # MG-4 (2026-05-31): generic + 3 shipped additions.
-            "composite_custom",
-            "composite_person",
-            "composite_address",
-            "composite_provider",
-        ):
+        for composite_name in COMPOSITES:
             bindings[composite_name] = (
                 CompositeAdapter(composite_name),
                 composite_capability(composite_name),

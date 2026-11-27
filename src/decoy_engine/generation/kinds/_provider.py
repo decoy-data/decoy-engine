@@ -21,7 +21,8 @@ name or a value, so they are never forwarded.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from decoy_engine import reasons
 from decoy_engine.generators.derivation import (
@@ -32,11 +33,21 @@ from decoy_engine.generators.derivation import (
 )
 
 if TYPE_CHECKING:
+    from decoy_engine.generation.kinds._provider_group import BundleCache
     from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry
 
-__all__ = ["draw_path", "provider_generate"]
+__all__ = [
+    "as_text",
+    "draw_path",
+    "guarded_values",
+    "keyed_draw",
+    "provider_column_values",
+    "provider_generate",
+    "provider_table_values",
+]
 
 DrawPath = Literal["pool", "keyed", "batch"]
+_T = TypeVar("_T")
 
 # A provider column is the registry-backed sibling of a faker column and draws from its family.
 _VALUE_FAMILY = "faker"
@@ -60,9 +71,37 @@ def provider_column_values(
     registry: ProviderRegistry,
     instance_default_locale: str | None,
 ) -> list[Any]:
-    """``n`` values for a ``provider`` generate column, in its locale or the instance default."""
+    """``n`` values for a scalar ``provider`` generate column, in its locale or the instance default.
+
+    The caller supplies the registry and the derivation context. A composite column, which needs
+    its table's bundle cache, goes through `provider_table_values`.
+    """
     locale = str(col.get("locale") or instance_default_locale or DEFAULT_GENERATE_LOCALE)
     return provider_generate(col, n, gen_ctx, registry, locale)
+
+
+def provider_table_values(
+    col: dict[str, Any],
+    n: int,
+    seed: int,
+    derive_key: Any,
+    instance_default_locale: str | None,
+    bundle_cache: BundleCache | None,
+) -> list[Any]:
+    """``n`` values for a ``provider`` generate column, in its locale or the instance default.
+
+    A column with a ``field`` takes its values from its group's bundle (see
+    `_provider_group`); every other column draws on its own seed.
+    """
+    from decoy_engine.generation.kinds._provider_group import provider_group_values
+    from decoy_engine.providers_v2 import get_default_registry
+
+    registry = get_default_registry()
+    locale = str(col.get("locale") or instance_default_locale or DEFAULT_GENERATE_LOCALE)
+    if col.get("field") is not None:
+        return provider_group_values(col, n, seed, derive_key, registry, locale, bundle_cache)
+    ctx = GenDeriveContext.for_column(derive_key=derive_key, column_config=col, fallback_seed=seed)
+    return provider_generate(col, n, ctx, registry, locale)
 
 
 def provider_generate(
@@ -73,13 +112,24 @@ def provider_generate(
     locale: str,
 ) -> list[Any]:
     """``n`` values of the provider ``col`` names, in the effective ``locale``."""
+    return guarded_values(
+        col, lambda: [as_text(v) for v in _draw(col, n, gen_ctx, registry, locale)]
+    )
+
+
+def guarded_values(col: dict[str, Any], produce: Callable[[], _T]) -> _T:
+    """``produce()``, or one fixed-text error when it fails for any reason.
+
+    The one translation site for provider and composite draws. The error is raised after the
+    ``except`` block closes, so it has neither a cause nor a context.
+    """
     # Imported here: the provider and pool packages import `generation` while it initializes.
     from decoy_engine.generation.pool import GenerationError
 
     failed = False
-    values: list[Any] = []
+    result: _T | None = None
     try:
-        values = [_as_text(v) for v in _draw(col, n, gen_ctx, registry, locale)]
+        result = produce()
     except Exception:
         # Any failure inside the provider, whatever its type, can quote a name or a value.
         failed = True
@@ -91,10 +141,10 @@ def provider_generate(
                 f"At table {col.get(TABLE_KEY)!r}, column {col.get('name')!r}."
             ),
         )
-    return values
+    return cast(_T, result)
 
 
-def _as_text(value: Any) -> str | None:
+def as_text(value: Any) -> str | None:
     """The value as text; a ``__str__`` that raises is a draw failure, caught by the caller."""
     return value if value is None or isinstance(value, str) else str(value)
 
@@ -145,15 +195,31 @@ def _draw_keyed(
     adapter: Any, provider: str, n: int, gen_ctx: GenDeriveContext, locale: str, namespace: str
 ) -> list[Any]:
     """``n`` identifiers, each drawn through the keyed adapter path with its row ordinal."""
+    # The identifier adapters take the row ordinal as the source value; the protocol types it
+    # narrower than they accept.
+    return keyed_draw(
+        gen_ctx,
+        locale,
+        namespace,
+        lambda spec: [adapter.generate(provider, spec=spec, source_value=i) for i in range(n)],
+    )
+
+
+def keyed_draw(
+    gen_ctx: GenDeriveContext, locale: str, namespace: str, draw: Callable[[Any], _T]
+) -> _T:
+    """``draw(spec)`` for a deterministic spec keyed by ``gen_ctx``'s value family.
+
+    The one place a keyed `ProviderSpec` is built for a generate column, scalar or group. The
+    family key is a 32-byte derived key, so it is dropped on failure before the traceback keeps
+    this frame.
+    """
     from decoy_engine.providers_v2 import ProviderSpec
 
     value_seed = gen_ctx.family_bytes(_VALUE_FAMILY)
     try:
         spec = ProviderSpec(locale=locale, deterministic=True, namespace=namespace, seed=value_seed)
-        # The identifier adapters take the row ordinal as the source value; the protocol types
-        # it narrower than they accept.
-        return [adapter.generate(provider, spec=spec, source_value=i) for i in range(n)]
+        return draw(spec)
     except BaseException:
-        # The family key is a 32-byte derived key; drop it before the traceback keeps this frame.
         del value_seed
         raise

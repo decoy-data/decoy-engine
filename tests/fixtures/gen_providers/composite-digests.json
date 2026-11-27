@@ -1,0 +1,10 @@
+{
+  "composite_address.city": "48e5f5f98c94b39ed72fa2f06c4cd25238b3dc82462f01a50e5f9bd6ec26649b",
+  "composite_address.state": "3f895a503bb291caf91886915d4461d04daed3cbd84072325da88f199255e76d",
+  "composite_address.zip": "59b7286b7872dbb30f63b60ace278e6df4edb6361447e97ad7b700b26b526076",
+  "composite_city_state_zip.city": "c188268585dcf5958f954d529269cc518fd4eb1a8b7873c86d3419e60ed90cf0",
+  "composite_city_state_zip.state": "c8ddf9e63e8100d18e3f5d8a2429e0be5a3a4aad796fd093564562284bcda837",
+  "composite_city_state_zip.zip": "a3002dbd429de32be3b1cfef50fef246b485e4e7216b0db4826a0250c344a1dc",
+  "composite_provider.npi": "decc52f1eb18401782c4064e0b067d468842c45335e86b4d94351d8e676f642c",
+  "composite_provider.practice_address": "20f9d9a716eb82958aa001241dc954c5ec4de214d67a45b019a2905c46413e66"
+}

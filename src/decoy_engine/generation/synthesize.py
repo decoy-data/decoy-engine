@@ -53,21 +53,21 @@ from decoy_engine.generation._statistical_column import (
 )
 from decoy_engine.generation._synthesize_derived import _derived_generate, _formula, _reference
 from decoy_engine.generation.kinds import (
+    BundleCache,
     LookupList,
     condition_values,
     conditional_tables,
     constant_values,
     parametric_values,
-    provider_column_values,
 )
 from decoy_engine.generation.kinds._lookup import lookup_column_values
+from decoy_engine.generation.kinds._provider import provider_table_values
 from decoy_engine.generation.relational import reference_draw_extras, reference_policies
 from decoy_engine.generation.relational._aggregate import aggregate_values, with_aggregates
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec, select_table
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
 from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
-from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
 
 if TYPE_CHECKING:
@@ -163,6 +163,7 @@ def _generate_tables_from_config(
         # Declared order: a `statistical` column with `condition_on` reads its already-generated
         # sibling from `data` (WS3 sequential conditional sampling).
         data: dict[str, list[Any]] = {}
+        bundles: BundleCache = {}  # this table's composite groups; dropped with the table
         # GEN-UNIQUE pair hook: a `unique_together` entry is drawn at its first-declared member's
         # turn; the second member's values wait here until the loop reaches it.
         pair_hooks: dict[str, Any] = {}
@@ -200,6 +201,7 @@ def _generate_tables_from_config(
                     reference_policy=policies.get((name, cname)),
                     on_warning=on_warning,
                     siblings=gcols,
+                    bundles=bundles,
                 )
                 warn_on_unseen_parents(
                     col,
@@ -315,6 +317,7 @@ def _generate_column(
     reference_policy: str | None = None,
     on_warning: Callable[[QualityWarning], None] | None = None,
     siblings: Sequence[Mapping[str, Any]] = (),
+    bundles: BundleCache | None = None,
 ) -> list[Any]:
     """Dispatch a generate column to its generator by ``type`` (mirrors V1
     ``ColumnGenerator.generators``), then apply the V1 ``null_probability``
@@ -330,7 +333,8 @@ def _generate_column(
     only. ``reference_date`` (pinned execution only) anchors ``windowed_date`` ``now``/``today``.
     ``reference_policy`` is the orphan policy of the relationship covering a ``reference`` column;
     with ``on_warning`` it decides what an empty parent does (see ``_reference``).
-    ``siblings`` are the table's column configs, for a column that reads its parent's row."""
+    ``siblings`` are the table's column configs, for a column that reads its parent's row.
+    ``bundles`` is the table's provider-group cache, shared by its `provider` columns."""
     col = with_table(col, table_name)
     kind = col.get("type")
     if kind == "sequence":
@@ -382,12 +386,7 @@ def _generate_column(
             col, n, seed, generated or {}, pools, siblings, reference_date=reference_date
         )
     elif kind == "provider":
-        ctx = GenDeriveContext.for_column(
-            derive_key=derive_key, column_config=col, fallback_seed=seed
-        )
-        values = provider_column_values(
-            col, n, ctx, get_default_registry(), instance_default_locale
-        )
+        values = provider_table_values(col, n, seed, derive_key, instance_default_locale, bundles)
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set
         # at validation; this branch is the defensive fallback for callers that

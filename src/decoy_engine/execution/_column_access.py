@@ -34,6 +34,7 @@ from typing import Any
 from decoy_engine._nested_json import nested_children
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions._when_parser import parse_when, when_column_refs
+from decoy_engine.generation.composite import COMPOSITES
 
 # Whether an entry reads its own column from the source or produces it. A created column is
 # exempt from "declared but missing from the source" only through `created_targets`.
@@ -279,11 +280,9 @@ def _composite(outputs: Callable[[Mapping[str, Any]], frozenset[str] | None]) ->
 
 def _fixed_outputs(provider: str) -> Callable[[Mapping[str, Any]], frozenset[str] | None]:
     def outputs(_entry: Mapping[str, Any]) -> frozenset[str] | None:
-        # The same source the compile-time wiring check uses, so the canonical columns
-        # cannot drift from what the handler writes.
-        from decoy_engine.generation.composite._validate import _COMPOSITE_OUTPUT_COLUMNS
-
-        return frozenset(_COMPOSITE_OUTPUT_COLUMNS[provider])
+        # The descriptor table the handler builds from, so the canonical columns cannot
+        # drift from what the handler writes.
+        return frozenset(COMPOSITES[provider].output_columns)
 
     return outputs
 
@@ -328,12 +327,8 @@ _SCALAR_STRATEGIES: tuple[str, ...] = (
     "group_key",
     "tokenize",
 )
-_FIXED_COMPOSITES: tuple[str, ...] = (
-    "composite_name_email",
-    "composite_city_state_zip",
-    "composite_person",
-    "composite_address",
-    "composite_provider",
+_FIXED_COMPOSITES: tuple[str, ...] = tuple(
+    name for name, descriptor in COMPOSITES.items() if not descriptor.variable_output
 )
 
 SURFACE_DECLARATIONS: dict[str, Declaration] = {

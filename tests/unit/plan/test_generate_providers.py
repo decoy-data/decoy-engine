@@ -116,6 +116,136 @@ def test_a_field_or_group_is_unexpected_on_a_scalar_provider(key: str) -> None:
     )
 
 
+# ---- composite fields and groups (GEN-PROVIDERS E2) ------------------------------------------
+
+
+def comp(
+    field: str, name: str | None = None, provider: str = "composite_person", **extra: Any
+) -> dict[str, Any]:
+    return prov(provider, name or field, field=field, **extra)
+
+
+def test_a_composite_column_with_a_known_field_is_accepted() -> None:
+    assert_accepted(
+        cfg(
+            [
+                comp("first_name"),
+                comp("email"),
+                comp("zip", provider="composite_city_state_zip"),
+                comp("npi", provider="composite_provider"),
+            ]
+        )
+    )
+
+
+@pytest.mark.parametrize("field", [CANARY, "", "FIRST_NAME", "first_name "])
+def test_an_unknown_field_is_refused_without_quoting_it(field: str) -> None:
+    assert_refused(cfg([comp(field, "x")]), "generate_provider_field_unknown", p("x", "field"))
+
+
+def test_a_field_of_another_composite_is_unknown() -> None:
+    assert_refused(cfg([comp("zip", "x")]), "generate_provider_field_unknown", p("x", "field"))
+
+
+def test_a_field_taken_twice_in_one_group_is_refused() -> None:
+    config = cfg([comp("email", "a"), comp("first_name", "b"), comp("email", "c")])
+    assert_refused(config, "generate_provider_field_duplicate", p("c", "field"))
+
+
+def test_two_groups_may_take_the_same_field_and_so_may_two_providers() -> None:
+    assert_accepted(
+        cfg(
+            [
+                comp("email", "a"),
+                comp("email", "b", group="guardian"),
+                comp("email", "c", provider="composite_name_email"),
+                comp("email", "d", group="composite_person_two"),
+            ]
+        )
+    )
+
+
+def test_a_group_label_may_be_shared_by_two_providers_without_clashing_fields() -> None:
+    assert_accepted(
+        cfg(
+            [
+                comp("zip", "a", provider="composite_address", group="x"),
+                comp("zip", "b", provider="composite_city_state_zip", group="x"),
+            ]
+        )
+    )
+
+
+def test_members_that_declare_different_locales_are_refused() -> None:
+    config = cfg([comp("first_name", "a", locale="en_US"), comp("email", "b", locale="en_GB")])
+    assert_refused(config, "generate_provider_locale_unsupported", p("b", "locale"))
+
+
+def test_the_group_check_refuses_two_different_explicit_locales_on_its_own() -> None:
+    """No composite declares a second locale yet, so the per-column check fires first at compile;
+    the group check must hold for the day one does."""
+    from decoy_engine.plan.checks._generate_providers import check_provider_groups
+
+    with pytest.raises(PlanCompileError) as info:
+        check_provider_groups(
+            "t", [comp("first_name", "a", locale="en_US"), comp("email", "b", locale="en_GB")]
+        )
+    assert (info.value.code, info.value.path) == (
+        "generate_provider_group_mismatch",
+        p("b", "locale"),
+    )
+
+
+def test_members_that_mix_an_omitted_and_an_explicit_locale_are_refused() -> None:
+    config = cfg([comp("first_name", "a"), comp("email", "b", locale="en_US")])
+    assert_refused(config, "generate_provider_group_mismatch", p("b", "locale"))
+    config = cfg([comp("first_name", "a", locale="en_US"), comp("email", "b")])
+    assert_refused(config, "generate_provider_group_mismatch", p("b", "locale"))
+
+
+def test_members_that_declare_the_same_locale_are_accepted() -> None:
+    assert_accepted(
+        cfg([comp("first_name", "a", locale="en_US"), comp("email", "b", locale="en_US")])
+    )
+
+
+def test_members_that_mix_stable_and_fresh_determinism_are_refused() -> None:
+    config = cfg([comp("first_name", "a"), comp("email", "b", determinism="fresh")])
+    assert_refused(config, "generate_provider_group_mismatch", p("b", "determinism"))
+    config = cfg([comp("first_name", "a", determinism="stable"), comp("email", "b")])
+    assert_accepted(config)
+
+
+def test_a_group_of_all_fresh_members_is_accepted() -> None:
+    assert_accepted(
+        cfg(
+            [
+                comp("first_name", "a", determinism="fresh"),
+                comp("email", "b", determinism="fresh"),
+            ]
+        )
+    )
+
+
+def test_groups_are_checked_per_table() -> None:
+    config = {
+        "global_settings": {"seed": 1},
+        "tables": [
+            {"name": "t", "row_count": 3, "generate_columns": [comp("email", "a")]},
+            {"name": "u", "row_count": 3, "generate_columns": [comp("email", "a")]},
+        ],
+    }
+    assert_accepted(config)
+
+
+def test_a_composite_locale_the_provider_does_not_declare_is_refused() -> None:
+    assert_refused(
+        cfg([comp("email", "x", locale="fr_FR")]),
+        "generate_provider_locale_unsupported",
+        p("x", "locale"),
+    )
+
+
 def _config_errors(col: dict[str, Any]) -> list[str]:
     full = {
         "version": 2,

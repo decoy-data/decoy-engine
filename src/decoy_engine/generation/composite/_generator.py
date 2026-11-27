@@ -27,19 +27,10 @@ from decoy_engine import reasons
 from decoy_engine.generation.composite._backend import COMPOSITE_BACKEND
 from decoy_engine.generation.composite._bundle_pool import BundlePool
 from decoy_engine.generation.composite._errors import CompositeError
+from decoy_engine.generation.composite._factory import COMPOSITES
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 
-_COMPOSITE_NAMES: frozenset[str] = frozenset(
-    {
-        "composite_name_email",
-        "composite_city_state_zip",
-        # MG-4 (2026-05-31): generic + shipped composite additions.
-        "composite_custom",
-        "composite_person",
-        "composite_address",
-        "composite_provider",
-    }
-)
+_COMPOSITE_NAMES: frozenset[str] = frozenset(COMPOSITES)
 
 
 @runtime_checkable
