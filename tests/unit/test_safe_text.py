@@ -190,11 +190,41 @@ def test_an_interned_cell_equal_to_no_literal_is_withheld() -> None:
         SafeText.const(cell)
 
 
-def test_an_interned_cell_equal_to_a_caller_literal_prints_only_that_literal() -> None:
+# Calls sit outside the asserts in this file: pytest's assert rewriting passes each argument through
+# a temporary variable, which is not a literal at the call site.
+# The plan's intent (A22): only a literal written at the call site prints. Identity with a constant
+# that the function happens to mention elsewhere is not proof, so a variable never qualifies.
+def test_an_interned_cell_equal_to_a_caller_literal_is_withheld_by_both_builders() -> None:
     literal = "abcdef"
     cell = sys.intern("".join(["abc", "def"]))
     assert cell is literal
-    assert str(SafeText.const(cell)) == "abcdef"
+    with pytest.raises(TypeError):
+        SafeText.const(cell)
+    with pytest.raises(TypeError):
+        SafeText.literal_template(cell)
+    printed = SafeText.const("abcdef")
+    assert str(printed) == "abcdef"  # the literal itself still prints
+
+
+def test_a_conditional_or_boolean_argument_is_not_a_literal_at_the_call_site() -> None:
+    cell = sys.intern("".join(["abc", "def"]))
+    flag = bool(cell)
+    with pytest.raises(TypeError):
+        SafeText.const(cell if flag else "abcdef")
+    with pytest.raises(TypeError):
+        SafeText.const(cell or "abcdef")
+    with pytest.raises(TypeError):
+        SafeText.literal_template(cell or "abcdef", names={"k": "v"})
+
+
+def test_a_literal_template_with_keyword_slots_still_passes_for_a_literal() -> None:
+    made = SafeText.literal_template("plain {{x}}", names={"k": "v"}, paths=None)
+    assert str(made) == "plain {x}"
+
+
+def test_a_keyword_only_text_is_not_proof() -> None:
+    with pytest.raises(TypeError):
+        SafeText.const(text="keyword text")  # type: ignore[call-arg]
 
 
 # A23: equal is not identical.
@@ -208,15 +238,15 @@ def test_an_equal_but_not_identical_cell_is_withheld() -> None:
 
 # literal_template: AE1a1 has no safe slot type, so every slot is withheld.
 def test_a_template_without_a_slot_prints_its_text() -> None:
-    assert str(SafeText.literal_template("fixed {{braces}} text")) == "fixed {braces} text"
+    made = SafeText.literal_template("fixed {{braces}} text")
+    assert str(made) == "fixed {braces} text"
 
 
 def test_a_template_slot_raises_under_strict_and_prints_a_marker_in_production(
     production: None,
 ) -> None:
-    assert str(SafeText.literal_template("at {name} done", names={"name": "orders"})) == (
-        "at <withheld> done"
-    )
+    made = SafeText.literal_template("at {name} done", names={"name": "orders"})
+    assert str(made) == "at <withheld> done"
     _safe_text._set_strict(True)
     with pytest.raises(TypeError):
         SafeText.literal_template("at {name} done", names={"name": "orders"})
@@ -283,7 +313,8 @@ def test_a_safe_text_and_the_withheld_singleton_round_trip_through_pickle() -> N
 
 
 def test_a_safe_text_does_not_print_itself_in_a_repr() -> None:
-    assert "pickled" not in repr(SafeText.const("pickled text"))
+    text = SafeText.const("pickled text")
+    assert "pickled" not in repr(text)
 
 
 def _worker_literal() -> Any:
@@ -309,12 +340,14 @@ def test_a_safe_text_crosses_a_process_pool_and_the_worker_withholds() -> None:
         assert pool.submit(_worker_strict).result() is False
         made = pool.submit(_worker_literal).result()
         assert isinstance(made, SafeText) and str(made) == "worker literal"
-        assert pool.submit(_worker_echo, SafeText.const("sent text")).result() == "sent text"
+        sent = SafeText.const("sent text")
+        assert pool.submit(_worker_echo, sent).result() == "sent text"
         assert pool.submit(_worker_non_literal, _canary()).result() is WITHHELD
 
 
 def test_a_two_character_literal_is_the_shortest_that_passes() -> None:
-    assert str(SafeText.const("ok")) == "ok"
+    made = SafeText.const("ok")
+    assert str(made) == "ok"
 
 
 def test_a_minted_text_cannot_be_changed_or_deleted() -> None:
@@ -330,7 +363,8 @@ def test_equality_with_a_non_safe_text_defers_to_the_other_side() -> None:
     text = SafeText.const("fixed text")
     assert text.__eq__("fixed text") is NotImplemented
     assert text != "fixed text"
-    assert text == SafeText.const("fixed text")
+    again = SafeText.const("fixed text")
+    assert text == again
 
 
 def test_the_slot_refusal_names_the_line() -> None:
@@ -340,12 +374,15 @@ def test_the_slot_refusal_names_the_line() -> None:
 
 def test_the_reprs_never_print_text() -> None:
     assert repr(WITHHELD) == "WITHHELD"
-    assert repr(SafeText.const("secret-ish")) == "SafeText(<text>)"
+    text = SafeText.const("secret-ish")
+    assert repr(text) == "SafeText(<text>)"
 
 
 def test_hash_follows_the_text() -> None:
-    assert hash(SafeText.const("same text")) == hash("same text")
-    assert len({SafeText.const("same text"), SafeText.const("same text")}) == 1
+    first = SafeText.const("same text")
+    second = SafeText.const("same text")
+    assert hash(first) == hash("same text")
+    assert len({first, second}) == 1
 
 
 def test_a_deleted_attribute_message_says_immutable() -> None:
@@ -364,7 +401,8 @@ def test_the_production_warning_names_module_function_and_line(
 
 
 def test_a_template_that_starts_with_a_slot_keeps_only_the_marker(production: None) -> None:
-    assert str(SafeText.literal_template("{x}")) == "<withheld>"
+    made = SafeText.literal_template("{x}")
+    assert str(made) == "<withheld>"
 
 
 def test_no_frame_means_no_proof(monkeypatch: pytest.MonkeyPatch) -> None:

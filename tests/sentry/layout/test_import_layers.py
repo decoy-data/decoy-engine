@@ -221,7 +221,7 @@ def test_a_tier_six_module_importing_execution_is_red(scratch: Path, tmp_path: P
 def test_the_safe_text_leaf_importing_errors_is_red(scratch: Path, tmp_path: Path) -> None:
     """A19: the leaf sits in its own bottom tier, so even a sibling-tier import breaks it."""
     tree = _tree(scratch, tmp_path)
-    leaf = tree / "src" / "decoy_engine" / "_safe_text.py"
+    leaf = tree / "src" / "decoy_engine" / "_safe_text" / "__init__.py"
     leaf.write_text(
         leaf.read_text(encoding="utf-8") + "\nfrom decoy_engine import errors\n",
         encoding="utf-8",

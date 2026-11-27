@@ -1,20 +1,25 @@
 """Text that provably came from a string written in source (F31 AE1).
 
-``SafeText.const`` and ``SafeText.literal_template`` print only a ``str`` that is the same object
-as a constant of the calling code object, so a row value, an f-string with a field or a wrapper's
-parameter can never become safe text. A failed check never keeps the argument: under the strict
+``SafeText.const`` and ``SafeText.literal_template`` print only a ``str`` that the calling code
+loads as a constant at that exact call: the call's first positional argument must be one
+``LOAD_CONST`` of the same object, with no branch jumping into the argument. A row value, an
+f-string with a field, a wrapper's parameter or a variable can never become safe text, even when
+the same function mentions an equal literal elsewhere. A failed check never keeps the argument: under the strict
 switch (tests only) it raises ``TypeError`` naming the call site; otherwise it returns ``WITHHELD``
 and logs one value-free warning per call site. A value that passes discloses only that it equals a
 literal in the calling code. This leaf imports nothing from ``decoy_engine`` so any layer can use it.
 
 Two modes fail closed, by design. The strict fixture in ``tests/conftest.py`` is function-scoped, so
 session- and module-scoped fixtures and subprocesses run non-strict (they withhold and log instead
-of raising). Code rebuilt from an AST, such as pytest's assert rewriting, can change folded
-literals, so a check there can withhold text that looks like a literal in source.
+of raising). Code rebuilt from an AST, such as pytest's assert rewriting (which passes each argument through a
+temporary variable), can hide the literal, so a check there can withhold text that looks like a
+literal in source. Build the text outside an ``assert`` statement in tests.
 """
 
 from __future__ import annotations
 
+import dis
+import functools
 import inspect
 import logging
 import os
@@ -77,8 +82,8 @@ def _strict_active() -> bool:
     return _strict and _strict_pid == os.getpid()
 
 
-def _caller_code() -> tuple[CodeType | None, _Site]:
-    """The code object and call site of the first frame outside this module and mutmut.
+def _caller_code() -> tuple[tuple[CodeType, int] | None, _Site]:
+    """The code object, call offset and call site of the first frame outside this module and mutmut.
 
     Frames are skipped by module name only, never by function name, so a caller cannot hide
     behind a function called ``trampoline``. No frame, or any error, means no proof.
@@ -90,7 +95,7 @@ def _caller_code() -> tuple[CodeType | None, _Site]:
             module = str(frame.f_globals.get("__name__", ""))
             if module != __name__ and not module.startswith(_MUTMUT_PREFIX):
                 code = frame.f_code
-                return code, (module, code.co_name, frame.f_lineno)
+                return (code, frame.f_lasti), (module, code.co_name, frame.f_lineno)
             frame = frame.f_back
     except Exception:  # fail closed
         pass
@@ -99,11 +104,64 @@ def _caller_code() -> tuple[CodeType | None, _Site]:
     return None, ("unknown", "unknown", 0)
 
 
-def _is_constant(text: object, code: CodeType | None) -> bool:
+_NO_LITERAL: Final = object()
+
+
+@functools.lru_cache(maxsize=512)
+def _literal_at_call(code: CodeType, lasti: int) -> object:
+    """The constant the call at ``lasti`` passes as its first positional argument, if it is one.
+
+    Walks back from the call over the argument pushes until the first positional argument is
+    reached. It is a literal only when that one instruction is ``LOAD_CONST`` and no branch jumps
+    into the span, so ``x if c else "lit"`` and ``x or "lit"`` never qualify.
+    """
+    try:
+        ins = list(dis.get_instructions(code))
+        at = next(i for i, ins_ in enumerate(ins) if ins_.offset == lasti)
+        call = ins[at]
+        if not call.opname.startswith("CALL") or call.opname == "CALL_FUNCTION_EX":
+            return _NO_LITERAL
+        total = int(call.arg or 0)
+        names = 0
+        need = total
+        if call.opname == "CALL_FUNCTION_KW":  # 3.10: the keyword names are a pushed tuple
+            names, need = len(ins[at - 1].argval), total + 1
+        else:  # 3.11 and 3.12: KW_NAMES sits just before the call (and PRECALL)
+            k = at - 1
+            while k >= 0 and ins[k].opname in ("PRECALL", "CACHE"):
+                k -= 1
+            if k >= 0 and ins[k].opname == "KW_NAMES":
+                names = len(ins[k].argval)
+        if total - names < 1:  # no positional argument: keyword-only text is no proof
+            return _NO_LITERAL
+        acc = 0
+        for j in range(at - 1, -1, -1):
+            op = ins[j]
+            if op.opname in ("PRECALL", "KW_NAMES", "CACHE"):
+                continue
+            acc += (
+                dis.stack_effect(op.opcode, op.arg, jump=False)
+                if op.opcode >= dis.HAVE_ARGUMENT
+                else dis.stack_effect(op.opcode)
+            )
+            if acc >= need:
+                break
+        else:
+            return _NO_LITERAL
+        if acc != need or ins[j].opname != "LOAD_CONST":
+            return _NO_LITERAL
+        if any(x.is_jump_target for x in ins[j + 1 : at + 1]):
+            return _NO_LITERAL
+        return ins[j].argval
+    except Exception:  # fail closed
+        return _NO_LITERAL
+
+
+def _is_constant(text: object, caller: tuple[CodeType, int] | None) -> bool:
     # Exact ``str`` first: a subclass's __len__ or a dead weakref proxy must not run or raise here.
-    if code is None or type(text) is not str or len(text) < _MIN_LEN:
+    if caller is None or type(text) is not str or len(text) < _MIN_LEN:
         return False
-    return any(const is text for const in code.co_consts)
+    return _literal_at_call(*caller) is text
 
 
 def _refuse(site: _Site) -> _Withheld:
@@ -133,8 +191,8 @@ class SafeText:
 
     @classmethod
     def const(cls, text: LiteralString) -> SafeText | _Withheld:
-        code, site = _caller_code()
-        if not _is_constant(text, code):
+        caller, site = _caller_code()
+        if not _is_constant(text, caller):
             return _refuse(site)
         return cls(text, _key=_KEY)
 
@@ -148,8 +206,8 @@ class SafeText:
     ) -> SafeText | _Withheld:
         """A literal format string. AE1a1 has no safe slot type, so every slot is withheld."""
         # ``names`` and ``paths`` are reserved for AE1a2 (safe slot types); unused here.
-        code, site = _caller_code()
-        if not _is_constant(fmt, code):
+        caller, site = _caller_code()
+        if not _is_constant(fmt, caller):
             return _refuse(site)
         try:
             parts: list[tuple[str, str | None, str | None, str | None]] | None = list(
