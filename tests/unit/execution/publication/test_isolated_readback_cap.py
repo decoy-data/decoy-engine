@@ -333,7 +333,21 @@ def test_a8_a_mid_read_refusal_publishes_nothing(
     assert result.committed_output_dir is None
 
 
+def _interrupt_over_memory() -> KeyboardInterrupt:
+    """Arrow reports exhaustion at a cap as a `KeyboardInterrupt` raised while handling a
+    `MemoryError`; only the exception types are read."""
+    try:
+        try:
+            raise MemoryError("CANARY")
+        except MemoryError:
+            raise KeyboardInterrupt from None
+    except KeyboardInterrupt as exc:
+        return exc
+    raise AssertionError("unreachable")
+
+
 MEMORY_FAILURES = {
+    "interrupt_over_memory": _interrupt_over_memory,
     "arrow_memory_error": lambda: pa.ArrowMemoryError("CANARY"),
     "bare_memory_error": lambda: MemoryError("CANARY"),
     "enomem": lambda: OSError(errno.ENOMEM, "CANARY"),
@@ -362,6 +376,32 @@ def _wholly_clean(run: Run, output: bool, staging: Path | None, scratch: Path) -
         assert list(scratch.iterdir()) == []
     else:
         assert staging.is_dir() and not (staging / "staging_output").exists()
+
+
+def test_a9_a_failure_while_measuring_is_a_memory_result_and_publishes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch: Path
+) -> None:
+    run = Run(tmp_path, monkeypatch, [ints("t1", 10)], ceiling=HUGE)
+
+    def failing(*args: Any, **kwargs: Any) -> int:
+        raise MemoryError("CANARY")
+
+    monkeypatch.setattr(f"{COMMIT}.lower_bound_bytes", failing)
+    result = run.go()
+    assert result.reason is not None and result.reason.code == "process_out_of_memory"
+    assert "CANARY" not in result.error + repr(result)
+    run.nothing_left(True)
+
+
+def test_a9_a_plain_interrupt_is_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch: Path
+) -> None:
+    run = Run(tmp_path, monkeypatch, [ints("t1", 10), ints("t2", 10)], ceiling=HUGE)
+    run.decodes.fail_on, run.decodes.error = 2, KeyboardInterrupt()
+    with pytest.raises(KeyboardInterrupt):
+        run.go()
+    run.nothing_left(True)
+    assert list(scratch.iterdir()) == []
 
 
 def _open_under(root: Path) -> list[str]:
@@ -426,8 +466,9 @@ def test_a12_every_exit_path_leaves_no_stage_and_no_open_file(
         )
     before = _open_under(tmp_path)
     if scenario == "detection_error":  # detection raises another coded error: it propagates
-        with pytest.raises(ExecutionError):
+        with pytest.raises(ExecutionError) as raised:
             run.go(held={}, output=output, staging=staging)
+        assert raised.value.code == reasons.runtime.OUT_OF_CORE_INSUFFICIENT_MEMORY
     else:
         result = run.go(held={}, output=output, staging=staging)
         expected = {
@@ -516,6 +557,7 @@ def test_a4_a_streamed_out_of_core_child_reads_back_once_per_table(
         config, held, output_dir=out, request=PublicationRequest("op-ooc"), **kwargs
     )
     assert result.outcome == "completed"
+    assert result.quality_metrics["execution"]["execution_mode"] == "out_of_core"
     assert result.extra["readback"]["kill_ceiling_bytes"] == ceiling
     assert len(decodes.names) == len(names) == result.extra["readback"]["tables_read"]
     _pub_equal(result, out)

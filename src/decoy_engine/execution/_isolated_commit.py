@@ -296,8 +296,10 @@ def collect(
         if _names_ok(names) and _admit(staging, names):
             admitted = True
             reader.run(names)
-    except (OSError, pa.ArrowException, MemoryError) as exc:
+    except (OSError, pa.ArrowException, MemoryError, KeyboardInterrupt) as exc:
         memory = is_memory_failure(exc)
+        if isinstance(exc, KeyboardInterrupt) and not memory:
+            raise  # a real interrupt; Arrow reports exhaustion at a cap as one with a memory cause
         code = exc.errno if isinstance(exc, OSError) else None
         admitted = False
     if admitted and reader.refusal is None:
@@ -308,8 +310,8 @@ def collect(
     failed = failed_receipt(request, os_errno=code)
     shown = failed if pub is not None else None
     if reader.refusal is not None:
-        return ReadbackRefused(reader.refusal, shown, reader.figures())
-    return ReadbackMemoryFailure(shown, reader.figures()) if memory else failed
+        return ReadbackRefused(reader.refusal, shown, reader.readback)
+    return ReadbackMemoryFailure(shown, reader.readback) if memory else failed
 
 
 def _publish(
@@ -318,12 +320,10 @@ def _publish(
     """Bind the read-back tables when there is an `output_dir`; the refusals are all before this."""
     outputs = reader.outputs
     if pub is None:
-        return Collected(outputs, None, reader.figures())
+        return Collected(outputs, None, reader.readback)
     components = [f"{name}.parquet" for name in outputs]
     receipt = publish_unit(pub.out, pub.txn, request, tables=components)
-    return (
-        Collected(outputs, receipt, reader.figures()) if receipt.outcome in COMMITTED else receipt
-    )
+    return Collected(outputs, receipt, reader.readback) if receipt.outcome in COMMITTED else receipt
 
 
 def _priced(table: pa.Table) -> TableBytesSpec:
@@ -350,12 +350,14 @@ class _Readback:
         self._read: list[TableBytesSpec] = []
         self._footers: list[TableBytesSpec] = []
         self._staged = 0
+        self.readback = Readback(None, 0, 0, 0, 0, 0)
 
     def run(self, names: list[str]) -> None:
         self._staged = len(names)
         self._held = [_priced(table) for table in self._sources.values()]
         self._ceiling = kill_ceiling()
         self._footers = [self._footer(name) for name in names]
+        self._measure()
         for index, name in enumerate(names):
             fit = check_readback(
                 [*self._held, *self._read],
@@ -368,9 +370,12 @@ class _Readback:
             table = _read_staged(self._staging, name)
             self.outputs[name] = table
             self._read.append(_priced(table))
+            self._measure()
 
-    def figures(self) -> Readback:
-        return Readback(
+    def _measure(self) -> None:
+        """Take the figures after each step, inside the guarded readback, so the result that
+        reports them never allocates again after a failure or a publication."""
+        self.readback = Readback(
             kill_ceiling_bytes=self._ceiling,
             sources_bytes=lower_bound_bytes(self._held),
             floor_bytes=lower_bound_bytes(self._footers),
