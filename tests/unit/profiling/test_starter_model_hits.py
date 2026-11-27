@@ -293,6 +293,7 @@ def test_at_e2h_a_header_suspect_table_is_refused_without_a_name(tmp_path: Path)
     err = raised.value
     code = str(reasons.config.STARTER_HEADER_SUSPECT)
     assert [(p.code, p.location) for p in err.problems] == [(code, "tables[0]")]
+    assert err.problems[0].text == reasons.config.STARTER_HEADER_SUSPECT.spec.summary
     assert err.problems[0].text == (
         "A scanned table looks like it has no header row; its column names may be data."
     )
@@ -380,3 +381,37 @@ def test_the_pan_entry_carries_the_fpe_namespace_and_luhn_settings() -> None:
     assert entry["provider_config"]["charset"] == "digits"
     assert entry["provider_config"]["validate_luhn"] is True
     assert "params" not in entry and "key_label" not in str(entry)
+
+
+# --- E2 final review: date fallback and declared-key evidence ----------------------------------
+
+
+def test_a_date_hit_on_a_unique_integer_column_writes_redact_not_hash(tmp_path: Path) -> None:
+    scan = _scan(tmp_path, {COLUMN: [str(i) for i in range(1, 21)]})
+    control = starter_config(scan)
+    assert _entry_of(control)["strategy"] == "hash"
+    result = starter_config(_patched(scan, hits=(_classifier("iso_date"),)))
+    assert _entry_of(result) == {"name": COLUMN, "strategy": "redact"}
+    assert _suggestion(result).decided_by == "fallback"
+    assert "classifier lgbm-v1 0.1.0: iso_date (band high)" in _note(result)
+
+
+def test_a_declared_key_note_keeps_its_model_evidence_on_both_sides(tmp_path: Path) -> None:
+    parent = _scan(tmp_path, {"id": [str(i) for i in range(1, 21)]}, table="p")
+    child = _scan(tmp_path, {"pid": [str(i) for i in range(1, 21)]}, table="k")
+    parent = _patched(parent, hits=(_classifier("us_ssn"),), column="id")
+    child = _patched(child, hits=(_ner("person_name"),), column="pid")
+    scan = dataclasses.replace(parent, tables=(*parent.tables, *child.tables))
+    rel = {
+        "parent": {"table": "p", "columns": ["id"]},
+        "children": [{"table": "k", "columns": ["pid"]}],
+        "namespace": "ns",
+        "orphan_policy": "warn",
+    }
+    result = starter_config(scan, relationships=[rel])
+    sides = {c["name"]: c for t in result.config["tables"] for c in t["columns"]}
+    for name in ("id", "pid"):
+        assert sides[name]["strategy"] == "hash"
+        assert sides[name]["namespace"] == "ns"
+    assert "classifier lgbm-v1 0.1.0: us_ssn (band high)" in result.notes[("p", "id")]
+    assert "ner en_core_web_sm 3.8.0: person_name (rate >=50%)" in result.notes[("k", "pid")]

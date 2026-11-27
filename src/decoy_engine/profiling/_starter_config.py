@@ -61,6 +61,7 @@ __all__ = [
 ]
 
 _KEY_STRATEGY = "hash"
+_DATE_FALLBACK_STRATEGY = "redact"
 _CHECK_NAMESPACE = "starter-check"
 _TARGETS: TypeAdapter[dict[str, TargetDescriptor]] = TypeAdapter(dict[str, TargetDescriptor])
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
@@ -79,9 +80,6 @@ _PLACEHOLDER_NOTE = (
 _LEADING_ZERO_NOTE = (
     "{count} sampled values in this column start with 0. The scan read it as a number, but "
     "`decoy run` reads CSV as text, so check that the strategy keeps leading zeros."
-)
-_HEADER_SUSPECT_TEXT = (
-    "A scanned table looks like it has no header row; its column names may be data."
 )
 _CLOUD_NOTE = (
     "`decoy run` does not read or write S3 or GCS until the CLI-CLOUD row lands. The target "
@@ -136,7 +134,7 @@ class ColumnSuggestion:
 
     def __post_init__(self) -> None:
         # `strategy`, `namespace` and `entry` describe one choice; a confirm matches on one and
-        # applies another, so they must agree. Only a regex suggestion is written into the config.
+        # applies another, so they must agree. Regex and classifier suggestions are both written.
         if self.live and self.source != "regex":
             raise ValueError("only a regex suggestion can be live")
         if self.entry and (
@@ -262,7 +260,9 @@ def _refuse_header_suspect(scan: ScanSet) -> None:
     flagged = reasons.warning.SCAN_HEADER_SUSPECT.spec.ref
     problems = [
         ConfigProblem(
-            str(reasons.config.STARTER_HEADER_SUSPECT), f"tables[{position}]", _HEADER_SUSPECT_TEXT
+            str(reasons.config.STARTER_HEADER_SUSPECT),
+            f"tables[{position}]",
+            reasons.config.STARTER_HEADER_SUSPECT.spec.summary,
         )
         for position, table in enumerate(scan.tables)
         if flagged in table.warnings
@@ -293,6 +293,11 @@ def _decide(
             chosen = _classifier_suggestion(table, stats, hit)
             if chosen is not None:
                 return chosen
+    if _unreadable_date_hit(stats, hits):
+        # A date hit with no complete format must not fall through to the inferred strategy:
+        # a likely-unique integer column would become `hash`, where E2 requires `redact`.
+        bare = ColumnSuggestion(table, stats.name, _DATE_FALLBACK_STRATEGY)
+        return dataclasses.replace(bare, entry=MappingProxyType(_entry(bare))), decision.review
     bare = ColumnSuggestion(
         table,
         stats.name,
@@ -305,6 +310,17 @@ def _decide(
     )
     named = dataclasses.replace(bare, namespace=stats.name) if _needs_namespace(bare) else bare
     return dataclasses.replace(named, entry=MappingProxyType(_entry(named))), decision.review
+
+
+def _unreadable_date_hit(stats: Any, hits: Sequence[ModelHit]) -> bool:
+    """True when a high-band classifier hit names a date detector the scan read no format for."""
+    for hit in hits:
+        if hit.source != "classifier" or hit.band != "high":
+            continue
+        choice = recommendations.starter_choice(hit.detector_id)
+        if choice is not None and choice.detected_date_format:
+            return _complete_date_format(stats, hit.detector_id, choice) is None
+    return False
 
 
 def _classifier_suggestion(
@@ -448,11 +464,10 @@ def _note(
     hits: Sequence[ModelHit],
 ) -> str:
     parts = [lead]
-    if key is None:
-        evidence = _evidence(stats, hits)
-        if evidence:
-            parts.append(f"Model evidence: {evidence}.")
-    elif key[1]:
+    evidence = _evidence(stats, hits)
+    if evidence:
+        parts.append(f"Model evidence: {evidence}.")
+    if key is not None and key[1]:
         parts.append(_PLACEHOLDER_NOTE)
     zeros = table.leading_zero_counts.get(stats.name)
     if zeros:

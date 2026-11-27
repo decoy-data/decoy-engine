@@ -82,7 +82,7 @@ TARGET_SHARED_DESTINATION = _d(
 )
 STARTER_HEADER_SUSPECT = _d(
     "starter_header_suspect",
-    "A scanned table looks like it has no header row, so its column names may be data.",
+    "A scanned table looks like it has no header row; its column names may be data.",
     since=UNRELEASED,
 )
 COLUMN_DUPLICATE = _d(
