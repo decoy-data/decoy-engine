@@ -433,8 +433,9 @@ def _run_chunked(
     """Preflight, route choice and the two chunk loops behind both public entry
     points. `enforce_schema_rule=False` is the legacy `run_native_or_oracle_chunked`
     contract: each route yields what it produces, with no type normalization."""
-    from decoy_engine.execution._chunked_input import _FixedSchemaChunks
+    from decoy_engine.execution._chunked_input import _FixedSchemaChunks, checked_chunks
 
+    chunks = checked_chunks(chunks, table=table)  # the one date check every entry shares
     # C5c-ii: the producer's guaranteed schema, taken before preflight wraps `chunks`; an
     # arbitrary iterable carries none and admits no C5c-ii column.
     captured_schema = chunks.source_schema if isinstance(chunks, _FixedSchemaChunks) else None
@@ -662,14 +663,13 @@ def run_mask_chunked(
     if vault_writer is not None:
         raise vault_requires_resident_output()
     # Local imports: the core imports this module at load time.
-    from decoy_engine.execution._chunked_input import checked_chunks
     from decoy_engine.execution.native.chunked import _core
     from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
 
     refuse_unchecked_route(config, "native_chunked")
     return _core.mask_chunked(
         config,
-        checked_chunks(chunks, table=table),
+        chunks,
         table=table,
         engine_version=engine_version,
         registry=registry,

@@ -294,7 +294,8 @@ def run_pipeline(
     stream_required = execution_mode == "stream"
     execution_mode = "auto" if stream_required else execution_mode
     require_optional_nonempty_str("quarantine_path", quarantine_path)
-    check_resident_sources(sources)  # after the knob checks: a bad knob refuses before any read
+    # After the knob checks: a bad knob refuses before any read.
+    sources = check_resident_sources(sources)
     # MG-5: a `tokenize` job's token vault reaches only the full-frame adapter, so under `auto`
     # it forces full-frame and disables auto-chunk; an explicit execution_mode is left alone.
     if token_vault_writer is not None and execution_mode == "auto":

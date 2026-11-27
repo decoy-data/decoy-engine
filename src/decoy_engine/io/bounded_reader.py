@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import io
 import math
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, TypeVar, overload
+from typing import Any
 
 import numpy as np
 import pyarrow as pa
@@ -29,7 +29,6 @@ import pyarrow.compute as pc
 import pyarrow.csv as pa_csv
 
 from decoy_engine import fileaccess, reasons
-from decoy_engine._arrow_types import CALENDAR_FIRST_DAY_NUMBER, CALENDAR_LAST_DAY_NUMBER
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileAccess, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
@@ -74,7 +73,6 @@ _STRING_TYPES_64 = ("large_string", "large_binary")
 # `iter_parquet_chunks` reads these as dictionaries; both offset widths qualify.
 _STRING_TYPES = _STRING_TYPES_32 + _STRING_TYPES_64
 _pc: Any = pc
-_Batch = TypeVar("_Batch", pa.Table, pa.RecordBatch)
 
 
 class BoundedReadError(DecoyError):
@@ -419,145 +417,6 @@ def iter_csv_chunks(
             yield flush()
 
 
-_FIRST_DAY = CALENDAR_FIRST_DAY_NUMBER
-_LAST_DAY = CALENDAR_LAST_DAY_NUMBER
-_SECONDS_PER_DAY = 86_400
-_TICKS_PER_SECOND = {"s": 1, "ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
-# Larger than any zone offset in the tz database, so a row this far inside the calendar edge
-# needs no local conversion and a row this far outside it is out of the calendar in any zone.
-_ZONE_MARGIN_DAYS = 2
-_INT64_MIN = -(2**63)
-_INT64_MAX = 2**63 - 1
-
-
-def _calendar_ticks(unit_ticks_per_day: int) -> tuple[int | None, int | None]:
-    """Inclusive physical bounds of years 1 to 9999 in one unit, `None` where the unit's own
-    storage range cannot pass that edge (so no comparison scalar is built for it)."""
-    low = _FIRST_DAY * unit_ticks_per_day
-    high = (_LAST_DAY + 1) * unit_ticks_per_day - 1
-    return (low if low > _INT64_MIN else None, high if high < _INT64_MAX else None)
-
-
-def _count_outside(ints: Any, low: int | None, high: int | None) -> Any:
-    """Row mask of cells below `low` or above `high`; a `None` bound is not tested."""
-    mask = None
-    for bound, test in ((low, _pc.less), (high, _pc.greater)):
-        if bound is not None:
-            hit = test(ints, pa.scalar(bound, ints.type))
-            mask = hit if mask is None else _pc.or_(mask, hit)
-    return mask
-
-
-def _is_temporal(arrow_type: pa.DataType) -> bool:
-    return (
-        pa.types.is_date32(arrow_type)
-        or pa.types.is_date64(arrow_type)
-        or pa.types.is_timestamp(arrow_type)
-    )
-
-
-def _offending_rows(column: Any) -> int:
-    """How many cells of one column are outside calendar years 1 to 9999, 0 when the type
-    cannot hold such a cell. A dictionary column counts the rows that reference a bad entry; one
-    that references none but still holds a bad entry counts those entries, because pandas
-    converts the whole dictionary."""
-    if pa.types.is_dictionary(column.type):
-        if not _is_temporal(column.type.value_type):
-            return 0
-        referenced = _offending_rows(column.cast(column.type.value_type))
-        if referenced:
-            return referenced
-        chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
-        return sum(_offending_rows(chunk.dictionary) for chunk in chunks)
-    arrow_type = column.type
-    zone = False
-    if pa.types.is_date32(arrow_type):
-        ticks_per_day, ints = 1, column.cast(pa.int32())
-    elif pa.types.is_date64(arrow_type):
-        ticks_per_day, ints = _SECONDS_PER_DAY * 1_000, column.cast(pa.int64())
-    elif pa.types.is_timestamp(arrow_type):
-        ticks_per_day = _TICKS_PER_SECOND[arrow_type.unit] * _SECONDS_PER_DAY
-        ints, zone = column.cast(pa.int64()), arrow_type.tz is not None
-    else:
-        return 0
-    low, high = _calendar_ticks(ticks_per_day)
-    extrema = _pc.min_max(ints).as_py() if (low is not None or high is not None) else None
-    if not extrema or extrema["min"] is None:
-        return 0
-    margin = _ZONE_MARGIN_DAYS * ticks_per_day if zone else 0
-    if not (
-        (low is not None and extrema["min"] < low + margin)
-        or (high is not None and extrema["max"] > high - margin)
-    ):
-        return 0
-    utc_outside = _count_outside(ints, low, high)
-    if not zone:
-        return _sum(utc_outside)
-    # A zoned cell must fit the calendar as an instant and as a local date. The cells inside the
-    # instant range but within the margin of an edge need the local wall-clock conversion.
-    band = _count_outside(
-        ints, None if low is None else low + margin, None if high is None else high - margin
-    )
-    inside_instant = _pc.invert(pc.fill_null(utc_outside, False))
-    near_edge = _pc.and_(pc.fill_null(band, False), inside_instant)
-    local = _pc.local_timestamp(column.filter(near_edge)).cast(pa.int64())
-    return _sum(utc_outside) + _sum(_count_outside(local, low, high))
-
-
-def _sum(mask: Any) -> int:
-    return 0 if mask is None else int(_pc.sum(mask).as_py() or 0)
-
-
-def check_source_dates(data: pa.Table | pa.RecordBatch, *, table: str) -> None:
-    """Refuse a source batch or table holding a date or timestamp outside calendar years 1 to 9999.
-
-    Arrow stores dates as integers that reach years far past 9999, which pandas and Python cannot
-    hold; this check sees the integers first, so the refusal never quotes a value. Only the
-    column name and the count of offending cells leave this function.
-    """
-    for index, name in enumerate(data.schema.names):
-        count = _offending_rows(data.column(index))
-        if count:
-            # No handler is open here, so the error has no cause or context.
-            raise SourceDateUnrepresentableError(table=table, column=name, count=count)
-
-
-def checked_batches(batches: Iterable[_Batch], *, table: str) -> Iterator[_Batch]:
-    """Yield each batch (or table) only after `check_source_dates` passed it."""
-    for batch in batches:
-        check_source_dates(batch, table=table)
-        yield batch
-
-
-def check_resident_sources(sources: Mapping[str, Any] | None) -> None:
-    """Check every resident table of a run's `sources` at its entry, before any transform,
-    profile or route sees it. A lazy source is checked batch by batch as it is read."""
-    for name, source in (sources or {}).items():
-        if isinstance(source, pa.Table):
-            check_source_dates(source, table=name)
-
-
-@overload
-def checked_loader(loader: Callable[[str], pa.Table]) -> Callable[[str], pa.Table]: ...
-
-
-@overload
-def checked_loader(loader: None) -> None: ...
-
-
-def checked_loader(loader: Callable[[str], pa.Table] | None) -> Callable[[str], pa.Table] | None:
-    """A `source_loader` whose every returned table passes `check_source_dates`."""
-    if loader is None:
-        return None
-
-    def load(name: str) -> pa.Table:
-        table = loader(name)
-        check_source_dates(table, table=name)
-        return table
-
-    return load
-
-
 __all__ = [
     "PANDAS_DEFAULT_NA_VALUES",
     "BoundedReadError",
@@ -567,10 +426,6 @@ __all__ = [
     "RowExceedsMaxRowBytes",
     "SourceDateUnrepresentableError",
     "UnsupportedColumnType",
-    "check_resident_sources",
-    "check_source_dates",
-    "checked_batches",
-    "checked_loader",
     "csv_convert_options",
     "cut_batch",
     "iter_csv_chunks",

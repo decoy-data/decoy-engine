@@ -49,9 +49,7 @@ class ResidentTableSource:
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
         head = self.table.slice(0, sample_rows)
-        check_source_dates(head, table=self.name)
-        return _frame_of(head)
+        return _frame_of(check_source_dates(head, table=self.name))
 
     def to_frame(self) -> pd.DataFrame:
-        check_source_dates(self.table, table=self.name)
-        return _frame_of(self.table)
+        return _frame_of(check_source_dates(self.table, table=self.name))

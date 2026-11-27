@@ -278,8 +278,7 @@ class S3ParquetSource:
 def _checked_frame(data: bytes, table: str) -> pd.DataFrame:
     """A whole Parquet object as a frame, after its dates passed the calendar check."""
     arrow_table = pq.read_table(io.BytesIO(data))
-    check_source_dates(arrow_table, table=table)
-    return arrow_table.to_pandas()
+    return check_source_dates(arrow_table, table=table).to_pandas()
 
 
 class S3CsvSource:

@@ -7,13 +7,17 @@ valid array of the same Arrow type, used for the other chunks of a stream.
 
 `public` pins what the unchanged public oracle `run_mask_pipeline_chunked`
 does with the shape: the class name of the exception it raises, `"altered"` for
-the `-2^63` shapes (row 0 yielded as null), or `"exact"` when it returns the
-value unchanged. The time-zone shapes are `"exact"`: the plan's guarantee 1
-lists them as refused, but neither pandas 2.3.3 nor pyarrow 24.0.0 and 25.0.1
-refuses them (probe `tz3.py` in the build scratchpad), so they still guard
-route equality and exactness without being an exception to the oracle. Pinned under
-pandas 2.3.3 with pyarrow 24.0.0 (project venv) and 25.0.1 (companion venv); an
-upgrade that changes a pin fails the test and is re-pinned by review.
+a shape whose row 0 is yielded as null, or `"exact"` when it returns the
+value unchanged. Pinned under pandas 2.3.3 with pyarrow 24.0.0 (project venv) and
+25.0.1 (companion venv); an upgrade that changes a pin fails the test and is
+re-pinned by review.
+
+DATE-RANGE-SENTINEL S5 refuses a source date outside calendar years 1 to 9999 at the reader
+(plan section 4.4a). A shape that used such a value as its passthrough carrier keeps the
+claim at the edge of the calendar instead: `bad` holds the first and last representable value
+of the same unit (for a zoned column, days inside the edge so the local date also fits), and
+`refused` holds the original out-of-calendar array, which both routes must refuse.
+`refused_public` is what `public` was for that original value; the profiler cases still use it.
 """
 
 from __future__ import annotations
@@ -54,6 +58,21 @@ class Shape:
     bad: pa.Array
     good: pa.Array
     public: str
+    refused: pa.Array | None = None
+    refused_public: str | None = None
+
+
+_DAY = 86_400
+FIRST_DAY, LAST_DAY = -719_162, 2_932_896  # 0001-01-01 and 9999-12-31 as days from 1970-01-01
+
+
+def _calendar_edges(unit: str, *, zoned: bool = False) -> list[int]:
+    """First and last representable instant of years 1 to 9999 in `unit`. A zoned column uses
+    the day after the first and before the last, so the local wall-clock date fits in any zone."""
+    mult = _UNIT_MULT[unit]
+    if zoned:
+        return [(FIRST_DAY + 1) * _DAY * mult, LAST_DAY * _DAY * mult]
+    return [FIRST_DAY * _DAY * mult, (LAST_DAY + 1) * _DAY * mult - 1]
 
 
 def _dict(indices: list[Any], values: list[Any], index_type: Any = None) -> pa.Array:
@@ -66,12 +85,15 @@ def _tz_shapes() -> list[Shape]:
     for unit in ("s", "ms", "us"):
         for tz in ("America/New_York", "+05:30", "Europe/London"):
             t = pa.timestamp(unit, tz=tz)
+            first, last = _calendar_edges(unit, zoned=True)
             out.append(
                 Shape(
                     f"ts_{unit}_{tz}_far",
-                    pa.array([_FAR_SECONDS * _UNIT_MULT[unit], None, 0], t),
+                    pa.array([last, None, first], t),
                     pa.array([1, None, 2], t),
                     "exact",
+                    refused=pa.array([_FAR_SECONDS * _UNIT_MULT[unit], None, 0], t),
+                    refused_public="exact",
                 )
             )
     # pandas' nanosecond bounds: the local time of the extreme value leaves 1677..2262.
@@ -97,12 +119,18 @@ def _min_shapes() -> list[Shape]:
     for kind in ("timestamp", "duration"):
         for unit in ("s", "ms", "us", "ns"):
             t = pa.timestamp(unit) if kind == "timestamp" else pa.duration(unit)
+            # A timestamp minimum is below year 1 in every unit but ns, so it is refused at the
+            # reader; the admitted claim moves to the calendar edge.
+            edge = kind == "timestamp" and unit != "ns"
+            first, last = _calendar_edges(unit) if edge else (I64MIN, 7)
             out.append(
                 Shape(
                     f"{kind}_{unit}_min",
-                    pa.array([I64MIN, None, 7], t),
+                    pa.array([first, None, last], t),
                     pa.array([1, None, 2], t),
-                    "altered",
+                    "exact" if edge else "altered",
+                    refused=pa.array([I64MIN, None, 7], t) if edge else None,
+                    refused_public="altered" if edge else None,
                 )
             )
     return out
@@ -118,15 +146,19 @@ def _build_shapes() -> list[Shape]:
         ),
         Shape(
             "date32_far",
-            pa.array([2**31 - 1, None, 0], pa.date32()),
+            pa.array([LAST_DAY, None, FIRST_DAY], pa.date32()),
             pa.array([0, None, 1], pa.date32()),
-            "ValueError",
+            "exact",
+            refused=pa.array([2**31 - 1, None, 0], pa.date32()),
+            refused_public="ValueError",
         ),
         Shape(
             "date64_far",
-            pa.array([2**62, None, 0], pa.date64()),
+            pa.array([LAST_DAY * _DAY * 1000, None, FIRST_DAY * _DAY * 1000], pa.date64()),
             pa.array([0, None, 86400000], pa.date64()),
-            "ValueError",
+            "exact",
+            refused=pa.array([2**62, None, 0], pa.date64()),
+            refused_public="ValueError",
         ),
         Shape(
             "time32s_out_of_day",

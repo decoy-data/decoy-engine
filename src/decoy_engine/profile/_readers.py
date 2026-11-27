@@ -378,8 +378,7 @@ class LazySource:
             )
         finally:
             handle.close()
-        check_source_dates(table, table=self.table)
-        return table
+        return check_source_dates(table, table=self.table)
 
 
 @dataclass(frozen=True)
@@ -504,8 +503,7 @@ def head_frame_from_batches(
     if not collected:
         return schema.empty_table().to_pandas()
     head = pa.Table.from_batches(collected).slice(0, sample_rows)
-    check_source_dates(head, table=table)
-    return head.to_pandas()
+    return check_source_dates(head, table=table).to_pandas()
 
 
 # ---------------------------------------------------------------------

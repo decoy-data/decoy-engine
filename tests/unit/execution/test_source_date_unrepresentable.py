@@ -259,3 +259,270 @@ def test_the_adapter_run_sequential_checks_its_own_loader() -> None:
         )
     assert caught.value.column == "far" and caught.value.code == CODE
     assert "10183" not in str(caught.value)
+
+
+def _outcome(call: Any) -> BaseException | None:
+    """What `call` raised, or `None`. Lets a test fail on an assertion about the outcome instead
+    of on whatever exception the unchecked code path happens to raise."""
+    try:
+        call()
+    except Exception as exc:
+        return exc
+    return None
+
+
+def _assert_refused(exc: BaseException | None, *, column: str) -> None:
+    assert isinstance(exc, SourceDateUnrepresentableError), repr(type(exc))
+    assert (exc.table, exc.column, exc.count) == (TABLE, column, 1)
+    assert exc.code == CODE
+    assert exc.__cause__ is None and exc.__context__ is None
+    text = str(exc) + repr(exc)
+    assert "10183" not in text and "12921" not in text and str(FAR_DAY) not in text
+
+
+def _far_chunks(bad_at: tuple[int, ...]) -> list[pa.Table]:
+    """Three small chunks; each index in `bad_at` carries one far date."""
+    out = []
+    for i in range(3):
+        days = [1, 2, FAR_DAY if i in bad_at else 3]
+        ids = pa.array([i * 3, i * 3 + 1, i * 3 + 2])
+        out.append(pa.table({"id": ids, "d": pa.array(days, pa.date32())}))
+    return out
+
+
+@pytest.mark.parametrize("bad_at", [(0,), (2,)])
+def test_the_exported_native_or_oracle_entry_refuses_the_far_date(
+    bad_at: tuple[int, ...], tmp_path: Path
+) -> None:
+    from decoy_engine.execution.native import run_native_or_oracle_chunked
+
+    cfg, _, _ = _setup(tmp_path)
+    chunks = iter(_far_chunks(bad_at))
+    exc = _outcome(
+        lambda: list(
+            run_native_or_oracle_chunked(
+                cfg, chunks, table=TABLE, engine_version=support.ENGINE_VERSION
+            )
+        )
+    )
+    _assert_refused(exc, column="d")
+
+
+@pytest.mark.parametrize("entry", ["run", "run_single"])
+def test_the_adapter_resident_entries_refuse_the_far_date(entry: str) -> None:
+    fx = build_fk_relational(rows=50, width=2, orphan_frac=0.0)
+    rows = next(iter(fx.sources.values())).num_rows
+    name = next(iter(fx.sources))
+    far = pa.array([FAR_DAY] * rows, pa.date32())
+    sources = {name: fx.sources[name].append_column("far", far)}
+    kwargs: dict[str, Any] = {
+        "registry": fx.registry,
+        "relationship_graph": fx.graph(OrphanPolicy.PRESERVE),
+        "namespace_registry": fx.namespace_registry,
+    }
+    adapter = PandasExecutionAdapter()
+    if entry == "run":
+        exc = _outcome(lambda: adapter.run(fx.plan, sources, **kwargs))
+    else:
+        exc = _outcome(lambda: adapter.run_single(fx.plan, sources[name], table=name, **kwargs))
+    assert isinstance(exc, SourceDateUnrepresentableError), repr(type(exc))
+    assert exc.column == "far" and exc.code == CODE
+    assert "10183" not in str(exc)
+
+
+def _nested(shape: str) -> pa.Array:
+    far = pa.array([0, 1, FAR_DAY], pa.date32())
+    if shape == "list":
+        return pa.ListArray.from_arrays(pa.array([0, 1, 2, 3], pa.int32()), far)
+    return pa.StructArray.from_arrays([far], names=["when"])
+
+
+@pytest.mark.parametrize("shape", ["list", "struct"])
+@pytest.mark.parametrize("route", ["oracle", "native"])
+def test_a_far_date_nested_in_a_list_or_struct_is_refused_on_both_chunked_routes(
+    shape: str, route: str, tmp_path: Path
+) -> None:
+    ids, days = pa.array([0, 1, 2]), pa.array([0, 1, 2], pa.date32())
+    chunk = pa.table({"id": ids, "d": days, "n": _nested(shape)})
+    path = tmp_path / "nested.parquet"
+    pq.write_table(
+        chunk.set_column(2, "n", pa.array([None] * 3, chunk.schema.field("n").type)), str(path)
+    )
+    cols = [support.pass_col(name) for name in ("id", "d", "n")]
+    cfg = support.make_cfg(cols, path=str(path))
+    kwargs: dict[str, Any] = {"table": TABLE, "engine_version": support.ENGINE_VERSION}
+    if route == "oracle":
+        exc = _outcome(
+            lambda: list(
+                run_mask_pipeline_chunked(cfg, iter([chunk]), source_schema=chunk.schema, **kwargs)
+            )
+        )
+    else:
+        exc = _outcome(lambda: list(run_native_chunked(cfg, iter([chunk]), **kwargs)))
+    _assert_refused(exc, column="n")
+
+
+@pytest.mark.parametrize("route", ["oracle", "native"])
+def test_an_unused_far_dictionary_entry_does_not_refuse_the_job_or_reach_pandas(
+    route: str, tmp_path: Path
+) -> None:
+    """Section 4.4 counts referenced rows. The entry no row uses is dropped by the checked read,
+    so pandas never converts it."""
+    cfg, _, _ = _setup(tmp_path)
+    dictionary = pa.array([0, 1, FAR_DAY], pa.date32())
+    column = pa.DictionaryArray.from_arrays(pa.array([0, 1, 1, None], pa.int8()), dictionary)
+    chunk = pa.table({"id": pa.array([0, 1, 2, 3]), "d": column})
+    kwargs: dict[str, Any] = {"table": TABLE, "engine_version": support.ENGINE_VERSION}
+    out: list[pa.Table] = []
+    if route == "oracle":
+        exc = _outcome(
+            lambda: out.extend(
+                run_mask_pipeline_chunked(cfg, iter([chunk]), source_schema=chunk.schema, **kwargs)
+            )
+        )
+    else:
+        exc = _outcome(lambda: out.extend(run_native_chunked(cfg, iter([chunk]), **kwargs)))
+    assert exc is None, repr(type(exc))
+    assert [t.num_rows for t in out] == [4]
+
+
+# ---------------------------------------------------------------------------
+# The source-boundary guard. The checked read in `decoy_engine.io` is the one date check; this
+# test fails when a path hands Arrow data to pandas without it (a new entry like the exported
+# native chunked entry or the adapter's resident `run`, which the first S5 build missed).
+# ---------------------------------------------------------------------------
+
+import ast  # noqa: E402
+
+import decoy_engine  # noqa: E402
+
+_SRC = Path(decoy_engine.__file__).parent
+_SINKS = {"to_pandas", "to_pandas_fk_safe"}
+_ANY_CHECK = {
+    "check_source_dates",
+    "checked_batches",
+    "check_resident_sources",
+    "checked_loader",
+    "checked_chunks",
+}
+
+# A function that takes caller data and converts it, or hands it to the route that does, must
+# call its check itself: (file, qualified name) -> the checks it must call (all of them).
+_SELF_CHECKED: dict[tuple[str, str], set[str]] = {
+    ("execution/_pipeline.py", "run_pipeline"): {"check_resident_sources", "checked_loader"},
+    ("execution/_pandas_adapter.py", "PandasExecutionAdapter.run"): {"check_resident_sources"},
+    ("execution/_sequential.py", "run_sequential"): {"checked_loader"},
+    ("execution/out_of_core/_runner.py", "run_fk_out_of_core"): {"check_resident_sources"},
+    ("execution/native/_chunked_entry.py", "_run_chunked"): {"checked_chunks"},
+    ("execution/_chunked.py", "run_mask_pipeline_chunked"): {"checked_chunks"},
+    ("profile/_readers.py", "LazySource.iter_batches"): {"checked_batches"},
+    ("profile/_readers.py", "LazySource.to_table"): {"check_source_dates"},
+    ("profile/_readers.py", "head_frame_from_batches"): {"check_source_dates"},
+    ("profile/_cloud_readers.py", "_checked_frame"): {"check_source_dates"},
+    ("profile/_readers_resident.py", "ResidentTableSource.sample_frame"): {"check_source_dates"},
+    ("profile/_readers_resident.py", "ResidentTableSource.to_frame"): {"check_source_dates"},
+}
+
+# Files whose conversions run on data one of the entries above already checked, or hold no source
+# data. A new conversion in any other file fails until it is checked or listed here with a reason.
+_DOWNSTREAM_FILES: dict[str, str] = {
+    "execution/_chunked_carry.py": "carried column of a checked chunk",
+    "execution/_chunked_profile.py": "profiles the first chunk, already checked on entry",
+    "execution/_mixed_fk_bridge.py": "frames built from checked run inputs",
+    "execution/_pandas_adapter.py": "`run` is the checked sink; the rest never converts",
+    "execution/_pipeline_finalize.py": "fidelity reports over checked inputs",
+    "execution/_pipeline_full_frame.py": "diagnoses a source `run` already checked",
+    "execution/_sequential.py": "`run_sequential` is the checked sink",
+    "execution/_transforms_table.py": "transform frame of a checked resident table",
+    "execution/_unified_slice_admission.py": "admission over a checked source",
+    "execution/_unified_slice_evidence.py": "output shaped from a checked source",
+    "execution/native/_bucket_perturb_ext.py": "kernel helper over a checked chunk",
+    "execution/native/_date_shift_ext.py": "kernel helper over a checked chunk",
+    "execution/native/_faker_null_mask.py": "kernel helper over a checked chunk",
+    "execution/native/_group_key_kernel.py": "kernel helper over a checked chunk",
+    "execution/native/_operator_step.py": "kernel helper over a checked chunk",
+    "execution/native/_when_mask.py": "kernel helper over a checked chunk",
+    "execution/out_of_core/_bucket_native.py": "out-of-core batch from a checked reader",
+    "execution/out_of_core/_mask_group_c.py": "out-of-core batch from a checked reader",
+    "execution/pipeline/_post_scan.py": "post-scan over checked inputs",
+    "execution/pipeline/_source_types.py": "index of a checked source",
+    "internal/pandas_compat.py": "the conversion helper; callers pass checked tables",
+    "profile/_fixed_width_reader.py": "builds an empty frame",
+    "profile/_readers.py": "`LazySource`/`head_frame_from_batches` carry their own checks",
+    "profile/_readers_resident.py": "`_frame_of` receives data its caller checked",
+    "profile/_cloud_readers.py": "`_checked_frame` is the checked sink",
+    "verification/postmask/_column_facts.py": "post-mask facts of masked output",
+}
+
+
+def _functions(tree: ast.AST) -> dict[str, ast.AST]:
+    found: dict[str, ast.AST] = {}
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                name = f"{prefix}{child.name}"
+                found[name] = child
+                walk(child, f"{name}.")
+            else:
+                walk(child, prefix)
+
+    walk(tree, "")
+    return found
+
+
+def _called(node: ast.AST) -> set[str]:
+    names = set()
+    for call in ast.walk(node):
+        if isinstance(call, ast.Call):
+            func = call.func
+            names.add(func.id if isinstance(func, ast.Name) else getattr(func, "attr", ""))
+    return names
+
+
+def _sink_sites() -> dict[tuple[str, str], int]:
+    sites: dict[tuple[str, str], int] = {}
+    for path in sorted(_SRC.rglob("*.py")):
+        rel = path.relative_to(_SRC).as_posix()
+        tree = ast.parse(path.read_text())
+        for name, func in _functions(tree).items():
+            if isinstance(func, ast.ClassDef):
+                continue
+            own = [
+                n
+                for n in ast.walk(func)
+                if isinstance(n, ast.Call)
+                and (getattr(n.func, "id", None) or getattr(n.func, "attr", None)) in _SINKS
+            ]
+            if own:
+                sites[(rel, name)] = len(own)
+    return sites
+
+
+def test_every_listed_entry_still_calls_its_check() -> None:
+    for (rel, qualname), required in _SELF_CHECKED.items():
+        tree = ast.parse((_SRC / rel).read_text())
+        func = _functions(tree).get(qualname)
+        assert func is not None, f"{rel}::{qualname} is gone; update the guard"
+        missing = required - _called(func)
+        assert not missing, f"{rel}::{qualname} no longer calls {sorted(missing)}"
+
+
+def test_no_path_converts_source_data_without_a_check() -> None:
+    unchecked = [
+        f"{rel}::{name}"
+        for (rel, name) in _sink_sites()
+        if (rel, name) not in _SELF_CHECKED and rel not in _DOWNSTREAM_FILES
+    ]
+    assert not unchecked, (
+        "Arrow data reaches pandas here without `decoy_engine.io.check_source_dates`: "
+        f"call the checked read, or list the file in _DOWNSTREAM_FILES with the reason: {unchecked}"
+    )
+
+
+def test_the_guard_lists_name_real_files_and_sinks() -> None:
+    sites = _sink_sites()
+    sink_files = {rel for rel, _ in sites}
+    stale = [rel for rel in _DOWNSTREAM_FILES if rel not in sink_files]
+    assert not stale, f"no conversion left in {stale}; drop them from _DOWNSTREAM_FILES"
+    assert set().union(*_SELF_CHECKED.values()) <= _ANY_CHECK

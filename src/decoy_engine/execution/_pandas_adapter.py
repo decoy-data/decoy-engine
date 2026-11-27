@@ -86,6 +86,7 @@ from decoy_engine.expressions._when_parser import validate_plan_when
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.instrumentation.timing import TimingCollector, timed_strategy, use_collector
+from decoy_engine.io import check_resident_sources
 from decoy_engine.keyprovider import require_mask_key
 from decoy_engine.plan._types import ColumnSeed
 
@@ -185,6 +186,8 @@ class PandasExecutionAdapter:
 
         `pin_degenerate_faker` (C5c-ii, full-frame callers only): see
         `apply_degenerate_faker_pin`."""
+        # `run` is a public entry: its tables reach pandas below whatever route called it.
+        sources = check_resident_sources(sources)
         # Every seed's `when`, before a handler, provider or sink runs: a bad predicate on a
         # later table would otherwise surface after earlier output was written.
         validate_plan_when(plan)

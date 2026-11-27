@@ -17,6 +17,7 @@ import pytest
 from decoy_engine import run_pipeline
 from decoy_engine.config import PipelineConfig
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.io import SourceDateUnrepresentableError
 
 _EV = "full-frame-range-test"
 
@@ -54,14 +55,16 @@ def _run(tmp_path, columns: list[dict], src: pa.Table):
 _MASK_SIBLING = {"name": "name", "strategy": "hash", "namespace": "n"}
 
 
-def test_far_date_raises_coded_error_naming_the_column(tmp_path) -> None:
-    # date32 at ~year 12921 (+4,000,000 days): valid in Arrow, overflows pandas.
+def test_far_date_is_refused_at_the_source_naming_the_column(tmp_path) -> None:
+    # date32 at ~year 12921 (+4,000,000 days): valid in Arrow, outside the Python calendar. The
+    # source read refuses it before the full-frame conversion (DATE-RANGE-SENTINEL S5, plan
+    # section 4.4a), so `full_frame_value_unrepresentable` is tested by the time64 case below.
     src = pa.table({"d": pa.array([4_000_000, 4_000_001], pa.date32()), "name": ["alice", "bob"]})
-    with pytest.raises(ExecutionError) as exc:
+    with pytest.raises(SourceDateUnrepresentableError) as exc:
         _run(tmp_path, [{"name": "d", "strategy": "passthrough"}, _MASK_SIBLING], src)
-    assert exc.value.code == "full_frame_value_unrepresentable"
-    assert "'d'" in str(exc.value)  # the offending column is named
-    assert "'t'" in str(exc.value)  # and its table
+    assert exc.value.code == "source_date_unrepresentable"
+    assert (exc.value.table, exc.value.column, exc.value.count) == ("t", "d", 2)
+    assert "12921" not in str(exc.value)
 
 
 def test_sub_microsecond_time_raises_coded_error(tmp_path) -> None:

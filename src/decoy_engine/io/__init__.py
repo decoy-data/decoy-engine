@@ -16,15 +16,17 @@ from decoy_engine.io.bounded_reader import (
     RowExceedsMaxRowBytes,
     SourceDateUnrepresentableError,
     UnsupportedColumnType,
-    check_resident_sources,
-    check_source_dates,
-    checked_batches,
-    checked_loader,
     csv_convert_options,
     cut_batch,
     iter_csv_chunks,
     iter_parquet_chunks,
     own_array,
+)
+from decoy_engine.io.source_dates import (
+    check_resident_sources,
+    check_source_dates,
+    checked_batches,
+    checked_loader,
 )
 
 __all__ = [

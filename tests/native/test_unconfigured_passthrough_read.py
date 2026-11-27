@@ -204,9 +204,17 @@ def test_genuine_reader_keeps_its_route_listing_and_coded_error(
 _DICT = BY_NAME["dict_null_referenced"]
 
 
+def _iso_dictionary(values: list[str], indices: list[int]) -> pa.Array:
+    return pa.DictionaryArray.from_arrays(pa.array(indices, pa.int32()), pa.array(values))
+
+
 class _DateShape:
-    good = pa.array([18262, 18263, 18264], pa.date32())
-    bad = pa.array([2**31 - 1, 18263, 18264], pa.date32())
+    """The ISO-date text a `windowed_date` anchor reads. The bad shape repeats a category, which
+    pandas refuses with the coded error. (An out-of-calendar `date32` anchor no longer gets this
+    far: the source read refuses it, see `test_a_far_date_anchor_is_refused_at_the_source`.)"""
+
+    good = _iso_dictionary(["1960-01-01", "1960-01-02", "1960-01-03"], [0, 1, 2])
+    bad = _iso_dictionary(["1960-01-01", "1960-01-01", "1960-01-03"], [0, 1, 2])
 
 
 _DATE = _DateShape()
@@ -456,3 +464,34 @@ def test_bytes_literal_in_a_predicate_reads_every_passthrough_column() -> None:
     """A string token that is not a plain `str` literal cannot be read safely."""
     entry = {**redact("s"), "when": "s == b'x'"}
     assert read_set([entry], ["x", "y"], get_default_registry()) == {"x", "y"}
+
+
+@pytest.mark.parametrize("forced", [False, True], ids=["plain", "companion_missing"])
+def test_a_far_date_anchor_is_refused_at_the_source(
+    forced: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The anchor shape this test used to carry as its bad chunk is out of the calendar, so the
+    reader refuses it before `windowed_date` sees it (plan section 4.4a)."""
+    from decoy_engine.io import SourceDateUnrepresentableError
+
+    columns, ref, _shape, good = _sibling_case("windowed_date")
+    columns = [passthrough(ref), *columns]
+    far = pa.array([2**31 - 1, 18263, 18264], pa.date32())
+    chunks = [good[0], good[0].set_column(good[0].schema.get_field_index(ref), ref, far)]
+    config = make_config(columns, global_settings=_WARN)
+    if forced:
+        config = make_config([*columns, hash_col("h")], global_settings=_WARN)
+        chunks = [t.append_column("h", pa.array(["p", "q", "r"])) for t in chunks]
+        monkeypatch.setitem(__import__("sys").modules, "decoy_engine_native", None)
+    gen = run_mask_chunked(
+        config,
+        chunks,
+        table=TABLE,
+        engine_version=ENGINE_VERSION,
+        key_provider=key_provider(),
+    )
+    next(gen)
+    with pytest.raises(SourceDateUnrepresentableError) as info:
+        next(gen)
+    assert (info.value.table, info.value.column, info.value.count) == (TABLE, ref, 1)
+    assert str(2**31 - 1) not in str(info.value)

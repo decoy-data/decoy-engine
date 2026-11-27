@@ -400,10 +400,9 @@ calendar date decides: a cell at the last instant of year 9999 UTC is refused in
 UTC, because its local date is in year 10000. A date outside the calendar cannot be listed in
 `preserve_values`; fix or drop it in the source.
 
-A dictionary-encoded date column is checked by the dates in its dictionary. If the dictionary
-holds a date outside the calendar, the run stops even when no row uses that entry, and the count
-in the message is the number of such dictionary entries. Pandas would convert every entry, so
-letting one pass would fail later with the year in the error text.
+A date nested in a list, map or struct column is checked too. A dictionary-encoded date column
+is checked by the rows that use each entry, so an out-of-calendar entry that no row uses does not
+stop the run. The read drops that entry before the column goes on, so no later step converts it.
 
 The same limit applies to a generator column fitted from a datetime snapshot (the legacy
 `ColumnGenerator` `distribution` sampler; the V2 config `type: distribution` is the parametric

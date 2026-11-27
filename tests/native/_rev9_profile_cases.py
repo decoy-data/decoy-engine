@@ -107,9 +107,12 @@ def _cases() -> dict[str, pa.Array]:
 CASES: dict[str, pa.Array] = _cases()
 
 # The test 15 shapes pandas converts and profiles (`public` is "exact" or "altered").
+# S5 moved the carrier of some shapes inside the calendar; the profiler keeps the original value.
 for _shape in SHAPES:
-    if _shape.public in ("exact", "altered"):
-        CASES[f"shape_{_shape.name}"] = pa.concat_arrays([_shape.bad] * (N // 3))
+    _public = _shape.refused_public or _shape.public
+    if _public in ("exact", "altered"):
+        _array = _shape.bad if _shape.refused is None else _shape.refused
+        CASES[f"shape_{_shape.name}"] = pa.concat_arrays([_array] * (N // 3))
 
 
 def case_ids() -> list[str]:
