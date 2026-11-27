@@ -21,6 +21,8 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - `ValidatorFinding` gains `failing_row_count` and lists at most `FINDING_INDEX_CAP` (10,000) row positions in `failing_row_indices` (all of them under quarantine `validation_fail`); `ValidationReport` gains `results` and its `elapsed_ms` is the time spent folding rows; `parent_window_respected` parses each date column with the format of its first value that pandas would use, and a parent table without its key or window column raises `ValidatorStateError` instead of a pyarrow `KeyError`.
 - a job with no foreign keys under `auto` is now refused with `nonfk_full_frame_capacity_exceeded` in three more places where it used to start and be killed for memory: before a lazy Parquet source is read whole, before a resident table is copied for its transforms, and after a mixed generate and mask job declines to the full-frame route.
 - the physical `plan_hash` and `activation_hash` of every unified-slice job change once, because the provider capability matrix gains a `draw` field and the registry fingerprint hashes it. `pipeline_config_hash` does not change, and no output value changes.
+- `run_pipeline` with `subset_request="skip"` now refuses an invalid `subset:` edge at `split_subset_config` (the same codes as when the subset stage runs). 0.28.4 skipped the check under `skip`, so a config that ran there can now fail at the split.
+- A temp directory that cannot take a new directory now stops the run with `runtime/scratch_root_unusable`. Before, the engine moved to another temp directory. `fileaccess.scratch_root()` chooses the directory from the first non-empty of `TMPDIR`, `TEMP` and `TMP`.
 
 ### Added (internal safe-text leaf, F31 AE1a1, 2026-11-24)
 
@@ -90,7 +92,7 @@ The range exit uses one function, `kernel.integer_width_exit_mask`, and one limi
 
 ### Fixed (native text_redact detector, TEXT-REDACT-RUST-SPLICE S0, 2026-11-24)
 
-The Rust text_redact detector now declines a cell whose byte length does not fit its 32-bit offsets. `text_redact_candidates` and `text_mask_detect_splice` return their usual `None` decline for such a cell, and every released core already sends a declined cell to the Python path. Before this, a cell longer than 4 GiB could wrap an end offset and leave part of a match unredacted. The release wheel smoke test now also refuses a wheel built with the test-only `test-detector-offset-limit` feature.
+The Rust text_redact detector now declines a cell whose byte length does not fit its 32-bit offsets. `text_redact_candidates` and `text_mask_detect_splice` return their usual `None` decline for such a cell, and every released core already sends a declined cell to the Python path. Before this, a cell 4 GiB or more could wrap an end offset and leave part of a match unredacted. The release wheel smoke test now also refuses a wheel built with the test-only `test-detector-offset-limit` feature.
 
 ### Changed (one scratch root and temp budget, F25 G6-1, 2026-11-24)
 
