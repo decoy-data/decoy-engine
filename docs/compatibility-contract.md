@@ -281,6 +281,14 @@ disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templ
 platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
 (DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
 
+**Pre-GA change (starter model hits, INIT-SCAN-SCAFFOLD E2, 2026-11-26).** `ColumnSuggestion.live` changes meaning.
+It said "written into the config", which is true of every starter entry. It now says a deterministic rule chose the
+entry (regex, declared key, integer-unique hash, fallback) and is false when a classifier chose it. `starter_config`
+reads `TableScan.model_hits`: a high-band classifier hit writes its detector's entry only when no regex match is
+confident, and NER or review-band hits add note evidence only. `ColumnSuggestion.decided_by` is new and read-only.
+`starter_config` now refuses a scan with a `scan_header_suspect` table with the new reason `config/starter_header_suspect`
+(a coded, value-free `PipelineConfigError` at `tables[<index>]`).
+
 **Pre-GA correction (COLUMN-SHAPE E1a, 2026-11-21).** Breaking for stored artifacts, no shim. A profile
 column now carries `shape` (`text`, `date`, `timestamp_tz`, `timestamp_naive`, `integer`, `float`, `decimal`,
 `decimal_wide`, `boolean`, `other`, `unknown`). Profile JSON gains the field and `schema_version` stays 1: a
