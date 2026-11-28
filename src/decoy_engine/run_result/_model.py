@@ -278,6 +278,8 @@ class Route(_Model):
     route_reason: SafeRef | None
     chunked: Flag
     native: NativeRoute | None
+    # Optional under /v1: left out of every dump until set, so an old document keeps its wire form.
+    sink: SafeRef | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class Delivery(_Model):

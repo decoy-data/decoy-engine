@@ -456,8 +456,12 @@ enum values; the read model ignores added fields, reads a new enum value as a st
 reason it cannot validate as `null`. Numbers and flags are strict on both sides (`False` is not a `0`,
 `"1"` is not a `1`). The `schema` key is required on read and accepts only `decoy-run-result/v1`: a
 document of another major (`/v2`), free text or a missing key is refused, never read as v1; a reader
-that wants `/v2` support adds a new model under a new tag. Hand-authored corpus samples (the v1 sample and its cross-minor variants) are in
-`tests/integration/compat_corpus/run_result/`.
+that wants `/v2` support adds a new model under a new tag. `route.sink` (RUN-STREAM E6) is an
+optional reference under `/v1`: `"used"` or one reason code that says why the caller did not use an
+output sink. It is left out of the written payload while unset. An older writer omits it, and a
+reader reads the missing field as `null`. A value that is not a safe reference (free text, a path)
+is refused on write. `build_run_result` takes it as `sink=`, default `None`. Hand-authored corpus
+samples (the v1 sample and its cross-minor variants) are in `tests/integration/compat_corpus/run_result/`.
 
 `decoy-record/v1` is the envelope of the local record library (`decoy_engine.records`): kind, payload tag, a
 content-addressed `id` (SHA-256 of the canonical envelope without `id`, parsed first so a reformatted file keeps
@@ -927,8 +931,10 @@ only this site moves.
   line in a `changelog.d` fragment that names the object and, for a parameter, the parameter, both in backticks.
   It also includes `read_csv_source`, `CsvDialect` and `resolve_csv_dialect`
   (CLI-DIALECT, 2026-11): `read_csv_source(path, dialect, *, table, dtype=None,
-  nrows=None, chunksize=None, file_access=None, field_key="source.path")` reads
-  a CSV source under its declared dialect. `dtype=str` with the default dialect
+  nrows=None, chunksize=None, file_access=None, field_key="source.path",
+  columns=None, compression="infer")` reads
+  a CSV source under its declared dialect. `compression` is pandas' argument; the default infers
+  it from the declared file name. `dtype=str` with the default dialect
   equals `pd.read_csv(path, dtype=str)`. A headerless file is width-checked and
   a refusal is `PipelineValidationError` with `source_file.column_count_mismatch`,
   `source_file.nul_byte` or `source_file.lone_cr`; the message is
@@ -1246,7 +1252,12 @@ only this site moves.
   table. When the output streams, the table is read as record batches re-cut to the resident
   chunk boundaries and never materialized; otherwise it is materialized once before the lane.
   A gated column (an integer column, or a bucketize source column) with no footer null count
-  declines auto-chunk with `lazy_source_null_count_unavailable`. New error codes:
+  declines auto-chunk with `lazy_source_null_count_unavailable`. A compressed CSV source (gzip,
+  bzip2, xz, zip, tar or zstd, by the declared file name) now gets the lazy CSV backend too
+  (RUN-STREAM E6): pandas decompresses it as a stream, one chunk in memory, and a decoder
+  failure mid-stream is the value-free refusal `chunked_passthrough_value_unrepresentable`, never
+  the decoder's text. Before, `build_lazy_source` returned `None` for it and the run read the file
+  whole. New error codes:
   `lazy_source_changed` (the opened file's footer facts differ from the routing snapshot, raised
   before the first chunk), `lazy_source_row_count_mismatch` (the stream's row total differs from
   the footer's, raised before commit) and `hold_back_spill_unavailable` (a streamed run's schema
@@ -1255,7 +1266,15 @@ only this site moves.
   use_threads=True)`, which now returns an `OpenedLazyBatches` owner (`schema`, `num_rows`,
   row-group facts, `batches`, an idempotent `close()`) instead of a `(schema, iterator)` pair.
   `ParquetTransactionalSink.spill_parent` is a read-only property (the target's parent, where the
-  hold-back spills); it is not part of the `TransactionalSink` protocol. Every routed table's
+  hold-back spills); it is not part of the `TransactionalSink` protocol. A caller's own sink may
+  provide three optional members the engine reads by name (RUN-STREAM E6): `spill_parent`, a
+  directory on the output's filesystem for a schema hold-back (without it the run fails with
+  `hold_back_spill_unavailable`); `committed_table_path(table)`, the path the table is published
+  to, which the quarantine alias guard compares against the sidecar path; and
+  `bounded_write_batches = True`, the marker that `write_batches` appends one batch at a time and
+  never holds the stream (without it a generated table does not stream, reason
+  `sink_not_bounded`). None of the three is part of the `TransactionalSink` protocol, and a sink
+  that lacks one is still accepted. Every routed table's
   input block (`quality_metrics["auto_chunk"]["input"]`, written `auto_chunk.input`) records `mode`, `reason` and, for a lazy table,
   `source_row_groups` and `source_max_row_group_rows`; `execution.loaded_fully_in_memory` is
   `False` when every source of a streamed run was read lazily. A caller that passes resident
