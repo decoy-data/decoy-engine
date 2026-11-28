@@ -298,5 +298,7 @@ def test_chunked_read_passthrough_unrepresentable_value_is_value_free() -> None:
     exc = caught.value
     assert exc.code == "chunked_passthrough_value_unrepresentable"
     _assert_value_free(exc, ("3001", "non-zero nanoseconds"), code=None, chained=True)
-    assert type(exc.__cause__) is pa.lib.ArrowInvalid
+    # The cause is the source-read choke point's value-free coded error, not pyarrow's.
+    assert isinstance(exc.__cause__, ExecutionError)
+    assert exc.__cause__.code == "source_column_unrepresentable"
     assert "chunk 0: passthrough column 'x' holds a value pandas cannot represent. " in str(exc)

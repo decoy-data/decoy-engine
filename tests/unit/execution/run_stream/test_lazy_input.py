@@ -27,8 +27,8 @@ from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _pipeline_auto_chunk as ac
 from decoy_engine.execution import _transactional_sink
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
-from decoy_engine.execution.pipeline import _post_scan
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.verification.postmask import PostScanBlockedError

@@ -44,7 +44,11 @@ from pydantic_core import PydanticCustomError, ValidationError
 
 from decoy_engine import reasons
 from decoy_engine._field_names import repeated_names
-from decoy_engine.config._delivery import DeliveryConfig
+from decoy_engine.config._delivery import (
+    DeliveryConfig,
+    best_effort_text,
+    is_unreleased_delivery_mode,
+)
 from decoy_engine.config._generate_options import problem_details
 from decoy_engine.config._generate_relational import (
     aggregate_problems,
@@ -193,6 +197,16 @@ class PipelineConfig(BaseModel):
         raise PydanticCustomError(
             str(reasons.config.PIPELINE_NAME_INVALID), "name is not an acceptable pipeline name."
         )
+
+    @field_validator("delivery")
+    @classmethod
+    def _best_effort_is_not_released(cls, value: DeliveryConfig) -> DeliveryConfig:
+        """Best-effort delivery is not built yet; row 61b removes this refusal when it ships."""
+        if is_unreleased_delivery_mode(value.mode):
+            raise PydanticCustomError(
+                str(reasons.config.DELIVERY_BEST_EFFORT_UNRELEASED), best_effort_text()
+            )
+        return value
 
     @model_validator(mode="after")
     def _f06_protected_quarantine_required(self) -> PipelineConfig:

@@ -18,7 +18,12 @@ Callers catch `except PlanCompileError as e:` and inspect `e.code`,
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from decoy_engine.errors import DecoyError
+
+if TYPE_CHECKING:
+    from decoy_engine._config_text import Refusal
 
 
 class PlanCompileError(DecoyError):
@@ -45,3 +50,11 @@ class PlanCompileError(DecoyError):
             rendered += f" {path}:"
         rendered += f" {message}"
         super().__init__(rendered)
+
+
+def refusal_error(code: str, refusal: Refusal) -> PlanCompileError:
+    """The compile error for a built refusal: its key as the path, its detail as the message.
+
+    The one mapping from `config_refusal` output to `PlanCompileError`: the message omits the
+    position because `PlanCompileError` prints its `path` itself."""
+    return PlanCompileError(code=code, path=refusal.key, message=refusal.detail)

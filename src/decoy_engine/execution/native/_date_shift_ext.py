@@ -50,9 +50,11 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.internal.pandas_compat import arrow_to_series
 from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as _BUCKET_REASON
 from decoy_engine.transforms.date_shift import order_window
 
@@ -206,7 +208,7 @@ def native_date_shift(
         # The oracle's own series preparation: an extension dtype is coerced to
         # object before parsing. `to_pandas()` of a pa.string() column is object
         # dtype with None for nulls, matching the frame the oracle reads.
-        series = col.to_pandas()
+        series = arrow_to_series(col, on_unrepresentable=source_column_unrepresentable())
         if pd.api.types.is_extension_array_dtype(series.dtype):
             series = series.astype(object)
         parsed = pd.to_datetime(series, format=date_format, errors="coerce")

@@ -256,6 +256,7 @@ config:
           namespace: service_date_ns
           provider_config:
             bucket: month
+            date_format: "%Y-%m-%d"
 
     # === claim_lines ===
     - name: claim_lines

@@ -34,7 +34,7 @@ recommendations, and the 10 compliance disguises (`hipaa`, `pci`, `gdpr` and the
 | SCAN-04 | Save the same profile with the explicit include-values option. | Values are present, and the document records that the raw policy was used. |
 | SCAN-05 | Profile the same file twice, in two processes. Profiling has no seed option; sampling uses a fixed internal `random_state` of 42. | The two profiles match field for field. |
 | SCAN-06 | Profile a table larger than `sample_row_cap` twice, in two processes. | Both profiles come from the same sampled rows and match. No reproducibility warning is expected: the sample is fixed by design. |
-| SCAN-07 | Request `detectors: [classifier]` without `regex`; then list a detector twice. | Both refused with `config.detectors_invalid`. |
+| SCAN-07 | Request `detectors: [classifier]` without `regex`; then list a detector twice. | The first parses as `[regex, classifier]` (regex always runs). The repeat is refused with `config.detectors_invalid`. |
 | SCAN-08 | Request `ner` on a machine without the spaCy model. | A clear status that the model is unavailable (`ner_status`, `ModelUnavailableError`). No traceback, and no silent skip. |
 | SCAN-09 | Add a `pre_scan` block to a config and compare the plan hash. | Unchanged. |
 | SCAN-10 | Load all disguises with `load_disguises()`. | Ten load: `ccpa`, `cpni`, `default`, `ferpa`, `gdpr`, `glba`, `hipaa`, `pc`, `pci`, `sox`, with the rule counts in `docs/capability-matrix.md`. |
