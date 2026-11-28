@@ -133,7 +133,10 @@ def test_post_validation_runner_does_not_capture_exception_text_or_mutate_result
         config={"post_validation": True},
     )
     assert summary is not None and summary.failed_checks == ("boom",)
-    assert "4111" not in repr(summary)
+    # Look for the whole planted token: a short digit run can turn up by chance
+    # inside the random timing floats that the summary carries.
+    assert "leaky cell value" not in repr(summary)
+    assert "4111111111111111" not in repr(summary)
     assert summary.quality_warnings[0].detail == {"error_type": "ValueError"}
     assert "quality_summary" not in result.quality_metrics
 
