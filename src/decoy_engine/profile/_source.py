@@ -41,12 +41,12 @@ from decoy_engine._field_names import DuplicateFieldNamesError
 from decoy_engine._lexeme import profile_descriptors
 from decoy_engine.contracts.column_shape import source_format_for
 from decoy_engine.fileaccess import FileAccess, entry_point
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._declared_columns import (
     DeclarationRequest,
     PreparedDeclaredSources,
     prepare_declared_sources,
 )
-from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._readers import (
     BOUNDED_FALLBACK_ROWS,
     LazySource,
@@ -324,7 +324,7 @@ def _profile_one_source(
     return result
 
 
-class _Unconvertible(Exception):
+class _UnconvertibleError(Exception):
     """The whole-sample conversion found a column pandas cannot hold (raised by the callback)."""
 
     def __init__(self, column: str | None) -> None:
@@ -333,7 +333,7 @@ class _Unconvertible(Exception):
 
 
 def _park_unconvertible(column: str | None) -> NoReturn:
-    raise _Unconvertible(column) from None
+    raise _UnconvertibleError(column) from None
 
 
 def _profile_bounded(
@@ -359,7 +359,7 @@ def _profile_bounded(
     # counted, never profiled. An exact count already says the source is larger.
     table = reader.sample_table(sample_rows) if isinstance(reader, ArrowSampleSource) else None
     sample_df: pd.DataFrame | None = None
-    unconvertible: _Unconvertible | None = None
+    unconvertible: _UnconvertibleError | None = None
     if table is None:
         sample_df = reader.sample_frame(sample_rows)
         proven_total = len(sample_df)
@@ -367,7 +367,7 @@ def _profile_bounded(
         proven_total = table.num_rows
         try:
             sample_df = arrow_to_frame(table, on_unrepresentable=_park_unconvertible)
-        except _Unconvertible as exc:
+        except _UnconvertibleError as exc:
             unconvertible = exc
     if (
         not row_count.exact
