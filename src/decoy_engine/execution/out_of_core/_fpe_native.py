@@ -27,6 +27,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR, RUST_COMPANION
+from decoy_engine.execution.native import fpe_checksum_config_rejection
 from decoy_engine.execution.native._crypto_ext import FpeConfig, FpeConfigError
 from decoy_engine.execution.native._fpe_route import fpe_fail_closed_error
 
@@ -43,12 +44,12 @@ def decline_reason(
 ) -> tuple[FpeConfig | None, str | None]:
     """`(config, None)` when `column` can run on the compiled kernel, else `(None, reason)`.
 
-    The order matches the sequential admission: a truthy checksum first (the kernel has no
-    checksum path), then the namespace, then a config the Python path would raise on, so the
+    The order matches the sequential admission: the checksum decision first, then the namespace, then a config the Python path would raise on, so the
     Python path raises it as before; the exact-`string` source check comes last."""
     cfg = provider_config_to_dict(seed.provider_config)
-    if cfg.get("checksum"):
-        return None, f"fpe_checksum_not_native:{column}"
+    checksum_reason = fpe_checksum_config_rejection(column, cfg, context="payload")
+    if checksum_reason is not None:
+        return None, checksum_reason
     if seed.namespace is None:
         return None, f"fpe_requires_namespace_stays_python:{column}"
     config = FpeConfig.from_mapping(cfg)

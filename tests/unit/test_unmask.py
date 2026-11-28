@@ -276,3 +276,20 @@ class TestErrors:
         with pytest.raises(ExecutionError) as exc:
             unmask_pipeline(cfg, {"accounts": tbl})
         assert exc.value.code == "fpe_charset_duplicate_symbols"
+
+
+class TestUnrecognizedChecksumScheme:
+    """A configured scheme the registry does not list never reaches a report or an error."""
+
+    SECRET_URL = "https://user:hunter2@example.invalid/x"
+
+    @pytest.mark.parametrize("values", [[], [None, None]])
+    def test_empty_or_all_null_column_refuses_without_echoing_the_scheme(
+        self, tmp_path, values
+    ) -> None:
+        cfg = _config(tmp_path, [_fpe_col("acct")])
+        masked = {"accounts": pa.table({"acct": pa.array(values, pa.string())})}
+        cfg["tables"][0]["columns"][0]["provider_config"]["checksum"] = self.SECRET_URL
+        with pytest.raises(ExecutionError) as info:
+            unmask_pipeline(cfg, masked)
+        assert "hunter2" not in f"{info.value} {info.value!r} {info.value.args}"

@@ -8,11 +8,12 @@ known-answer self-test and its own wrapper. `load_compiled_fpe_kernel` parallels
 vector through the FF1 entry point at load, and return a thin wrapper, else raise
 `CryptoExtensionUnavailableError` before any output (the fail-before-output contract).
 
-The compiled kernel reproduces only the non-checksum FF1 path: checksum modes decline to the
-pandas oracle (C6a plan §3g), and config-level fail-closed cases (duplicate / degenerate
+The compiled kernel reproduces only the non-checksum FF1 path today: a checksum config declines
+to the pandas oracle at route admission, and the wrapper refuses it through the same decision
+(`fpe_checksum_rejection`). Config-level fail-closed cases (duplicate / degenerate
 charset, missing namespace, tweak construction) are handled before dispatch so the oracle's
 shipped handler raises them (plan §3d grading split). This wrapper therefore sees only
-valid, non-checksum configs; it computes NO warnings (the Rust kernel computes none, and the
+valid configs the checksum decision admits; it computes NO warnings (the Rust kernel computes none, and the
 route adapter computes them from the original input at the oracle invocation scope, plan §3e).
 """
 
@@ -40,6 +41,7 @@ from ._crypto_ext import (
     _require_mask_key,
 )
 from ._crypto_reference import _row_error
+from ._operator_config_rejections import fpe_checksum_rejection
 
 __all__ = [
     "load_compiled_fpe_kernel",
@@ -129,13 +131,11 @@ class _CompiledFpeKernel:
         try:
             mask_key = _require_mask_key(mask_key, "fpe")
             charset, preserve_sep, validate_luhn, checksum = config._resolve()
-            if (
-                checksum is not None
-            ):  # pragma: no cover - checksum declines to the oracle before here
-                raise AssertionError(
-                    "fpe checksum mode must decline to the pandas oracle before the native kernel "
-                    f"(column {tweak_column!r}); the native FF1 kernel has no checksum path."
-                )
+            refusal = fpe_checksum_rejection(tweak_column, checksum, charset, context="payload")
+            if refusal is not None:
+                # Route admission declines first; this refuses a direct call before any FFI.
+                # The code only: the message carries no column name or value.
+                raise ValueError(refusal.partition(":")[0])
             tweak = build_ff1_tweak(
                 FF1_TWEAK_SCOPE_JOIN_GROUP if config.join_group else FF1_TWEAK_SCOPE_COLUMN,
                 config.join_group or tweak_column,
