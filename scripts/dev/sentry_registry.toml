@@ -270,7 +270,7 @@ baseline = "tests/sentry/baselines/group-by-single-reader.json"
 id = "lossless-int-columns"
 baseline = "tests/sentry/baselines/lossless-int-columns.json"
 approved_growth = [
-  { key = "adapter_fk_safe_columns::execution/chunked/_oracle_step.py::oracle_chunk_step", decision = "owner 2026-11-15 ratchet 1:1 re-home rule; count unchanged at 19, old key gone; plan section 5" },
+  { key = "adapter_fk_safe_columns::execution/chunked/_oracle_step.py::oracle_chunk_step", decision = "owner 2026-11-15 ratchet 1:1 re-home rule; count unchanged at 17, old key gone; plan section 5" },
 ]
 
 [[sentry]]

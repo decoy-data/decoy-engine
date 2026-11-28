@@ -97,7 +97,7 @@ from decoy_engine.execution.native._route_decline_codes import (
     table_decline,
 )
 from decoy_engine.execution.native._when_admission import first_when_decline
-from decoy_engine.execution.native.chunked._route_scan import scan_table_nodes
+from decoy_engine.execution.native.chunked import scan_table_nodes
 from decoy_engine.generation.pool import PoolCache
 from decoy_engine.profile import DeclarationRequest
 from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
