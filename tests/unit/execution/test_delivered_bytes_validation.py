@@ -232,7 +232,9 @@ def test_a_credential_in_a_validator_param_is_not_echoed_by_run_pipeline(tmp_pat
 # --- 6. non-finite and non-string parameters ------------------------------------------------------
 
 
-@pytest.mark.parametrize("threshold", ["NaN", "nan", "inf", "-Infinity", float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "threshold", ["NaN", "nan", "inf", "-Infinity", float("nan"), float("inf")]
+)
 def test_a_non_finite_threshold_is_refused_not_ignored(threshold: Any) -> None:
     with pytest.raises(ValueError) as caught:
         ValidationSession(
@@ -248,7 +250,7 @@ def test_an_ordinary_numeric_string_threshold_still_works() -> None:
 
 
 _RELATIONSHIP_PARAMS = {
-    "parent_table": {"url": _SECRET_URL},
+    "parent_table": "a",
     "parent_column": "x",
     "child_table": "b",
     "child_column": "y",

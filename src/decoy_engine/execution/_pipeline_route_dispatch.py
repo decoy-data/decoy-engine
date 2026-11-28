@@ -26,7 +26,10 @@ from decoy_engine.declared_casting._boundary import open_cast_run
 from decoy_engine.execution import _pipeline_route_exec as _route_exec
 from decoy_engine.execution import _pipeline_sources as _psrc
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution._transactional_sink import TransactionalSink
+from decoy_engine.execution._transactional_sink import (
+    TransactionalSink,
+    has_whole_table_contract,
+)
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
 from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run, current_duckdb_run
 from decoy_engine.execution.pipeline.post_scan import attach_cast_run, tee_reader
@@ -106,12 +109,12 @@ def complete_resident_validation(
 
 
 def _plain_callable_sink(sink: object) -> bool:
-    """True for a bare ``Callable[[str, pa.Table], None]``: no write/commit/abort contract."""
+    """True for a callable that is not a whole-table transactional sink (the sequential route's test)."""
     return (
         sink is not None
         and callable(sink)
         and not isinstance(sink, TransactionalSink)
-        and not callable(getattr(sink, "write", None))
+        and not has_whole_table_contract(sink)
     )
 
 

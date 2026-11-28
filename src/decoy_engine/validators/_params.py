@@ -8,6 +8,7 @@ skips the check. Messages name the validator and the parameter, never the value.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -24,16 +25,17 @@ from decoy_engine._config_text import (
 )
 from decoy_engine.errors import ConfigRuleError
 
-__all__ = ["ParamError", "compile_pattern", "numeric_param"]
+__all__ = ["ParamError", "compile_pattern", "numeric_param", "string_param"]
 
 
 class _Why(Enum):
-    """The three refusals a validator parameter can earn. `config_refusal` takes its problem,
+    """The refusals a validator parameter can earn. `config_refusal` takes its problem,
     expectation and hint as literals, so each has its own call below."""
 
     NOT_AN_INTEGER = "integer"
     NOT_A_NUMBER = "number"
     BAD_PATTERN = "pattern"
+    NOT_A_STRING = "string"
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,13 @@ def _refusal(refused: _Refused, position: ConfigPosition) -> Refusal:
     if refused.why is _Why.NOT_A_NUMBER:
         return config_refusal(
             position, Problem.WRONG_TYPE, expected=Expected.NUMBER, names=(Name(refused.validator),)
+        )
+    if refused.why is _Why.NOT_A_STRING:
+        return config_refusal(
+            position,
+            Problem.WRONG_TYPE,
+            expected=Expected.NON_EMPTY_STRING,
+            names=(Name(refused.validator),),
         )
     return config_refusal(
         position, Problem.UNPARSEABLE, names=(Name(refused.validator),), hint="not a valid regex"
@@ -116,13 +125,30 @@ def numeric_param(
             parsed = kind(value)
         except ValueError:
             pass
-        if parsed is None:
+        # "NaN" and "inf" parse as floats, and every comparison against NaN is false, so a
+        # non-finite threshold would switch its check off without a word.
+        if parsed is None or not math.isfinite(parsed):
             raise _param_error(_Refused(validator, name, why), None)
         return parsed
     accepted = (int, float) if kind is float else (int,)
     if isinstance(value, bool) or not isinstance(value, accepted):
         raise _param_error(_Refused(validator, name, why), None)
-    return kind(value)
+    number = kind(value)
+    if not math.isfinite(number):
+        raise _param_error(_Refused(validator, name, why), None)
+    return number
+
+
+def string_param(params: dict[str, Any], name: str, *, validator: str) -> str:
+    """Read ``params[name]`` as a non-empty string, checked by type before any use.
+
+    Raises:
+        ParamError: The value is absent, empty or not a string. The message never carries it.
+    """
+    value = params.get(name)
+    if not isinstance(value, str) or not value:
+        raise _param_error(_Refused(validator, name, _Why.NOT_A_STRING), None)
+    return value
 
 
 def compile_pattern(pattern: str, *, validator: str) -> re.Pattern[str]:

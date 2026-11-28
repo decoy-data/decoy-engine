@@ -43,7 +43,7 @@ from decoy_engine.validators._fold import (
     finding_index_cap,
     run_whole,
 )
-from decoy_engine.validators._params import numeric_param
+from decoy_engine.validators._params import numeric_param, string_param
 from decoy_engine.validators._types import RowSpan, SkippedColumn, ValidatorFinding
 
 
@@ -81,6 +81,9 @@ def _require_params(params: dict[str, Any], keys: list[str], validator_name: str
         raise ValueError(
             f"{validator_name} validator requires params {missing!r} (all are required strings)."
         )
+    # Checked before any edge lookup, which formats these names into its own error.
+    for key in keys:
+        string_param(params, key, validator=validator_name)
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +500,6 @@ class ReconciliationFold:
         if not (self._child_seen and self._parent_has_column and self._child_has_column):
             return FoldResult((), (), self._skips())
         failing = CappedIndices(self._cap)
-        worst_delta = 0.0
         for index, key, parent_val in self._parent_rows:
             if key in self._bad:
                 failing.add(index)
@@ -512,7 +514,6 @@ class ReconciliationFold:
             delta = abs(parent_numeric - self._agg.get(key, 0.0))
             if delta > self._tolerance:
                 failing.add(index)
-                worst_delta = max(worst_delta, delta)
         checked = ((self._parent_table, self._parent_column),)
         if not failing.count:
             return FoldResult((), checked)
@@ -526,8 +527,7 @@ class ReconciliationFold:
                     detail=(
                         f"{failing.count} row(s) in {self._parent_table}.{self._parent_column} "
                         f"do not reconcile with {self._child_table}.{self._child_column} "
-                        f"({self._op}, tolerance={self._tolerance}); "
-                        f"worst absolute delta observed: {worst_delta}"
+                        f"({self._op}, tolerance={self._tolerance})"
                     ),
                     failing_row_count=failing.count,
                 ),

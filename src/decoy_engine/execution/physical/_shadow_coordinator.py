@@ -165,7 +165,7 @@ class ShadowCoordinator:
         self._validated(plan, snapshot, result)
         return result
 
-    def run_mask_half(
+    def _run_mask_half(
         self,
         plan: PhysicalPlan,
         snapshot: ShadowSnapshot,
@@ -173,7 +173,10 @@ class ShadowCoordinator:
         admitted_edges: tuple[RelationshipEdge, ...],
     ) -> ShadowRunResult:
         """The mask half of a mixed plan, left unjudged: `dispatch_mixed` judges the stitched
-        whole once, through `run`, and a half alone is not the job's output."""
+        whole once, through `run`, and a half alone is not the job's output.
+
+        Private on purpose: it skips the validator boundary `run` owns, so the public surface
+        has no way to run a plan without judgement."""
         return self._dispatch(plan, snapshot, admitted_edges=admitted_edges, when_masks=None)
 
     def _dispatch(

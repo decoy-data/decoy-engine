@@ -110,8 +110,7 @@ EXPECTED: dict[str, tuple[tuple[Any, ...], ...]] = {
             "parent",
             "total",
             (1, 2, 3),
-            "3 row(s) in parent.total do not reconcile with child.amt (sum, "
-            "tolerance=1e-06); worst absolute delta observed: 1.0",
+            "3 row(s) in parent.total do not reconcile with child.amt (sum, tolerance=1e-06)",
         ),
     ),
 }

@@ -1,6 +1,6 @@
 """TQ mutation-kill oracles for `execution/_sequential.py` HELPER functions:
 `table_topo_order` (FK-topological table sort, Kahn) and
-`_has_transactional_write_contract` (the write/commit/abort sink probe). The big
+`has_whole_table_contract` (the write/commit/abort sink probe). The big
 `run_sequential` orchestrator is graded by its own kill file. Both helpers are
 pure enough to drive directly: `table_topo_order` reads only
 `plan.seed_envelope.per_table` + `graph.edges`, so a stub plan + a hand-built
@@ -14,10 +14,8 @@ import types
 import pytest
 
 from decoy_engine.execution import ExecutionError
-from decoy_engine.execution._sequential import (
-    _has_transactional_write_contract,
-    table_topo_order,
-)
+from decoy_engine.execution._sequential import table_topo_order
+from decoy_engine.execution._transactional_sink import has_whole_table_contract
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 
 
@@ -106,19 +104,19 @@ def _sink(**methods: object) -> object:
 
 class TestHasTransactionalWriteContract:
     def test_full_three_method_sink_is_transactional(self) -> None:
-        assert _has_transactional_write_contract(_sink(write=1, commit=1, abort=1)) is True
+        assert has_whole_table_contract(_sink(write=1, commit=1, abort=1)) is True
 
     def test_missing_abort_is_not_transactional(self) -> None:
         # write+commit but no abort: the real contract needs ALL THREE. Kills the
         # dropped-abort-clause mutant (returns True) and the no-default
         # getattr(..., "abort") mutant (raises instead of returning False).
-        assert _has_transactional_write_contract(_sink(write=1, commit=1)) is False
+        assert has_whole_table_contract(_sink(write=1, commit=1)) is False
 
     def test_missing_write_is_not_transactional(self) -> None:
         # commit+abort but no write: kills the dropped-write-clause mutant.
-        assert _has_transactional_write_contract(_sink(commit=1, abort=1)) is False
+        assert has_whole_table_contract(_sink(commit=1, abort=1)) is False
 
     def test_missing_commit_is_not_transactional(self) -> None:
         # write only (commit absent): the no-default getattr(..., "commit")
         # mutant raises AttributeError instead of returning False.
-        assert _has_transactional_write_contract(_sink(write=1)) is False
+        assert has_whole_table_contract(_sink(write=1)) is False

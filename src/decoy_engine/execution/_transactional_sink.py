@@ -111,6 +111,28 @@ class TransactionalSink(Protocol):
         ...
 
 
+@runtime_checkable
+class _WholeTableWriter(Protocol):
+    """write, commit and abort together. `write_batches` is not part of it: only the out-of-core
+    runner calls it."""
+
+    def write(self, table: str, data: pa.Table) -> None: ...
+
+    def commit(self) -> object: ...
+
+    def abort(self) -> None: ...
+
+
+def has_whole_table_contract(sink: object) -> bool:
+    """True if `sink` implements write, commit and abort together.
+
+    The one test for a transactional writer on a whole-table call: sequential execution and
+    resident delivery both ask it, so a writer that has only `write` is a plain callable on both
+    routes and receives every table on both.
+    """
+    return isinstance(sink, _WholeTableWriter)
+
+
 class _CallableSinkAdapter:
     """Wraps a plain Callable[[str, pa.Table], None] as a TransactionalSink.
 

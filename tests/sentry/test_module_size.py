@@ -97,6 +97,10 @@ ALLOWLIST: dict[str, int] = {
     # the B4 source-type admission threading (_source_arrow_types + the source_types param); split
     # the probe-recovery resolver into its own module.
     "src/decoy_engine/execution/_pipeline_routing_signals.py": 633,
+    # the whole-table writer contract both sink routes share lives beside the sink; the execution
+    # package is at its module ceiling, so a new module is not allowed. Split the callable adapter
+    # into execution/sinks/ when the package is next restructured.
+    "src/decoy_engine/execution/_transactional_sink.py": 620,
     # fan-in guard on the budget resolver; split the disk-preflight helpers into _disk_budget.py.
     "src/decoy_engine/execution/out_of_core/_budget.py": 622,
     # float FK key token pricing; split the disk-width helpers into _spill_widths.py.

@@ -173,6 +173,7 @@ from decoy_engine.execution._sequential_order import table_topo_order
 from decoy_engine.execution._transactional_sink import (
     TransactionalSink,
     _CallableSinkAdapter,
+    has_whole_table_contract,
 )
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution.pipeline.post_scan import note_quarantined, publish_after_gate
@@ -202,27 +203,6 @@ if TYPE_CHECKING:
 
 _NodeKey = tuple[str, tuple[str, ...]]
 _KeyTuple = tuple[object, ...]
-
-
-def _has_transactional_write_contract(sink: object) -> bool:
-    """True if `sink` implements write/commit/abort, independent of write_batches.
-
-    `run_sequential`'s whole-table path never calls `write_batches` (only the
-    out-of-core streaming runner does; see `_tsink.` call sites below), so a
-    sink built to the pre-SC1 three-method shape is still fully transactional
-    for THIS call site. `isinstance(sink, TransactionalSink)` alone rejects
-    such a sink now that the runtime_checkable Protocol requires all four
-    methods, silently misrouting it into `_CallableSinkAdapter` -- which calls
-    the sink object AS a function and raises `TypeError`. This restores the
-    back-compat dispatch without weakening `TransactionalSink` itself (the
-    out-of-core runner still requires `write_batches` from callers that need
-    streaming writes).
-    """
-    return (
-        callable(getattr(sink, "write", None))
-        and callable(getattr(sink, "commit", None))
-        and callable(getattr(sink, "abort", None))
-    )
 
 
 @entry_point
@@ -368,7 +348,7 @@ def run_sequential(
 
     # Resolve which sink protocol to use once, before the loop.
     # isinstance with a runtime_checkable Protocol checks for write/write_batches/
-    # commit/abort; _has_transactional_write_contract additionally admits a
+    # commit/abort; has_whole_table_contract additionally admits a
     # write/commit/abort-only sink, which this call site never needs write_batches
     # from (see the helper's docstring).
     _tsink: TransactionalSink | None
@@ -381,7 +361,7 @@ def run_sequential(
     # attempting to stage a temp file there.
     _is_genuine_transactional_sink = isinstance(
         sink, TransactionalSink
-    ) or _has_transactional_write_contract(sink)
+    ) or has_whole_table_contract(sink)
     if _is_genuine_transactional_sink:
         _tsink = sink  # type: ignore[assignment]
     elif sink is not None:

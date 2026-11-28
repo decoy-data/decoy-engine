@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._transactional_sink import has_whole_table_contract
 from tests._declared_schema import declare_rest
-from tests.acceptance._f06_support import column, config, text_table, write_csv
+from tests.acceptance._f06_support import column, text_table
 
 
 class _WriteOnlyCallable:
@@ -35,19 +36,49 @@ def test_write_only_callable_is_not_a_whole_table_sink() -> None:
     assert not has_whole_table_contract(_WriteOnlyCallable())
 
 
+def _two_table_job(tmp_path: Path) -> tuple[dict[str, Any], dict[str, pa.Table]]:
+    parent = text_table(id=["1", "2"], v=["a", "b"])
+    child = text_table(cid=["x", "y"], pid=["1", "2"])
+    sources: dict[str, Any] = {}
+    targets: dict[str, Any] = {}
+    for name, data in (("parent", parent), ("child", child)):
+        path = str(tmp_path / f"{name}.parquet")
+        pq.write_table(data, path)
+        sources[name] = {"type": "file", "format": "parquet", "path": path}
+        targets[name] = {"type": "file", "format": "parquet", "path": path + ".out"}
+    raw = {
+        "version": 2,
+        "global_settings": {"seed": 7},
+        "sources": sources,
+        "tables": [
+            {"name": "parent", "columns": [column("id", "hash", namespace="ns"), column("v")]},
+            {"name": "child", "columns": [column("cid"), column("pid", "hash", namespace="ns")]},
+        ],
+        "targets": targets,
+        "relationships": [
+            {
+                "parent": {"table": "parent", "columns": ["id"]},
+                "children": [{"table": "child", "columns": ["pid"]}],
+                "orphan_policy": "fail",
+                "namespace": "ns",
+            }
+        ],
+        "namespaces": {},
+    }
+    return declare_rest(raw), {"parent": parent, "child": child}
+
+
 @pytest.mark.parametrize("mode", ["full_frame", "sequential"])
 def test_a_write_only_callable_receives_every_table_on_both_routes(
     tmp_path: Path, mode: str
 ) -> None:
-    src = write_csv(tmp_path / "g.csv", ["id", "v"], [["1", "a"]])
-    raw = config([column("id"), column("v")], source_path=src)
+    cfg, tables = _two_table_job(tmp_path)
     sink = _WriteOnlyCallable()
-    result: Any = run_pipeline(
-        declare_rest(raw),
-        {"people": text_table(id=["1", "2"], v=["a", "b"])},
+    run_pipeline(
+        cfg,
+        tables,
         engine_version="probe",
-        sink=sink,
+        sink=sink,  # type: ignore[arg-type]
         execution_mode=mode,  # type: ignore[arg-type]
     )
-    assert result is not None
-    assert sink.received == ["people"]
+    assert sorted(sink.received) == ["child", "parent"]
