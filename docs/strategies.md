@@ -2210,6 +2210,12 @@ Draws numbers from a named family, with no source file. To shape a column like a
   only its own keys.
 - `min` / `max`: optional clip applied to each draw (`min` at most `max`).
 
+The fitted datetime sampler behind the SDK call `ColumnGenerator.generate_column` (type
+`distribution` with a `snapshot`) refuses a fitted bound outside 1677-09-22 to 2262-04-10, and a
+live year bin outside the snapshot's own min and max years, with `plan/generation_unbounded_column`.
+The refusal names the property (`min`, `max` or `year_bins`) and never a value. A snapshot whose
+max is before its min still gives null cells.
+
 ### lookup
 
 Draws each row from a list in a file or in a shipped code set, optionally weighted.

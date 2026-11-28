@@ -18,8 +18,13 @@ from itertools import pairwise
 from typing import TYPE_CHECKING, NoReturn
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Name
-from decoy_engine.contracts.distribution_snapshot import names_unsupported_year
+from decoy_engine._config_text import Name, Problem, config_position, config_refusal
+from decoy_engine.contracts.distribution_snapshot import (
+    MAX_SAMPLED_YEAR,
+    MIN_YEAR,
+    SAMPLED_YEARS_RULE,
+    names_unsupported_year,
+)
 
 if TYPE_CHECKING:
     from decoy_engine.generation.statistical._spec import StatisticalSpec
@@ -136,6 +141,17 @@ def _datetime_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     return None
 
 
+def names_far_year(spec: StatisticalSpec) -> bool:
+    """True when a live year bin lies outside the sampled years (a zero-weight bin is never drawn)."""
+    buckets = spec.datetime_buckets
+    if buckets is None:
+        return names_unsupported_year(spec.stats)
+    return any(
+        b.count > 0 and not (b.start_year >= MIN_YEAR and b.end_year <= MAX_SAMPLED_YEAR)
+        for b in buckets
+    )
+
+
 def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     """`(property, reason)` for the first degenerate rule `spec` breaks, else None.
 
@@ -153,8 +169,22 @@ def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     return None
 
 
+def _refuse_far_year(spec: StatisticalSpec) -> NoReturn:
+    from decoy_engine.generation.statistical._spec import StatisticalSpecError
+
+    refusal = config_refusal(
+        config_position("statistical", Name(spec.column)),
+        Problem.NOT_ALLOWED,
+        hint=SAMPLED_YEARS_RULE,
+    )
+    raise StatisticalSpecError(code=reasons.plan.GENERATION_UNBOUNDED_COLUMN, message=refusal.text)
+
+
 def check_degenerate(spec: StatisticalSpec) -> None:
-    """Raise `STATISTICAL_STATS_DEGENERATE` when `spec`'s snapshot cannot be sampled."""
+    """Raise `STATISTICAL_STATS_DEGENERATE` when `spec`'s snapshot cannot be sampled, or
+    `GENERATION_UNBOUNDED_COLUMN` when a datetime snapshot names a year the sampler cannot hold."""
+    if spec.kind == "datetime" and names_far_year(spec):
+        _refuse_far_year(spec)
     finding = degenerate_finding(spec)
     if finding is not None:
         refuse_degenerate(column_label(spec.column), f"{finding[1]}. {_REFIT_HINT}")

@@ -13,6 +13,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from decoy_engine.contracts.calendar_range import (
+    NS_END_DAY_NUMBER,
+    NS_FIRST_DAY_NUMBER,
+    NS_PER_DAY,
+    admit_ns_datetime_snapshot,
+)
+
 
 class _DistributionMixin:
     """Distribution-snapshot samplers for :class:`ColumnGenerator`."""
@@ -329,29 +336,6 @@ class _DistributionMixin:
             )
             return pd.Series([pd.NaT] * num_rows, dtype="datetime64[ns]")
 
-        try:
-            ts_min = pd.Timestamp(min_iso)
-            ts_max = pd.Timestamp(max_iso)
-        except (TypeError, ValueError):
-            # The bounds are source data values, so they stay out of the log.
-            self.logger.warning(
-                "distribution datetime snapshot has an unparseable min/max; emitting nulls",
-            )
-            return pd.Series([pd.NaT] * num_rows, dtype="datetime64[ns]")
-
-        # Normalize tz-aware bounds to UTC-naive so the in-year
-        # uniform math doesn't trip on mixed-tz arithmetic. D1a
-        # already strips tz before isoformat, so this is defensive.
-        if ts_min.tzinfo is not None:
-            ts_min = ts_min.tz_convert("UTC").tz_localize(None)
-        if ts_max.tzinfo is not None:
-            ts_max = ts_max.tz_convert("UTC").tz_localize(None)
-        if ts_max < ts_min:
-            self.logger.warning(
-                "distribution datetime snapshot has max < min; emitting nulls",
-            )
-            return pd.Series([pd.NaT] * num_rows, dtype="datetime64[ns]")
-
         # Build year -> weight, filter malformed entries.
         years: list[int] = []
         weights_list: list[float] = []
@@ -369,6 +353,21 @@ class _DistributionMixin:
                 continue
             years.append(yi)
             weights_list.append(wi)
+
+        try:
+            admitted = admit_ns_datetime_snapshot(min_iso, max_iso, years)
+        except ValueError:
+            # The bounds are source data values, so they stay out of the log.
+            self.logger.warning(
+                "distribution datetime snapshot has an unparseable min/max; emitting nulls",
+            )
+            return pd.Series([pd.NaT] * num_rows, dtype="datetime64[ns]")
+        ts_min_ns, ts_max_ns = admitted.min_ns, admitted.max_ns
+        if ts_max_ns < ts_min_ns:
+            self.logger.warning(
+                "distribution datetime snapshot has max < min; emitting nulls",
+            )
+            return pd.Series([pd.NaT] * num_rows, dtype="datetime64[ns]")
         if not years:
             self.logger.warning(
                 "distribution datetime snapshot has no usable year_bins; emitting nulls",
@@ -387,41 +386,22 @@ class _DistributionMixin:
         probs = weights / total
         chosen_idx = rng.choice(len(years), size=num_rows, p=probs)
 
-        # For each row, compute the in-year window clipped to
-        # [ts_min, ts_max]. Vectorized via nanosecond integer math
-        # so the uniform draw is one numpy call.
+        # Each row's window is its year clipped to the snapshot's min and max. The year edges are
+        # whole-day numbers clipped to the nanosecond domain before they become integers of
+        # nanoseconds, so the first and last partial years of the domain need no out-of-range date.
         years_arr = np.asarray([years[i] for i in chosen_idx], dtype=np.int64)
-        # QA walks/generators F7 (2026-06-01, MEDIUM correctness): cap
-        # years_arr to ts_max.year so neither year_starts nor year_ends
-        # construction trips OutOfBoundsDatetime at the active
-        # pd.to_datetime precision (nanosecond by default; max year
-        # 2262). Pre-fix any year_bins entry beyond the active
-        # precision crashed the entire distribution sampler. The
-        # nanosecond clip on hi_ns/lo_ns below already bounds the
-        # per-row output to [ts_min, ts_max], so capping the
-        # intermediate year is safe: every row that picked a beyond-
-        # max bin now lands at ts_max.year (which the downstream clip
-        # would have produced anyway). The audit's documented endpoint
-        # cap at 9999 still applies for snapshots that use the wider
-        # datetime64[s] precision where ts_max can reach year 9999.
-        ts_max_year = int(ts_max.year)
-        years_arr = np.minimum(years_arr, ts_max_year)
-        # Build per-row year-start + year-end timestamps.
-        year_starts = pd.to_datetime([f"{y}-01-01" for y in years_arr])
-        year_ends = pd.to_datetime(
-            ["9999-12-31" if y >= 9999 else f"{y + 1}-01-01" for y in years_arr]
-        )  # exclusive
-        # Clip to the snapshot's actual min/max.
-        lo_ns = np.maximum(year_starts.view("int64"), ts_min.value)
-        hi_ns = np.minimum(year_ends.view("int64"), ts_max.value)
-        # A clipped window can be inverted when the chosen year sits
-        # entirely outside [min, max] (snapshot integrity bug, but
-        # be defensive: clamp to year-start so we still emit a
-        # plausible value rather than nulls or an out-of-range draw).
+        starts = np.asarray([f"{y:04d}-01-01" for y in years_arr], dtype="datetime64[D]")
+        ends = np.asarray([f"{y + 1:04d}-01-01" for y in years_arr], dtype="datetime64[D]")
+        start_days = np.clip(starts.astype(np.int64), NS_FIRST_DAY_NUMBER, NS_END_DAY_NUMBER)
+        end_days = np.clip(ends.astype(np.int64), NS_FIRST_DAY_NUMBER, NS_END_DAY_NUMBER)
+        lo_ns = np.maximum(start_days * NS_PER_DAY, ts_min_ns)
+        hi_ns = np.minimum(end_days * NS_PER_DAY, ts_max_ns)
+        # A clipped window can be inverted when the chosen year sits entirely outside
+        # [min, max] (a snapshot integrity bug): clamp to the window start so a plausible value
+        # is emitted rather than nulls or an out-of-range draw.
         bad = hi_ns <= lo_ns
         if bad.any():
             hi_ns = np.where(bad, lo_ns + 1, hi_ns)
-        # Random nanosecond offsets within each row's window.
         rand_floats = rng.random(size=num_rows)
         offsets = (rand_floats * (hi_ns - lo_ns)).astype(np.int64)
         sample_ns = lo_ns + offsets

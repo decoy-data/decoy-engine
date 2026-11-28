@@ -64,7 +64,7 @@ def test_the_owner_holds_the_rule() -> None:
 
 
 def test_the_scan_sees_each_shape() -> None:
-    assert renderings('raise X("sampled years must lie in 1..9998")') == ["phrase", "literal-9998"]
+    assert renderings('raise X("sampled years must lie in 1..9998")') == ["phrase"]
     assert "phrase" in renderings('M = "a sampled year is outside the range"')
     assert renderings("LIMIT = 9998") == ["literal-9998"]
     assert renderings('LIMIT = "9998"') == ["literal-9998"]

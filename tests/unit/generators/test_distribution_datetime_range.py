@@ -24,8 +24,7 @@ SEED = 20261127
 CODE = reasons.plan.GENERATION_UNBOUNDED_COLUMN
 
 BOUND_TEXT = (
-    "[generation_unbounded_column] {prop}: a fitted datetime must lie in "
-    "1677-09-22 to 2262-04-10."
+    "[generation_unbounded_column] {prop}: a fitted datetime must lie in 1677-09-22 to 2262-04-10."
 )
 BIN_TEXT = (
     "[generation_unbounded_column] year_bins: a live year bin must lie between the fitted "
@@ -119,7 +118,7 @@ def test_an_unsupported_snapshot_is_refused_before_any_draw(
         assert exc.prop == prop
         assert str(exc) == message
         record = reason_from_exception(exc)
-        assert record.code == CODE.code and record.namespace == CODE.namespace
+        assert record.code == CODE and record.namespace == CODE.namespace
         text = str(exc) + repr(exc)
         for year in FIXTURE_YEARS:
             assert year not in text
