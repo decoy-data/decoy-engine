@@ -39,10 +39,11 @@ import os
 import stat
 import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from functools import partial
 from typing import TYPE_CHECKING, Any, TextIO, overload
 
 import pandas as pd
-from pandas.io.common import get_handle, infer_compression
+from pandas.io.common import get_handle
 
 from decoy_engine import fileaccess
 from decoy_engine._lexeme import pandas_lexeme_kwargs
@@ -51,7 +52,12 @@ from decoy_engine.errors import ConfigError, PipelineValidationError
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import pandas as pandas_adapter
 from decoy_engine.fileaccess.adapters.memory import MemoryHandle
-from decoy_engine.profile._csv_decode import decoded, translating
+from decoy_engine.profile._csv_decode import (
+    csv_compression,
+    csv_is_compressed,
+    is_decoder_failure,
+    refusing,
+)
 from decoy_engine.validation_result import CODES
 
 if TYPE_CHECKING:
@@ -397,16 +403,16 @@ def _read_whole(
     names: list[str] | None,
     table: str,
     kept: list[str] | None = None,
+    passes: Callable[[Exception], bool] | None = None,
 ) -> pd.DataFrame:
     # Headerless, the adapter lets a pandas parser error through a strict policy (its text can
-    # carry a cell) so it is replaced here by the coded refusal, which chains nothing. With a
-    # header there is no coded refusal: the plain adapter maps it to a read error, and the
-    # ambient policy keeps the library error as before.
+    # carry a cell) and it is replaced here by the coded refusal. With a header the plain adapter
+    # maps it to a read error, and the ambient policy keeps the library error as before.
     read = pandas_adapter.read_csv if names is None else pandas_adapter.read_csv_parser_errors
     failed = False
     try:
         with open_handle() as handle:
-            frame = read(handle, **kwargs)
+            frame = read(handle, passthrough=passes, **kwargs)
     except _PARSER_ERRORS:
         if names is None:
             raise
@@ -422,6 +428,7 @@ def _read_chunks(
     names: list[str] | None,
     table: str,
     kept: list[str] | None = None,
+    passes: Callable[[Exception], bool] | None = None,
 ) -> Iterator[pd.DataFrame]:
     read = (
         pandas_adapter.read_csv_chunks
@@ -431,7 +438,7 @@ def _read_chunks(
     failed = False
     try:
         with open_handle() as handle:
-            for chunk in read(handle, **kwargs):
+            for chunk in read(handle, passthrough=passes, **kwargs):
                 yield chunk if names is None else _named(chunk, kept or names, table)
     except _PARSER_ERRORS:
         if names is None:
@@ -446,6 +453,20 @@ def _read_csv_rows(
     dialect: CsvDialect,
     *,
     table: str,
+    refuse_decoder: bool = True,
+    **options: Any,
+) -> pd.DataFrame | Iterator[pd.DataFrame]:
+    """`_read_rows` with a decoder failure replaced by the one coded refusal: every CSV read goes
+    through here. `refuse_decoder=False` is the bytes seam, which keeps `FileAccessReadError`."""
+    call = partial(_read_rows, open_handle, dialect, table=table, refuse_decoder=refuse_decoder)
+    return refusing(table, lambda: call(**options)) if refuse_decoder else call(**options)
+
+
+def _read_rows(
+    open_handle: OpenHandle,
+    dialect: CsvDialect,
+    *,
+    table: str,
     nrows: int | None = None,
     chunksize: int | None = None,
     dtype: type[str] | None = None,
@@ -453,6 +474,7 @@ def _read_csv_rows(
     columns: Sequence[str] | None = None,
     exact_text: bool = False,
     compression: str | None = "infer",
+    refuse_decoder: bool = True,
 ) -> pd.DataFrame | Iterator[pd.DataFrame]:
     """The shared core: one frame, or an iterator of frames when `chunksize` is set.
 
@@ -487,6 +509,7 @@ def _read_csv_rows(
             )
         _scan_record_widths(open_handle, dialect, table=table, nrows=nrows, compression=compression)
         read_opts = {"header": None, **_positional_lexemes(lexeme_columns, names)}
+    passes = is_decoder_failure if refuse_decoder else None
     kwargs: dict[str, Any] = {"sep": dialect.delimiter, "dtype": dtype, **read_opts, **use}
     if compression != "infer":
         kwargs["compression"] = compression
@@ -495,12 +518,14 @@ def _read_csv_rows(
     if nrows is not None:
         kwargs["nrows"] = nrows
     if chunksize is None:
-        frame = _read_whole(open_handle, kwargs, names, table, kept)
+        frame = _read_whole(open_handle, kwargs, names, table, kept, passes)
         return frame if columns is None else _shaped(frame, columns)
     if dialect.has_header:
         with open_handle() as handle:  # a missing or denied file fails at the call, as headerless
             handle.stat()
-    chunks = _read_chunks(open_handle, {**kwargs, "chunksize": chunksize}, names, table, kept)
+    chunks = _read_chunks(
+        open_handle, {**kwargs, "chunksize": chunksize}, names, table, kept, passes
+    )
     return chunks if columns is None else _shaped(chunks, columns)
 
 
@@ -582,20 +607,16 @@ def read_csv_source(
     def open_handle() -> FileHandle:
         return access.open_read(request)
 
-    result = decoded(
-        table,
-        lambda: _read_csv_rows(
-            open_handle,
-            dialect,
-            table=table,
-            nrows=nrows,
-            chunksize=chunksize,
-            dtype=dtype,
-            columns=columns,
-            compression=csv_compression(path) if compression == "infer" else compression,
-        ),
+    return _read_csv_rows(
+        open_handle,
+        dialect,
+        table=table,
+        nrows=nrows,
+        chunksize=chunksize,
+        dtype=dtype,
+        columns=columns,
+        compression=csv_compression(path) if compression == "infer" else compression,
     )
-    return result if isinstance(result, pd.DataFrame) else translating(table, result)
 
 
 def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") -> pd.DataFrame:
@@ -609,29 +630,16 @@ def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") ->
     only `field_key`, never a cell. `table` names the source in any `PipelineValidationError`.
     """
     handle = MemoryHandle(raw, field_key)
-    frame = _read_csv_rows(lambda: handle, CsvDialect(), table=table, dtype=str, exact_text=True)
+    frame = _read_csv_rows(
+        lambda: handle, CsvDialect(), table=table, dtype=str, exact_text=True, refuse_decoder=False
+    )
     assert isinstance(frame, pd.DataFrame)  # noqa: S101 - chunksize is None
     return frame
 
 
-def csv_compression(path: str | os.PathLike[str]) -> str | None:
-    """The one place the codec is read from a declared file name (pandas' own rule)."""
-    return infer_compression(os.fspath(path), "infer")
-
-
-def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
-    """What pandas infers from the name of `path` (`compression="infer"`): True when its
-    suffix names a compression format.
-
-    Taken from pandas' own inference, so a pandas upgrade changes the answer with it. It looks at
-    the name only and opens nothing. It does not decide how a read decompresses: `read_csv_source`
-    takes the codec from the declared name and passes it on, so a rooted file policy (which hands
-    pandas a descriptor path with no suffix) still reads a compressed file."""
-    return csv_compression(path) is not None
-
-
 __all__ = [
     "CsvDialect",
+    "csv_compression",
     "csv_is_compressed",
     "read_csv_bytes",
     "read_csv_source",

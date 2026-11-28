@@ -331,6 +331,7 @@ RS-Q1 (a) makes four places in the DELIV plan stale (engine branch `plan/deliv` 
 | E `src/decoy_engine/profile/_lazy_build.py` | compressed CSV gets the lazy builder | engine `CODEMAP.md:128` | E6 | 144 to about 140 |
 | E `src/decoy_engine/profile/_lazy_csv.py` | infer `compression` from the declared name, pass it on | engine `CODEMAP.md:128` | E6 | 229 to about 240 |
 | E `src/decoy_engine/profile/_csv_reader.py` | `compression` argument on `read_csv_source` | engine `CODEMAP.md:128` (one CSV reader) | E6 | 598 to at most 600, or a census entry |
+| E `src/decoy_engine/profile/_csv_decode.py` | one coded, value-free refusal for a decoder failure; `_read_csv_rows` applies it for every CSV read | engine `CODEMAP.md:128` (one CSV reader) | E6 | new, 85 |
 | E `src/decoy_engine/run_result/_model.py`, `_build.py` | `Route.sink`, `build_run_result(sink=)` | engine `CODEMAP.md:106` | E6 | 416 to about 418; 277 to about 281 |
 | E `docs/compatibility-contract.md`, `CHANGELOG.md` | optional sink members, `Route.sink`, lazy compressed CSV | existing | E6 | small |
 | E `tests/snapshots/frozen_schemas/run-result.schema.json` | regenerate the serialization schema with `python scripts/release/frozen_schemas.py --write` and review the optional field delta | existing frozen schema | E6 | generated |

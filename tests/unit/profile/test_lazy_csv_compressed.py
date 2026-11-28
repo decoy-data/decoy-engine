@@ -28,6 +28,7 @@ from decoy_engine.profile import _csv_reader as csv_reader
 from decoy_engine.profile import build_lazy_source
 from decoy_engine.profile._csv_reader import CsvDialect, read_csv_source
 from decoy_engine.profile._lazy_csv import CsvLazySource
+from decoy_engine.profile._readers import build_declared_source
 
 CORPUS: dict[str, bytes] = {
     "plain": b"a,b\n1,x\n2,y\n3,\n",
@@ -228,9 +229,28 @@ def test_a_decoder_failure_in_the_rooted_policy_carries_no_cell_text(tmp_path: P
         suffix, raw = _damaged()["gzip_plaintext_tail"]
         (tmp_path / f"f{suffix}").write_bytes(raw)
         lazy = _lazy(tmp_path, access, f"f{suffix}")
-        with pytest.raises(Exception) as err:
+        with pytest.raises(ExecutionError) as err:
             _rows(lazy.iter_batches(7))
-        assert CANARY not in f"{err.value!s} {err.value!r}"
+        _assert_refusal(err.value)
+    finally:
+        os.close(fd)
+
+
+def test_a_rooted_zstd_failure_after_a_valid_batch_is_the_coded_refusal(tmp_path: Path) -> None:
+    zstd = pytest.importorskip("zstandard")
+    big = b"a,b\n" + b"".join(f"{i},x{i}\n".encode() for i in range(20000))
+    packed = bytearray(zstd.ZstdCompressor(level=1).compress(big))
+    packed[-40:-8] = b"\xff" * 32
+    access, fd = _rooted(tmp_path)
+    try:
+        (tmp_path / "f.csv.zst").write_bytes(bytes(packed))
+        lazy = _lazy(tmp_path, access, "f.csv.zst")
+        batches = lazy.iter_batches(7)
+        first = next(iter(batches))
+        assert first.num_rows == 7
+        with pytest.raises(ExecutionError) as err:
+            _rows(batches)
+        _assert_refusal(err.value)
     finally:
         os.close(fd)
 
@@ -292,4 +312,52 @@ def test_a_zstd_backend_error_is_the_coded_refusal_without_the_backend(
     dialect = CsvDialect()
     with pytest.raises(ExecutionError) as err:
         _rows(read_csv_source(tmp_path / "f.csv.zst", dialect, table="t", dtype=str, chunksize=7))
+    _assert_refusal(err.value)
+
+
+def test_a_rooted_zstd_error_after_a_valid_batch_is_the_coded_refusal_without_the_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The strict adapter must not replace the backend's error before it is classified."""
+    stand_in = types.ModuleType("zstandard")
+
+    class ZstdError(Exception):
+        pass
+
+    stand_in.ZstdError = ZstdError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "zstandard", stand_in)
+
+    def _chunks() -> Iterator[pd.DataFrame]:
+        yield pd.DataFrame({"a": ["1"] * 7, "b": ["x"] * 7})
+        raise ZstdError("frame header b'LEAKCELL,secret@x.com'")
+
+    def _read(*_a: Any, **kwargs: Any) -> Any:
+        # The header probe (no chunksize) succeeds; the chunked read yields a batch, then fails.
+        return _chunks() if "chunksize" in kwargs else pd.DataFrame({"a": [], "b": []})
+
+    monkeypatch.setattr(pd, "read_csv", _read)
+    access, fd = _rooted(tmp_path)
+    try:
+        (tmp_path / "f.csv.zst").write_bytes(b"x")
+        lazy = _lazy(tmp_path, access, "f.csv.zst")
+        batches = iter(lazy.iter_batches(7))
+        assert next(batches).num_rows == 7
+        with pytest.raises(ExecutionError) as err:
+            next(batches)
+        _assert_refusal(err.value)
+    finally:
+        os.close(fd)
+
+
+def test_the_resident_declared_source_refuses_a_damaged_gzip_with_the_coded_error(
+    tmp_path: Path,
+) -> None:
+    suffix, raw = _damaged()["gzip_plaintext_tail"]
+    path = tmp_path / f"f{suffix}"
+    path.write_bytes(raw)
+    source = build_declared_source(
+        "t", {"type": "file", "format": "csv", "path": str(path), "has_header": True}
+    )
+    with pytest.raises(ExecutionError) as err:
+        source.to_frame()
     _assert_refusal(err.value)

@@ -276,6 +276,7 @@ def guarded_with_parser_errors(
     parser_errors: tuple[type[Exception], ...],
     fn: Callable[..., T],
     *args: Any,
+    passthrough: Callable[[Exception], bool] | None = None,
     **kwargs: Any,
 ) -> T:
     """`guarded`, except the named parser error types also pass through unchanged.
@@ -283,7 +284,11 @@ def guarded_with_parser_errors(
     For a caller that classifies a parse failure itself and raises its own value-free coded
     refusal (the library text can carry a cell value, so the caller must never forward it).
     Every other library failure maps exactly as in `guarded`. The one place a library error
-    type is allowed past a strict policy; adapters name the types, never a caller."""
+    type is allowed past a strict policy; adapters name the types, never a caller.
+
+    `passthrough` is the same door for failures a type cannot name (a decoder `OSError` with no
+    errno, an optional backend's error): it is asked while the library's own exception is still
+    in hand, and a True answer re-raises it for a caller that replaces it with a coded refusal."""
     if not strict:
         return fn(*args, **kwargs)
     resurfaced: Exception | None = None
@@ -296,6 +301,8 @@ def guarded_with_parser_errors(
     except parser_errors:
         raise
     except Exception as exc:
+        if passthrough is not None and passthrough(exc):
+            raise
         resurfaced = _resurface(exc)
         if resurfaced is exc:
             raise
@@ -315,6 +322,7 @@ def guarded_iter(
     strict: bool,
     it: Iterable[T],
     parser_errors: tuple[type[Exception], ...] = (),
+    passthrough: Callable[[Exception], bool] | None = None,
 ) -> Iterator[T]:
     """Step an iterator under `guarded` semantics (`guarded_with_parser_errors` when
     `parser_errors` is given). Under the local policy it is a plain `yield from`, so CLI text
@@ -325,7 +333,9 @@ def guarded_iter(
     iterator = iter(it)
     while True:
         try:
-            item = guarded_with_parser_errors(display, True, parser_errors, next, iterator)
+            item = guarded_with_parser_errors(
+                display, True, parser_errors, next, iterator, passthrough=passthrough
+            )
         except StopIteration:
             return
         yield item
