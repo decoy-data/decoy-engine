@@ -42,7 +42,6 @@ _ANY_CHECK = frozenset(
         "checked_chunks",
     }
 )
-_STOP_AT = 40  # a larger allowlist is a design question to report, not to work around
 
 Site = tuple[str, str]  # (module path under src/decoy_engine, qualified function name)
 
@@ -362,7 +361,7 @@ def test_the_pinned_caller_edges_are_the_ones_the_scan_resolves() -> None:
 
 
 def test_the_allowlists_stay_small_and_the_helper_set_matches_the_file() -> None:
-    assert len(_DOWNSTREAM_FUNCTIONS) <= _STOP_AT, "over 40 entries: stop and report"
+    assert len(_DOWNSTREAM_FUNCTIONS) <= 40, "over 40 entries: stop and report"  # a design question
     tree = _functions(ast.parse(repository_texts()[_HELPERS_FILE]))
     in_file = {
         name

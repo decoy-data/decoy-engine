@@ -643,9 +643,8 @@ def test_e4_list_of_int64_above_2_pow_53_agrees_with_the_oracle() -> None:
     "dtype, values",
     [
         (pa.time64("ns"), [1000, None, 3001, 5, 7, None, 9]),
-        (pa.date32(), [2**31 - 1, None, 0, 1, 2, None, 3]),
     ],
-    ids=["time64_ns_with_nanoseconds", "date32_outside_pandas_range"],
+    ids=["time64_ns_with_nanoseconds"],
 )
 def test_e4_value_pandas_refuses_raises_on_the_oracle_and_is_exact_on_the_entry(
     dtype: pa.DataType, values: list[Any]
@@ -662,6 +661,20 @@ def test_e4_value_pandas_refuses_raises_on_the_oracle_and_is_exact_on_the_entry(
     assert not isinstance(refused.value, ExecutionError)
     got = _entry(config, chunks)
     assert pa.concat_tables(got).column("p").equals(pa.chunked_array([pa.array(values, dtype)]))
+
+
+def test_e4_a_date_outside_the_calendar_is_refused_by_the_checked_read_on_both_routes() -> None:
+    """The checked source read (DATE-RANGE-SENTINEL S5) refuses a date no pandas calendar holds
+    before either route converts it, so the oracle and the entry agree on one coded refusal."""
+    from decoy_engine.io import SourceDateUnrepresentableError
+
+    src = _e4_source("p", [2**31 - 1, None, 0, 1, 2, None, 3], pa.date32())
+    chunks = split(src, 2)
+    config = make_config([redact("s"), passthrough("p")])
+    with pytest.raises(SourceDateUnrepresentableError):
+        _oracle(config, chunks)
+    with pytest.raises(SourceDateUnrepresentableError):
+        _entry(config, chunks)
 
 
 def test_e9_safe_cast_message_holds_no_value_and_no_exception_context() -> None:
