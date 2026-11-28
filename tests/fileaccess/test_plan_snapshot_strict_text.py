@@ -97,12 +97,12 @@ def _digest_mismatch() -> str:
     return _manifest(b'{"a": 1}', "0" * 64)
 
 
-def _unpinned_reference() -> str:
+def _unpinned_reference(name: str = "a") -> str:
     data = yaml.safe_load(_manifest(b"{}", hashlib.sha256(b"{}").hexdigest()))
     data["generation"]["snapshots"] = []
     config = json.loads(data["generation"]["config_json"])
     config["tables"][0]["generate_columns"] = [
-        {"name": "a", "type": "statistical", "snapshot_file": CANARY_PATH}
+        {"name": name, "type": "statistical", "snapshot_file": CANARY_PATH}
     ]
     data["generation"]["config_json"] = json.dumps(config)
     return yaml.safe_dump(data, sort_keys=False)
@@ -144,3 +144,12 @@ def test_the_ambient_refusal_is_closed_set_too(case: str) -> None:
     assert info.value.code == code
     for text in _texts(info.value):
         assert "CANARY" not in text, text
+
+
+def test_unpinned_snapshot_reports_the_display_position(policy: RootRelative) -> None:
+    with pytest.raises(PlanCompileError) as info:
+        plan_from_yaml(_unpinned_reference("https://user:PRIVATEPW@host/x"), file_access=policy)
+    path = "tables.t.generate_columns.<name>.snapshot_file"
+    message = "missing. The plan must include the referenced snapshot in its pinned snapshots"
+    assert str(info.value) == f"[statistical_snapshot_not_pinned] {path}: {message}"
+    assert (info.value.path, info.value.message) == (path, message)

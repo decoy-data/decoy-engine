@@ -25,11 +25,23 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.contracts.bucketize_width import BUCKETIZE_PRESETS, unresolvable_width_field
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine._config_text import Name, Problem, config_refusal, config_root_position
+from decoy_engine.contracts.bucketize_width import (
+    BUCKETIZE_PRESETS,
+    is_oversized_integer_width,
+    unresolvable_width_field,
+)
+from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
+
+_WIDTH_HINT = (
+    "No usable width. Set either a known 'preset' or a positive numeric 'width' (an integer "
+    "width must be below 2**53; a numeric-looking string does not count, the emitter must "
+    "coerce it to a real number before it reaches the engine)."
+)
 
 
-def check_bucketize_config(config: dict[str, Any]) -> None:
+def check_bucketize_config(config: dict[str, Any], shapes: ColumnShapes | None = None) -> None:
     """Reject bucketize columns whose bucket width cannot be resolved.
 
     Compile-check ownership table row #23 (Sprint 13 / coercion-13 S3,
@@ -89,15 +101,22 @@ def check_bucketize_config(config: dict[str, Any]) -> None:
                     ),
                 )
             if field == "width":
-                raise PlanCompileError(
-                    code=reasons.plan.BUCKETIZE_WIDTH_UNRESOLVABLE,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.width",
-                    message=(
-                        f"bucketize column {col_name!r} in table {table_name!r} has "
-                        "no usable width. Set "
-                        "either a known 'preset' or a positive numeric 'width' "
-                        "(a numeric-looking string does not count; the emitter "
-                        "must coerce it to a real number before it reaches the "
-                        "engine)."
+                if (
+                    shapes is not None
+                    and shapes.get((table_name, col_name)) is ColumnShape.DECIMAL
+                    and is_oversized_integer_width(pc)
+                ):
+                    continue  # the decimal shape rule refuses it as column_shape_mismatch
+                width_refusal = config_refusal(
+                    config_root_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "width",
                     ),
+                    Problem.NOT_ALLOWED,
+                    hint=_WIDTH_HINT,
                 )
+                raise refusal_error(reasons.plan.BUCKETIZE_WIDTH_UNRESOLVABLE, width_refusal)

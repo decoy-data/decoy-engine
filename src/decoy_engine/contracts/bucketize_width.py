@@ -12,12 +12,18 @@ from collections.abc import Mapping
 from typing import Any
 
 __all__ = [
+    "BUCKETIZE_FORMATS",
     "BUCKETIZE_PRESETS",
     "EXACT_INT_BOUND",
     "MAX_EXACT_DECIMAL_WIDTH",
+    "is_oversized_integer",
+    "is_oversized_integer_width",
     "resolve_bucketize_width",
     "unresolvable_width_field",
 ]
+
+# The label formats a bucketize column accepts: one list for the handler and the array kernel.
+BUCKETIZE_FORMATS: tuple[str, ...] = ("lower", "range", "midpoint")
 
 BUCKETIZE_PRESETS: Mapping[str, int] = {
     "by_year": 1,
@@ -39,11 +45,18 @@ MAX_EXACT_DECIMAL_WIDTH = 10**15
 EXACT_INT_BOUND: int = 2**53
 
 
+def is_oversized_integer(raw: Any) -> bool:
+    """Whether ``raw`` is an integer (not a bool) at or above ``EXACT_INT_BOUND``."""
+    return isinstance(raw, int) and not isinstance(raw, bool) and raw >= EXACT_INT_BOUND
+
+
 def resolve_bucketize_width(provider_config: Mapping[str, Any]) -> int | float | None:
     """The effective bucket width, or None when the config names none.
 
     A known ``preset`` gives its width. An unknown ``preset`` gives None. With no ``preset``, a
-    positive, non-boolean number is the width; anything else gives None.
+    positive, non-boolean number is the width; anything else gives None. An integer width at or
+    above ``EXACT_INT_BOUND`` gives None too: its bucket bounds cannot be held exactly, so the
+    handler, the plan check and the array kernel all refuse it by this one rule.
     """
     preset = provider_config.get("preset")
     if preset is not None:
@@ -51,7 +64,16 @@ def resolve_bucketize_width(provider_config: Mapping[str, Any]) -> int | float |
     raw = provider_config.get("width")
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None
+    if is_oversized_integer(raw):
+        return None
     return raw if raw > 0 else None
+
+
+def is_oversized_integer_width(provider_config: Mapping[str, Any]) -> bool:
+    """Whether the width is a positive integer the resolver refuses only for its size."""
+    return provider_config.get("preset") is None and is_oversized_integer(
+        provider_config.get("width")
+    )
 
 
 def unresolvable_width_field(provider_config: Mapping[str, Any]) -> str | None:

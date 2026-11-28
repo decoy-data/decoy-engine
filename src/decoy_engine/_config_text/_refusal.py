@@ -16,12 +16,14 @@ supplied names that pass `approve_name` (else a fixed placeholder), the closed `
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePosixPath
 
 from decoy_engine import reasons
-from decoy_engine.fileaccess import position_key
+from decoy_engine.fileaccess import at_position, position_key
 from decoy_engine.reasons import approve_name
 
 
@@ -180,10 +182,21 @@ Segment = str | int | Name | Member
 
 @dataclass(frozen=True, slots=True)
 class ConfigPosition:
-    """Where a refusal happened. `key` is the display joined once, with the table and column an
-    enclosing `at_position` binds, so a refusal and its `path` agree."""
+    """Where a refusal happened. `key` is the display joined once (by `config_position`, with
+    the table and column an enclosing `at_position` binds, or by `config_root_position`), so a
+    refusal and its `path` agree."""
 
     key: str
+
+
+_config_root_keys: frozenset[str] = frozenset()
+
+
+def register_config_root_keys(fields: Iterable[str]) -> frozenset[str]:
+    """Bind the schema's keys when the config model loads, keeping this layer schema-independent."""
+    global _config_root_keys
+    _config_root_keys = frozenset(fields) | {"generation", "declared_casting"}
+    return _config_root_keys
 
 
 def _display(segments: tuple[Segment, ...]) -> str:
@@ -204,8 +217,25 @@ def _display(segments: tuple[Segment, ...]) -> str:
 
 def config_position(*segments: Segment) -> ConfigPosition:
     """Join `segments` into one position. A plain `str` is a field name and must be a literal
-    (sentry rule S2)."""
+    (sentry rule S2). It is relative to the active column, so the first segment is a literal
+    that is not a config root key; a complete key goes through `config_root_position`."""
+    first = segments[0] if segments else None
+    if type(first) is not str or first in _config_root_keys:
+        raise TypeError("a relative position starts with a literal field name, not a root key")
     return ConfigPosition(position_key(_display(segments)))
+
+
+def config_root_position(*segments: Segment) -> ConfigPosition:
+    """Like `config_position`, for a check that walks the whole config and already starts its
+    segments at the config root (`tables`, ...): the enclosing `at_position` is not prepended,
+    or a per-column host would see that column twice."""
+    return ConfigPosition(_display(segments))
+
+
+def at_generate_column(table: object, column: object) -> AbstractContextManager[None]:
+    """Bind the display prefix for field refusals while keeping grant keys independent."""
+    at = config_root_position("tables", Name(table), "generate_columns", Name(column))
+    return at_position(at.key)
 
 
 class _Absent:

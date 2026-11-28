@@ -17,9 +17,12 @@ from decoy_engine._config_text._refusal import (
     Problem,
     QuotedName,
     Refusal,
+    at_generate_column,
     config_position,
     config_refusal,
+    config_root_position,
     kind_of,
+    register_config_root_keys,
 )
 
 __all__ = [
@@ -31,10 +34,13 @@ __all__ = [
     "Problem",
     "QuotedName",
     "Refusal",
+    "at_generate_column",
     "config_position",
     "config_refusal",
+    "config_root_position",
     "kind_of",
     "passthrough",
     "read_config",
+    "register_config_root_keys",
     "yaml_error_text",
 ]

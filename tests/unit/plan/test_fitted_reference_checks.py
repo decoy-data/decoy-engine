@@ -502,15 +502,23 @@ def test_schema_mismatch_is_value_free_for_a_statistical_column(tmp_path: Path) 
     assert SCHEMA_CANARY not in str(err) and SCHEMA_CANARY not in err.message
 
 
-def test_plan_load_refuses_unknown_schema_version_value_free(tmp_path: Path) -> None:
+@pytest.mark.parametrize("active", ["", "tables.orders.columns.age"])
+def test_plan_load_refuses_unknown_schema_version_value_free(tmp_path: Path, active: str) -> None:
     data = _plan_yaml(tmp_path)
     entry = data["generation"]["snapshots"][0]
     raw = json.dumps(_bad_schema_snapshot()).encode()
     entry["payload_b64"] = base64.b64encode(raw).decode("ascii")
     entry["sha256"] = hashlib.sha256(raw).hexdigest()
-    with pytest.raises(PlanCompileError) as exc:
+    from decoy_engine import fileaccess
+
+    with fileaccess.at_position(active), pytest.raises(PlanCompileError) as exc:
         plan_from_yaml(yaml.safe_dump(data, sort_keys=False))
     assert exc.value.code == "statistical_snapshot_schema_mismatch"
+    assert exc.value.path == "generation.snapshots[0].schema_version"
+    assert str(exc.value) == (
+        "[statistical_snapshot_schema_mismatch] generation.snapshots[0].schema_version: "
+        "does not match; expected an accepted schema version. This engine consumes only the accepted schema versions"
+    )
     assert SCHEMA_CANARY not in str(exc.value) and SCHEMA_CANARY not in exc.value.message
 
 

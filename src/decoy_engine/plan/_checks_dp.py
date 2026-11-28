@@ -33,6 +33,14 @@ import math
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from decoy_engine import reasons
+from decoy_engine._config_text import (
+    Problem,
+    Refusal,
+    at_generate_column,
+    config_position,
+    config_refusal,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.plan._checks_dp_carrier import (
     carrier_aware_query_count,
     check_flag_tokens_canonical,
@@ -41,7 +49,7 @@ from decoy_engine.plan._checks_dp_carrier import (
     column_block_matches_schema,
     schema_matches_legacy,
 )
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.plan._types import DpVerification
 from decoy_engine.quality.dp_ledger import ReleaseLedger
 from decoy_engine.quality.dp_provenance import ProvenanceError, validate_recorded_provenance
@@ -163,57 +171,52 @@ def check_dp_generate_contract(config: dict[str, Any]) -> None:
                 continue
             col_name = col_entry.get("name", "?")
             if (col_entry.get("type"), col_entry.get("distribution")) == ("reference", "fitted"):
-                raise PlanCompileError(
-                    code=reasons.plan.DP_GENERATE_FITTED_FANOUT_UNSUPPORTED,
-                    path=f"tables.{table_name}.generate_columns.{col_name}.distribution",
-                    message="a DP pipeline cannot use the exact fitted fan-out; use `distribution: random`",
+                with at_generate_column(table_name, col_name):
+                    refusal = config_refusal(
+                        config_position("distribution"),
+                        Problem.NOT_ALLOWED,
+                        hint="Use distribution: random for a DP pipeline",
+                    )
+                raise_bare(
+                    refusal_error(reasons.plan.DP_GENERATE_FITTED_FANOUT_UNSUPPORTED, refusal)
                 )
             if col_entry.get("type") != "statistical":
                 continue
-            where = f"{col_name!r} in table {table_name!r}"
             if col_entry.get("condition_on") is not None:
-                raise PlanCompileError(
-                    code=reasons.plan.DP_JOINT_UNSUPPORTED,
-                    path=f"tables.{table_name}.generate_columns.{col_name}.condition_on",
-                    message=(
-                        f"statistical column {where} sets condition_on under "
-                        "global_settings.dp: conditional/joint sampling has no composition "
-                        "accounting in this build and is out of scope (Scope B covers "
-                        "single-column marginals only). Remove condition_on, or drop "
-                        "global_settings.dp."
-                    ),
-                )
+                with at_generate_column(table_name, col_name):
+                    refusal = config_refusal(
+                        config_position("condition_on"),
+                        Problem.NOT_ALLOWED,
+                        hint="Remove condition_on or drop global_settings.dp",
+                    )
+                raise_bare(refusal_error(reasons.plan.DP_JOINT_UNSUPPORTED, refusal))
             # high_cardinality checked first (larger disclosure).
             if col_entry.get("high_cardinality") is True:
-                raise PlanCompileError(
-                    code=reasons.plan.DP_GENERATE_HIGH_CARDINALITY_UNSUPPORTED,
-                    path=f"tables.{table_name}.generate_columns.{col_name}.high_cardinality",
-                    message=(
-                        f"statistical column {where} sets high_cardinality: true under "
-                        "global_settings.dp: this retains the FULL real vocabulary, "
-                        "incompatible with a DP release. Remove high_cardinality, or drop "
-                        "global_settings.dp."
-                    ),
+                with at_generate_column(table_name, col_name):
+                    refusal = config_refusal(
+                        config_position("high_cardinality"),
+                        Problem.NOT_ALLOWED,
+                        hint="Remove high_cardinality or drop global_settings.dp",
+                    )
+                raise_bare(
+                    refusal_error(reasons.plan.DP_GENERATE_HIGH_CARDINALITY_UNSUPPORTED, refusal)
                 )
             if col_entry.get("allow_real_categories") is True:
-                raise PlanCompileError(
-                    code=reasons.plan.DP_GENERATE_ALLOW_REAL_CATEGORIES_UNSUPPORTED,
-                    path=(f"tables.{table_name}.generate_columns.{col_name}.allow_real_categories"),
-                    message=(
-                        f"statistical column {where} sets allow_real_categories: true under "
-                        "global_settings.dp: this releases the REAL observed vocabulary "
-                        "instead of the OpenDP-certified label set, silently voiding the DP "
-                        "guarantee. Remove allow_real_categories, or drop global_settings.dp."
-                    ),
+                with at_generate_column(table_name, col_name):
+                    refusal = config_refusal(
+                        config_position("allow_real_categories"),
+                        Problem.NOT_ALLOWED,
+                        hint="Remove allow_real_categories or drop global_settings.dp",
+                    )
+                raise_bare(
+                    refusal_error(
+                        reasons.plan.DP_GENERATE_ALLOW_REAL_CATEGORIES_UNSUPPORTED, refusal
+                    )
                 )
 
 
-def _raise(code: str, *, table_name: Any, col_name: Any, message: str) -> NoReturn:
-    raise PlanCompileError(
-        code=code,
-        path=f"tables.{table_name}.generate_columns.{col_name}.snapshot_file",
-        message=message,
-    )
+def _raise(code: str, refusal: Refusal) -> NoReturn:
+    raise_bare(refusal_error(code, refusal))
 
 
 def verify_dp_snapshots(
@@ -280,6 +283,8 @@ def verify_dp_snapshots(
             if not isinstance(col_snap, dict):
                 continue  # check_statistical_columns owns this verdict
 
+            with at_generate_column(table_name, col_name):
+                position = config_position("snapshot_file")
             dp_block = snap.get("dp")
             if (
                 not isinstance(dp_block, dict)
@@ -287,13 +292,10 @@ def verify_dp_snapshots(
             ):
                 _raise(
                     "dp_snapshot_not_dp_fit",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r} references a "
-                        f"snapshot with no {DP_SNAPSHOT_SCHEMA_VERSION!r} `dp` block, but "
-                        "global_settings.dp declares this pipeline's output must be DP. Fit it "
-                        "with fit_dp_snapshot, or drop global_settings.dp."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="Fit the snapshot with fit_dp_snapshot, or drop global_settings.dp",
                     ),
                 )
 
@@ -311,16 +313,13 @@ def verify_dp_snapshots(
             # would stop validating the proof stack entirely).
             try:
                 validate_recorded_provenance(dp_block.get("provenance"))
-            except ProvenanceError as exc:
+            except ProvenanceError:
                 _raise(
                     "dp_snapshot_provenance_uncertified",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: the "
-                        f"snapshot's recorded proof stack is not a certified row [{exc.code}] "
-                        f"{exc.message}. A receipt fit on an uncertified platform/stack is not "
-                        "one this build may accept."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The recorded proof stack is not certified",
                     ),
                 )
 
@@ -328,18 +327,17 @@ def verify_dp_snapshots(
             # scope, adjacency and boundary this build's stability-1 argument is
             # made for, before trusting any reconstruction below. A future codec
             # version or a different adjacency must fail closed, not verify.
-            check_release_compatibility(dp_block, table_name=table_name, col_name=col_name)
+            check_release_compatibility(dp_block, position=position)
 
             categorical_cols = dp_block.get("categorical_columns")
             numeric_domains = dp_block.get("numeric_domains")
             if not isinstance(categorical_cols, list) or not isinstance(numeric_domains, dict):
                 _raise(
                     "dp_snapshot_not_dp_fit",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: the "
-                        "snapshot's `dp` block is missing categorical_columns/numeric_domains."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The DP block must declare categorical_columns and numeric_domains",
                     ),
                 )
             # Carrier-aware reconstruction (guide sections 3.4/3.9): a flag
@@ -354,28 +352,19 @@ def verify_dp_snapshots(
             if carrier_aware is None or carrier_aware != expected_query_count:
                 _raise(
                     "dp_snapshot_query_count_mismatch",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: the "
-                        "snapshot's column_schema carriers "
-                        f"(reconstructing to {carrier_aware!r}) do not agree with its "
-                        f"categorical_columns/numeric_domains ({expected_query_count!r}), or a "
-                        "recorded carrier is not one of ('number', 'flag', 'text'). The "
-                        "artifact's declared schedule does not match its declared columns."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The column_schema carriers do not match the declared query schedule",
                     ),
                 )
             if dp_block.get("query_count") != expected_query_count:
                 _raise(
                     "dp_snapshot_query_count_mismatch",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: the "
-                        f"snapshot declares query_count={dp_block.get('query_count')!r}, but "
-                        f"its own categorical_columns/numeric_domains recompute to "
-                        f"{expected_query_count!r}. The artifact's declared schedule does not "
-                        "match its declared columns."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The query_count does not match the declared columns",
                     ),
                 )
 
@@ -398,17 +387,10 @@ def verify_dp_snapshots(
             if not schema_consistent:
                 _raise(
                     "dp_snapshot_column_schema_mismatch",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: the "
-                        "snapshot's column_schema names/carriers do not match its own "
-                        "categorical_columns/numeric_domains per column (schema names "
-                        f"{sorted(column_schema)!r} vs declared "
-                        f"{sorted(set(categorical_cols) | set(numeric_domains))!r}). A "
-                        "column_schema that only agrees in aggregate count but disagrees "
-                        "per column is a corrupted or hand-edited artifact, not a genuine "
-                        "release."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The column_schema does not match categorical_columns and numeric_domains",
                     ),
                 )
 
@@ -423,13 +405,10 @@ def verify_dp_snapshots(
             if not carrier_ok:
                 _raise(
                     "dp_snapshot_carrier_invalid",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: source "
-                        f"column {source_column!r} records carrier {col_carrier!r} for kind "
-                        f"{col_kind!r}, which is not an allowed kind x carrier pair (numeric->"
-                        "number, categorical->text/flag)."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The column kind and carrier must be numeric/number or categorical/text or flag",
                     ),
                 )
 
@@ -442,15 +421,10 @@ def verify_dp_snapshots(
             if not column_block_matches_schema(col_snap, column_schema, source_column):
                 _raise(
                     "dp_snapshot_column_block_schema_mismatch",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: source "
-                        f"column {source_column!r} records carrier {col_carrier!r}/kind "
-                        f"{col_kind!r} in its columns block, which disagrees with the dp "
-                        f"block's column_schema entry {column_schema.get(source_column)!r}. "
-                        "The two recorded declarations for one column must be identical; a "
-                        "divergence is a corrupted or hand-edited artifact."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The column kind and carrier must match the DP column_schema entry",
                     ),
                 )
 
@@ -461,13 +435,10 @@ def verify_dp_snapshots(
             if not eligible:
                 _raise(
                     "dp_snapshot_kind_not_dp_eligible",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: source "
-                        f"column {source_column!r} has kind {kind!r}, which is not declared "
-                        "in the snapshot's own dp.categorical_columns/dp.numeric_domains. "
-                        "Only columns the fit itself declared DP-eligible are accepted."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The snapshot must declare the source column as DP-eligible",
                     ),
                 )
 
@@ -482,8 +453,7 @@ def verify_dp_snapshots(
                     dp_block,
                     source_column=source_column,
                     numeric_domains=numeric_domains,
-                    table_name=table_name,
-                    col_name=col_name,
+                    position=position,
                 )
 
             # Guide 3.4 shape guard: a flag column's top_values must be only
@@ -493,20 +463,15 @@ def verify_dp_snapshots(
                 col_snap,
                 kind=kind,
                 col_carrier=col_carrier,
-                table_name=table_name,
-                col_name=col_name,
-                source_column=source_column,
+                position=position,
             )
 
             release_id = dp_block.get("release_id")
             if not isinstance(release_id, str) or not release_id:
                 _raise(
                     "dp_snapshot_missing_release_id",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: the "
-                        "snapshot's dp block has no release_id."
+                    config_refusal(
+                        position, Problem.NOT_ALLOWED, hint="The DP block must declare a release_id"
                     ),
                 )
 
@@ -534,13 +499,10 @@ def verify_dp_snapshots(
             if not (eps_ok and delta_ok):
                 _raise(
                     "dp_snapshot_budget_malformed",
-                    table_name=table_name,
-                    col_name=col_name,
-                    message=(
-                        f"statistical column {col_name!r} in table {table_name!r}: the "
-                        f"snapshot's dp block has epsilon_total={epsilon_total!r}, "
-                        f"delta_total={delta_total!r}, which must both be finite "
-                        "(epsilon_total >= 0, delta_total >= 0)."
+                    config_refusal(
+                        position,
+                        Problem.NOT_ALLOWED,
+                        hint="The composed epsilon_total and delta_total must be finite and nonnegative",
                     ),
                 )
 
@@ -548,13 +510,10 @@ def verify_dp_snapshots(
                 if release_id_to_digest[release_id] != read.sha256:
                     _raise(
                         "dp_release_id_conflict",
-                        table_name=table_name,
-                        col_name=col_name,
-                        message=(
-                            f"release_id {release_id!r} was already seen with a different "
-                            "artifact digest. Independent releases must mint independent "
-                            "release IDs; a reused ID with different bytes is a conflicting "
-                            "artifact, not the same release."
+                        config_refusal(
+                            position,
+                            Problem.NOT_ALLOWED,
+                            hint="Each distinct artifact must have a distinct release_id",
                         ),
                     )
                 # Same ID, same digest: already charged (guide section 6 row F5).

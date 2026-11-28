@@ -17,7 +17,8 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.execution.out_of_core._mask import mask_batch, mask_column, mask_table
+from decoy_engine.execution.out_of_core import mask_column
+from decoy_engine.execution.out_of_core._mask import mask_batch, mask_table
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 
 _SEED = b"\x00" * 8
@@ -178,3 +179,41 @@ def test_truncate_invalid_config_fails_closed_not_raw_passthrough(provider_confi
         mask_column(values, seed, _SEED)
     assert exc.value.code == code
     assert exc.value.strategy == "truncate"
+
+
+@pytest.mark.parametrize("bad", ["CANARY", "\ud800", 42])
+def test_ooc_truncate_params_rejects_mask_char_value_free(bad: Any) -> None:
+    from decoy_engine.execution.out_of_core._mask import truncate_params
+
+    with pytest.raises(StrategyError) as exc:
+        truncate_params({"length": 3, "mask_char": bad})
+    assert exc.value.code == "truncate_mask_char_invalid"
+    assert "CANARY" not in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", ["CANARY", "\ud800", 42])
+def test_native_truncate_rejects_mask_char_value_free(bad: Any) -> None:
+    from decoy_engine.execution.native._kernels_scalar import native_truncate
+
+    with pytest.raises(StrategyError) as exc:
+        native_truncate(pa.array(["abcdef"]), length=3, keep="head", mask_char=bad)
+    assert exc.value.code == "truncate_mask_char_invalid"
+    assert "CANARY" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("field", "hint"),
+    [
+        ("length", "length must be an integer >= 1."),
+        ("keep", "keep must be 'head' or 'tail'."),
+    ],
+)
+def test_mask_column_truncate_refuses_credentials(field: str, hint: str) -> None:
+    config: dict[str, Any] = {"length": 3}
+    config[field] = "https://worker:password@example.invalid/private"
+    seed = _col("truncate", provider_config=tuple(config.items()))
+    with pytest.raises(StrategyError) as caught:
+        mask_column(pa.array(["sensitive"]), seed, _SEED)
+    assert str(caught.value) == (
+        f"[truncate_{field}_invalid] strategy='truncate': provider_config.{field}: not allowed, got string. {hint}"
+    )

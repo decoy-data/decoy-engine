@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Name, Problem, config_position, config_refusal
+from decoy_engine._config_text import Name, Problem, config_refusal, config_root_position
 from decoy_engine._error_base import raise_bare
 from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.plan._errors import PlanCompileError, refusal_error
@@ -60,7 +60,7 @@ def declared_casting_from_dict(data: dict[str, Any]) -> DeclaredCastingPlan:
     columns: list[PlanDeclaredColumn] = []
     for raw in data.get("columns") or ():
         table, column = raw.get("table"), raw.get("column")
-        at_column = config_position("declared_casting", Name(table), Name(column))
+        at_column = config_root_position("declared_casting", Name(table), Name(column))
         rejected: str | None = None
         try:
             contract = build_contract(dict(raw["contract"]))

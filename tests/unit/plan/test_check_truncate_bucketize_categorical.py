@@ -47,8 +47,9 @@ class TestCheckTruncateConfig:
         with pytest.raises(PlanCompileError) as exc:
             check_truncate_config(cfg)
         assert exc.value.code == "truncate_length_invalid"
-        assert "t.c" in exc.value.path
-        assert "3" in exc.value.message
+        assert exc.value.path == "tables.t.columns.c.provider_config.length"
+        assert "got string" in exc.value.message
+        assert "3" not in str(exc.value)
 
     def test_missing_length_rejected(self) -> None:
         cfg = _config("truncate", {})
@@ -85,6 +86,19 @@ class TestCheckTruncateConfig:
         with pytest.raises(PlanCompileError) as exc:
             check_truncate_config(cfg)
         assert exc.value.code == "truncate_mask_char_invalid"
+
+    def test_unencodable_mask_char_rejected_value_free(self) -> None:
+        cfg = _config("truncate", {"length": 3, "mask_char": "\ud800"})
+        with pytest.raises(PlanCompileError) as exc:
+            check_truncate_config(cfg)
+        assert exc.value.code == "truncate_mask_char_invalid"
+
+    def test_rejected_mask_char_not_echoed(self) -> None:
+        cfg = _config("truncate", {"length": 3, "mask_char": "CANARY"})
+        with pytest.raises(PlanCompileError) as exc:
+            check_truncate_config(cfg)
+        assert exc.value.code == "truncate_mask_char_invalid"
+        assert "CANARY" not in str(exc.value)
 
     def test_valid_length_only_compiles(self) -> None:
         check_truncate_config(_config("truncate", {"length": 3}))  # no raise

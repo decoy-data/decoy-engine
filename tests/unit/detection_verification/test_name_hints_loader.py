@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from decoy_engine import fileaccess
 from decoy_engine.detection.name_hints.loader import (
     NameHintLoaderError,
     load_name_hint_terms,
@@ -117,7 +118,12 @@ detectors:
 
 class TestManifestErrors:
     def test_missing_manifest(self, tmp_path: Path) -> None:
-        with pytest.raises(NameHintLoaderError, match="manifest.yaml: not found"):
+        with (
+            fileaccess.at_position("tables.orders.columns.age"),
+            pytest.raises(
+                NameHintLoaderError, match=r"^pre_scan\.name_hints/manifest\.yaml: not found"
+            ),
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_manifest_missing_files_key(self, tmp_path: Path) -> None:

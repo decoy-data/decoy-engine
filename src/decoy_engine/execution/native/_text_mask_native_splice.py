@@ -30,6 +30,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from decoy_engine.contracts.label_text import is_utf8_text
 from decoy_engine.detection.detectors import _SPAN_DETECTORS, Span, iter_spans
 from decoy_engine.execution.native._text_redact_kernel import (
     CATALOG_VERSION,
@@ -93,13 +94,9 @@ def plan_native_splice(
     the COMPLETE set first. Ids that are not span detectors emit no spans and are ignored, as
     `iter_spans` ignores them.
     """
-    if unmatched_span_policy not in _NATIVE_POLICIES or not isinstance(token, str):
-        return None
-    try:
-        token.encode("utf-8")
-    except UnicodeEncodeError:
-        # A token with unpaired surrogates cannot cross to Rust; the oracle emits it verbatim,
-        # so decline and let the Python splice reproduce that.
+    # A token with unpaired surrogates cannot cross to Rust; the oracle emits it verbatim,
+    # so decline and let the Python splice reproduce that.
+    if unmatched_span_policy not in _NATIVE_POLICIES or not is_utf8_text(token):
         return None
     effective: dict[str, str] = dict(DETECTOR_DEFAULTS)
     if strategy_map:

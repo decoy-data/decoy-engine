@@ -31,13 +31,17 @@ written). Source-null cells are unaffected (null passthrough is not a leak).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.contracts.bucketize_width import resolve_bucketize_width
+from decoy_engine.contracts.bucketize_width import BUCKETIZE_FORMATS, resolve_bucketize_width
 from decoy_engine.contracts.format_error_reasons import format_error_reason
 from decoy_engine.execution._adapter import (
     StrategyContext,
@@ -52,7 +56,7 @@ from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.kernel import integer_width_exit_mask
 from decoy_engine.plan._types import ColumnSeed
 
-_FORMATS = frozenset({"lower", "range", "midpoint"})
+_FORMATS = frozenset(BUCKETIZE_FORMATS)
 _NOT_NUMERIC = "value is not numeric under bucketize"
 
 
@@ -99,6 +103,58 @@ def _render_labels(
     return formatted
 
 
+@dataclass(frozen=True)
+class BucketizeSettings:
+    """The resolved bucketize config: one width, one format, and the F06 integer-output flag.
+
+    Built once from the column's config by ``resolve_bucketize_settings``; the handler, the array
+    operator and the physical route all read these fields and never the raw config.
+    """
+
+    width: int | float
+    fmt: str
+    declared_integer_output: bool
+
+
+def resolve_bucketize_settings(cfg: Mapping[str, Any], column: str) -> BucketizeSettings:
+    """Resolve width and format from ``cfg``, failing closed on an unusable width.
+
+    An unresolved width must never leave the column unmasked, so it raises ``StrategyError``. An
+    unknown format reads as ``lower``.
+    """
+    width = resolve_bucketize_width(cfg)
+    if width is None:
+        # Invalid config: fail closed (Sprint 13 GATE-1 Q4). A masking
+        # strategy must never silently pass the source column through.
+        raise StrategyError(
+            code=reasons.runtime.BUCKETIZE_WIDTH_UNRESOLVABLE,
+            strategy="bucketize",
+            message=(
+                f"column {column!r} uses bucketize but neither a known "
+                "preset nor a resolvable numeric width is configured."
+            ),
+        )
+    fmt = str(cfg.get("format", "lower")).lower()
+    if fmt not in _FORMATS:
+        fmt = "lower"
+    return BucketizeSettings(width, fmt, bool(cfg.get("declared_integer_output")))
+
+
+def render_exceptional_bucket_labels(nums: pd.Series, settings: BucketizeSettings) -> pd.Series:
+    """Labels for a few positions, rendered by the handler's own code with the dtype kept.
+
+    For the valid-NaN rows of a pandas extension column, where the oracle's output depends on the
+    dtype, the format and the width. Missing positions come back null.
+    """
+    formatted = _render_labels(
+        nums,
+        settings.width,
+        settings.fmt,
+        declared_integer_output=settings.declared_integer_output,
+    )
+    return formatted.astype(object).where(nums.notna().to_numpy(), None)
+
+
 class BucketizeStrategyHandler:
     """Round numeric values into fixed-width buckets."""
 
@@ -120,21 +176,8 @@ class BucketizeStrategyHandler:
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
         require_shape_declared("bucketize", column, ctx)
-        width = resolve_bucketize_width(cfg)
-        if width is None:
-            # Invalid config: fail closed (Sprint 13 GATE-1 Q4). A masking
-            # strategy must never silently pass the source column through.
-            raise StrategyError(
-                code=reasons.runtime.BUCKETIZE_WIDTH_UNRESOLVABLE,
-                strategy="bucketize",
-                message=(
-                    f"column {column!r} uses bucketize but neither a known "
-                    "preset nor a resolvable numeric width is configured."
-                ),
-            )
-        fmt = str(cfg.get("format", "lower")).lower()
-        if fmt not in _FORMATS:
-            fmt = "lower"
+        settings = resolve_bucketize_settings(cfg, column)
+        width, fmt = settings.width, settings.fmt
 
         col = df[column]
         nums = pd.to_numeric(col, errors="coerce")
@@ -156,7 +199,7 @@ class BucketizeStrategyHandler:
             labelled,
             width,
             fmt,
-            declared_integer_output=bool(cfg.get("declared_integer_output")),
+            declared_integer_output=settings.declared_integer_output,
         )
 
         # Sprint 2 honesty pack (D7): a non-null cell that fails numeric coercion is a per-row

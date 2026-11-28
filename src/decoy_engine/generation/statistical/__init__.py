@@ -40,6 +40,9 @@ from decoy_engine.generation.statistical._spec import (
     spec_from_dict,
     spec_to_dict,
 )
+from decoy_engine.generation.statistical._spec import (
+    _refuse as statistical_spec_error,
+)
 
 __all__ = [
     "DISTINCT_PARENT_CAP",
@@ -67,4 +70,5 @@ __all__ = [
     "select_table",
     "spec_from_dict",
     "spec_to_dict",
+    "statistical_spec_error",
 ]

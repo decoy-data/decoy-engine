@@ -35,8 +35,8 @@ from decoy_engine._config_text import (
     Member,
     Problem,
     Refusal,
-    config_position,
     config_refusal,
+    config_root_position,
     read_config,
 )
 from decoy_engine._error_base import raise_bare
@@ -214,7 +214,7 @@ class ModelPackLoader:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position("pre_scan", "model_pack"),
+                        config_root_position("pre_scan", "model_pack"),
                         Problem.NOT_ALLOWED,
                         hint=(
                             "ML is disabled via DECOY_ML_DISABLED; "
@@ -265,7 +265,7 @@ class ModelPackLoader:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _load_manifest(self) -> ModelPackManifest:
-        at_manifest = config_position("pre_scan", "model_pack", Member("manifest.json"))
+        at_manifest = config_root_position("pre_scan", "model_pack", Member("manifest.json"))
         # Read inside `read_config` like the weights: an OS failure on the first read (an
         # unreadable directory) carries the locator in its text.
         data = read_config(
@@ -296,7 +296,7 @@ class ModelPackLoader:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position(
+                        config_root_position(
                             "pre_scan", "model_pack", Member("manifest.json"), "format_version"
                         ),
                         Problem.MISMATCH,
@@ -310,7 +310,7 @@ class ModelPackLoader:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position(
+                        config_root_position(
                             "pre_scan",
                             "model_pack",
                             Member("manifest.json"),
@@ -326,7 +326,7 @@ class ModelPackLoader:
             )
 
     def _read_weights(self) -> bytes:
-        at_weights = config_position("pre_scan", "model_pack", Member("model.joblib"))
+        at_weights = config_root_position("pre_scan", "model_pack", Member("model.joblib"))
         weights = read_config(
             lambda: self._read_member("model.joblib"),
             at_weights,
@@ -344,7 +344,7 @@ class ModelPackLoader:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position(
+                        config_root_position(
                             "pre_scan", "model_pack", Member("manifest.json"), "sha256"
                         ),
                         Problem.EMPTY,
@@ -357,7 +357,7 @@ class ModelPackLoader:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position("pre_scan", "model_pack", Member("model.joblib")),
+                        config_root_position("pre_scan", "model_pack", Member("model.joblib")),
                         Problem.MISMATCH,
                         expected=Expected.SHA256,
                         hint=(
@@ -420,7 +420,7 @@ class ModelPackLoader:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position("pre_scan", "model_pack", "signing_key"),
+                        config_root_position("pre_scan", "model_pack", "signing_key"),
                         Problem.UNPARSEABLE,
                         hint=(
                             "DECOY_PACK_SIGNING_KEY is set but is not a valid signing key; "
@@ -441,7 +441,7 @@ class ModelPackLoader:
                 raise_bare(
                     _refuse(
                         config_refusal(
-                            config_position("pre_scan", "model_pack", "signature"),
+                            config_root_position("pre_scan", "model_pack", "signature"),
                             Problem.MISSING,
                             hint=(
                                 "The pack is unsigned (manifest_hmac is empty) but "
@@ -455,7 +455,7 @@ class ModelPackLoader:
                 raise_bare(
                     _refuse(
                         config_refusal(
-                            config_position("pre_scan", "model_pack", "signature"),
+                            config_root_position("pre_scan", "model_pack", "signature"),
                             Problem.MISMATCH,
                             hint=(
                                 "The pack signature verification FAILED. The manifest may have been "
@@ -479,7 +479,7 @@ class ModelPackLoader:
                     "without a verified signature (DE-04).",
                     self._label,
                 )
-            at_signature = config_position("pre_scan", "model_pack", "signature")
+            at_signature = config_root_position("pre_scan", "model_pack", "signature")
             if not self._trusted:
                 raise_bare(
                     _refuse(
@@ -531,7 +531,7 @@ class ModelPackLoader:
     def _deserialise(self, model_bytes: bytes) -> dict[str, Any]:
         # SHA-256 verified above before reaching this point.
         # joblib.load of a trusted, locally generated, hash-verified artifact.
-        at_weights = config_position("pre_scan", "model_pack", Member("model.joblib"))
+        at_weights = config_root_position("pre_scan", "model_pack", Member("model.joblib"))
         library_missing = False
         try:
             import io
@@ -543,7 +543,7 @@ class ModelPackLoader:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position("pre_scan", "model_pack", "joblib"),
+                        config_root_position("pre_scan", "model_pack", "joblib"),
                         Problem.NOT_FOUND,
                         hint="joblib is a base dependency and failed to import. Reinstall decoy-engine",
                     ),

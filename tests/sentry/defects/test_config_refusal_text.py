@@ -173,7 +173,7 @@ def test_the_merge_base_ratchet_catches_a_raised_count() -> None:
 ZERO = "detection/name_hints/loader.py"
 IMPORTS = (
     "from decoy_engine._config_text import (Expected, Kind, Member, Name, Problem, Refusal,"
-    " config_position, config_refusal, read_config)\n"
+    " config_position, config_refusal, config_root_position, read_config)\n"
     "from decoy_engine._error_base import raise_bare\n"
     "from decoy_engine.errors import ConfigError\n"
     "from decoy_engine.plan import PlanCompileError, refusal_error\n"
@@ -226,6 +226,10 @@ FIRES: dict[str, tuple[str, str]] = {
         "S2",
         "def f(v):\n    config_position(f'{v}')\n    config_refusal("
         "config_position(f'{v}'), Problem.MISSING)\n",
+    ),
+    "risky root segment": (
+        "S2",
+        "def f(v):\n    config_refusal(config_root_position(f'{v}'), Problem.MISSING)\n",
     ),
     "Name(str(v))": (
         "S2",
@@ -429,7 +433,11 @@ CLEAN: dict[str, str] = {
         "def f(tbl):\n    return read_config(lambda: _check(tbl), config_position('a'), g)\n"
     ),
     "plain raw binding": (
-        "def f(v):\n    config_refusal(config_position(Name(v)), Problem.MISSING)\n"
+        "def f(v):\n    config_refusal(config_position('a', Name(v)), Problem.MISSING)\n"
+    ),
+    "root position with a raw binding": (
+        "def f(t, c):\n    config_refusal(config_root_position('tables', Name(t), 'columns',"
+        " Name(c)), Problem.MISSING)\n"
     ),
     "index segment": (
         "def f(xs):\n    for i, x in enumerate(xs):\n"
@@ -544,6 +552,22 @@ def test_s6_protected_checker_passes_and_an_extra_unprotected_call_fails() -> No
     assert "S6" not in _rules(protected)
     extra = protected + "def other(tbl):\n    return _check(tbl)\n"
     assert "S6" in _rules(extra)
+
+
+def test_s7_a_relative_position_starts_with_a_literal_field_not_a_root_key_or_a_variable() -> None:
+    ok = "def f(name):\n    return config_position('statistical', Name(name), 'x')\n"
+    assert "S7" not in _rules(ok)
+    for bad in (
+        "config_position('tables', Name(t), 'columns')",
+        "config_position('delivery')",
+        "config_position(Name(field_key), 'schema_version')",
+        "config_position(prefix, 'x')",
+    ):
+        assert "S7" in _rules(f"def f():\n    return {bad}\n"), bad
+
+
+def test_the_real_tree_has_no_s7_finding() -> None:
+    assert [f.key for f in scan.scan_tree(SRC) if f.rule == "S7"] == []
 
 
 FACTORY = (

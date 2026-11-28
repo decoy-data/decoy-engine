@@ -7,7 +7,10 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from decoy_engine import reasons
 from decoy_engine._arrow_types import is_text, narrow_text
+from decoy_engine._execution_error import ExecutionError
+from decoy_engine.contracts.label_text import is_utf8_text
 from decoy_engine.determinism import derive
 from decoy_engine.internal.pandas_missing import is_null_cell as _is_missing
 from decoy_engine.kernel._canonicalize import canonicalize_derive_source
@@ -175,7 +178,15 @@ def truncate_array(
     UTF-8, a non-Arrow list, a failed cast or other Arrow error -- falls back
     to `_truncate_array_reference`, so the guard is total and non-raising: it
     takes the fast path or matches the reference.
+
+    A ``str`` `mask_char` with no UTF-8 form (an unpaired surrogate) is refused up front, before
+    either path, so the outcome never depends on whether a row is long enough to use it.
     """
+    if mask_char is not None and isinstance(mask_char, str) and not is_utf8_text(mask_char):
+        raise ExecutionError(
+            code=reasons.runtime.TRUNCATE_MASK_CHAR_INVALID,
+            message="truncate mask_char must be a single character that encodes as UTF-8.",
+        )
     if (
         type(length) is int
         and 0 < length <= 2**31 - 1

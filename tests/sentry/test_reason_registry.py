@@ -180,7 +180,6 @@ ADAPTERS: dict[tuple[str, str], str] = {
         "its other callers pass a registry symbol"
     ),
     ("plan/_generation.py", "check_fitted_references"): _REWRAP,
-    ("plan/_serialize.py", "_pinned_snapshot_from_dict"): _REWRAP,
     ("plan/validate/_consolidator.py", "validate_plan"): _REWRAP,
     ("subset/_api.py", "_compute"): _REWRAP,
     ("unmask.py", "unmask_pipeline"): _REWRAP,

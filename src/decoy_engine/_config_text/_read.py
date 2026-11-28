@@ -60,7 +60,7 @@ def _mark(exc: BaseException) -> tuple[int | None, int | None]:
     return None, None
 
 
-def passthrough(exc: Exception) -> BaseException | None:
+def passthrough(exc: Exception, *, display: ConfigPosition | None = None) -> BaseException | None:
     """How a failure that is not an ordinary read or parse error leaves a loader, or None.
 
     One rule for every route that reads a pinned or configured file, so no route rebuilds it:
@@ -68,13 +68,18 @@ def passthrough(exc: Exception) -> BaseException | None:
     - Under the ambient policy a builtin `MemoryError` is returned as is (re-raise it).
     - Under a strict policy a recognised memory or disk-resource failure keeps its class and gets
       the file-access replacement (fixed text, no filename): the fresh error is returned, to be
-      raised bare. The policy's own typed errors are returned as is.
+      raised bare. A keyed policy error uses the supplied display position when its grant key is private.
     - Anything else gives None: the caller turns it into its own value-free outcome.
 
     A caller re-raises with `raise` when the result `is exc`, and with `raise_bare` otherwise.
     """
     if fileaccess.is_ambient():
         return exc if isinstance(exc, MemoryError) else None
+    if display is not None:
+        if isinstance(exc, fileaccess.FileAccessDenied):
+            return fileaccess.FileAccessDenied(display.key, kind=exc.kind)
+        if isinstance(exc, fileaccess.FileAccessReadError):
+            return fileaccess.FileAccessReadError(display.key)
     classified = fileaccess.classified_failure(exc)
     if classified is not None:
         if classified.fresh is not None:

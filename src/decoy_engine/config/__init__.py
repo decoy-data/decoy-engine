@@ -89,7 +89,7 @@ from decoy_engine.config._parse import (
     parse_relationship_config,
     pre_scan_hash_input,
 )
-from decoy_engine.config._pipeline import PipelineConfig
+from decoy_engine.config._pipeline import CONFIG_ROOT_KEYS, PipelineConfig
 from decoy_engine.config._post_scan import (
     NO_SINK_KIND,
     Dismissal,
@@ -158,6 +158,7 @@ from decoy_engine.config._transforms import (
 )
 
 __all__ = [
+    "CONFIG_ROOT_KEYS",
     "DERIVED_ORIGIN",
     "FILE_SOURCE_PATH_FIELDS",
     "NAMESPACE_PLACEHOLDER_PREFIX",

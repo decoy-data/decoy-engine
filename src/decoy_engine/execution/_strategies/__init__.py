@@ -29,7 +29,12 @@ from decoy_engine.execution._adapter import (
     StrategyShape,
 )
 from decoy_engine.execution._strategies._bucket_perturb import BucketPerturbStrategyHandler
-from decoy_engine.execution._strategies._bucketize import BucketizeStrategyHandler
+from decoy_engine.execution._strategies._bucketize import (
+    BucketizeSettings,
+    BucketizeStrategyHandler,
+    render_exceptional_bucket_labels,
+    resolve_bucketize_settings,
+)
 from decoy_engine.execution._strategies._categorical import CategoricalStrategyHandler
 from decoy_engine.execution._strategies._code_set import CodeSetHandler
 from decoy_engine.execution._strategies._date_shift import DateShiftStrategyHandler
@@ -49,8 +54,18 @@ from decoy_engine.execution._strategies._shuffle import ShuffleStrategyHandler
 from decoy_engine.execution._strategies._text_mask import TextMaskHandler
 from decoy_engine.execution._strategies._text_redact import TextRedactHandler
 from decoy_engine.execution._strategies._tokenize import TokenizeStrategyHandler
-from decoy_engine.execution._strategies._top_code import TopCodeStrategyHandler
-from decoy_engine.execution._strategies._truncate import TruncateHandler
+from decoy_engine.execution._strategies._top_code import (
+    TopCodeSettings,
+    TopCodeStrategyHandler,
+    render_exceptional_top_code,
+    resolve_top_code_settings,
+    top_code_warning,
+)
+from decoy_engine.execution._strategies._truncate import (
+    TruncateHandler,
+    truncate_params,
+    validated_truncate_params,
+)
 from decoy_engine.execution._strategies._windowed_date import WindowedDateStrategyHandler
 from decoy_engine.execution._strategies.nested import NestedStrategyHandler
 from decoy_engine.plan.checks import REQUIREMENTS_BY_STRATEGY, StrategyRequirement, requirements_for
@@ -177,6 +192,7 @@ def output_declaration(
 __all__ = [
     "SCALAR_HANDLERS",
     "BucketPerturbStrategyHandler",
+    "BucketizeSettings",
     "BucketizeStrategyHandler",
     "CategoricalStrategyHandler",
     "CodeSetHandler",
@@ -202,9 +218,17 @@ __all__ = [
     "TextMaskHandler",
     "TextRedactHandler",
     "TokenizeStrategyHandler",
+    "TopCodeSettings",
     "TopCodeStrategyHandler",
     "TruncateHandler",
     "WindowedDateStrategyHandler",
     "output_declaration",
+    "render_exceptional_bucket_labels",
+    "render_exceptional_top_code",
+    "resolve_bucketize_settings",
+    "resolve_top_code_settings",
     "strategy_catalog",
+    "top_code_warning",
+    "truncate_params",
+    "validated_truncate_params",
 ]

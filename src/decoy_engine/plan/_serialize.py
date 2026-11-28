@@ -27,17 +27,25 @@ from typing import Any
 import yaml
 
 from decoy_engine import reasons
+from decoy_engine._config_text import (
+    Problem,
+    at_generate_column,
+    config_position,
+    config_refusal,
+    config_root_position,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.expressions._when_parser import validate_envelope_when
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._checks_dp import check_dp_generate_contract, verify_dp_snapshots
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.plan._generation import (
     ReadSnapshot,
     build_generation_plan,
     check_generate_snapshot_columns,
     column_pins_snapshot,
     pinned_digest_message,
-    snapshot_schema_failure,
+    snapshot_schema_refusal,
     verified_pinned_bytes,
 )
 from decoy_engine.plan._serialize_declared import (
@@ -332,7 +340,8 @@ def _pinned_snapshot_from_dict(
         PlanCompileError: ``code='dp_pinned_snapshot_digest_mismatch'``
             when the recomputed digest disagrees with the stored one.
     """
-    position = f"generation.snapshots[{index}]"
+    at_position = config_root_position("generation", "snapshots", index)
+    position = at_position.key
     source_path = data["source_path"]
     raw = verified_pinned_bytes(data)
     if raw is None:
@@ -355,7 +364,7 @@ def _pinned_snapshot_from_dict(
     parsed: Any = None
     not_json = False
     try:
-        parsed = parse_snapshot_json(raw, shown=position)
+        parsed = parse_snapshot_json(raw, at=at_position)
     except StatisticalSpecError:
         not_json = True
     if not_json:
@@ -367,9 +376,11 @@ def _pinned_snapshot_from_dict(
                 "valid JSON. A digest match is not proof the payload is a JSON snapshot artifact."
             ),
         )
-    mismatch = snapshot_schema_failure(parsed, position)
+    mismatch = snapshot_schema_refusal(
+        parsed, config_root_position("generation", "snapshots", index, "schema_version")
+    )
     if mismatch is not None:
-        raise PlanCompileError(code=mismatch.code, path=position, message=mismatch.message)
+        raise refusal_error(reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH, mismatch)
     read_snapshot = ReadSnapshot(
         path=source_path,
         sha256=stored_sha256,
@@ -382,22 +393,11 @@ def _pinned_snapshot_from_dict(
 def _require_statistical_snapshots_pinned(
     config: dict[str, Any], pinned: dict[str, ReadSnapshot]
 ) -> None:
-    """HIGH H-A: refuse a deserialized `generation` block whose config
-    references a `snapshot_file` the pinned set does not cover, BEFORE
-    `check_statistical_columns` ever runs.
+    """Require a pin for every snapshot referenced by the stored config.
 
-    `check_statistical_columns` is shared with `compile_plan`, where a
-    path absent from `pinned` genuinely means "the read pass couldn't
-    open it" and a direct-read fallback re-derives the right unreadable
-    verdict (guide section 4.7). At LOAD time that fallback is wrong: an
-    absent path means a serialized Plan's `generation.snapshots` no
-    longer covers a `snapshot_file` its own `config_json` references --
-    a malformed manifest, not a missing file -- so falling back would
-    make deserialization a filesystem read plus an existence oracle over
-    a path named in this untrusted document, contradicting "read once and
-    pinned, never reopened." This check runs first and refuses instead,
-    leaving `check_statistical_columns`'s own fallback path unreachable
-    here."""
+    An absent pin indicates an incomplete manifest. Refuse before the column checks
+    can attempt to open a path supplied by that manifest.
+    """
     tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
     for table_entry in tables:
         if not isinstance(table_entry, dict):
@@ -409,15 +409,13 @@ def _require_statistical_snapshots_pinned(
             snapshot_file = col_entry.get("snapshot_file")
             col_name = col_entry.get("name", "?")
             if snapshot_file and str(snapshot_file) not in pinned:
-                raise PlanCompileError(
-                    code=reasons.plan.STATISTICAL_SNAPSHOT_NOT_PINNED,
-                    path=f"tables.{table_name}.generate_columns.{col_name}.snapshot_file",
-                    message=(
-                        f"generate column {col_name!r} references a snapshot_file that is "
-                        "not among this Plan's pinned snapshots -- a malformed manifest, not a "
-                        "fallback to a fresh filesystem read."
-                    ),
-                )
+                with at_generate_column(table_name, col_name):
+                    missing = config_refusal(
+                        config_position("snapshot_file"),
+                        Problem.MISSING,
+                        hint="The plan must include the referenced snapshot in its pinned snapshots",
+                    )
+                raise_bare(refusal_error(reasons.plan.STATISTICAL_SNAPSHOT_NOT_PINNED, missing))
 
 
 def _generation_plan_from_dict(data: dict[str, Any]) -> GenerationPlan:
