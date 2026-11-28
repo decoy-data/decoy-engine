@@ -38,7 +38,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Name, Problem, config_position, config_refusal
+from decoy_engine._config_text import Name, Problem, config_refusal, config_root_position
 from decoy_engine._error_base import raise_bare
 from decoy_engine.errors import FpeUnencryptableError
 from decoy_engine.plan._errors import refusal_error
@@ -98,7 +98,7 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
             resolved = _CHARSETS.get(charset_spec, charset_spec)
             if not isinstance(resolved, str):
                 resolved = str(resolved)
-            at_charset = config_position(
+            at_charset = config_root_position(
                 "tables", Name(table_name), "columns", Name(col_name), "provider_config", "charset"
             )
             duplicate = False
@@ -188,7 +188,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
                 continue
             col_name = col_entry.get("name", "?")
             verdict = classify_fpe_scheme(checksum)
-            at_checksum = config_position(
+            at_checksum = config_root_position(
                 "tables", Name(table_name), "columns", Name(col_name), "provider_config", "checksum"
             )
             if verdict == "unknown":
@@ -228,7 +228,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
             if required is not None:
                 missing = required - charset_set
                 if missing:
-                    at_charset = config_position(
+                    at_charset = config_root_position(
                         "tables",
                         Name(table_name),
                         "columns",

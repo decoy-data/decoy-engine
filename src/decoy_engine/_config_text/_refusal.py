@@ -187,6 +187,12 @@ class ConfigPosition:
     key: str
 
 
+# Top-level config keys. A position that starts with one is a complete key from the root, so it
+# is built with `config_root_position`: `config_position` prepends the active column and would
+# print the column twice.
+CONFIG_ROOT_KEYS = frozenset({"tables", "delivery", "generation", "targets", "sources", "version"})
+
+
 def _display(segments: tuple[Segment, ...]) -> str:
     out = ""
     for segment in segments:
@@ -205,7 +211,11 @@ def _display(segments: tuple[Segment, ...]) -> str:
 
 def config_position(*segments: Segment) -> ConfigPosition:
     """Join `segments` into one position. A plain `str` is a field name and must be a literal
-    (sentry rule S2)."""
+    (sentry rule S2). It is relative to the active column, so the first segment is a literal
+    that is not a config root key; a complete key goes through `config_root_position`."""
+    first = segments[0] if segments else None
+    if type(first) is not str or first in CONFIG_ROOT_KEYS:
+        raise TypeError("a relative position starts with a literal field name, not a root key")
     return ConfigPosition(position_key(_display(segments)))
 
 

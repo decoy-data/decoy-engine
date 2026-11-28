@@ -10,14 +10,14 @@ import json
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Name, Refusal, config_position, read_config
+from decoy_engine._config_text import ConfigPosition, Refusal, read_config
 
 
-def parse_snapshot_json(raw: bytes, *, shown: str) -> Any:
+def parse_snapshot_json(raw: bytes, *, at: ConfigPosition) -> Any:
     """Parse snapshot bytes as JSON or raise `StatisticalSpecError` (unreadable).
 
-    `shown` names where the bytes came from (a config position such as
-    ``generation.snapshots[0]``); it is displayed only when it is an approved name. The decode
+    `at` is where the bytes came from, a typed position (rooted for a complete key such as
+    ``generation.snapshots[0]``, relative for a field under the active column). The decode
     errors hold the file (`UnicodeDecodeError.object`, `JSONDecodeError.doc`), so `read_config`
     reads only the integer line and column, and the refusal has no cause or context.
     """
@@ -29,4 +29,4 @@ def parse_snapshot_json(raw: bytes, *, shown: str) -> Any:
             code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE, message=refusal.text
         )
 
-    return read_config(lambda: json.loads(raw), config_position(Name(shown)), _refuse)
+    return read_config(lambda: json.loads(raw), at, _refuse)

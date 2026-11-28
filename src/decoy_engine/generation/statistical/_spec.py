@@ -186,11 +186,11 @@ def spec_from_dict(data: Mapping[str, Any]) -> StatisticalSpec:
 # `_load_snapshot` is the sole `open()` site for a snapshot artifact in this package (guide section
 # 4.7 item 3). `load_spec` never calls it: it takes the snapshot the compiler already read and
 # pinned. It remains for compile-time callers that must read a path, and for tests building fixtures.
-def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, dict[str, Any]]:
+def _load_snapshot(path: str) -> tuple[str, dict[str, Any]]:
     """Read + parse a snapshot artifact. Returns `(content_sha256, parsed)`.
     No caching: every call is a fresh read + hash + parse."""
-    key = fileaccess.position_key(field_key)
-    at_snapshot = config_position(Name(field_key))
+    at_snapshot = config_position("snapshot_file")
+    key = at_snapshot.key
     # Reading and parsing run through `read_config`, so the refusal holds a position and no
     # exception text, and has no cause or context.
     raw = read_config(
@@ -199,7 +199,7 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
         lambda r: _refuse(reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE, r),
     )
     digest = hashlib.sha256(raw).hexdigest()
-    snap = parse_snapshot_json(raw, shown=field_key)
+    snap = parse_snapshot_json(raw, at=at_snapshot)
     if not isinstance(snap, dict):
         raise_bare(
             _refuse(
@@ -219,7 +219,7 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
             _refuse(
                 reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
                 config_refusal(
-                    config_position(Name(field_key), "schema_version"),
+                    config_position("snapshot_file", "schema_version"),
                     Problem.MISMATCH,
                     expected=Expected.SCHEMA_VERSION,
                     hint="This engine consumes only the accepted schema versions",

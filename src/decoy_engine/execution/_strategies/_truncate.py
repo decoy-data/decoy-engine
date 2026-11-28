@@ -79,9 +79,8 @@ class TruncateHandler:
                 code=reasons.runtime.TRUNCATE_LENGTH_INVALID,
                 strategy="truncate",
                 message=(
-                    f"column {column!r} uses truncate with invalid length "
-                    f"{length!r} ({type(length).__name__}); length must be an "
-                    "integer >= 1."
+                    f"column {column!r} uses truncate with an invalid length "
+                    f"(type {type(length).__name__}); length must be an integer >= 1."
                 ),
             )
         # MG-1/S3: keep + mask_char. Legacy from_end maps to keep="tail";
@@ -94,7 +93,7 @@ class TruncateHandler:
             raise StrategyError(
                 code=reasons.runtime.TRUNCATE_KEEP_INVALID,
                 strategy="truncate",
-                message=f"column {column!r} uses truncate with invalid keep {keep!r}.",
+                message=f"column {column!r} uses truncate with an invalid keep; keep must be 'head' or 'tail'.",
             )
         mask_char = cfg.get("mask_char")
         if mask_char is not None:

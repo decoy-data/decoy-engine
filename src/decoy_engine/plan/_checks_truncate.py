@@ -28,8 +28,13 @@ from typing import Any
 from decoy_engine import reasons
 from decoy_engine._config_text import Name, Problem, config_refusal, config_root_position
 from decoy_engine.contracts.label_text import is_mask_char
-from decoy_engine.plan._errors import PlanCompileError, refusal_error
+from decoy_engine.plan._errors import refusal_error
 
+_LENGTH_HINT = (
+    "length must be an integer >= 1. A masking strategy must never silently pass the source "
+    "value through on a bad config; fix or remove this column's length."
+)
+_KEEP_HINT = "keep must be 'head' or 'tail' when set."
 _MASK_CHAR_HINT = "mask_char must be a single character that encodes as UTF-8 when set."
 
 
@@ -78,28 +83,37 @@ def check_truncate_config(config: dict[str, Any]) -> None:
 
             length = pc.get("length")
             if not isinstance(length, int) or length < 1:
-                raise PlanCompileError(
-                    code=reasons.plan.TRUNCATE_LENGTH_INVALID,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.length",
-                    message=(
-                        f"truncate column {col_name!r} in table {table_name!r} has "
-                        f"invalid length {length!r} ({type(length).__name__}). length "
-                        "must be an integer >= 1. A masking strategy must never "
-                        "silently pass the source value through on a bad config; fix "
-                        "or remove this column's length."
+                length_refusal = config_refusal(
+                    config_root_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "length",
                     ),
+                    Problem.NOT_ALLOWED,
+                    got=length,
+                    hint=_LENGTH_HINT,
                 )
+                raise refusal_error(reasons.plan.TRUNCATE_LENGTH_INVALID, length_refusal)
 
             keep = pc.get("keep")
             if keep is not None and keep not in ("head", "tail"):
-                raise PlanCompileError(
-                    code=reasons.plan.TRUNCATE_KEEP_INVALID,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.keep",
-                    message=(
-                        f"truncate column {col_name!r} in table {table_name!r} has "
-                        f"invalid keep {keep!r}. keep must be 'head' or 'tail' when set."
+                keep_refusal = config_refusal(
+                    config_root_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "keep",
                     ),
+                    Problem.NOT_ALLOWED,
+                    got=keep,
+                    hint=_KEEP_HINT,
                 )
+                raise refusal_error(reasons.plan.TRUNCATE_KEEP_INVALID, keep_refusal)
 
             mask_char = pc.get("mask_char")
             if mask_char is not None and not is_mask_char(mask_char):

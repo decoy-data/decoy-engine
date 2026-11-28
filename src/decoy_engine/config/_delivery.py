@@ -15,7 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Problem, config_position, config_refusal
+from decoy_engine._config_text import Problem, config_refusal, config_root_position
 from decoy_engine.errors import PipelineValidationError
 
 DeliveryMode = Literal["strict", "best_effort"]
@@ -46,7 +46,7 @@ def refuse_unreleased_delivery(config: Mapping[str, Any]) -> None:
     block = config.get("delivery")
     if isinstance(block, Mapping) and is_unreleased_delivery_mode(block.get("mode")):
         refusal = config_refusal(
-            config_position("delivery"),
+            config_root_position("delivery"),
             Problem.NOT_ALLOWED,
             code=reasons.config.DELIVERY_BEST_EFFORT_UNRELEASED,
         )

@@ -65,6 +65,26 @@ class TestTruncateV1ByteIdentity:
         assert exc.value.code == "truncate_length_invalid"
         assert exc.value.strategy == "truncate"
 
+    @pytest.mark.parametrize("length", ["https://u:pw@h/x", "secret", 0, -2])
+    def test_invalid_length_message_never_echoes_the_value(self, length):
+        df = pd.DataFrame({"col": ["hello"]})
+        with pytest.raises(StrategyError) as exc:
+            TruncateHandler().run(df.copy(), "col", _seed({"length": length}), _FakeCtx())
+        assert exc.value.message == (
+            f"strategy='truncate': column 'col' uses truncate with an invalid length (type {type(length).__name__}); "
+            "length must be an integer >= 1."
+        )
+
+    def test_invalid_keep_message_never_echoes_the_value(self):
+        df = pd.DataFrame({"col": ["hello"]})
+        with pytest.raises(StrategyError) as exc:
+            TruncateHandler().run(
+                df.copy(), "col", _seed({"length": 2, "keep": "https://u:pw@h/x"}), _FakeCtx()
+            )
+        assert exc.value.message == (
+            "strategy='truncate': column 'col' uses truncate with an invalid keep; keep must be 'head' or 'tail'."
+        )
+
     def test_length_one_is_valid(self):
         # length == 1 is the smallest valid length; it must truncate, not raise
         # (pins the `< 1` boundary against drift to `<= 1` / `< 2`).

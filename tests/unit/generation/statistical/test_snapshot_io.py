@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Name, config_root_position
 from decoy_engine.generation.statistical import StatisticalSpecError, parse_snapshot_json
 
 UNREADABLE = reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE
@@ -19,7 +20,7 @@ LEAKS = ("\xff", "0xff", "ÿ", "position", "codec")
 
 def _refusal(raw: bytes) -> StatisticalSpecError:
     with pytest.raises(StatisticalSpecError) as caught:
-        parse_snapshot_json(raw, shown="s.json")
+        parse_snapshot_json(raw, at=config_root_position(Name("s.json")))
     return caught.value
 
 
@@ -49,15 +50,16 @@ def test_at_e1_5_truncated_json_keeps_its_code_and_message_text() -> None:
 
 
 def test_valid_json_parses() -> None:
-    assert parse_snapshot_json(b'{"a": 1}', shown="s.json") == {"a": 1}
+    assert parse_snapshot_json(b'{"a": 1}', at=config_root_position(Name("s.json"))) == {"a": 1}
 
 
 def test_at_e1_7_cold_import_cycle_and_public_export() -> None:
     code = (
         "from decoy_engine.generation.statistical import "
         "StatisticalSpecError, parse_snapshot_json\n"
+        "from decoy_engine._config_text import Name, config_root_position\n"
         "try:\n"
-        "    parse_snapshot_json(b'\\xff', shown='s.json')\n"
+        "    parse_snapshot_json(b'\\xff', at=config_root_position(Name('s.json')))\n"
         "except StatisticalSpecError:\n"
         "    raise SystemExit(0)\n"
         "raise SystemExit(2)\n"

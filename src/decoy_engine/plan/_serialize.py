@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Name, config_root_position
 from decoy_engine.expressions._when_parser import validate_envelope_when
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._checks_dp import check_dp_generate_contract, verify_dp_snapshots
@@ -352,10 +353,11 @@ def _pinned_snapshot_from_dict(
     # non-JSON payload is a typed refusal, raised outside the handler so no decoder error rides.
     from decoy_engine.generation.statistical import StatisticalSpecError, parse_snapshot_json
 
+    at_position = config_root_position(Name(position))
     parsed: Any = None
     not_json = False
     try:
-        parsed = parse_snapshot_json(raw, shown=position)
+        parsed = parse_snapshot_json(raw, at=at_position)
     except StatisticalSpecError:
         not_json = True
     if not_json:
@@ -367,7 +369,9 @@ def _pinned_snapshot_from_dict(
                 "valid JSON. A digest match is not proof the payload is a JSON snapshot artifact."
             ),
         )
-    mismatch = snapshot_schema_failure(parsed, position)
+    mismatch = snapshot_schema_failure(
+        parsed, config_root_position(Name(position), "schema_version")
+    )
     if mismatch is not None:
         raise PlanCompileError(code=mismatch.code, path=position, message=mismatch.message)
     read_snapshot = ReadSnapshot(

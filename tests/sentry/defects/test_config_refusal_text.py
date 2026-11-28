@@ -433,7 +433,7 @@ CLEAN: dict[str, str] = {
         "def f(tbl):\n    return read_config(lambda: _check(tbl), config_position('a'), g)\n"
     ),
     "plain raw binding": (
-        "def f(v):\n    config_refusal(config_position(Name(v)), Problem.MISSING)\n"
+        "def f(v):\n    config_refusal(config_position('a', Name(v)), Problem.MISSING)\n"
     ),
     "root position with a raw binding": (
         "def f(t, c):\n    config_refusal(config_root_position('tables', Name(t), 'columns',"
@@ -552,6 +552,22 @@ def test_s6_protected_checker_passes_and_an_extra_unprotected_call_fails() -> No
     assert "S6" not in _rules(protected)
     extra = protected + "def other(tbl):\n    return _check(tbl)\n"
     assert "S6" in _rules(extra)
+
+
+def test_s7_a_relative_position_starts_with_a_literal_field_not_a_root_key_or_a_variable() -> None:
+    ok = "def f(name):\n    return config_position('statistical', Name(name), 'x')\n"
+    assert "S7" not in _rules(ok)
+    for bad in (
+        "config_position('tables', Name(t), 'columns')",
+        "config_position('delivery')",
+        "config_position(Name(field_key), 'schema_version')",
+        "config_position(prefix, 'x')",
+    ):
+        assert "S7" in _rules(f"def f():\n    return {bad}\n"), bad
+
+
+def test_the_real_tree_has_no_s7_finding() -> None:
+    assert [f.key for f in scan.scan_tree(SRC) if f.rule == "S7"] == []
 
 
 FACTORY = (

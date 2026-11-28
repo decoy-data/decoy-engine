@@ -28,6 +28,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from decoy_engine._config_text._refusal import CONFIG_ROOT_KEYS
 from tests.sentry.defects._config_refusal_scope import Scope, _build_scope, _name_of, _own_walk
 
 # The AE5 loader modules, plus the files split out of them (the corpus checks, the withheld-values
@@ -685,6 +686,7 @@ def scan_source(rel: str, text: str, *, zero: bool | None = None) -> list[Findin
     sigs, own = refusal_classes([(rel, text)])
     is_zero = rel in ZERO_SET if zero is None else zero
     found = _Scanner(rel, tree, sigs, is_zero).run() + own + _copies_of_raise_bare(rel, tree)
+    found += _relative_position_findings(rel, tree)
     if is_zero:
         found += _snippet_s6(rel, text, sigs)
     return found
@@ -704,6 +706,23 @@ def _snippet_s6(rel: str, text: str, sigs: dict[str, Sig]) -> list[Finding]:
         if fn not in cleared
         for call in calls
     ]
+
+
+def _relative_position_findings(rel: str, tree: ast.Module) -> list[Finding]:
+    """S7: `config_position` is relative to the active column, so its first segment must be a
+    string literal that is not a config root key. A complete key (a root key, a variable, a
+    `Name`) goes through `config_root_position`, or the column is printed twice."""
+    if rel.startswith(CONFIG_TEXT_DIR):
+        return []
+    out: list[Finding] = []
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and _is_call_to(call, "config_position")):
+            continue
+        first = call.args[0] if call.args else None
+        literal = isinstance(first, ast.Constant) and isinstance(first.value, str)
+        if not literal or first.value in CONFIG_ROOT_KEYS:  # type: ignore[union-attr]
+            out.append(Finding("S7", rel, "<module>", _digest(call), call.lineno))
+    return out
 
 
 def scan_tree(src: Path) -> list[Finding]:
@@ -726,6 +745,7 @@ def scan_texts(texts: dict[str, str]) -> list[Finding]:
             continue
         out += _Scanner(rel, tree, sigs, rel in ZERO_SET).run()
         out += _copies_of_raise_bare(rel, tree)
+        out += _relative_position_findings(rel, tree)
     out += helper_findings(texts, sigs)
     return out
 

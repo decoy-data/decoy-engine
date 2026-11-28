@@ -32,6 +32,7 @@ from typing import Any
 
 from decoy_engine import fileaccess, reasons, safe_output
 from decoy_engine._config_text import (
+    ConfigPosition,
     Expected,
     Name,
     Problem,
@@ -124,7 +125,7 @@ def _snapshot_field_keys(config: dict[str, Any]) -> dict[str, str]:
     return seen
 
 
-def snapshot_schema_failure(parsed: Any, shown: str) -> Any:
+def snapshot_schema_failure(parsed: Any, at_version: ConfigPosition) -> Any:
     """The one snapshot schema-version check, for compile (`read_and_pin_snapshots`) and plan
     load. Returns a `StatisticalSpecError` or `None`. The message names the field and the
     expected version only: the stored text is untrusted and never echoed."""
@@ -133,7 +134,7 @@ def snapshot_schema_failure(parsed: Any, shown: str) -> Any:
     if isinstance(parsed, dict) and parsed.get("schema_version") in ACCEPTED_SCHEMA_VERSIONS:
         return None
     refusal = config_refusal(
-        config_position(Name(shown), "schema_version"),
+        at_version,
         Problem.MISMATCH,
         expected=Expected.SCHEMA_VERSION,
         hint="This engine consumes only the accepted schema versions",
@@ -300,7 +301,7 @@ def read_and_pin_snapshots(
             base_dir,
             EMBEDDED_SNAPSHOT_MAX_BYTES,
         )
-        at_snapshot = config_position(Name(field_key))
+        at_snapshot = config_root_position(Name(field_key))
         if read.oversize:
             too_large = config_refusal(
                 at_snapshot,
@@ -327,14 +328,16 @@ def read_and_pin_snapshots(
         raw = read.raw
         digest = read.sha256
         try:
-            parsed = parse_snapshot_json(raw, shown=field_key)
+            parsed = parse_snapshot_json(raw, at=at_snapshot)
         except StatisticalSpecError as exc:
             failures[path] = exc
             continue
         guard = snapshot_content_guard.get()
         if guard is not None:
             guard(parsed)
-        mismatch = snapshot_schema_failure(parsed, field_key)
+        mismatch = snapshot_schema_failure(
+            parsed, config_root_position(Name(field_key), "schema_version")
+        )
         if mismatch is not None:
             failures[path] = mismatch
             continue
