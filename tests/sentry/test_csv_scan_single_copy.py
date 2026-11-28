@@ -9,7 +9,10 @@ dialect and the fail-closed rules. One other module reads bundled data, not user
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
+
+from decoy_engine.fileaccess._errors import guarded_iter, guarded_with_parser_errors
 
 SRC = Path(__file__).parents[2] / "src" / "decoy_engine"
 READER = "profile/_csv_reader.py"
@@ -81,6 +84,11 @@ PASS_THROUGH_CALLERS: dict[str, frozenset[str]] = {
     # the adapter defines the reads; only the CSV reader turns their errors into a refusal
     "read_csv_parser_errors": frozenset({"fileaccess/adapters/pandas.py", READER}),
     "read_csv_chunks_parser_errors": frozenset({"fileaccess/adapters/pandas.py", READER}),
+    # the keyword that lets a decoder failure through (`guarded` forwards it by **kwargs, so any
+    # adapter call passing it is a caller): the same closed set, as an argument or a keyword
+    "decoder_passthrough": frozenset(
+        {"fileaccess/_errors.py", "fileaccess/adapters/pandas.py", READER}
+    ),
 }
 
 
@@ -95,12 +103,14 @@ def pass_through_references(source: str, names: frozenset[str]) -> dict[str, lis
             hit = node.attr
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
             hit = node.name  # a definition: a second copy of the pass-through is a new caller
+        elif isinstance(node, (ast.keyword, ast.arg)) and node.arg in names:
+            hit = node.arg
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name in names:
                     found.setdefault(alias.name, []).append(node.lineno)
         if hit is not None:
-            found.setdefault(hit, []).append(node.lineno)
+            found.setdefault(hit, []).append(getattr(node, "lineno", 0))
     return found
 
 
@@ -132,3 +142,17 @@ def test_the_pass_through_walk_sees_a_seeded_caller() -> None:
     assert pass_through_references(attribute, names) == {"read_csv_parser_errors": [2]}
     assert pass_through_references(plain, names) == {"read_csv_chunks_parser_errors": [1]}
     assert pass_through_references("import os\nos.path.join('a')\n", names) == {}
+
+
+def test_the_pass_through_walk_sees_a_seeded_passthrough_keyword() -> None:
+    names = frozenset(PASS_THROUGH_CALLERS)
+    seeded = "from decoy_engine.fileaccess.adapters import pandas as p\np.read_csv(h, decoder_passthrough=f)\n"
+    forwarded = "def g(d, s, fn, *a, decoder_passthrough=None, **k):\n    return fn(*a)\n"
+    assert pass_through_references(seeded, names) == {"decoder_passthrough": [2]}
+    assert pass_through_references(forwarded, names) == {"decoder_passthrough": [1]}
+
+
+def test_decoder_passthrough_is_keyword_only() -> None:
+    for guard in (guarded_iter, guarded_with_parser_errors):
+        parameter = inspect.signature(guard).parameters["decoder_passthrough"]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, guard.__name__

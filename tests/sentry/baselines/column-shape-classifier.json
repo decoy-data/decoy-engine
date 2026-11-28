@@ -8,6 +8,9 @@
   "classify_column::plan/checks/_column_shapes.py": {
    "reason": "classifies a source schema the profile has no entry for"
   },
+  "classify_column::profiling/scan_set.py": {
+   "reason": "the scan records each column's observed shape for the starter"
+  },
   "declared_shape::plan/checks/_column_shapes.py": {
    "reason": "maps an F06 declaration to its shape"
   },

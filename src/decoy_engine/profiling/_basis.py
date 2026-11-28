@@ -96,7 +96,7 @@ _DOCUMENT = (
     | _entries(
         "document",
         "FieldStats",
-        label="name row_count dtype_raw",
+        label="name row_count dtype_raw shape",
         scanned="inferred_type null_count null_rate distinct_count unique_rate is_likely_unique "
         "min_value max_value mean_value min_length max_length avg_length date_min date_max "
         "date_format invalid_count sample_invalid casing_pattern format_pattern format_pattern_complete alphabet "

@@ -18,7 +18,7 @@ import pyarrow as pa
 from decoy_engine import fileaccess
 from decoy_engine.config._csv_dialect import CsvDialect
 from decoy_engine.fileaccess import FileAccess
-from decoy_engine.profile._csv_reader import _read_csv_rows
+from decoy_engine.profile._csv_reader import _read_csv_rows, csv_compression
 from decoy_engine.profile._policy_bound import _PolicyBound
 
 if TYPE_CHECKING:
@@ -70,6 +70,7 @@ class CsvFileSource(_PolicyBound):
                 dialect,
                 table=self.table,
                 nrows=nrows,
+                compression=csv_compression(self.path),
                 lexeme_columns=self.lexeme_columns,
             ),
         )

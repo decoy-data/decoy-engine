@@ -40,6 +40,7 @@ from decoy_engine import reason_adapter, reasons
 from decoy_engine._field_names import repeated_names
 from decoy_engine.config import PipelineConfigError, SourceDescriptor
 from decoy_engine.config._pre_scan import PreScanConfig
+from decoy_engine.contracts.column_shape import ColumnShape, classify_column, source_format_for
 from decoy_engine.detection.types import DetectorRun
 from decoy_engine.errors import DecoyError, PipelineValidationError
 from decoy_engine.fileaccess import (
@@ -370,12 +371,25 @@ def _read_and_profile(
         sample_strategy="full" if whole else strategy,
         sample_row_cap=row_cap,
         file_access=file_access,
+        shapes=_column_shapes(src, reader, descriptor, [str(c) for c in frame.columns]),
     )
     profile = replace(profile, basis=read_basis(profile.sample_strategy, row_cap, reached_end))
     models, position = model_pass
     hits = {} if models is None else models.run(frame, name, position)
     del frame
     return _table_scan(name, descriptor, profile, tuple(warned), total, exact, zero_counts, hits)
+
+
+def _column_shapes(
+    src: Any, reader: Any, descriptor: dict[str, Any], columns: Sequence[str]
+) -> dict[str, ColumnShape]:
+    """What the source says each of ``columns`` holds: its descriptor format first, then the
+    reader's cheap schema (Parquet and resident only; `source_schema` is None for CSV and fixed
+    width, whose format already decides). The classifier is the one type-to-shape mapping."""
+    schema = src.source_schema(reader)
+    types = {f.name: f.type for f in schema} if schema is not None else {}
+    fmt = source_format_for({"t": descriptor}, "t")
+    return {c: classify_column(source_format=fmt, arrow_type=types.get(c)) for c in columns}
 
 
 def _text_frames(
