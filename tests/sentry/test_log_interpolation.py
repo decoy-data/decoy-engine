@@ -37,13 +37,7 @@ _LEVELS = frozenset({"debug", "info", "warning", "warn", "error", "exception", "
 _EXCEPTION_MARKER = "<exception traceback>"
 
 # (module path relative to decoy_engine, qualified function name, variable) -> (count, reason).
-ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
-    # System errors whose text names a path or an OS condition, not data.
-    ("disguises/loader.py", "_load_from", "exc"): (1, "OSError reading a packaged file"),
-    ("internal/memory.py", "MemoryMonitor.monitor_memory_usage", "e"): (1, "psutil failure"),
-    # Package or environment configuration text, no customer data.
-    ("internal/faker_setup.py", "make_faker", "exc"): (1, "Faker locale error; locale is config"),
-}
+ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {}
 
 
 def _logger_aliases(tree: ast.AST) -> frozenset[str]:
@@ -296,6 +290,11 @@ _TB = "<exception traceback>"
             {(_M, "f", "exc"): 1},
         ),
         ("def f():\n    log.info('%s', row.count())\n", {}),
+        # A row-derived value in `extra=` reaches a JSON formatter as data, so `extra` is scanned.
+        (
+            "def f():\n    log.info('done', extra={'customer': row['customer_id']})\n",
+            {(_M, "f", "row"): 1},
+        ),
         # Safe forms.
         ("def f():\n    _log.warning('x %s', type(exc).__name__)\n", {}),
         ("def f():\n    _log.warning('x %s', len(values))\n", {}),

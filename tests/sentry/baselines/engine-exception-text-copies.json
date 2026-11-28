@@ -94,10 +94,6 @@
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1
   },
-  "audit::internal/memory.py::MemoryMonitor.monitor_memory_usage::f{exc}::log": {
-   "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
-   "max": 1
-  },
   "audit::phase.py::_fixed_text::exc.args::assign": {
    "reason": "AE4 inventory of engine exception-text copies (F31 audit census); existing site, shrink-only via its max",
    "max": 1

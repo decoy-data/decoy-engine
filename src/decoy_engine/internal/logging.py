@@ -9,6 +9,7 @@ from typing import Any
 
 from decoy_engine import fileaccess
 from decoy_engine.fileaccess import FileAccessUnavailable, LocalFileAccess
+from decoy_engine.safe_output import SafeRecordFilter
 
 # Create a module-level logger instance
 _LOGGER_INSTANCE = None
@@ -19,12 +20,13 @@ _OWNED_ATTR = "_decoy_engine_owned"
 
 
 def _new_engine_handler(kind, formatter, *args):
-    """The one place an engine-owned handler is built, so none can skip the ownership mark.
+    """The one place an engine-owned handler is built, so none skips the mark or the filter.
 
     `kind` is "console" or a callable that builds the handler (the file path).
     """
     handler = logging.StreamHandler() if kind == "console" else kind(*args)
     handler.setFormatter(formatter)
+    handler.addFilter(SafeRecordFilter())
     setattr(handler, _OWNED_ATTR, True)
     return handler
 

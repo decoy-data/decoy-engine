@@ -16,6 +16,7 @@ from decoy_engine import fileaccess
 from decoy_engine.disguises.schema import Disguise
 from decoy_engine.fileaccess import DirHandle, FileAccess, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import serial
+from decoy_engine.safe_output import safe_error_type
 
 _log = logging.getLogger(__name__)
 
@@ -77,9 +78,9 @@ def _load_from(folder: DirHandle) -> list[Disguise]:
             if fileaccess.keeps_class(exc):
                 raise
             _log.error(
-                "load_disguises: could not read %s: %s",
+                "load_disguises: could not read %s (%s)",
                 path.name,
-                exc,
+                safe_error_type(exc).value,
             )
             continue
 
