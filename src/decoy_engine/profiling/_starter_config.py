@@ -21,21 +21,15 @@ import dataclasses
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
-
-from pydantic import TypeAdapter, ValidationError
 
 from decoy_engine import reasons
 from decoy_engine.config import (
     NAMESPACE_PLACEHOLDER_PREFIX,
     PipelineConfig,
     PipelineConfigError,
-    TargetDescriptor,
-    duplicate_target_groups,
     parse_pipeline_config,
-    relationship_shape_error,
 )
 from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
@@ -48,6 +42,11 @@ from decoy_engine.profiling._starter_inference import (
     detected_date_config,
     format_needed,
     infer_starter_strategy,
+)
+from decoy_engine.profiling._starter_targets import (
+    allocate_targets,
+    check_relationship_shapes,
+    refuse_shared_destinations,
 )
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
 from decoy_engine.safe_output import ConfigProblem
@@ -66,8 +65,6 @@ __all__ = [
 _KEY_STRATEGY = "hash"
 _DATE_FALLBACK_STRATEGY = "redact"
 _CHECK_NAMESPACE = "starter-check"
-_TARGETS: TypeAdapter[dict[str, TargetDescriptor]] = TypeAdapter(dict[str, TargetDescriptor])
-_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 # A note is one line: model and detector ids come from a pack file, so any control character in
 # one is folded to a space before it can reach a YAML comment or a `.decoy` note.
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -184,9 +181,9 @@ def starter_config(
     if baseline_sha256 is not None and baseline_path is None:
         raise ValueError("baseline_sha256 needs baseline_path")
     _refuse_header_suspect(scan)
-    _check_relationship_shapes(scan, relationships)
+    check_relationship_shapes(scan, relationships)
     keys = declared_key_namespaces(relationships)
-    allocated = _allocate_targets(scan, targets or {})
+    allocated = allocate_targets(scan, targets or {})
     suggestions: list[ColumnSuggestion] = []
     notes: dict[tuple[str, str], str] = {}
     sources: dict[str, Any] = {}
@@ -218,7 +215,7 @@ def starter_config(
         config["scan_baseline"] = {"path": baseline_path, "schema": SCAN_SET_SCHEMA}
         if baseline_sha256 is not None:
             config["scan_baseline"]["sha256"] = baseline_sha256
-    _refuse_shared_destinations(allocated, [t["name"] for t in tables])
+    refuse_shared_destinations(allocated, [t["name"] for t in tables])
     check_starter_config(config)
     return StarterConfig(
         config=config,
@@ -498,66 +495,6 @@ def _evidence(stats: Any, hits: Sequence[ModelHit], *, declared_key: bool = Fals
     return " ".join(_CONTROL.sub(" ", "; ".join(parts)).split())
 
 
-def _check_relationship_shapes(scan: ScanSet, relationships: Sequence[Mapping[str, Any]]) -> None:
-    columns = {t.name: [f.name for f in t.profile.fields] for t in scan.tables}
-    for position, rel in enumerate(relationships):
-        found = relationship_shape_error(rel, columns)
-        if found is not None:
-            code, path = found
-            raise PipelineConfigError.from_problems(
-                [
-                    ConfigProblem(
-                        code,
-                        f"relationships[{position}]",
-                        f"A declared relationship does not fit the scanned tables ({path}).",
-                    )
-                ],
-                prefix="starter config input is invalid",
-            )
-
-
-def _allocate_targets(scan: ScanSet, given: Mapping[str, Any]) -> dict[str, Any]:
-    """The one place a target path is made. Raises ValueError (names only) on a bad input."""
-    readers: dict[str, int] = {}
-    for table in scan.tables:
-        if table.descriptor["type"] == "file":
-            readers[table.descriptor["path"]] = readers.get(table.descriptor["path"], 0) + 1
-    out: dict[str, Any] = {}
-    used_dirs: set[str] = set()
-    for table in scan.tables:
-        name = table.name
-        if name in given:
-            explicit = given[name]
-            if not isinstance(explicit, Mapping) or not explicit:
-                raise ValueError(f"the target given for table {name!r} is empty or not a mapping")
-            out[name] = copy.deepcopy(dict(explicit))
-        else:
-            shared = table.descriptor["type"] == "file" and readers[table.descriptor["path"]] > 1
-            out[name] = _default_target(table, used_dirs, shared)
-    return out
-
-
-def _default_target(table: TableScan, used_dirs: set[str], shared: bool) -> dict[str, Any]:
-    descriptor = table.descriptor
-    target: dict[str, Any] = {"type": "file", "format": descriptor["format"]}
-    if descriptor["type"] == "file":
-        path = Path(descriptor["path"])
-        middle = f".{_UNSAFE_NAME.sub('_', table.name)}" if shared else ""
-        target["path"] = str(path.with_name(f"{path.stem}{middle}.masked{path.suffix}"))
-        if descriptor.get("layout"):
-            target["layout"] = copy.deepcopy(descriptor["layout"])
-    else:
-        # Cloud inputs are written to a local folder; two table names must not share a file.
-        base = _UNSAFE_NAME.sub("_", table.name)
-        name, n = base, 1
-        while name in used_dirs:
-            n += 1
-            name = f"{base}-{n}"
-        used_dirs.add(name)
-        target["path"] = f"masked/{name}.{descriptor['format']}"
-    return target
-
-
 def _problems_of(raw: dict[str, Any]) -> tuple[ConfigProblem, ...] | None:
     """The value-free problems `raw` fails with, or None when it validates."""
     try:
@@ -565,18 +502,6 @@ def _problems_of(raw: dict[str, Any]) -> tuple[ConfigProblem, ...] | None:
     except PipelineConfigError as err:
         return err.problems
     return None
-
-
-def _refuse_shared_destinations(targets: Mapping[str, Any], table_names: Sequence[str]) -> None:
-    """Refuse two tables writing one destination before the full validation reports it generically."""
-    try:
-        validated = _TARGETS.validate_python(dict(targets))
-    except ValidationError:
-        return  # a malformed target is reported by `_check`
-    groups = duplicate_target_groups(validated, table_names)
-    if groups:
-        first, second = groups[0][:2]
-        raise ValueError(f"tables {first!r} and {second!r} share one target destination")
 
 
 def swap_placeholder_namespaces(config: dict[str, Any]) -> tuple[dict[str, Any], int]:
