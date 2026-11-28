@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 204 (asserted by the sentry).
+# Count: 206 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -1630,7 +1630,25 @@ owner = "cam"
 reason = "engine-owned staging and spill files hold source values, so they are created 0600 on their own descriptor whatever the umask"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_protected_dir.py"
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_physical_parent"
+sink = "os.path.realpath"
+ordinal = 0
+rule = "the parent directory of a path the cleanup ledger acquires, looks up or retries, or of a local publication stage the transaction creates: resolved once, strictly, so the identity and the operand name the same directory"
+owner = "cam"
+reason = "one physical-parent resolution gives acquisition, lookup and confirmation the same identity rule"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_physical_parent"
+sink = "os.stat"
+ordinal = 0
+rule = "the parent directory of a path the cleanup ledger acquires, looks up or retries, or of a local publication stage the transaction creates: resolved once, strictly, so the identity and the operand name the same directory"
+owner = "cam"
+reason = "one physical-parent resolution gives acquisition, lookup and confirmation the same identity rule"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
 function = "_lstat"
 sink = "os.lstat"
 ordinal = 0

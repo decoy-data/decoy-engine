@@ -38,7 +38,14 @@ from decoy_engine import reasons
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._entry import require_ambient
-from decoy_engine.fileaccess._fdtree import _owned, remove_tree
+from decoy_engine.fileaccess._fdtree import (
+    _lstat,
+    _owned,
+    _raise_errno,
+    has_parent_component,
+    path_key,
+    remove_tree,
+)
 from decoy_engine.fileaccess._types import FileAccessUnavailable
 
 _MODE = 0o700
@@ -76,10 +83,6 @@ class ProtectedDirAclFailed(DecoyError, OSError):  # noqa: N818 - the plan names
 # -- the issued-root registry ------------------------------------------------------------------
 
 
-def _key(path: str | os.PathLike[str]) -> str:
-    return os.path.normcase(os.path.abspath(os.fspath(path)))
-
-
 def _live_root(key: str) -> str | None:
     """The root this module issued (and has not removed) that holds ``key``, else None."""
     with _LOCK:
@@ -89,7 +92,7 @@ def _live_root(key: str) -> str | None:
 def _vet_live(raw: str, path: str, root: str) -> None:
     """Refuse a ``..`` component, and any symlink or reparse point between the issued root and
     ``path``: containment is lexical, so a planted link would otherwise lead outside the root."""
-    if ".." in raw.replace("\\", "/").split("/"):
+    if has_parent_component(raw):
         raise ProtectedDirUnsafe
     current = path[: len(root)]
     for part in [p for p in path[len(root) :].split(os.sep) if p] or [""]:
@@ -104,12 +107,12 @@ def _vet_live(raw: str, path: str, root: str) -> None:
 def _register(path: str | os.PathLike[str]) -> None:
     """Make ``path`` a live issued root: it and its children are the engine's own paths."""
     with _LOCK:
-        _ISSUED.add(_key(path))
+        _ISSUED.add(path_key(path))
 
 
 def _unregister(path: str | os.PathLike[str]) -> None:
     with _LOCK:
-        _ISSUED.discard(_key(path))
+        _ISSUED.discard(path_key(path))
 
 
 def _owned_private(found: os.stat_result) -> bool:
@@ -118,23 +121,6 @@ def _owned_private(found: os.stat_result) -> bool:
 
 
 # -- filesystem calls, each with OS text and context stripped ----------------------------------
-
-
-def _raise_errno(code: int) -> None:
-    if code:
-        raise OSError(code, os.strerror(code))
-
-
-def _lstat(path: str) -> os.stat_result | None:
-    code, found = 0, None
-    try:
-        found = os.lstat(path)
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        code = exc.errno or errno.EIO
-    _raise_errno(code)
-    return found
 
 
 def _mkdir(path: str) -> None:
@@ -251,7 +237,7 @@ def _open(path: str, *, create: bool, parents: bool) -> None:
 def _authorized_path(path: str | os.PathLike[str]) -> str:
     raw = os.fspath(path)
     absolute = os.path.abspath(raw)  # every later call uses this, so the cwd cannot shift it
-    root = _live_root(_key(absolute))
+    root = _live_root(path_key(absolute))
     if root is None:
         require_ambient(_WHAT)
     else:

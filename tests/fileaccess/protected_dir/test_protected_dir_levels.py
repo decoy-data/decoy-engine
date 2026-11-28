@@ -18,6 +18,7 @@ import pytest
 from decoy_engine import fileaccess
 from decoy_engine.fileaccess import ProtectedDirUnsafe, protected_scratch_dir
 from decoy_engine.fileaccess import _protected_dir as pd
+from decoy_engine.fileaccess._fdtree import path_key
 from tests.fileaccess.protected_dir.test_protected_dir import _Strict
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Windows lane is L0.1w")
@@ -32,8 +33,8 @@ def test_extraction_keeps_protected_scratch_dir(tmp_path: Path) -> None:
         assert root.parent == tmp_path / "a" / "b"
         assert re.fullmatch(r"p-[0-9a-f]{16}", root.name)  # the 8-byte token
         assert _mode(root) == 0o700 and _mode(root.parent) == 0o700  # missing levels made
-        assert pd._live_root(pd._key(root)) == pd._key(root)
-    assert pd._live_root(pd._key(root)) is None
+        assert pd._live_root(path_key(root)) == path_key(root)
+    assert pd._live_root(path_key(root)) is None
     assert not root.exists()
     with pytest.raises(ProtectedDirUnsafe):
         with protected_scratch_dir(tmp_path, f"x{os.sep}y"):
@@ -64,7 +65,7 @@ def test_allocate_makes_a_fresh_unregistered_protected_directory(tmp_path: Path)
     for made in (first, second):
         assert re.fullmatch(r"decoy-arena-pending-[0-9a-f]{16}", os.path.basename(made))
         assert _mode(Path(made)) == 0o700
-        assert pd._live_root(pd._key(made)) is None  # the caller decides whether to register
+        assert pd._live_root(path_key(made)) is None  # the caller decides whether to register
 
 
 def test_register_and_unregister_make_a_live_root(tmp_path: Path) -> None:
@@ -72,10 +73,10 @@ def test_register_and_unregister_make_a_live_root(tmp_path: Path) -> None:
     child = os.path.join(root, "child")
     pd._register(root)
     try:
-        assert pd._live_root(pd._key(child)) == pd._key(root)
+        assert pd._live_root(path_key(child)) == path_key(root)
     finally:
         pd._unregister(root)
-    assert pd._live_root(pd._key(child)) is None
+    assert pd._live_root(path_key(child)) is None
     pd._unregister(root)  # idempotent
 
 

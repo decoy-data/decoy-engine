@@ -27,6 +27,7 @@ from tests.sentry.defects import _defect_scan as scan
 # Globs under `src/decoy_engine`: the modules the isolated and resident commit windows run
 # through (the A19 trace), each of which must match a file.
 SCOPE = (
+    "fileaccess/cleanup/*.py",
     "publication/*.py",
     "vault/*.py",
     "reason_adapter.py",

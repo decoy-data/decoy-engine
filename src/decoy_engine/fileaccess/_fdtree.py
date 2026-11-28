@@ -146,6 +146,89 @@ def remove_tree(path: str | os.PathLike[str]) -> None:
     shutil.rmtree(path, **hook)
 
 
+# -- no-follow lookups and confirmed removal (the cleanup ledger's leaf operations) -----------
+
+OBSERVED_REMOVED = "removed"  # the name is confirmed absent
+OBSERVED_PENDING = "pending"  # the name is present, a dangling link included
+OBSERVED_UNKNOWN = "unknown"  # the lookup failed, or nothing was observed yet
+
+
+def path_key(path: str | os.PathLike[str]) -> str:
+    """The lexical key of the issued-root registry: normalized absolute path."""
+    return os.path.normcase(os.path.abspath(os.fspath(path)))
+
+
+def _raise_errno(code: int) -> None:
+    if code:
+        raise OSError(code, os.strerror(code))
+
+
+def _lstat(path: str) -> os.stat_result | None:
+    """`os.lstat` that returns None on absence and raises an errno-only `OSError` otherwise.
+
+    The error is raised outside the handler, so it carries no path, OS text or context."""
+    code, found = 0, None
+    try:
+        found = os.lstat(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    _raise_errno(code)
+    return found
+
+
+def has_parent_component(raw: str) -> bool:
+    """Whether `raw` holds a `..` component. Checked on the raw text, before any normalization
+    can erase it (a link followed by `..` leaves the lexical parent)."""
+    return ".." in raw.replace("\\", "/").split("/")
+
+
+def _physical_parent(parent: str) -> tuple[str, tuple[int, int]]:
+    """The physical absolute directory `parent` names, with its `(st_dev, st_ino)`.
+
+    The one parent resolution of acquisition, lookup, retry and local stage creation: it
+    resolves every link once, so the operand later joined to a leaf names the same directory
+    the identity was taken from. Filesystem errors are errno-only and raised outside the handler."""
+    code, physical, ident = 0, "", (0, 0)
+    try:
+        physical = os.path.realpath(parent, strict=True)
+        found = os.stat(physical)
+        ident = (found.st_dev, found.st_ino)
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    _raise_errno(code)
+    return physical, ident
+
+
+def observe(path: str) -> str:
+    """One no-follow observation of `path`: removed (absent), pending (present) or unknown."""
+    try:
+        return OBSERVED_PENDING if _lstat(path) is not None else OBSERVED_REMOVED
+    except OSError:
+        return OBSERVED_UNKNOWN
+
+
+def remove_confirmed(path: str, *, record: Any = None) -> bool:
+    """Remove the tree at `path`, then prove it gone with one no-follow lookup.
+
+    True only when the lookup shows absence. A name still present, a lookup error or a removal
+    `OSError` returns False so the caller keeps ownership and retries; anything else (a
+    `MemoryError`, an interrupt) propagates. When `record` is given, the outcome is stored on its
+    `observation` attribute before the boolean is returned, so a caller reads evidence from the
+    attempt and never looks the path up again. A symlink at `path` is not followed:
+    `shutil.rmtree` refuses it, the lookup sees it present, and it stays as residue."""
+    outcome = OBSERVED_UNKNOWN
+    try:
+        remove_tree(path)
+        outcome = observe(path)
+    except OSError:
+        outcome = OBSERVED_UNKNOWN
+    if record is not None:
+        record.observation = outcome
+    return outcome == OBSERVED_REMOVED
+
+
 def _rmtree_fd(dir_fd: int) -> None:
     """Remove everything beneath `dir_fd` without following any link (a no-op on win32)."""
     if not _osflags.WINDOWS:

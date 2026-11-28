@@ -29,12 +29,17 @@ from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._entry import is_ambient, require_ambient
 from decoy_engine.fileaccess._errors import deny, guarded, guarded_iter
-from decoy_engine.fileaccess._fdtree import _close, _exact_stat, _rmtree_fd, _write_marker
+from decoy_engine.fileaccess._fdtree import (
+    _close,
+    _exact_stat,
+    _rmtree_fd,
+    _write_marker,
+    path_key,
+)
 from decoy_engine.fileaccess._output import _call, create_private_at, make_stage_dir_at
 from decoy_engine.fileaccess._protected_dir import (
     ProtectedDirUnsafe,
     _allocate,
-    _key,
     _live_root,
     _parent_base,
     _register,
@@ -245,7 +250,7 @@ class ScratchArena(StageWalk, StageClaim):
         live issued root is taken under every policy (`open_protected_dir`'s rule); any other
         path needs the ambient policy."""
         target = os.path.abspath(os.fspath(path))
-        live = _live_root(_key(target))
+        live = _live_root(path_key(target))
         if live is None:
             require_ambient("a scratch directory named by path")
         else:
