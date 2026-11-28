@@ -92,7 +92,7 @@ def check_charset_unique(charset_spec: str, charset: str) -> None:
     """
     if len(set(charset)) != len(charset):
         raise FpeUnencryptableError(
-            f"fpe charset {charset_spec!r} -> {charset!r} contains duplicate "
+            "fpe charset contains duplicate "
             "symbols; FF1 requires an ordered, duplicate-free alphabet. Remove "
             "the repeated character(s) from the charset.",
             code=reasons.runtime.FPE__UNENCRYPTABLE_LENGTH,
@@ -423,7 +423,17 @@ def _fpe_value(
             )
         charset_set = set(charset)
         if preserve_separators:
-            positions = [i for i, ch in enumerate(val) if ch in charset_set]
+            # A fixed-width checksum scheme refuses anything longer than its ceiling, so stop
+            # collecting one past it: the refusal then costs O(limit), not O(len(val)).
+            from decoy_engine.transforms._fpe_checksum import max_fixed_length
+
+            limit = max_fixed_length(checksum)
+            positions: list[int] = []
+            for i, ch in enumerate(val):
+                if ch in charset_set:
+                    positions.append(i)
+                    if limit is not None and len(positions) > limit:
+                        break
             if not positions:
                 raise FpeUnencryptableError(
                     f"fpe cannot encrypt this {len(val)}-character value: it has no "

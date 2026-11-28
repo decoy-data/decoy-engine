@@ -20,6 +20,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.execution._positional_keys import positional_key_array
 from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
 from decoy_engine.execution.native._categorical_ext import (
@@ -53,6 +54,7 @@ from decoy_engine.execution.native._operator_params import (
     TruncateParams,
 )
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.internal.pandas_compat import arrow_to_series
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._crypto_ext import FpeRowError
@@ -280,7 +282,7 @@ def _preserved_mask(
     if preserve is None:
         return None
     array = source.combine_chunks() if isinstance(source, pa.ChunkedArray) else source
-    return preserve.mask(array.to_pandas())
+    return preserve.mask(arrow_to_series(array, on_unrepresentable=source_column_unrepresentable()))
 
 
 def _preserved_kwargs(preserved: np.ndarray[Any, Any] | None) -> dict[str, Any]:

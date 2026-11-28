@@ -56,7 +56,7 @@ from decoy_engine.errors import (
     DecoyError,
     MaskKeyRequiredError,
 )
-from decoy_engine.generation.pool._errors import GenerationError
+from decoy_engine.generation.pool import native_type_not_admitted_error
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.transforms.fpe import _CHARSETS
 
@@ -170,13 +170,13 @@ class FpeConfig:
         charset = _CHARSETS.get(self.charset, self.charset)
         if len(set(charset)) != len(charset):
             raise FpeConfigError(
-                f"fpe charset {self.charset!r} resolved to {charset!r} with duplicate "
+                "fpe charset resolved with duplicate "
                 "symbols; FF1 requires an ordered, duplicate-free alphabet (a "
                 "duplicate would make decode ambiguous)."
             )
         if len(charset) < 2:
             raise FpeConfigError(
-                f"fpe charset {self.charset!r} resolved to {charset!r} with fewer than "
+                "fpe charset resolved with fewer than "
                 "2 distinct characters; a degenerate charset has nothing to permute "
                 "over and would leave the column unmasked."
             )
@@ -376,7 +376,7 @@ def _translate_compiled_kernel_error(exc: ValueError) -> Exception:
         # kernel folds all of these into one coded rejection at the array's Arrow
         # type, so the exception TYPE is what a caller can rely on matching, not a
         # specific one of the reference's finer-grained codes.
-        return GenerationError(code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED, message=detail)
+        return native_type_not_admitted_error()
     # An unrecognized code means the compiled kernel raised something this wrapper
     # was not built to translate; surface it as-is rather than guess at a mapping.
     return exc
@@ -422,7 +422,10 @@ class _CompiledKeyedDerivationKernel:
                     native_threads=native_threads,
                 )
             except ValueError as exc:
-                raise _translate_compiled_kernel_error(exc) from exc
+                translated = _translate_compiled_kernel_error(exc)
+            # Raised outside the handler: the native error formats the Arrow type (field names
+            # and metadata values), so it must be neither this error's cause nor its context.
+            raise translated
         except BaseException:
             del mask_key
             raise

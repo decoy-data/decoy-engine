@@ -120,7 +120,7 @@ def _fpe_charset(cfg: dict[str, Any]) -> str:
             code=reasons.runtime.FPE_CHARSET_DEGENERATE,
             strategy="fpe",
             message=(
-                f"fpe resolved charset {charset_spec!r} -> {charset!r} has fewer than "
+                "fpe resolved charset has fewer than "
                 "2 distinct characters; a degenerate charset has nothing to permute over."
             ),
         )

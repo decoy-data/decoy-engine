@@ -193,6 +193,8 @@ PRE-SCAN-RUN E1 (additive): writing a `pre_scan` block now turns the run-start p
 
 PRE-SCAN-RUN E2 (additive): `decoy_engine.profiling.evaluate_pre_scan(config, core)` returns a value-free `PreScanVerdict` (table names, column names and detector source names only) and `PreScanVerdict.to_check()` builds the `pre_scan` run result check. `PreScanBlockedError` (code `pre_scan.uncovered_pii_blocked`) and `PreScanFailedError` (code `pre_scan.profile_failed`) are registered coded families in the reason adapter, so the codes reach the run result instead of `decoy.unexpected_error`. `PreScanWarning` is a `UserWarning`. No run calls them yet.
 
+INIT-SCAN-SCAFFOLD E1 (frozen refusal, 2026-11-26): a `pre_scan.detectors` or `post_scan.detectors` list without `regex` is no longer refused with `config.detectors_invalid` ("detectors must include regex."). `canonical_detectors` adds `regex` and returns the canonical order, so `[ner]` parses as `[regex, ner]` and `[]` as `[regex]`. A repeated source and an unknown source still raise as before, and `ner_model` without `ner` still raises `config.pre_scan_ner_inactive`. Two configs that differ only in how they name regex now parse, dump and hash alike. Dumps always carry `regex`, so an older engine still reads them; an older engine refuses a hand-written list without it. `evaluate_pre_scan` reads the same rule through `PreScanConfig`, so its `detectors` field keeps its sorted bytes.
+
 **Pre-GA correction (one environment flag rule, DUP-FREEZE E3, 2026-11-14).** Every boolean engine flag reads
 through one parser (`decoy_engine.internal.env_flags.env_flag`). The accepted set, after `strip().lower()`, is
 `1`, `true`, `yes`, `on` (true) and `0`, `false`, `no`, `off` (false); an unset or empty variable gives the flag's
@@ -904,6 +906,16 @@ only this site moves.
   (A5a): a `format: fixed_width` `FileSource` can now be read through these
   names instead of importing the private `decoy_engine.profile._fixed_width_reader`
   module, which the additive-only rule in §4.1 does not cover.
+  It also includes the experimental source-read conversions `arrow_to_frame`, `arrow_to_series`
+  and `arrow_to_frame_pair` (SOURCE-READ-BOUNDARY S1b-1, pre-release, not frozen): one Arrow-to-pandas
+  conversion that calls a required `on_unrepresentable(column)` callback, which must raise, for a
+  column pandas cannot hold, instead of leaking pandas' value-quoting error. `widen=True` is not
+  available yet.
+  The public chunked oracles `run_mask_chunked` and `run_mask_pipeline_chunked` raise the same
+  coded `ExecutionError` for such a column (`runtime/source_column_unrepresentable` from the
+  first-chunk profile read, `full_frame_value_unrepresentable` from a later chunk) where a raw
+  `ArrowInvalid`, `ArrowTypeError` or `ValueError` used to escape. Catch `ExecutionError` and read
+  `.code`.
   It also includes `generated_table_to_pandas(table)` (2026-11-08): converts a generated
   Arrow table to pandas with every integer column kept as a pandas nullable integer, so
   output written from the frame prints `1` where a plain `to_pandas()` prints `1.0`.
@@ -1574,6 +1586,9 @@ PermanentError
 SDK_VERSION
 TransientError
 WriteResult
+arrow_to_frame
+arrow_to_frame_pair
+arrow_to_series
 atomic_swap_db_providers
 load_custom_providers
 register_faker_list_provider

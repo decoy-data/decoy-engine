@@ -16,7 +16,7 @@ result.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
@@ -36,14 +36,14 @@ from decoy_engine.config import (
     post_scan_sink_kind,
 )
 from decoy_engine.execution._chunked_input import SourceFacts, capture_source_facts, check_opened
-from decoy_engine.execution._pipeline_sources import materialize_source
 from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
 from decoy_engine.execution.out_of_core import MaskedKeyStager, resolve_ooc_memory_limit
-from decoy_engine.execution.pipeline._post_scan_distribution import (
+from decoy_engine.execution.pipeline.post_scan._distribution import (
     DistributionState,
     refuse_transformed_integrity,
     refuse_unchecked_distribution,
 )
+from decoy_engine.execution.pipeline.post_scan._suite import suite_frames, suite_tables
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.internal.memory_limit import require_megabytes
 from decoy_engine.profile import LazySource
@@ -81,6 +81,7 @@ __all__ = [
     "attach_cast_run",
     "bind_gate",
     "note_quarantined",
+    "publish_after_gate",
     "settle",
     "tee_reader",
 ]
@@ -279,11 +280,10 @@ class PostScanGate:
         self.ran = True
         if not post_scan_integrity_requested(self._config):
             return
-        masked = _suite_tables(outputs, sources, table_kinds)
+        masked = suite_tables(outputs, sources, table_kinds)
         if masked:
             self.report = run_post_mask(
-                {n: materialize_source(sources[n]).to_pandas() for n in masked},
-                {n: outputs[n].to_pandas() for n in masked},
+                *suite_frames(sources, outputs, masked),
                 config=dict(self._config),
                 detectors=self._detectors,
             )
@@ -354,7 +354,7 @@ class PostScanGate:
     ) -> Callable[[tuple[KeyResult, ...]], dict[str, Any]]:
         """The column suite over staged output, in batches. A table the route transformed has no
         raw baseline to compare against, so `before_commit` refuses that case before it gets here."""
-        masked = _suite_tables(staged, self._sources)
+        masked = suite_tables(staged, self._sources)
 
         def suite(keys: tuple[KeyResult, ...]) -> dict[str, Any]:
             with fileaccess.protected_scratch_dir(prefix="decoy-post-scan-columns-") as scratch:
@@ -430,10 +430,9 @@ class PostScanGate:
         raw_sources: bool,
     ) -> dict[str, Any]:
         # Generated tables have no source to compare against, as in the report-only suite.
-        masked = _suite_tables(outputs, sources, table_kinds)
+        masked = suite_tables(outputs, sources, table_kinds)
         return run_post_mask(
-            {n: materialize_source(sources[n]).to_pandas() for n in masked},
-            {n: outputs[n].to_pandas() for n in masked},
+            *suite_frames(sources, outputs, masked),
             config=dict(self._config),
             detectors=self._detectors,
             keys=keys,
@@ -453,20 +452,6 @@ class PostScanGate:
             lambda n: self._source(n, sources[n], raw),
             cast_run=self._cast_run,
         )
-
-
-def _suite_tables(
-    names: Iterable[str],
-    sources: Mapping[str, Any],
-    table_kinds: Mapping[str, str] | None = None,
-) -> list[str]:
-    """The tables the column suite compares: those the run masked that also have a source. A
-    generated table has no source to compare against."""
-    return [
-        n
-        for n in names
-        if n in sources and (table_kinds is None or table_kinds.get(n, "mask") == "mask")
-    ]
 
 
 _ACTIVE: ContextVar[PostScanGate | None] = ContextVar("decoy_post_scan_gate", default=None)

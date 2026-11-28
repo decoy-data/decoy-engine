@@ -247,14 +247,19 @@ def _validate_string_escapes(tree: lark.Tree[Any]) -> None:
             content = str(token)[1:-1]  # strip surrounding double-quote chars
             try:
                 content.encode("raw_unicode_escape").decode("unicode_escape")
-            except (UnicodeDecodeError, ValueError) as exc:
+                bad_escape = False
+            except (UnicodeDecodeError, ValueError):
+                bad_escape = True
+            if bad_escape:
+                # Raised outside the except block: the decode error holds the literal's text in
+                # `.object`, and an implicit `__context__` would carry it to every error surface.
                 raise ValidationError(
                     f"invalid string escape sequence in a string literal{_position(token)}. "
                     f"Check that all backslash sequences are valid "
                     f"(e.g. \\\\n, \\\\t, \\\\\\\\, \\\\uXXXX). "
                     f"Raw Windows paths such as C:\\\\xyz should escape "
                     f"the backslash (C:\\\\\\\\xyz) or use forward slashes."
-                ) from exc
+                )
 
 
 def evaluate(compiled: CompiledExpression, row_context: dict[str, Any]) -> Any:
