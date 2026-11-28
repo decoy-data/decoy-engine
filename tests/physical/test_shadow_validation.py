@@ -327,3 +327,33 @@ def test_r3_deferral_needs_an_open_session(tmp_path: Path) -> None:
         with pytest.raises(ValidatorStateError) as closed:
             _coordinator(inputs, owned).run(plan, snapshot)
     assert closed.value.code == reasons.runtime.VALIDATOR_SESSION_UNAVAILABLE
+
+
+def test_no_public_coordinator_method_runs_a_plan_unjudged() -> None:
+    """Every public method that takes a plan and a snapshot refuses output a validator rejects.
+
+    The unchecked dispatch the mixed route needs is private, so a caller of the exported
+    `ShadowCoordinator` cannot reach a result without judgement."""
+    import inspect
+
+    config = _generate_config()
+    config["validators"] = [
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+    ]
+    plan, ctx, snapshot = _admitted_dispatch(config)
+    coordinator = ShadowCoordinator(ctx=ctx)
+    runners = [
+        name
+        for name, member in inspect.getmembers(ShadowCoordinator, inspect.isfunction)
+        if not name.startswith("_")
+        and {"plan", "snapshot"} <= set(inspect.signature(member).parameters)
+    ]
+    assert "run" in runners
+    for name in runners:
+        kwargs = {
+            key: ()
+            for key, param in inspect.signature(getattr(coordinator, name)).parameters.items()
+            if param.default is inspect.Parameter.empty and key not in {"plan", "snapshot"}
+        }
+        with pytest.raises(ValidatorFailedError):
+            getattr(coordinator, name)(plan, snapshot, **kwargs)

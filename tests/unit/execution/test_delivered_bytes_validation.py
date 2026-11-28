@@ -11,7 +11,7 @@ paired source; validator construction echoes a supplied value.
 
 from __future__ import annotations
 
-import re
+import types
 from pathlib import Path
 from typing import Any
 
@@ -180,33 +180,44 @@ def test_a_whole_table_callable_receives_the_source_through_run_pipeline(tmp_pat
 
 
 @pytest.mark.parametrize(
-    "validators",
+    ("validators", "position"),
     [
-        [_SECRET_URL],
-        [{"name": "leak_check", "params": {"max_identical_ratio": _SECRET_URL}}],
-        [{"name": "leak_check", "params": {"min_rows": _SECRET_URL}}],
-        [
-            {
-                "name": "reconciliation_holds",
-                "params": {
-                    "parent_table": "a",
-                    "parent_column": "x",
-                    "child_table": "b",
-                    "child_column": "y",
-                    "tolerance": _SECRET_URL,
-                },
-            }
-        ],
-        [{"name": _SECRET_URL}],
+        ([_SECRET_URL], "validators entry 0"),
+        (
+            [{"name": "leak_check", "params": {"max_identical_ratio": _SECRET_URL}}],
+            "validators[0].params.max_identical_ratio",
+        ),
+        (
+            [{"name": "leak_check", "params": {"min_rows": _SECRET_URL}}],
+            "validators[0].params.min_rows",
+        ),
+        (
+            [
+                {
+                    "name": "reconciliation_holds",
+                    "params": {
+                        "parent_table": "a",
+                        "parent_column": "x",
+                        "child_table": "b",
+                        "child_column": "y",
+                        "tolerance": _SECRET_URL,
+                    },
+                }
+            ],
+            "validators[0].params.tolerance",
+        ),
+        ([{"name": _SECRET_URL}], "validators entry 0"),
     ],
     ids=["entry", "ratio", "min-rows", "tolerance", "name"],
 )
-def test_validator_construction_errors_do_not_echo_values(validators: list[Any]) -> None:
+def test_validator_construction_errors_do_not_echo_values(
+    validators: list[Any], position: str
+) -> None:
     with pytest.raises(ValueError) as caught:
         ValidationSession({"validators": validators})
     text = str(caught.value)
     assert "hunter2" not in text and "svc-user" not in text
-    assert re.search(r"validators(\[0\]| entry 0)", text)
+    assert position in text
 
 
 def test_a_credential_in_a_validator_param_is_not_echoed_by_run_pipeline(tmp_path: Path) -> None:
@@ -216,3 +227,81 @@ def test_a_credential_in_a_validator_param_is_not_echoed_by_run_pipeline(tmp_pat
     with pytest.raises(Exception) as caught:
         run_pipeline(declare_rest(raw), {"people": text_table(id=["1"])}, engine_version="probe")
     assert "hunter2" not in str(caught.value)
+
+
+# --- 6. non-finite and non-string parameters ------------------------------------------------------
+
+
+@pytest.mark.parametrize("threshold", ["NaN", "nan", "inf", "-Infinity", float("nan"), float("inf")])
+def test_a_non_finite_threshold_is_refused_not_ignored(threshold: Any) -> None:
+    with pytest.raises(ValueError) as caught:
+        ValidationSession(
+            {"validators": [{"name": "leak_check", "params": {"max_identical_ratio": threshold}}]}
+        )
+    assert "validators[0].params.max_identical_ratio" in str(caught.value)
+
+
+def test_an_ordinary_numeric_string_threshold_still_works() -> None:
+    ValidationSession(
+        {"validators": [{"name": "leak_check", "params": {"max_identical_ratio": "0.25"}}]}
+    )
+
+
+_RELATIONSHIP_PARAMS = {
+    "parent_table": {"url": _SECRET_URL},
+    "parent_column": "x",
+    "child_table": "b",
+    "child_column": "y",
+}
+
+
+@pytest.mark.parametrize("name", ["reconciliation_holds", "parent_window_respected"])
+@pytest.mark.parametrize("param", ["parent_table", "child_table", "child_column"])
+def test_a_non_string_relationship_param_is_refused_value_free(name: str, param: str) -> None:
+    params: dict[str, Any] = {
+        **_RELATIONSHIP_PARAMS,
+        "window_start_column": "s",
+        "window_end_column": "e",
+        param: {"url": _SECRET_URL},
+    }
+    with pytest.raises(ValueError) as caught:
+        ValidationSession({"validators": [{"name": name, "params": params}]})
+    text = str(caught.value)
+    assert "hunter2" not in text and "svc-user" not in text
+    assert param in text
+
+
+# --- 7. reconciliation findings carry no data value ----------------------------------------------
+
+
+def test_a_reconciliation_finding_and_its_quarantine_reason_hold_no_amount() -> None:
+    from decoy_engine.quarantine import _normalize_worklist
+    from decoy_engine.validators._relationship_checks import validate_reconciliation_holds
+
+    planted = 987654.25
+    config_ = {
+        "relationships": [
+            {"parent": {"table": "p", "columns": ["id"]}, "children": [{"table": "c"}]}
+        ]
+    }
+    outputs = {
+        "p": pa.table({"id": ["1"], "amt": pa.array([planted])}),
+        "c": pa.table({"id": ["2"], "amt": pa.array([1.0])}),
+    }
+    entry = {
+        "name": "reconciliation_holds",
+        "params": {
+            "parent_table": "p",
+            "parent_column": "amt",
+            "child_table": "c",
+            "child_column": "amt",
+        },
+    }
+    findings = validate_reconciliation_holds(outputs, entry, config_)
+    assert findings
+    for finding in findings:
+        assert "987654" not in finding.detail
+    report = types.SimpleNamespace(findings=findings)
+    items = _normalize_worklist(report, (), ["validation_fail"])  # type: ignore[arg-type]
+    assert items
+    assert all("987654" not in item.reason for item in items)
