@@ -20,7 +20,7 @@ from decoy_engine.execution import ExecutionError, _pipeline_route_dispatch
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution._strategies._passthrough import PassthroughHandler
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.profile import LazySource
 from decoy_engine.verification.postmask import distribution as distribution_module
 from tests._declared_schema import file_schemas
@@ -393,7 +393,7 @@ def test_a_loader_run_without_distribution_is_not_refused(tmp_path: Path) -> Non
 
 
 def test_a_deferred_gate_with_distribution_is_refused_with_the_deferred_code() -> None:
-    from decoy_engine.execution.pipeline._post_scan_distribution import distribution_refusal
+    from decoy_engine.execution.pipeline.post_scan._distribution import distribution_refusal
 
     ctx = SimpleNamespace(
         config={"post_scan": {"integrity": True, "distribution": {"tolerance_pct": 5}}},

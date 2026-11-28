@@ -13,8 +13,8 @@ import pytest
 
 from decoy_engine.execution._pipeline_finalize import finalize_validators_and_quarantine
 from decoy_engine.execution._row_errors import RowErrorRecord
-from decoy_engine.execution.pipeline import _post_scan
-from decoy_engine.execution.pipeline._post_scan import (
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
+from decoy_engine.execution.pipeline.post_scan._gate import (
     PostScanGate,
     publish_after_gate,
     settle,

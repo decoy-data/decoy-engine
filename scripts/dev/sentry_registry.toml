@@ -54,6 +54,9 @@ baseline = "tests/sentry/baselines/module-size.json"
 [[sentry]]
 id = "public-import-boundary"
 baseline = "tests/sentry/baselines/public-import-boundary.json"
+approved_growth = [
+  { key = "arrow_frames.py", decision = "owner 2026-11-24 arrow_frames.py public facade over internal.pandas_compat, same pattern as providers.py" },
+]
 
 [[sentry]]
 id = "exception-hierarchy"

@@ -181,10 +181,10 @@ def spies(monkeypatch: pytest.MonkeyPatch) -> Spies:
 
     real_convert = _fk_keys.to_pandas_fk_safe
 
-    def convert_spy(table: Any, cols: Any) -> Any:
+    def convert_spy(table: Any, cols: Any, **kw: Any) -> Any:
         if _has_dup(table.schema.names):
             s.dup_conversions += 1
-        return real_convert(table, cols)
+        return real_convert(table, cols, **kw)
 
     _replace_everywhere(monkeypatch, real_convert, convert_spy)
 
@@ -417,9 +417,9 @@ _SITECUSTOMIZE = textwrap.dedent(
                 fh.write(line + "\\n")
         from decoy_engine.execution import _fk_keys
         _real_convert = _fk_keys.to_pandas_fk_safe
-        def _convert(table, cols):
+        def _convert(table, cols, **kw):
             _log("convert")
-            return _real_convert(table, cols)
+            return _real_convert(table, cols, **kw)
         _fk_keys.to_pandas_fk_safe = _convert
         import decoy_engine.execution
         from decoy_engine.execution import _guards
