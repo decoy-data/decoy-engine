@@ -173,7 +173,7 @@ def test_the_merge_base_ratchet_catches_a_raised_count() -> None:
 ZERO = "detection/name_hints/loader.py"
 IMPORTS = (
     "from decoy_engine._config_text import (Expected, Kind, Member, Name, Problem, Refusal,"
-    " config_position, config_refusal, read_config)\n"
+    " config_position, config_refusal, config_root_position, read_config)\n"
     "from decoy_engine._error_base import raise_bare\n"
     "from decoy_engine.errors import ConfigError\n"
     "from decoy_engine.plan import PlanCompileError, refusal_error\n"
@@ -226,6 +226,10 @@ FIRES: dict[str, tuple[str, str]] = {
         "S2",
         "def f(v):\n    config_position(f'{v}')\n    config_refusal("
         "config_position(f'{v}'), Problem.MISSING)\n",
+    ),
+    "risky root segment": (
+        "S2",
+        "def f(v):\n    config_refusal(config_root_position(f'{v}'), Problem.MISSING)\n",
     ),
     "Name(str(v))": (
         "S2",
@@ -430,6 +434,10 @@ CLEAN: dict[str, str] = {
     ),
     "plain raw binding": (
         "def f(v):\n    config_refusal(config_position(Name(v)), Problem.MISSING)\n"
+    ),
+    "root position with a raw binding": (
+        "def f(t, c):\n    config_refusal(config_root_position('tables', Name(t), 'columns',"
+        " Name(c)), Problem.MISSING)\n"
     ),
     "index segment": (
         "def f(xs):\n    for i, x in enumerate(xs):\n"

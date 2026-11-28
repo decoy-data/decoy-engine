@@ -28,7 +28,13 @@ import math
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._config_text import ConfigPosition, Name, Problem, config_position, config_refusal
+from decoy_engine._config_text import (
+    ConfigPosition,
+    Name,
+    Problem,
+    config_refusal,
+    config_root_position,
+)
 from decoy_engine._nested_json import nested_children
 from decoy_engine.contracts.bucketize_width import EXACT_INT_BOUND
 from decoy_engine.contracts.label_text import is_utf8_text
@@ -79,7 +85,7 @@ def _reject_unusable_bound(value: Any, *, code: str, at: ConfigPosition) -> int 
     huge Python int never raises OverflowError in `math.isfinite`); and
     magnitude >= 2**53 (past float64's exact-integer range, where the tail
     comparison silently rounds and a true tail value can escape generalization --
-    a PHI leak Codex reproduced). `where` is the human-readable column locator.
+    a PHI leak Codex reproduced). `at` is the bound's position from the config root.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         type_refusal = config_refusal(at, Problem.WRONG_TYPE, got=value, hint=_BOUND_TYPE_HINT)
@@ -213,7 +219,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                 # list/dict preset would raise `TypeError: unhashable type`.
                 if not isinstance(preset, str) or preset not in _PRESETS:
                     preset_refusal = config_refusal(
-                        config_position(
+                        config_root_position(
                             "tables",
                             Name(table_name),
                             "columns",
@@ -231,7 +237,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                 cap = _reject_unusable_bound(
                     pc.get("cap"),
                     code=reasons.plan.TOP_CODE_BOUNDS_UNRESOLVABLE,
-                    at=config_position(
+                    at=config_root_position(
                         "tables",
                         Name(table_name),
                         "columns",
@@ -243,7 +249,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                 over_label = pc.get("over_label")
                 if not is_utf8_text(over_label) or not over_label:
                     over_refusal = config_refusal(
-                        config_position(
+                        config_root_position(
                             "tables",
                             Name(table_name),
                             "columns",
@@ -283,7 +289,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
             floor = _reject_unusable_bound(
                 pc.get("floor"),
                 code=reasons.plan.TOP_CODE_INVALID_FLOOR,
-                at=config_position(
+                at=config_root_position(
                     "tables",
                     Name(table_name),
                     "columns",
@@ -295,7 +301,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
             under_label = pc.get("under_label")
             if not is_utf8_text(under_label) or not under_label:
                 under_refusal = config_refusal(
-                    config_position(
+                    config_root_position(
                         "tables",
                         Name(table_name),
                         "columns",
@@ -309,7 +315,7 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                 raise refusal_error(reasons.plan.TOP_CODE_MISSING_UNDER_LABEL, under_refusal)
             if floor >= cap:
                 order_refusal = config_refusal(
-                    config_position(
+                    config_root_position(
                         "tables",
                         Name(table_name),
                         "columns",

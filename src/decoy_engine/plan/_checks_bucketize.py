@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Name, Problem, config_position, config_refusal
+from decoy_engine._config_text import Name, Problem, config_refusal, config_root_position
 from decoy_engine.contracts.bucketize_width import (
     BUCKETIZE_PRESETS,
     is_oversized_integer_width,
@@ -108,7 +108,7 @@ def check_bucketize_config(config: dict[str, Any], shapes: ColumnShapes | None =
                 ):
                     continue  # the decimal shape rule refuses it as column_shape_mismatch
                 width_refusal = config_refusal(
-                    config_position(
+                    config_root_position(
                         "tables",
                         Name(table_name),
                         "columns",

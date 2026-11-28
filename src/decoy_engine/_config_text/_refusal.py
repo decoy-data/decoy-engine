@@ -180,8 +180,9 @@ Segment = str | int | Name | Member
 
 @dataclass(frozen=True, slots=True)
 class ConfigPosition:
-    """Where a refusal happened. `key` is the display joined once, with the table and column an
-    enclosing `at_position` binds, so a refusal and its `path` agree."""
+    """Where a refusal happened. `key` is the display joined once (by `config_position`, with
+    the table and column an enclosing `at_position` binds, or by `config_root_position`), so a
+    refusal and its `path` agree."""
 
     key: str
 
@@ -206,6 +207,13 @@ def config_position(*segments: Segment) -> ConfigPosition:
     """Join `segments` into one position. A plain `str` is a field name and must be a literal
     (sentry rule S2)."""
     return ConfigPosition(position_key(_display(segments)))
+
+
+def config_root_position(*segments: Segment) -> ConfigPosition:
+    """Like `config_position`, for a check that walks the whole config and already starts its
+    segments at the config root (`tables`, ...): the enclosing `at_position` is not prepended,
+    or a per-column host would see that column twice."""
+    return ConfigPosition(_display(segments))
 
 
 class _Absent:

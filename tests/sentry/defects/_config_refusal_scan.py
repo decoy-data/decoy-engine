@@ -55,6 +55,9 @@ S1_EXEMPT = frozenset({("profiling/model_pack/loader.py", "_rebuild_load_error")
 # from a refusal's `.detail` or `.key` is a second copy of the mapping, with no baseline entry.
 MAPPING_SITE = ("plan/_errors.py", "refusal_error")
 CONFIG_TEXT_DIR = "_config_text/"
+# Both position builders take the same closed segments (rule S2); they differ only in whether
+# the enclosing `at_position` is prepended.
+POSITION_BUILDERS = frozenset({"config_position", "config_root_position"})
 ERROR_BASE = "_error_base.py"
 # The one engine-owned fixed text a zero-set builtin error may take besides a literal.
 FIXED_TEXT_ATTR = "MEMORY_TEXT"
@@ -226,7 +229,7 @@ def _segment_ok(node: ast.expr, scope: Scope) -> bool:
 
 
 def _is_position(node: ast.expr, scope: Scope, seen: int = 0) -> bool:
-    if isinstance(node, ast.Call) and _name_of(node.func) == "config_position":
+    if isinstance(node, ast.Call) and _name_of(node.func) in POSITION_BUILDERS:
         return not node.keywords and all(_segment_ok(a, scope) for a in node.args)
     if isinstance(node, ast.Name) and seen < 4:
         for owner in scope.chain():

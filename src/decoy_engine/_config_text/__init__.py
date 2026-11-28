@@ -19,6 +19,7 @@ from decoy_engine._config_text._refusal import (
     Refusal,
     config_position,
     config_refusal,
+    config_root_position,
     kind_of,
 )
 
@@ -33,6 +34,7 @@ __all__ = [
     "Refusal",
     "config_position",
     "config_refusal",
+    "config_root_position",
     "kind_of",
     "passthrough",
     "read_config",

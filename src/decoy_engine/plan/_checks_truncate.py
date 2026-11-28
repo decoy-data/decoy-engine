@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Name, Problem, config_position, config_refusal
+from decoy_engine._config_text import Name, Problem, config_refusal, config_root_position
 from decoy_engine.contracts.label_text import is_mask_char
 from decoy_engine.plan._errors import PlanCompileError, refusal_error
 
@@ -104,7 +104,7 @@ def check_truncate_config(config: dict[str, Any]) -> None:
             mask_char = pc.get("mask_char")
             if mask_char is not None and not is_mask_char(mask_char):
                 mask_refusal = config_refusal(
-                    config_position(
+                    config_root_position(
                         "tables",
                         Name(table_name),
                         "columns",
