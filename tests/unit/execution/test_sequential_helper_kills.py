@@ -14,8 +14,8 @@ import types
 import pytest
 
 from decoy_engine.execution import ExecutionError
+from decoy_engine.execution._publication_observer import has_whole_table_contract
 from decoy_engine.execution._sequential import table_topo_order
-from decoy_engine.execution._transactional_sink import has_whole_table_contract
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 
 

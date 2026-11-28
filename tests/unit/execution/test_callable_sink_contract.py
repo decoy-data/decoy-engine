@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution import run_pipeline
-from decoy_engine.execution._transactional_sink import has_whole_table_contract
+from decoy_engine.execution._publication_observer import has_whole_table_contract
 from tests._declared_schema import declare_rest
 from tests.acceptance._f06_support import column, text_table
 

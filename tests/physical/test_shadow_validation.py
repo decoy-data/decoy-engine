@@ -27,13 +27,18 @@ from tests.physical.test_shadow_full_frame import (
 from tests.physical.test_shadow_generation import _admitted_dispatch, _generate_config
 from tests.physical.test_shadow_mixed import ENGINE_VERSION, _accounts_source, _mixed_config
 
-_REJECT_ALL = {"pattern": "^$"}
+
+def _reject_all() -> dict[str, str]:
+    """A fresh params dict per use: a test that edits its config after compile
+    (`test_r3_a_caller_edit_after_compile_cannot_change_the_verdict`) must not change the
+    pattern every later test reads."""
+    return {"pattern": "^$"}
 
 
 def test_generation_branch_refuses_output_a_validator_rejects() -> None:
     config = _generate_config()
     config["validators"] = [
-        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _reject_all()}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
     with pytest.raises(ValidatorFailedError):
@@ -48,7 +53,7 @@ def test_mixed_branch_refuses_output_a_validator_rejects(tmp_path: Path) -> None
         mask_table_columns={"accounts": [{"name": "acct_id", "strategy": "passthrough"}]},
     )
     config["validators"] = [
-        {"name": "regex_match", "columns": {"accounts": ["acct_id"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"accounts": ["acct_id"]}, "params": _reject_all()}
     ]
     inputs = capture_physical_plan_inputs(
         config, {"accounts": accounts}, engine_version=ENGINE_VERSION, execution_mode="full_frame"
@@ -71,7 +76,7 @@ def _mixed_reject_all(tmp_path: Path) -> tuple[Any, Any, Any, Any, Any]:
         mask_table_columns={"accounts": [{"name": "acct_id", "strategy": "passthrough"}]},
     )
     config["validators"] = [
-        {"name": "regex_match", "columns": {"accounts": ["acct_id"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"accounts": ["acct_id"]}, "params": _reject_all()}
     ]
     inputs = capture_physical_plan_inputs(
         config, {"accounts": accounts}, engine_version=ENGINE_VERSION, execution_mode="full_frame"
@@ -105,7 +110,7 @@ def test_no_public_coordinator_method_runs_a_plan_unjudged() -> None:
     assert public == ["run"], public
     config = _generate_config()
     config["validators"] = [
-        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _reject_all()}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
     with pytest.raises(ValidatorFailedError):
@@ -135,7 +140,7 @@ def test_the_stitched_mixed_result_is_judged_once(
 def test_bound_session_is_fed_by_a_generation_result_and_fails(tmp_path: Path) -> None:
     config = _generate_config()
     config["validators"] = [
-        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _reject_all()}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
     with pytest.raises(ValidatorFailedError):
@@ -159,7 +164,7 @@ def test_bound_session_is_fed_by_a_mixed_result_and_fails(tmp_path: Path) -> Non
 def test_full_frame_branch_refuses_output_a_validator_rejects(tmp_path: Path) -> None:
     config, source = _admitted_table_config(tmp_path)
     config["validators"] = [
-        {"name": "regex_match", "columns": {_TABLE: ["shuffled"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {_TABLE: ["shuffled"]}, "params": _reject_all()}
     ]
     sources = {_TABLE: source}
     inputs, plan = _capture(config, sources)
@@ -186,7 +191,7 @@ def test_full_frame_branch_returns_output_a_validator_accepts(tmp_path: Path) ->
 def _full_frame_reject_all(tmp_path: Path) -> tuple[Any, Any, Any, Any, Any]:
     config, source = _admitted_table_config(tmp_path)
     config["validators"] = [
-        {"name": "regex_match", "columns": {_TABLE: ["shuffled"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {_TABLE: ["shuffled"]}, "params": _reject_all()}
     ]
     sources = {_TABLE: source}
     inputs, plan = _capture(config, sources)
@@ -206,7 +211,7 @@ def test_v15b_default_context_full_frame_is_judged_at_close(tmp_path: Path) -> N
 def test_v15d_generation_fed_under_a_session_is_judged_at_close() -> None:
     config = _generate_config()
     config["validators"] = [
-        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _reject_all()}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
     with bind_validation_session(config, key_state_budget=lambda: None) as session:
@@ -256,7 +261,7 @@ def test_r2_standalone_full_frame_with_a_default_context_refuses_rejected_rows(
 def test_r2_a_bound_generation_run_cannot_leave_its_scope_with_rejected_rows() -> None:
     config = _generate_config()
     config["validators"] = [
-        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _reject_all()}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
     returned: list[Any] = []
@@ -269,7 +274,7 @@ def test_r2_a_bound_generation_run_cannot_leave_its_scope_with_rejected_rows() -
 def test_r2_close_raises_the_same_verdict_every_time() -> None:
     config = _generate_config()
     config["validators"] = [
-        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _reject_all()}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
     with bind_validation_session(config, key_state_budget=lambda: None) as session:
@@ -284,7 +289,7 @@ def test_r2_an_ambient_session_holding_other_validators_is_refused() -> None:
     """An accept-all session must not judge a run configured with reject-all."""
     config = _generate_config()
     config["validators"] = [
-        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _REJECT_ALL}
+        {"name": "regex_match", "columns": {"people": ["tier"]}, "params": _reject_all()}
     ]
     plan, ctx, snapshot = _admitted_dispatch(config)
     ambient = {

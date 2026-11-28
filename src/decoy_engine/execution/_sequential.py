@@ -156,6 +156,7 @@ from decoy_engine.execution._output_projection import (
     enforce_output_projection,
 )
 from decoy_engine.execution._publication_observer import (
+    has_whole_table_contract,
     observed_abort,
     observed_commit,
     report_partial_publication,
@@ -173,7 +174,6 @@ from decoy_engine.execution._sequential_order import table_topo_order
 from decoy_engine.execution._transactional_sink import (
     TransactionalSink,
     _CallableSinkAdapter,
-    has_whole_table_contract,
 )
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
 from decoy_engine.execution.pipeline.post_scan import note_quarantined, publish_after_gate
