@@ -11,6 +11,7 @@ paired source; validator construction echoes a supplied value.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -205,7 +206,7 @@ def test_validator_construction_errors_do_not_echo_values(validators: list[Any])
         ValidationSession({"validators": validators})
     text = str(caught.value)
     assert "hunter2" not in text and "svc-user" not in text
-    assert "validators entry 0" in text
+    assert re.search(r"validators(\[0\]| entry 0)", text)
 
 
 def test_a_credential_in_a_validator_param_is_not_echoed_by_run_pipeline(tmp_path: Path) -> None:

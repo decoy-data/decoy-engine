@@ -119,7 +119,9 @@ def deliver_resident_outputs(sink: object, result: ExecutionResult) -> None:
     """Hand a plain callable each resident output once, after validation and settle.
 
     A route that wrote through the sink (sequential, streamed) returns no outputs, so nothing
-    reaches it twice; a resident route returns its tables and never calls a bare callable.
+    reaches it twice; a resident route returns its tables and never calls a bare callable. A
+    callable has no transaction, so there is no commit to make (and `observed_commit` stays the
+    only commit site).
     """
     if not result.outputs or not _plain_callable_sink(sink):
         return
@@ -128,7 +130,6 @@ def deliver_resident_outputs(sink: object, result: ExecutionResult) -> None:
     adapter = _CallableSinkAdapter(sink)
     for name, table in result.outputs.items():
         adapter.write(name, table)
-    adapter.commit()
 
 
 def execute_route(

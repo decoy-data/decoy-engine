@@ -9,11 +9,75 @@ skips the check. Messages name the validator and the parameter, never the value.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
+from decoy_engine._config_text import (
+    ConfigPosition,
+    Expected,
+    Name,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+)
 from decoy_engine.errors import ConfigRuleError
 
 __all__ = ["ParamError", "compile_pattern", "numeric_param"]
+
+
+class _Why(Enum):
+    """The three refusals a validator parameter can earn. `config_refusal` takes its problem,
+    expectation and hint as literals, so each has its own call below."""
+
+    NOT_AN_INTEGER = "integer"
+    NOT_A_NUMBER = "number"
+    BAD_PATTERN = "pattern"
+
+
+@dataclass(frozen=True)
+class _Refused:
+    """What a refusal is about, kept so it can be rebuilt at a ``validators`` entry."""
+
+    validator: str
+    param: str
+    why: _Why
+
+
+def _position(index: int | None, param: str) -> ConfigPosition:
+    if index is None:
+        return config_position("params", Name(param))
+    return config_position("validators", index, "params", Name(param))
+
+
+def _refusal(refused: _Refused, position: ConfigPosition) -> Refusal:
+    if refused.why is _Why.NOT_AN_INTEGER:
+        return config_refusal(
+            position,
+            Problem.WRONG_TYPE,
+            expected=Expected.INTEGER,
+            names=(Name(refused.validator),),
+        )
+    if refused.why is _Why.NOT_A_NUMBER:
+        return config_refusal(
+            position, Problem.WRONG_TYPE, expected=Expected.NUMBER, names=(Name(refused.validator),)
+        )
+    return config_refusal(
+        position, Problem.UNPARSEABLE, names=(Name(refused.validator),), hint="not a valid regex"
+    )
+
+
+def _error(refusal: Refusal, refused: _Refused) -> ParamError:
+    error = ParamError(refusal.text)
+    error.refused = refused
+    return error
+
+
+def _param_error(refused: _Refused, index: int | None) -> ParamError:
+    """The refusal built through ``config_refusal``: the text names the entry, the parameter and
+    the validator, never the value."""
+    return _error(_refusal(refused, _position(index, refused.param)), refused)
 
 
 class ParamError(ConfigRuleError):
@@ -21,9 +85,11 @@ class ParamError(ConfigRuleError):
 
     A ``ConfigRuleError``, so the reason adapter classifies it as a config failure."""
 
+    refused: _Refused
+
     def at_entry(self, index: int) -> ParamError:
         """The same refusal located at ``validators`` entry ``index``, with no exception context."""
-        return ParamError(f"validators entry {index}: {self.message}")
+        return _param_error(self.refused, index)
 
 
 def numeric_param(
@@ -41,7 +107,7 @@ def numeric_param(
     if name not in params:
         return default
     value = params[name]
-    noun = "a number" if kind is float else "an integer"
+    why = _Why.NOT_A_NUMBER if kind is float else _Why.NOT_AN_INTEGER
     if isinstance(value, str):
         # `int()` and `float()` echo the text they reject, so the failure is raised after the
         # handler with no exception context.
@@ -51,11 +117,11 @@ def numeric_param(
         except ValueError:
             pass
         if parsed is None:
-            raise ParamError(f"{validator} validator: params.{name} must be {noun}.")
+            raise _param_error(_Refused(validator, name, why), None)
         return parsed
     accepted = (int, float) if kind is float else (int,)
     if isinstance(value, bool) or not isinstance(value, accepted):
-        raise ParamError(f"{validator} validator: params.{name} must be {noun}.")
+        raise _param_error(_Refused(validator, name, why), None)
     return kind(value)
 
 
@@ -74,5 +140,5 @@ def compile_pattern(pattern: str, *, validator: str) -> re.Pattern[str]:
     except re.error:
         pass
     if compiled is None:
-        raise ParamError(f"{validator} validator: params.pattern is not a valid regex.")
+        raise _param_error(_Refused(validator, "pattern", _Why.BAD_PATTERN), None)
     return compiled
