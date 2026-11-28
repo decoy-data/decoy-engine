@@ -11,26 +11,28 @@ This module is the only place the detectors and the runner turn a cell or a colu
 
 from __future__ import annotations
 
-import math
-import re
+import json
+import warnings
+from collections.abc import Callable, Iterator
 from decimal import Decimal
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 
 from decoy_engine._error_base import DecoyError
-from decoy_engine.internal.canonical_cell import (
-    TEMPORAL,
-    Blob,
-    Map,
-    Members,
-    Null,
-    Record,
-    Seq,
-    canonical_cell,
+from decoy_engine.internal.cell_atoms import (
+    AS,
+    Duration,
+    Instant,
+    Months,
+    decimal_exact,
+    int_digits,
     is_null,
-    temporal_text,
+    is_wide,
+    reduced,
+    temporal_form,
     unboxed,
 )
 
@@ -43,25 +45,6 @@ class UnreadableCellError(DecoyError, ValueError):
 
     def __init__(self) -> None:
         super().__init__("a cell could not be read as text")
-
-
-class ComparisonNotPreservedError(DecoyError):
-    """A column's text keys lost the equality its cells have. The text is fixed, so no cell
-    reaches the report; the table fails with this class name."""
-
-    def __init__(
-        self, message: str = "a column's text keys do not keep its cells' equality"
-    ) -> None:
-        super().__init__(message)
-
-
-class RecordNotComparableError(ComparisonNotPreservedError):
-    """A record, or a cell holding one, faces a cell that is not equal to it. No spelling of a record
-    is predicted, so a record row is identical or the table is refused. The text is fixed, so no cell reaches the
-    report; the table fails with this class name."""
-
-    def __init__(self) -> None:
-        super().__init__("a record cell cannot be compared with another cell unless they are equal")
 
 
 def cell_text(value: object) -> str:
@@ -84,20 +67,10 @@ def column_text(series: pd.Series) -> pd.Series:
     return _text(series[series.notna().to_numpy(dtype=bool)])
 
 
-def key_text(series: pd.Series) -> list[str | None]:
-    """One text key per row of `series`, None for a null. Cells of one value share a key
-    whatever their type, as pandas `==` treats them: a float 10001.0 and an int 10001 must not
-    read as two values, or a leaked source value looks changed. A cell that is not a number
-    keys as its `str()` text, built from `canonical_cell`, so a value and its exported text
-    still match. See `_number_key` and `_canonical_key`."""
-    return [_canonical_key(canonical_cell(c)) for c in _cells(series)]
-
-
 def detector_text(series: pd.Series) -> list[str | None]:
     """One text per row of `series`, None for a null, for the detectors to read. A cell reads as
     written, except that an integral number reads as its exact plain digits, so a PAN or phone
-    kept as an int, float or `Decimal("4111111111111111.00")` stays visible. Never the key: the
-    key rounds a number to its binary64 and drops the digits a detector reads."""
+    kept as an int, float or `Decimal("4111111111111111.00")` stays visible."""
     return [None if is_null(c) else _detector_cell(c) for c in _cells(series)]
 
 
@@ -154,44 +127,18 @@ def _is_arrow_binary(dtype: object) -> bool:
     return binary_dtype is not None and isinstance(dtype, binary_dtype)
 
 
-# A number keys as the shortest text of its nearest binary64, the way NumPy and pandas compare
-# int, float and Decimal (they promote to float64). Each cell first becomes its exact value, the
-# General Decimal Arithmetic "reduce" form built from `Decimal.as_tuple` and
-# `float.as_integer_ratio` with no context, so no precision rounds it and no int-to-str digit
-# limit applies. Within binary64 range the value then goes through `float(text)` (correctly
-# rounded, Clinger 1990) and `repr` (shortest round trip, Steele and White 1990), which gives
-# one text for every spelling that rounds to the same double. Outside the range the exact value
-# is the key. Text that is a plain decimal numeral reads as that number; a leading zero or `+`
-# keeps the text, since a ZIP or phone code must reach the detectors as written.
-_PLAIN_ZEROS = 32  # beyond this many padding zeros a key uses the E form, so its size is bounded
-_BAND = 10**19  # an adjusted exponent beyond this is only a bucket: no real number gets there
-_EXP_DIGITS = 20  # an exponent of more digits is a band, so no int() sees more than 25 digits
-_ADJUSTED_RANGE = (-325, 308)  # adjusted exponents whose value can round to a finite binary64
+# Detector formatting. A long integral value reads in an exact bounded form, so its size is
+# bounded; an absurd exponent reads as a band name. No `int()` sees the exponent's digits.
+_PLAIN_ZEROS = 32
+_BAND = 10**19
 _DETECTOR_DIGITS = 64  # longer than any detector pattern
-_NUMERAL = re.compile(
-    r"(?P<sign>-?)(?:(?P<whole>0|[1-9][0-9]*)(?:\.(?P<part>[0-9]*))?|\.(?P<bare>[0-9]+))"
-    r"(?:[eE](?P<exp>[+-]?[0-9]+))?",
-    re.ASCII,
-)
-_INFINITY = re.compile(r"(?P<sign>-?)inf(?:inity)?", re.ASCII | re.IGNORECASE)
-
-
-def _reduced(negative: bool, digits: str, exponent: int) -> tuple[bool, str, int]:
-    """(sign, coefficient, exponent) with no leading or trailing coefficient zeros; zero is an
-    empty coefficient."""
-    coefficient = digits.lstrip("0")
-    if not coefficient:
-        return False, "", 0
-    trimmed = coefficient.rstrip("0")
-    return negative, trimmed, exponent + len(coefficient) - len(trimmed)
+_INT64 = (-(2**63), 2**63 - 1)
 
 
 def _number_text(negative: bool, digits: str, exponent: int) -> str:
-    """The key of the finite number (-1)**negative * int(digits) * 10**exponent in its exact
-    form: plain decimal text when it needs at most `_PLAIN_ZEROS` padding zeros, else
-    `<coefficient>E<exponent>`; a band name for an absurd exponent. The form depends only on the
-    value, so equal values share one key and a key read back as text is the same key."""
-    negative, coefficient, exponent = _reduced(negative, digits, exponent)
+    """The finite number (-1)**negative * int(digits) * 10**exponent as exact text: plain when it
+    needs at most `_PLAIN_ZEROS` padding zeros, else `<coefficient>E<exponent>`."""
+    negative, coefficient, exponent = reduced(negative, digits, exponent)
     if not coefficient:
         return "0"
     point = len(coefficient) + exponent
@@ -211,142 +158,45 @@ def _number_text(negative: bool, digits: str, exponent: int) -> str:
     return sign + text
 
 
-def _binary64_key(negative: bool, digits: str, exponent: int, nearest: float | None = None) -> str:
-    """`_number_text` of the value's nearest binary64 when it has a finite non-zero one, else of
-    the exact value. `nearest` is that double when the caller already has it."""
-    negative, coefficient, exponent = _reduced(negative, digits, exponent)
-    adjusted = exponent + len(coefficient) - 1
-    if coefficient and _ADJUSTED_RANGE[0] <= adjusted <= _ADJUSTED_RANGE[1]:
-        if nearest is None:
-            # Never a Decimal-float operation, so no decimal context trap can fire.
-            nearest = float(f"{'-' if negative else ''}{coefficient}e{exponent}")
-        if math.isfinite(nearest):
-            return _short_key(nearest)
-    return _number_text(negative, coefficient, exponent)
+def _fits(ticks: int) -> bool:
+    """True when NumPy can hold `ticks` as a value. The lowest int64 is its NaT."""
+    return _INT64[0] < ticks <= _INT64[1]
 
 
-def _short_key(value: float) -> str:
-    """The key of a finite double: the value of its shortest round-trip text."""
-    if value == 0:
-        return "0"
-    # `Decimal(str)` is exact and reads no context.
-    return _number_text(*_decimal_exact(Decimal(repr(value))))
+def temporal_text(form: Instant | Duration | Months) -> str:
+    """The text of a NumPy date or duration: the pandas value it equals, or an exact NumPy or
+    attosecond text when pandas cannot hold it. Never raises."""
+    if isinstance(form, Months):
+        return (
+            f"{form.months} months"
+            if not _fits(form.months)
+            else str(np.timedelta64(form.months, "M"))
+        )
+    return _exact_text(form.attoseconds, isinstance(form, Instant))
 
 
-def _int_digits(value: int) -> str:
-    # Through Decimal: `str(int)` raises past the int-to-str digit limit.
-    return "".join(map(str, Decimal(abs(value)).as_tuple().digits))
-
-
-def _special(negative: bool, nan: bool) -> str:
-    if nan:
-        return "NaN"
-    return "-Infinity" if negative else "Infinity"
-
-
-def _is_wide(value: float | np.floating) -> bool:
-    return isinstance(value, np.floating) and np.finfo(type(value)).nmant > 52
-
-
-def _float_exact(value: float | np.floating) -> tuple[bool, str, int]:
-    """A finite binary float of any width at its exact value: n / 2**k is n * 5**k / 10**k."""
-    numerator, denominator = value.as_integer_ratio()
-    scale = denominator.bit_length() - 1
-    return numerator < 0, _int_digits(abs(numerator) * 5**scale), -scale
-
-
-def _float_key(value: float | np.floating) -> str:
-    if not np.isfinite(value):
-        return _special(bool(value < 0), bool(np.isnan(value)))
-    if not _is_wide(value):
-        return _short_key(float(value))
-    # A wide float keys as its own `str` export, which a normal exporter writes, not as the
-    # double its value happens to round to.
-    return _binary64_key(*_float_exact(value), nearest=float(str(value)))
-
-
-def _decimal_exact(value: Decimal) -> tuple[bool, str, int]:
-    sign, digits, exponent = value.as_tuple()
-    return bool(sign), "".join(map(str, digits)), int(exponent)
-
-
-def _decimal_key(value: Decimal) -> str:
-    if not value.is_finite():
-        return _special(value.is_signed(), value.is_nan())
-    return _binary64_key(*_decimal_exact(value))
-
-
-def _text_key(text: str) -> str:
-    """`text` read as a number when it is a plain decimal numeral or an infinity, else itself."""
-    numeral = _NUMERAL.fullmatch(text)
-    if numeral is None:
-        infinity = _INFINITY.fullmatch(text)
-        return text if infinity is None else _special(bool(infinity["sign"]), nan=False)
-    fraction = numeral["part"] or numeral["bare"] or ""
-    digits = (numeral["whole"] or "") + fraction
-    negative = bool(numeral["sign"])
-    if not digits.strip("0"):
-        return "0"
-    exponent = numeral["exp"] or "0"
-    magnitude = exponent.lstrip("+-").lstrip("0")
-    if len(magnitude) > _EXP_DIGITS:
-        # The sign of the exponent picks the band; no int() sees the digits.
-        band = "Underflow" if exponent.startswith("-") else "Overflow"
-        return f"-{band}" if negative else band
-    shift = int(magnitude or "0") * (-1 if exponent.startswith("-") else 1)
-    return _binary64_key(negative, digits, shift - len(fraction))
-
-
-def _number_key(value: object) -> str:
-    if isinstance(value, (bool, np.bool_)):
-        # pandas `==` holds True equal to 1 and 1.0, so a bool keys as the number it equals.
-        return "1" if value else "0"
-    if isinstance(value, (float, np.floating)):
-        return _float_key(value)
-    if isinstance(value, (int, np.integer)):
-        return _binary64_key(int(value) < 0, _int_digits(int(value)), 0)
-    if isinstance(value, Decimal):
-        return _decimal_key(value)
-    return _text_key(cell_text(value))
-
-
-def _canonical_key(form: object) -> str | None:
-    """The key of a canonical form: None for a null, a number or text leaf as `_number_key`
-    reads it, and anything else as the `str()` text of the value it stands for."""
-    if isinstance(form, Null):
-        return None
-    if isinstance(form, TEMPORAL):
-        return _text_key(temporal_text(form))
-    if isinstance(form, (Seq, Map, Members, Record)):
-        return _text_key(_canonical_text(form))
-    return _number_key(form)
-
-
-def _canonical_text(form: object) -> str:
-    """`form` as Python writes the value inside a container: a leaf by its `repr`, a container
-    by its punctuation, a mapping in key order."""
-    if isinstance(form, Null):
-        return form.spelling
-    if isinstance(form, TEMPORAL):
-        return temporal_text(form, nested=True)
-    if isinstance(form, Seq):
-        inner = ", ".join(_canonical_text(item) for item in form.items)
-        if form.style == "tuple":
-            return f"({inner},)" if len(form.items) == 1 else f"({inner})"
-        return f"[{inner}]"
-    if isinstance(form, Map):
-        return "{" + ", ".join(f"{k}: {_canonical_text(v)}" for k, v in form.entries) + "}"
-    if isinstance(form, Members):
-        return form.spelling
-    if isinstance(form, Record):
-        inner = ", ".join(_canonical_text(f) for f in form.fields)
-        return f"record({inner},)" if len(form.fields) == 1 else f"record({inner})"
-    return form.spelling if isinstance(form, Blob) else repr(form)
+def _exact_text(attoseconds: int, instant: bool) -> str:
+    make_np: Any = np.datetime64 if instant else np.timedelta64
+    make_pd = pd.Timestamp if instant else pd.Timedelta
+    nanos, remainder = divmod(attoseconds, AS["ns"])
+    if remainder == 0 and _fits(nanos):
+        return str(pd.Timestamp(nanos) if instant else pd.Timedelta(nanos, unit="ns"))
+    for unit in ("s", "ms", "us"):
+        if attoseconds % AS[unit] == 0 and _fits(attoseconds // AS[unit]):
+            try:
+                return str(make_pd(make_np(attoseconds // AS[unit], unit)))
+            except (OverflowError, ValueError):
+                break
+    for unit in ("ns", "ps", "fs", "as"):
+        if attoseconds % AS[unit] == 0 and _fits(attoseconds // AS[unit]):
+            return str(make_np(attoseconds // AS[unit], unit))
+    # No unit holds it. The kind stays in the text so an instant never reads as a duration.
+    return f"{attoseconds} attoseconds" + (" from the epoch" if instant else "")
 
 
 def _plain_digits(negative: bool, digits: str, exponent: int) -> str:
     """An integral value as plain digits when that is short, else its exact key form."""
-    negative, coefficient, exponent = _reduced(negative, digits, exponent)
+    negative, coefficient, exponent = reduced(negative, digits, exponent)
     if not coefficient:
         return "0"
     if len(coefficient) + exponent > _DETECTOR_DIGITS:
@@ -357,10 +207,10 @@ def _plain_digits(negative: bool, digits: str, exponent: int) -> str:
 def _detector_cell(value: object) -> str:
     value = unboxed(value)
     if isinstance(value, (np.datetime64, np.timedelta64)):
-        # The same exact conversion as the key; a bare count comes back as the number it equals.
-        form = canonical_cell(value)
-        if isinstance(form, TEMPORAL):
-            return temporal_text(form)
+        # The exact conversion identity uses; a bare count comes back as the number it equals.
+        form = temporal_form(value)
+        if not isinstance(form, int):
+            return temporal_text(form)  # type: ignore[arg-type]
         value = form
     if isinstance(value, (bool, np.bool_)):
         return cell_text(value)
@@ -368,16 +218,173 @@ def _detector_cell(value: object) -> str:
         if not np.isfinite(value):
             return cell_text(value)
         if np.floor(value) == value:
-            return _plain_digits(bool(value < 0), _int_digits(value.as_integer_ratio()[0]), 0)
-        return repr(float(str(value)) if _is_wide(value) else float(value))
+            return _plain_digits(bool(value < 0), int_digits(value.as_integer_ratio()[0]), 0)
+        return repr(float(str(value)) if is_wide(value) else float(value))
     if isinstance(value, (int, np.integer)):
-        return _plain_digits(int(value) < 0, _int_digits(int(value)), 0)
+        return _plain_digits(int(value) < 0, int_digits(int(value)), 0)
     if isinstance(value, Decimal) and value.is_finite():
-        exact = _decimal_exact(value)
+        exact = decimal_exact(value)
         return _plain_digits(*exact) if _is_integral(exact) else cell_text(value)
     return cell_text(value)
 
 
 def _is_integral(exact: tuple[bool, str, int]) -> bool:
-    _, coefficient, exponent = _reduced(*exact)
+    _, coefficient, exponent = reduced(*exact)
     return not coefficient or exponent >= 0
+
+
+# Export spellings: a cell as Python, NumPy or `json.dumps(default=str)` write it, rendered
+# from digits so neither the int-to-str limit nor the decimal context changes the text.
+def holds_decimal(value: object) -> bool:
+    value = unboxed(value)
+    if isinstance(value, Decimal):
+        return True
+    if isinstance(value, dict):
+        return any(holds_decimal(k) or holds_decimal(v) for k, v in value.items())
+    if isinstance(value, (list, tuple, set, frozenset)) or (
+        isinstance(value, np.ndarray) and value.dtype == object
+    ):
+        return any(holds_decimal(v) for v in value)
+    return False
+
+
+def native_value(value: object) -> object:
+    value = unboxed(value)
+    if isinstance(value, np.ndarray):
+        return list(value)
+    if isinstance(value, np.generic) and not isinstance(value, np.void):
+        return value.item()
+    return value
+
+
+def export_text(value: object, native: bool, as_repr: bool, capitals: int) -> str:
+    """`str(value)` or `repr(value)` as Python writes it, with ints and Decimals rendered from
+    their digits, so neither the int-to-str limit nor the decimal context changes the text.
+    `native` reads NumPy leaves and arrays as their Python values (`item`, `tolist`)."""
+    value = native_value(value) if native else unboxed(value)
+
+    def inner(v: object) -> str:
+        return export_text(v, native, True, capitals)
+
+    kind = type(value)
+    if kind is list:
+        return "[" + ", ".join(map(inner, value)) + "]"  # type: ignore[call-overload]
+    if kind is tuple:
+        items = list(map(inner, value))  # type: ignore[call-overload]
+        return "(" + ", ".join(items) + ("," if len(items) == 1 else "") + ")"
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        fields = ", ".join(f"{f}={inner(v)}" for f, v in zip(value._fields, value, strict=True))
+        return f"{kind.__name__}({fields})"
+    if kind is dict:
+        pairs = (f"{inner(k)}: {inner(v)}" for k, v in value.items())  # type: ignore[attr-defined]
+        return "{" + ", ".join(pairs) + "}"
+    if kind in (set, frozenset):
+        body = "{" + ", ".join(map(inner, value)) + "}" if value else "()"  # type: ignore[call-overload]
+        if kind is set:
+            return body if value else "set()"
+        return f"frozenset({body})" if value else "frozenset()"
+    if kind is bool:
+        return repr(value)
+    if kind is int:
+        return ("-" if value < 0 else "") + int_digits(value)  # type: ignore[operator, arg-type]
+    if kind is Decimal:
+        text = decimal_text(value, capitals)  # type: ignore[arg-type]
+        return f"Decimal('{text}')" if as_repr else text
+    if kind is str:
+        return repr(value) if as_repr else value  # type: ignore[return-value]
+    if isinstance(value, (list, tuple, dict, set, frozenset)):
+        # A subclass (OrderedDict, Counter) keeps its own text; its ints are not re-rendered.
+        return repr(value)
+    return repr(value) if as_repr else str(value)
+
+
+def decimal_text(value: Decimal, capitals: int) -> str:
+    """`str(value)` under a context with this `capitals`, built from the digits (the
+    to-sci-string rule of the General Decimal Arithmetic spec, as `_pydecimal` writes it)."""
+    sign, digits, exponent = value.as_tuple()
+    prefix = "-" if sign else ""
+    coefficient = "".join(map(str, digits))
+    if exponent == "F":
+        return prefix + "Infinity"
+    if exponent in ("n", "N"):
+        payload = coefficient.lstrip("0")
+        return prefix + ("NaN" if exponent == "n" else "sNaN") + payload
+    exponent = int(exponent)  # finite: an int exponent
+    left = exponent + len(coefficient)
+    dot = left if exponent <= 0 and left > -6 else 1
+    if dot <= 0:
+        whole, part = "0", "." + "0" * -dot + coefficient
+    elif dot >= len(coefficient):
+        whole, part = coefficient + "0" * (dot - len(coefficient)), ""
+    else:
+        whole, part = coefficient[:dot], "." + coefficient[dot:]
+    shown = "" if left == dot else "eE"[capitals] + f"{left - dot:+d}"
+    return prefix + whole + part + shown
+
+
+def export_json(value: object, sort: bool, capitals: int) -> str:
+    """`json.dumps(native(value), default=str)` (or with `sort_keys`), rendered from digits."""
+    value = native_value(value)
+    if value is None or isinstance(value, bool):
+        return {None: "null", True: "true", False: "false"}[value]
+    if type(value) is int:
+        return export_text(value, True, False, capitals)
+    if type(value) is float:
+        return json.dumps(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(export_json(v, sort, capitals) for v in value) + "]"
+    if isinstance(value, dict):
+        items = sorted(value.items(), key=lambda kv: kv[0]) if sort else list(value.items())
+        return (
+            "{"
+            + ", ".join(
+                f"{_json_key(native_value(k))}: {export_json(v, sort, capitals)}" for k, v in items
+            )
+            + "}"
+        )
+    if isinstance(value, Decimal):
+        return json.dumps(decimal_text(value, capitals))
+    # `default=str`: the cell's own text as a JSON string.
+    return json.dumps(export_text(value, True, False, capitals))
+
+
+def _json_key(key: object) -> str:
+    if isinstance(key, str):
+        return json.dumps(key)
+    if key is None or isinstance(key, (bool, int, float)):
+        return json.dumps(export_json(key, False, 1))
+    raise ValueError("a JSON key of this type has no spelling")
+
+
+def safe_text(render: Callable[[], str]) -> Iterator[str]:
+    try:
+        text = render()
+    except Exception:
+        # A spelling that cannot be built is not a spelling of this cell; the next is tried.
+        return
+    yield text
+
+
+def temporal_spellings(x: object, form: object) -> Iterator[str]:
+    native = x.item() if isinstance(x, np.generic) else x
+    renders: list[Callable[[], str]] = [lambda: native.isoformat()]  # type: ignore[union-attr]
+    if isinstance(form, Instant):
+        renders += [
+            lambda: str(pd.Timestamp(x)),
+            lambda: pd.Timestamp(x).isoformat(),
+            lambda: str(np.datetime64(x)),  # type: ignore[call-overload]
+        ]
+    elif isinstance(form, Duration):
+        renders += [
+            lambda: str(pd.Timedelta(x)),
+            lambda: pd.Timedelta(x).isoformat(),
+            lambda: str(np.timedelta64(x)),  # type: ignore[call-overload]
+        ]
+    elif isinstance(form, Months):
+        renders.append(lambda: str(np.timedelta64(x)))  # type: ignore[call-overload]
+    for render in renders:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            yield from safe_text(render)

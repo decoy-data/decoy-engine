@@ -9,12 +9,8 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from decoy_engine.internal.cell_text import UnreadableCellError, column_text, key_text
-from decoy_engine.verification.postmask._column_facts import (
-    canonical_cells,
-    identity_counts,
-    source_distinct,
-)
+from decoy_engine.internal.cell_identity import distinct_values, identity_facts
+from decoy_engine.internal.cell_text import UnreadableCellError, column_text
 
 A = {"id": 1, "tags": ["x", "y"], "inner": {"p": 1, "q": 2}}
 A_REORDERED = {"inner": {"q": 2, "p": 1}, "tags": ["x", "y"], "id": 1}
@@ -22,6 +18,16 @@ A_REORDERED = {"inner": {"q": 2, "p": 1}, "tags": ["x", "y"], "id": 1}
 
 def _objects(*cells: object) -> pd.Series:
     return pd.Series(list(cells), dtype=object)
+
+
+def identity_counts(src: pd.Series, out: pd.Series) -> tuple[int, int]:
+    facts = identity_facts(src, out)
+    return facts.comparable, facts.identical
+
+
+def _alike(src: pd.Series, out: pd.Series) -> bool:
+    """Every row of the two columns is the same value (what equal text keys used to say)."""
+    return identity_facts(src, out).all_same
 
 
 def test_identity_counts_ignore_dict_key_order() -> None:
@@ -34,16 +40,15 @@ def test_a_dict_with_a_changed_value_still_differs() -> None:
 
 
 def test_source_distinct_counts_reordered_dicts_once() -> None:
-    assert source_distinct(_objects(A, A_REORDERED)) == 1
-    assert len(set(canonical_cells(_objects(A, A_REORDERED)))) == 1
+    assert distinct_values(_objects(A, A_REORDERED)) == 1
 
 
-def test_text_keys_ignore_dict_key_order() -> None:
-    assert key_text(_objects(A, "a@b.c")) == key_text(_objects(A_REORDERED, "a@b.c"))
+def test_dict_key_order_is_not_a_change() -> None:
+    assert _alike(_objects(A, "a@b.c"), _objects(A_REORDERED, "a@b.c"))
 
 
-def test_text_keys_keep_a_dict_with_a_changed_value_apart() -> None:
-    assert key_text(_objects(A)) != key_text(_objects({**A, "id": 2}))
+def test_a_dict_with_a_changed_value_is_kept_apart() -> None:
+    assert not _alike(_objects(A), _objects({**A, "id": 2}))
 
 
 def _bytes_categorical(cells: list[bytes]) -> pd.Series:
@@ -72,11 +77,11 @@ def _array_cell(mapping: dict[str, object]) -> np.ndarray:
     return cell
 
 
-def test_text_keys_ignore_dict_key_order_inside_an_array_cell() -> None:
+def test_dict_key_order_inside_an_array_cell_is_not_a_change() -> None:
     first = _objects(_array_cell(A))
     second = _objects(_array_cell(A_REORDERED))
-    assert key_text(first) == key_text(second)
-    assert key_text(first) != key_text(_objects(_array_cell({**A, "id": 2})))
+    assert _alike(first, second)
+    assert not _alike(first, _objects(_array_cell({**A, "id": 2})))
 
 
 class _Point(NamedTuple):
@@ -84,58 +89,57 @@ class _Point(NamedTuple):
     y: int
 
 
-def test_text_key_of_a_namedtuple_cell_renders_without_error() -> None:
-    assert key_text(_objects(_Point(1, 2)))[0] == key_text(_objects((1, 2)))[0]
+def test_a_namedtuple_cell_equals_its_plain_tuple() -> None:
+    assert _alike(_objects(_Point(1, 2)), _objects((1, 2)))
 
 
-def test_a_dict_cell_does_not_freeze_equal_to_a_set_of_pairs() -> None:
-    mapping, pairs = canonical_cells(_objects({"id": 1}, {("id", 1)}))
-    assert mapping != pairs
-    assert source_distinct(_objects({"id": 1}, {("id", 1)})) == 2
+def test_a_dict_cell_is_not_equal_to_a_set_of_pairs() -> None:
+    assert not _alike(_objects({"id": 1}), _objects({("id", 1)}))
+    assert distinct_values(_objects({"id": 1}, {("id", 1)})) == 2
 
 
-def test_equal_typed_array_cells_of_different_units_share_a_key() -> None:
+def test_equal_typed_array_cells_of_different_units_are_alike() -> None:
     seconds = np.zeros(1, dtype="timedelta64[s]")
     nanos = np.zeros(1, dtype="timedelta64[ns]")
-    assert key_text(_objects(seconds)) == key_text(_objects(nanos))
+    assert _alike(_objects(seconds), _objects(nanos))
 
 
-def test_a_zero_dimensional_array_cell_keys_its_payload() -> None:
+def test_a_zero_dimensional_array_cell_compares_its_payload() -> None:
     scalar = np.array(7)
-    assert key_text(_objects(scalar, "x"))[0] is not None
+    assert identity_counts(_objects(scalar, "x"), _objects(7, "x")) == (2, 2)
     boxed = np.empty((), dtype=object)
     boxed[()] = A
     other = np.empty((), dtype=object)
     other[()] = A_REORDERED
     changed = np.empty((), dtype=object)
     changed[()] = {**A, "id": 2}
-    assert key_text(_objects(boxed)) == key_text(_objects(other))
-    assert key_text(_objects(boxed)) != key_text(_objects(changed))
+    assert _alike(_objects(boxed), _objects(other))
+    assert not _alike(_objects(boxed), _objects(changed))
 
 
-def test_a_duration_array_keys_alike_in_every_unit() -> None:
+def test_a_duration_array_is_alike_in_every_unit() -> None:
     one_second = np.array([1], dtype="timedelta64[s]")
     in_millis = np.array([1000], dtype="timedelta64[ms]")
-    assert key_text(_objects(one_second, "x")) == key_text(_objects(in_millis, "x"))
+    assert _alike(_objects(one_second, "x"), _objects(in_millis, "x"))
 
 
-def test_an_int_array_keys_like_an_object_array_of_the_same_ints() -> None:
+def test_an_int_array_equals_an_object_array_of_the_same_ints() -> None:
     typed = np.array([1, 2])
     boxed = np.empty(2, dtype=object)
     boxed[:] = [1, 2]
-    assert key_text(_objects(typed, "x")) == key_text(_objects(boxed, "x"))
+    assert _alike(_objects(typed, "x"), _objects(boxed, "x"))
 
 
 def test_a_zero_dimensional_array_cell_survives_the_identity_check() -> None:
     cells = _objects(np.array(7), "x")
     assert identity_counts(cells, _objects(np.array(7), "x")) == (2, 2)
-    assert source_distinct(cells) == 2
+    assert distinct_values(cells) == 2
 
 
 def test_a_zero_dimensional_nat_is_not_comparable() -> None:
     nat = np.array(np.datetime64("NaT"))
     assert identity_counts(_objects(nat, "x"), _objects(nat, "x")) == (1, 1)
-    assert source_distinct(_objects(nat, "x")) == 1
+    assert distinct_values(_objects(nat, "x")) == 1
 
 
 def test_identity_counts_walk_both_sides_when_the_dtypes_differ() -> None:
@@ -147,4 +151,4 @@ def test_identity_counts_walk_both_sides_when_the_dtypes_differ() -> None:
 
 def test_source_distinct_walks_a_datetime_column() -> None:
     column = pd.Series(pd.to_datetime(["2020-01-01", None, "2020-01-01", "2020-01-02"]))
-    assert source_distinct(column) == 2
+    assert distinct_values(column) == 2

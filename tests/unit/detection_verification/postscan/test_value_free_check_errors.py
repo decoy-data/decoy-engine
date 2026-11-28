@@ -18,7 +18,8 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from decoy_engine.internal.cell_text import UnreadableCellError, column_text, key_text
+from decoy_engine.internal.cell_identity import identity_facts
+from decoy_engine.internal.cell_text import UnreadableCellError, column_text
 from decoy_engine.profiling import profile_columns
 from decoy_engine.verification.postmask import post_scan_verdict, run_post_mask
 from decoy_engine.verification.postmask.residual_pii import check_residual_pii
@@ -150,12 +151,9 @@ def test_every_bytes_dtype_reads_as_its_utf8_text(route):
 def test_numbers_and_dates_keep_their_pandas_text():
     assert column_text(pd.Series([1.5, None])).tolist() == ["1.5"]
     assert column_text(pd.Series(pd.to_datetime(["2020-01-01"]))).tolist() == ["2020-01-01"]
-    assert key_text(pd.Series([10001.0, 10001, None, memoryview(b"a@x.com")])) == [
-        "10001",
-        "10001",
-        None,
-        "a@x.com",
-    ]
+    cells = pd.Series([10001.0, 10001, None, memoryview(b"a@x.com")])
+    facts = identity_facts(cells, pd.Series(["10001", "10001", None, "a@x.com"], dtype=object))
+    assert (facts.comparable, facts.identical, facts.all_same) == (3, 3, True)
 
 
 @pytest.mark.parametrize("arrow", [*_ARROW_BINARY.values(), pa.binary(19)], ids=str)
@@ -218,7 +216,8 @@ def test_an_embedded_nul_is_kept_in_the_cell_text(route):
     column = _NUL_COLUMNS[route]()
     expected = [cell.decode() for cell in _NUL_CELLS]
     assert column_text(column).tolist() == expected
-    assert key_text(column) == expected
+    facts = identity_facts(column, pd.Series(expected, dtype=object))
+    assert (facts.comparable, facts.identical) == (len(expected), len(expected))
 
 
 @pytest.mark.parametrize("route", _NUL_COLUMNS)

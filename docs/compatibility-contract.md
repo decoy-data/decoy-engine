@@ -1264,6 +1264,11 @@ only this site moves.
   error inside the policy comparison now propagates unchanged instead of becoming an `error`
   finding. A deferred post-scan whose suite raised reports `pass_failed_with`, and under
   `ner_findings: fail` its `check_error` raises `PostScanBlockedError` where the run delivered.
+  PM-1 (2026-11) routes every post-scan cell comparison through `internal.cell_identity`. A
+  policy column whose output is an export spelling of the source (a Decimal as its text, UTF-8
+  bytes as their text) now fails as unchanged where it passed as masked, and a record or a cyclic
+  cell gives that column an `error` finding instead of failing its table. No public signature
+  changes; the private `internal.canonical_cell` module is gone.
   SCAN-ML M4 (2026-11) adds `PostScanBlockedError` and model findings in the post-scan.
   `run_post_mask` takes a keyword `detectors` (a `DetectorSet`); `None`, the default and the
   platform hook's call, runs the regex detectors as before. `run_pipeline` with

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.internal.cell_identity import IdentityFacts, IdentityFailure
 from decoy_engine.profiling import KEY_BATCH_ROWS, KeyBatches
 
 if TYPE_CHECKING:
@@ -23,13 +24,14 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class CellView:
-    """What the cells of a column carried as text keys say where the key would mislead: the text
-    the detectors read, and the distinct count of the cells themselves. The key array serves the
-    comparison only."""
+    """What a frame column's own cells say, read before any Arrow conversion: their distinct
+    count (or the count's failure class), and whether the comparison authority refused them. A
+    refused column is held in the table as a length-matched null placeholder."""
 
-    detector_text: pa.Array
     distinct: int
     distinct_error: str | None
+    # The class name of the failure that refused the cells, or None.
+    refused: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,8 +50,11 @@ class TableBatches:
     # True when a read may return fewer rows than `num_rows` declares: a declared cast drops
     # quarantined rows, and the footer count is the count before the drop.
     drops_rows: bool = False
-    # Per column carried as text keys on the resident frame path; empty on every other table.
+    # Per column of a resident frame, read from its original cells; empty on every other table.
     cell_views: Mapping[str, CellView] = field(default_factory=dict)
+    # The identity of each paired column of a resident frame, computed on the original cells
+    # before conversion; None on every other table, whose batches are compared instead.
+    identity: Mapping[str, IdentityFacts | IdentityFailure] | None = None
 
 
 def _require_columns(columns: Sequence[str]) -> None:

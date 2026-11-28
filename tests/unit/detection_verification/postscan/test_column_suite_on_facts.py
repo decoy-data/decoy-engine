@@ -222,7 +222,8 @@ def test_a_coded_error_in_the_facts_pass_propagates_as_the_same_object(
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise error
 
-    monkeypatch.setattr(column_facts_module, "column_distinct", boom)
+    # A frame's distinct counts are read from its cells, before the batch pass.
+    monkeypatch.setattr(column_facts_module, "distinct_values", boom)
     src, out, config = FIXTURES["synthetic_faker"]
     with pytest.raises(FileAccessReadError) as info:
         run_post_mask({"t": src}, {"t": out}, config=config)
@@ -414,7 +415,9 @@ def _distinct_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("distinct failed")
 
+    # Both readers: the batch pass counts with DuckDB, a resident frame from its cells.
     monkeypatch.setattr(column_facts_module, "column_distinct", boom)
+    monkeypatch.setattr(column_facts_module, "distinct_values", boom)
 
 
 def test_a_failed_distinct_count_that_decides_the_grade_is_an_error(
@@ -514,7 +517,8 @@ def test_run_post_mask_tables_refuses_a_zero_memory_limit(tmp_path: Path):
 def test_a_failed_output_count_does_not_make_a_constant_source_escalate(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    real = column_facts_module.column_distinct
+    # A resident frame counts source then output from its cells, one call per column.
+    real = column_facts_module.distinct_values
     calls = {"n": 0}
 
     def second_fails(*args: Any, **kwargs: Any) -> Any:
@@ -523,7 +527,7 @@ def test_a_failed_output_count_does_not_make_a_constant_source_escalate(
             raise RuntimeError("output count failed")
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(column_facts_module, "column_distinct", second_fails)
+    monkeypatch.setattr(column_facts_module, "distinct_values", second_fails)
     frame = pd.DataFrame({"email": [EMAILS[0]] * 40})
     report = run_post_mask({"t": frame}, {"t": frame}, config=_cfg(("email", "faker")))
     (finding,) = report["residual_pii"]

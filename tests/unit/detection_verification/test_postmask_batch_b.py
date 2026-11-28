@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from decoy_engine.verification.postmask import _column_facts as facts_module
 from decoy_engine.verification.postmask.policy_validation import check_policy_validation
 from decoy_engine.verification.postmask.residual_pii import check_residual_pii
 from decoy_engine.verification.postmask.runner import run_post_mask
@@ -150,13 +151,11 @@ class TestPolicyValidationComparisonFailure:
         src = pd.DataFrame({"col_a": [1, 2, 3]})
         out = pd.DataFrame({"col_a": [1, 2, 3]})
 
-        # Monkeypatch the equals call so the comparison block raises.
-        original_equals = pd.Series.equals
-
-        def _exploding_equals(self, other):
+        # Make the one comparison authority raise, as the policy check calls it.
+        def _exploding_compare(*_args):
             raise TypeError("simulated ArrowDtype mismatch")
 
-        monkeypatch.setattr(pd.Series, "equals", _exploding_equals)
+        monkeypatch.setattr(facts_module, "identity_facts", _exploding_compare)
 
         cfg = {
             "tables": [
@@ -167,8 +166,6 @@ class TestPolicyValidationComparisonFailure:
             ]
         }
         findings = check_policy_validation({"t": src}, {"t": out}, cfg)
-        # Restore for any test isolation issues.
-        monkeypatch.setattr(pd.Series, "equals", original_equals)
 
         assert len(findings) == 1
         assert findings[0].severity == "error", (

@@ -1,9 +1,7 @@
 """PM-1 S1a: pair table for the cell identity authority (value forms, nulls, records).
 
-Written before the module exists (plan: docs/plans/2026-11-27-pm1-comparison-redesign.md,
-slice S1a). The authority is imported inside each test, so collection works today. Rows that
-need the missing module are strict xfail and name the slice that turns them green. Synthetic
-values only, and no assertion message carries a cell value (value-free).
+Plan: docs/plans/2026-11-27-pm1-comparison-redesign.md, slice S1a. Synthetic values only,
+and no assertion message carries a cell value (value-free).
 """
 
 from __future__ import annotations
@@ -21,44 +19,22 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from decoy_engine.internal import cell_identity
 from decoy_engine.internal.pandas_missing import is_null_cell
 
-# Built from parts: the string-target sentry would otherwise flag a module that is not built yet.
-MODULE = ".".join(("decoy_engine", "internal", "cell_identity"))
-
-
-class _AuthorityMissingError(Exception):
-    """The authority module is not built yet (only this module's absence is expected)."""
+FIXED_TEXT = "a column holds a cell that cannot be compared"
 
 
 def _authority() -> Any:
-    try:
-        import importlib
-
-        return importlib.import_module(MODULE)
-    except ModuleNotFoundError as exc:
-        if exc.name != MODULE:
-            raise
-        raise _AuthorityMissingError from exc
-
-
-# S3 builds identity_facts, distinct_values, IdentityFacts and CellNotComparableError.
-needs_authority = pytest.mark.xfail(
-    raises=_AuthorityMissingError,
-    strict=True,
-    reason="S3: internal.cell_identity does not exist yet",
-)
-# S2 extends the shared missing-cell predicate (masked constant, Decimal sNaN).
-needs_predicate = pytest.mark.xfail(
-    strict=True, reason="S2: is_null_cell does not yet treat masked or sNaN as missing"
-)
+    return cell_identity
 
 
 def _col(*cells: object) -> pd.Series:
     arr = np.empty(len(cells), dtype=object)
     for i, cell in enumerate(cells):
         arr[i] = cell
-    return pd.Series(arr)
+    # dtype=object: pandas would otherwise infer a temporal dtype and convert the cells.
+    return pd.Series(arr, dtype=object)
 
 
 def _facts(a: object, b: object) -> Any:
@@ -176,7 +152,6 @@ SAME_ROWS = [
 ]
 
 
-@needs_authority
 @pytest.mark.parametrize(("a", "b"), [r[1:] for r in SAME_ROWS], ids=[r[0] for r in SAME_ROWS])
 def test_value_forms_same(a: object, b: object) -> None:
     assert _same(a, b)
@@ -217,7 +192,6 @@ DIFFERENT_ROWS = [
 ]
 
 
-@needs_authority
 @pytest.mark.parametrize(
     ("a", "b"), [r[1:] for r in DIFFERENT_ROWS], ids=[r[0] for r in DIFFERENT_ROWS]
 )
@@ -226,10 +200,9 @@ def test_value_forms_different(a: object, b: object) -> None:
     assert _differs(b, a)
 
 
-@needs_authority
 @pytest.mark.parametrize(
     "cell",
-    [np.timedelta64(-(2**62), "ns"), np.timedelta64(-(2**62), "M"), np.datetime64(2**62, "M")],
+    [np.timedelta64(-(2**62), "2ns"), np.timedelta64(-(2**62), "2M"), np.datetime64(2**62, "M")],
     ids=["PC1-4 ns", "PC1-4 months", "PC1-5 huge months"],
 )
 def test_temporal_extremes_are_values_not_null(cell: object) -> None:
@@ -255,7 +228,6 @@ NULL_CELLS = [
 ]
 
 
-@needs_authority
 @pytest.mark.parametrize(("name", "cell"), NULL_CELLS, ids=[n for n, _ in NULL_CELLS])
 def test_null_forms(name: str, cell: object) -> None:
     both = _facts(cell, cell)
@@ -264,7 +236,6 @@ def test_null_forms(name: str, cell: object) -> None:
     assert _facts(1, cell).comparable == 0
 
 
-@needs_authority
 def test_one_null_pairs_with_every_other_null_form() -> None:
     for _, x in NULL_CELLS:
         for _, y in NULL_CELLS:
@@ -272,19 +243,16 @@ def test_one_null_pairs_with_every_other_null_form() -> None:
             assert (facts.comparable, facts.all_same) == (0, True)
 
 
-@needs_authority
 def test_null_rows_do_not_hide_a_changed_row() -> None:
     facts = _authority().identity_facts(_col(1, None, 3), _col(1, None, 4))
     assert (facts.comparable, facts.identical, facts.all_same) == (2, 1, False)
 
 
-@needs_authority
 def test_empty_columns() -> None:  # E-1
     facts = _authority().identity_facts(_col(), _col())
     assert (facts.comparable, facts.identical, facts.all_same) == (0, 0, True)
 
 
-@needs_authority
 def test_all_null_columns() -> None:  # E-2, E-3
     auth = _authority()
     both = auth.identity_facts(_col(None, np.nan), _col(pd.NA, None))
@@ -293,14 +261,12 @@ def test_all_null_columns() -> None:  # E-2, E-3
     assert (one.comparable, one.all_same) == (0, False)
 
 
-@needs_authority
 def test_positions_not_labels() -> None:  # E-5
     src = pd.Series([1, 2], index=[10, 11], dtype=object)
     out = pd.Series([1, 2], index=["a", "b"], dtype=object)
     assert _authority().identity_facts(src, out).identical == 2
 
 
-@needs_authority
 def test_string_na_vs_object_none() -> None:  # E-14
     facts = _authority().identity_facts(
         pd.Series([pd.NA, "a"], dtype="string"), pd.Series([None, "a"], dtype=object)
@@ -308,7 +274,6 @@ def test_string_na_vs_object_none() -> None:  # E-14
     assert (facts.comparable, facts.identical, facts.all_same) == (1, 1, True)
 
 
-@needs_authority
 def test_merge_folds_batches() -> None:
     auth = _authority()
     one = auth.identity_facts(_col(1, 2), _col(1, 2))
@@ -318,7 +283,6 @@ def test_merge_folds_batches() -> None:
     assert one.merge(one).all_same is True
 
 
-@needs_authority
 def test_distinct_values_counts_value_forms() -> None:
     auth = _authority()
     assert auth.distinct_values(_col({"id": 1}, {("id", 1)})) == 2  # OD-1
@@ -341,7 +305,6 @@ RECORD_CELLS = [
 ]
 
 
-@needs_authority
 @pytest.mark.parametrize(("name", "build"), RECORD_CELLS, ids=[n for n, _ in RECORD_CELLS])
 @pytest.mark.parametrize("side", ["source", "output"])
 @pytest.mark.parametrize("other", ["null", "equal", "text", "number"])
@@ -356,17 +319,16 @@ def test_record_is_refused_not_compared(
         _facts(src, out)
     assert info.value.__cause__ is None
     assert info.value.__context__ is None
-    assert not info.value.args or all(not isinstance(a, np.void) for a in info.value.args)
+    assert str(info.value) == FIXED_TEXT
+    assert info.value.args == (FIXED_TEXT,)
 
 
-@needs_authority
 def test_record_distinct_count_is_refused() -> None:
     auth = _authority()
     with pytest.raises(auth.CellNotComparableError):
         auth.distinct_values(_col(1, _record()))
 
 
-@needs_authority
 def test_record_row_aborts_the_whole_column_call() -> None:  # CX-3b, a row-level refusal
     auth = _authority()
     with pytest.raises(auth.CellNotComparableError):
@@ -385,7 +347,6 @@ def _cycle_dict() -> dict[str, object]:
     return box
 
 
-@needs_authority
 @pytest.mark.parametrize("build", [_cycle_list, _cycle_dict], ids=["list", "dict"])
 def test_cycle_raises_within_five_seconds(build: Callable[[], object]) -> None:  # PC1-1
     error = _authority().CellNotComparableError
@@ -393,14 +354,12 @@ def test_cycle_raises_within_five_seconds(build: Callable[[], object]) -> None: 
         _facts(build(), build())
 
 
-@needs_authority
 def test_shared_child_is_not_a_cycle() -> None:  # R2-V7b
     child = [1, 2]
     with _within(5):
         assert _same([child, child], [[1, 2], [1, 2]])
 
 
-@needs_authority
 def test_masked_constant_inside_a_list_is_null_at_depth() -> None:  # PC1-1
     with _within(5):
         assert _same([np.ma.masked, "marker"], [None, "marker"])
@@ -429,7 +388,6 @@ def test_masker_predicate_keeps_real_values(cell: object) -> None:
     assert is_null_cell(cell) is False
 
 
-@needs_predicate
 @pytest.mark.parametrize("cell", [np.ma.masked, Decimal("sNaN")], ids=["masked", "sNaN"])
 def test_masker_predicate_treats_masked_and_snan_as_missing(cell: object) -> None:
     assert is_null_cell(cell) is True

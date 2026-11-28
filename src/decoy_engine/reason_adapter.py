@@ -163,8 +163,8 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
         reasons.route.POST_SCAN_MODELS_UNSUPPORTED,
     ),
     (
-        "decoy_engine.internal.cell_text",
-        "ComparisonNotPreservedError",
+        "decoy_engine.internal.cell_atoms",
+        "CellNotComparableError",
         reasons.post_scan.CHECK_ERROR,
     ),
 )

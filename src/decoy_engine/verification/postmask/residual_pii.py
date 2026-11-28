@@ -51,13 +51,14 @@ import pandas as pd
 
 from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
+from decoy_engine.internal.cell_identity import IdentityFailure
 from decoy_engine.plan.column_access import TableWrites, may_write
 from decoy_engine.profiling import passes_through
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
     DetectorRate,
-    cells_distinct_or_error,
-    identity_counts,
+    cell_view,
+    compare_or_failure,
     standalone_writes,
 )
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
@@ -132,8 +133,8 @@ def check_residual_pii(
     for table_name, df in output_frames.items():
         try:
             facts[table_name] = {
-                str(c): _frame_column_facts(table_name, df, str(c), source_frames)
-                for c in df.columns
+                c: _frame_column_facts(table_name, df, c, source_frames)
+                for c in dict.fromkeys(str(c) for c in df.columns)
             }
         except Exception as exc:
             if passes_through(exc):
@@ -149,26 +150,28 @@ def _frame_column_facts(
     source_frames: dict[str, pd.DataFrame] | None,
 ) -> ColumnFacts:
     """The facts one column of a resident frame yields, so the frame check and the batch check
-    share `residual_pii_findings` as the only place a finding is built."""
-    series = df[col_name]
+    share `residual_pii_findings` as the only place a finding is built. Read by first position;
+    a column the authority refuses reaches no detector."""
+    series = df.iloc[:, [str(c) for c in df.columns].index(col_name)]
     comparable = identical = distinct = 0
-    identity_error: str | None = None
+    out_view = cell_view(series)
+    identity_error = out_view.refused
     distinct_error: str | None = None
     pair = _aligned_source(source_frames, table_name, col_name, series)
     if pair is not None:
-        src, out = pair
+        src_view = cell_view(pair[0])
+        refused = src_view.refused or out_view.refused
         # Each failure is the column's own and is recorded by class name only, as the batch
         # check does: the message of a comparison error can carry a cell value.
-        try:
-            comparable, identical = identity_counts(src, out)
-        except Exception as exc:
-            if passes_through(exc):
-                raise
-            identity_error = type(exc).__name__
+        facts = IdentityFailure(refused) if refused else compare_or_failure(*pair)
+        if isinstance(facts, IdentityFailure):
+            identity_error = facts.error
+        else:
+            comparable, identical = facts.comparable, facts.identical
         if comparable:
-            # Counted on the cells the comparison saw; a failed count leaves the identity counts
-            # standing, as a failed DuckDB count does on the batch path.
-            distinct, distinct_error = cells_distinct_or_error(src)
+            # A failed count leaves the identity counts standing, as on the batch path.
+            distinct, distinct_error = src_view.distinct, src_view.distinct_error
+    detectors = () if out_view.refused else run_all_detectors(series, col_name)
     return ColumnFacts(
         table=table_name,
         column=col_name,
@@ -179,10 +182,7 @@ def _frame_column_facts(
         bytes_identical=False,
         source_distinct=distinct,
         output_distinct=0,
-        detectors=tuple(
-            DetectorRate(m.detector_id, m.match_rate, m.confidence)
-            for m in run_all_detectors(series, col_name)
-        ),
+        detectors=tuple(DetectorRate(m.detector_id, m.match_rate, m.confidence) for m in detectors),
         identity_error=identity_error,
         distinct_error=distinct_error,
         source_distinct_failed=distinct_error is not None,
@@ -237,9 +237,10 @@ def _aligned_source(
     if source_frames is None:
         return None
     src_df = source_frames.get(table_name)
-    if src_df is None or col_name not in src_df.columns:
+    names = [] if src_df is None else [str(c) for c in src_df.columns]
+    if src_df is None or col_name not in names:
         return None
-    src_col = src_df[col_name]
+    src_col = src_df.iloc[:, names.index(col_name)]
     if len(src_col) != len(out_col):
         return None
     return src_col.reset_index(drop=True), out_col.reset_index(drop=True)

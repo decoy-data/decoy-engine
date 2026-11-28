@@ -21,7 +21,7 @@ import pytest
 from decoy_engine.fileaccess import FileAccessReadError
 from decoy_engine.verification.postmask import _column_facts as facts_module
 from decoy_engine.verification.postmask import from_table, run_post_mask
-from decoy_engine.verification.postmask._column_facts import standalone_writes
+from decoy_engine.verification.postmask._column_facts import cell_view, standalone_writes
 from decoy_engine.verification.postmask.residual_pii import (
     _frame_column_facts,
     check_residual_pii,
@@ -301,9 +301,17 @@ def _both_paths(src_cols: dict, out_cols: dict, config: dict, tmp_path: Path, mo
         # for one at the point each reads its cells.
         src_frame = src_frame.apply(_with_raising_cells)
         real_series = facts_module._series
+        real_column = facts_module._column
         monkeypatch.setattr(
             facts_module, "_series", lambda batch, c: _with_raising_cells(real_series(batch, c))
         )
+
+        def column(batch, c):
+            # The identity pass reads Arrow columns, which cannot hold the marker cell.
+            cells = real_column(batch, c)
+            return _with_raising_cells(cells.to_pandas()) if _RAISE in cells.to_pylist() else cells
+
+        monkeypatch.setattr(facts_module, "_column", column)
     frame = check_residual_pii({"t": out_frame}, config, source_frames={"t": src_frame})
     frame_facts = {c: _frame_column_facts("t", out_frame, c, {"t": src_frame}) for c in out_cols}
     batch_facts = facts_module.column_facts(
@@ -469,6 +477,11 @@ def _hits(facts, column: str) -> dict[str, tuple[float, str]]:
     return {d.detector_id: (d.match_rate, d.confidence) for d in facts[column].detectors}
 
 
+def _table(frame: pd.DataFrame):
+    columns = _runner._first_columns(frame)
+    return _runner._frame_table("t", columns, {c: cell_view(v) for c, v in columns.items()})
+
+
 class TestRound5BatchEdges:
     def test_a1i_one_run_per_batch_gives_the_same_hits_at_every_batch_size(self, tmp_path):
         cells = ["212555.0100"] * 30 + ["2125550100.0"] * 30
@@ -476,10 +489,7 @@ class TestRound5BatchEdges:
         out = pd.DataFrame({"phone": pd.Series([*cells, 2], dtype=object)})
         tables = {}
         for rows in (1, 7, 1000):
-            source, output = (
-                _runner._frame_table("t", src, out)[0],
-                _runner._frame_table("t", out, src)[0],
-            )
+            source, output = _table(src), _table(out)
             facts = facts_module.column_facts(
                 source, output, ["phone"], batch_rows=rows, scratch=tmp_path, memory_limit="256MB"
             )
@@ -505,10 +515,7 @@ class TestRound5BatchEdges:
         )
         seen = {}
         for rows in (2, 100):
-            source, output = (
-                _runner._frame_table("t", src, out)[0],
-                _runner._frame_table("t", out, src)[0],
-            )
+            source, output = _table(src), _table(out)
             facts = facts_module.column_facts(
                 source,
                 output,

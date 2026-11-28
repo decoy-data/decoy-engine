@@ -28,13 +28,8 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
-from decoy_engine.internal.canonical_cell import canonical_cell, contains_members
-from decoy_engine.internal.cell_text import (
-    ComparisonNotPreservedError,
-    detector_text,
-    key_text,
-    numpy_bytes_as_objects,
-)
+from decoy_engine.internal.cell_identity import IdentityFacts, IdentityFailure
+from decoy_engine.internal.cell_text import detector_text, numpy_bytes_as_objects
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.plan.column_access import TableWrites
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
@@ -42,10 +37,9 @@ from decoy_engine.verification.postmask import _model_findings
 from decoy_engine.verification.postmask._blocked import severity_counts
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
-    cells_distinct_or_error,
+    cell_view,
     column_facts,
-    identity_counts,
-    source_distinct,
+    compare_or_failure,
     standalone_writes,
 )
 from decoy_engine.verification.postmask._keys import KeyResult
@@ -186,122 +180,80 @@ def _megabytes(limit: str) -> int:
 
 def _native(series: pd.Series) -> pa.Array | None:
     try:
-        array = pa.array(numpy_bytes_as_objects(series), from_pandas=True)
-        # Arrow keeps a set as an ordered list, so the native compare would call equal sets in
-        # another iteration order different. The text keys and the preservation check decide it.
-        if pa.types.is_nested(array.type) and any(
-            contains_members(canonical_cell(c)) for c in series.astype(object)
-        ):
-            return None
-        return array
-    # Only Arrow refusing the column selects the text keys; any other error fails the table.
+        return pa.array(numpy_bytes_as_objects(series), from_pandas=True)
+    # Only Arrow refusing the column selects the detector text; any other error fails the table.
     except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         if passes_through(exc):
             raise
         return None
 
 
-def _text(series: pd.Series) -> pa.Array:
-    return pa.array(key_text(series), type=pa.string())
-
-
 def _column_names(frame: pd.DataFrame) -> list[str]:
     return [str(c) for c in frame.columns]
 
 
-def _first_positions(frame: pd.DataFrame) -> dict[str, int]:
-    """Each column name's first position, as a repeated name is matched by its first column."""
-    return {c: n for n, c in reversed(list(enumerate(_column_names(frame))))}
+def _first_columns(frame: pd.DataFrame) -> dict[str, pd.Series]:
+    """Each column name's first column, in frame order: a repeated name is matched by its first."""
+    columns: dict[str, pd.Series] = {}
+    for n, name in enumerate(_column_names(frame)):
+        if name not in columns:
+            columns[name] = frame.iloc[:, n]
+    return columns
 
 
 def _frame_table(
-    name: str, frame: pd.DataFrame, other: pd.DataFrame | None
-) -> tuple[TableBatches, dict[int, pa.Array]]:
-    """`frame` as Arrow, column by column, and the text keys emitted for the columns carried as
-    text, by position. A column Arrow will not take (mixed int and str, Decimal with float, a
-    set) is carried as the text of each value, which is all the detectors read. The choice is
-    made for the column on both sides at once: if either side needs the text, both get it, so a
-    source int and an output "1" still compare equal as they do in pandas."""
-    names = _column_names(frame)
-    other_at = {} if other is None else _first_positions(other)
+    name: str, columns: Mapping[str, pd.Series], views: dict[str, CellView]
+) -> TableBatches:
+    """The first columns of a frame as Arrow, for the detectors and value tallies only: identity
+    and distinct counts were read from the cells before this (`CellView`). A column Arrow will
+    not take (mixed int and str, a set) is carried as the text the detectors read. A refused
+    column is a null placeholder of its length, so no conversion or detector sees its cells."""
     arrays = []
-    texted: dict[int, pa.Array] = {}
-    first = _first_positions(frame)
-    views: dict[str, CellView] = {}
-    for n, series in enumerate(frame.iloc[:, i] for i in range(len(names))):
-        paired = names[n] in other_at and other is not None
-        native = _native(series)
-        if paired and other is not None:
-            native = native if _native(other.iloc[:, other_at[names[n]]]) is not None else None
-        if native is None:
-            texted[n] = _text(series)
-            if first[names[n]] == n:
-                views[names[n]] = _cell_view(series)
-        arrays.append(native if native is not None else texted[n])
-    table = from_table(name, pa.Table.from_arrays(arrays, names))
-    return replace(table, cell_views=views), texted
-
-
-def _cell_view(series: pd.Series) -> CellView:
-    """The key array serves the comparison; the detectors and the distinct count read the cells."""
-    distinct, error = cells_distinct_or_error(series)
-    return CellView(pa.array(detector_text(series), type=pa.string()), distinct, error)
-
-
-def _require_preserved(
-    src: pd.DataFrame,
-    out: pd.DataFrame,
-    src_keys: Mapping[int, pa.Array],
-    out_keys: Mapping[int, pa.Array],
-) -> None:
-    """Raise when a text-keyed column compares differently than its cells do: fewer identical or
-    other comparable rows, or a constant source that the keys make varied. Extra key matches
-    with the same counts are allowed, and so is a varied source the keys make constant: the
-    facts count the cells, so that cannot grade wrong. The keys are the arrays `_frame_table` emitted, the ones the
-    graders read. Equal lengths only, as the column check compares no others."""
-    if len(src) != len(out):
-        return
-    src_at, out_names = _first_positions(src), _column_names(out)
-    for n, out_array in out_keys.items():
-        name = out_names[n]
-        if name not in src_at or src_at[name] not in src_keys:
+    for column, series in columns.items():
+        if views[column].refused:
+            arrays.append(pa.nulls(len(series)))
             continue
-        cells = (
-            src.iloc[:, src_at[name]].reset_index(drop=True),
-            out.iloc[:, n].reset_index(drop=True),
-        )
-        keys = (
-            pd.Series(src_keys[src_at[name]].to_pylist(), dtype=object),
-            pd.Series(out_array.to_pylist(), dtype=object),
-        )
-        by_cells, by_keys = identity_counts(*cells), identity_counts(*keys)
-        lost = by_keys[0] != by_cells[0] or by_keys[1] < by_cells[1]
-        # Diversity only matters where a row is comparable; an uncountable source is not counted.
-        changed = (
-            bool(by_cells[0])
-            and ColumnFacts.constant(source_distinct(cells[0]))
-            and not ColumnFacts.constant(source_distinct(keys[0]))
-        )
-        if lost or changed:
-            raise ComparisonNotPreservedError
+        # A cell the detectors cannot read (`UnreadableCellError`) fails the table, as before.
+        array = _native(series)
+        arrays.append(pa.array(detector_text(series), pa.string()) if array is None else array)
+    table = from_table(name, pa.Table.from_arrays(arrays, list(columns)))
+    return replace(table, cell_views=views)
+
+
+def _frame_identity(
+    src: pd.Series, out: pd.Series, src_view: CellView, out_view: CellView
+) -> IdentityFacts | IdentityFailure:
+    refused = src_view.refused or out_view.refused
+    return IdentityFailure(refused) if refused else compare_or_failure(src, out)
 
 
 def _frame_tables(
     source_frames: dict[str, pd.DataFrame], output_frames: dict[str, pd.DataFrame]
 ) -> tuple[dict[str, TableBatches], dict[str, TableBatches], dict[str, str]]:
-    """Both sides as tables. A name whose frame cannot be converted at all is left out of both
-    and recorded with the error's class name, so the other tables are still checked."""
+    """Both sides as tables. Each column's identity and distinct counts are read from the frame
+    cells first, so no Arrow conversion decides them. A name whose frame cannot be converted at
+    all is left out of both and recorded with the error's class name."""
     src: dict[str, TableBatches] = {}
     out: dict[str, TableBatches] = {}
     failed: dict[str, str] = {}
     for name, out_frame in output_frames.items():
         try:
             src_frame = source_frames.get(name)
-            out_table, out_keys = _frame_table(name, out_frame, src_frame)
+            identity: dict[str, IdentityFacts | IdentityFailure] | None = None
             if src_frame is not None:
-                src[name], src_keys = _frame_table(name, src_frame, out_frame)
-                _require_preserved(src_frame, out_frame, src_keys, out_keys)
-            out[name] = out_table
+                src_cols = _first_columns(src_frame)
+                src_views = {c: cell_view(series) for c, series in src_cols.items()}
+                src[name] = _frame_table(name, src_cols, src_views)
+            out_cols = _first_columns(out_frame)
+            out_views = {c: cell_view(series) for c, series in out_cols.items()}
+            out_table = _frame_table(name, out_cols, out_views)
+            if src_frame is not None and len(src_frame) == len(out_frame):
+                identity = {
+                    c: _frame_identity(src_cols[c], series, src_views[c], out_views[c])
+                    for c, series in out_cols.items()
+                    if c in src_cols
+                }
+            out[name] = replace(out_table, identity=identity)
         except Exception as exc:
             if passes_through(exc):
                 raise
@@ -482,6 +434,7 @@ def _suite_facts(
                 scratch=scratch,
                 memory_limit=memory_limit,
                 value_columns=distribution_value_columns(distribution, name),
+                identity=table.identity,
             )
         except Exception as exc:
             if passes_through(exc):

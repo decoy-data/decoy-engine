@@ -11,6 +11,7 @@ import pytest
 from decoy_engine import reasons
 from decoy_engine.execution import ExecutionError
 from decoy_engine.fileaccess import FileAccessReadError
+from decoy_engine.verification.postmask import _column_facts as column_facts_module
 from decoy_engine.verification.postmask import runner
 from decoy_engine.verification.postmask.policy_validation import check_policy_validation
 
@@ -72,11 +73,12 @@ def test_a_coded_error_inside_the_policy_comparison_propagates_as_the_same_objec
     raised = FileAccessReadError("sources.t.path")
     calls: list[int] = []
 
-    def equals(self: pd.Series, other: Any) -> bool:
+    def compare(*_args: Any) -> Any:
         calls.append(1)
         raise raised
 
-    monkeypatch.setattr(pd.Series, "equals", equals)
+    # The policy check compares through the one authority.
+    monkeypatch.setattr(column_facts_module, "identity_facts", compare)
     config = {
         "version": 2,
         "tables": [{"name": "t", "columns": [{"name": "email", "strategy": "hash"}]}],
