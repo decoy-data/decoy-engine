@@ -82,8 +82,15 @@
    "check_statistical_columns": "src/decoy_engine/plan/_checks_statistical.py",
    "_check_ner_available_for_strategy": "src/decoy_engine/plan/_checks_ner.py",
    "check_text_redact_ner_available": "src/decoy_engine/plan/_checks_ner.py",
-   "check_text_mask_ner_available": "src/decoy_engine/plan/_checks_ner.py",
-   "check_fpe_checksum_scheme": "src/decoy_engine/plan/_checks_fpe_checksum.py"
+   "check_text_mask_ner_available": "src/decoy_engine/plan/_checks_ner.py"
+  }
+ },
+ "E2-fpe": {
+  "landed": true,
+  "from": "src/decoy_engine/plan/_checks.py",
+  "owners": {
+   "check_fpe_checksum_scheme": "src/decoy_engine/plan/_checks_fpe.py",
+   "check_fpe_charset_config": "src/decoy_engine/plan/_checks_fpe.py"
   }
  },
  "E3": {

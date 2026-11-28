@@ -378,18 +378,6 @@
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
     },
-    "plan/_checks.py::check_fpe_checksum_scheme::306ac36803": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks.py::check_fpe_checksum_scheme::778eca3d99": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks.py::check_fpe_checksum_scheme::d315c6c179": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
     "plan/_checks.py::check_non_poolable_provider_with_pool_backend::244a3afadd": {
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
@@ -555,10 +543,6 @@
       "max": 1
     },
     "plan/_checks_faker.py::check_faker_requires_provider::bfca1239b8": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks_fpe.py::check_fpe_charset_config::a73ea70898": {
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
     },
