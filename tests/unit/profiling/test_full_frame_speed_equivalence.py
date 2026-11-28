@@ -12,7 +12,6 @@ fixtures and a mixed 50k-row frame. Regenerate only on a trusted baseline with
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +26,8 @@ _GOLDEN: dict[str, Any] = json.loads(GOLDEN.read_text()) if GOLDEN.exists() else
 
 
 def dump_profile(df: pd.DataFrame) -> dict[str, Any]:
-    out = asdict(profile_columns(df, "t"))
+    # `to_dict` is the stored-document surface; the in-process `shape` input is not part of it.
+    out = profile_columns(df, "t").to_dict()
     out.pop("generated_at")  # wall-clock stamp, differs between any two runs
     for f in out["fields"]:
         # Which value wins a count tie in value_counts depends on hash order, so it differs

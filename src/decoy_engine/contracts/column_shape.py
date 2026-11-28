@@ -3,8 +3,8 @@
 One closed vocabulary (``ColumnShape``) and the only two functions that map a type to a shape.
 ``classify_column`` maps what the data is (source format, then Arrow type). ``declared_shape``
 maps an F06 declaration. Both are called from places named in
-``tests/sentry/test_column_shape_classifier.py``: the profile walk and the plan's shape
-assembler. A stored token is never mapped to ``other``: an unknown token is refused where it is
+``tests/sentry/test_column_shape_classifier.py``: the profile walk, the plan's shape
+assembler and the scan. A stored token is never mapped to ``other``: an unknown token is refused where it is
 loaded. This module imports ``pyarrow`` and ``_arrow_types`` only.
 """
 

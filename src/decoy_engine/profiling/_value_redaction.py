@@ -119,7 +119,7 @@ VALUE_FREE_FIELDS: Final[frozenset[tuple[str, str]]] = frozenset(
         "max_length", "avg_length", "date_format", "invalid_count", "casing_pattern",
         "format_pattern", "format_pattern_complete", "alphabet", "value_set_size_class", "numeric_range_class",
         "mode_freq", "top_values", "detector_matches", "sentinels", "pii_score",
-        "distribution", "detection_trail", "domain",
+        "distribution", "detection_trail", "domain", "shape",
     )
     | _free("TopValue", "count", "pct")
     | _free(
@@ -346,6 +346,10 @@ _SCALARS: Final[Mapping[Any, tuple[type, ...]]] = types.MappingProxyType(
 )
 
 
+def _is_enum(hint: Any) -> bool:
+    return isinstance(hint, type) and issubclass(hint, enum.Enum)
+
+
 def _checkable(hint: Any) -> bool:
     """True when `_conforms` can verify a value against `hint` (scalars, `list`, `Optional`)."""
     origin = get_origin(hint)
@@ -355,6 +359,7 @@ def _checkable(hint: Any) -> bool:
         hint is type(None)
         or hint in _SCALARS
         or get_origin(hint) is Literal
+        or _is_enum(hint)
         or dataclasses.is_dataclass(hint)
     )
 
@@ -371,6 +376,9 @@ def _conforms(value: Any, hint: Any) -> bool:
         return True
     if hint is type(None):
         return value is None
+    if _is_enum(hint):
+        # A closed token set, like a Literal: any other string or type may be a cell.
+        return type(value) is str and value in {m.value for m in hint}
     if origin is Literal:
         # Exactly one of the declared strings: a near miss or another type may be a cell.
         return type(value) is str and value in get_args(hint)

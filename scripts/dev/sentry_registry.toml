@@ -278,6 +278,7 @@ id = "column-shape-classifier"
 baseline = "tests/sentry/baselines/column-shape-classifier.json"
 approved_growth = [
   { key = "observed_shape::profile/arrow/_walk_arrow.py", decision = "owner 2026-11-24 standing: re-home after the Arrow profiler move; same site" },
+  { key = "classify_column::profiling/scan_set.py", decision = "owner 2026-11-27 approved one new reviewed caller (plan names profiling/scan_set.py), question COLUMN-SHAPE-RULE--E5-ratchet" },
 ]
 
 [[sentry]]
