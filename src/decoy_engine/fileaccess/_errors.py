@@ -322,6 +322,7 @@ def guarded_iter(
     strict: bool,
     it: Iterable[T],
     parser_errors: tuple[type[Exception], ...] = (),
+    *,
     decoder_passthrough: Callable[[Exception], bool] | None = None,
 ) -> Iterator[T]:
     """Step an iterator under `guarded` semantics (`guarded_with_parser_errors` when

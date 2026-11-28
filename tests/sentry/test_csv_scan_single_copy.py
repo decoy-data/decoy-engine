@@ -9,7 +9,10 @@ dialect and the fail-closed rules. One other module reads bundled data, not user
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
+
+from decoy_engine.fileaccess._errors import guarded_iter, guarded_with_parser_errors
 
 SRC = Path(__file__).parents[2] / "src" / "decoy_engine"
 READER = "profile/_csv_reader.py"
@@ -147,3 +150,9 @@ def test_the_pass_through_walk_sees_a_seeded_passthrough_keyword() -> None:
     forwarded = "def g(d, s, fn, *a, decoder_passthrough=None, **k):\n    return fn(*a)\n"
     assert pass_through_references(seeded, names) == {"decoder_passthrough": [2]}
     assert pass_through_references(forwarded, names) == {"decoder_passthrough": [1]}
+
+
+def test_decoder_passthrough_is_keyword_only() -> None:
+    for guard in (guarded_iter, guarded_with_parser_errors):
+        parameter = inspect.signature(guard).parameters["decoder_passthrough"]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, guard.__name__
