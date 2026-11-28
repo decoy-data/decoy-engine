@@ -51,6 +51,7 @@ from decoy_engine.fileaccess._scratch_reports import CleanupReport, Disposition
 from decoy_engine.fileaccess._stage_claim import StageClaim
 from decoy_engine.fileaccess._stage_walk import StageLife, StageWalk
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, FileRole
+from decoy_engine.fileaccess.cleanup import CleanupLedger
 
 if sys.platform != "win32":
     import fcntl
@@ -222,22 +223,23 @@ class ScratchArena(StageWalk, StageClaim):
         base = _parent_base(under)
         base_fd = _open_base(base)
         fd, pending, ours = -1, "", False
-        try:
-            pending = os.path.basename(_allocate(base, _PENDING_PREFIX))
-            fd = _open_dir(pending, base_fd)
-            # Not what the allocator made: change nothing on disk.
-            if not _exact(fd, stat.S_IFDIR, 0o700):
-                raise ProtectedDirUnsafe
-            ours = True
-            final = _mark_and_publish(fd, base_fd, pending)
-        except BaseException:
-            if ours:
-                _quietly(_rmtree_fd, fd)
-                _quietly(_rmdir, pending, base_fd)
-            if fd >= 0:
-                _close(fd)
-            _close(base_fd)
-            raise
+        with CleanupLedger() as ledger:  # removes the pending name if every other cleanup missed it
+            try:
+                pending = os.path.basename(_allocate(base, _PENDING_PREFIX, ledger))
+                fd = _open_dir(pending, base_fd)
+                # Not what the allocator made: change nothing on disk.
+                if not _exact(fd, stat.S_IFDIR, 0o700):
+                    raise ProtectedDirUnsafe
+                ours = True
+                final = _mark_and_publish(fd, base_fd, pending)
+            except BaseException:
+                if ours:
+                    _quietly(_rmtree_fd, fd)
+                    _quietly(_rmdir, pending, base_fd)
+                if fd >= 0:
+                    _close(fd)
+                _close(base_fd)
+                raise
         root = _Root(fd, base_fd, final, os.path.join(base, final), owning=True)
         _register(root.path)
         root.releases = under is None or is_ambient()  # the release rule is fixed at open

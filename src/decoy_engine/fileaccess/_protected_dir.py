@@ -23,6 +23,7 @@ Windows branch is verified only by the Windows lane (L0.1w).
 from __future__ import annotations
 
 import errno
+import functools
 import os
 import re
 import secrets
@@ -30,7 +31,7 @@ import stat
 import sys
 import tempfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -47,6 +48,7 @@ from decoy_engine.fileaccess._fdtree import (
     remove_tree,
 )
 from decoy_engine.fileaccess._types import FileAccessUnavailable
+from decoy_engine.fileaccess.cleanup import CleanupLedger
 
 _MODE = 0o700
 _REPARSE_POINT = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: junction, mount point, placeholder
@@ -260,19 +262,51 @@ def open_protected_dir(
     return Path(absolute)
 
 
-def create_protected_dir(path: str | os.PathLike[str]) -> Path:
-    """A new protected directory at ``path``, created exclusively: a name that already exists is
-    refused with `ProtectedDirUnsafe` and left untouched, so a caller removes only what it made.
-    The parent must exist. A caller path needs the ambient policy, as in `open_protected_dir`."""
+def _create_level_at(operand: str) -> str:
+    """The ledger's create callable: make one protected level and return its operand."""
+    _create_level(operand)
+    return operand
+
+
+def create_protected_dir(path: str | os.PathLike[str], *, ledger: CleanupLedger) -> Path:
+    """A new protected directory at ``path``, created exclusively and recorded in ``ledger``
+    before it is made: a name that already exists is refused with `ProtectedDirUnsafe` and left
+    untouched, so a caller removes only what it made. The parent must exist. A caller path needs
+    the ambient policy, as in `open_protected_dir`. A ``..`` component is refused before any
+    rewrite can erase it, because a link followed by ``..`` leaves the lexical parent."""
+    if has_parent_component(os.fspath(path)):
+        raise FileAccessUnavailable("a protected directory path cannot hold a parent component.")
     absolute = _authorized_path(path)
     taken = False
+    made = absolute
     try:
-        _create_level(absolute)
+        made = ledger.acquire(absolute, _create_level_at)
     except FileExistsError:
         taken = True
     if taken:
         raise ProtectedDirUnsafe
-    return Path(absolute)
+    return Path(made)
+
+
+def _has_path_part(prefix: str) -> bool:
+    return (
+        os.path.isabs(prefix)
+        or os.sep in prefix
+        or (os.altsep is not None and os.altsep in prefix)
+        or bool(os.path.splitdrive(prefix)[0])
+    )
+
+
+def allocate_protected_dir(
+    ledger: CleanupLedger, *, parent: str | os.PathLike[str] | None = None, prefix: str
+) -> Path:
+    """A fresh protected directory under ``parent`` (default: ``scratch_root()``), recorded in
+    ``ledger`` before it is made. While it is held, it and its children are the engine's own
+    paths: the root is registered inside the create and unregistered only once its removal is
+    confirmed. The ledger removes it; a caller never does."""
+    if _has_path_part(prefix):
+        raise ProtectedDirUnsafe
+    return Path(_allocate(_parent_base(parent), prefix, ledger, register=True))
 
 
 @contextmanager
@@ -281,15 +315,8 @@ def protected_scratch_dir(
 ) -> Iterator[Path]:
     """A fresh protected directory under ``parent`` (default: ``scratch_root()``),
     removed on every exit. While it is open, it and its children are the engine's own paths."""
-    if os.sep in prefix or (os.altsep is not None and os.altsep in prefix):
-        raise ProtectedDirUnsafe
-    root = _allocate(_parent_base(parent), prefix)
-    _register(root)
-    try:
-        yield Path(root)
-    finally:
-        _unregister(root)
-        remove_tree(root)
+    with CleanupLedger() as ledger:
+        yield allocate_protected_dir(ledger, parent=parent, prefix=prefix)
 
 
 def scratch_root() -> Path:
@@ -314,14 +341,15 @@ def scratch_root() -> Path:
 
 
 def _takes_a_directory(base: str) -> bool:
-    """Whether a protected directory can be made under ``base``; the probe is removed."""
+    """Whether a protected directory can be made under ``base``; the probe is removed, and the
+    confirmed removal is the verdict (a parent that allows create but denies delete would gain
+    one directory per call)."""
     try:
-        probe = _allocate(base, ".decoy-probe-")
-        remove_tree(probe)  # best effort; the check below is what counts
+        with CleanupLedger() as ledger:
+            probe = _allocate(base, ".decoy-probe-", ledger)
+            return ledger.remove(probe)
     except (OSError, ProtectedDirUnsafe):
         return False
-    # A parent that allows create but denies delete would gain one directory per call.
-    return _lstat(probe) is None
 
 
 def _parent_base(parent: str | os.PathLike[str] | None) -> str:
@@ -335,18 +363,27 @@ def _parent_base(parent: str | os.PathLike[str] | None) -> str:
     return base
 
 
-def _allocate(base: str, prefix: str) -> str:
-    """Create a fresh protected directory ``prefix`` plus a random token under ``base``. The
-    caller registers it (``_register``) if it should count as an issued root."""
+def _creator(candidate: str, register: bool) -> Callable[[str], str]:
+    def create(operand: str) -> str:
+        _create_level(operand)
+        if register:  # inside the create, so a recorded root is never unregistered unseen
+            _register(candidate)
+        return candidate
+
+    return create
+
+
+def _allocate(base: str, prefix: str, ledger: CleanupLedger, *, register: bool = False) -> str:
+    """Create a fresh protected directory ``prefix`` plus a random token under ``base``, recorded
+    in ``ledger`` first. With ``register`` it also counts as an issued root until its removal is
+    confirmed."""
     for _ in range(8):
         candidate = os.path.join(base, prefix + secrets.token_hex(8))
-        clash = False
+        release = functools.partial(_unregister, candidate) if register else None
         try:
-            _create_level(candidate)
+            return ledger.acquire(candidate, _creator(candidate, register), on_release=release)
         except FileExistsError:
-            clash = True
-        if not clash:
-            return candidate
+            pass  # a rival took this token: try the next
     raise OSError(errno.EEXIST, os.strerror(errno.EEXIST))
 
 

@@ -26,13 +26,15 @@ from typing import BinaryIO, Literal, TextIO
 from decoy_engine.fileaccess import _durable, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
-from decoy_engine.fileaccess._fdtree import remove_tree
+from decoy_engine.fileaccess._fdtree import remove_confirmed
 from decoy_engine.fileaccess._local_chain import (
     HeldStage,
     _ensure_dirs,
     _make_stage_dir,
+    _make_stage_dir_win,
     _open_dir,
     _publish_durable_dir,
+    anchored,
     link_noclobber_beside,
 )
 from decoy_engine.fileaccess._output import (
@@ -310,9 +312,7 @@ class LocalOutputTxn(_LocalStageDir):
         stage: Path | None = None
         if kind == "dir":
             if sys.platform == "win32":
-                if label in CREATES_PARENTS:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                stage = Path(tempfile.mkdtemp(prefix=STAGE_PREFIX[label], dir=target.parent))
+                stage = _make_stage_dir_win(target.parent, label)
             else:
                 stage, self._held.fd = _make_stage_dir(
                     target.parent,
@@ -476,13 +476,12 @@ class LocalOutputTxn(_LocalStageDir):
             )
 
     def abort(self) -> None:
-        if self._life.finished:
+        if self._life.finished and self._stage is None:
             return
         self._life.end()
         try:
-            if self._stage is not None:
-                remove_tree(self._stage)
-                self._stage = None
+            if self._stage is not None and remove_confirmed(str(self._stage)):
+                self._stage = None  # kept until the removal is proven, so a retry can finish it
         finally:
             self._held.close()  # after the stage is gone: the lock outlives the name
         if self._label in _durable.FD_STAGED_LABELS:
@@ -504,7 +503,7 @@ class LocalOutputDir:
     strict = False
 
     def __init__(self, req: FileRequest) -> None:
-        self._target = Path(req.locator)
+        self._target = anchored(req.locator)
         self.display = self.locator = req.locator
         self.leaf = self._target.name
         self._field_key = req.field_key

@@ -14,12 +14,14 @@ from __future__ import annotations
 import errno
 import os
 import secrets
+import tempfile
 from pathlib import Path
 
 from decoy_engine.fileaccess import _durable, _osflags
-from decoy_engine.fileaccess._fdtree import _close
+from decoy_engine.fileaccess._fdtree import _close, _physical_parent
 from decoy_engine.fileaccess._link import raise_link_error
 from decoy_engine.fileaccess._output import (
+    CREATES_PARENTS,
     STAGE_PREFIX,
     _call,
     _mark_publication_stage,
@@ -27,7 +29,7 @@ from decoy_engine.fileaccess._output import (
     make_parent_dir_at,
     make_stage_dir_at,
 )
-from decoy_engine.fileaccess._types import LinkUnsupported
+from decoy_engine.fileaccess._types import LinkUnsupported, StageLabel
 
 
 def _open_dir(directory: Path) -> int:
@@ -69,14 +71,24 @@ def _ensure_dirs(directory: Path) -> None:
     _close(_open_dir_creating(directory))
 
 
+def anchored(locator: str) -> Path:
+    """`locator` made absolute against the current directory without collapsing any component:
+    `link/..` stays, so the kernel still resolves it through the link, and the leaf is not
+    followed. Later owner operations keep naming the same place after a `chdir`."""
+    return Path(locator if os.path.isabs(locator) else os.path.join(os.getcwd(), locator))
+
+
 def _make_stage_dir(
     parent: Path, prefix: str, *, create_parents: bool, created: list[str] | None = None
 ) -> tuple[Path, int]:
     """A new private stage directory beside the target, made by `make_stage_dir_at`, and its open
-    descriptor; a publication stage is locked and marked before it is returned."""
+    descriptor; a publication stage is locked and marked before it is returned. The returned path
+    is the physical absolute parent joined to the name, resolved before the stage exists, so
+    abort and every later lookup name the directory that was made."""
     parent_fd = _open_dir_creating(parent, created) if create_parents else _open_dir(parent)
     name = f"{prefix}{secrets.token_hex(6)}"
     try:
+        physical = _physical_parent(str(parent))[0]
         fd = make_stage_dir_at(parent_fd, name)
         if prefix == STAGE_PREFIX["publication"]:
             try:
@@ -86,7 +98,14 @@ def _make_stage_dir(
                 raise
     finally:
         _close(parent_fd)
-    return parent / name, fd
+    return Path(physical) / name, fd
+
+
+def _make_stage_dir_win(parent: Path, label: StageLabel) -> Path:
+    """The win32 arm: `mkdtemp` under the physical absolute parent."""
+    if label in CREATES_PARENTS:
+        parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=STAGE_PREFIX[label], dir=_physical_parent(str(parent))[0]))
 
 
 class HeldStage:

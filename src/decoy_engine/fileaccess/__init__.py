@@ -65,6 +65,7 @@ from decoy_engine.fileaccess._private import write_private
 from decoy_engine.fileaccess._protected_dir import (
     ProtectedDirAclFailed,
     ProtectedDirUnsafe,
+    allocate_protected_dir,
     create_protected_dir,
     open_protected_dir,
     protected_scratch_dir,
@@ -101,6 +102,7 @@ from decoy_engine.fileaccess._types import (
     OutputTxn,
     StageDir,
 )
+from decoy_engine.fileaccess.cleanup import CleanupLedger, Deferred
 
 # Public callables that install a policy for their call. A sentry fails on any public
 # callable that reaches `current()` without being listed and accepting `file_access=`.
@@ -172,8 +174,10 @@ __all__ = [
     "RESERVED_MEMBER_NAMES",
     "STAGE_MARKER",
     "ClassifiedFailure",
+    "CleanupLedger",
     "CleanupReport",
     "CommitUncertain",
+    "Deferred",
     "DirHandle",
     "FileAccess",
     "FileAccessDenied",
@@ -200,6 +204,7 @@ __all__ = [
     "RootedFileAccess",
     "ScratchArena",
     "StageDir",
+    "allocate_protected_dir",
     "ambient_forbidden",
     "at_position",
     "bind_iterator",

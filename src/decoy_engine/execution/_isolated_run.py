@@ -387,6 +387,8 @@ def _run_isolated(
         if staging_dir is not None
         else scratch.enter_context(fileaccess.protected_scratch_dir(prefix="decoy-isolated-run-"))
     )
+    # Until the one-job-directory rewrite: the ledger records the stage before it is made.
+    ledger = scratch.enter_context(fileaccess.CleanupLedger())
     pub: Publication | CommitReceipt | None = None
     owned_stage: Path | None = None
 
@@ -404,7 +406,9 @@ def _run_isolated(
             attempt.failed_receipt_for(failed_receipt(pub.request))
             staging_output_dir = pub.stage
         else:
-            owned_stage = fileaccess.create_protected_dir(work_root / "staging_output")
+            owned_stage = fileaccess.create_protected_dir(
+                work_root / "staging_output", ledger=ledger
+            )
             staging_output_dir = owned_stage
         source_rollback = scratch.enter_context(ExitStack())
         payload_path = _write_payload(
