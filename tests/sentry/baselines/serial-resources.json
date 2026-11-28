@@ -488,9 +488,6 @@
   "tests/unit/generation/test_fr0_budget.py::test_budget_that_fits_resident_but_not_streaming_declines_with_the_sink_untouched": {
    "reason": "Compares planned byte figures from estimator or budget arithmetic; reads no clock or process memory."
   },
-  "tests/unit/generation/test_fr0_budget.py::test_ceiling_sweep_never_allocates_past_a_reservation": {
-   "reason": "Name-only match triaged in P2: the test reads no clock, process memory, fixed port or rlimit."
-  },
   "tests/unit/generation/test_fr0_budget.py::test_decline_leaves_the_sink_untouched_and_returns_resident": {
    "reason": "Name-only match triaged in P2: the test reads no clock, process memory, fixed port or rlimit."
   },

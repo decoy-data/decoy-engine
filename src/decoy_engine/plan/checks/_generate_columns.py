@@ -23,7 +23,12 @@ from decoy_engine import reasons
 from decoy_engine.config import is_exact_sequence_key
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import formula_is_evaluable
-from decoy_engine.generators.derivation import DEFAULT_GENERATE_LOCALE
+from decoy_engine.internal.faker_locale import (
+    effective_locale,
+    faker_keys,
+    is_single_factory,
+    locale_entries,
+)
 from decoy_engine.plan._checks import check_derived_column_refs
 from decoy_engine.plan._checks_derived_aggregate import check_derived_aggregate_refs
 from decoy_engine.plan._checks_group_key import check_group_key_refs
@@ -182,11 +187,7 @@ def _check_provider(
     """A deferred default leaves a locale-less column to `check_faker_default_locale`."""
     from decoy_engine.plan.checks._generate_providers import check_provider_column
 
-    known = (
-        None
-        if isinstance(default_locale, _Deferred)
-        else (default_locale or DEFAULT_GENERATE_LOCALE)
-    )
+    known = None if isinstance(default_locale, _Deferred) else effective_locale(default_locale)
     check_provider_column(table, col, default_locale=known)
 
 
@@ -205,6 +206,14 @@ def _builtin(entry: str | None) -> tuple[Any, frozenset[str]]:
     return fake, frozenset(get_faker_providers(fake, provider_snapshot={}))
 
 
+@lru_cache(maxsize=64)
+def _proxy_names(entries: tuple[str, ...]) -> frozenset[str]:
+    """Provider names the multi-locale Faker serves, which omits single-factory helpers."""
+    from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+
+    return frozenset(get_faker_providers(make_faker(list(entries)), provider_snapshot={}))
+
+
 class _FakerView:
     """Provider and kwargs lookups for one check pass, against the effective locale only."""
 
@@ -214,9 +223,12 @@ class _FakerView:
     @staticmethod
     def _locale(locale: Any) -> tuple[Any, frozenset[str]]:
         # One Faker per entry: a multi-locale Faker proxies attribute reads and some raise.
-        entries = locale if isinstance(locale, list) else [locale]
-        built = [_builtin(entry or None) for entry in entries]
-        return built[0][0], frozenset().union(*(names for _, names in built))
+        entries = locale_entries(locale)
+        first, names = _builtin(entries[0])
+        if not is_single_factory(locale):
+            # Generation draws through the multi-locale proxy, so only what it can serve counts.
+            names = _proxy_names(faker_keys(locale))
+        return first, names
 
     def check(
         self,
@@ -239,7 +251,11 @@ class _FakerView:
             raise _refusal(reasons.plan.GENERATE_LOCALE_UNKNOWN, table, name, "locale")
         if not locale and isinstance(default_locale, _Deferred):
             return
-        effective = locale or default_locale
+        effective = effective_locale(locale, default_locale)
+        # A locale-less column runs in the platform default, which make_faker would silently
+        # replace with en_US if it is unknown.
+        if not self._locales_known(effective):
+            raise _refusal(reasons.plan.GENERATE_LOCALE_UNKNOWN, table, name, "locale")
         fake, names = self._locale(effective)
         faker_type = col.get("faker_type", "word")
         if faker_type not in names and not has_custom_faker_override(faker_type, self._snapshot):
@@ -257,10 +273,8 @@ class _FakerView:
         from faker.config import AVAILABLE_LOCALES
 
         entries = locale if isinstance(locale, list) else [locale]
-        # Faker reads "en-US" as "en_US", so the check normalizes the same way.
-        return all(
-            not e or (isinstance(e, str) and e.replace("-", "_") in AVAILABLE_LOCALES)
-            for e in entries
+        return all(not e or isinstance(e, str) for e in entries) and all(
+            e in AVAILABLE_LOCALES for e in locale_entries(locale)
         )
 
     def _kwargs_known(self, fake: Any, faker_type: str, kwargs: dict[str, Any]) -> bool:

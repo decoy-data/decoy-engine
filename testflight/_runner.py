@@ -88,7 +88,41 @@ class JobResult:
     elapsed_s: float = 0.0
     invariant_results: list[InvariantResult] = field(default_factory=list)
     error: str | None = None
+    # Exception class name for `error`; safe to log, unlike the message text.
+    error_type: str | None = None
     fingerprint: str = ""
+
+
+# Fixed text for a failed invariant; the detail can quote a cell value.
+INVARIANT_FAILED_CATEGORY = "invariant_failed"
+_UNCLASSIFIED = "unclassified"
+
+
+def failed_invariant_fields(ir: InvariantResult) -> tuple[str, str]:
+    """The only parts of a failed invariant that may be shown: (family, fixed category).
+
+    One choke point for the pytest message and the evidence report; the detail text
+    can quote a cell value and is never returned.
+    """
+    return ir.family, INVARIANT_FAILED_CATEGORY
+
+
+def failure_text(result: JobResult) -> str:
+    """Value-free text for a failed job, safe for the CI log and report.md.
+
+    Names the exception type for a job error (fixed fallback "unclassified") and
+    the family plus a fixed category for each failed invariant. Never the raw
+    error or detail text, which can quote a cell value. One choke point for the
+    pytest assertion and the evidence report.
+    """
+    lines: list[str] = []
+    if result.error is not None:
+        lines.append(f"job error type: {result.error_type or _UNCLASSIFIED}")
+    for r in result.invariant_results:
+        if not r.passed:
+            family, category = failed_invariant_fields(r)
+            lines.append(f"[{family}] {category}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +339,7 @@ def run_job(manifest_path: Path) -> JobResult:
             passed=False,
             elapsed_s=elapsed,
             error=str(exc),
+            error_type=type(exc).__name__,
         )
 
     elapsed = time.monotonic() - t0
