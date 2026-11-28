@@ -27,7 +27,8 @@ import pandas as pd
 from decoy_engine import reasons as reason_codes
 from decoy_engine.contracts.distribution_snapshot import (
     MAX_SAMPLED_YEAR,
-    MIN_YEAR,
+    WINDOW_YEARS_RULE,
+    names_year_beyond,
 )
 from decoy_engine.errors import DecoyError
 from decoy_engine.generation import stream as gen_stream
@@ -129,32 +130,18 @@ def _check_histogram(
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
     buckets = spec.datetime_buckets
-    if buckets is None:  # `_refuse_degenerate` passed, so the stats name a year outside the range
+    # `_refuse_degenerate` passed, so a missing decode means the stats name a year outside the range.
+    # A windowed column keeps the narrower rule it always had: a live bin in 9999 is refused here
+    # although plan compile and `sample_column` now hold it.
+    if buckets is None or names_year_beyond(buckets, MAX_SAMPLED_YEAR):
         _refuse(
             table,
             col,
             CODE_UNBOUNDED,
             "year_bins",
-            f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
+            WINDOW_YEARS_RULE,
         )
     weights = [float(b.count) for b in buckets]
-    bad = sorted(
-        {
-            y
-            for b, w in zip(buckets, weights, strict=True)
-            if w > 0
-            for y in (b.start_year, b.end_year)
-            if not MIN_YEAR <= y <= MAX_SAMPLED_YEAR
-        }
-    )
-    if bad:
-        _refuse(
-            table,
-            col,
-            CODE_UNBOUNDED,
-            "year_bins",
-            f"a sampled year is outside {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
-        )
     parsed_bounds: dict[str, datetime] = {}
     for bound in ("min", "max"):
         try:

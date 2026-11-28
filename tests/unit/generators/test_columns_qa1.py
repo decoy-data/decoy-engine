@@ -454,47 +454,31 @@ class TestFormulaHashKeyedMigration:
 
 class TestWalksGenF7DistributionDatetimeYear9999:
     """QA walks/generators F7 (2026-06-01, MEDIUM correctness):
-    `_generate_distribution_datetime` does not crash on source rows
-    with year 9999. Pre-fix `y + 1` produced the literal `10000-01-01`
-    string; `pd.Timestamp("10000-01-01")` raises OutOfBoundsDatetime.
-    Post-fix the exclusive year-end is capped at 9999-12-31 for the
-    year-9999 row only; the snapshot maximum (ts_max) clip below still
-    bounds the per-row window."""
+    `_generate_distribution_datetime` must not crash with OutOfBoundsDatetime on a snapshot with a
+    live year-9999 bin (`y + 1` once produced the literal `10000-01-01`). QA F7 fixed that with
+    a cap at the snapshot maximum. S5b replaced the cap with a refusal: a live bin outside the
+    fitted min and max years is a coded `plan/generation_unbounded_column` error."""
 
-    def test_beyond_ts_max_year_bin_does_not_raise(self):
-        """A snapshot with a year_bins entry beyond ts_max (a malformed
-        but parseable snapshot) must not crash with OutOfBoundsDatetime.
-        Pre-fix the intermediate year_starts construction crashed for
-        any year beyond the active datetime precision. Post-fix
-        years_arr is capped at ts_max.year so the per-row clip never
-        sees the out-of-range year string."""
+    def test_live_bin_beyond_ts_max_year_is_refused_not_clamped(self):
+        """QA F7 capped a live year bin at ts_max.year so a malformed snapshot did not crash the
+        sampler with OutOfBoundsDatetime. That wrote the bin's rows into the wrong year without
+        notice, so S5b refuses it: a live bin outside the fitted min and max years raises
+        `plan/generation_unbounded_column` (prop `year_bins`) before any draw."""
+        from decoy_engine.contracts.calendar_range import FittedRangeError
+
         snapshot = {
             "kind": "datetime",
             "min": "2026-01-01T00:00:00",
             "max": "2026-12-31T23:59:59",
             "year_bins": [
                 {"year": 2026, "count": 100},
-                # Beyond ts_max (and beyond ns precision): pre-fix
-                # this killed the entire distribution sampler.
                 {"year": 9999, "count": 50},
             ],
         }
-        col = {
-            "name": "ts",
-            "type": "distribution",
-            "snapshot": snapshot,
-        }
-        cg = ColumnGenerator(seed=42)
-        # Must not raise OutOfBoundsDatetime.
-        result = cg.generate_column(150, col, "t", {})
-        assert len(result) == 150
-        # Every output must land within [ts_min, ts_max] because the
-        # nanosecond clip caps everything at ts_max.
-        years = pd.to_datetime(result).dt.year
-        assert years.max() <= 2026, (
-            f"QA walks/generators F7: capped years_arr should keep "
-            f"output <= ts_max.year=2026. Got max year {years.max()}."
-        )
+        col = {"name": "ts", "type": "distribution", "snapshot": snapshot}
+        with pytest.raises(FittedRangeError) as caught:
+            ColumnGenerator(seed=42).generate_column(150, col, "t", {})
+        assert caught.value.prop == "year_bins"
 
 
 class TestWalksGenF8LocaleFakerCache:

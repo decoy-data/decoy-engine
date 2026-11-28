@@ -2213,6 +2213,20 @@ Draws numbers from a named family, with no source file. To shape a column like a
   only its own keys.
 - `min` / `max`: optional clip applied to each draw (`min` at most `max`).
 
+The fitted datetime sampler behind the SDK call `ColumnGenerator.generate_column` (type
+`distribution` with a `snapshot`) refuses a fitted bound outside the pandas nanosecond limits
+(1677-09-21 00:12 to 2262-04-11 23:47 UTC; an exact `pd.Timestamp.min` or `pd.Timestamp.max` is
+held), and a live year bin outside the snapshot's own min and max years, with
+`plan/generation_unbounded_column`.
+The refusal names the property (`min`, `max` or `year_bins`) and never a value. Year bins are read
+as UTC years. A snapshot whose max is before its min gives null cells only when both bounds lie
+inside the nanosecond range; a bound outside it is refused first.
+
+The statistical generator refuses a live datetime year bin outside years 1 to 9999 with the same
+code, on plan compile and on `sample_column`. A profile with a live 9999 bin (a `9999-12-31`
+sentinel) compiles and samples: the final year ends at its last instant. Window admission still
+refuses a live 9999 bin.
+
 ### lookup
 
 Draws each row from a list in a file or in a shipped code set, optionally weighted.

@@ -50,6 +50,7 @@ from datetime import datetime, timedelta
 from typing import Any, Final, NamedTuple, TypeVar
 
 from decoy_engine import reasons
+from decoy_engine.contracts.distribution_snapshot import MAX_BIN_YEAR
 from decoy_engine.generation.statistical._cell_format import (
     CellFormat,
     emits_int,
@@ -486,7 +487,7 @@ def sample_column(
         weights = [float(b.count) for b in buckets]
         # Drop zero-weight bins before drawing: random.choices can round a draw up to the cumulative
         # total and land on a trailing zero-weight range, so a range admission ignored (weight 0, e.g.
-        # 9999) could still be picked and crash datetime(year + 1). Non-empty since sum(weights) > 0.
+        # 9999) could still be picked and crash the range end. Non-empty since sum(weights) > 0.
         kept = [(b, w) for b, w in zip(buckets, weights, strict=True) if w > 0]
         ranges = [b for b, _ in kept]
         weights = [w for _, w in kept]
@@ -498,7 +499,13 @@ def sample_column(
             chosen = rng.choices(ranges, weights=weights, k=1)[0]
             year_start = datetime(chosen.start_year, 1, 1)
             # Uniform over the whole range, so a multi-year bucket spreads across its years.
-            year_seconds = (datetime(chosen.end_year + 1, 1, 1) - year_start).total_seconds()
+            # The final calendar year ends at its last instant: year 10000 cannot be built.
+            range_end = (
+                datetime(chosen.end_year + 1, 1, 1)
+                if chosen.end_year < MAX_BIN_YEAR
+                else datetime.max
+            )
+            year_seconds = (range_end - year_start).total_seconds()
             ts = min(max(year_start + timedelta(seconds=rng.random() * year_seconds), lo), hi)
             value = floor_datetime(ts, fmt.resolution, lo) if fmt and fmt.resolution else ts
             out.append(None if null_rate and rng.random() < null_rate else value)
