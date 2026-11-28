@@ -46,6 +46,7 @@ from decoy_engine.internal.cell_atoms import (
     unboxed,
 )
 from decoy_engine.internal.cell_text import (
+    UnreadableCellError,
     cell_text,
     export_json,
     export_text,
@@ -57,6 +58,7 @@ from decoy_engine.internal.pandas_missing import is_null_cell
 
 __all__ = [
     "CellNotComparableError",
+    "DistinctBudgetError",
     "DistinctCounter",
     "IdentityFacts",
     "IdentityFailure",
@@ -508,18 +510,22 @@ def _typed_facts(a: pa.Array, b: pa.Array) -> IdentityFacts:
 def identity_facts(src: Column, out: Column) -> IdentityFacts:
     """The identity facts of two equal-length columns compared by position.
 
-    Raises `CellNotComparableError` for a record, cycle or unhashable cell on either side,
-    `UnreadableCellError` for text bytes that are not UTF-8; both have fixed text."""
+    Raises `CellNotComparableError` for a record, cycle or unhashable cell on either side, and
+    `UnreadableCellError` for a cell it cannot read: text bytes that are not UTF-8, or a value no
+    cast or Python type can hold (a `date32` past year 9999). Both have fixed text."""
     if len(src) != len(out):
         raise ValueError("identity_facts: the columns differ in length")
-    typed_a, typed_b = _typed(src), _typed(out)
-    if typed_a is not None and typed_b is not None:
-        common = _common(typed_a, typed_b)
+    try:  # the one read boundary: no cast or overflow failure leaves the authority uncoded
+        typed_a, typed_b = _typed(src), _typed(out)
+        common = None if typed_a is None or typed_b is None else _common(typed_a, typed_b)
         if common is not None:
             return _typed_facts(*common)
+        pairs = zip(_cells(src), _cells(out), strict=True)
+    except (OverflowError, pa.ArrowException):
+        raise UnreadableCellError from None
     comparable = identical = 0
     all_same = True
-    for x, y in zip(_cells(src), _cells(out), strict=True):
+    for x, y in pairs:
         verdict = _verdict(x, y)
         comparable += verdict >= _SAME
         identical += verdict == _SAME
@@ -558,11 +564,15 @@ def duckdb_countable(kind: pa.DataType) -> bool:
     )
 
 
+class DistinctBudgetError(Exception):
+    """A distinct count would pass its budget: the caller's per-column reason, never an OOM."""
+
+
 class DistinctCounter:
     """An exact distinct count over the batches of one column, refused before its memory budget.
 
-    The budget is an estimate of `_ENTRY_BYTES` per distinct form; a refusal raises a fixed
-    `MemoryError` and the partial count is discarded."""
+    The budget is an estimate of `_ENTRY_BYTES` per distinct form; a refusal raises
+    `DistinctBudgetError` and the partial count is discarded."""
 
     _ENTRY_BYTES = 256
 
@@ -578,8 +588,7 @@ class DistinctCounter:
             self._seen.update(_forms(column))
         if len(self._seen) > self._limit:
             self._seen = set()
-            # A builtin class: the facts record an uncoded failure by its class name.
-            raise MemoryError("a distinct count would pass its memory budget")
+            raise DistinctBudgetError
 
     def count(self) -> int:
         return len(self._seen)

@@ -35,6 +35,7 @@ from decoy_engine.detection.detectors import counting_scope, decide_detector, ru
 from decoy_engine.internal.cell_identity import (
     CellNotComparableError,
     Column,
+    DistinctBudgetError,
     DistinctCounter,
     IdentityFacts,
     IdentityFailure,
@@ -42,6 +43,7 @@ from decoy_engine.internal.cell_identity import (
     duckdb_countable,
     identity_facts,
 )
+from decoy_engine.internal.cell_text import UnreadableCellError
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.internal.pandas_compat import arrow_to_series, exact_int_types_mapper
 from decoy_engine.plan.column_access import (
@@ -233,6 +235,7 @@ class _Tally:
 
 
 _NOT_INSPECTABLE_CODE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+_DISTINCT_LIMIT_CODE = reasons.quality.HIGH_CARDINALITY_DISTINCT_LIMIT_EXCEEDED
 _LENGTH_MISMATCH_CODE = reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
 
 
@@ -291,9 +294,12 @@ def _aligned(
 
 
 def compare_or_failure(src: Column, out: Column) -> IdentityFacts | IdentityFailure:
-    """`identity_facts`, or the failure's class name. A coded error passes through unchanged."""
+    """`identity_facts`, or the failure's class name. A coded error passes through unchanged. A
+    cell the authority cannot read is `postmask_column_not_inspectable`, as the batch reader's."""
     try:
         return identity_facts(src, out)
+    except UnreadableCellError:
+        return IdentityFailure(_NOT_INSPECTABLE_CODE)
     except Exception as exc:
         if passes_through(exc):
             raise
@@ -361,9 +367,12 @@ def _counted(table: TableBatches) -> tuple[TableBatches, Callable[[], None]]:
 
 
 def _count_or_error(count: Callable[[], int]) -> tuple[int, str | None]:
-    """`count()` and no error, or zero and the class name of an uncoded failure of that count."""
+    """`count()` and no error, or zero and the class name of an uncoded failure of that count. A
+    count over its memory budget is its own reason, never an out-of-memory."""
     try:
         return count(), None
+    except DistinctBudgetError:
+        return 0, _DISTINCT_LIMIT_CODE
     except Exception as exc:
         if passes_through(exc):
             raise

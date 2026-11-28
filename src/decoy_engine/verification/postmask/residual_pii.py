@@ -66,15 +66,15 @@ _PRODUCES_PII_LIKE_VALUES: frozenset[str] = frozenset(
 # QA-4 F1: text_redact belongs here, as a hit after it ran is a detector-coverage failure.
 _DESTROYS_PATTERN: frozenset[str] = frozenset({"hash", "redact", "text_redact", "bucketize"})
 
-# The destroying strategies that replace a whole cell. text_redact is left out: it replaces
-# matched spans, and the name-hint-only detectors are not in its span set, so a cell can still
-# hold a name after it ran.
+# The destroying strategies that replace a whole cell. Not text_redact: it replaces matched spans,
+# and the name-hint-only detectors are not in its span set, so a cell can still hold a name.
 _WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"})
 
 # Strategies that leave the column untouched: a hit is the operator's choice, graded 'info'.
 # The cell is the source cell only when no other writer owns the column (`may_write`).
 _NO_OP_BY_DESIGN: frozenset[str] = frozenset({"passthrough"})
 _NOT_INSPECTABLE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+_DISTINCT_LIMIT = reasons.quality.HIGH_CARDINALITY_DISTINCT_LIMIT_EXCEEDED
 
 # Strategies that REPLACE values per-cell: positional identity with the source at scale means the
 # mask did not fire. Mirrors the substitution side of validation/post/_checks/_leakage.py.
@@ -488,9 +488,11 @@ def residual_pii_findings(
             written = may_write(writes, table_name, col_name)
             # A passthrough leaves its cell alone only when nothing else writes the column.
             exempt = configured in _NO_OP_BY_DESIGN and not written
-            # A column the check could not read is never clean: one error finding, naming the code.
-            unread = _NOT_INSPECTABLE in (fact.identity_error, fact.distinct_error)
-            if unread:
+            # A column the check could not read or count is never clean: one error row, its code.
+            failed = (fact.identity_error, fact.distinct_error)
+            code = next((c for c in (_NOT_INSPECTABLE, _DISTINCT_LIMIT) if c in failed), None)
+            unread = code == _NOT_INSPECTABLE
+            if code:
                 findings.append(
                     ResidualPIIFinding(
                         table=table_name,
@@ -498,13 +500,11 @@ def residual_pii_findings(
                         detector_id="",
                         match_rate=0.0,
                         severity="error",
-                        message=f"column could not be inspected ({_NOT_INSPECTABLE}); "
-                        "a leak cannot be ruled out.",
+                        message=f"column could not be checked ({code}); a leak cannot be ruled out.",
                     )
                 )
             if not fact.detectors:
-                # A comparison that raised on a column the run may have written is reported with
-                # no detector hit too: the check could not run.
+                # A failed comparison on a column the run may write is reported with no hit too.
                 if fact.identity_error is not None and written and not unread:
                     findings.append(
                         ResidualPIIFinding(

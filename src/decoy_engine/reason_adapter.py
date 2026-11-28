@@ -146,6 +146,11 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.profiling.scan_set", "ScanSourceError", reasons.runtime.SCAN_SOURCE_FAILED),
     ("decoy_engine.profiling.scan_set_read", "ScanSetReadError", reasons.config.UNTAGGED),
     ("decoy_engine.internal.cell_text", "UnreadableCellError", reasons.runtime.CELL_UNREADABLE),
+    (
+        "decoy_engine.internal.cell_identity",
+        "DistinctBudgetError",
+        reasons.quality.HIGH_CARDINALITY_DISTINCT_LIMIT_EXCEEDED,
+    ),
     # F22 errno-only file-access errors: one meaning each, whoever raised them.
     (
         "decoy_engine.fileaccess._types",
