@@ -169,7 +169,6 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
     mode and in ``run_config_only_checks``.
     """
     from decoy_engine.checksums import classify_fpe_scheme, required_charset
-    from decoy_engine.transforms.fpe import _CHARSETS as _FPE_CHARSETS
 
     tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
     for table_entry in tables:
@@ -223,7 +222,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
                 if isinstance(provider_config, dict)
                 else "digits"
             )
-            charset_str = _FPE_CHARSETS.get(str(charset_spec), str(charset_spec))
+            charset_str = _CHARSETS.get(str(charset_spec), str(charset_spec))
             charset_set = frozenset(charset_str)
             required = required_charset(checksum)
             if required is not None:
