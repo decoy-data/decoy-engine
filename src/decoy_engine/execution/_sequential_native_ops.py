@@ -40,6 +40,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR
+from decoy_engine.execution.native import FpeChecksumContext, fpe_checksum_config_rejection
 from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
 from decoy_engine.execution.native._categorical_ext import native_categorical
 from decoy_engine.execution.native._crypto_ext import FpeConfig, FpeConfigError
@@ -247,11 +248,12 @@ def _hash_apply(bound: BoundHashKernel, values: pa.Array, call: HashCall) -> Nat
     )
 
 
-def _fpe_config_reason(column: str, seed: ColumnSeed) -> str | None:
+def _fpe_config_reason(column: str, seed: ColumnSeed, *, context: FpeChecksumContext) -> str | None:
     # Gate order is part of the contract: checksum, namespace, config, then the source type.
     cfg = provider_config_to_dict(seed.provider_config)
-    if cfg.get("checksum"):
-        return f"fpe_checksum_not_native:{column}"
+    checksum_reason = fpe_checksum_config_rejection(column, cfg, context=context)
+    if checksum_reason is not None:
+        return checksum_reason
     if seed.namespace is None:
         return f"fpe_requires_namespace_stays_python:{column}"
     try:
@@ -264,11 +266,10 @@ def _fpe_config_reason(column: str, seed: ColumnSeed) -> str | None:
 def _fpe_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) -> str | None:
     """Why an fpe column stays on Python, or None.
 
-    A truthy `checksum` is rejected before anything else, as the chunked admission does: the
-    compiled FF1 kernel has no checksum path. A config the handler would raise on (no namespace,
+    The checksum decision comes before anything else, as the chunked admission does. A config the handler would raise on (no namespace,
     a duplicate or degenerate charset) also stays Python so the handler raises it as before.
     The type check is exact `string`: `large_string` declines."""
-    reason = _fpe_config_reason(column, seed)
+    reason = _fpe_config_reason(column, seed, context="payload")
     if reason is None and input_type != pa.string():
         return f"fpe_source_type_not_string:{column}:{input_type}"
     return reason
@@ -280,7 +281,7 @@ def _fpe_key_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) -> st
     Only a key qualifies: `to_pandas_fk_safe` keeps a key's integers exact, so the native cast
     and the Python handler's `str(v)` read the same value. An ordinary nullable integer payload
     is widened to float64 and stays on Python."""
-    reason = _fpe_config_reason(column, seed)
+    reason = _fpe_config_reason(column, seed, context="key")
     if reason is None and input_type != pa.string() and not pa.types.is_integer(input_type):
         return f"fpe_source_type_not_string:{column}:{input_type}"
     return reason

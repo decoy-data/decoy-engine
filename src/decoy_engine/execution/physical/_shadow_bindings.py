@@ -32,6 +32,7 @@ from decoy_engine.execution._operator_registry import (
     POSITIONAL_FAKER_SOURCE_TYPES,
 )
 from decoy_engine.execution._runner import group_by_sibling
+from decoy_engine.execution.native import fpe_checksum_config_rejection
 from decoy_engine.execution.native._capabilities import capabilities_for
 from decoy_engine.execution.native._categorical_prepared import (
     prepare_categorical,
@@ -315,10 +316,14 @@ def execution_binding_for_slice_node(
             # hash column never reaches here as a "native"-admitted node.
             return None
     elif strategy == "fpe":
-        # fpe is mask-keyed and namespaced; a checksum mode declines to the oracle (C6a §3g),
-        # so leaving the node unbound here is what sends a checksum column (and a namespace-less
-        # one, which the oracle raises `fpe_requires_namespace` for) to the full-frame oracle.
-        if caps.key_source is None or namespace is None or cfg.get("checksum"):
+        # fpe is mask-keyed and namespaced; a checksum the one decision declines leaves the node
+        # unbound here, which sends that column (and a namespace-less one, which the oracle
+        # raises `fpe_requires_namespace` for) to the full-frame oracle.
+        if (
+            caps.key_source is None
+            or namespace is None
+            or fpe_checksum_config_rejection(column, cfg, context="payload") is not None
+        ):
             return None
     elif strategy == "faker":
         # JC-5 already guarantees deterministic + reuse + a namespace; the pool size may be None

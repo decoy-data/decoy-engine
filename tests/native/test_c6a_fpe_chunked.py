@@ -319,6 +319,31 @@ def test_checksum_declines_to_oracle() -> None:
     )
 
 
+@_NEEDS_COMPANION
+def test_checksum_decline_on_a_repeated_column_declaration_is_not_skipped() -> None:
+    """A raw config may declare a column twice. The first declaration has no checksum, the
+    later one does; the later decline must still reroute the table to the oracle."""
+    config = make_config([fpe_col(checksum="luhn")])  # model validation rejects duplicates
+    cols = config["tables"][0]["columns"]
+    plain = make_config([fpe_col()])["tables"][0]["columns"][0]
+    cols.insert(0, plain)
+    chunks = [pa.table({"c": _col(["4111111111111111", "4012888888881881"])})]
+    sink: list[Any] = []
+    out = list(
+        run_mask_chunked(
+            config,
+            chunks,
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            key_provider=key_provider(),
+            route_evidence_sink=sink,
+        )
+    )
+    assert sink[0].native_admitted is False
+    assert sink[0].reroute_reason == "fpe_checksum_not_native:c"
+    assert out
+
+
 # ── Companion-absent fallback (§3f, test 6) ──
 
 
