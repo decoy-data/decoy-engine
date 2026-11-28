@@ -87,7 +87,9 @@ def _registered(raw: Any) -> str:
     )
 
 
-def _route(view: RouteView | None, chunked: bool, native: NativeRoute | None) -> Route:
+def _route(
+    view: RouteView | None, chunked: bool, native: NativeRoute | None, sink: str | None
+) -> Route:
     kind = None if view is None else _ROUTE_MODE.get(view.route, "other")
     chunked = chunked or kind == "chunked"
     reason = None if view is None or view.reason_code is None else _registered(view.reason_code)
@@ -96,6 +98,7 @@ def _route(view: RouteView | None, chunked: bool, native: NativeRoute | None) ->
         route_reason=reason,
         chunked=chunked,
         native=native,
+        sink=sink,
     )
 
 
@@ -219,6 +222,7 @@ def build_run_result(
     elapsed_s: float,
     phases: Sequence[tuple[str, float]],
     pre_checks: Sequence[Check] = (),
+    sink: str | None = None,
 ) -> RunResult:
     """``producer`` is the CLI version; the engine and registry versions are the builder's own.
 
@@ -228,7 +232,10 @@ def build_run_result(
     ``pre_checks`` are checks the caller ran before the engine did (the pre-scan and scan-drift checks, in that order). They come
     first in ``checks``; a blocking one that failed makes the status ``findings``, as
     ``blocking_failed`` does, but the engine checks keep the caller's own flag. Only ``pre_scan`` and ``scan_drift`` are
-    accepted, at most one of each. A pre-check cannot claim to block unless it failed."""
+    accepted, at most one of each. A pre-check cannot claim to block unless it failed.
+
+    ``sink`` is the caller's own fact about its output sink: ``"used"`` or one reason code for
+    why none was used. It is a ``SafeRef`` on the document, so free text is refused."""
     if tables.run_failed != (failure is not None):
         raise ValueError("tables.run_failed disagrees with failure")
     pre = tuple(_pre_check(c) for c in pre_checks)
@@ -255,7 +262,7 @@ def build_run_result(
             event_schema=EVENT_SCHEMA_VERSION,
         ),
         config=config_ref,
-        route=_route(route, chunked, native),
+        route=_route(route, chunked, native, sink),
         delivery=tables.delivery,
         tables=tables.tables,
         checks=pre + _checks(execution_result, blocking_failed),

@@ -170,13 +170,13 @@ class FpeConfig:
         charset = _CHARSETS.get(self.charset, self.charset)
         if len(set(charset)) != len(charset):
             raise FpeConfigError(
-                f"fpe charset {self.charset!r} resolved to {charset!r} with duplicate "
+                "fpe charset resolved with duplicate "
                 "symbols; FF1 requires an ordered, duplicate-free alphabet (a "
                 "duplicate would make decode ambiguous)."
             )
         if len(charset) < 2:
             raise FpeConfigError(
-                f"fpe charset {self.charset!r} resolved to {charset!r} with fewer than "
+                "fpe charset resolved with fewer than "
                 "2 distinct characters; a degenerate charset has nothing to permute "
                 "over and would leave the column unmasked."
             )

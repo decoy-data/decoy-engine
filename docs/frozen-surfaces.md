@@ -80,6 +80,10 @@ pinning test says `accepted-known-limit: <id>`, and the id is listed under
 | `decoy.trust-policy/v1` | contract 3.1 | `src/decoy_engine/signed_evidence/_trust.py` | `tests/unit/signed_evidence/test_conformance_corpus.py`, `tests/sentry/release/test_tag_artifacts.py` |
 | `decoy.required-catalog/v1` | contract 3.1 | `src/decoy_engine/signed_evidence/_catalog.py` | `tests/unit/signed_evidence/test_conformance_corpus.py`, `tests/sentry/release/test_tag_artifacts.py` |
 
+The `decoy-run-result/v1` row also covers the optional `/route/sink` field (RUN-STREAM E6). It is left out of
+the written payload while unset. `tests/snapshots/frozen_schemas/run-result.schema.json` and the next-minor
+corpus cell pin it.
+
 ## Public names (contract 3.4)
 
 `tests/unit/test_public_api.py` (`test_all_lists_every_public_name`) holds `decoy_engine.__all__`

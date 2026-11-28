@@ -60,11 +60,11 @@
   },
   "src/decoy_engine/execution/native/_chunked_entry.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
-   "max": 689
+   "max": 641
   },
   "src/decoy_engine/execution/native/_dispatch.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
-   "max": 688
+   "max": 651
   },
   "src/decoy_engine/execution/native/_requirements.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
@@ -85,10 +85,6 @@
   "src/decoy_engine/internal/faker_setup.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
    "max": 688
-  },
-  "src/decoy_engine/plan/_checks.py": {
-   "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
-   "max": 700
   },
   "src/decoy_engine/plan/_compile.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",

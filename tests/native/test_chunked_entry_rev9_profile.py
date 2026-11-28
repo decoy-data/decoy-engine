@@ -11,10 +11,10 @@ import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.contracts.column_shape import NO_SOURCES
-from decoy_engine.execution import _chunked_oracle
 from decoy_engine.execution._chunked_profile import first_chunk_profile
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import FK_KEY_DTYPE_UNSUPPORTED_CODE
+from decoy_engine.execution.chunked import _oracle_step
 from decoy_engine.execution.native._chunked_evidence import plan_column_backends
 from decoy_engine.execution.native._dispatch import plan_native_route, run_native_or_oracle_chunked
 from decoy_engine.plan import compile_plan, plan_to_yaml
@@ -211,13 +211,13 @@ def _chunk(kind: pa.DataType) -> pa.Table:
 
 def _guard_spy(monkeypatch: pytest.MonkeyPatch) -> list[set[str]]:
     seen: list[set[str]] = []
-    real = _chunked_oracle.reject_lossy_chunked_fk_passthrough
+    real = _oracle_step.reject_lossy_chunked_fk_passthrough
 
     def spy(chunk: pa.Table, *, table: str, passthrough_fk_columns: set[str]) -> None:
         seen.append(set(passthrough_fk_columns))
         real(chunk, table=table, passthrough_fk_columns=passthrough_fk_columns)
 
-    monkeypatch.setattr(_chunked_oracle, "reject_lossy_chunked_fk_passthrough", spy)
+    monkeypatch.setattr(_oracle_step, "reject_lossy_chunked_fk_passthrough", spy)
     return seen
 
 

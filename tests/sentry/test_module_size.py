@@ -108,17 +108,15 @@ ALLOWLIST: dict[str, int] = {
     "src/decoy_engine/detection/detectors.py": 920,
     # monolithic train_and_evaluate; decompose into split/fit/calibrate/evaluate modules.
     "src/decoy_engine/profiling/model_pack/trainer.py": 711,
-    # compile-check ownership table; split into per-strategy check modules once the check set stabilises.
-    "src/decoy_engine/plan/_checks.py": 700,
     # statistical-column check threading; same per-strategy-check decomposition target as _checks.py.
     "src/decoy_engine/plan/_compile.py": 673,
     # dispatch entry plus the table-keyed params, the job-seed hand-off and the eager string-pool
     # check for the position-keyed faker; dense exception, the pool check itself lives in _chunk_masking.
     # OBS-2: threads the decline records and branch-call snapshot onto each chunk's evidence.
-    "src/decoy_engine/execution/native/_chunked_entry.py": 689,
+    "src/decoy_engine/execution/native/_chunked_entry.py": 641,
     # OBS-2b: one structured decline record paired with each existing decision source; the record
     # types live in _route_decline_codes.py. Split the static admission pass out next.
-    "src/decoy_engine/execution/native/_dispatch.py": 688,
+    "src/decoy_engine/execution/native/_dispatch.py": 651,
     # fail-closed output projection and corpus pinning on the mask route; split the FK-resolution helpers.
     # cross-column V1 folds joint_mask key_by into the source-anchor snapshot build (a comment, no new logic).
     # MG-5 vault: the _fk_key_value compat wrapper moved to _fk_key_compat.py (pure move, zero behavior change).

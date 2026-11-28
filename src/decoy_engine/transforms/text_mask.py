@@ -101,7 +101,7 @@ import hashlib
 import hmac as _hmac_mod
 import logging
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from decoy_engine import reasons
@@ -113,7 +113,7 @@ from decoy_engine.errors import FpeChecksumError, FpeUnencryptableError, Pipelin
 from decoy_engine.transforms._faker_span import shared_faker
 from decoy_engine.transforms._text_mask_splice import splice_spans, warn_passthrough_unmatched
 from decoy_engine.transforms._text_mask_synthetic import _synthetic_span_value
-from decoy_engine.transforms.date_shift import _COMMON_FORMATS
+from decoy_engine.transforms.date_shift import _COMMON_FORMATS, shift_date_text
 from decoy_engine.transforms.fpe import (
     _CHARSETS,
     FF1_KEY_LABEL,
@@ -455,7 +455,7 @@ def _mask_date_shift(
     "YYYY-MM-DD"; "01/15/1990" reformats to "MM/DD/YYYY".
 
     A span that does not parse (an unrecognised format, or a date such as 2024-02-30) comes
-    back as ``token``, never as its real text.
+    back as ``token``, never as its real text. So does a span shifted past year 1 or 9999.
     """
     try:
         fmt = _detect_date_format(matched_text)
@@ -465,8 +465,8 @@ def _mask_date_shift(
         range_size = max_days - min_days + 1
         offset_seed = int.from_bytes(span_key[:8], "big")
         shift = min_days + (offset_seed % range_size)
-        shifted = dt + timedelta(days=shift)
-        return shifted.strftime(fmt)
+        shifted = shift_date_text(dt, shift, fmt)
+        return token if shifted is None else shifted
     except BaseException:
         del span_key
         raise

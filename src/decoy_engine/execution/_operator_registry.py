@@ -88,6 +88,10 @@ class OperatorSpec:
     # operator. A coordinator policy, not a capability fact: an operator whose
     # capabilities declare any diagnostic outside this set declines the unified slice.
     routed_diagnostics: frozenset[str] = frozenset()
+    # fpe only: the checksum schemes the compiled kernel runs. Empty until the Rust batch path
+    # lands, so every configured scheme still declines. Read only by
+    # `native._operator_config_rejections.fpe_checksum_rejection`.
+    checksum_schemes: frozenset[str] = frozenset()
 
 
 _STRING_ONLY = frozenset({pa.string()})

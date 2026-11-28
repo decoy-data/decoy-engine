@@ -431,6 +431,18 @@
             }
           ],
           "title": "Route Reason"
+        },
+        "sink": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sink"
         }
       },
       "required": [

@@ -15,7 +15,6 @@ that need a first chunk run after it, and per-chunk checks stay in the loop.
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -31,20 +30,18 @@ from . import _chunked_group_key as group_key
 from . import _chunked_text_mask as text_mask_gate
 from . import _guards
 from ._chunked_adapter_gate import chunked_adapter_touches_pandas_ingestion
-from ._chunked_carry import adapter_fk_safe_columns, plan_carry
+from ._chunked_carry import plan_carry
 from ._chunked_fk import (
     fk_hash_strategy_columns_for_table,
     fk_passthrough_columns_for_table,
-    reject_lossy_chunked_fk_passthrough,
 )
 from ._chunked_fk_dtype import (
     fk_declared_dtypes_for_table,
-    reject_mismatched_chunked_fk_declared_dtype,
 )
 from ._chunked_profile import profile_input
 from ._guards import reject_gated_hash_on_integer
-from ._row_error_summary import chunk_row_error_summary
 from ._transforms import reject_config_references_stored_index
+from .chunked import OracleChunkStep, oracle_chunk_step
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import FileAccess
@@ -402,100 +399,24 @@ def _oracle_masked(
     yield and owns any enriched result for the sink; advance the row offset; add
     vault entries; yield.
     """
-    from decoy_engine.errors import RowErrorsFailedError
-
-    carry = state.carry
     first = state.first
     if first is None:  # pragma: no cover - callers return early for a zero-chunk state
         raise AssertionError("_oracle_masked called with a zero-chunk preflight state")
+    step = OracleChunkStep(
+        plan=state.plan, table=table, on_chunk=on_chunk, chunk_result_sink=chunk_result_sink
+    )
 
     def _masked() -> Iterator[pa.Table]:
         row_offset = base_row_offset  # DGRN counter; inert for value-keyed strategies.
         for chunk_index, chunk in enumerate(_chunked_mod._chain_first(first, state.chunk_iter)):
-            if state.guard_passthrough_fk_columns:
-                reject_lossy_chunked_fk_passthrough(
-                    chunk, table=table, passthrough_fk_columns=state.guard_passthrough_fk_columns
-                )
-            # `hash_fk_key_columns` triggers the guard independently of
-            # `declared_fk_dtypes`: `dtype` is optional in config, so a hash FK key
-            # with no declared dtype leaves `declared_fk_dtypes` empty yet still
-            # needs predicate 12's real-type check (else an unsafe real
-            # date64/decimal256 reaches the kernel unchecked).
-            if state.declared_fk_dtypes or state.hash_fk_key_columns:
-                reject_mismatched_chunked_fk_declared_dtype(
-                    chunk,
-                    table=table,
-                    declared_fk_dtypes=state.declared_fk_dtypes,
-                    hash_fk_key_columns=state.hash_fk_key_columns,
-                )
-            # These source columns must stay a chunk-stable string on every chunk,
-            # not just the first (the iterable's dtype can drift).
-            if state.text_mask_cols:
-                text_mask_gate.reject_unsafe_text_mask_chunk_schema(
-                    chunk.schema, state.text_mask_cols, table=table
-                )
-            if state.code_set_cols:
-                code_set_gate.reject_unsafe_code_set_chunk_schema(
-                    chunk.schema, state.code_set_cols, table=table
-                )
-            if state.bucket_perturb_cols:
-                bucket_perturb_gate.reject_unsafe_bucket_perturb_chunk_schema(
-                    chunk.schema, state.bucket_perturb_cols, table=table
-                )
-            # Per-chunk DGRN domain guard (no whole-stream row count); see `_chunked_dgrn.py`.
-            dgrn.validate_chunk_row_offset_range(row_offset, chunk.num_rows)
-            try:
-                result = state.adapter.run(
-                    state.plan,
-                    {table: chunk if carry is None else carry.adapter_input(chunk)},
-                    registry=state.registry,
-                    pool_cache=state.pool_cache,
-                    relationship_graph=state.graph,
-                    namespace_registry=state.ns_registry,
-                    unconfigured_column_policy=state.projection_policy,
-                    key_provider=state.key_provider,
-                    row_offset=row_offset,
-                    code_set_records=state.code_set_records,
-                )
-            except Exception as exc:
-                if carry is not None:
-                    carry.diagnose_adapter(
-                        exc,
-                        chunk,
-                        table=table,
-                        chunk_index=chunk_index,
-                        fk_safe=lambda: adapter_fk_safe_columns(
-                            state.plan, state.registry, state.graph, table
-                        ),
-                    )
-                raise
-            if carry is not None and carry.carried and result.row_errors:
-                # The failing chunk is reported with the real carried columns, never the
-                # placeholders the adapter saw.
-                result = dataclasses.replace(
-                    result,
-                    outputs={**result.outputs, table: carry.reattach(result.outputs[table], chunk)},
-                )
-            if chunk_result_sink is not None and (on_chunk is None or result.row_errors):
-                chunk_result_sink.append(result)
-            # The chunked path has no quarantine machinery, so a per-row strategy
-            # error (bucketize/date_shift format_error, code_set mask_error)
-            # cannot be routed anywhere. Discarding it would silently keep the raw
-            # source value in the streamed output, the leak the full-frame path
-            # closes. Fail closed the moment any chunk reports a row error; this
-            # applies to every caller, including a routed job in run_pipeline.
-            if result.row_errors:
-                raise RowErrorsFailedError(
-                    result.row_errors,
-                    summary=chunk_row_error_summary(
-                        result.row_errors,
-                        table=table,
-                        columns=chunk.schema.names,
-                        chunk_index=chunk_index,
-                        chunk_row_offset=row_offset,
-                    ),
-                )
-            masked = result.outputs[table] if on_chunk is None else on_chunk(result, chunk)
+            masked = oracle_chunk_step(
+                state,
+                step,
+                source_chunk=chunk,
+                adapter_chunk=chunk,
+                chunk_index=chunk_index,
+                row_offset=row_offset,
+            )
             row_offset = dgrn.advance_row_offset(row_offset, chunk)
             if vault_writer is not None:
                 from decoy_engine.vault import collect_vault_entries
