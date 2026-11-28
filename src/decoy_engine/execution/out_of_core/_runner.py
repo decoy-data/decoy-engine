@@ -356,7 +356,7 @@ def run_fk_out_of_core(
             **hash_run.metrics(),
         }
         # Before the publish: a failed validation commits nothing.
-        _validate_batch.finish_validation(validators, quality_metrics)
+        _validate_batch.finish_validation(validators, quality_metrics, tables=sources)
         seal = {"quarantine_access": seal_evidence(cast_run, quality_metrics)}  # last, pre-publish
         if sink is not None:
             receipt = observed_commit(sink)

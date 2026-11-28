@@ -142,12 +142,12 @@ def _build_ctx(
     plan_override: Plan | None = None,
     relationship_graph_override: RelationshipGraph | None = None,
     adapter: ExecutionAdapter | None = None,
-    validators: Any = None,
     quarantine_config: Any = None,
     sink: Any = None,
     source_loader: Any = None,
     vault_writer: Any = None,
     fidelity_report: bool = False,
+    validation_config: Any = None,
 ) -> ShadowContext:
     ns_registry = build_namespace_registry(config, inputs.profile)
     projection_policy = resolve_unconfigured_column_policy(config)
@@ -161,12 +161,12 @@ def _build_ctx(
         namespace_registry=ns_registry,
         unconfigured_column_policy=projection_policy,
         full_frame_adapter=resolved_adapter,
-        validators=validators,
         quarantine_config=quarantine_config,
         sink=sink,
         source_loader=source_loader,
         vault_writer=vault_writer,
         fidelity_report=fidelity_report,
+        validation_config=validation_config,
     )
 
 
@@ -608,7 +608,6 @@ def test_decline_relationship_edge_touches_admitted_table(tmp_path: Path) -> Non
 @pytest.mark.parametrize(
     ("kwarg", "value"),
     [
-        ("validators", [{"type": "row_count"}]),
         ("quarantine_config", {"path": "q.parquet"}),
         ("sink", object()),
         ("source_loader", lambda table: pa.table({})),
@@ -625,6 +624,22 @@ def test_decline_runtime_feature_outside_forwarded_contract(
     ctx = _build_ctx(inputs, config, adapter=_AdapterSpy(), **{kwarg: value})
     snapshot = capture_shadow_snapshot(sources)
     _assert_declines(inputs, plan, ctx, snapshot, FULL_FRAME_RUNTIME_FEATURE_UNSUPPORTED)
+
+
+def test_validators_requested_is_admitted_and_changes_no_output(tmp_path: Path) -> None:
+    """EXPECT-OFF-ROUTE S2: a `validators:` list no longer declines this driver."""
+    config, source = _admitted_table_config(tmp_path)
+    sources = {_TABLE: source}
+    inputs, plan = _capture(config, sources)
+    plain = _coordinator(inputs, _build_ctx(inputs, config)).run(
+        plan, capture_shadow_snapshot(sources)
+    )
+    with_validators = {**config, "validators": [{"name": "luhn"}]}
+    inputs_v, plan_v = _capture(with_validators, sources)
+    result = _coordinator(inputs_v, _build_ctx(inputs_v, with_validators)).run(
+        plan_v, capture_shadow_snapshot(sources)
+    )
+    _assert_outputs_and_diagnostics_equal(result, plain)
 
 
 def test_decline_missing_runtime_dependency(tmp_path: Path) -> None:

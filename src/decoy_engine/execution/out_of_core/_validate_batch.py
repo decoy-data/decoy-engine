@@ -2,8 +2,8 @@
 
 Established methodology: the chunked oracle (`_chunked_oracle.py`) validates per chunk and
 this module follows the same shape, with the D3b vault collector (`_vault_collect.py`) as the
-structural twin: a cheap admission allowlist at routing time, a per-batch hook at each
-driver's mask step, one assembly step at run end. The per-cell verdicts are NOT
+structural twin: a cheap admission allowlist at routing time, a per-batch hook on each
+driver's delivered stream (after declared formatting), one assembly step at run end. The per-cell verdicts are NOT
 re-implemented: each batch is checked by calling the registered validator function itself
 (`decoy_engine.validators.validator_function`) on one column occurrence, so a verdict cannot drift from
 the full-frame oracle's. Only the report bookkeeping lives here.
@@ -51,13 +51,14 @@ from decoy_engine.validators import (
     SkippedColumn,
     ValidationReport,
     ValidatorFinding,
+    active_validation_session,
     assemble_report,
     finding_index_cap,
     validator_function,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping
 
     from decoy_engine.plan._types import Plan
     from decoy_engine.profile._readers import LazySource
@@ -71,6 +72,7 @@ __all__ = [
     "build_validator_collector",
     "collect_batch_validation",
     "finish_validation",
+    "validate_delivered",
     "validators_ooc_safe",
 ]
 
@@ -348,12 +350,29 @@ def collect_batch_validation(
         collector.add_batch(table, masked_batch)
 
 
+def validate_delivered(
+    collector: ValidatorCollector | None, table: str, batches: Iterable[pa.RecordBatch]
+) -> Iterator[pa.RecordBatch]:
+    """Pass `batches` through unchanged, checking each as it goes by.
+
+    Apply it to the stream a driver hands to its sink or its resident assembly, after declared
+    formatting and the FK rewrite, so the verdict covers the bytes the route delivers.
+    """
+    for batch in batches:
+        collect_batch_validation(collector, table, batch)
+        yield batch
+
+
 def finish_validation(
-    collector: ValidatorCollector | None, quality_metrics: dict[str, Any]
+    collector: ValidatorCollector | None,
+    quality_metrics: dict[str, Any],
+    tables: Iterable[str] = (),
 ) -> None:
     """Stamp `quality_metrics["validation"]`, then fail closed on any finding.
 
-    Runs before the sink publish so a failed validation commits nothing.
+    Runs before the sink publish so a failed validation commits nothing. The run's bound
+    session records this collector's verdict on `tables`, so a resident return is not checked a
+    second time and the session's `close` does not refuse them as unseen.
     """
     if collector is None:
         return
@@ -363,3 +382,6 @@ def finish_validation(
         from decoy_engine.errors import ValidatorFailedError
 
         raise ValidatorFailedError(report)
+    session = active_validation_session()
+    if session is not None:
+        session.record_external_verdict(tables, owner="out_of_core_collector")

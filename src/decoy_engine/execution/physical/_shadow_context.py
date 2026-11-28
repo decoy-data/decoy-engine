@@ -41,14 +41,14 @@ recoverable from `plan` alone, so the harness builds them the same way
 `run_pipeline` does and mirrors them onto `ctx`) and `full_frame_adapter`,
 the caller-INJECTED, already-selected `ExecutionAdapter` instance (never
 constructed by the coordinator itself -- see `_shadow_full_frame.py`).
-`validators_requested` / `quarantine_requested` extend the slice 5a
-runtime-admission record with the two settings `_pipeline_finalize.
-finalize_validators_and_quarantine` reads straight off `config`: unlike
-`sink`/`source_loader`/`vault_writer`, `run_pipeline` takes no `validators`/
-`quarantine` KEYWORD at all (both come from `config["validators"]`/
-`config["quarantine"]`), so `from_key_provider` accepts the same raw values
-a caller would read off its own config and reduces them to presence here,
-matching the pattern. All five default to the admitted value
+`quarantine_requested` extends the slice 5a runtime-admission record with the
+setting `_pipeline_finalize.finalize_validators_and_quarantine` reads straight
+off `config`: unlike `sink`/`source_loader`/`vault_writer`, `run_pipeline` takes
+no `quarantine` KEYWORD at all (it comes from `config["quarantine"]`), so
+`from_key_provider` accepts the same raw value a caller would read off its own
+config and reduces it to presence here, matching the pattern. Validators are
+not an admission input: they run on the outputs and never change a route. All
+five default to the admitted value
 (`None`/`False`), so every pre-existing construction is unchanged.
 """
 
@@ -149,9 +149,14 @@ class ShadowContext:
     namespace_registry: NamespaceRegistry | None = None
     unconfigured_column_policy: UnconfiguredColumnPolicy | None = None
     full_frame_adapter: ExecutionAdapter | None = None
-    validators_requested: bool = False
     quarantine_requested: bool = False
+    # The pipeline config whose `validators:` judge a standalone result. None means the caller
+    # validates the result itself (the unified slice checks the rendered bytes).
+    validation_config: Mapping[str, Any] | None = field(default=None, repr=False)
     provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None = None
+    # The caller that commits to feeding this result to the run's validation session itself.
+    # Set, the coordinator defers its tables to that owner instead of judging them.
+    validation_owner: str | None = None
 
     def _validate(self) -> None:
         if self.batch_size_rows < 1:
@@ -177,9 +182,10 @@ class ShadowContext:
         namespace_registry: NamespaceRegistry | None = None,
         unconfigured_column_policy: UnconfiguredColumnPolicy | None = None,
         full_frame_adapter: ExecutionAdapter | None = None,
-        validators: Any = None,
         quarantine_config: Any = None,
+        validation_config: Mapping[str, Any] | None = None,
         provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None = None,
+        validation_owner: str | None = None,
     ) -> ShadowContext:
         """Resolve `mask_key` the same way `run_pipeline` does
         (`keyprovider.resolve_mask_key`), so the shadow side and the oracle,
@@ -208,10 +214,9 @@ class ShadowContext:
         own resolved runtime objects, retained (not reduced to booleans) the
         same way `key_provider` and `relationship_graph` are -- the dispatch
         needs the objects themselves, not just their presence.
-        `validators` / `quarantine_config` mirror what a caller read off its
-        own `config["validators"]` / `config["quarantine"]` and are reduced
-        to presence-only booleans here, the same treatment as `sink` /
-        `source_loader` / `vault_writer` above.
+        `quarantine_config` mirrors what a caller read off its own
+        `config["quarantine"]` and is reduced to a presence-only boolean here, the
+        same treatment as `sink` / `source_loader` / `vault_writer` above.
 
         `provider_snapshot` (5a-faker) is retained as-is (not reduced to a
         boolean) -- the generation admission gate and the synthesis adapter
@@ -238,7 +243,8 @@ class ShadowContext:
             namespace_registry=namespace_registry,
             unconfigured_column_policy=unconfigured_column_policy,
             full_frame_adapter=full_frame_adapter,
-            validators_requested=bool(validators),
             quarantine_requested=quarantine_config is not None,
+            validation_config=validation_config,
             provider_snapshot=provider_snapshot,
+            validation_owner=validation_owner,
         )

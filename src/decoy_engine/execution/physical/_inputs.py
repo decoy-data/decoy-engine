@@ -336,7 +336,6 @@ def compute_plan_hash(inputs: PhysicalPlanInputs) -> str:
         inputs.execution_mode,
         inputs.fidelity_report,
         inputs.vault_writer_present,
-        len(inputs.validators),
         inputs.auto_chunk,
         inputs.chunk_size_rows,
         inputs.auto_chunk_threshold_rows,

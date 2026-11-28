@@ -10,9 +10,9 @@ The shape rules are the shared core's (`_mixed_admission`: edge topology,
 complete-graph restriction, child key type). On top of them this module adds
 what only the production route needs:
 
-  * the job-level restrictions the bounded routes already enforce (validators,
-    quarantine, fidelity report, post-validation, token vault, non-pandas
-    substrate), which need every masked output resident at once;
+  * the job-level restrictions the bounded routes already enforce (quarantine,
+    fidelity report, post-validation, token vault, non-pandas substrate), which
+    need every masked output resident at once;
   * the kill switches (`auto_chunk`, the chunked dispatcher, `mixed_route`);
   * that no relationship edge touches a mask table when there is no coupled
     edge (a mask->mask FK cannot be resolved chunk-by-chunk, and the chunked
@@ -102,7 +102,6 @@ def admit_mixed_static(
     table_kinds: Mapping[str, str],
     caller_sources: Mapping[str, pa.Table | LazySource],
     resolved_substrate: str,
-    validators: list[Any],
     fidelity_report: bool,
     post_validation: bool,
     vault_writer: Any,
@@ -122,7 +121,6 @@ def admit_mixed_static(
         return None, "declared_casting"
     declined = _job_setting_decline(
         resolved_substrate=resolved_substrate,
-        validators=validators,
         fidelity_report=fidelity_report,
         post_validation=post_validation,
         vault_writer=vault_writer,
@@ -192,7 +190,6 @@ def admit_mixed_static(
 def _job_setting_decline(
     *,
     resolved_substrate: str,
-    validators: list[Any],
     fidelity_report: bool,
     post_validation: bool,
     vault_writer: Any,
@@ -208,8 +205,6 @@ def _job_setting_decline(
         return "chunked_dispatcher_disabled"
     if resolved_substrate != "pandas":
         return "non_pandas_substrate_requested"
-    if validators:
-        return "validators_present"
     if quarantine is not None:
         return "quarantine_configured"
     if fidelity_report:

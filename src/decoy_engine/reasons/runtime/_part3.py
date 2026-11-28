@@ -95,9 +95,12 @@ __all__ = [
     "UNIFIED_SLICE_INVARIANT_VIOLATION",
     "UNKNOWN_TRANSFORM_OP",
     "VALIDATOR_COLUMN_MISSING",
+    "VALIDATOR_CONFIG_NOT_OWNED",
     "VALIDATOR_KEY_STATE_OVER_BUDGET",
+    "VALIDATOR_SESSION_UNAVAILABLE",
     "VALIDATOR_SOURCE_PAIRING_MISMATCH",
     "VALIDATOR_SPAN_REPEATED",
+    "VALIDATOR_TABLE_NOT_OBSERVED",
     "VAULT_COMMIT_FAILED",
     "VAULT_CRYPTO_NOT_INSTALLED",
     "VAULT_ENTRY_TOO_LARGE",
@@ -541,10 +544,25 @@ VALIDATOR_SOURCE_PAIRING_MISMATCH = _d(
     "The source rows read for a leak check do not line up with the published rows.",
     since="1.35.0",
 )
+VALIDATOR_TABLE_NOT_OBSERVED = _d(
+    "validator_table_not_observed",
+    "A table was marked complete or left to an owner, but no validator ever saw its rows.",
+    since=UNRELEASED,
+)
 VALIDATOR_COLUMN_MISSING = _d(
     "validator_column_missing",
     "A validator needs a parent key or window column that the parent table does not have.",
     since="1.35.0",
+)
+VALIDATOR_CONFIG_NOT_OWNED = _d(
+    "validator_config_not_owned",
+    "The validation session bound to a run does not hold the validators the run is configured with.",
+    since=UNRELEASED,
+)
+VALIDATOR_SESSION_UNAVAILABLE = _d(
+    "validator_session_unavailable",
+    "A table was left to an owner, but no open validation session exists to judge it.",
+    since=UNRELEASED,
 )
 VALIDATOR_SPAN_REPEATED = _d(
     "validator_span_repeated",

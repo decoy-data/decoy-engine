@@ -524,13 +524,49 @@ def test_decline_out_of_core_mask_driver_with_generate(tmp_path: Path) -> None:
     assert excinfo.value.code == MIXED_DRIVER_UNSUPPORTED
 
 
+def test_validators_are_admitted_and_change_no_output(tmp_path: Path) -> None:
+    """EXPECT-OFF-ROUTE S2: a `validators:` list no longer declines the mixed driver."""
+    accounts = _accounts_source()
+    outputs = []
+    for validators in (
+        None,
+        [
+            {
+                "name": "regex_match",
+                "columns": {"accounts": ["acct_id"]},
+                "params": {"pattern": ".*"},
+            }
+        ],
+    ):
+        config = _mixed_config(
+            tmp_path,
+            mask_sources={"accounts": accounts},
+            mask_table_columns={"accounts": [{"name": "acct_id", "strategy": "passthrough"}]},
+        )
+        if validators is not None:
+            config["validators"] = validators
+        inputs = capture_physical_plan_inputs(
+            config,
+            {"accounts": accounts},
+            engine_version=ENGINE_VERSION,
+            execution_mode="full_frame",
+        )
+        plan = compile_physical_plan(inputs)
+        ctx = ShadowContext.from_key_provider(
+            plan=inputs.plan, key_provider=None, relationship_graph=inputs.graph
+        )
+        result = ShadowCoordinator(ctx=ctx, registry=inputs.registry).run(
+            plan, capture_shadow_snapshot({"accounts": accounts})
+        )
+        outputs.append(result.outputs)
+    assert set(outputs[0]) == set(outputs[1])
+    assert outputs[0]["accounts"].equals(outputs[1]["accounts"])
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
-    [
-        ("validators", [{"name": "fk_intact"}]),
-        ("quarantine", {"output_path": "q.parquet"}),
-    ],
-    ids=["validators", "quarantine"],
+    [("quarantine", {"output_path": "q.parquet"})],
+    ids=["quarantine"],
 )
 def test_decline_disqualifying_job_setting(
     tmp_path: Path, field: str, value: Any, monkeypatch: pytest.MonkeyPatch

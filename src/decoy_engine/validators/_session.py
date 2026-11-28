@@ -20,12 +20,16 @@ beside a capped sample of indices).
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.errors import ValidatorStateError
+from decoy_engine.errors import ValidatorFailedError, ValidatorStateError
 from decoy_engine.validators._fold import KeyStateBudget, assemble_report, finding_index_cap
 from decoy_engine.validators._registry import build_fold
 from decoy_engine.validators._types import (
@@ -37,6 +41,65 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from decoy_engine.validators._fold import Fold
+
+
+_ACTIVE: ContextVar[ValidationSession | None] = ContextVar("decoy_validation_session", default=None)
+
+
+def active_validation_session() -> ValidationSession | None:
+    """The session bound to this run, or None outside ``bind_validation_session``."""
+    return _ACTIVE.get()
+
+
+@contextmanager
+def bind_validation_session(
+    config: dict[str, Any], *, key_state_budget: Callable[[], int | None]
+) -> Iterator[ValidationSession | None]:
+    """Bind one session for the run, or bind nothing when the config has no validators.
+
+    ``key_state_budget`` resolves the keyed folds' ceiling; it runs only when a session opens.
+    Opening validates every entry before any source is read, so a bad pattern or an unknown
+    validator name fails at the start of the run. Either way the scope owns the binding: a
+    nested run (a provider that starts a job) never sees its caller's session, and the caller's
+    is back when the scope ends.
+    """
+    if not config.get("validators"):
+        token = _ACTIVE.set(None)
+        try:
+            yield None
+        finally:
+            _ACTIVE.reset(token)
+        return
+    session = ValidationSession(config, key_state_budget_bytes=key_state_budget())
+    token = _ACTIVE.set(session)
+    try:
+        yield session
+        # A clean exit enforces the verdict: a caller that never judged the run's tables cannot
+        # leave the scope with rejected rows in hand. A caller that already called `close` has
+        # had its verdict (it raised, or returned the report), so it is not asked twice.
+        if not session.close_attempted:
+            session.close()
+    finally:
+        _ACTIVE.reset(token)
+
+
+def run_resident_validation(
+    outputs: Mapping[str, pa.Table], config: dict[str, Any], sources: Mapping[str, Any]
+) -> ValidationReport | None:
+    """Validate resident outputs and return the report, or None when no validators are configured.
+
+    With a session bound to the run the outputs go through it, so the run's one report covers
+    them; without one this is the whole-table ``validate`` call.
+    """
+    if not config.get("validators"):
+        return None
+    session = active_validation_session()
+    if session is None:
+        from decoy_engine.validators import _registry
+
+        return _registry.validate(dict(outputs), config, sources=dict(sources))
+    session.observe_unobserved(outputs, sources)
+    return session.finish()
 
 
 class ValidationSession:
@@ -68,17 +131,54 @@ class ValidationSession:
         entries: list[Any] = config.get("validators") or []
         self._names: list[str] = []
         self._folds: list[Fold] = []
-        for entry in entries:
-            name, fold = build_fold(entry, config, cap=cap, budget=budget, sources=sources)
+        for index, entry in enumerate(entries):
+            name, fold = build_fold(
+                entry, config, cap=cap, budget=budget, sources=sources, index=index
+            )
             self._names.append(name)
             self._folds.append(fold)
         self._rows: dict[str, int] = {}
         self._complete: set[str] = set()
+        # Plan section 3a: completion is not judgement. A fed table is judged by a caller that
+        # records this session's verdict, or else by `close`; an external verdict and a deferral
+        # each name the owner that answers for the table.
+        self._judged: set[str] = set()
+        self._external: set[str] = set()
+        self._deferred: set[str] = set()
+        self._explicit_source_rows: dict[str, int] = {}
         self._elapsed = 0.0
         self._report: ValidationReport | None = None
+        self._fingerprint = _fingerprint(config)
+        self._close_attempted = False
+        self._refused = False
+
+    @property
+    def close_attempted(self) -> bool:
+        """True once ``close`` has run, whether it returned or raised."""
+        return self._close_attempted
+
+    def owns(self, config: Mapping[str, Any]) -> bool:
+        """True when this session judges exactly what ``config`` configures.
+
+        Compares the entries and every key they read (tables, relationships, quarantine), with
+        types preserved. A config that configures no check is owned by any session. ``config``
+        must hold plain dicts and lists.
+        """
+        if judging_config(config) is None:
+            return True
+        theirs = _fingerprint(config)
+        return theirs is not None and theirs == self._fingerprint
 
     def observe(self, table: str, output: pa.Table, source: pa.Table | None = None) -> None:
-        """Feed one complete resident table, then mark it complete."""
+        """Feed one complete resident table, then mark it complete.
+
+        The first complete observer of a table owns its folds. A later observer of the same
+        table adds nothing, so a table reached by two completion steps is never counted twice.
+        """
+        if table in self._complete:
+            return
+        if source is not None:
+            self._explicit_source_rows[table] = source.num_rows
         self._feed(
             table, output, self._source_rows(table, source, self._rows.get(table, 0), output)
         )
@@ -95,9 +195,129 @@ class ValidationSession:
         """Feed a published batch with the raw batch it came from."""
         self._feed(table, output, source)
 
+    def observe_unobserved(
+        self, outputs: Mapping[str, pa.Table], sources: Mapping[str, pa.Table]
+    ) -> bool:
+        """Feed every resident table no observer has completed. True when it fed any."""
+        fed = False
+        for table, output in outputs.items():
+            if table not in self._complete:
+                source = sources.get(table)
+                self.observe(table, output, source if isinstance(source, pa.Table) else None)
+                fed = True
+        return fed
+
+    def observe_source_batches(
+        self,
+        table: str,
+        output: pa.Table,
+        source_batches: Iterable[pa.RecordBatch],
+        source_schema: pa.Schema,
+    ) -> None:
+        """Feed one complete resident table against its source read batch by batch.
+
+        The source is never held whole: each batch is paired with the output rows at the same
+        positions, then the table is marked complete.
+        """
+        if table in self._complete:
+            return
+        offset = 0
+        for batch in source_batches:
+            if offset + batch.num_rows > output.num_rows:
+                break
+            self._feed(table, output.slice(offset, batch.num_rows), batch)
+            offset += batch.num_rows
+        else:
+            if offset == output.num_rows:
+                if offset == 0:
+                    self._feed(table, output, source_schema.empty_table())
+                self._explicit_source_rows[table] = offset
+                self._complete_table(table)
+                return
+        raise ValidatorStateError(
+            code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
+            message=f"the source rows for table {table!r} do not match the published rows.",
+        )
+
+    def unobserved_tables(self, tables: Iterable[str]) -> list[str]:
+        """The names in ``tables`` no observer has completed."""
+        return [table for table in tables if table not in self._complete]
+
+    def paired_tables(self) -> frozenset[str]:
+        """The tables a check reads a source for, so a caller loads only those sources."""
+        return frozenset().union(*(fold.paired_tables() for fold in self._folds))
+
+    def reads_every_source(self) -> bool:
+        """True when a whole-table function is open: it may read the source of any table."""
+        return any(getattr(fold, "reads_sources", False) for fold in self._folds)
+
     def table_complete(self, table: str) -> None:
-        """The table has delivered every row; keyed folds may resolve what waited on it."""
+        """The table has delivered every row; keyed folds may resolve what waited on it.
+
+        Completion is not a judgement: ``close`` refuses a completed table nobody fed or judged.
+        """
         self._complete_table(table)
+
+    def defer(self, tables: Iterable[str], *, owner: str) -> None:
+        """Leave ``tables`` to ``owner``, which commits to feeding them before ``close``."""
+        _require_owner(owner)
+        self._require_open()
+        self._deferred |= set(tables)
+
+    def record_external_verdict(self, tables: Iterable[str], *, owner: str) -> None:
+        """``owner`` judged ``tables`` itself and fails the run on any finding; they are complete."""
+        _require_owner(owner)
+        self._require_open()
+        for table in tables:
+            self._external.add(table)
+            self._complete_table(table)
+
+    def record_verdict(self, report: ValidationReport) -> None:
+        """A judge acted on ``report``: it raised, or quarantine covered the failure.
+
+        Only this session's own report settles its tables, so a stale or foreign report leaves
+        them for ``close``.
+        """
+        if report is self._report:
+            self._judged |= self._rows.keys()
+
+    def unjudged_tables(self) -> list[str]:
+        """Fed tables no judge has acted on yet."""
+        return sorted(t for t in self._rows if t not in self._judged and t not in self._external)
+
+    def close(self) -> ValidationReport:
+        """Finish, then judge every fed table no caller judged, whoever fed it.
+
+        Raises:
+            ValidatorStateError: A table was completed or deferred but never fed or judged
+                (``validator_table_not_observed``).
+            ValidatorFailedError: A finding falls on a table no caller judged or vouched for.
+        """
+        self._close_attempted = True
+        report = self.finish()
+        unseen = sorted((self._complete | self._deferred) - self._rows.keys() - self._external)
+        if unseen:
+            raise ValidatorStateError(
+                code=reasons.runtime.VALIDATOR_TABLE_NOT_OBSERVED,
+                message=f"no validator saw the rows of table {unseen[0]!r}.",
+            )
+        if self._refused:
+            raise ValidatorFailedError(report)
+        settled = self._judged | self._external
+        self._judged |= self._rows.keys()
+        if not report.passed and any(f.table not in settled for f in report.findings):
+            # Remembered, so a second `close` raises the same verdict instead of reporting it.
+            self._refused = True
+            raise ValidatorFailedError(report)
+        return report
+
+    def _require_open(self) -> None:
+        """A table cannot be left to an owner once the session has given its verdict."""
+        if self._close_attempted or self._report is not None:
+            raise ValidatorStateError(
+                code=reasons.runtime.VALIDATOR_SESSION_UNAVAILABLE,
+                message="the validation session is closed; it cannot take a table from an owner.",
+            )
 
     def _source_rows(
         self,
@@ -152,12 +372,19 @@ class ValidationSession:
 
     def _check_pairing(self) -> None:
         """A paired check needs as many source rows as published rows, table by table."""
-        held: Mapping[str, Any] = self._sources or {}
+        held: dict[str, int] = {
+            **{
+                name: tbl.num_rows
+                for name, tbl in (self._sources or {}).items()
+                if isinstance(tbl, pa.Table)
+            },
+            **self._explicit_source_rows,
+        }
         for fold in self._folds:
             for table in fold.paired_tables():
-                source = held.get(table)
-                if table in self._rows and isinstance(source, pa.Table):
-                    if source.num_rows != self._rows[table]:
+                source_rows = held.get(table)
+                if table in self._rows and source_rows is not None:
+                    if source_rows != self._rows[table]:
                         raise ValidatorStateError(
                             code=reasons.runtime.VALIDATOR_SOURCE_PAIRING_MISMATCH,
                             message=(
@@ -165,3 +392,38 @@ class ValidationSession:
                                 "published rows."
                             ),
                         )
+
+
+# The config keys that decide what a run's checks judge: the entries, the table list a default
+# leak scope reads, the relationships the FK checks read, and the quarantine setting that lifts the
+# finding cap. A plan carries exactly these, and a session owns a run only when they match.
+_JUDGEMENT_KEYS = ("validators", "tables", "relationships", "quarantine")
+
+
+def judging_config(config: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """The part of ``config`` that decides what its validators judge, or None when it has none.
+
+    The values are shared, not copied: pass an already-frozen config (a plan's captured inputs) to
+    get a snapshot no caller can edit.
+    """
+    if not config or not config.get("validators"):
+        return None
+    return MappingProxyType({k: config[k] for k in _JUDGEMENT_KEYS if config.get(k)})
+
+
+def _fingerprint(config: Mapping[str, Any]) -> bytes | None:
+    """The type-preserving canonical bytes of the judgement keys (``[1]`` and ``[1.0]`` differ)."""
+    from decoy_engine._canonical import CanonicalJsonError, canonical_json_bytes
+
+    projected = judging_config(config)
+    if projected is None:
+        return None
+    try:
+        return canonical_json_bytes(dict(projected))
+    except CanonicalJsonError:
+        return None
+
+
+def _require_owner(owner: str) -> None:
+    if not owner:
+        raise ValueError("an owner token is required to defer or judge a table outside the session")

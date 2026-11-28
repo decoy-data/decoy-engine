@@ -37,7 +37,7 @@ from decoy_engine.execution.out_of_core._validate_batch import (
 )
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
-from decoy_engine.validators import _registry
+from decoy_engine.validators import ValidationSession, _registry
 from tests._keyed_secret import THROWAWAY_KEY_PROVIDER
 from tests.parity import _strict_compare as sc
 
@@ -978,15 +978,19 @@ def test_failures_spanning_batches_merge_to_whole_table_positions(
 def test_duplicate_entries_with_different_parameters_stay_separate(tmp_path: Path) -> None:
     vs = [
         _v("regex_match", {"parent": ["code"]}, pattern="^[a-z]+$"),
-        _v("regex_match", {"parent": ["code"]}, pattern="^ab.$"),
+        _v("regex_match", {"parent": ["code"]}, pattern="^zz$"),
         _v("regex_match", {"parent": ["code"]}, pattern="^[a-z]+$"),
     ]
     cfg, tables = standard(tmp_path, vs)
     kind, report = _assert_parity(cfg, tables)
     assert [f.validator for f in report.findings] == ["regex_match"] * 3
     assert report.validators_run == ("regex_match",)  # names dedup, findings do not
-    assert report.findings[0].failing_row_indices == report.findings[2].failing_row_indices
-    assert "'^ab.$'" in report.findings[1].detail and "'^ab.$'" not in report.findings[0].detail
+    first, middle, last = (f.failing_row_indices for f in report.findings)
+    assert first == last
+    # A finding never quotes its pattern (value-free), so the middle entry proves it used its own
+    # pattern by failing different rows: `^zz$` matches nothing, the others fail only a few.
+    assert middle != first and len(middle) > len(first)
+    assert all("^zz$" not in f.detail and "[a-z]" not in f.detail for f in report.findings)
 
 
 def test_a_repeated_column_in_one_entry_is_two_findings(tmp_path: Path) -> None:
@@ -1262,6 +1266,27 @@ def test_a_passing_validated_run_still_commits_exactly_once(
     assert mode(result) == _OOC
     assert sink.commits == 1 and sink.aborts == 0
     assert sorted(p.stem for p in (tmp_path / "sink_out").glob("*.parquet")) == ["child", "parent"]
+
+
+def test_a_no_sink_run_gives_the_bound_session_nothing_to_feed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The batches were checked out-of-core; the resident completion must not check them twice.
+    fed: list[bool] = []
+    real = ValidationSession.observe_unobserved
+
+    def spy(self: ValidationSession, outputs: Any, sources: Any) -> bool:
+        fed.append(real(self, outputs, sources))
+        return fed[-1]
+
+    monkeypatch.setattr(ValidationSession, "observe_unobserved", spy)
+    vs = [_v("column_in_set", {"child": ["memo"]}, allowed_values=[f"m{i}" for i in range(6)])]
+    cfg, tables = standard(tmp_path, vs)
+    result = run(cfg, tables)
+    assert mode(result) == _OOC
+    assert sorted(result.outputs) == ["child", "parent"]
+    assert fed == [False], "the resident completion fed out-of-core tables a second time"
+    assert result.quality_metrics["validation"]["validators"]["passed"] is True
 
 
 def test_a_direct_caller_with_an_unadmitted_validator_fails_closed(tmp_path: Path) -> None:

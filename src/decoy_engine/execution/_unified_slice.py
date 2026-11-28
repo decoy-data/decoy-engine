@@ -242,8 +242,12 @@ def _execute_admitted(
             unified_slice_enabled=True,
         )
 
+        # The slice feeds its rendered bytes to the run's session (`_render_and_seal`).
         ctx = ShadowContext.from_key_provider(
-            plan=plan, key_provider=key_provider, native_threads=native_threads
+            plan=plan,
+            key_provider=key_provider,
+            native_threads=native_threads,
+            validation_owner="unified_slice",
         )
         snapshot = capture_shadow_snapshot({candidate.table: candidate.source})
 
@@ -322,12 +326,13 @@ def _execute_admitted(
             caller_sources={candidate.table: candidate.source},
             execution_plan_decision=execution_plan_decision,
         )
-        # Post-validation declines the unified slice, so its quarantine keep-mask
-        # (second return) is unused here.
-        outputs, _ = _pipeline_finalize.finalize_validators_and_quarantine(
+        # Row errors only: validators judge the rendered bytes, so they run in the caller's
+        # `_render_and_seal` after declared casting formats these outputs. Post-validation
+        # declines the unified slice, so the quarantine keep-mask (second return) is unused.
+        outputs, _ = _pipeline_finalize.finalize_quarantine(
             outputs,
+            None,
             config=config,
-            caller_sources={candidate.table: candidate.source},
             mask_row_errors=tuple(shadow_result.row_errors),
             quality_metrics=quality_metrics,
         )

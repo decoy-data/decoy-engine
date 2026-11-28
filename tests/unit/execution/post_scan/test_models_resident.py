@@ -259,7 +259,7 @@ class _FakeCastRun:
 
     def post_mask(self, outputs: Any, errors: Any) -> tuple[Any, Any, Any]:
         self._order.append("post_mask")
-        return outputs, None, None
+        return outputs, errors, None
 
     def finish(self) -> tuple[dict[str, Any], Any]:
         self._order.append("finish")
@@ -285,6 +285,7 @@ def test_the_unified_slice_return_runs_the_gate_between_render_and_seal(
             result,
             sources={"t": outputs["t"]},
             table_kinds={"t": "mask"},
+            config={},
         )
     finally:
         _post_scan._ACTIVE.reset(token)
@@ -310,6 +311,7 @@ def test_a_blocking_gate_leaves_no_seal(monkeypatch: pytest.MonkeyPatch) -> None
                 ExecutionResult(outputs={}, warnings=()),
                 sources={},
                 table_kinds={},
+                config={},
             )
     finally:
         _post_scan._ACTIVE.reset(token)

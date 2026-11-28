@@ -589,7 +589,6 @@ def _mixed_static_plan(ctx: PipelineRunContext) -> MixedStaticPlan | None:
         table_kinds=ctx.table_kinds,
         caller_sources=ctx.caller_sources,
         resolved_substrate=ctx.resolved_substrate,
-        validators=(ctx.config.get("validators") or []),
         fidelity_report=ctx.fidelity_report,
         post_validation=ctx.post_validation,
         vault_writer=ctx.vault_writer,

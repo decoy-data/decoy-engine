@@ -104,7 +104,7 @@ from decoy_engine.execution.out_of_core._stream_join import (
     JoinRowCursor,
     StreamFkJoiner,
 )
-from decoy_engine.execution.out_of_core._validate_batch import collect_batch_validation
+from decoy_engine.execution.out_of_core._validate_batch import validate_delivered
 from decoy_engine.execution.out_of_core._vault_collect import collect_batch_vault
 from decoy_engine.relationships._graph import OrphanPolicy
 
@@ -371,7 +371,6 @@ def stream_table(
                 )
                 # Aligned source/masked pair, before the reorder and the type reconcile.
                 collect_batch_vault(vault_config, table_name, raw_batch, masked_batch, vault_writer)
-                collect_batch_validation(validators, table_name, masked_batch)
                 for col in payload_masked_observed:
                     idx = masked_batch.schema.get_field_index(col)
                     if idx >= 0:
@@ -429,6 +428,10 @@ def stream_table(
                     child_cursors.append(child_cursor)
 
                 # --- Phase 3: resolve FK columns from the payload store; no source read. ---
+                def _delivered(batches: Iterator[pa.RecordBatch]) -> Iterator[pa.RecordBatch]:
+                    # The validators judge what the sink or the resident table receives, after rendering.
+                    return validate_delivered(validators, table_name, batches)
+
                 def rewritten() -> Iterator[pa.RecordBatch]:
                     for row_nr_start, masked_batch in store.iter_batches():
                         out = masked_batch
@@ -468,7 +471,7 @@ def stream_table(
                         plan,
                         table_name,
                         raw_parent_source,
-                        _declared.maybe_render(cast_run, table_name, rewritten()),
+                        _delivered(_declared.maybe_render(cast_run, table_name, rewritten())),
                         fixed_schema=fixed_schema,
                         fk_components=fk_components,
                         outgoing_edges=outgoing_edges,
@@ -483,7 +486,9 @@ def stream_table(
                         masked_observed_types=payload_masked_observed,
                     )
                 else:
-                    batches = list(_declared.maybe_render(cast_run, table_name, rewritten()))
+                    batches = list(
+                        _delivered(_declared.maybe_render(cast_run, table_name, rewritten()))
+                    )
                     table_out = (
                         assemble_resident(batches, fk_components)
                         if batches

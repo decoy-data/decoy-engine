@@ -15,7 +15,6 @@ author already controls the whole pipeline.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -23,6 +22,7 @@ import pyarrow as pa
 
 from decoy_engine.validators._catalog import ColumnFold
 from decoy_engine.validators._fold import finding_index_cap, run_whole
+from decoy_engine.validators._params import compile_pattern
 from decoy_engine.validators._types import ValidatorFinding
 
 
@@ -47,11 +47,7 @@ class RegexMatchFold(ColumnFold):
             raise ValueError(
                 "regex_match validator requires params.pattern (a non-empty regex string)."
             )
-        try:
-            self._compiled = re.compile(pattern_raw)
-        except re.error as exc:
-            raise ValueError("regex_match validator: params.pattern is not a valid regex.") from exc
-        self._pattern = pattern_raw
+        self._compiled = compile_pattern(pattern_raw, validator="regex_match")
 
     def failing_positions(self, values: list[Any]) -> Iterable[int]:
         for i, val in enumerate(values):
@@ -59,7 +55,8 @@ class RegexMatchFold(ColumnFold):
                 yield i
 
     def describe(self, count: int, table: str, column: str) -> str:
-        return f"{count} row(s) in {table}.{column} do not match pattern {self._pattern!r}"
+        # The pattern is operator text and can carry a credential, so it stays out of findings.
+        return f"{count} row(s) in {table}.{column} do not match the configured pattern"
 
 
 class ColumnInSetFold(ColumnFold):

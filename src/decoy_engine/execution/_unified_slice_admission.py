@@ -140,7 +140,7 @@ _OPERATOR_REQUIRED_KERNEL: dict[str, str] = {
 
 # The one diagnostic obligation the coordinator routes, per operator: the format_error row
 # errors of date_shift and bucket_perturb, which the coordinator collects, rebases, and hands to
-# `finalize_validators_and_quarantine` (a non-empty set raises there and the
+# `finalize_quarantine` (a non-empty set raises there and the
 # unified slice reroutes the table to the oracle, which fails identically). Any
 # other obligation (a warning reducer, a second trigger) or any other operator
 # carrying one still declines: nothing else is routed. This is coordinator POLICY,
@@ -249,11 +249,7 @@ def cheap_admission(
         # slice returns early without it, so admitting an opted-in job would
         # silently skip post-validation while reporting success.
         return None
-    if (
-        config.get("validators")
-        or config.get("quarantine")
-        or post_scan_model_setting(config) is not None
-    ):
+    if config.get("quarantine") or post_scan_model_setting(config) is not None:
         return None
     if profile.relationships:
         return None

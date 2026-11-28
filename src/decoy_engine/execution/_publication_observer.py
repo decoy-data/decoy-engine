@@ -26,7 +26,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 
 from decoy_engine import reasons
 from decoy_engine.publication import CommitReceipt, SinkState
@@ -39,6 +39,9 @@ from decoy_engine.reasons import (
     ReasonContext,
     ReasonRecord,
 )
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 STORAGE_REF = "output"
 """The approved storage alias reported instead of any path or URI."""
@@ -200,3 +203,25 @@ def report_partial_publication(failure: BaseException) -> ReasonRecord | None:
         )
     except Exception:
         return None
+
+
+@runtime_checkable
+class _WholeTableWriter(Protocol):
+    """write, commit and abort together. `write_batches` is not part of it: only the out-of-core
+    runner calls it."""
+
+    def write(self, table: str, data: pa.Table) -> None: ...
+
+    def commit(self) -> object: ...
+
+    def abort(self) -> None: ...
+
+
+def has_whole_table_contract(sink: object) -> bool:
+    """True if `sink` implements write, commit and abort together.
+
+    The one test for a transactional writer on a whole-table call: sequential execution and
+    resident delivery both ask it, so a writer that has only `write` is a plain callable on both
+    routes and receives every table on both.
+    """
+    return isinstance(sink, _WholeTableWriter)

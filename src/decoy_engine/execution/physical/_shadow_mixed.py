@@ -193,7 +193,9 @@ def dispatch_mixed(
     # `admitted_edges` (default `()`) is the only new signal threaded
     # through: every pre-5b-ii caller of `run()` leaves it at that default.
     mask_only_plan = dataclasses.replace(plan, synthesis=None)
-    mask_result = coordinator.run(mask_only_plan, merged_snapshot, admitted_edges=admitted_edges)
+    mask_result = coordinator._run_mask_half(
+        mask_only_plan, merged_snapshot, admitted_edges=admitted_edges
+    )
 
     outputs = stitch_generate_mask_outputs(generate_outputs, mask_result.outputs)
     # `driver_invocation` names the generate half's seam (mirroring slice
@@ -339,10 +341,6 @@ def _require_no_disqualifying_job_settings(ctx: ShadowContext, config: dict[str,
     `derive_key`/`instance_default_locale`/`key_provider` are deliberately
     NOT checked here -- see the module docstring's "parity-proven, not
     admission-checked" note."""
-    if config.get("validators"):
-        raise ShadowDifference(
-            code=GENERATION_SHAPE_UNSUPPORTED, detail="config.validators is non-empty"
-        )
     if config.get("quarantine") is not None:
         raise ShadowDifference(
             code=GENERATION_SHAPE_UNSUPPORTED, detail="config.quarantine is not None"

@@ -154,6 +154,39 @@ class ShadowCoordinator:
         admitted_edges: tuple[RelationshipEdge, ...] = (),
         when_masks: Mapping[str, pa.Array] | None = None,
     ) -> ShadowRunResult:
+        """Run the plan and return its result, judged by the configured validators.
+
+        A caller that judges the result itself says so with a ``validation_owner`` on the
+        context, never by skipping the boundary here.
+        """
+        result = self._dispatch(
+            plan, snapshot, admitted_edges=admitted_edges, when_masks=when_masks
+        )
+        self._validated(plan, snapshot, result)
+        return result
+
+    def _run_mask_half(
+        self,
+        plan: PhysicalPlan,
+        snapshot: ShadowSnapshot,
+        *,
+        admitted_edges: tuple[RelationshipEdge, ...],
+    ) -> ShadowRunResult:
+        """The mask half of a mixed plan, left unjudged: `dispatch_mixed` judges the stitched
+        whole once, through `run`, and a half alone is not the job's output.
+
+        Private on purpose: it skips the validator boundary `run` owns, so the public surface
+        has no way to run a plan without judgement."""
+        return self._dispatch(plan, snapshot, admitted_edges=admitted_edges, when_masks=None)
+
+    def _dispatch(
+        self,
+        plan: PhysicalPlan,
+        snapshot: ShadowSnapshot,
+        *,
+        admitted_edges: tuple[RelationshipEdge, ...],
+        when_masks: Mapping[str, pa.Array] | None,
+    ) -> ShadowRunResult:
         # Task 4.6 slice 5a: a PURE-GENERATE plan (no mask tables at all)
         # dispatches through the Task 4.2 SynthesisStageAdapter instead of
         # every branch below -- see _dispatch_synthesis. Checked first, and
@@ -196,6 +229,18 @@ class ShadowCoordinator:
         return run_shadow_batches(
             self, plan, snapshot, admitted_edges=admitted_edges, when_masks=when_masks
         )
+
+    def _validated(
+        self, plan: PhysicalPlan, snapshot: ShadowSnapshot, result: ShadowRunResult
+    ) -> ShadowRunResult:
+        """Every branch returns finished output, so the configured validators judge it here, at
+        the one result boundary, before it leaves `run`."""
+        from decoy_engine.execution.physical._shadow_generation import enforce_validators
+
+        enforce_validators(
+            self.ctx, result.outputs, dict(snapshot.tables), plan_config=plan.validation_config
+        )
+        return result
 
     def _dispatch_synthesis(
         self, physical_synthesis: SynthesisStage, snapshot: ShadowSnapshot

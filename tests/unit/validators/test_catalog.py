@@ -320,7 +320,7 @@ class TestUnknownValidator:
     def test_unknown_validator_raises(self) -> None:
         outputs = {"t": pa.table({"x": ["1"]})}
         config: dict[str, Any] = {"validators": [{"name": "bogus_validator"}]}
-        with pytest.raises(ValueError, match="bogus_validator"):
+        with pytest.raises(ValueError, match=r"validators entry 0 names an unknown validator"):
             validate(outputs, config)
 
 

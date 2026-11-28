@@ -147,13 +147,13 @@ def test_cheap_admission_declines_vault_writer(tmp_path: Path) -> None:
     assert _cheap_ok(config, profile, source, vault_writer=object()) is None
 
 
-def test_cheap_admission_declines_validators(tmp_path: Path) -> None:
+def test_cheap_admission_admits_validators(tmp_path: Path) -> None:
     source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
     config, source = _build(tmp_path, [{"name": "c", "strategy": "passthrough"}], source)
     profile, _ = _profile_and_plan(config, source)
     config = dict(config)
     config["validators"] = [{"name": "x"}]
-    assert _cheap_ok(config, profile, source) is None
+    assert _cheap_ok(config, profile, source) is not None
 
 
 def test_cheap_admission_declines_relationships(tmp_path: Path) -> None:

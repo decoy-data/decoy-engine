@@ -18,15 +18,21 @@ from contextlib import nullcontext
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any
 
+import pyarrow as pa
+
 from decoy_engine import reasons
 from decoy_engine.config import post_scan_sink_kind, post_scan_sink_refusal
 from decoy_engine.declared_casting._boundary import open_cast_run
 from decoy_engine.execution import _pipeline_route_exec as _route_exec
 from decoy_engine.execution import _pipeline_sources as _psrc
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution._publication_observer import has_whole_table_contract
+from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
 from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run, current_duckdb_run
 from decoy_engine.execution.pipeline.post_scan import attach_cast_run, tee_reader
+from decoy_engine.profile import LazySource
+from decoy_engine.validators import ValidationSession, bind_validation_session
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
@@ -34,6 +40,8 @@ if TYPE_CHECKING:
     from decoy_engine.progress import ProgressChannel
 
 __all__ = [
+    "complete_resident_validation",
+    "deliver_resident_outputs",
     "emit_route",
     "execute_mixed_route",
     "execute_out_of_core_route",
@@ -56,6 +64,75 @@ def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> Pipelin
     return replace(ctx, post_scan_detectors=detectors)
 
 
+# Rows per batch when a lazy source is paired with its output; bounds what validation holds.
+_SOURCE_BATCH_ROWS = 65_536
+
+
+def _key_state_budget(ctx: PipelineRunContext) -> int:
+    """The validators' own memory ceiling, resolved once. It is not charged to the generation
+    ledger or the faker-pool carve."""
+    from decoy_engine.execution.out_of_core import resolve_budget
+
+    return resolve_budget(ctx.out_of_core_budget_bytes).budget_bytes
+
+
+def complete_resident_validation(
+    session: ValidationSession, ctx: PipelineRunContext, result: ExecutionResult
+) -> ExecutionResult:
+    """Finish the run's validation over the outputs a resident route returned.
+
+    Tables no earlier observer completed are fed here; a table finalize already folded is not
+    fed again. `close` then fails the run on every table no judge acted on, whoever fed it; a
+    table finalize judged (raised, or covered by quarantine) is not raised twice. The report is
+    stored once.
+    """
+    from decoy_engine.execution._pipeline_finalize import stamp_validation
+
+    pending = session.unobserved_tables(result.outputs)
+    wanted = session.paired_tables()
+    every = session.reads_every_source()
+    resident: dict[str, Any] = {}
+    for name in pending:
+        source = ctx.caller_sources.get(name) if name in wanted or every else None
+        if isinstance(source, LazySource) and name in wanted:
+            batches = source.iter_batches(_SOURCE_BATCH_ROWS)
+            session.observe_source_batches(name, result.outputs[name], batches, source.schema)
+        elif isinstance(source, pa.Table):
+            resident[name] = source
+    session.observe_unobserved(result.outputs, resident)
+    report = session.close()
+    if "validation" not in result.quality_metrics:
+        stamp_validation(result.quality_metrics, ctx.config, report)
+    return result
+
+
+def _plain_callable_sink(sink: object) -> bool:
+    """True for a callable that is not a whole-table transactional sink (the sequential route's test)."""
+    return (
+        sink is not None
+        and callable(sink)
+        and not isinstance(sink, TransactionalSink)
+        and not has_whole_table_contract(sink)
+    )
+
+
+def deliver_resident_outputs(sink: object, result: ExecutionResult) -> None:
+    """Hand a plain callable each resident output once, after validation and settle.
+
+    A route that wrote through the sink (sequential, streamed) returns no outputs, so nothing
+    reaches it twice; a resident route returns its tables and never calls a bare callable. A
+    callable has no transaction, so there is no commit to make (and `observed_commit` stays the
+    only commit site).
+    """
+    if not result.outputs or not _plain_callable_sink(sink):
+        return
+    from decoy_engine.execution._transactional_sink import _CallableSinkAdapter
+
+    adapter = _CallableSinkAdapter(sink)
+    for name, table in result.outputs.items():
+        adapter.write(name, table)
+
+
 def execute_route(
     ctx: PipelineRunContext, decision: RouteDecision, refusals: dict[Any, Any]
 ) -> ExecutionResult:
@@ -70,6 +147,9 @@ def execute_route(
     with (
         bind_duckdb_run(ctx.out_of_core_threads) as recorder,
         bind_gate(ctx, decision.route if ctx.has_mask_table else "full_frame") as gate,
+        bind_validation_session(
+            ctx.config, key_state_budget=lambda: _key_state_budget(ctx)
+        ) as session,
     ):
         # Before any sink write or route read: a callable sink delivers on `write`. The run
         # context and the gate's snapshot have already read source metadata.
@@ -92,7 +172,10 @@ def execute_route(
             result = execute_mixed_route(ctx, decision)
         else:
             result = _pipeline_full_frame.run_full_frame_route(ctx, decision)
+        if session is not None:
+            result = complete_resident_validation(session, ctx, result)
         result = settle(gate, ctx, result)
+        deliver_resident_outputs(ctx.sink, result)
         execution_block = result.quality_metrics.setdefault("execution", {})
         execution_block["native_threads"] = {
             "count": ctx.native_threads,

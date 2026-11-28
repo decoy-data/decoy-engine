@@ -67,6 +67,7 @@ from decoy_engine.validators._generic import (
     validate_regex_match,
 )
 from decoy_engine.validators._leak_check import LeakCheckFold, validate_leak_check
+from decoy_engine.validators._params import ParamError
 from decoy_engine.validators._relationship_checks import (
     ParentWindowFold,
     ReconciliationFold,
@@ -142,6 +143,9 @@ _SPECS: dict[str, ValidatorSpec] = {
 class _WholeTableFold:
     """A validator known only by its whole-table function: it sees every table at finish."""
 
+    # The function may read any table's source, so a caller offers every resident source.
+    reads_sources = True
+
     def __init__(
         self,
         fn: _ValidatorFn,
@@ -154,6 +158,7 @@ class _WholeTableFold:
         self._config = config
         self._sources = sources
         self._tables: dict[str, pa.Table] = {}
+        self._paired: dict[str, pa.Table] = {}
 
     def add(self, table: str, span: RowSpan) -> None:
         if table in self._tables:
@@ -163,6 +168,9 @@ class _WholeTableFold:
                 message=f"a whole-table validator was given table {table!r} in several batches.",
             )
         self._tables[table] = span.output
+        # The source rows the route paired with this table are what the function compares to.
+        if isinstance(span.source, pa.Table):
+            self._paired[table] = span.source
 
     def table_complete(self, table: str) -> None:
         return None
@@ -171,7 +179,16 @@ class _WholeTableFold:
         return frozenset()
 
     def finish(self) -> FoldResult:
-        return FoldResult(self._fn(self._tables, self._entry, self._config, sources=self._sources))
+        # The caller's own mapping reaches the validator untouched unless a table was paired from
+        # batches the caller does not hold whole.
+        held = self._sources or {}
+        extra = {
+            name: tbl
+            for name, tbl in self._paired.items()
+            if not isinstance(held.get(name), pa.Table) or held[name].num_rows != tbl.num_rows
+        }
+        sources = {**held, **extra} if extra else self._sources
+        return FoldResult(self._fn(self._tables, self._entry, self._config, sources=sources))
 
 
 def validator_function(name: str) -> _ValidatorFn:
@@ -183,6 +200,11 @@ def validator_function(name: str) -> _ValidatorFn:
     return _REGISTRY[name]
 
 
+def _require_params_mapping(entry: dict[str, Any], index: int) -> None:
+    if not isinstance(entry.get("params") or {}, dict):
+        raise ValueError(f"validators entry {index}: params must be a mapping.")
+
+
 def build_fold(
     entry: Any,
     config: dict[str, Any],
@@ -190,6 +212,7 @@ def build_fold(
     cap: int | None,
     budget: KeyStateBudget,
     sources: dict[str, pa.Table] | None,
+    index: int = 0,
 ) -> tuple[str, Fold]:
     """Open the fold for one ``validators:`` entry.
 
@@ -199,16 +222,27 @@ def build_fold(
     """
     if not isinstance(entry, dict):
         raise ValueError(
-            f"each validators: entry must be a dict with a 'name' key, "
-            f"got {type(entry).__name__!r}: {entry!r}"
+            f"validators entry {index} must be a dict with a 'name' key, "
+            f"got {type(entry).__name__!r}."
         )
     name: str = entry.get("name") or ""
     fn = _REGISTRY.get(name)
     if fn is None:
-        raise ValueError(f"unknown validator {name!r}. Known validators: {sorted(_REGISTRY)}")
+        raise ValueError(
+            f"validators entry {index} names an unknown validator. "
+            f"Known validators: {sorted(_REGISTRY)}"
+        )
+    _require_params_mapping(entry, index)
     spec = _SPECS.get(name)
     if spec is not None and spec.fn is fn:
-        return name, spec.factory(entry, config, cap, budget)
+        try:
+            fold = spec.factory(entry, config, cap, budget)
+        except ParamError as exc:
+            located = exc.at_entry(index)
+        else:
+            return name, fold
+        # Raised outside the handler so the error carries no exception context.
+        raise located
     return name, _WholeTableFold(fn, entry, config, sources)
 
 

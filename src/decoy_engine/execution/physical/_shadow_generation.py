@@ -52,6 +52,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine import reasons
 from decoy_engine.config import post_scan_integrity_requested
 from decoy_engine.execution._pipeline import classify_table_kinds
 from decoy_engine.execution.physical._shadow_diff_codes import (
@@ -76,6 +77,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SHADOW_ADMISSIBLE_FAKER_TYPES",
     "dispatch_synthesis",
+    "enforce_validators",
     "require_generation_shape",
     "require_pure_generation_shadowable",
     "run_synthesis_adapter",
@@ -237,6 +239,75 @@ def require_pure_generation_shadowable(
     _require_pure_job_scope(config, generate_table_names)
     _require_admitted_runtime_carriers(ctx)
     return plan_obj
+
+
+def enforce_validators(
+    ctx: ShadowContext,
+    outputs: Mapping[str, pa.Table],
+    sources: Mapping[str, pa.Table],
+    *,
+    plan_config: Mapping[str, Any] | None = None,
+) -> None:
+    """Judge a standalone shadow result, feed the run's session with it, or defer it by name.
+
+    The run's configured checks are the physical plan's own frozen judgement config
+    (`plan_config`), else the config the caller handed the context, else the generation payload
+    the plan embeds. A bound session must judge exactly that config; one that judges another
+    would give the rows a different verdict, so the run is refused.
+
+    A context whose `validation_owner` is set belongs to a caller that validates the result
+    itself (the unified slice, on the rendered bytes): it defers the tables to that owner through
+    the bound session, and the session's `close` refuses them if the owner never feeds them.
+    Deferring needs an open session to answer for the tables, so none, or a closed one, refuses.
+    Otherwise a bound session is fed and judges at `close`. With no session the configured checks
+    judge here.
+
+    Raises:
+        ValidatorFailedError: A configured validator found a failing row in `outputs`.
+        ValidatorStateError: The bound session does not judge the run's configuration
+            (`validator_config_not_owned`), or a deferral has no open session
+            (`validator_session_unavailable`).
+    """
+    from decoy_engine.errors import ValidatorFailedError, ValidatorStateError
+    from decoy_engine.execution.physical._inputs import thaw_config
+    from decoy_engine.validators import (
+        active_validation_session,
+        judging_config,
+        run_resident_validation,
+    )
+
+    raw: Mapping[str, Any] | None = None
+    if plan_config:
+        raw = thaw_config(plan_config)
+    elif ctx.validation_config:
+        raw = dict(ctx.validation_config)
+    elif ctx.plan is not None and ctx.plan.generation is not None:
+        raw = _decode_generation_config_shallow(ctx.plan.generation.config_json)
+    configured = judging_config(raw)
+    config = dict(raw) if configured is not None and raw is not None else None
+    session = active_validation_session()
+    if session is not None and config is not None and not session.owns(config):
+        raise ValidatorStateError(
+            code=reasons.runtime.VALIDATOR_CONFIG_NOT_OWNED,
+            message="the bound validation session does not hold this run's validators.",
+        )
+    if ctx.validation_owner is not None:
+        if session is not None:
+            session.defer(outputs, owner=ctx.validation_owner)
+        elif config is not None:
+            raise ValidatorStateError(
+                code=reasons.runtime.VALIDATOR_SESSION_UNAVAILABLE,
+                message="no open validation session exists to answer for the deferred tables.",
+            )
+        return
+    if session is not None:
+        session.observe_unobserved(outputs, sources)
+        return
+    if config is None:
+        return
+    report = run_resident_validation(outputs, config, sources)
+    if report is not None and not report.passed:
+        raise ValidatorFailedError(report)
 
 
 def _decode_generation_config_shallow(config_json: str) -> dict[str, Any]:
@@ -410,10 +481,6 @@ def _require_pure_job_scope(config: dict[str, Any], generate_table_names: frozen
     if config.get("subset") is not None:
         raise ShadowDifference(
             code=GENERATION_SHAPE_UNSUPPORTED, detail="config.subset is not None"
-        )
-    if config.get("validators"):
-        raise ShadowDifference(
-            code=GENERATION_SHAPE_UNSUPPORTED, detail="config.validators is non-empty"
         )
     if config.get("quarantine") is not None:
         raise ShadowDifference(

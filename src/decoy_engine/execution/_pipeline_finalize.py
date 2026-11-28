@@ -46,8 +46,10 @@ if TYPE_CHECKING:
 __all__ = [
     "compute_fidelity_reports",
     "compute_post_validation",
+    "finalize_quarantine",
     "finalize_validators_and_quarantine",
     "stamp_execution_metrics",
+    "stamp_validation",
 ]
 
 # `run_pipeline`'s execution-knob defaults. Owned here (not `_pipeline.py`,
@@ -381,11 +383,20 @@ def _unchecked_column_warnings(config: dict[str, Any], report: Any) -> list[Qual
     ]
 
 
+def stamp_validation(quality_metrics: dict[str, Any], config: dict[str, Any], report: Any) -> None:
+    """The one writer of `quality_metrics["validation"]`: the report, plus a warning for each
+    column `leak_check` was asked to check and did not."""
+    quality_metrics["validation"] = {"validators": dataclasses.asdict(report)}
+    unchecked = _unchecked_column_warnings(config, report)
+    if unchecked:
+        quality_metrics["validation"]["warnings"] = [dataclasses.asdict(w) for w in unchecked]
+
+
 def finalize_validators_and_quarantine(
     outputs: dict[str, pa.Table],
     *,
     config: dict[str, Any],
-    caller_sources: dict[str, pa.Table],
+    caller_sources: Mapping[str, Any],
     mask_row_errors: tuple[Any, ...],
     quality_metrics: dict[str, Any],
 ) -> tuple[dict[str, pa.Table], dict[str, set[int]]]:
@@ -408,18 +419,38 @@ def finalize_validators_and_quarantine(
     the first return value; post-validation uses the second to align the
     sources it scans to the filtered output.
     """
+    from decoy_engine.validators import active_validation_session, run_resident_validation
+
+    # Only resident tables pair with an output; `caller_sources` must be aligned to these outputs.
+    resident = {name: src for name, src in caller_sources.items() if isinstance(src, pa.Table)}
+    v_report = run_resident_validation(outputs, config, resident)
+    if v_report is not None:
+        stamp_validation(quality_metrics, config, v_report)
+    settled = finalize_quarantine(
+        outputs,
+        v_report,
+        config=config,
+        mask_row_errors=mask_row_errors,
+        quality_metrics=quality_metrics,
+    )
+    # finalize_quarantine returned, so it judged the report: nothing failed, or quarantine covered.
+    session = active_validation_session()
+    if session is not None and v_report is not None:
+        session.record_verdict(v_report)
+    return settled
+
+
+def finalize_quarantine(
+    outputs: dict[str, pa.Table],
+    v_report: Any,
+    *,
+    config: dict[str, Any],
+    mask_row_errors: tuple[Any, ...],
+    quality_metrics: dict[str, Any],
+) -> tuple[dict[str, pa.Table], dict[str, set[int]]]:
+    """The D8 tail of `finalize_validators_and_quarantine`: one combined quarantine pass over a
+    validator verdict (None when none ran) and the row errors, then the fail-closed remainder."""
     quarantine_removed: dict[str, set[int]] = {}
-    validators_config: list[Any] = config.get("validators") or []
-    v_report: Any = None
-    if validators_config:
-        from decoy_engine.validators._registry import validate as _run_validators
-
-        v_report = _run_validators(outputs, config, sources=caller_sources)
-        quality_metrics["validation"] = {"validators": dataclasses.asdict(v_report)}
-        unchecked = _unchecked_column_warnings(config, v_report)
-        if unchecked:
-            quality_metrics["validation"]["warnings"] = [dataclasses.asdict(w) for w in unchecked]
-
     if mask_row_errors:
         # Additive manifest key, counts only (no cell values -- trap T3).
         row_error_counts: dict[str, int] = {}

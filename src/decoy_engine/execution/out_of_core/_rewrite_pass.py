@@ -195,6 +195,10 @@ def _stream_table(
             )
             orphan_totals = [0] * len(joiners)
 
+            def _delivered(batches: Iterator[pa.RecordBatch]) -> Iterator[pa.RecordBatch]:
+                # The validators judge what the sink or the resident table receives, after rendering.
+                return _validate_batch.validate_delivered(validators, table_name, batches)
+
             def rewritten() -> Iterator[pa.RecordBatch]:
                 for raw_batch in _runner._iter_source_batches(
                     raw, batch_rows, fixed_schema=sink is not None
@@ -230,7 +234,6 @@ def _stream_table(
                     )
                     # Before the join: FK child keys are not yet remapped here (they decline admission).
                     collect_batch_vault(vault_config, table_name, raw_batch, out, vault_writer)
-                    _validate_batch.collect_batch_validation(validators, table_name, out)
                     for join_idx, joiner in enumerate(joiners):
                         # key_source pins every join to the immutable raw batch:
                         # edges overlapping on a child column must each key off
@@ -249,7 +252,7 @@ def _stream_table(
                     plan,
                     table_name,
                     raw,
-                    _declared.maybe_render(cast_run, table_name, rewritten()),
+                    _delivered(_declared.maybe_render(cast_run, table_name, rewritten())),
                     fixed_schema=fixed_schema,
                     fk_components=fk_components,
                     outgoing_edges=outgoing_edges,
@@ -263,7 +266,9 @@ def _stream_table(
                     on_stream_consumed=_release_joiners,
                 )
             else:
-                batches = list(_declared.maybe_render(cast_run, table_name, rewritten()))
+                batches = list(
+                    _delivered(_declared.maybe_render(cast_run, table_name, rewritten()))
+                )
                 table_out = (
                     assemble_resident(batches, fk_components)
                     if batches

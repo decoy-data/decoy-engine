@@ -42,13 +42,24 @@ def _render_and_seal(
     *,
     sources: Mapping[str, pa.Table | LazySource],
     table_kinds: Mapping[str, str],
+    config: dict[str, Any],
 ) -> ExecutionResult:
     """F06 for a lane that returns a finished result: render its outputs, judge them, then seal
-    last. The gate speaks after the render and before the seal, so a block leaves no sealed
-    artifact; with no cast run it judges the outputs as they are."""
+    last. Validators and the gate speak after the render and before the seal, in full-frame's
+    order, so a failure leaves no sealed artifact; with no cast run they judge the outputs as
+    they are."""
+    aligned: Mapping[str, Any] = sources
     if cast_run is not None:
-        outputs, _, _ = cast_run.post_mask(result.outputs, {})
+        outputs, aligned, _ = cast_run.post_mask(result.outputs, sources)
         result = dataclasses.replace(result, outputs=outputs)
+    outputs, _ = _pipeline_finalize.finalize_validators_and_quarantine(
+        dict(result.outputs),
+        config=config,
+        caller_sources=aligned,
+        mask_row_errors=(),
+        quality_metrics=result.quality_metrics,
+    )
+    result = dataclasses.replace(result, outputs=outputs)
     if (gate := active_gate()) is not None:
         gate.run_resident(result.outputs, sources, table_kinds)
     if cast_run is None:
@@ -120,7 +131,11 @@ def _run_full_frame(
     )
     if unified_slice_result is not None:
         return _render_and_seal(
-            cast_run, unified_slice_result, sources=caller_sources, table_kinds=ctx.table_kinds
+            cast_run,
+            unified_slice_result,
+            sources=caller_sources,
+            table_kinds=ctx.table_kinds,
+            config=ctx.config,
         )
 
     publish = ctx.publish

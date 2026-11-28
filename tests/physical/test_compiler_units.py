@@ -120,6 +120,26 @@ def test_plan_hash_stable_for_identical_inputs(tmp_path: Path) -> None:
     assert inputs_a.plan_hash() == inputs_b.plan_hash()
 
 
+def test_plan_hash_ignores_the_validator_count_and_keeps_the_resident_fit(
+    tmp_path: Path,
+) -> None:
+    """EXPECT-OFF-ROUTE S2: validators do not change the plan hash's route inputs, and the
+    resident-fit verdict that replaced them in S2's scope still does."""
+    import dataclasses
+
+    from decoy_engine.execution.pipeline import ResidentFit
+
+    inputs = _flat_inputs(tmp_path)
+    counted = dataclasses.replace(inputs, validators=({"name": "luhn"}, {"name": "npi"}))
+    assert counted.plan_hash() == inputs.plan_hash()
+    fit = ResidentFit("FIT", "code", 1, 1, 1, 1, 1)
+    refused = ResidentFit("INSUFFICIENT", "code", 1, 1, 1, 1, 1)
+    assert (
+        dataclasses.replace(inputs, resident_fit=fit).plan_hash()
+        != dataclasses.replace(inputs, resident_fit=refused).plan_hash()
+    )
+
+
 def test_plan_hash_changes_with_execution_mode(tmp_path: Path) -> None:
     inputs_auto = _flat_inputs(tmp_path)
     inputs_forced = _flat_inputs(tmp_path, execution_mode="full_frame")
@@ -393,7 +413,6 @@ def test_plan_hash_digest_construction_is_pinned(tmp_path: Path) -> None:
         inputs.execution_mode,
         inputs.fidelity_report,
         inputs.vault_writer_present,
-        len(inputs.validators),
         inputs.auto_chunk,
         inputs.chunk_size_rows,
         inputs.auto_chunk_threshold_rows,

@@ -238,3 +238,34 @@ def test_quarantine_validation_fail_lists_every_failing_row() -> None:
         (finding,) = report.findings
         assert finding.failing_row_count == 25_000
         assert finding.failing_row_indices == failing
+
+
+_NESTED_CONFIG = {
+    "validators": [
+        {"name": "regex_match", "columns": {"t": ["c"]}, "params": {"pattern": ".*"}},
+    ]
+}
+
+
+def test_a_validator_free_nested_run_does_not_inherit_the_outer_session() -> None:
+    from decoy_engine.validators import active_validation_session, bind_validation_session
+
+    with bind_validation_session(_NESTED_CONFIG, key_state_budget=lambda: None) as outer:
+        assert outer is not None
+        with bind_validation_session({}, key_state_budget=lambda: None) as inner:
+            assert inner is None
+            assert active_validation_session() is None, "the nested run saw the outer session"
+        assert active_validation_session() is outer, "the outer session was not restored"
+        outer.observe("t", pa.table({"c": ["a"]}))
+
+
+def test_a_nested_run_with_validators_binds_its_own_session() -> None:
+    from decoy_engine.validators import active_validation_session, bind_validation_session
+
+    with bind_validation_session(_NESTED_CONFIG, key_state_budget=lambda: None) as outer:
+        with bind_validation_session(_NESTED_CONFIG, key_state_budget=lambda: None) as inner:
+            assert inner is not outer
+            assert active_validation_session() is inner
+            inner.observe("t", pa.table({"c": ["a"]}))
+        assert active_validation_session() is outer
+        outer.observe("t", pa.table({"c": ["a"]}))

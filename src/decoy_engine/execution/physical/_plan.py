@@ -15,7 +15,8 @@ resource estimate, determinism binding, or diagnostic-obligation set here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import pyarrow as pa
@@ -237,3 +238,7 @@ class PhysicalPlan:
     plan_hash: str
     synthesis: SynthesisStage | None
     tables: tuple[PhysicalTable, ...]
+    # What decides this plan's checks (entries, tables, relationships, quarantine), frozen with the
+    # captured inputs, so a run that executes the plan alone judges what was compiled. Judgement
+    # only: no route reads it, and it is not part of the plan's identity.
+    validation_config: Mapping[str, Any] | None = field(default=None, repr=False, compare=False)
