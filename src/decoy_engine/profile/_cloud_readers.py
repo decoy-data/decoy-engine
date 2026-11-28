@@ -226,7 +226,10 @@ def _csv_sample_from_window(
     with none (the proof read still tells it apart from a parse failure by type).
     """
     if len(window) < size:
-        window = window.rsplit(b"\n", 1)[0] + b"\n"
+        # One copy up to the last newline (`BytesIO` shares a `bytes` object it is given);
+        # a window with no newline is parsed whole, as one line.
+        cut = window.rfind(b"\n")
+        window = window[: cut + 1] if cut >= 0 else window + b"\n"
     try:
         return pd.read_csv(
             io.BytesIO(window),
@@ -259,6 +262,11 @@ def _csv_schema_from_window(
     return arrow_adapter.table_from_pandas(provider, head).schema
 
 
+def _line_ends(data: bytes) -> int:
+    """How many lines `data` ends, by `\n`, `\r` or `\r\n`: a bound on the rows in it."""
+    return data.count(b"\n") + data.count(b"\r") - data.count(b"\r\n")
+
+
 def _csv_rows_from_ranges(
     size: int,
     fetch: Fetch,
@@ -271,8 +279,10 @@ def _csv_rows_from_ranges(
     Fetches the first window, then ranged windows of doubling size appended to the buffer
     (a byte is never fetched twice), until the buffer cut at its last newline parses to
     `n + 1` rows or the buffer is the whole object. One row past `n` proves the `n`-th row
-    was complete. A `ParserError` on a prefix may be a quoted field cut open at the last
-    newline, so it fetches again; on the whole object it is raised as `to_frame` would.
+    was complete. A prefix that ends `n` lines or fewer cannot hold `n + 1` rows and is not
+    parsed, so a sample that needs the whole object costs one parse, not one per window.
+    A `ParserError` on a prefix may be a quoted field cut open at the last newline, so it
+    fetches again; on the whole object it is raised as `to_frame` would.
     A ranged response shorter than asked means the object shrank or the store misbehaved;
     it raises `source_changed` rather than looping or returning a short frame. The bytes
     fetched stop at `_CSV_SAMPLE_MAX_BYTES`; rows not found by then on a larger object raise
@@ -285,25 +295,30 @@ def _csv_rows_from_ranges(
         if end > len(buffer):
             buffer += _fetch_span(fetch, len(buffer), end - 1, provider)
         whole = len(buffer) >= size
-        unparsed = False
-        try:
-            frame = _csv_sample_from_window(buffer, size, n + 1, lexeme_columns)
-        except PROOF_READ_ERRORS:
-            unparsed = True
-        if unparsed:
-            if whole:
-                # Row `n + 1` is on the object and does not parse: a row exists past `n`,
-                # which is all the proof asks. The `n` rows themselves must still parse,
-                # and an error there is raised as `to_frame` would. Read outside the
-                # `except` block so the first error is not left as the second's context.
-                return _csv_sample_from_window(buffer, size, n, lexeme_columns)
-        else:
-            if len(frame) <= n:
+        # Each row ends a line, so a prefix that ends `n` lines or fewer cannot hold row
+        # `n + 1` and is not parsed: its frame would only be repeated by a later parse.
+        if whole or _line_ends(buffer) > n:
+            # An earlier window's frame is released before the next parse, so the peak is
+            # one frame on top of the fetched bytes, not two.
+            frame = None
+            try:
+                frame = _csv_sample_from_window(buffer, size, n + 1, lexeme_columns)
+            except PROOF_READ_ERRORS:
+                pass
+            if frame is None:
+                if whole:
+                    # Row `n + 1` is on the object and does not parse: a row exists past `n`,
+                    # which is all the proof asks. The `n` rows themselves must still parse,
+                    # and an error there is raised as `to_frame` would. Read outside the
+                    # `except` block so the first error is not left as the second's context.
+                    return _csv_sample_from_window(buffer, size, n, lexeme_columns)
+            elif len(frame) <= n:
                 if whole:
                     return frame
             else:
                 # Row `n + 1` only proved row `n` complete; the sample is parsed again from
                 # `n` rows so that row cannot change a column's inferred type.
+                frame = None
                 return _csv_sample_from_window(buffer, size, n, lexeme_columns)
         if not whole and len(buffer) >= _CSV_SAMPLE_MAX_BYTES:
             raise SampleWindowExceeded()

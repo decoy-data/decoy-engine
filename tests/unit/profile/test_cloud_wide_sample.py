@@ -45,8 +45,9 @@ _CHILD = textwrap.dedent(
 
     data = open(sys.argv[1], "rb").read()
     mode, margin, rows = sys.argv[2], int(sys.argv[4]), int(sys.argv[5])
-    limit = address_space() + margin
-    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    base = address_space()
+    if margin:
+        resource.setrlimit(resource.RLIMIT_AS, (base + margin, base + margin))
     if mode == "main":
         frame = pd.read_csv(io.BytesIO(data), nrows=rows)
     elif mode == "control":
@@ -57,6 +58,9 @@ _CHILD = textwrap.dedent(
         source = _cloud_readers.S3CsvSource({"format": "csv", "bucket": "b", "key": "k"})
         frame = source.sample_frame(rows) if mode == "sample" else source.schema()
     print("rows", len(frame))
+    for line in open("/proc/self/status"):
+        if line.startswith("VmPeak"):
+            print("peak", int(line.split()[1]) * 1024 - base)
     """
 )
 
@@ -72,9 +76,9 @@ def wide_csv(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return path
 
 
-def _run(path: Path, mode: str) -> subprocess.CompletedProcess[str]:
+def _run(path: Path, mode: str, margin: int = MARGIN) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - argv is the test interpreter and fixed paths
-        [sys.executable, "-c", _CHILD, str(path), mode, str(ROOT), str(MARGIN), str(ROWS)],
+        [sys.executable, "-c", _CHILD, str(path), mode, str(ROOT), str(margin), str(ROWS)],
         capture_output=True,
         text=True,
         timeout=300,
@@ -93,3 +97,22 @@ def test_the_limit_catches_a_low_memory_false_parse(wide_csv: Path) -> None:
     done = _run(wide_csv, "control")
     assert done.returncode != 0
     assert "MemoryError" in done.stderr
+
+
+def _peak(path: Path, mode: str) -> int:
+    done = _run(path, mode, margin=0)
+    assert done.returncode == 0, done.stderr[-300:]
+    return int(done.stdout.split("peak ")[1].split()[0])
+
+
+def test_sample_peak_is_one_parse_over_the_fetched_bytes(wide_csv: Path) -> None:
+    """The ranged sample parses once, over the bytes it fetched, never over an earlier frame.
+
+    `main`'s parse runs on bytes already in memory. The sample also holds its own copy of the
+    object, and the address space its ranged pieces used (the allocator may keep it mapped),
+    so `3 * size` (93 MiB here) is allowed on top. A prefix frame kept while the next window
+    parses, or a parse per window, goes over. Measured on Linux (Dell WSL2 and GCP): `main`
+    + 142 MiB with a parse per window, + 109 MiB with only the earlier frame released, + 77 MiB
+    with one parse."""
+    size = wide_csv.stat().st_size
+    assert _peak(wide_csv, "sample") <= _peak(wide_csv, "main") + 3 * size
