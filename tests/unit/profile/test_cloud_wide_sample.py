@@ -105,6 +105,7 @@ def _peak(path: Path, mode: str) -> int:
     return int(done.stdout.split("peak ")[1].split()[0])
 
 
+@pytest.mark.serial
 def test_sample_peak_is_one_parse_over_the_fetched_bytes(wide_csv: Path) -> None:
     """The ranged sample parses once, over the bytes it fetched, never over an earlier frame.
 
