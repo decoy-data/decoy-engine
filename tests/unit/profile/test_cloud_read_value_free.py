@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -80,18 +81,70 @@ def _far_date_parquet() -> bytes:
 
 
 @pytest.mark.parametrize("provider", ["s3", "gcs"])
-def test_parquet_to_frame_unrepresentable_column_is_coded(
-    monkeypatch: pytest.MonkeyPatch, provider: str
+@pytest.mark.parametrize("read", ["sample", "to_frame"])
+def test_parquet_unrepresentable_column_is_coded(
+    monkeypatch: pytest.MonkeyPatch, provider: str, read: str
 ) -> None:
-    """The bounded `to_frame` converts through the one source-read conversion, as `main`'s did:
-    the column pandas cannot hold leaves as the coded error that names it, with no date."""
+    """The bounded reads convert through the one source-read conversion, as `main`'s local
+    readers do: the column pandas cannot hold leaves as the coded error that names it, with no
+    date, through the strict read guard unchanged."""
     _serve(monkeypatch, provider, _far_date_parquet())
     with pytest.raises(ExecutionError) as info:
-        _source(provider, "parquet").to_frame()
+        _run(_source(provider, "parquet"), read)
     assert info.value.code == reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE
     assert "'d'" in str(info.value)
     assert "10000" not in _everything(info.value) and "2932897" not in _everything(info.value)
     assert info.value.__cause__ is None and info.value.__context__ is None
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+@pytest.mark.parametrize(
+    ("stage", "read"), [("convert", "sample"), ("convert", "to_frame"), ("attrs", "to_frame")]
+)
+def test_parquet_conversion_failure_is_scrubbed(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    provider: str,
+    read: str,
+    stage: str,
+) -> None:
+    """Any other failure of the Arrow-to-pandas step (the conversion or the `PANDAS_ATTRS`
+    metadata) runs inside the strict read guard, so it leaves as the read error, value-free."""
+    secret = f"{CANARY} /srv/private/path.parquet"
+    if stage == "convert":
+
+        def broken(*_a: Any, **_k: Any) -> pd.DataFrame:
+            raise ValueError(secret)
+
+        monkeypatch.setattr(cr, "arrow_to_frame", broken)
+        if read == "sample":
+            monkeypatch.setattr(
+                "decoy_engine.profile._readers.arrow_to_frame", broken, raising=True
+            )
+    else:
+
+        def bad_json(*_a: Any, **_k: Any) -> Any:
+            raise ValueError(secret)
+
+        monkeypatch.setattr(
+            "decoy_engine.fileaccess.adapters.arrow.json", SimpleNamespace(loads=bad_json)
+        )
+    data = _far_date_parquet() if stage == "convert" else _attrs_parquet()
+    _serve(monkeypatch, provider, data)
+    with caplog.at_level(logging.DEBUG), pytest.raises(Exception) as info:
+        _run(_source(provider, "parquet"), read)
+    assert CANARY not in _everything(info.value) and "/srv/private" not in _everything(info.value)
+    assert CANARY not in caplog.text
+    assert isinstance(info.value, FileAccessReadError)
+
+
+def _attrs_parquet() -> bytes:
+    """A frame with `attrs`, so the read restores them from the `PANDAS_ATTRS` metadata."""
+    frame = pd.DataFrame({"id": [1, 2]})
+    frame.attrs = {"source": "unit"}
+    sink = io.BytesIO()
+    frame.to_parquet(sink)
+    return sink.getvalue()
 
 
 @pytest.mark.parametrize(
