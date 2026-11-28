@@ -149,6 +149,8 @@ SAME_ROWS = [
     ("DN-R1-2f nan in list", [float("nan")], [None]),
     ("nested temporal", [dt.date(2020, 1, 1), 1], [np.datetime64("2020-01-01", "D"), 1.0]),
     ("uuid", uuid.UUID(int=1), uuid.UUID(int=1)),
+    # Past the ns range: read through `asm8`, never `.value`.
+    ("DN-P1-2 second unit", pd.Timestamp(np.datetime64(2**40, "s")), np.datetime64(2**40, "s")),
 ]
 
 

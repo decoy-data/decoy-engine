@@ -60,10 +60,14 @@ def _col(cells: list[object]) -> pd.Series:
     return pd.Series(arr, dtype=object)
 
 
-def _frames(src: list[object], out: list[object]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    source = pd.DataFrame({"v": _col(src), "n": [f"src{i}" for i in range(ROWS)]})
-    output = pd.DataFrame({"v": _col(out), "n": [f"out{i}" for i in range(ROWS)]})
+def _frames(src: Cells, out: Cells) -> tuple[pd.DataFrame, pd.DataFrame]:
+    source = pd.DataFrame({"v": _column(src), "n": [f"src{i}" for i in range(ROWS)]})
+    output = pd.DataFrame({"v": _column(out), "n": [f"out{i}" for i in range(ROWS)]})
     return source, output
+
+
+def _column(cells: Cells) -> pd.Series:
+    return cells if isinstance(cells, pd.Series) else _col(cells)
 
 
 def _record() -> np.void:
@@ -71,6 +75,16 @@ def _record() -> np.void:
     arr = np.full(2, (9917, 9917.5), dtype=[("a", "i4"), ("b", "f8")])
     arr.flags.writeable = False
     return arr[0]
+
+
+def _record_categories(reverse: bool) -> pd.Series:
+    # Two read-only record categories; reversing both the categories and the codes keeps the
+    # values, so only a reader of the codes would see a change.
+    arr = np.array([(9917, 1.5), (9918, 2.5)], dtype=[("a", "i4"), ("b", "f8")])
+    arr.flags.writeable = False
+    categories = pd.Index([arr[1], arr[0]] if reverse else [arr[0], arr[1]], dtype=object)
+    codes = [(i + reverse) % 2 for i in range(ROWS)]
+    return pd.Series(pd.Categorical.from_codes(codes, categories=categories))
 
 
 def _collided(i: int, reverse: bool) -> set[int]:
@@ -81,8 +95,9 @@ def _collided(i: int, reverse: bool) -> set[int]:
     return box
 
 
+Cells = list[object] | pd.Series
 # name: (source cells, output cells, the pinned policy row of the target)
-FIXTURES: dict[str, tuple[list[object], list[object], tuple[Any, ...]]] = {
+FIXTURES: dict[str, tuple[Cells, Cells, tuple[Any, ...]]] = {
     "V1-1 dict null key vs empty dict": (
         [{"k": None} if i % 2 else {} for i in range(ROWS)],
         [{"k": None} if i % 2 else {} for i in range(ROWS)],
@@ -106,6 +121,11 @@ FIXTURES: dict[str, tuple[list[object], list[object], tuple[Any, ...]]] = {
     "V1-3 read-only record": (
         [_record() if i == 3 else i for i in range(ROWS)],
         [_record() if i == 3 else i for i in range(ROWS)],
+        REFUSED,
+    ),
+    "CX-3a record categories, codes reversed": (
+        _record_categories(False),
+        _record_categories(True),
         REFUSED,
     ),
 }
