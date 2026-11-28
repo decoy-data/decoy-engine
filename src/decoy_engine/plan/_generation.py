@@ -38,6 +38,7 @@ from decoy_engine._config_text import (
     Refusal,
     config_position,
     config_refusal,
+    config_root_position,
     passthrough,
 )
 from decoy_engine._error_base import raise_bare
@@ -147,7 +148,7 @@ def statistical_refusal(code: str, declared: str, table_name: object, col_name: 
     exception text reaches it. An unreadable snapshot gets a fixed phrase and, for a relative
     value, the fixed rule hint; the declared value and the resolved path are config-derived and
     stay out. The key is the column's position."""
-    at_column = config_position("tables", Name(table_name), "generate_columns", Name(col_name))
+    at_column = config_root_position("tables", Name(table_name), "generate_columns", Name(col_name))
     if code == reasons.plan.REFERENCE_FANOUT_MISSING:
         return config_refusal(
             at_column,
@@ -477,7 +478,7 @@ def check_fitted_references(
             snapshot_file = col.get("snapshot_file")
             if not snapshot_file:
                 missing = config_refusal(
-                    config_position(
+                    config_root_position(
                         "tables", Name(table_name), "generate_columns", Name(name), "snapshot_file"
                     ),
                     Problem.MISSING,
@@ -497,7 +498,7 @@ def check_fitted_references(
                 conflict = [k for k in _FITTED_CONFLICT_KEYS if col.get(k) is not None]
                 if conflict:
                     clash = config_refusal(
-                        config_position(
+                        config_root_position(
                             "tables",
                             Name(table_name),
                             "generate_columns",
