@@ -418,10 +418,6 @@
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
     },
-    "plan/_checks_bucketize.py::check_bucketize_config::057db99e15": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
     "plan/_checks_bucketize.py::check_bucketize_config::234f3cf292": {
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
@@ -602,18 +598,6 @@
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
     },
-    "plan/_checks_top_code.py::_reject_unusable_bound::3f62b0b833": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks_top_code.py::_reject_unusable_bound::4022c11eaf": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks_top_code.py::_reject_unusable_bound::4c54d5b0c5": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
     "plan/_checks_top_code.py::check_top_code_config::34d926f3a6": {
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
@@ -622,31 +606,11 @@
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
     },
-    "plan/_checks_top_code.py::check_top_code_config::52a0e5ab39": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks_top_code.py::check_top_code_config::766fa2e77e": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks_top_code.py::check_top_code_config::8c62c8d8cc": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
     "plan/_checks_top_code.py::check_top_code_config::8e48b8eac8": {
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
     },
-    "plan/_checks_top_code.py::check_top_code_config::98479b75db": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
     "plan/_checks_truncate.py::check_truncate_config::ac405fec5e": {
-      "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
-      "max": 1
-    },
-    "plan/_checks_truncate.py::check_truncate_config::dd1301c7f4": {
       "reason": "Message or path built at the site from a runtime value; migrates to config_refusal in AE5b (docs/plans/2026-11-25-f31-ae5-plan-amendment.md).",
       "max": 1
     },

@@ -28,16 +28,46 @@ import math
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._config_text import ConfigPosition, Name, Problem, config_position, config_refusal
 from decoy_engine._nested_json import nested_children
 from decoy_engine.contracts.bucketize_width import EXACT_INT_BOUND
 from decoy_engine.contracts.label_text import is_utf8_text
 from decoy_engine.execution._strategies._top_code import _PRESETS
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
+
+KNOWN_PRESETS = tuple(sorted(_PRESETS))
+_BOUND_TYPE_HINT = (
+    "Set a numeric bound (a numeric-looking string does not count; the emitter must "
+    "coerce it to a real number)."
+)
+_BOUND_FINITE_HINT = (
+    "A NaN/inf bound never fires its tail comparison, so nothing is generalized and the "
+    "column passes through unmasked; set a finite numeric bound."
+)
+_BOUND_RANGE_HINT = (
+    "A bound at or beyond 2**53 cannot be compared exactly against a null-bearing column "
+    "(Arrow int64+null widens to float64), so a true tail value can round to the bound and "
+    "escape generalization, a leak. Use a bound with magnitude below 2**53."
+)
+_PRESET_HINT = (
+    "An unresolved preset leaves the column unmasked at run; set a known preset or drop "
+    "'preset' and set a numeric 'cap' + 'over_label' instead."
+)
+_OVER_LABEL_HINT = (
+    "A numeric cap needs a non-empty 'over_label' that encodes as UTF-8, the aggregate "
+    'label for values above cap (e.g. "90+").'
+)
+_UNDER_LABEL_HINT = (
+    "A floor needs a non-empty 'under_label' that encodes as UTF-8, the aggregate label "
+    "for values below floor."
+)
+_FLOOR_GE_CAP_HINT = (
+    "floor must be strictly less than cap, or every value falls into one tail or the "
+    "other with nothing left in range."
+)
 
 
-def _reject_unusable_bound(
-    value: Any, *, code: str, path: str, kind: str, where: str
-) -> int | float:
+def _reject_unusable_bound(value: Any, *, code: str, at: ConfigPosition) -> int | float:
     """Raise PlanCompileError if `value` cannot serve as an EXACT top_code bound;
     otherwise RETURN it narrowed to `int | float`.
 
@@ -52,37 +82,14 @@ def _reject_unusable_bound(
     a PHI leak Codex reproduced). `where` is the human-readable column locator.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise PlanCompileError(
-            code=code,
-            path=path,
-            message=(
-                f"top_code column {where} has invalid {kind} "
-                f"({type(value).__name__}). Set a numeric {kind} (a numeric-looking "
-                "string does not count; the emitter must coerce it to a real number)."
-            ),
-        )
+        type_refusal = config_refusal(at, Problem.WRONG_TYPE, got=value, hint=_BOUND_TYPE_HINT)
+        raise refusal_error(code, type_refusal)
     if isinstance(value, float) and not math.isfinite(value):
-        raise PlanCompileError(
-            code=code,
-            path=path,
-            message=(
-                f"top_code column {where} has non-finite {kind}. A NaN/inf "
-                f"{kind} never fires its tail comparison, so nothing is generalized "
-                "and the column passes through unmasked; set a finite numeric bound."
-            ),
-        )
+        finite_refusal = config_refusal(at, Problem.NOT_ALLOWED, hint=_BOUND_FINITE_HINT)
+        raise refusal_error(code, finite_refusal)
     if abs(value) >= EXACT_INT_BOUND:
-        raise PlanCompileError(
-            code=code,
-            path=path,
-            message=(
-                f"top_code column {where} has a {kind} whose magnitude is at "
-                f"or beyond 2**53 ({EXACT_INT_BOUND}). Past that, float64 cannot compare "
-                "it exactly against a null-bearing column (Arrow int64+null widens to "
-                "float64), so a true tail value can round to the bound and escape "
-                f"generalization -- a leak. Use a {kind} with magnitude below 2**53."
-            ),
-        )
+        range_refusal = config_refusal(at, Problem.NOT_ALLOWED, hint=_BOUND_RANGE_HINT)
+        raise refusal_error(code, range_refusal)
     # Every reject path above raised; the value is a finite in-range number.
     return value
 
@@ -205,39 +212,49 @@ def check_top_code_config(config: dict[str, Any]) -> None:
                 # `preset` must be a hashable str before the membership test: a
                 # list/dict preset would raise `TypeError: unhashable type`.
                 if not isinstance(preset, str) or preset not in _PRESETS:
-                    raise PlanCompileError(
-                        code=reasons.plan.TOP_CODE_BOUNDS_UNRESOLVABLE,
-                        path=f"tables.{table_name}.columns.{col_name}.provider_config.preset",
-                        message=(
-                            f"top_code column {where} has a preset that is "
-                            f"not a known preset (known: {sorted(_PRESETS)!r}). An "
-                            "unresolved preset leaves the column unmasked at run; set "
-                            "a known preset or drop 'preset' and set a numeric 'cap' "
-                            "+ 'over_label' instead."
+                    preset_refusal = config_refusal(
+                        config_position(
+                            "tables",
+                            Name(table_name),
+                            "columns",
+                            Name(col_name),
+                            "provider_config",
+                            "preset",
                         ),
+                        Problem.NOT_FOUND,
+                        choices=KNOWN_PRESETS,
+                        hint=_PRESET_HINT,
                     )
+                    raise refusal_error(reasons.plan.TOP_CODE_BOUNDS_UNRESOLVABLE, preset_refusal)
                 cap: int | float = _PRESETS[preset]["cap"]
             else:
                 cap = _reject_unusable_bound(
                     pc.get("cap"),
                     code=reasons.plan.TOP_CODE_BOUNDS_UNRESOLVABLE,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.cap",
-                    kind="cap",
-                    where=where,
+                    at=config_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "cap",
+                    ),
                 )
                 over_label = pc.get("over_label")
                 if not is_utf8_text(over_label) or not over_label:
-                    raise PlanCompileError(
-                        code=reasons.plan.TOP_CODE_MISSING_OVER_LABEL,
-                        path=(f"tables.{table_name}.columns.{col_name}.provider_config.over_label"),
-                        message=(
-                            f"top_code column {col_name!r} in table "
-                            f"{table_name!r} sets a numeric cap but has no "
-                            "non-empty 'over_label' that encodes as UTF-8. Set "
-                            "'over_label' to the aggregate label for values "
-                            'above cap (e.g. "90+").'
+                    over_refusal = config_refusal(
+                        config_position(
+                            "tables",
+                            Name(table_name),
+                            "columns",
+                            Name(col_name),
+                            "provider_config",
+                            "over_label",
                         ),
+                        Problem.MISSING,
+                        hint=_OVER_LABEL_HINT,
                     )
+                    raise refusal_error(reasons.plan.TOP_CODE_MISSING_OVER_LABEL, over_refusal)
 
             # Absence keyed on `"floor" not in pc`, NOT `floor is None`: an
             # explicit `floor: None` is a present-but-malformed bound (operator
@@ -266,30 +283,41 @@ def check_top_code_config(config: dict[str, Any]) -> None:
             floor = _reject_unusable_bound(
                 pc.get("floor"),
                 code=reasons.plan.TOP_CODE_INVALID_FLOOR,
-                path=f"tables.{table_name}.columns.{col_name}.provider_config.floor",
-                kind="floor",
-                where=where,
+                at=config_position(
+                    "tables",
+                    Name(table_name),
+                    "columns",
+                    Name(col_name),
+                    "provider_config",
+                    "floor",
+                ),
             )
             under_label = pc.get("under_label")
             if not is_utf8_text(under_label) or not under_label:
-                raise PlanCompileError(
-                    code=reasons.plan.TOP_CODE_MISSING_UNDER_LABEL,
-                    path=(f"tables.{table_name}.columns.{col_name}.provider_config.under_label"),
-                    message=(
-                        f"top_code column {col_name!r} in table {table_name!r} "
-                        "sets 'floor' but has no non-empty 'under_label' that encodes as UTF-8. "
-                        "Set 'under_label' to the "
-                        "aggregate label for values below floor."
+                under_refusal = config_refusal(
+                    config_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "under_label",
                     ),
+                    Problem.MISSING,
+                    hint=_UNDER_LABEL_HINT,
                 )
+                raise refusal_error(reasons.plan.TOP_CODE_MISSING_UNDER_LABEL, under_refusal)
             if floor >= cap:
-                raise PlanCompileError(
-                    code=reasons.plan.TOP_CODE_FLOOR_GE_CAP,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.floor",
-                    message=(
-                        f"top_code column {col_name!r} in table {table_name!r} "
-                        "has a floor at or above its cap. floor must be "
-                        "strictly less than cap, or every value falls into "
-                        "one tail or the other with nothing left in range."
+                order_refusal = config_refusal(
+                    config_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "floor",
                     ),
+                    Problem.NOT_ALLOWED,
+                    hint=_FLOOR_GE_CAP_HINT,
                 )
+                raise refusal_error(reasons.plan.TOP_CODE_FLOOR_GE_CAP, order_refusal)
