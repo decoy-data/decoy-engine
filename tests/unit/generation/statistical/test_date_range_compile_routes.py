@@ -5,8 +5,12 @@ plan compile, on window admission and on a direct `sample_column`, with
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from decoy_engine import reasons
@@ -21,8 +25,14 @@ from decoy_engine.generation.statistical import (
     sample_column,
     spec_from_dict,
 )
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import _generate_column
 from decoy_engine.generators.columns import ColumnGenerator
+from decoy_engine.plan import PlanCompileError, compile_plan
+from decoy_engine.plan._checks import check_statistical_columns
+from decoy_engine.profile import Profile
+from decoy_engine.quality.snapshot import compute_distribution_snapshot
+from decoy_engine.reason_adapter import reason_from_exception
 
 CODE = reasons.plan.GENERATION_UNBOUNDED_COLUMN
 COMPILE_TEXT = "statistical.c: not allowed. sampled years must lie in 1..9998"
@@ -85,13 +95,47 @@ def test_sample_column_refuses_before_any_draw() -> None:
     assert "9999" not in str(caught.value)
 
 
-def test_plan_compile_reports_the_public_code() -> None:
-    from decoy_engine.reason_adapter import reason_from_exception
+def _compile_config(tmp_path: Path) -> dict[str, Any]:
+    df = pd.DataFrame({"when": pd.date_range("2001-01-01", periods=40, freq="40D")})
+    snap = compute_distribution_snapshot(df)
+    snap["columns"]["when"]["stats"]["year_bins"] = [
+        {"year": 2001, "count": 30},
+        {"year": 9999, "count": 3},
+    ]
+    path = tmp_path / "snapshot.json"
+    path.write_text(json.dumps(snap), encoding="utf-8")
+    col = {"name": "when", "type": "statistical", "snapshot_file": str(path)}
+    return {
+        "global_settings": {"seed": 1},
+        "tables": [{"name": "t", "row_count": 10, "generate_columns": [col]}],
+    }
 
-    with pytest.raises(StatisticalSpecError) as caught:
-        check_degenerate(_spec(FAR_BIN))
-    record = reason_from_exception(caught.value)
+
+def test_plan_compile_reports_the_public_code_value_free(tmp_path: Path) -> None:
+    """The refusal comes through plan compile's own statistical_refusal path, not a direct call."""
+    cfg = _compile_config(tmp_path)
+    with pytest.raises(PlanCompileError) as caught:
+        check_statistical_columns(cfg)
+    assert caught.value.code == "generation_unbounded_column"
+    assert caught.value.path == "tables.t.generate_columns.when"
+    assert "9999" not in str(caught.value) and "9999" not in caught.value.message
+    with pytest.raises(PlanCompileError) as full:
+        compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
+    assert full.value.code == "generation_unbounded_column"
+    assert str(full.value) == str(caught.value)
+    assert "9999" not in str(full.value)
+    record = reason_from_exception(full.value)
     assert (record.namespace, record.code) == ("plan", "generation_unbounded_column")
+
+
+def _profile() -> Profile:
+    return Profile(
+        schema_version=1,
+        tables=(),
+        relationships=(),
+        profiled_at=datetime.now(timezone.utc),
+        decoy_engine_version="test",
+    )
 
 
 CONTROLS = {

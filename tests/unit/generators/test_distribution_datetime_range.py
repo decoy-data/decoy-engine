@@ -223,3 +223,13 @@ def test_a_bound_pandas_reads_beyond_the_domain_is_refused_not_nulled() -> None:
     snap = _snap("2020-01-01", "Dec 31 9999", [(2020, 5)])
     with pytest.raises(FittedRangeError):
         ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
+
+
+@pytest.mark.parametrize("bound", [1_577_836_800_000_000_000, 2020.5, ["2020-01-01"]])
+def test_a_non_string_bound_is_unparseable_not_out_of_range(bound: Any) -> None:
+    # Main's unparseable-bound path emits nulls. A non-string must not be stringified and then
+    # refused as if it named a far date.
+    snap = _snap("2020-01-01T00:00:00", "2020-12-31T00:00:00", [(2020, 5)])
+    snap["max"] = bound
+    out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
+    assert out.isna().all()
