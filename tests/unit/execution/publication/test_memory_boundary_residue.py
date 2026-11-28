@@ -85,12 +85,15 @@ def test_a_failed_abort_removal_still_closes_the_held_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     txn = _local.LocalOutputTxn(tmp_path / "out", "dir", "exclusive", "publication")
-    assert txn._held.fd >= 0
+    stage = Path(txn.local_stage_path())
+    assert txn._held.fd >= 0 and stage.is_dir()
     fired = removal_fault(monkeypatch, STAGE)
     raises_memory(txn.abort)
     assert fired
     assert txn._held.fd == -1  # closed before the error reached the caller
-    txn.abort()  # a second abort returns early and stays quiet
+    assert txn.abort() is None  # L13: the retry runs, removes the kept stage and stays quiet
+    assert not stage.exists() and txn._stage is None
+    assert txn.abort() is None  # finished and nothing left: a no-op
 
 
 @pytest.mark.parametrize("memory_failure", [False, True], ids=["success", "memory_failure"])

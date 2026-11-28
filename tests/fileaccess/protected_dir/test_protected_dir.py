@@ -22,6 +22,7 @@ from decoy_engine.fileaccess import (
     open_protected_dir,
     protected_scratch_dir,
 )
+from decoy_engine.fileaccess.cleanup import CleanupLedger
 from tests.fileaccess.support import ALL_ACCESS
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Windows lane is L0.1w")
@@ -186,16 +187,19 @@ def test_p0_strict_refused_caller_path_but_live_root_children_work(tmp_path: Pat
             with pytest.raises(fileaccess.FileAccessUnavailable):
                 with protected_scratch_dir(tmp_path / "callerparent", "x-"):
                     pass
-            with pytest.raises(fileaccess.FileAccessUnavailable):
-                fileaccess.create_protected_dir(tmp_path / "exclusive")
+            with CleanupLedger() as ledger:
+                with pytest.raises(fileaccess.FileAccessUnavailable):
+                    fileaccess.create_protected_dir(tmp_path / "exclusive", ledger=ledger)
             assert not (tmp_path / "exclusive").exists()
             assert not (tmp_path / "caller").exists()
             assert not (tmp_path / "callerparent").exists()
             with protected_scratch_dir(None, "s-") as root:
                 child = open_protected_dir(root / "a" / "b", create=True, parents=True)
                 assert _mode(child) == 0o700
-                exclusive = fileaccess.create_protected_dir(child / "exclusive")
-                assert exclusive == child / "exclusive" and _mode(exclusive) == 0o700
+                with CleanupLedger() as ledger:
+                    exclusive = fileaccess.create_protected_dir(child / "exclusive", ledger=ledger)
+                    assert exclusive == child / "exclusive" and _mode(exclusive) == 0o700
+                assert not exclusive.exists()  # the ledger removed what it made
                 with protected_scratch_dir(root, "n-") as nested:
                     assert nested.parent == root
                 escape = root / ".." / "escaped"
@@ -312,3 +316,29 @@ def test_a_dotdot_component_inside_a_live_root_is_refused(tmp_path: Path) -> Non
         with pytest.raises(ProtectedDirUnsafe):
             open_protected_dir(root / "real" / ".." / "phys", create=True)
         assert not (root / "phys").exists()
+
+
+def test_create_protected_dir_refuses_a_present_name_and_leaves_it(tmp_path: Path) -> None:
+    (tmp_path / "taken").mkdir()
+    (tmp_path / "taken" / "keep.txt").write_text("caller data")
+    with CleanupLedger() as ledger:
+        with pytest.raises(ProtectedDirUnsafe):
+            fileaccess.create_protected_dir(tmp_path / "taken", ledger=ledger)
+    assert (tmp_path / "taken" / "keep.txt").read_text() == "caller data"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_l19b_dotdot_after_a_link_is_refused_before_any_create(tmp_path: Path) -> None:
+    base, other = tmp_path / "base", tmp_path / "other"
+    base.mkdir()
+    (other / "deep").mkdir(parents=True)
+    (base / "victim").write_text("caller data")
+    (base / "link").symlink_to(other / "deep")
+    before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+    with CleanupLedger() as ledger:
+        with pytest.raises(fileaccess.FileAccessUnavailable) as info:
+            fileaccess.create_protected_dir(f"{base}/link/../victim", ledger=ledger)
+        assert ledger._entries == []
+    assert str(base) not in str(info.value)
+    assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == before
+    assert (base / "victim").read_text() == "caller data" and not (other / "victim").exists()

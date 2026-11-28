@@ -180,7 +180,7 @@ def test_refuses_unsafe_root(temp_root: Path, monkeypatch: pytest.MonkeyPatch, c
     else:
         planted.touch()
     before = sorted((p.name, os.lstat(p).st_mode) for p in temp_root.iterdir())
-    monkeypatch.setattr(fileaccess._scratch, "_allocate", lambda base, prefix: str(planted))
+    monkeypatch.setattr(fileaccess._scratch, "_allocate", lambda base, prefix, ledger: str(planted))
     with pytest.raises(ProtectedDirUnsafe) as info:
         ScratchArena.fresh()
     assert info.value.code == reasons.runtime.SCRATCH_UNSAFE

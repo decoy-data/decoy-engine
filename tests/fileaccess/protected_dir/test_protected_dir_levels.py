@@ -19,6 +19,7 @@ from decoy_engine import fileaccess
 from decoy_engine.fileaccess import ProtectedDirUnsafe, protected_scratch_dir
 from decoy_engine.fileaccess import _protected_dir as pd
 from decoy_engine.fileaccess._fdtree import path_key
+from decoy_engine.fileaccess.cleanup import CleanupLedger
 from tests.fileaccess.protected_dir.test_protected_dir import _Strict
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Windows lane is L0.1w")
@@ -59,25 +60,28 @@ def test_parent_base_default_and_policy_stance(tmp_path: Path) -> None:
 
 
 def test_allocate_makes_a_fresh_unregistered_protected_directory(tmp_path: Path) -> None:
-    first = pd._allocate(str(tmp_path), "decoy-arena-pending-")
-    second = pd._allocate(str(tmp_path), "decoy-arena-pending-")
-    assert first != second
-    for made in (first, second):
-        assert re.fullmatch(r"decoy-arena-pending-[0-9a-f]{16}", os.path.basename(made))
-        assert _mode(Path(made)) == 0o700
-        assert pd._live_root(path_key(made)) is None  # the caller decides whether to register
+    with CleanupLedger() as ledger:
+        first = pd._allocate(str(tmp_path), "decoy-arena-pending-", ledger)
+        second = pd._allocate(str(tmp_path), "decoy-arena-pending-", ledger)
+        assert first != second
+        for made in (first, second):
+            assert re.fullmatch(r"decoy-arena-pending-[0-9a-f]{16}", os.path.basename(made))
+            assert _mode(Path(made)) == 0o700
+            assert pd._live_root(path_key(made)) is None  # the caller decides whether to register
+    assert not os.path.exists(first) and not os.path.exists(second)  # the ledger removed both
 
 
 def test_register_and_unregister_make_a_live_root(tmp_path: Path) -> None:
-    root = pd._allocate(str(tmp_path), "r-")
-    child = os.path.join(root, "child")
-    pd._register(root)
-    try:
-        assert pd._live_root(path_key(child)) == path_key(root)
-    finally:
-        pd._unregister(root)
-    assert pd._live_root(path_key(child)) is None
-    pd._unregister(root)  # idempotent
+    with CleanupLedger() as ledger:
+        root = pd._allocate(str(tmp_path), "r-", ledger)
+        child = os.path.join(root, "child")
+        pd._register(root)
+        try:
+            assert pd._live_root(path_key(child)) == path_key(root)
+        finally:
+            pd._unregister(root)
+        assert pd._live_root(path_key(child)) is None
+        pd._unregister(root)  # idempotent
 
 
 def test_owned_private_needs_the_effective_owner_and_no_group_or_other_bits(

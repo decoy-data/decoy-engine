@@ -45,6 +45,7 @@ def test_scratch_root_is_one_function(tmp_path: Path, monkeypatch: pytest.Monkey
     # The stdlib cache may name another directory by now; the selected variable still wins.
     monkeypatch.setattr(tempfile, "tempdir", str(cached))
     assert scratch_root() == chosen
+    assert list(chosen.iterdir()) == []  # L17: the probe is gone once scratch_root returns
     assert Path(_parent_base(None)) == chosen
     assert default_ooc_temp_root() == chosen
     if sys.platform != "win32":  # the arena is POSIX-only until S1w
@@ -155,3 +156,48 @@ def _value_free(exc: BaseException, var: str, value: str, other: str | None = No
     if other is not None:
         assert other not in text.replace(var, "")  # TMP is a prefix of TMPDIR
     assert exc.__cause__ is None and exc.__context__ is None
+
+
+def _spies(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from decoy_engine.fileaccess import _protected_dir as pd
+
+    calls: list[str] = []
+    for name in ("_parent_base", "_allocate"):
+        real = getattr(pd, name)
+
+        def spy(*args: object, _real: object = real, _name: str = name, **kw: object) -> object:
+            calls.append(_name)
+            return _real(*args, **kw)  # type: ignore[operator]
+
+        monkeypatch.setattr(pd, name, spy)
+    return calls
+
+
+def _bad_prefixes() -> list[str]:
+    bad = ["/abs-", f"a{os.sep}b-"]
+    if os.altsep:
+        bad.append(f"a{os.altsep}b-")
+    if sys.platform == "win32":
+        bad.append("D:temp-")
+    return bad
+
+
+@pytest.mark.parametrize("prefix", _bad_prefixes())
+def test_l18_a_prefix_with_a_path_part_is_refused_before_anything_is_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    from decoy_engine.fileaccess import ProtectedDirUnsafe, protected_scratch_dir
+    from decoy_engine.fileaccess._protected_dir import allocate_protected_dir
+    from decoy_engine.fileaccess.cleanup import CleanupLedger
+
+    calls = _spies(monkeypatch)
+    before = sorted(os.listdir(tmp_path))
+    with CleanupLedger() as ledger:
+        with pytest.raises(ProtectedDirUnsafe):
+            allocate_protected_dir(ledger, parent=tmp_path, prefix=prefix)
+        assert ledger._entries == []
+    with pytest.raises(ProtectedDirUnsafe):
+        with protected_scratch_dir(tmp_path, prefix):
+            pass
+    assert calls == []  # refused before _parent_base or _allocate ran
+    assert sorted(os.listdir(tmp_path)) == before
