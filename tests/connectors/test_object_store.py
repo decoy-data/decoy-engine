@@ -301,23 +301,14 @@ def test_iter_object_streams_the_object(admin: Any) -> None:
     assert b"".join(_store().iter_object(KEY)) == b"a" * 10
 
 
-def test_gcs_iter_object_streams_through_the_gcs_open_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gcs_iter_object_streams_pinned_ranges(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("google.cloud.storage")
+    from tests._cloud_fakes import FakeGcsSession, GcsObject, gcs_client_over
+
     from decoy_engine.connectors import object_store
     from decoy_engine.connectors.gcs import GCSConfig
 
-    class Blob:
-        def open(self, mode: str, **kw: Any) -> io.BytesIO:
-            assert mode == "rb" and kw["retry"] is not None
-            return io.BytesIO(b"gcs-bytes")
-
-    class Bucket:
-        def blob(self, key: str) -> Blob:
-            return Blob()
-
-    class Client:
-        def bucket(self, name: str) -> Bucket:
-            return Bucket()
-
-    monkeypatch.setattr(object_store, "_build_gcs_client", lambda config: Client())
+    session = FakeGcsSession(GcsObject(b"gcs-bytes"))
+    monkeypatch.setattr(object_store, "_build_gcs_client", lambda config: gcs_client_over(session))
     assert b"".join(GCSObjectStore(GCSConfig(bucket="b")).iter_object("k")) == b"gcs-bytes"
+    assert [(r["range"], r["pin"]) for r in session.ledger.data_requests] == [("bytes=0-8", "7")]

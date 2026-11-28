@@ -24,11 +24,12 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.profile._readers import ProfileSource, build_profile_source
-from tests.unit.profile.test_duplicate_header_readers import _FakeBlob, _FakeGcsClient
+from tests._cloud_fakes import FakeGcsSession, GcsObject, install_gcs
 
 PAD = "x" * 290
 MIB = 1 << 20
 BUCKET = "bkt-test"
+Tamper = Callable[[int, bytes], bytes]
 
 
 def _csv_bytes(rows: int) -> bytes:
@@ -45,24 +46,12 @@ class Env:
     gcs_log: list[str] = field(default_factory=list)
 
 
-class _CountingGcs(_FakeGcsClient):
-    """Logs one `open` and one `close` per client block, so a client opened per window shows."""
-
-    def __init__(self, data: bytes, log: list[str]) -> None:
-        super().__init__(data)
-        self._log = log
-
-    def __enter__(self) -> _CountingGcs:
-        self._log.append("open")
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        self._log.append("close")
-
-
-def _gcs(env: Env, data: bytes) -> None:
-    storage = pytest.importorskip("google.cloud.storage")
-    env.monkeypatch.setattr(storage, "Client", lambda *a, **k: _CountingGcs(data, env.gcs_log))
+def _gcs(env: Env, data: bytes, tamper: Tamper | None = None) -> FakeGcsSession:
+    """A real storage client over a fake transport; `env.gcs_log` shows each client block."""
+    pytest.importorskip("google.cloud.storage")
+    session = install_gcs(env.monkeypatch, FakeGcsSession(GcsObject(data), tamper=tamper))
+    env.gcs_log = session.log
+    return session
 
 
 @pytest.fixture
@@ -187,9 +176,6 @@ def test_at0a_quoted_field_open_across_two_window_edges(env: Env, kind: str) -> 
 # ---------------------------------------------------------------- AT-0c
 
 
-Tamper = Callable[[int, bytes], bytes]
-
-
 class _CountingS3:
     """A fake S3 client that counts every request and the bytes returned."""
 
@@ -201,63 +187,58 @@ class _CountingS3:
 
     def head_object(self, Bucket: str, Key: str) -> dict[str, Any]:
         self.requests += 1
-        return {"ContentLength": len(self._data)}
+        return {"ContentLength": len(self._data), "ETag": '"v1"'}
 
-    def get_object(self, Bucket: str, Key: str, Range: str | None = None) -> dict[str, Any]:
+    def get_object(self, Bucket: str, Key: str, Range: str, IfMatch: str) -> dict[str, Any]:
         self.requests += 1
-        if Range is None:
-            return {"Body": io.BytesIO(self._data)}
+        assert IfMatch == '"v1"'
         match = re.match(r"bytes=(\d+)-(\d+)", Range)
         assert match
-        chunk = self._data[int(match[1]) : int(match[2]) + 1]
+        start, end = int(match[1]), int(match[2])
+        chunk = self._data[start : end + 1]
         if self._tamper:
             chunk = self._tamper(self.requests - 1, chunk)
         self.bytes_read += len(chunk)
-        return {"Body": io.BytesIO(chunk)}
+        # The answer an honest 206 carries in botocore's shape; a tampered body is the store
+        # losing bytes after it promised the range.
+        return {
+            "Body": io.BytesIO(chunk),
+            "ResponseMetadata": {"HTTPStatusCode": 206},
+            "ContentRange": f"bytes {start}-{end}/{len(self._data)}",
+            "ContentLength": end - start + 1,
+        }
 
 
-class _Counts:
-    """What a stubbed cloud CSV reader asked its backend for: requests and bytes fetched."""
+class _LedgerCounts:
+    """`_Counts` read live from a fake GCS ledger: media GETs and the bytes they served."""
 
-    def __init__(self) -> None:
-        self.requests = 0
-        self.bytes_read = 0
+    def __init__(self, ledger: Any) -> None:
+        self._ledger = ledger
+
+    @property
+    def requests(self) -> int:
+        return len(self._ledger.data_requests)
+
+    @property
+    def bytes_read(self) -> int:
+        return int(self._ledger.fetched)
 
 
 def _stub(
     env: Env, kind: str, data: bytes, tamper: Tamper | None = None
-) -> tuple[ProfileSource, _Counts]:
+) -> tuple[ProfileSource, _CountingS3 | _LedgerCounts]:
+    """A cloud CSV source and live counts of the requests and bytes it fetched."""
     from decoy_engine.profile import _cloud_readers
 
-    counts = _Counts()
     if kind == "s3":
         client = _CountingS3(data, tamper)
         env.monkeypatch.setattr(_cloud_readers._clients, "s3_client", lambda **_kw: client)
         source = build_profile_source({"type": "s3", "format": "csv", "bucket": BUCKET, "key": "k"})
-        counts = client  # type: ignore[assignment]
-        return source, counts
+        return source, client
 
-    storage = pytest.importorskip("google.cloud.storage")
-
-    class _Blob(_FakeBlob):
-        def download_as_bytes(
-            self, start: int | None = None, end: int | None = None, **kw: Any
-        ) -> bytes:
-            counts.requests += 1
-            chunk = super().download_as_bytes(start, end)
-            if tamper:
-                chunk = tamper(counts.requests, chunk)
-            counts.bytes_read += len(chunk)
-            return chunk
-
-    class _Client(_CountingGcs):
-        def __init__(self) -> None:
-            super().__init__(data, env.gcs_log)
-            self._blob = _Blob(data)
-
-    env.monkeypatch.setattr(storage, "Client", lambda *a, **k: _Client())
+    ledger = _gcs(env, data, tamper).ledger
     source = build_profile_source({"type": "gcs", "format": "csv", "bucket": BUCKET, "object": "o"})
-    return source, counts
+    return source, _LedgerCounts(ledger)
 
 
 @pytest.mark.parametrize("kind", ["s3", "gcs"])

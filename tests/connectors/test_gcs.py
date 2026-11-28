@@ -7,9 +7,10 @@ on a single dict[str, dict] that represents the remote bucket; reads
 and writes mutate the same dict so tests can pre-seed and assert.
 
 What the fake covers: `Client.bucket`, `Client.get_bucket`,
-`Bucket.list_blobs`, `Bucket.blob`, `Blob.reload`, `Blob.open` (read
-and write modes), plus the metadata fields `name`, `size`,
-`content_type`, `updated`.
+`Bucket.list_blobs`, `Bucket.blob`, `Blob.reload`, `Blob.open` (write
+mode), the generation-pinned ranged media GET that `gcs_download` sends
+through `blob.client._http`, plus the metadata fields `name`, `size`,
+`generation`, `content_type`, `updated`.
 
 What the fake does not cover: signed-URL generation, resumable-session
 state, server-side encryption. Tests that need those should run against
@@ -82,15 +83,45 @@ class _FakeBlobFile:
         self._buf.close()
 
 
+class _FakeMediaHttp:
+    """The ranged, generation-pinned media GET under `gcs_download`."""
+
+    def __init__(self, store: dict, name: str):
+        self.store = store
+        self.name = name
+
+    def request(self, method, url, headers=None, stream=False, timeout=None):
+        from urllib.parse import parse_qs, urlsplit
+
+        from tests._cloud_fakes import Body, Ledger, Response
+
+        ledger = Ledger()
+        entry = self.store.get(self.name)
+        pin = parse_qs(urlsplit(url).query).get("ifGenerationMatch", [None])[0]
+        if entry is None:
+            return Response(ledger, 404, {}, Body(ledger, b""))
+        if pin is None or int(pin) != entry.get("generation", 1):
+            return Response(ledger, 412, {}, Body(ledger, b""))
+        start, end = (int(v) for v in headers["Range"].removeprefix("bytes=").split("-"))
+        part = entry["body"][start : end + 1]
+        hdrs = {"Content-Range": f"bytes {start}-{end}/{len(entry['body'])}"}
+        return Response(ledger, 206, hdrs, Body(ledger, part))
+
+
 class _FakeBlob:
     def __init__(self, store: dict, name: str):
         self.store = store
         self.name = name
-        # Lazy: size/content_type/updated populated by reload() or list_blobs.
+        # Lazy: size/generation/content_type/updated populated by reload() or list_blobs.
         self.size = None
+        self.generation = None
         self.content_type = None
         self.updated = None
         self.calls: list[tuple[str, object, object]] = []
+        self.client = type("_Client", (), {"_http": _FakeMediaHttp(store, name)})()
+
+    def _get_download_url(self, client, if_generation_match=None):
+        return f"https://fake.invalid/{self.name}?alt=media&ifGenerationMatch={if_generation_match}"
 
     def reload(self, timeout=None, retry=None):
         self.calls.append(("reload", timeout, retry))
@@ -98,6 +129,7 @@ class _FakeBlob:
             raise gax_exc.NotFound(f"No such object: {self.name}")
         entry = self.store[self.name]
         self.size = entry["size"]
+        self.generation = entry.get("generation", 1)
         self.content_type = entry["content_type"]
         self.updated = entry["updated"]
 

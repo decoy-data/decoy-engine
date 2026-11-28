@@ -20,7 +20,9 @@ __all__ = [
     "NO_SELECTIONS",
     "RELATION_NOT_FOUND",
     "RELATION_SHAPE_CHANGED",
+    "SAMPLE_WINDOW_EXCEEDED",
     "SOURCE_UNREACHABLE",
+    "STORED_CONTENT_ENCODING",
     "UNSUPPORTED_COLUMN_TYPE",
     "VALUE_GUARD_FAILED",
     "VALUE_NOT_REPRESENTABLE",
@@ -72,4 +74,26 @@ UNSUPPORTED_COLUMN_TYPE = _d(
 VALUE_GUARD_FAILED = _d("value_guard_failed", "Value guard failed.")
 VALUE_NOT_REPRESENTABLE = _d(
     "value_not_representable", "Value not representable.", outcome=_USAGE, retry=_FIX
+)
+
+_d = _catalog.connector("SampleWindowExceeded")
+
+# A cloud CSV sample stops at a fixed byte total, so one huge quoted row cannot pull the object.
+SAMPLE_WINDOW_EXCEEDED = _d(
+    "sample_window_exceeded",
+    "The sample rows were not found within the sample read limit.",
+    outcome=_USAGE,
+    retry=_FIX,
+    since=UNRELEASED,
+)
+
+_d = _catalog.connector("StoredContentEncoding")
+
+# Ranges of a gzip-stored GCS object are ranges of the compressed bytes, so none can be checked.
+STORED_CONTENT_ENCODING = _d(
+    "stored_content_encoding",
+    "The object is stored with a content encoding and cannot be read in checked ranges.",
+    outcome=_USAGE,
+    retry=_FIX,
+    since=UNRELEASED,
 )

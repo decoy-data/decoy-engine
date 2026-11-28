@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, TypeVar
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.ipc
 import pyarrow.parquet as pq
@@ -15,6 +17,8 @@ from decoy_engine.errors import ParquetFixedListNullError
 from decoy_engine.fileaccess._errors import guarded, guarded_iter
 from decoy_engine.fileaccess._types import FileHandle, StageDir
 from decoy_engine.safe_output import output_schema, output_table
+
+_T = TypeVar("_T")
 
 
 def _strict(handle: FileHandle) -> bool:
@@ -71,6 +75,48 @@ def iter_batches(
     """`ParquetFile.iter_batches`, each step guarded under a strict handle."""
     source = guarded(handle.display, _strict(handle), parquet_file.iter_batches, **kwargs)
     return guarded_iter(handle.display, _strict(handle), source)
+
+
+def collect_batches(
+    handle: FileHandle,
+    parquet_file: pq.ParquetFile,
+    collect: Callable[[Iterator[pa.RecordBatch]], _T],
+    **kwargs: Any,
+) -> _T:
+    """`collect(parquet_file.iter_batches(**kwargs))` as one guarded call under a strict handle.
+
+    The conversion `collect` does (Arrow to pandas) fails on a bad cell with the cell in its
+    text, after every batch read cleanly, so the guard must span it as well as the reads."""
+
+    def read() -> _T:
+        return collect(parquet_file.iter_batches(**kwargs))
+
+    return guarded(handle.display, _strict(handle), read)
+
+
+def table_from_pandas(display: str, frame: pd.DataFrame) -> pa.Table:
+    """`pa.Table.from_pandas(frame, preserve_index=False)`, guarded under a strict policy.
+
+    Arrow's error for a cell it cannot convert names the cell, so a caller that profiles an
+    object it does not own converts through here and never sees the library text."""
+    return guarded(display, True, pa.Table.from_pandas, frame, preserve_index=False)
+
+
+def parquet_table_to_pandas(
+    table: pa.Table, convert: Callable[[pa.Table], pd.DataFrame]
+) -> pd.DataFrame:
+    """The frame `pd.read_parquet` returns for `table`: `convert(table)` (the caller's
+    `Table.to_pandas()`, what pandas calls for the default dtype backend), then `attrs` from the
+    `PANDAS_ATTRS` schema metadata.
+
+    Pattern: pandas `io/parquet.py` `PyArrowImpl.read`. pyarrow 14 to 20 leave `attrs` to the
+    caller, and the step is harmless where pyarrow already restores them. The caller passes the
+    conversion so a column pandas cannot hold fails with the caller's own coded error."""
+    frame = convert(table)
+    metadata = table.schema.metadata
+    if metadata and b"PANDAS_ATTRS" in metadata:
+        frame.attrs = json.loads(metadata[b"PANDAS_ATTRS"])
+    return frame
 
 
 @contextmanager

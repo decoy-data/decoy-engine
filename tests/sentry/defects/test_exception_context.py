@@ -173,11 +173,21 @@ def test_restoring_either_private_import_turns_the_guard_red(
     assert scan.facade_import_findings(_tree(tmp_path, files)) != []
 
 
-# ----- class 6: validation.post consumes the kernel and pool facades -------------------------
+# ----- class 6: consumers reach a private module through its facade --------------------------
 
 
-def test_validation_post_imports_only_the_public_facades() -> None:
+def test_consumers_import_only_the_public_facades() -> None:
     assert scan.consumer_facade_findings(scan.ModuleIndex()) == []
+
+
+def test_the_profile_entry_names_every_private_fileaccess_module() -> None:
+    bans = scan.CONSUMER_FACADES["profile/"]
+    assert "decoy_engine.fileaccess._errors" in bans
+    assert set(bans.values()) == {"decoy_engine.fileaccess.adapters.arrow"}
+    assert all(
+        name.startswith("decoy_engine.fileaccess.") and name.rpartition(".")[2].startswith("_")
+        for name in bans
+    )
 
 
 def test_validation_post_reads_both_names_through_the_facades() -> None:
@@ -187,22 +197,35 @@ def test_validation_post_reads_both_names_through_the_facades() -> None:
 
 
 @pytest.mark.parametrize(
-    ("needle", "bad"),
+    ("rel", "needle", "bad"),
     [
         (
+            "validation/post/_checks/_cardinality.py",
             "from decoy_engine.kernel import canonicalize_derive_source",
             "from decoy_engine.kernel._canonicalize import canonicalize_derive_source",
         ),
         (
+            "validation/post/_checks/_cardinality.py",
             "from decoy_engine.generation.pool import effective_pool_size",
             "from decoy_engine.generation.pool._identity import effective_pool_size",
         ),
+        (
+            "profile/_cloud_readers.py",
+            "from decoy_engine.fileaccess.adapters import arrow as arrow_adapter",
+            "from decoy_engine.fileaccess._errors import guarded\n"
+            "from decoy_engine.fileaccess.adapters import arrow as arrow_adapter",
+        ),
+        (
+            "profile/_cloud_readers.py",
+            "from decoy_engine.fileaccess.adapters import arrow as arrow_adapter",
+            "from decoy_engine.fileaccess import _errors\n"
+            "from decoy_engine.fileaccess.adapters import arrow as arrow_adapter",
+        ),
     ],
 )
-def test_restoring_a_private_import_in_validation_post_turns_the_guard_red(
-    tmp_path: Path, needle: str, bad: str
+def test_restoring_a_private_import_in_a_consumer_turns_the_guard_red(
+    tmp_path: Path, rel: str, needle: str, bad: str
 ) -> None:
-    rel = "validation/post/_checks/_cardinality.py"
     text = (scan.SRC / rel).read_text(encoding="utf-8")
     assert needle in text
     index = _tree(tmp_path, {rel: text.replace(needle, bad, 1)})

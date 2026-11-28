@@ -106,6 +106,8 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.quality.snapshot", "DistributionSnapshotError", "quality"),
     ("decoy_engine.verification.postmask._blocked", "PostScanBlockedError", "post_scan"),
     ("decoy_engine.connectors._postgres_session", "PostgresSnapshotError", "connector"),
+    ("decoy_engine.profile._cloud_readers", "SampleWindowExceeded", "connector"),
+    ("decoy_engine.connectors._clients", "StoredContentEncoding", "connector"),
     ("decoy_engine.execution.physical._shadow_diff_codes", "ShadowDifference", "physical"),
     ("decoy_engine.publication._types", "PublicationRefused", "decoy"),
     ("decoy_engine.publication._types", "PublicationFailed", "decoy"),

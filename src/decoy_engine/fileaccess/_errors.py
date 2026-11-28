@@ -14,6 +14,9 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, Literal, NewType, TypeVar
 
+from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError
+from decoy_engine.errors import ConnectorError
 from decoy_engine.fileaccess._types import (
     DenialKind,
     FileAccessDenied,
@@ -138,6 +141,14 @@ MEMORY_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
 GLIBC_TLS_OOM_MARKER = "cannot allocate memory for thread-local data"
 
 
+def _memory_text(message: str) -> bool:
+    """Whether `message` carries one of the documented memory-failure shapes. The one text test:
+    `is_memory_failure` and `resurface_scrubbed` must never disagree on it."""
+    return any(marker in message for marker in MEMORY_ERROR_MARKERS) or any(
+        pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS
+    )
+
+
 def typed_memory_member(exc: BaseException) -> BaseException | None:
     """The first typed memory error in `exc` or its `__cause__`/`__context__` links, else None.
 
@@ -168,9 +179,7 @@ def is_memory_failure(exc: BaseException) -> bool:
     if typed_memory_member(exc) is not None:
         return True
     message = str(exc)
-    if any(marker in message for marker in MEMORY_ERROR_MARKERS):
-        return True
-    return any(pattern.search(message) for pattern in MEMORY_ERROR_PATTERNS)
+    return _memory_text(message)
 
 
 def passes_by_type(exc: Exception) -> bool:
@@ -184,17 +193,19 @@ def passes_by_type(exc: Exception) -> bool:
 
 def resurface_scrubbed(exc: Exception) -> Exception | None:
     """A failure the engine recognises only by its TEXT (Arrow's `Wrapping <cell> failed`,
-    OpenSSL's context copy), rebuilt as the same type around the scrubbed text; None when `exc`
-    is not such a failure or cannot be rebuilt so that the predicate still matches."""
-    from decoy_engine.execution._isolated_common import is_memory_failure, scrub_error_text
+    OpenSSL's context copy), rebuilt as the same type around the fixed `MEMORY_TEXT`; None when
+    `exc`'s own message is not such a failure or it cannot be rebuilt so that the predicate
+    still matches.
 
-    if not is_memory_failure(exc):
+    The library text is never reused: it can carry a cell value next to the marker (an Arrow
+    conversion error that names the cell and also the OpenSSL marker), and no redaction of the
+    original text can be proven to catch every shape. A typed memory error elsewhere in the
+    chain does not make the outer message one."""
+    message = str(exc)
+    if not _memory_text(message):
         return None
-    try:
-        rebuilt = type(exc)(scrub_error_text(str(exc)))
-    except Exception:
-        return None
-    return rebuilt if is_memory_failure(rebuilt) else None
+    rebuilt = _fixed_text_rebuild(exc)
+    return rebuilt if isinstance(rebuilt, Exception) else None
 
 
 def _errno_rebuild(exc: OSError) -> OSError:
@@ -261,12 +272,24 @@ def _resurface(exc: Exception) -> Exception | None:
     return resurface_scrubbed(exc)
 
 
+def is_source_read_refusal(exc: BaseException) -> bool:
+    """The coded refusal of the source-read conversion (`arrow_to_frame`'s callback): it names
+    the column, never a value, and is raised with no cause or context, so a guard passes it
+    unchanged. Any other error from that conversion is scrubbed like a library failure."""
+    return (
+        isinstance(exc, ExecutionError)
+        and exc.code == reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE
+        and exc.__cause__ is None
+        and exc.__suppress_context__
+    )
+
+
 def guarded(display: str, strict: bool, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """Run a library call. Under a strict policy a library failure becomes the typed
     `FileAccessReadError` naming only `display`; memory and disk-resource failures keep
-    their class; a denial from inside passes unchanged. Under the local policy the call is
-    made as it is, so CLI text is unchanged. The new error is raised after the `except`
-    block closes so no library error is left as its `__context__`."""
+    their class; a denial or a connector error from inside passes unchanged. Under the local
+    policy the call is made as it is, so CLI text is unchanged. The new error is raised after
+    the `except` block closes so no library error is left as its `__context__`."""
     return guarded_with_parser_errors(display, strict, (), fn, *args, **kwargs)
 
 
@@ -298,10 +321,16 @@ def guarded_with_parser_errors(
         # FileAccessUnavailable is only raised at the policy/open and txn layers today, never by a
         # library read/write of an open handle; passing it through is defensive, not load-bearing.
         raise
+    except ConnectorError:
+        # Raised by the engine's own stream under the library (a cloud range read), with fixed
+        # text and a kind the caller branches on; a read error would lose both.
+        raise
     except parser_errors:
         raise
     except Exception as exc:
-        if decoder_passthrough is not None and decoder_passthrough(exc):
+        if is_source_read_refusal(exc) or (
+            decoder_passthrough is not None and decoder_passthrough(exc)
+        ):
             raise
         resurfaced = _resurface(exc)
         if resurfaced is exc:

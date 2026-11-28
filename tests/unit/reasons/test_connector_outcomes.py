@@ -17,6 +17,8 @@ _USAGE = {
     "extension_untrusted_location",
     "relation_not_found",
     "relation_shape_changed",
+    "sample_window_exceeded",
+    "stored_content_encoding",
     "unsupported_column_type",
     "value_not_representable",
 }

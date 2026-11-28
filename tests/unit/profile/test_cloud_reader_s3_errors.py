@@ -60,10 +60,11 @@ class _ReadFailing:
         self._exc = exc
 
     def head_object(self, **_kw: Any) -> dict:
-        return {"ContentLength": 10}
+        return {"ContentLength": 10, "ETag": '"v1"'}
 
-    def get_object(self, **_kw: Any) -> dict:
+    def get_object(self, **kw: Any) -> dict:
         exc = self._exc
+        start, end = (int(n) for n in kw["Range"].removeprefix("bytes=").split("-"))
 
         class Body:
             def __enter__(self) -> Body:
@@ -75,7 +76,13 @@ class _ReadFailing:
             def read(self, *_a: Any) -> bytes:
                 raise exc
 
-        return {"Body": Body()}
+        # The headers of an honest 206 (botocore's shape); only the body fails.
+        return {
+            "Body": Body(),
+            "ResponseMetadata": {"HTTPStatusCode": 206},
+            "ContentRange": f"bytes {start}-{end}/10",
+            "ContentLength": end - start + 1,
+        }
 
 
 _STREAM = [
@@ -86,7 +93,7 @@ _STREAM = [
 
 
 @pytest.mark.parametrize(("exc", "kind"), _STREAM, ids=lambda v: type(v).__name__)
-@pytest.mark.parametrize("read", ["range", "full"])
+@pytest.mark.parametrize("read", ["range", "to_frame"])
 def test_profiler_body_read_failures_are_classified_and_unchained(
     monkeypatch: pytest.MonkeyPatch, exc: BaseException, kind: str, read: str
 ) -> None:

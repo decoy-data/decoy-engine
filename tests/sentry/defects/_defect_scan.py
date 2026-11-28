@@ -425,6 +425,14 @@ CONSUMER_FACADES: dict[str, dict[str, str]] = {
         "decoy_engine.generation.pool._canonicalize": "decoy_engine.kernel",
         "decoy_engine.generation.pool._identity": "decoy_engine.generation.pool",
     },
+    # `profile/` guards library failures through the arrow adapter, never the private
+    # `fileaccess._*` modules behind it. The private names come from the package directory, so
+    # a module added later is covered without an edit here.
+    "profile/": {
+        f"decoy_engine.fileaccess.{p.stem}": "decoy_engine.fileaccess.adapters.arrow"
+        for p in sorted((SRC / "fileaccess").glob("_*.py"))
+        if p.stem != "__init__"
+    },
 }
 
 
