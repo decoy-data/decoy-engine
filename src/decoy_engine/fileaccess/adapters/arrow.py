@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, BinaryIO, TypeVar
+from typing import Any, TypeVar
 
 import pyarrow as pa
 import pyarrow.ipc
@@ -64,14 +64,21 @@ def read_table(handle: FileHandle, **kwargs: Any) -> pa.Table:
 _T = TypeVar("_T")
 
 
-def _read_single_file(handle: FileHandle, read: Callable[[BinaryIO], _T]) -> _T:
+def _read_single_file(handle: FileHandle, read: Callable[[pa.NativeFile], _T]) -> _T:
     """Close the input even when Arrow retains its scanner or rejects a corrupt footer."""
-    with guarded(handle.display, _strict(handle), handle.open_binary) as source:
+    with guarded(
+        handle.display, _strict(handle), pa.input_stream, handle.library_path(), compression=None
+    ) as source:
         return guarded(handle.display, _strict(handle), read, source)
 
 
 def read_staged_table(handle: FileHandle) -> pa.Table:
-    return _read_single_file(handle, pq.read_table)
+    try:
+        return _read_single_file(handle, pq.read_table)
+    except FileNotFoundError:
+        # The path-based dataset reader reported a missing staged table by path alone.
+        pass
+    raise FileNotFoundError(handle.library_path())
 
 
 def parquet_file(handle: FileHandle, **kwargs: Any) -> pq.ParquetFile:
