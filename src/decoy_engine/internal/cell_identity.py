@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine._error_base import DecoyError
 from decoy_engine.internal.cell_atoms import (
     INFINITY,
     NUMERAL,
@@ -515,6 +516,7 @@ def identity_facts(src: Column, out: Column) -> IdentityFacts:
     cast or Python type can hold (a `date32` past year 9999). Both have fixed text."""
     if len(src) != len(out):
         raise ValueError("identity_facts: the columns differ in length")
+    unreadable = False
     try:  # the one read boundary: no cast or overflow failure leaves the authority uncoded
         typed_a, typed_b = _typed(src), _typed(out)
         common = None if typed_a is None or typed_b is None else _common(typed_a, typed_b)
@@ -522,7 +524,10 @@ def identity_facts(src: Column, out: Column) -> IdentityFacts:
             return _typed_facts(*common)
         pairs = zip(_cells(src), _cells(out), strict=True)
     except (OverflowError, pa.ArrowException):
-        raise UnreadableCellError from None
+        unreadable = True
+    if unreadable:
+        # Raised outside the handler, so the cast failure is not chained as its context.
+        raise UnreadableCellError
     comparable = identical = 0
     all_same = True
     for x, y in pairs:
@@ -564,7 +569,7 @@ def duckdb_countable(kind: pa.DataType) -> bool:
     )
 
 
-class DistinctBudgetError(Exception):
+class DistinctBudgetError(DecoyError):
     """A distinct count would pass its budget: the caller's per-column reason, never an OOM."""
 
 
