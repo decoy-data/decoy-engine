@@ -185,6 +185,8 @@ def read_pinned_artifact(
     field_key: str,
     base_dir: str | Path | None,
     cap: int,
+    *,
+    display: ConfigPosition | None = None,
 ) -> PinnedRead:
     """Read one declared file once under `role`: the one read step snapshots and lookups share.
 
@@ -201,7 +203,7 @@ def read_pinned_artifact(
     except Exception as exc:
         # The same rule `read_config` applies: a strict policy keeps the class of a disk, quota or
         # memory failure but rebuilds it without the text the library put there.
-        outcome = passthrough(exc)
+        outcome = passthrough(exc, display=display)
         if outcome is exc:
             raise
         fresh = outcome
@@ -293,12 +295,14 @@ def read_and_pin_snapshots(
         at_snapshot = config_root_position(
             "tables", Name(table), "generate_columns", Name(column), "snapshot_file"
         )
+        field_key = f"tables.{table}.generate_columns.{column}.snapshot_file"
         read = read_pinned_artifact(
             FileRole.SNAPSHOT,
             path,
-            at_snapshot.key,
+            field_key,
             base_dir,
             EMBEDDED_SNAPSHOT_MAX_BYTES,
+            display=at_snapshot if field_key != at_snapshot.key else None,
         )
         if read.oversize:
             too_large = config_refusal(

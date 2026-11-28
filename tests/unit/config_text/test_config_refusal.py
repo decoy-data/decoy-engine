@@ -20,6 +20,7 @@ from decoy_engine._config_text import (
     Refusal,
     config_position,
     config_refusal,
+    config_root_position,
     kind_of,
     read_config,
 )
@@ -90,7 +91,7 @@ def test_an_approved_name_is_shown() -> None:
 
 @pytest.mark.parametrize(("value", "shown"), [("../x.yaml", "x.yaml"), ("/etc/x.yaml", "x.yaml")])
 def test_member_shows_the_bare_name(value: str, shown: str) -> None:
-    assert _pos("pre_scan", Member(value)) == f"pre_scan/{shown}"
+    assert config_root_position("pre_scan", Member(value)).key == f"pre_scan/{shown}"
 
 
 @pytest.mark.parametrize(
@@ -104,11 +105,11 @@ def test_member_shows_the_bare_name(value: str, shown: str) -> None:
 def test_member_that_is_a_url_shows_as_a_placeholder(value: str) -> None:
     # The basename alone would pass `approve_name`, so the raw value is checked first.
     assert approve_name("BEARER_CANARY") is not None
-    assert _pos("pre_scan", Member(value)) == "pre_scan/<file>"
+    assert config_root_position("pre_scan", Member(value)).key == "pre_scan/<file>"
 
 
 def test_member_with_a_non_string_is_a_placeholder() -> None:
-    assert _pos("pre_scan", Member(["x"])) == "pre_scan/<file>"
+    assert config_root_position("pre_scan", Member(["x"])).key == "pre_scan/<file>"
 
 
 def test_index_segments_render_in_brackets() -> None:

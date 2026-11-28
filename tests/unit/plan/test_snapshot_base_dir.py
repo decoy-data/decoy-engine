@@ -163,6 +163,29 @@ def test_no_base_dir_hands_the_declared_locator_to_the_policy_unchanged(
     assert seen == ["snap.json"]
 
 
+def test_snapshot_grant_uses_the_declared_column_name() -> None:
+    config = stat_config()
+    column = config["tables"][0]["generate_columns"][0]
+    column.update(name="sales@region", source_column="amount")
+    grant = (FileRole.SNAPSHOT, "tables.synthetic.generate_columns.sales@region.snapshot_file")
+    with (FIXTURES / "snap.json").open("rb") as snapshot:
+        policy = fileaccess.PreopenedFileAccess(files={grant: snapshot.fileno()})
+        plan = _compile(config, file_access=policy)
+    assert [pin.source_path for pin in plan.generation.snapshots] == ["snap.json"]
+    assert [spec.column_name for spec in plan.generation.statistical_specs] == ["sales@region"]
+
+
+def test_denied_snapshot_grant_reports_the_display_position() -> None:
+    config = stat_config()
+    column = config["tables"][0]["generate_columns"][0]
+    column.update(name="https://user:PRIVATEPW@host/x", source_column="amount")
+    with pytest.raises(fileaccess.FileAccessDenied) as info:
+        _compile(config, file_access=fileaccess.PreopenedFileAccess())
+    assert info.value.field_key == "tables.synthetic.generate_columns.<name>.snapshot_file"
+    assert "PRIVATEPW" not in str(info.value)
+    assert info.value.__context__ is None
+
+
 def test_a_rooted_policy_still_reads_a_root_relative_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -47,8 +47,9 @@ class TestCheckTruncateConfig:
         with pytest.raises(PlanCompileError) as exc:
             check_truncate_config(cfg)
         assert exc.value.code == "truncate_length_invalid"
-        assert "t.c" in exc.value.path
-        assert "3" in exc.value.message
+        assert exc.value.path == "tables.t.columns.c.provider_config.length"
+        assert "got string" in exc.value.message
+        assert "3" not in str(exc.value)
 
     def test_missing_length_rejected(self) -> None:
         cfg = _config("truncate", {})

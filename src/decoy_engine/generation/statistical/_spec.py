@@ -190,11 +190,12 @@ def _load_snapshot(path: str) -> tuple[str, dict[str, Any]]:
     """Read + parse a snapshot artifact. Returns `(content_sha256, parsed)`.
     No caching: every call is a fresh read + hash + parse."""
     at_snapshot = config_position("snapshot_file")
-    key = at_snapshot.key
     # Reading and parsing run through `read_config`, so the refusal holds a position and no
     # exception text, and has no cause or context.
     raw = read_config(
-        lambda: fileaccess.read_all(FileRole.SNAPSHOT, path, key),
+        lambda: fileaccess.read_all(
+            FileRole.SNAPSHOT, path, fileaccess.position_key("snapshot_file")
+        ),
         at_snapshot,
         lambda r: _refuse(reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE, r),
     )
