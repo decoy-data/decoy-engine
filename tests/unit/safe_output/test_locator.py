@@ -215,6 +215,7 @@ def test_the_known_remote_set_is_not_a_second_copy() -> None:
     assert hits == []
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize(
     "text",
     ["a:" * 4000, "a:b" * 2700, ("x:" * 3 + "/") * 1300, "a" * 8000 + ":"],
