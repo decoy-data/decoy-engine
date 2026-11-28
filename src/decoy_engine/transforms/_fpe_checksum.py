@@ -20,6 +20,28 @@ from decoy_engine.errors import FpeChecksumError
 from decoy_engine.transforms.fpe import _permute
 
 
+def max_fixed_length(scheme: str | None) -> int | None:
+    """The longest legal value for a fixed-width scheme, or None when there is no ceiling.
+
+    The caller stops collecting in-charset positions once it passes this, so a oversized cell
+    is refused without a copy proportional to its length."""
+    exact = EXACT_LENGTHS.get(scheme) if scheme else None
+    return max(exact) if exact else None
+
+
+def _require_decimal_digits(scheme: str, part: str) -> None:
+    """Fail closed, value-free, when a digit-only part carries a non-decimal character.
+
+    Any Unicode decimal passes, since ``int()`` reads it: a full-width prefix stays pinned. An
+    ALPHANUM charset would otherwise let a nondigit reach arithmetic whose error quotes it."""
+    if not part.isdecimal():
+        raise FpeChecksumError(
+            "FPE checksum mode: a position that must be a digit holds another character, "
+            "so the check digit cannot be computed. The engine fails closed.",
+            scheme=scheme,
+        )
+
+
 # Valid length(s) per checksum scheme. NPI/ISBN-13/EAN-13/VIN have EXACT lengths;
 # GTIN has four legal lengths (GS1); Luhn is variable (any Luhn-protected digit
 # string) so only a floor applies. Codex cross-model review (2026-07-14): a value
@@ -40,9 +62,11 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
     exact = EXACT_LENGTHS.get(scheme)
     if exact is not None:
         expected = " or ".join(str(n) for n in sorted(exact))
+        # The caller stops collecting one past the ceiling, so an over-length count is a floor.
+        got = f"more than {max(exact)}" if len(s) > max(exact) else str(len(s))
         raise FpeChecksumError(
-            f"FPE checksum scheme {scheme!r} requires exactly {expected} character(s); "
-            f"got {len(s)}. A value outside the scheme's fixed length cannot "
+            f"FPE checksum scheme requires exactly {expected} character(s); "
+            f"got {got}. A value outside the scheme's fixed length cannot "
             "be format-preserving-encrypted without leaking or truncating a character, "
             "so the engine fails closed. Fix the source data or route this column "
             "through a different strategy.",
@@ -51,7 +75,7 @@ def _validate_scheme_length(scheme: str, s: str) -> None:
     minimum = MIN_LENGTHS.get(scheme)
     if minimum is not None:
         raise FpeChecksumError(
-            f"FPE checksum scheme {scheme!r} requires at least {minimum} characters "
+            f"FPE checksum scheme requires at least {minimum} characters "
             f"(body + check digit); got {len(s)}. The engine fails closed "
             "rather than pass the value through unmasked.",
             scheme=scheme,
@@ -106,7 +130,7 @@ def _fpe_checksum_permute(
         Use validate-only or a different strategy for IBAN columns.
 
     unknown scheme
-        FAILS CLOSED.  Any scheme name not in ``checksums._KNOWN_SCHEMES``
+        FAILS CLOSED.  Any scheme name not in ``checksums.classify_fpe_scheme``
         raises ``FpeChecksumError``.  The pre-SP04 fall-through to plain
         FPE with no check digit was silent misconfiguration; Decoy forbids
         that pattern.
@@ -134,20 +158,27 @@ def _fpe_checksum_permute(
     forward (encrypt) and inverse (decrypt) directions.
     """
     try:
-        from decoy_engine.checksums import _KNOWN_SCHEMES, calc_check_digit, validate
+        from decoy_engine.checksums import (
+            calc_check_digit,
+            classify_fpe_scheme,
+            recognized_schemes,
+            validate,
+        )
+
+        verdict = classify_fpe_scheme(scheme)
 
         # H2: unknown scheme - fail closed.
-        if scheme not in _KNOWN_SCHEMES:
+        if verdict == "unknown":
             raise FpeChecksumError(
-                f"FPE checksum mode received unknown scheme {scheme!r}. "
-                f"Known schemes: {sorted(_KNOWN_SCHEMES)}. "
+                "FPE checksum mode received an unknown scheme. "
+                f"Known schemes: {recognized_schemes()}. "
                 "Check your config for typos; valid fpe checksum schemes are "
                 "luhn, npi, vin, isbn13, ean13, gtin (iban is not supported for FPE).",
                 scheme=scheme,
             )
 
         # B1: IBAN - fail closed.
-        if scheme == "iban":
+        if verdict == "unsupported":
             raise FpeChecksumError(
                 "FPE checksum mode does not support 'iban': per-country BBAN "
                 "structure (enforced by stdnum.iban.validate) cannot be satisfied "
@@ -170,8 +201,8 @@ def _fpe_checksum_permute(
         # which every supported scheme's check-digit arithmetic is indifferent to.
         if forward and not validate(scheme, s):
             raise FpeChecksumError(
-                f"FPE checksum mode: source value fails checksums.validate() for "
-                f"scheme {scheme!r}; its check digit does not match its body. "
+                "FPE checksum mode: source value fails checksums.validate() for "
+                "the configured scheme; its check digit does not match its body. "
                 "Permuting an already-invalid identifier would produce output "
                 "that looks checksum-valid but has no honest source, so the "
                 "engine fails closed. Fix the source data or route this column "
@@ -181,6 +212,13 @@ def _fpe_checksum_permute(
             )
 
         _DIGITS_ONLY = "0123456789"
+
+        # The pinned NPI leading digit and ISBN-13 bookland prefix skip `_permute`, so no
+        # charset gate checks them before the check-digit arithmetic. Validate them here.
+        if scheme == "npi":
+            _require_decimal_digits(scheme, s[0])
+        elif scheme == "isbn13":
+            _require_decimal_digits(scheme, s[:3])
 
         # luhn / ean13 / gtin: digit-only, check digit at end.
         if scheme in ("luhn", "ean13", "gtin"):
@@ -218,7 +256,7 @@ def _fpe_checksum_permute(
 
         # Should never reach here: all known non-IBAN schemes handled above.
         raise FpeChecksumError(
-            f"Unhandled scheme {scheme!r} in _fpe_checksum_permute (internal error).",
+            "Unhandled scheme in _fpe_checksum_permute (internal error).",
             scheme=scheme,
         )
     except BaseException:

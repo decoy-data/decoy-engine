@@ -97,6 +97,24 @@ class UnmaskResult:
     columns: tuple[UnmaskColumnReport, ...]
 
 
+def _require_known_checksum_scheme(scheme: object, column: str, table_name: str) -> None:
+    """Raise a value-free `ExecutionError` unless `scheme` is one FPE can mask, so it can be reversed.
+
+    The configured string is never echoed: it is customer config and may carry a credential."""
+    from decoy_engine.checksums import classify_fpe_scheme
+
+    verdict = classify_fpe_scheme(scheme)
+    if verdict != "supported":
+        kind = "not a recognized scheme" if verdict == "unknown" else "not supported for fpe"
+        raise ExecutionError(
+            code=reasons.runtime.FPE_CHECKSUM_UNSUPPORTED,
+            message=(
+                f"column {column!r} in table {table_name!r} uses fpe with a checksum scheme "
+                f"that is {kind}, so it cannot be reversed."
+            ),
+        )
+
+
 def _decrypt_column(
     table: pa.Table,
     column: str,
@@ -131,7 +149,7 @@ def _decrypt_column(
                 code=reasons.runtime.FPE_CHARSET_DEGENERATE,
                 message=(
                     f"column {column!r} in table {table_name!r} uses fpe but its "
-                    f"resolved charset {charset_spec!r} -> {charset!r} has fewer than 2 "
+                    "resolved charset has fewer than 2 "
                     "distinct characters. A degenerate charset has nothing to permute "
                     "over, so this column cannot be reversed."
                 ),
@@ -144,6 +162,10 @@ def _decrypt_column(
         # the plain inverse and silently returned WRONG plaintext (e.g. npi
         # 1234567893 -> 1770507352 -> 5577387655), still reported `reversed`.
         checksum: str | None = cfg.get("checksum") or None
+        # Refuse an unrecognized scheme before any row work or report text: an empty or
+        # all-null column never reaches the per-value check, and the report quotes the scheme.
+        if checksum is not None:
+            _require_known_checksum_scheme(checksum, column, table_name)
         validate_luhn = (
             checksum is None
             and bool(cfg.get("validate_luhn", False))

@@ -16,6 +16,8 @@ Findings:
 
 from __future__ import annotations
 
+import tracemalloc
+
 import pytest
 
 import decoy_engine.checksums as checksums
@@ -294,18 +296,24 @@ class TestFpeMinimumLength:
 
     def test_npi_too_short_raises(self) -> None:
         short = "12345"  # 5 chars, not >= 10
-        with pytest.raises(FpeChecksumError, match="npi"):
+        with pytest.raises(FpeChecksumError) as info:
             fpe_encrypt_value(short, _KEY, _DIGITS, _TWEAK, checksum="npi")
+        assert info.value.scheme == "npi"  # the error names the scheme as a field, not in text
+        assert "scheme 'npi'" not in str(info.value)
 
     def test_vin_too_short_raises(self) -> None:
         short = "1HGCM826"  # 8 chars, not 17
-        with pytest.raises(FpeChecksumError, match="vin"):
+        with pytest.raises(FpeChecksumError) as info:
             fpe_encrypt_value(short, _KEY, _VIN_ALPHA, _TWEAK, checksum="vin")
+        assert info.value.scheme == "vin"  # the error names the scheme as a field, not in text
+        assert "scheme 'vin'" not in str(info.value)
 
     def test_isbn13_too_short_raises(self) -> None:
         short = "97831614"  # 8 chars, not 13
-        with pytest.raises(FpeChecksumError, match="isbn13"):
+        with pytest.raises(FpeChecksumError) as info:
             fpe_encrypt_value(short, _KEY, _DIGITS, _TWEAK, checksum="isbn13")
+        assert info.value.scheme == "isbn13"  # the error names the scheme as a field, not in text
+        assert "scheme 'isbn13'" not in str(info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -334,21 +342,21 @@ class TestFpeChecksumCompileCheck:
         }
 
     def test_unknown_checksum_raises_at_compile(self) -> None:
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
         from decoy_engine.plan._errors import PlanCompileError
 
         with pytest.raises(PlanCompileError, match="bogus|unknown|fpe_checksum"):
             check_fpe_checksum_scheme(self._config_with_checksum("bogus"))
 
     def test_iban_checksum_raises_at_compile(self) -> None:
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
         from decoy_engine.plan._errors import PlanCompileError
 
         with pytest.raises(PlanCompileError, match="iban|fpe_checksum"):
             check_fpe_checksum_scheme(self._config_with_checksum("iban"))
 
     def test_known_non_iban_checksum_passes(self) -> None:
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         # npi and luhn are digit schemes; "digits" charset is correct.
         check_fpe_checksum_scheme(self._config_with_checksum("npi"))
@@ -376,7 +384,7 @@ class TestFpeChecksumCompileCheck:
         )
 
     def test_no_checksum_passes(self) -> None:
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         config = {
             "tables": [
@@ -439,7 +447,7 @@ class TestFpeChecksumCharsetIncompatible:
         After this fix: the misconfiguration is caught at plan-compile and
         never reaches runtime.
         """
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
         from decoy_engine.plan._errors import PlanCompileError
 
         with pytest.raises(PlanCompileError) as exc:
@@ -449,7 +457,7 @@ class TestFpeChecksumCharsetIncompatible:
 
     def test_luhn_alpha_only_charset_raises_at_compile(self) -> None:
         """Alpha-only charset for luhn (no digits) must raise fpe_checksum_charset_incompatible."""
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
         from decoy_engine.plan._errors import PlanCompileError
 
         with pytest.raises(PlanCompileError) as exc:
@@ -461,37 +469,37 @@ class TestFpeChecksumCharsetIncompatible:
 
     def test_vin_exact_vin_alphabet_passes(self) -> None:
         """Charset equal to the VIN alphabet (no I/O/Q) must compile."""
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         check_fpe_checksum_scheme(self._cfg("vin", "0123456789ABCDEFGHJKLMNPRSTUVWXYZ"))
 
     def test_vin_superset_charset_passes(self) -> None:
         """Full uppercase alphanum (superset: includes I/O/Q, harmless extras) must compile."""
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         check_fpe_checksum_scheme(self._cfg("vin", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
 
     def test_vin_named_ALPHANUM_passes(self) -> None:
         """Named 'ALPHANUM' charset is a superset of the VIN alphabet; must compile."""
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         check_fpe_checksum_scheme(self._cfg("vin", "ALPHANUM"))
 
     def test_luhn_digits_charset_passes(self) -> None:
         """Digits charset is correct for luhn; must compile."""
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         check_fpe_checksum_scheme(self._cfg("luhn", "0123456789"))
 
     def test_luhn_named_digits_passes(self) -> None:
         """Named 'digits' charset for luhn; must compile."""
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         check_fpe_checksum_scheme(self._cfg("luhn", "digits"))
 
     def test_luhn_alphanum_superset_passes(self) -> None:
         """Alphanumeric superset (includes digits) for luhn; must compile."""
-        from decoy_engine.plan._checks import check_fpe_checksum_scheme
+        from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 
         check_fpe_checksum_scheme(self._cfg("luhn", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
 
@@ -670,3 +678,53 @@ class TestFpeChecksumLengthBoundary:
         assert all(c in "0123" for c in non_check), (
             f"permuted VIN body {non_check!r} left the caller's 4-symbol charset."
         )
+
+
+# ---------------------------------------------------------------------------
+# Hostile ciphertext and oversized cells: value-free refusal, ceiling-bound memory
+# ---------------------------------------------------------------------------
+
+_ALNUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _text(exc: BaseException) -> str:
+    return f"{exc} {exc!r} {exc.args}"
+
+
+@pytest.mark.parametrize(
+    ("scheme", "ciphertext"),
+    [("npi", "Z234567893"), ("isbn13", "ZZZ4567890123"), ("isbn13", "97Z1234567890")],
+)
+def test_nondigit_prefix_raises_a_value_free_checksum_error(scheme: str, ciphertext: str) -> None:
+    with pytest.raises(FpeChecksumError) as info:
+        fpe_decrypt_value(ciphertext, _KEY, _ALNUM, _TWEAK, True, False, scheme)
+    assert "Z" not in _text(info.value)
+
+
+def test_a_fullwidth_pinned_prefix_round_trips_like_the_old_transform() -> None:
+    """A Unicode decimal prefix is a digit to the check arithmetic, so it stays pinned.
+
+    The guard rejects what ``int()`` cannot read (a letter), not a non-ASCII decimal."""
+    charset = "0123456789\uff19\uff17\uff18"
+    source = "\uff19\uff17\uff180306406157"
+    out = fpe_encrypt_value(source, _KEY, charset, _TWEAK, checksum="isbn13")
+    assert out[:3] == "\uff19\uff17\uff18"
+    back = fpe_decrypt_value(out, _KEY, charset, _TWEAK, True, False, "isbn13")
+    assert back == source
+
+
+@pytest.mark.serial
+@pytest.mark.parametrize("scheme", ["npi", "isbn13", "ean13", "gtin", "vin"])
+def test_an_oversized_cell_is_refused_without_a_length_sized_copy(scheme: str) -> None:
+    cell = "1" * 300_000
+    # Warm the refusal path so cold imports are not charged to the measurement.
+    with pytest.raises(FpeChecksumError):
+        fpe_encrypt_value("1" * 40, _KEY, _ALNUM, _TWEAK, True, False, scheme)
+    tracemalloc.start()
+    try:
+        with pytest.raises(FpeChecksumError):
+            fpe_encrypt_value(cell, _KEY, _ALNUM, _TWEAK, True, False, scheme)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 200_000, peak
