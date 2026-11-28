@@ -14,6 +14,8 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, Literal, NewType, TypeVar
 
+from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError
 from decoy_engine.errors import ConnectorError
 from decoy_engine.fileaccess._types import (
     DenialKind,
@@ -270,6 +272,18 @@ def _resurface(exc: Exception) -> Exception | None:
     return resurface_scrubbed(exc)
 
 
+def is_source_read_refusal(exc: BaseException) -> bool:
+    """The coded refusal of the source-read conversion (`arrow_to_frame`'s callback): it names
+    the column, never a value, and is raised with no cause or context, so a guard passes it
+    unchanged. Any other error from that conversion is scrubbed like a library failure."""
+    return (
+        isinstance(exc, ExecutionError)
+        and exc.code == reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE
+        and exc.__cause__ is None
+        and exc.__suppress_context__
+    )
+
+
 def guarded(display: str, strict: bool, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """Run a library call. Under a strict policy a library failure becomes the typed
     `FileAccessReadError` naming only `display`; memory and disk-resource failures keep
@@ -309,6 +323,8 @@ def guarded_with_parser_errors(
     except parser_errors:
         raise
     except Exception as exc:
+        if is_source_read_refusal(exc):
+            raise
         resurfaced = _resurface(exc)
         if resurfaced is exc:
             raise

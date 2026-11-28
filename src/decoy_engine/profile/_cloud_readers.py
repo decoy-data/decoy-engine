@@ -181,16 +181,16 @@ def _read_parquet_frame(size: int, fetch: Fetch, provider: str) -> pd.DataFrame:
     """The object as `pd.read_parquet` gives it, one column chunk per request. The schema keeps
     the pandas metadata (index, categoricals, timezones) and a file with no row groups valid."""
     handle, pf = _parquet(size, fetch, provider)
-    table = arrow_adapter.collect_batches(
+    convert = partial(arrow_to_frame, on_unrepresentable=source_column_unrepresentable())
+    # The conversion and the `attrs` step run inside the strict read guard: its coded refusal
+    # for a column pandas cannot hold passes unchanged, and any other failure is scrubbed.
+    return arrow_adapter.collect_batches(
         handle,
         pf,
-        lambda b: pa.Table.from_batches(b, schema=pf.schema_arrow),
+        lambda b: arrow_adapter.parquet_table_to_pandas(
+            pa.Table.from_batches(b, schema=pf.schema_arrow), convert
+        ),
         batch_size=_PARQUET_FRAME_BATCH_ROWS,
-    )
-    # Converted after the guarded read, through the one source-read conversion, so a column
-    # pandas cannot hold raises its own code (as `main`'s `to_frame` does), not a read error.
-    return arrow_adapter.parquet_table_to_pandas(
-        table, partial(arrow_to_frame, on_unrepresentable=source_column_unrepresentable())
     )
 
 
