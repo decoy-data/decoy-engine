@@ -10,6 +10,7 @@ import pytest
 
 from decoy_engine import phase, progress, reasons
 from decoy_engine.reasons import CleanupState, Operation, PublicationState, ReasonRecord
+from tests.unit.progress.test_consumer_contract import v0_projection
 
 _RV = reasons.REGISTRY_VERSION
 _TS = 1700000000.0
@@ -68,7 +69,7 @@ def _events() -> dict[str, progress.ProgressEvent]:
     }
 
 
-# (event_to_dict, event_to_legacy_dict) per event type, captured on the pre-F31 base.
+# (event_to_dict, its version-0 keys) per event type, captured on the pre-F31 base.
 _SNAPSHOT = {
     "phase": (
         {
@@ -278,7 +279,7 @@ _SNAPSHOT = {
 @pytest.mark.parametrize("name", sorted(_SNAPSHOT))
 def test_progress_dicts_unchanged(name: str) -> None:
     event = _events()[name]
-    assert (progress.event_to_dict(event), progress.event_to_legacy_dict(event)) == _SNAPSHOT[name]
+    assert (progress.event_to_dict(event), v0_projection(event)) == _SNAPSHOT[name]
 
 
 class _PlainSubclassError(ValueError):

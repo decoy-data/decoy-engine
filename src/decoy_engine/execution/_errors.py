@@ -47,6 +47,21 @@ def text_mask_unsupported_pair_error(column: str | None) -> StrategyError:
     )
 
 
+def text_mask_fail_closed_error(column: str | None) -> StrategyError:
+    """The value-free `StrategyError` a sub-floor fpe span with no `sub_floor_span` policy maps to.
+
+    The handler, the native routes and the out-of-core route all raise this one error, so a
+    consumer keying on the code or the text sees the same event on every route."""
+    return StrategyError(
+        code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
+        strategy="text_mask",
+        message=(
+            f"column {column!r}: a text span is outside the FPE domain of its charset. "
+            "The engine fails closed rather than silently choose a sub_floor_span fallback."
+        ),
+    )
+
+
 def vault_requires_resident_output() -> ExecutionError:
     """B-6 D1 boundary rule B0: a file-vault writer where the engine does not hold every output row.
 

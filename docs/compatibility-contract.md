@@ -281,6 +281,14 @@ disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templ
 platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
 (DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
 
+**Pre-GA change (starter model hits, INIT-SCAN-SCAFFOLD E2, 2026-11-26).** `ColumnSuggestion.live` changes meaning.
+It said "written into the config", which is true of every starter entry. It now says a deterministic rule chose the
+entry (regex, declared key, integer-unique hash, fallback) and is false when a classifier chose it. `starter_config`
+reads `TableScan.model_hits`: a high-band classifier hit writes its detector's entry only when no regex match is
+confident, and NER or review-band hits add note evidence only. `ColumnSuggestion.decided_by` is new and read-only.
+`starter_config` now refuses a scan with a `scan_header_suspect` table with the new reason `config/starter_header_suspect` (ships in 0.28.5, registry 1.35.0)
+(a coded, value-free `PipelineConfigError` at `tables[<index>]`).
+
 **Pre-GA correction (COLUMN-SHAPE E1a, 2026-11-21).** Breaking for stored artifacts, no shim. A profile
 column now carries `shape` (`text`, `date`, `timestamp_tz`, `timestamp_naive`, `integer`, `float`, `decimal`,
 `decimal_wide`, `boolean`, `other`, `unknown`). Profile JSON gains the field and `schema_version` stays 1: a
@@ -342,6 +350,8 @@ recommended declaration changes typed output: `bucketize` under `lower` writes i
 
 **Pre-GA correction (BUCKET-TOPCODE-NATIVE S1a, 2026-11-24).** Three byte changes in the `bucketize` handler, on every route that runs it. With an integer width, a finite value of magnitude 2**53 or more (B2) and either infinity (B3) now give one `format_error` row error with the reason `value is out of range under bucketize` and a null cell; before, the label was rounded or the cast failed with no code. A valid NaN stays ordinary missing. With quarantine on the row leaves the main output; with the fail policy the job fails before it publishes. With a float width, an integer source of any pandas dtype is converted to float64 with round-to-nearest before the division (B4), so `int64[pyarrow]` gives the labels NumPy `int64` and nullable `Int64` already gave and no longer raises with the value in the message: 9007199254740993 at width 2.5 gives lower `9007199254740992.0`. Values below 2**53 and float sources are unchanged. No plan hash, seed protocol, route or reason code moves.
 
+**Pre-GA determinism golden re-record (TESTFLIGHT-GOLDENS, 2026-11-25).** Breaking for the committed testflight fingerprints of two jobs, no shim. PR #770 (UF-DOMAIN S1) writes a column no rule changes from the source Arrow column on every pandas route. In job `d_longitudinal_visits`, `clinic_stays.clinic_id` (a nullable integer) is now `int64` and was `double`; in job `e_hostile_edge_cases`, the zero-row `empty_table.seq_id` is now `string` and was `null`. Row counts, null counts and every other column are unchanged, and the output is the same across `PYTHONHASHSEED` values. `testflight/golden_fingerprints.json` is re-recorded for those two jobs on Linux; the other jobs keep their golden. The nightly `testflight` workflow was red from 2026-11-23 to 2026-11-25 until this re-record.
+
 **Pre-GA correction (COMPANION-REDS, 2026-11-23).** The physical `plan_hash` and `activation_hash` of an auto-routed
 no-FK full-frame job move once (a forced full-frame job is excluded). The resident-fit verdict and its code join the hash (#767, ships in 0.28.4), and its byte
 figures stay out of it, so a lazy and a resident input of the same job on the same host give the same hash. The
@@ -353,6 +363,12 @@ for every unified-slice job, because `CapabilityMatrix` gains a `draw` field (`p
 `registry_fingerprint()` hashes the dump of every provider's matrix. Both hashes are written to output evidence. No
 other input to the fingerprint changes: with `draw` removed the fingerprint equals the one on the previous main, and a test
 pins that. `pipeline_config_hash` does not move. No schema version moves.
+
+**Pre-GA correction (GEN-NONFAKER-DRAWS S2, 2026-11-24).** `lorem_text` becomes a poolable provider, so a generate
+column `provider: lorem_text` draws from a pool of Faker paragraphs instead of one seeded Faker call per row. Its values
+change; the type stays text. The masking side had refused `lorem_text` at compile, so no earlier masked output exists.
+The new reasons `route/faker_computed_output_type_unsupported` and
+`runtime/out_of_core_faker_computed_output_type_unsupported` are unreleased. No schema version moves.
 
 **Pre-GA correction (DELIV E2f, `decoy-publication/v1` members, 2026-11-23).** Breaking for older readers, no new
 version, no kept reader. In the `decoy-publication/v1` descriptor: `rows` is nullable (an int, or null; the key
@@ -942,13 +958,18 @@ only this site moves.
   base_row_offset=0, native_threads=1, route_evidence_sink=None,
   pool_cache=None)`: `config` and `chunks` are positional-or-keyword, everything
   after the `*` is keyword-only, and new parameters are additive. Its pinned
-  guarantees are value equality with `run_mask_pipeline_chunked` (one stated
-  exception: on the stock-adapter path, a passthrough column no `when:` predicate,
+  guarantees are value equality with `run_mask_pipeline_chunked` (stated
+  exceptions: on the stock-adapter path, a passthrough column no `when:` predicate,
   sibling-reading strategy or composite generator reads or writes is the source
-  column itself and never goes through pandas, so a value the oracle's round trip rounds or refuses, such as a
-  nullable integer above 2^53, comes back exact; a read passthrough column that
-  pandas refuses raises `chunked_passthrough_value_unrepresentable`, and a custom
-  or subclass adapter carries nothing), one output type per column per call (`string` for hash, truncate,
+  column itself and never goes through pandas. The oracle also writes an untouched column from the
+  source, so a nullable integer above 2^53 or a `timestamp[ns]` of `-2**63` is exact on both
+  entries. A value pandas refuses to convert, such as a `time64[ns]` with nanoseconds or a `date32`
+  outside pandas' range, raises on the oracle and comes back exact here; a read passthrough
+  column that pandas refuses raises `chunked_passthrough_value_unrepresentable`. An adapter that
+  is not exactly `PandasExecutionAdapter`, a subclass included, runs the oracle leg and carries
+  nothing (`reroute_reason="adapter_requested"` when the table would otherwise run natively;
+  an earlier reason such as `when_predicate_not_native:<col>` wins otherwise). The oracle types each chunk on its own,
+  so an all-null masked chunk can be `null` there), one output type per column per call (`string` for hash, truncate,
   string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
   that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see
   "Pass-through text width" in §3.4), no pandas
@@ -1378,6 +1399,13 @@ nothing is coerced. While `name` is unset the config dump and
 excluded from the plan hash because it is data binding, not masking semantics.
 `tests/unit/config/test_pipeline_name.py` pins all of this.
 
+`PipelineConfig` refuses `delivery.mode: best_effort` with `config.delivery_best_effort_unreleased` (DELIV BE0-E,
+ships in 0.28.5, registry 1.35.0), at the location `delivery`. The mode was accepted before and no run
+implemented it, so the narrowing is pre-GA. `compile_plan` refuses the same value on a raw mapping through
+`decoy_engine.config.refuse_unreleased_delivery`. `DeliveryConfig`, `plan_delivery` and the frozen
+`pipeline-config.schema.json` keep `best_effort`, so row 61b lifts the refusal without a schema change and the
+lift is additive under §4.1. `tests/unit/config/test_delivery_config.py` pins it.
+
 **Declaration gate on the run, isolated and profile routes (CONFIG-EXPLICIT E2c).** `prepare_declared_sources`
 (`DeclarationRequest.for_run`, `for_descriptors`) is the one boundary. `profile_source` calls it first, or accepts the
 `PreparedDeclaredSources` that `build_run_context` already made for the same config object (`declared=`; a capability
@@ -1512,6 +1540,11 @@ change in any release. The registry is `src/decoy_engine/contracts/stability.py`
   1,186 names.
 - An experimental surface becomes frozen by moving its registry row and dropping the marker in a minor release. A
   frozen name never goes back to experimental inside a major.
+- The CLI package's Python API is experimental too. Its list lives in the CLI repository's `docs/release/versioning.md`.
+- The CLI census reads this registry through one seam in `decoy_engine.contracts.stability`: the tier labels,
+  `EXPERIMENTAL_MARKER`, `is_experimental_export` and `tier_key`. Both censuses call the two functions and keep no
+  copy of the rule. `is_experimental_export` takes a third argument, a function from module name to source text, so the
+  caller does the file read and `contracts` does none. Renaming or moving any of these names needs a CLI repin in the same release train.
 
 The experimental names at 1.0, one per line (the sentry compares this list with the registry):
 

@@ -117,32 +117,36 @@ detectors:
 
 class TestManifestErrors:
     def test_missing_manifest(self, tmp_path: Path) -> None:
-        with pytest.raises(NameHintLoaderError, match="manifest not found"):
+        with pytest.raises(NameHintLoaderError, match="manifest.yaml: not found"):
             load_name_hint_terms(tmp_path)
 
     def test_manifest_missing_files_key(self, tmp_path: Path) -> None:
         _write(tmp_path, "manifest.yaml", "library_version: 1.0.0\n")
-        with pytest.raises(NameHintLoaderError, match="non-empty `files:` list"):
+        with pytest.raises(
+            NameHintLoaderError, match="files: (missing|empty); expected a non-empty list"
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_manifest_empty_files_list(self, tmp_path: Path) -> None:
         _write(tmp_path, "manifest.yaml", "files: []\n")
-        with pytest.raises(NameHintLoaderError, match="non-empty `files:` list"):
+        with pytest.raises(
+            NameHintLoaderError, match="files: (missing|empty); expected a non-empty list"
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_manifest_files_entry_not_string(self, tmp_path: Path) -> None:
         _write(tmp_path, "manifest.yaml", "files:\n  - 42\n")
-        with pytest.raises(NameHintLoaderError, match="entry that is not a string"):
+        with pytest.raises(NameHintLoaderError, match=r"files\[0\]: wrong type; expected a string"):
             load_name_hint_terms(tmp_path)
 
     def test_listed_file_missing(self, tmp_path: Path) -> None:
         _write(tmp_path, "manifest.yaml", "files:\n  - ghost.yaml\n")
-        with pytest.raises(NameHintLoaderError, match="ghost.yaml.*does not exist"):
+        with pytest.raises(NameHintLoaderError, match="ghost.yaml: not found; expected a file"):
             load_name_hint_terms(tmp_path)
 
     def test_manifest_yaml_parse_error(self, tmp_path: Path) -> None:
         _write(tmp_path, "manifest.yaml", "files:\n  - one.yaml\n  - : invalid\n")
-        with pytest.raises(NameHintLoaderError, match="could not parse"):
+        with pytest.raises(NameHintLoaderError, match="could not be parsed"):
             load_name_hint_terms(tmp_path)
 
 
@@ -156,37 +160,49 @@ class TestPerFileErrors:
     def test_detectors_not_a_list(self, tmp_path: Path) -> None:
         self._wrap_manifest(tmp_path)
         _write(tmp_path, "bad.yaml", "detectors: not-a-list\n")
-        with pytest.raises(NameHintLoaderError, match="`detectors:` must be a list"):
+        with pytest.raises(NameHintLoaderError, match="detectors: wrong type; expected a list"):
             load_name_hint_terms(tmp_path)
 
     def test_entry_not_a_mapping(self, tmp_path: Path) -> None:
         self._wrap_manifest(tmp_path)
         _write(tmp_path, "bad.yaml", "detectors:\n  - just_a_string\n")
-        with pytest.raises(NameHintLoaderError, match="entry #0 must be a mapping"):
+        with pytest.raises(
+            NameHintLoaderError, match=r"detectors\[0\]: wrong type; expected a mapping"
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_missing_detector_id(self, tmp_path: Path) -> None:
         self._wrap_manifest(tmp_path)
         _write(tmp_path, "bad.yaml", "detectors:\n  - patterns: [x]\n")
-        with pytest.raises(NameHintLoaderError, match="missing a non-empty `detector_id:`"):
+        with pytest.raises(
+            NameHintLoaderError,
+            match=r"detectors\[0\].detector_id: (missing|empty); expected a non-empty string",
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_empty_detector_id_string(self, tmp_path: Path) -> None:
         self._wrap_manifest(tmp_path)
         _write(tmp_path, "bad.yaml", 'detectors:\n  - detector_id: ""\n    patterns: [x]\n')
-        with pytest.raises(NameHintLoaderError, match="missing a non-empty `detector_id:`"):
+        with pytest.raises(
+            NameHintLoaderError,
+            match=r"detectors\[0\].detector_id: (missing|empty); expected a non-empty string",
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_missing_patterns(self, tmp_path: Path) -> None:
         self._wrap_manifest(tmp_path)
         _write(tmp_path, "bad.yaml", "detectors:\n  - detector_id: foo\n")
-        with pytest.raises(NameHintLoaderError, match="non-empty `patterns:` list"):
+        with pytest.raises(
+            NameHintLoaderError, match="foo.patterns: (missing|empty); expected a non-empty list"
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_empty_patterns_list(self, tmp_path: Path) -> None:
         self._wrap_manifest(tmp_path)
         _write(tmp_path, "bad.yaml", "detectors:\n  - detector_id: foo\n    patterns: []\n")
-        with pytest.raises(NameHintLoaderError, match="non-empty `patterns:` list"):
+        with pytest.raises(
+            NameHintLoaderError, match="foo.patterns: (missing|empty); expected a non-empty list"
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_pattern_term_not_string(self, tmp_path: Path) -> None:
@@ -194,7 +210,10 @@ class TestPerFileErrors:
         _write(
             tmp_path, "bad.yaml", "detectors:\n  - detector_id: foo\n    patterns: [valid, 42]\n"
         )
-        with pytest.raises(NameHintLoaderError, match="pattern #1 must be a non-empty string"):
+        with pytest.raises(
+            NameHintLoaderError,
+            match=r"foo.patterns\[1\]: (wrong type|empty); expected a non-empty string",
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_empty_pattern_string(self, tmp_path: Path) -> None:
@@ -202,7 +221,10 @@ class TestPerFileErrors:
         _write(
             tmp_path, "bad.yaml", 'detectors:\n  - detector_id: foo\n    patterns: ["valid", ""]\n'
         )
-        with pytest.raises(NameHintLoaderError, match="pattern #1 must be a non-empty string"):
+        with pytest.raises(
+            NameHintLoaderError,
+            match=r"foo.patterns\[1\]: (wrong type|empty); expected a non-empty string",
+        ):
             load_name_hint_terms(tmp_path)
 
 
@@ -223,14 +245,18 @@ detectors:
     patterns: [b]
 """,
         )
-        with pytest.raises(NameHintLoaderError, match="dup.*twice"):
+        with pytest.raises(
+            NameHintLoaderError, match="dup: declared more than once.*at most once per file"
+        ):
             load_name_hint_terms(tmp_path)
 
     def test_duplicate_across_files(self, tmp_path: Path) -> None:
         _write(tmp_path, "manifest.yaml", "files:\n  - one.yaml\n  - two.yaml\n")
         _write(tmp_path, "one.yaml", "detectors:\n  - detector_id: dup\n    patterns: [a]\n")
         _write(tmp_path, "two.yaml", "detectors:\n  - detector_id: dup\n    patterns: [b]\n")
-        with pytest.raises(NameHintLoaderError, match="dup.*declared in both"):
+        with pytest.raises(
+            NameHintLoaderError, match="dup: declared more than once.*exactly one file"
+        ):
             load_name_hint_terms(tmp_path)
 
 

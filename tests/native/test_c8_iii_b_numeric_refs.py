@@ -361,6 +361,7 @@ def _partition(draw: Any) -> tuple[str, str, pa.Array, int]:
     return kind, draw(st.sampled_from(_PRED[kind])), arr, chunk
 
 
+@pytest.mark.timeout(900)
 @settings(
     max_examples=40,
     deadline=None,

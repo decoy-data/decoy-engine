@@ -12,7 +12,8 @@
    "reason": "text_mask per-span bounds (TEXT-MASK-DATE-BOUNDS)"
   },
   "execution/native/_operator_params.py::resolve_operator_params": {
-   "reason": "the text_mask branch; the date_shift branch calls shift_window"
+   "reason": "the text_mask branch; the date_shift branch calls shift_window",
+   "max": 2
   },
   "execution/out_of_core/_mask_group_c.py::_text_mask_array": {
    "reason": "text_mask per-span bounds"

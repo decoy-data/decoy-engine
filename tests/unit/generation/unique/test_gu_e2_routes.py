@@ -253,12 +253,15 @@ class TestAT12RetryAndMemory:
         from decoy_engine.generation._bounds import legacy_table_bytes
         from decoy_engine.generation._budget_ledger import GenerationBudgetLedger
         from decoy_engine.generation._streamed import _fit_band, run_generation
+        from decoy_engine.generation.pool import provider_init_bytes, run_faker_footprint
 
         rows = 20_000
         col = {"name": "f", "type": "faker", "faker_type": "email"}
         legacy = legacy_table_bytes(rows, [320])
-        limit = int(legacy * (1 + _fit_band())) + 1024
         plain = cfg([table("t", rows, [col])])
+        # Faker's provider charge is the same for both runs; only the seen set differs.
+        init = provider_init_bytes(*run_faker_footprint(plain, None))
+        limit = int(legacy * (1 + _fit_band())) + 1024 + init
         assert run_generation(plain, ledger=GenerationBudgetLedger(limit)).tables is not None
         uniq = cfg([table("t", rows, [{**col, "unique": True}])])
         assert unique_set_bytes(rows, 320) * (1 + _fit_band()) > 1024 + 1

@@ -30,6 +30,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._error_base import raise_bare as _raise_bare
 from decoy_engine._opaque import OpaqueBox as _OpaqueBox
 from decoy_engine.keyprovider import (
     KEY_REQUIRED_GUIDANCE,
@@ -55,7 +56,6 @@ from decoy_engine.secret_providers._errors import (
     is_kept,
     kept_error,
 )
-from decoy_engine.secret_providers._errors import raise_bare as _raise_bare
 from decoy_engine.secret_providers._local import FileSecretProvider, _LocalProvider
 from decoy_engine.secret_providers._registry import SecretProviderRegistry, default_registry
 from decoy_engine.secret_providers._requirements import (

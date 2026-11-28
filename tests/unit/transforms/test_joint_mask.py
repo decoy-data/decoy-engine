@@ -265,6 +265,30 @@ class TestConfigValidation:
         with pytest.raises(PlanCompileError, match="reference"):
             validate_joint_mask_config(bad)
 
+    @pytest.mark.parametrize("kind", ["missing", "unreadable", "no-such-column"])
+    def test_reference_locator_credentials_stay_out_of_the_error(self, tmp_path, kind):
+        """A `customer:` reference whose locator carries a password never reaches the error text."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        canary = "DECOY_CANARY_F31_PW"
+        name = f"user:{canary}@host.parquet"
+        if kind == "missing":
+            reference = f"customer:https://user:{canary}@host/ref.parquet"
+        else:
+            target = tmp_path / name
+            if kind == "unreadable":
+                target.write_bytes(b"not parquet")
+            else:
+                pq.write_table(pa.table({"id": pa.array([1], pa.int64())}), str(target))
+            reference = f"customer:{target}"
+        with pytest.raises(PlanCompileError) as info:
+            validate_joint_mask_config(_make_config(reference=reference))
+        assert info.value.code.startswith("joint_mask_")
+        assert canary not in str(info.value)
+        assert all(canary not in repr(a) for a in info.value.args)
+        assert str(tmp_path) not in str(info.value)
+
     def test_missing_key_by_raises(self):
         """A config without 'key_by' must raise PlanCompileError."""
         bad = {"columns": _ZIP_COLS, "reference": "us_zip5_city_state"}
