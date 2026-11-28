@@ -466,7 +466,7 @@ def test_an_open_session_left_uncommitted_on_a_normal_exit_aborts_and_raises() -
     sink = b6a.RecordingSink()
     session = mod.OutputPublish(sink, True, False)
     with pytest.raises(ExecutionError) as err, session:
-        session.open()
+        session.start_streaming()
     assert err.value.code == "internal_publish_not_committed"
     assert sink.calls == [("abort",)]
 
@@ -478,7 +478,7 @@ def test_a_committed_or_unopened_session_exits_quietly() -> None:
         pass
     committed = mod.OutputPublish(sink, True, False)
     with committed:
-        committed.open()
+        committed.start_streaming()
         committed.commit()
     assert sink.calls == [("commit",)]
 
@@ -498,6 +498,6 @@ def test_an_abort_error_that_is_not_an_exception_still_propagates_like_the_seque
     sink = Interrupting()
     session = mod.OutputPublish(sink, True, False)
     with pytest.raises(KeyboardInterrupt), session:
-        session.open()
+        session.start_streaming()
         raise RuntimeError("original")
     assert sink.count("abort") == 1

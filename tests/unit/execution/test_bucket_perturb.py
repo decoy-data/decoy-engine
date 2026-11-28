@@ -382,7 +382,7 @@ class TestBucketPerturbIntegration:
             provider_config=(("bucket", "weekly_typo"), ("date_format", "%Y-%m-%d")),
         )
         plan = _plan("d", seed)
-        with pytest.raises(StrategyError, match="weekly_typo") as exc:
+        with pytest.raises(StrategyError, match="provider_config is invalid") as exc:
             PandasExecutionAdapter().run_single(
                 plan,
                 src,

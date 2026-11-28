@@ -13,7 +13,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from decoy_engine import run_mask_chunked
+from decoy_engine import reasons, run_mask_chunked
 from decoy_engine.execution import _pandas_adapter
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
@@ -90,6 +90,13 @@ def _public_error(
 
 def _same_exc(a: BaseException | None, b: BaseException) -> None:
     assert a is not None and type(a) is type(b) and str(a) == str(b)
+
+
+def _same_refusal(a: BaseException | None, b: BaseException) -> None:
+    """The same coded refusal of the same column. A `when:` mask converts without the table name,
+    so the text may differ by it."""
+    assert isinstance(a, ExecutionError) and isinstance(b, ExecutionError)
+    assert a.code == b.code and a.column == b.column
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +264,7 @@ def test_refused_value_in_chunk_two_is_coded(
     config = _read_cfg("x", configured=configured)
     chunks = [_chunk(x=_T64.good), _chunk(x=_T64.good), _chunk(x=_T64.bad)]
     oracle_exc = _public_error(config, chunks, below_gate=not configured)
-    assert type(oracle_exc).__name__ == "ArrowInvalid"
+    assert type(oracle_exc).__name__ == "ExecutionError"
     sink: list[Any] = []
     kwargs = dict(
         table=TABLE,
@@ -278,7 +285,7 @@ def test_refused_value_in_chunk_two_is_coded(
     with pytest.raises(ExecutionError) as info:
         next(gen)
     _expect_coded(info, "x", 2)
-    _same_exc(info.value.__cause__, oracle_exc)
+    _same_refusal(info.value.__cause__, oracle_exc)
     assert len(sink) == 2
 
 
@@ -398,10 +405,10 @@ def test_sibling_reference_puts_the_passthrough_column_in_the_read_set(
     seen: list[pa.DataType] = []
     real = _pandas_adapter.to_pandas_fk_safe
 
-    def spy(table: pa.Table, fk: Any) -> Any:
+    def spy(table: pa.Table, fk: Any, **kwargs: Any) -> Any:
         if ref in table.column_names:
             seen.append(table.schema.field(ref).type)
-        return real(table, fk)
+        return real(table, fk, **kwargs)
 
     monkeypatch.setattr(_pandas_adapter, "to_pandas_fk_safe", spy)
     out, sink, ev = run_entry(config, chunks)
@@ -694,7 +701,9 @@ def test_masked_column_conversion_failure_is_not_wrapped() -> None:
     next(gen)
     with pytest.raises(Exception) as info:
         next(gen)
-    assert not isinstance(info.value, ExecutionError)
+    # Not wrapped by the chunked route: the choke point's own coded error comes through.
+    assert isinstance(info.value, ExecutionError)
+    assert info.value.code == "full_frame_value_unrepresentable"
     _same_exc(info.value, oracle_exc)
 
 
@@ -757,7 +766,9 @@ def test_custom_adapter_converting_a_refused_passthrough_raises_raw() -> None:
     next(gen)
     with pytest.raises(Exception) as info:
         next(gen)
-    assert not isinstance(info.value, ExecutionError)
+    # Not wrapped by the chunked route: the choke point's own coded error comes through.
+    assert isinstance(info.value, ExecutionError)
+    assert info.value.code == "full_frame_value_unrepresentable"
     _same_exc(info.value, oracle_exc)
 
 
@@ -776,9 +787,11 @@ def test_stock_adapter_subclass_is_not_wrapped_either() -> None:
         adapter=Sub(),
     )
     next(gen)
-    with pytest.raises(Exception) as info:
+    with pytest.raises(ExecutionError) as info:
         next(gen)
-    assert type(info.value).__name__ == "ArrowInvalid"
+    assert info.value.code == reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE
+    assert info.value.column == "x"
+    assert info.value.code != CODE
 
 
 # ---------------------------------------------------------------------------

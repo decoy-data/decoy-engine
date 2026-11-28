@@ -999,6 +999,9 @@ gate tooling only.
 - L1 from plan review round 1: route `identity_error` on both the frame and batch paths through
   the central `safe_error_class` (`_progress_events.py:85`) at the message site
   (`residual_pii.py:558`). Class names are under the V1 bar.
+- L2 from RG-E2 Codex round 1: new-file discovery outside the baseline directory compares
+  basenames (`test_baseline_registry.py:131`, `_ratchet.py:452`), so a second data file with the
+  same basename as a covered one can escape the reader scan. Predates RG-E2.
 
 # Owner decisions (2026-11-24)
 

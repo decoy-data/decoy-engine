@@ -225,6 +225,26 @@ def test_pre_scan_does_not_change_the_plan_hash(tmp_path: Path) -> None:
     assert _hash(tmp_path, pre_scan={"detectors": ["regex", "classifier"]}) == base
 
 
+def test_naming_regex_does_not_change_the_fail_mode_hash_or_dump(tmp_path: Path) -> None:
+    """AT-E1d: configs that differ only in how they name regex parse and hash alike."""
+    spellings = [
+        ["ner", "classifier"],
+        ["classifier", "regex", "ner"],
+        ["regex", "ner", "classifier"],
+    ]
+    hashes = set()
+    dumps = []
+    for detectors in spellings:
+        pre = {"on_findings": "fail", "detectors": detectors}
+        hashes.add(_hash(tmp_path, pre_scan=pre))
+        raw = copy.deepcopy(LEGACY_RAW)
+        raw["pre_scan"] = pre
+        dumps.append(PipelineConfig.model_validate(raw).model_dump()["pre_scan"])
+    assert len(hashes) == 1
+    assert all(d == dumps[0] for d in dumps)
+    assert tuple(dumps[0]["detectors"]) == ("regex", "classifier", "ner")
+
+
 @pytest.mark.parametrize("model", ["en_core_web_sm", "en_core_web_md"])
 def test_ner_model_is_part_of_the_post_scan_hash(tmp_path: Path, model: str) -> None:
     default = _hash(tmp_path, post_scan={"integrity": True, "detectors": ["regex", "ner"]})

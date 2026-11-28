@@ -114,3 +114,15 @@ def raise_uniqueness_impossible(
         message += f"; {verb} row {_count('row', row) + 1:,}"
     message += f". {_REMEDY.get(kind or '', _DEFAULT_REMEDY)}"
     raise GenerationError(code=reasons.runtime.UNIQUENESS_IMPOSSIBLE, message=message)
+
+
+def native_type_not_admitted_error() -> GenerationError:
+    """The one public error for an input column type the compiled kernels do not admit.
+
+    The native detail formats the Arrow type, which carries field names and metadata values
+    from the caller's data, so the message is fixed. Every compiled-kernel translator builds
+    this error here, so the policy has a single definition."""
+    return GenerationError(
+        code=reasons.runtime.NATIVE_TYPE_NOT_ADMITTED,
+        message="the native kernel does not admit the input column type",
+    )

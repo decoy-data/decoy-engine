@@ -323,7 +323,7 @@ def test_a_run_with_a_regex_fail_and_an_ner_fail_leads_with_finding_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from decoy_engine.detection._ner_rate import NER_MIN_RATES, NerRate
-    from decoy_engine.execution.pipeline._post_scan import PostScanGate
+    from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 
     mf = importlib.import_module(_FINDINGS)
     monkeypatch.setattr(mf, "pipeline_version", lambda _model: _NER[1])

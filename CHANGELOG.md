@@ -9,6 +9,172 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.28.5] - 2026-11-27
+
+### Breaking for consumers
+
+- `PipelineConfig` and `compile_plan` refuse `delivery.mode: best_effort`, a value that was accepted and had no effect.
+- `TelemetryClient`, `ExecutionEvent` and `event_to_legacy_dict` are removed from the public surface; `ExecutionContext` loses its `telemetry` parameter, so its positional parameters `resolve_connector`, `derive_key`, `pipeline_derive_key`, `captured_outputs`, `pool_resolver`, `column_relationships` and `instance_default_locale` move up one (pass them by keyword); the 21 root names `BundlePool`, `CompositeAddress`, `PoolCache`, `composite_city_state_zip`, `EinAdapter`, `EinDomain`, `EinValidator`, `MrnAdapter`, `MrnDomain`, `MrnValidator`, `NdcAdapter`, `NdcDomain`, `NdcValidator`, `NpiAdapter`, `NpiDomain`, `NpiValidator`, `SsnAdapter`, `SsnDomain`, `SsnValidator`, `IdentifierError` and `IdentifierFormatError` are removed from `decoy_engine`; and the `FK_SELF_REFERENCE` validation code alias is removed (the reason code `fk.self_reference` stays)
+- `read_fixed_width` on a file with no record (or with `max_records=0`) now types each column by the layout, a text field as a pandas `string` column, so an untouched column of an empty fixed-width source is written with its declared type (`int64`, `float64` or `string`) on every route, not `null` on the resident routes. For an empty fixed-width source this also moves: full and bounded `profile` dtypes change from `object` to `string`, `int64` and `float64`, so `profile_hash` and the physical `plan_hash` change; head, random and full scans report `integer` and `float` for numeric fields; and a `when` that gives string output on a numeric field (for example `redact` with `when: c > 2` on an int field) is now refused with `when_string_output_on_numeric_unsupported`, as it already was on a non-empty file, where it used to return 0 rows.
+- `bucketize` with an integer width now turns a finite value of magnitude 2**53 or more, and any infinity, into a `format_error` row error with a null cell. A float width on an `int64[pyarrow]` column now labels a large value instead of raising.
+- Parquet output with a null fixed-size list cell now raises `ParquetFixedListNullError` and publishes nothing.
+- `ValidatorFinding` gains `failing_row_count` and lists at most `FINDING_INDEX_CAP` (10,000) row positions in `failing_row_indices` (all of them under quarantine `validation_fail`); `ValidationReport` gains `results` and its `elapsed_ms` is the time spent folding rows; `parent_window_respected` parses each date column with the format of its first value that pandas would use, and a parent table without its key or window column raises `ValidatorStateError` instead of a pyarrow `KeyError`.
+- a job with no foreign keys under `auto` is now refused with `nonfk_full_frame_capacity_exceeded` in three more places where it used to start and be killed for memory: before a lazy Parquet source is read whole, before a resident table is copied for its transforms, and after a mixed generate and mask job declines to the full-frame route.
+- the physical `plan_hash` and `activation_hash` of every unified-slice job change once, because the provider capability matrix gains a `draw` field and the registry fingerprint hashes it. `pipeline_config_hash` does not change, and no output value changes.
+- `run_pipeline` with `subset_request="skip"` now refuses an invalid `subset:` edge at `split_subset_config` (the same codes as when the subset stage runs). 0.28.4 skipped the check under `skip`, so a config that ran there can now fail at the split.
+- A temp directory that cannot take a new directory now stops the run with `runtime/scratch_root_unusable`. Before, the engine moved to another temp directory. `fileaccess.scratch_root()` chooses the directory from the first non-empty of `TMPDIR`, `TEMP` and `TMP`.
+
+### Added (internal safe-text leaf, F31 AE1a1, 2026-11-24)
+
+An internal `SafeText` type holds text written as a string literal in the calling code. An AST
+sentry fails the build for any call that passes anything else, so a row value cannot become safe
+text. At run time a refusal withholds the text and logs one warning per call site with no value;
+under the test-only strict switch it raises instead.
+No public name changes. Later F31 slices route error and log text through it.
+
+### Changed (starter_config reads model hits, INIT-SCAN-SCAFFOLD E2, 2026-11-26)
+
+`starter_config` now reads `TableScan.model_hits`. With no confident regex match, the first high-band classifier hit writes the entry of its detector (`source="classifier"`, `live=False`); a date detector without a complete format still writes `redact`. A confident regex match always wins. Review-band classifier hits and NER hits never change an entry. Every hit adds one line of evidence to the column's note (model id, version, detector id, band or rate bucket, no cell text), and a hit that disagrees with the regex match says the regex was kept.
+
+`ColumnSuggestion.live` now means a deterministic rule chose the entry (regex, declared key, integer-unique hash, fallback). It is false when a model chose it. Before, it meant "written into the config", which is true of every starter entry. `ColumnSuggestion.decided_by` is new and read-only: `declared_key`, `regex`, `classifier`, `integer_key` or `fallback`. `confident_matches` in `_starter_inference` is now the one rule for a confident regex match.
+
+`starter_config` refuses a scan whose table carries `scan_header_suspect`, with the new config reason `config/starter_header_suspect` at `tables[<index>]`. The message names no table or column.
+
+### Changed (best_effort delivery refused at validation, DELIV BE0-E, 2026-11-27)
+
+`delivery: {mode: best_effort}` now fails validation with the new reason `config/delivery_best_effort_unreleased`, reported at the location `delivery`. No run implemented the mode, so a config that asked for it ran as `strict` without a word. `decoy_engine.config.refuse_unreleased_delivery` runs the same refusal on a raw mapping, and `compile_plan` calls it first for entries that never build a `PipelineConfig`. `strict` and an omitted block behave as before, and `DeliveryConfig` and the frozen config schema still list `best_effort`, so lifting the refusal later is additive.
+
+### Removed (unused root names, PROP-SURFACE E-S1a, 2026-11-25)
+
+The root `decoy_engine` no longer exports `TelemetryClient`, `ExecutionEvent` and `event_to_legacy_dict`. `ExecutionContext` loses its `telemetry` field and parameter. Use `event_to_dict` for progress events.
+
+The 21 top-level bindings that the F9 trim kept outside `__all__` are gone: `BundlePool`, `CompositeAddress`, `PoolCache`, `composite_city_state_zip`, the `Ein`, `Mrn`, `Ndc`, `Npi` and `Ssn` adapter, domain and validator names, `IdentifierError` and `IdentifierFormatError`. Import them from `decoy_engine.identifiers`, `decoy_engine.generation.pool` or `decoy_engine.generation.composite`.
+
+`decoy_engine.internal.crypto.deterministic_hash` and the `FK_SELF_REFERENCE` alias on the validation codes are deleted. The reason code `fk.self_reference` stays.
+
+### Added (Stability seam for the CLI census, EXPERIMENTAL-TIER S0, 2026-11-26)
+
+`decoy_engine.contracts.stability` now holds `is_experimental_export` and `tier_key`, the engine census's identity rule moved out of the test tree so the CLI census can call it. No tier changes and no runtime behavior changes. `is_experimental_export` takes a source reader from the caller, so the module does no file I/O. Contract 3.6 names these functions as the consumer seam.
+
+### Fixed (empty fixed-width type parity, EMPTY-LAYOUT-PARITY, 2026-11-24)
+
+An empty fixed-width file written to a Parquet target gave different column types on the lazy
+and resident runs. The lazy source takes its schema from the layout. The resident read built its
+frame from the records, so with none every column was `object` and converted to Arrow `null`.
+Since 0.28.4 writes an untouched column from the source table, the resident run wrote that `null`.
+`read_fixed_width` now builds the zero-record frame from the layout, and the lazy and resident
+readers share one layout-to-Arrow type map (`layout_arrow_schema`).
+
+### Added (end-to-end proof and docs for the non-FK memory guard, NONFK-OOM S5, 2026-11-25)
+
+The route narrative in `docs/execution-backends.md` now covers large jobs with no foreign keys: the
+three routes, the resident-fit verdict, what "before the read" means for each entry point, and that
+`--max-memory` does not move the memory ceiling. The bench script
+`scripts/bench-auto-chunk/bench_nonfk_fallthrough.py` now records a refused run and an end-to-end
+`decoy run` under a memory cap. The end-to-end run writes only into a fresh subdirectory of
+`--workdir`, only the registered capacity refusal counts as a refusal, and the lower bound binds
+full-frame trials only (`--phase after` expects W-P on the chunked route).
+No engine behavior changes in this slice.
+
+### Changed (Companion check-digit arithmetic, FPE-CHECKSUM-NATIVE S2a, 2026-11-25)
+
+The native companion now holds one Rust copy of the luhn, npi, ean13, gtin, isbn13 and vin check-digit rules, locked to `decoy_engine.checksums` by a generated known-answer corpus. The FPE kernel and the text_redact `pan` and `npi` detectors call it. No masked value and no detector result changes.
+
+### Fixed (bucketize range errors and float-width integer sources, BUCKET-TOPCODE-NATIVE S1a, 2026-11-24)
+
+Three byte changes in the `bucketize` handler. None of them moves a plan hash or a seed.
+
+- B2: with an integer width, a finite value whose float64 magnitude is at least 2**53 gives one `format_error` row error with the reason `value is out of range under bucketize` and a null cell. Before, the label was rounded or the cast failed with no code.
+- B3: with an integer width, positive and negative infinity give the same row error and null cell. Before, the cast failed with no code. A valid NaN is still ordinary missing and gives no error. With quarantine on, the row leaves the main output. With the fail policy, the job fails before it publishes.
+- B4: with a float width, an integer source of any pandas dtype is converted to float64 with round-to-nearest before the division. An `int64[pyarrow]` value of magnitude above 2**53 used to raise `ArrowInvalid` with the value in the message. It now gets the label NumPy `int64` and nullable `Int64` already had: 9007199254740993 at width 2.5 gives lower `9007199254740992.0`. Values below 2**53 and float sources are unchanged.
+
+The range exit uses one function, `kernel.integer_width_exit_mask`, and one limit, `contracts.bucketize_width.EXACT_INT_BOUND`, which the `top_code` handler and compile check now share. The reason text has one owner, `contracts/format_error_reasons.py`.
+
+### Fixed (native text_redact detector, TEXT-REDACT-RUST-SPLICE S0, 2026-11-24)
+
+The Rust text_redact detector now declines a cell whose byte length does not fit its 32-bit offsets. `text_redact_candidates` and `text_mask_detect_splice` return their usual `None` decline for such a cell, and every released core already sends a declined cell to the Python path. Before this, a cell 4 GiB or more could wrap an end offset and leave part of a match unredacted. The release wheel smoke test now also refuses a wheel built with the test-only `test-detector-offset-limit` feature.
+
+### Changed (one scratch root and temp budget, F25 G6-1, 2026-11-24)
+
+One function, `fileaccess.scratch_root()`, now names the directory every engine scratch root goes under. The first non-empty variable of `TMPDIR`, `TEMP` and `TMP` chooses it. If that directory cannot take a new directory, the run stops with `runtime/scratch_root_unusable` instead of moving to another temp directory. The out-of-core disk preflight and the runtime temp-disk cap measure the directory the run spills under.
+
+### Changed (ratchet registry integrity, RG-E1, 2026-11-24)
+
+Test tooling only; no engine behavior changes. `scripts/dev/ratchet_check.py` now fails a diff that removes a sentry id without a dated `[retired]` decision (or keys moved to a new id), deletes or empties the registry, deletes a sentry test file without a rename or a `[retired_files]` decision, adds an unknown key to a registry row, names a baseline path with `..`, a backslash or an absolute part, or adds a baseline file with no `created_in`. A replacement or split now matches each key to one removed id and spends each pair once. A base commit that does not exist, or a base file that cannot be read, fails instead of reading as empty. Each new decision row prints as a `ratchet: decision ...` line. The registry gains empty `[retired]`, `[retired_files]` and `[checker_change]` tables.
+
+### Added (delivery stage, DELIV E2b, 2026-11-23)
+
+`decoy_engine.publication` exports `DeliveryStage`, `StagedMember`, `StageDecision` and `DeliveryReceipt`. A stage opens beside a run folder and hands out members with `reserve`; the writer writes to the member's path and calls `complete()`, which claims the file into the unit with a no-clobber hard link, so the target file system decides name collisions. Under the pointer lock the stage re-checks each claimed file, binds the unit, and swaps `LATEST` with a compare-and-swap on the state read at open. Only claimed files of tables the decision does not deliver are removed. A moved pointer, a refused bind or a failed swap gives receipt `nothing` with a reason code; a bind or swap whose durability is unknown gives `uncertain`, which counts as delivered. A target that cannot hard-link or ignores `chmod` fails at open (named limit `delivery_links_unsupported`). A vault passed with `set_vault` is published create-only before the bind.
+
+`decoy_engine.fileaccess` adds `StageDir.claim_from` and `seal_of`, `FileSeal`, `LinkUnsupported`, `OutputDir.leaf` and `parent_identity`, and the `delivery_slots` stage label. One no-clobber link (`link_noclobber_at`) now serves the durable vault publish, the strict and ambient exclusive file publish, and the claim.
+
+### Fixed (Exact in-memory source handoff, FIXED-LIST-NULL, 2026-11-23)
+
+The engine hands in-memory sources to the isolated child with their Arrow types and values intact. A plain run can return a fixed-size list with null cells in memory. When the child must write such a result as Parquet, `run_pipeline_isolated` returns a crashed result where it previously could raise in the caller. Parquet output reports `runtime/parquet_fixed_list_null` where it previously raised a raw Arrow error or published an unreadable file.
+
+### Added (shared memory failure classifier and refreshed connector error, F25-G7-A1A, 2026-11-24)
+
+`decoy_engine.fileaccess` exports `classified_failure`, `is_memory_failure` and the one chain walker `typed_memory_member`, and `decoy_engine.connectors` exports `refreshed_error`, which rebuilds a caught `TransientError` or `PermanentError` with fixed text and the same class and kind.
+
+### Changed (job-level validators are folds with exact counts, EXPECT-OFF-ROUTE S1, 2026-11-23)
+
+Each validator now takes rows span by span and keeps an exact failing count with at most 10,000
+listed row positions. The count is `failing_row_count` on every finding. Quarantine
+`validation_fail` lists every failing row, because quarantine removes exactly those rows. A
+whole-table `validate()` call gives the same findings, wording and order as before for any
+finding under the cap. `ValidationReport.results` has one `ValidatorResult` per configured entry
+(`passed`, `failed` or `skipped`), and `ValidationSession` is the public way to feed it batches.
+The keyed validators (`fk_intact`, `parent_window_respected`, `reconciliation_holds`) accept their
+parent and child tables in either order. `parent_window_respected` now guesses one date format
+for each column from its first value that is not null or a null string, so a column that mixes formats gives the same
+verdict at any chunk size. `leak_check` records every column and table it does not check. Each
+skip has a registered code: `warning/leak_check_skip_passthrough`, `warning/leak_check_skip_fk_child`,
+`warning/leak_check_skip_when`, `warning/leak_check_skip_exempt`,
+`warning/leak_check_skip_missing_column`, `warning/leak_check_skip_below_min_rows` and
+`warning/leak_check_skip_table_not_produced`. A column that
+`leak_check` names in `columns:` and then skips raises a `QualityWarning`,
+`warning/leak_check_column_not_checked`, in `quality_metrics["validation"]["warnings"]`; the run still
+passes. The new runtime codes are `runtime/validator_key_state_over_budget` and
+`runtime/validator_source_pairing_mismatch`, `runtime/validator_column_missing` (a parent table lacks a key or window column) and `runtime/validator_span_repeated` (a whole-table validator was given a table in several batches), all raised as `ValidatorStateError`. A validator that checked a column or table that is not there now reports it in `ValidatorResult.skipped` with `warning/validator_skip_missing_column` or `warning/validator_skip_missing_table`, and an entry that checked nothing has status `skipped`. No route changes in this
+slice.
+
+### Added (resident fit before the read, the transform copy and a mixed decline, NONFK-OOM, 2026-11-23)
+
+The no-FK capacity check now runs at the three points where the engine makes a whole-table copy
+before it has chosen a route. All three use the same ceilings as the route check: only a strict
+lower bound above the host or cgroup kill ceiling refuses, and a bound between 85% of it and the
+ceiling runs as before.
+
+- Before a lazy Parquet source is read whole (the `resident_fallback` read), the bound is the
+  footer input bytes of the tables about to be read. No table is charged a pandas copy there, a
+  vault run included, because the chunked lane may still take it; a job that ends on full-frame is
+  priced at the full bound in the route decision. A source with no footer is not priced.
+- Before a resident table is copied to pandas for its transforms, the bound is every resident input
+  byte plus that table's pandas copy. A bound in the gap between 85% and 100% of the ceiling caps
+  the final verdict at `route/nonfk_full_frame_unverified`.
+- When a mixed job declines after generation and continues on the full-frame route, the replaced
+  decision is priced like any no-FK full-frame decision, with the generated tables counted at their
+  input bytes, before the lazy mask sources are read.
+
+`execution_mode` other than `auto` and any job with a foreign key are not priced. The CLI's own
+whole read of a source is not covered here.
+
+### Changed (subset edge directions are checked in the split, VALIDATE-SUBSET-EDGES, 2026-11-24)
+
+`split_subset_config` now checks the `subset:` edge directions, so a bad edge is refused before any source is read, on every path that splits a config: `run_pipeline` (including `subset_request="skip"`), `validate_plan` and the CLI gate. The codes stay `subset_unknown_edge` and `subset_dangling_not_acknowledged`. A `SubsetRequest` override skips the block it replaces, so it is not refused for that block. The dangling refusal text names `allow dangling` (`.decoy`) and `allow_dangling: true` (YAML) before the Python `FanOutPolicy` spelling.
+
+`decoy_engine.subset` adds `drop_subset_block(config)`, the run config with its `subset` block set to `None` (the input dict itself when it has no block).
+
+### Added (computed Faker draws on masking, GEN-NONFAKER-DRAWS, 2026-11-23)
+
+A `faker` column with `provider: uuid`, `random_int_range` or `random_choice` now compiles and runs. Before, `compile_plan` refused it with `plan.non_poolable_provider_with_pool_backend`, even though `decoy scan` and `decoy init` write `provider: uuid` for a UUID column. These providers build no pool. The value is drawn from the key: for the source value and namespace in deterministic mode, for the row number under the job seed otherwise. A null source stays null.
+
+- `uuid` writes an RFC 9562 version 4 string. `random_int_range` writes an int64 from `min`, `max` and `step`. `random_choice` writes one of `elements`, typed as the one Arrow type of the list.
+- The new plan reasons `plan/computed_draw_range_invalid`, `plan/computed_draw_elements_invalid`, `plan/computed_draw_mode_unsupported` and `plan/computed_draw_namespace_reserved` refuse arguments, cardinality modes and namespaces a computed draw cannot honor. The new runtime reason `runtime/computed_draw_position_out_of_domain` covers a row number outside the unsigned 64-bit domain. None carries an argument value.
+- `address_full` and `lorem_text` are still refused at compile.
+- Computed providers run the whole frame. The chunked, unified, sequential and out-of-core native routes do not admit them yet; auto routing falls through, and a forced out-of-core run refuses before any write.
+- The argument and default facts for the three providers live in one table, `providers_v2.FAKER_DRAW_CONTRACTS`, which the Faker adapter and the numeric-typing integer table now read. `generation.pool.derive_pool_indices` is the public name of the former private index helper. `classify_provider` gains the class `computed_native`.
+
 ## [0.28.4] - 2026-11-23
 
 ### Breaking for consumers

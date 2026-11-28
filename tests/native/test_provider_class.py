@@ -61,7 +61,10 @@ def test_faker_poolable_provider_is_pool_native() -> None:
 
 def test_faker_non_poolable_provider_is_python_only() -> None:
     assert classify_provider("address_full", None) == "python_only"
-    assert classify_provider("lorem_text", None) == "python_only"
+
+
+def test_lorem_text_is_pool_native() -> None:
+    assert classify_provider("lorem_text", None) == "pool_native"
 
 
 def test_faker_computed_draw_provider_is_computed_native() -> None:

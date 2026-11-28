@@ -144,15 +144,19 @@ def relationships_from_config(config: dict) -> tuple[PlanRelationship, ...]:
                     break
             else:
                 edge_id = f"<{parent_end.table}>"
+            message = (
+                f"relationship {edge_id}: parent and child key column counts differ. Composite FK "
+                "relationships require matching column tuples on both ends."
+            )
             failure = PreflightFailure(
                 code=reasons.subset.SUBSET_RELATIONSHIP_COMPOSITE_LENGTH,
                 relationship=edge_id,
-                message=str(exc),
+                message=message,
             )
             raise SubsetPreflightError(
                 code=reasons.subset.SUBSET_RELATIONSHIP_COMPOSITE_LENGTH,
                 report=one_failure_report(failure),
-                message=str(exc),
+                message=message,
             ) from exc
     return tuple(relationships)
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.internal.faker_locale import requested_locale
 
 __all__ = ["check_provider_column", "registry_provider_names"]
 
@@ -50,6 +51,6 @@ def check_provider_column(
         raise _refusal(reasons.plan.GENERATE_PROVIDER_FIELD_UNEXPECTED, table, name, "group")
     if caps.backend_type == COMPOSITE_BACKEND:
         raise _refusal(reasons.plan.GENERATE_PROVIDER_FIELD_REQUIRED, table, name, "field")
-    locale = col.get("locale") or default_locale
+    locale = requested_locale(col.get("locale"), default_locale)
     if locale is not None and locale not in caps.supported_locales:
         raise _refusal(reasons.plan.GENERATE_PROVIDER_LOCALE_UNSUPPORTED, table, name, "locale")

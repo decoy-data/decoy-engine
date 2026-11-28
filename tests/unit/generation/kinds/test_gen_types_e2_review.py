@@ -51,7 +51,7 @@ def test_a_faker_int_output_over_non_integer_text_fails_coded_without_the_value(
 
 
 def test_a_streamed_sequence_keeps_int_values_before_a_decimal_cast(monkeypatch: Any) -> None:
-    from decoy_engine.generation import _streamed as site
+    from decoy_engine.generation.stream import _batches as site
 
     seen: list[Any] = []
     real = site.cast_output_values

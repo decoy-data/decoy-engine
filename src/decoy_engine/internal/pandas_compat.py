@@ -13,11 +13,14 @@ from __future__ import annotations
 import importlib
 import re
 from collections.abc import Callable, Iterable
-from typing import Any, Final, NoReturn
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+
+if TYPE_CHECKING:
+    from decoy_engine.fileaccess import ClassifiedFailure
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -113,39 +116,177 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
     return dtype_cls() if dtype_cls is not None else None
 
 
+# A value pandas cannot hold raises ValueError (a date past year 9999; ArrowInvalid is a subclass,
+# as is a sub-microsecond time64), OverflowError, or a bare ArrowException (a string with invalid
+# UTF-8: "Wrapping <cell text> failed"). Every one quotes the cell.
+_UNREPRESENTABLE: Final = (pa.ArrowException, ValueError, OverflowError)
+
+
+_Mapper = Callable[[pa.DataType], pd.api.extensions.ExtensionDtype | None]
+
+# The callback is told the failing column, or None when no single column reproduces the failure.
+_OnUnrepresentable = Callable[[str | None], NoReturn]
+
+
+def _fail(on_unrepresentable: Callable[[Any], NoReturn], column: str | None) -> NoReturn:
+    on_unrepresentable(column)
+    raise TypeError("on_unrepresentable must raise")
+
+
+def _classify(exc: Exception) -> ClassifiedFailure | None:
+    """The one memory classification (`fileaccess.classified_failure`); imported late, see above."""
+    from decoy_engine.fileaccess import classified_failure
+
+    return classified_failure(exc)
+
+
+def _raise_resource(failure: ClassifiedFailure | None, original: BaseException) -> None:
+    """Raise a memory or resource failure value-free; return for any other kind.
+
+    Called after the handler has closed. `fresh` carries no chain and fixed text; a type that
+    cannot be rebuilt keeps the original object.
+    """
+    if failure is None or failure.kind == "text_memory":
+        return
+    if failure.fresh is not None:
+        raise failure.fresh
+    raise original
+
+
+def _first_failing_column(table: pa.Table, types_mapper: _Mapper | None) -> str | None:
+    """The first column that does not convert alone, or None when every one does.
+
+    A recognized conversion failure counts as that column failing: its text may quote a cell and
+    is dropped here, never chained. A resource failure, or any other exception, propagates as
+    itself.
+    """
+    for position, name in enumerate(table.column_names):
+        try:
+            table.column(position).to_pandas(types_mapper=types_mapper)
+        except _UNREPRESENTABLE as exc:
+            failure = _classify(exc)
+            original = exc
+        else:
+            continue
+        _raise_resource(failure, original)
+        return name
+    return None
+
+
+def _no_widening(widen: bool) -> None:
+    if widen:
+        raise NotImplementedError("widening a column pandas cannot hold is not available yet")
+
+
+def arrow_to_frame(
+    table: pa.Table,
+    *,
+    on_unrepresentable: _OnUnrepresentable,
+    widen: bool = False,
+    types_mapper: _Mapper | None = None,
+    ignore_metadata: bool = False,
+) -> pd.DataFrame:
+    """Experimental: the one Arrow-to-pandas conversion of a table (source-read boundary, S1b).
+
+    A column pandas cannot hold calls `on_unrepresentable(column)` (None when no single column
+    reproduces the failure) after the conversion's own
+    handler has closed, so the coded error it raises carries no pandas or Arrow text (which
+    quotes the value). `ignore_metadata` keeps every physical field a plain column under its own
+    name, instead of restoring a stored pandas index. Code outside this module does not call `to_pandas` itself.
+    """
+    _no_widening(widen)
+    try:
+        return table.to_pandas(types_mapper=types_mapper, ignore_metadata=ignore_metadata)
+    except _UNREPRESENTABLE as exc:
+        failure = _classify(exc)
+        original = exc
+    _raise_resource(failure, original)
+    twin = failure.fresh if failure is not None else None
+    # Probed outside the handler above, so no exception raised from here carries a context
+    # that quotes the value.
+    column = _first_failing_column(table, types_mapper)
+    if column is None and twin is not None:
+        raise twin from None
+    _fail(on_unrepresentable, column)
+
+
+def arrow_to_series(
+    array: pa.Array | pa.ChunkedArray,
+    *,
+    on_unrepresentable: Callable[[str], NoReturn],
+    widen: bool = False,
+    types_mapper: _Mapper | None = None,
+    name: str = "",
+) -> pd.Series:
+    """Experimental: `arrow_to_frame` for one column; `name` is what the callback is told."""
+    _no_widening(widen)
+    try:
+        return array.to_pandas(types_mapper=types_mapper)
+    except _UNREPRESENTABLE as exc:
+        failure = _classify(exc)
+        original = exc
+    _raise_resource(failure, original)
+    twin = failure.fresh if failure is not None else None
+    if twin is not None:
+        try:
+            array.to_pandas(types_mapper=types_mapper)
+        except _UNREPRESENTABLE as exc:
+            retry_failure = _classify(exc)
+            retry_original = exc
+        else:
+            raise twin from None
+        # The retry can hit a typed allocation failure the first attempt reported ambiguously.
+        _raise_resource(retry_failure, retry_original)
+    _fail(on_unrepresentable, name)
+
+
+def arrow_to_frame_pair(
+    source: pa.Table,
+    output: pa.Table,
+    *,
+    on_unrepresentable: _OnUnrepresentable,
+    widen: bool = False,
+    types_mapper: _Mapper | None = None,
+    ignore_metadata: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Experimental: a source table and its output converted together, one rule for both sides."""
+    kwargs: dict[str, Any] = {
+        "on_unrepresentable": on_unrepresentable,
+        "widen": widen,
+        "types_mapper": types_mapper,
+        "ignore_metadata": ignore_metadata,
+    }
+    return arrow_to_frame(source, **kwargs), arrow_to_frame(output, **kwargs)
+
+
 def table_to_pandas_exact_ints(
     table: pa.Table,
     columns: Iterable[str],
     *,
-    types_mapper: Callable[[pa.DataType], pd.api.extensions.ExtensionDtype | None] = (
-        exact_int_types_mapper
-    ),
+    on_unrepresentable: _OnUnrepresentable,
+    types_mapper: _Mapper = exact_int_types_mapper,
     on_unconvertible: Callable[[str], NoReturn] | None = None,
 ) -> pd.DataFrame:
-    """`table.to_pandas()` with the named integer columns kept exact as nullable integer dtypes.
+    """`arrow_to_frame` with the named integer columns kept exact as nullable integer dtypes.
 
     Plain `to_pandas()` widens an integer column holding any null to float64, which rounds values
     beyond 2**53. Columns not named, or not integer-typed, keep pyarrow's default. A column that
-    does not fit its own dtype calls `on_unconvertible(column)` (which must raise), or re-raises
-    the pyarrow error when none is given.
+    does not fit its own dtype calls `on_unconvertible(column)` (or `on_unrepresentable` when none
+    is given), which must raise.
     """
-    df = table.to_pandas()
-    failed = None
+    df = arrow_to_frame(table, on_unrepresentable=on_unrepresentable)
     for col in columns:
         if col not in table.column_names or not pa.types.is_integer(table.schema.field(col).type):
             continue
-        try:
-            series = table.column(col).to_pandas(types_mapper=types_mapper)
-        except (pa.lib.ArrowInvalid, OverflowError):
-            if on_unconvertible is None:
-                raise
-            failed = col
-            break
+        series = arrow_to_series(
+            table.column(col),
+            on_unrepresentable=on_unconvertible or on_unrepresentable,
+            types_mapper=types_mapper,
+            name=col,
+        )
         # `.array` carries no index, so the assignment is positional even when `df` has a
         # non-default index.
         df[col] = series.array
-    if failed is not None and on_unconvertible is not None:
-        on_unconvertible(failed)  # raised outside the except block, so no exception context
     return df
 
 

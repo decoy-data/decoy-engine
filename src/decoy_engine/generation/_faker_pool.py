@@ -33,15 +33,16 @@ fingerprints, and therefore their roots, differ).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
+import pyarrow as pa
 from faker import VERSION as _FAKER_VERSION
 from faker import Faker
 
 from decoy_engine.determinism import seed_bytes_to_int
+from decoy_engine.generation.pool import DEFAULT_POOL_SIZE, pool_take
 from decoy_engine.generation.pool._cardinality import CardinalityMode
-from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generation.pool._value_pool import ValuePool, _freeze_array
 from decoy_engine.generators.derivation import (  # noqa: F401  (the families are re-exported)
@@ -50,6 +51,7 @@ from decoy_engine.generators.derivation import (  # noqa: F401  (the families ar
     GenDeriveContext,
 )
 from decoy_engine.generators.derivation import pool_seeds as _pool_seeds
+from decoy_engine.internal.faker_locale import requested_locale
 from decoy_engine.internal.faker_setup import make_faker, resolve_pool_provider
 
 # Codex round-2 spec C, ROUND-3 confirmed: an IMMUTABLE closed allowlist, not
@@ -313,8 +315,8 @@ def try_pool(
     against the live custom-provider registry exactly as before.
     """
     faker_type = col.get("faker_type", "word")
-    requested_locale = col.get("locale") or instance_default_locale
-    if not pool_eligible(faker_type, requested_locale, n, opted_out=pool_opted_out(col)):
+    requested = requested_locale(col.get("locale"), instance_default_locale)
+    if not pool_eligible(faker_type, requested, n, opted_out=pool_opted_out(col)):
         return None
     gen_ctx = GenDeriveContext.for_column(
         derive_key=derive_key, column_config=col, fallback_seed=seed
@@ -324,7 +326,7 @@ def try_pool(
         faker_kwargs=faker_kwargs,
         n=n,
         gen_ctx=gen_ctx,
-        effective_locale=col.get("locale") or instance_default_locale,
+        effective_locale=requested,
         provider_snapshot=provider_snapshot,
     )
 
@@ -375,6 +377,17 @@ def build_pool_values(
         raise
 
 
+def _arrow_form(raw_values: list[Any]) -> pa.Array[Any] | None:
+    """The pool's Arrow form, or `None` for values Arrow cannot hold as one array.
+
+    Without it the sampler gathers from the object array, which gives the same values.
+    """
+    try:
+        return pa.array(raw_values)
+    except pa.ArrowException:
+        return None
+
+
 def _build_and_sample_returning_pool(
     *,
     faker_type: str,
@@ -423,6 +436,7 @@ def _build_and_sample_returning_pool(
             backend_type="faker",
             backend_version=_FAKER_VERSION,
             distinct_count=len(set(values.tolist())),
+            arrow=_arrow_form(raw_values),
         )
         sampled = PoolSampler().sample(
             pool, n, mode=CardinalityMode.REUSE, seed=selection_seed, deterministic=False
@@ -443,17 +457,41 @@ class PooledSelector:
     is built once, before the first batch.
     """
 
+    # Every public method that draws indices. Observers and mutants of the pick read this list
+    # instead of naming a method, so a new entry point is one edit and a sentry fails if it is
+    # missing (`tests/unit/generation/pool/test_pick_methods.py`).
+    PICK_METHODS: ClassVar[tuple[str, ...]] = ("select", "take")
+
     def __init__(self, values: Any, selection_seed: bytes) -> None:
         try:
             self._values = values
+            self._arrow = _arrow_form(values.tolist())
             self._rng = np.random.default_rng(seed_bytes_to_int(selection_seed))
         except BaseException:
             del selection_seed
             raise
 
+    @property
+    def has_arrow(self) -> bool:
+        """True when the pool also has an Arrow form, so `take` can serve it."""
+        return self._arrow is not None
+
+    def _indices(self, size: int) -> np.ndarray[Any, Any]:
+        return self._rng.integers(0, len(self._values), size=size)
+
+    def take(self, size: int) -> pa.Array[Any]:
+        """The next `size` picks as one Arrow array, with no Python list in between."""
+        if self._arrow is None:
+            raise ValueError("this pool has no Arrow form; read it with select")
+        return pool_take(self._arrow, self._indices(size))
+
     def select(self, size: int) -> list[Any]:
-        indices = self._rng.integers(0, len(self._values), size=size)
-        return list(self._values[indices].tolist())
+        """The same picks as Python values, gathered from the object array.
+
+        The draw is the one `take` makes. A list consumer gathers from the object array because
+        an Arrow take then `to_pylist` builds every str again (about 20x slower at 1M picks).
+        """
+        return list(self._values[self._indices(size)].tolist())
 
 
 def open_pooled_selector(

@@ -46,7 +46,9 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.internal.pandas_compat import arrow_to_series
 from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON
 
 if TYPE_CHECKING:
@@ -97,7 +99,7 @@ def native_range_exceeded(values: pa.Array, bucket: str, date_format: str) -> bo
     paths and passes through unchanged, so it needs no guard. This is a pure predicate: each
     route owns what to do about a True (the out-of-core route aborts, the sequential route hands
     the column to Python, whose `datetime.date` arithmetic covers the whole calendar)."""
-    series = values.to_pandas()
+    series = arrow_to_series(values, on_unrepresentable=source_column_unrepresentable())
     if pd.api.types.is_extension_array_dtype(series.dtype):
         series = series.astype(object)
     parsed = pd.to_datetime(series, format=date_format, errors="coerce")
@@ -274,7 +276,7 @@ def native_bucket_perturb(
         # SAME pd.to_datetime call. `to_pandas()` for a pa.string() column yields
         # object dtype with None for nulls, matching the pandas adapter the oracle
         # reads through.
-        series = col.to_pandas()
+        series = arrow_to_series(col, on_unrepresentable=source_column_unrepresentable())
         if pd.api.types.is_extension_array_dtype(series.dtype):
             series = series.astype(object)
         parsed = pd.to_datetime(series, format=date_format, errors="coerce")

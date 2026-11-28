@@ -113,7 +113,9 @@ class OpenDpReleaseSession:
                 certificates.append(grouped.map(1))
                 certificates.append(total.map(1))
         except ValueError as exc:
-            raise _InfeasibleAtEpsQError(str(exc)) from exc
+            raise _InfeasibleAtEpsQError(
+                "no calibration within OpenDP's search bounds at this eps_q"
+            ) from exc
         return certificates
 
     def _allocate_epsilon_cached(self) -> float:
