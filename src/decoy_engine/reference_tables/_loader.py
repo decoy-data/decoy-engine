@@ -19,6 +19,17 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import fileaccess
+from decoy_engine._arrow_types import is_text
+from decoy_engine._config_text import (
+    Expected,
+    Kind,
+    Problem,
+    Refusal,
+    config_position,
+    config_refusal,
+    read_config,
+)
+from decoy_engine._error_base import raise_bare
 from decoy_engine.fileaccess import (
     FileAccess,
     FileAccessDenied,
@@ -83,18 +94,12 @@ def load_table(
     handle: FileHandle
     if path is None:
         if name not in SHIPPED_TABLES:
-            if not fileaccess.is_ambient():
-                # A rejected name may be a path a caller handed in as the lookup key, so under a
-                # strict policy the message names nothing (X4). Membership is checked before any
-                # file access, so this is a lookup miss, never an existence oracle.
-                raise FileNotFoundError(
-                    "no shipped reference table of that name. Provide a path= override or a "
-                    "'customer:' reference."
-                )
+            # A rejected name may be a path or URL a caller handed in as the lookup key, so the
+            # message names nothing under any policy (X4). Membership is checked before any file
+            # access, so this is a lookup miss, never an existence oracle.
             raise FileNotFoundError(
-                f"no shipped reference table {name!r}. "
-                f"Provide a path= override, a 'customer:/path/to/file.parquet' reference, "
-                f"or check the table name."
+                "no shipped reference table of that name. Provide a path= override or a "
+                "'customer:' reference."
             )
         handle = fileaccess.engine_handle(shipped_path(name))
     else:
@@ -108,41 +113,82 @@ def load_table(
         )
 
     try:
-        try:
-            arrow_table = arrow_adapter.read_table(handle)
-        except (FileAccessDenied, FileAccessReadError):
-            raise
-        except Exception as exc:
-            if fileaccess.keeps_class(exc):
-                raise
-            raise ValueError(f"failed to read Parquet at {handle.display}: {exc}") from exc
+        # The route's own typed file-access errors pass unchanged under either policy.
+        arrow_table = read_config(
+            lambda: arrow_adapter.read_table(handle),
+            config_position("reference_table"),
+            _refusal,
+            passes=(FileAccessDenied, FileAccessReadError),
+        )
     finally:
         handle.close()
-    shown = handle.display
 
+    at_id = config_position("reference_table", "id")
     if "id" not in arrow_table.schema.names:
-        raise ValueError(
-            f"reference table at {shown} is missing required 'id' column. "
-            f"All reference tables must have a stable 'id' column."
+        raise_bare(
+            _refusal(
+                config_refusal(
+                    at_id,
+                    Problem.MISSING,
+                    expected=Expected.INT64,
+                    hint="All reference tables must have a stable int64 'id' column",
+                )
+            )
         )
 
     id_type = arrow_table.schema.field("id").type
     if id_type != pa.int64():
-        raise ValueError(
-            f"reference table at {shown} has 'id' column of type {id_type!r}; "
-            f"expected int64. All reference tables must have a stable int64 'id' column "
-            f"(schema convention -- see reference_tables/__init__.py)."
+        # The kind only: a rendered Arrow type carries file-authored text (a timestamp zone,
+        # struct field names), so it never reaches the message.
+        raise_bare(
+            _refusal(
+                config_refusal(
+                    at_id,
+                    Problem.WRONG_TYPE,
+                    expected=Expected.INT64,
+                    got_kind=_type_kind(id_type),
+                    hint=(
+                        "All reference tables must have a stable int64 'id' column "
+                        "(schema convention -- see reference_tables/__init__.py)"
+                    ),
+                )
+            )
         )
 
-    _check_version(name, arrow_table, shown)
+    _check_version(name, arrow_table)
     return ReferenceTable(arrow_table, name=name)
 
 
-def _check_version(name: str, table: Any, shown: str) -> None:
+# Checked in order; the first predicate that holds names the kind. Engine literals only.
+_TYPE_KINDS: tuple[tuple[Kind, Any], ...] = (
+    (Kind.INTEGER, pa.types.is_integer),
+    (Kind.FLOATING_POINT, pa.types.is_floating),
+    (Kind.DECIMAL, pa.types.is_decimal),
+    (Kind.BOOLEAN, pa.types.is_boolean),
+    (Kind.STRING, is_text),
+    (Kind.BINARY, lambda t: pa.types.is_binary(t) or pa.types.is_large_binary(t)),
+    (Kind.TIMESTAMP, pa.types.is_timestamp),
+    (Kind.DATE, pa.types.is_date),
+    (Kind.TIME, pa.types.is_time),
+    (Kind.DURATION, pa.types.is_duration),
+    (Kind.DICTIONARY, pa.types.is_dictionary),
+    (Kind.NESTED, pa.types.is_nested),
+)
+
+
+def _type_kind(arrow_type: pa.DataType) -> Kind:
+    """A value-free closed kind for an Arrow type."""
+    return next((kind for kind, test in _TYPE_KINDS if test(arrow_type)), Kind.OTHER)
+
+
+def _refusal(refusal: Refusal) -> ValueError:
+    return ValueError(refusal.text)
+
+
+def _check_version(name: str, table: Any) -> None:
     """Emit a WARNING when file version metadata does not match expected.
 
-    `shown` is the display the caller already resolved (the path under the ambient CLI, the
-    config position otherwise), so these diagnostics never carry a raw locator."""
+    The diagnostics name the table, never its location."""
     expected = _SHIPPED_VERSIONS.get(name)
     if expected is None:
         return  # Unknown table name: no version expectation, skip check.
@@ -151,10 +197,9 @@ def _check_version(name: str, table: Any, shown: str) -> None:
     actual_bytes = schema_meta.get(b"decoy_table_version")
     if actual_bytes is None:
         _LOG.debug(
-            "reference table %r at %s has no decoy_table_version metadata "
+            "reference table %r has no decoy_table_version metadata "
             "(expected %r). Continuing with loaded data.",
             name,
-            shown,
             expected,
         )
         return
@@ -162,12 +207,10 @@ def _check_version(name: str, table: Any, shown: str) -> None:
     actual = actual_bytes.decode("utf-8", errors="replace")
     if actual != expected:
         _LOG.warning(
-            "reference table %r version mismatch: file has %r, engine "
-            "expects %r (path: %s). Using the available version. If this "
+            "reference table %r version mismatch: engine "
+            "expects %r. Using the available version. If this "
             "is a customer-provided table, update the table or adjust "
             "_SHIPPED_VERSIONS in _loader.py.",
             name,
-            actual,
             expected,
-            shown,
         )

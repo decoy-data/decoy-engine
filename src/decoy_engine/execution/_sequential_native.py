@@ -1,38 +1,35 @@
 """Native routing for payload masks on the sequential (SEQ) FK route.
 
 `run_sequential` masks one table at a time in pandas. This module is the dispatcher that lets a
-handler ask for a native result instead of computing it in Python, reusing the SAME keyed
-kernels the out-of-core route calls (no keyed derivation is re-implemented here); the handler
-keeps its pandas orchestration. The per-strategy parts (kernel load, admission, kernel call,
-error channel, warnings) are one `NativeOp` descriptor each in `_sequential_native_ops.py`,
-looked up by the column's strategy; a strategy with no descriptor runs in Python. Kernel state
-is kept per strategy. Two strategies keep their seam in a sibling module because their shape
-does not fit the per-value descriptor: `text_mask` (`_sequential_native_text_mask.py`) and
-`group_key` (`_sequential_native_group_key.py`, whose admission reads a sibling column).
+handler ask for a native result instead of computing it in Python, reusing the SAME keyed kernels
+the out-of-core route calls; the handler keeps its pandas orchestration. The per-strategy parts
+(kernel load, admission, kernel call, error channel, warnings) are one `NativeOp` descriptor each in
+`_sequential_native_ops.py`, looked up by the column's strategy; a strategy with no descriptor runs
+in Python. Two strategies keep their seam in a sibling module because their shape does not fit the
+per-value descriptor: `text_mask` (`_sequential_native_text_mask.py`) and `group_key`
+(`_sequential_native_group_key.py`, whose admission reads a sibling column).
 
 Only hash and fpe may be native FK keys on this route (`_KEY_STRATEGIES`): both are injective,
 deterministic per-value maps whose orphan REMAP minting re-runs the PARENT's handler through the
 same kernel. Any other native-capable strategy's column that is an FK parent or child key stays
 Python with a reporting-only decline (`REASON_KEY_NOT_INJECTIVE`), because its output is not a
-guaranteed unique key. The REMAP and inherited-child machinery serves the key strategies, each
-entry attributed to the parent's strategy. Three FK paths stay distinct, because only one calls
-the kernel at the scalar seam: (1) parent/payload derivation, masked at the handler and native
-when the input type was admitted at table prep; (2) a matched child, handed the parent's
-already-masked value by `resolve_fk_keys` (no kernel call, reported as inherited); (3) REMAP,
-which mints an orphan key by re-running the parent's handler (`make_remap_fn`), admitted on its
-own from the orphan keys' type and only when the parent's REMAP decision is native, so one
-column never mixes two Unicode normalizations. A column thus has up to two decisions (execution
-and REMAP); both come from the same pinned type and admission predicate.
+guaranteed unique key. The REMAP and inherited-child machinery serves the key strategies, each entry
+attributed to the parent's strategy. Three FK paths stay distinct, because only one calls the kernel
+at the scalar seam: (1) parent/payload derivation, masked at the handler and native when the input
+type was admitted at table prep; (2) a matched child, handed the parent's already-masked value by
+`resolve_fk_keys` (no kernel call, reported as inherited); (3) REMAP, which mints an orphan key by
+re-running the parent's handler (`make_remap_fn`), admitted on its own from the orphan keys' type
+and only when the parent's REMAP decision is native, so one column never mixes two Unicode
+normalizations. A column thus has up to two decisions (execution and REMAP); both come from the same
+pinned type and admission predicate.
 
 Boundary with pandas: the kernel is Arrow in, Arrow out, but the handler holds a pandas column.
-Input is rebuilt as an Arrow array of the column's PINNED source type (read from the Arrow
-source at table prep), never inferred from pandas (inference would turn `large_string` into
-`string` and an all-null column into `null`); output is a plain list assigned positionally, so a
-`when` selection with a gapped index lands on the right rows. There is no fallback: a kernel
-fault, or a column that stops converting, aborts the run, so no column is ever part native and
-part Python. Reason codes carry the strategy outcome, the column and the Arrow type only, never
-a cell, key or derived value.
-"""
+Input is rebuilt as an Arrow array of the column's PINNED source type (read from the Arrow source at
+table prep), never inferred from pandas (inference would turn `large_string` into `string` and an
+all-null column into `null`); output is a plain list assigned positionally, so a `when` selection
+with a gapped index lands on the right rows. There is no fallback: a kernel fault, or a column that
+stops converting, aborts the run, so no column is ever part native and part Python. Reason codes
+carry the strategy outcome, the column and the Arrow type only, never a cell, key or derived value."""
 
 from __future__ import annotations
 
@@ -111,7 +108,8 @@ from decoy_engine.execution.native._fpe_ext import load_compiled_fpe_kernel
 from decoy_engine.execution.native._index_ext import load_compiled_index_kernel
 from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core._categorical_native import BoundIndexKernel
-from decoy_engine.execution.out_of_core._hash_native import REASON_UNAVAILABLE, BoundHashKernel
+from decoy_engine.execution.out_of_core._hash_native import BoundHashKernel
+from decoy_engine.execution.sequential import bound_decline, load_faker_kernels
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import StrategyContext
@@ -132,8 +130,7 @@ REASON_BUCKET_OUT_OF_RANGE = reasons.route.SEQUENTIAL_BUCKET_PERTURB_DATE_OUT_OF
 _CONVERSION_ERRORS = (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError)
 
 
-# Loaders live here, not in the ops module, so each resolves through this module's globals at
-# call time (a test swaps the companion load by patching the name).
+# Loaders live here so each resolves through this module's globals (tests patch the name).
 def _load_hash(native_threads: int | None) -> BoundHashKernel:
     return BoundHashKernel(load_compiled_crypto_kernel(), native_threads)
 
@@ -152,7 +149,9 @@ _OPS: dict[str, NativeOp] = {
     CATEGORICAL: categorical_op(_load_index),
     BUCKET_PERTURB: bucket_perturb_op(_load_index),
     DATE_SHIFT: date_shift_op(_load_index),
-    FAKER: faker_op(_load_index),
+    FAKER: faker_op(
+        lambda n: load_faker_kernels(n, load_compiled_index_kernel, load_compiled_crypto_kernel)
+    ),
     TEXT_REDACT: text_redact_op(_load_text_redact),
     TEXT_MASK: text_mask_op(_load_text_redact),
     GROUP_KEY: group_key_op(load_raw_hex),
@@ -166,8 +165,8 @@ class SeqNativeRun:
     that needs a decision. The decisions outlive the table that made them: REMAP on a later
     child table reads its parent's decision after the parent frame has been evicted."""
 
-    def __init__(self, *, native_threads: int | None = None) -> None:
-        self._native_threads = native_threads
+    def __init__(self, *, native_threads: int | None = None, registry: Any = None) -> None:
+        self._native_threads, self._registry = native_threads, registry
         self._load_attempted: set[str] = set()
         self._bound: dict[str, Any] = {}
         self._decisions: dict[tuple[str, str], ColumnDecision] = {}
@@ -199,7 +198,7 @@ class SeqNativeRun:
     ) -> ColumnDecision:
         bound = self._kernel(op)
         admit = op.key_admit if is_key and op.key_admit is not None else op.admit
-        reason = admit(column, input_type, seed) if bound is not None else REASON_UNAVAILABLE
+        reason = bound_decline(self._registry, admit, bound, column, input_type, seed)
         native = bound is not None and reason is None
         return ColumnDecision(
             table,

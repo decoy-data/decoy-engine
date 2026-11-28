@@ -1,9 +1,8 @@
 """Typed, versioned progress events and their serializers (F29).
 
 The event dataclasses, the typed retry, checkpoint and publication groups, the numeric and
-identifier validation, and the two projections (`event_to_dict`, version 1, and
-`event_to_legacy_dict`, version 0). The channel, sinks and bindings live in
-`decoy_engine.progress`, which re-exports everything here: import from there.
+identifier validation, and the projection `event_to_dict` (version 1). The channel, sinks and
+bindings live in `decoy_engine.progress`, which re-exports everything here: import from there.
 
 Every field is typed and bounded, and an event can only be serialized through an explicit
 per-variant allowlist, so an arbitrary attribute never rides out of the process.
@@ -582,7 +581,7 @@ def _field_value(event: Any, name: str) -> Any:
 def event_to_dict(event: ProgressEvent) -> dict[str, Any]:
     """The version-1 JSON-ready dict of the event (`kind` names the type).
 
-    A strict additive superset of `event_to_legacy_dict`: every legacy key is present with
+    A strict additive superset of the version-0 keys (`_LEGACY_FIELDS`): every one is present with
     the same meaning. Only the per-variant allowlisted fields are emitted."""
     variant = type(event)
     legacy = _LEGACY_FIELDS[variant]
@@ -593,8 +592,3 @@ def event_to_dict(event: ProgressEvent) -> dict[str, Any]:
             if counter in out:
                 out[counter] = None
     return out
-
-
-def event_to_legacy_dict(event: ProgressEvent) -> dict[str, Any]:
-    """The version-0 projection: exactly the pre-F29 keys, through the same safe boundary."""
-    return {name: _field_value(event, name) for name in _LEGACY_FIELDS[type(event)]}

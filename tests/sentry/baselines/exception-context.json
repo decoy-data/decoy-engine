@@ -98,9 +98,6 @@
   "decoy_engine/plan/_checks_declared_casting.py::compile_declared_casting_contract::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
-  "decoy_engine/plan/_serialize_declared.py::declared_casting_from_dict::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
   "decoy_engine/quarantine.py::publish_staged_jsonl::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
@@ -123,9 +120,6 @@
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
   "decoy_engine/secret_providers/vault.py::_parse_rfc3339::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/transforms/_codeset_loader.py::_resolve_read_path::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
   "decoy_engine/validation/_config.py::_load_config::0": {

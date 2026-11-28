@@ -126,30 +126,27 @@ def test_r4_reference_table_errors() -> None:
     shipped = _raises(lambda: load_table("nope"))
     assert isinstance(shipped, FileNotFoundError)
     assert _text(shipped) == (
-        "no shipped reference table 'nope'. Provide a path= override, a "
-        "'customer:/path/to/file.parquet' reference, or check the table name."
+        "no shipped reference table of that name. Provide a path= override or a "
+        "'customer:' reference."
     )
     missing = _raises(lambda: load_table("customer:nope.parquet"))
     assert isinstance(missing, ValueError)
-    assert _text(missing) == "failed to read Parquet at nope.parquet: nope.parquet"
+    assert _text(missing) == "reference_table: could not be read"
     Path("bad.parquet").write_text("x")
     bad = _raises(lambda: load_table("customer:bad.parquet"))
-    assert _text(bad).startswith(
-        "failed to read Parquet at bad.parquet: Error creating dataset. Could not read schema "
-        "from 'bad.parquet'. Is this a 'parquet' file?: Could not open Parquet"
-    )
+    assert _text(bad) == "reference_table: could not be parsed"
     pq.write_table(pa.table({"x": [1]}), "noid.parquet")
     noid = _raises(lambda: load_table("customer:noid.parquet"))
     assert _text(noid) == (
-        "reference table at noid.parquet is missing required 'id' column. "
-        "All reference tables must have a stable 'id' column."
+        "reference_table.id: missing; expected int64. "
+        "All reference tables must have a stable int64 'id' column"
     )
     pq.write_table(pa.table({"id": pa.array([1], pa.int32())}), "id32.parquet")
     id32 = _raises(lambda: load_table("customer:id32.parquet"))
     assert _text(id32) == (
-        "reference table at id32.parquet has 'id' column of type DataType(int32); expected "
-        "int64. All reference tables must have a stable int64 'id' column (schema convention "
-        "-- see reference_tables/__init__.py)."
+        "reference_table.id: wrong type; expected int64, got integer. "
+        "All reference tables must have a stable int64 'id' column (schema convention "
+        "-- see reference_tables/__init__.py)"
     )
 
 
@@ -201,21 +198,16 @@ def test_r12_config_file_errors() -> None:
 def test_r3_snapshot_read_errors() -> None:
     missing = _raises(lambda: _load_snapshot("nope.json"))
     assert isinstance(missing, StatisticalSpecError)
-    assert _text(missing) == (
-        "[statistical_snapshot_unreadable] snapshot_file 'nope.json' could not be read: "
-        "[Errno 2] No such file or directory: 'nope.json'"
-    )
+    assert _text(missing) == ("[statistical_snapshot_unreadable] snapshot_file: could not be read")
     Path("s.json").write_text("{")
     bad = _raises(lambda: _load_snapshot("s.json"))
     assert _text(bad) == (
-        "[statistical_snapshot_unreadable] snapshot_file 's.json' could not be read: "
-        "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+        "[statistical_snapshot_unreadable] snapshot_file: could not be parsed at line 1, column 2"
     )
     digest = _raises(lambda: _snapshot_content_digest("nope.json"))
     assert isinstance(digest, RuntimeError)
     assert _text(digest).startswith(
-        "strategy_config_fingerprint: snapshot_file 'nope.json' is missing or unreadable "
-        "(FileNotFoundError: [Errno 2] No such file or directory: 'nope.json'); "
+        "strategy_config_fingerprint: snapshot_file is missing or unreadable (FileNotFoundError); "
     )
 
 

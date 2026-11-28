@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
@@ -37,6 +38,7 @@ from tests.parity import _f0_fixtures as fx
 from tests.parity import _f_audit_cells as cells
 from tests.parity._f_audit_witness import DeterministicIndexSpy
 from tests.parity._fr0_support import plan_of
+from tests.parity.support.pick_spy import install_pick_spy
 
 THRESHOLD = 90
 FORBIDDEN = "deterministic-index path"
@@ -79,13 +81,10 @@ class _Reached:
         self.calls = 0
 
     def install_core(self, mp: pytest.MonkeyPatch) -> None:
-        real, outer = _faker_pool.PooledSelector.select, self
+        def count(*_: Any) -> None:
+            self.calls += 1
 
-        def select(selector: Any, size: int) -> Any:
-            outer.calls += 1
-            return real(selector, size)
-
-        mp.setattr(_faker_pool.PooledSelector, "select", select)
+        install_pick_spy(mp, count)
 
     def install_legacy(self, mp: pytest.MonkeyPatch) -> None:
         real, outer = _faker_pool._build_and_sample_returning_pool, self
@@ -159,10 +158,17 @@ def _deterministic_sample(values: Any, n: int) -> list[Any]:
 
 
 def mutate_core(mp: pytest.MonkeyPatch) -> None:
-    def select(self: _faker_pool.PooledSelector, size: int) -> list[Any]:
+    """Each entry point keeps its return type: `select` a list, `take` an Arrow array."""
+
+    def take(self: _faker_pool.PooledSelector, size: int) -> Any:
+        return pa.array(_deterministic_sample(self._values, size))
+
+    def select(self: _faker_pool.PooledSelector, size: int) -> Any:
         return _deterministic_sample(self._values, size)
 
-    mp.setattr(_faker_pool.PooledSelector, "select", select)
+    substitutes = {"take": take, "select": select}
+    for name in _faker_pool.PooledSelector.PICK_METHODS:
+        mp.setattr(_faker_pool.PooledSelector, name, substitutes[name])
 
 
 def mutate_legacy(mp: pytest.MonkeyPatch) -> None:
