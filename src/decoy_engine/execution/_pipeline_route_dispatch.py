@@ -26,7 +26,7 @@ from decoy_engine.execution import _pipeline_sources as _psrc
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
 from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run, current_duckdb_run
-from decoy_engine.execution.pipeline._post_scan import attach_cast_run, tee_reader
+from decoy_engine.execution.pipeline.post_scan import attach_cast_run, tee_reader
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
@@ -63,7 +63,7 @@ def execute_route(
     carries the declared-route refusals the admission layers noted while deciding."""
     from decoy_engine.declared_casting._refusals import stamp
     from decoy_engine.execution import _pipeline_full_frame
-    from decoy_engine.execution.pipeline._post_scan import bind_gate, settle
+    from decoy_engine.execution.pipeline.post_scan import bind_gate, settle
 
     # One recorder for the whole run, the post-scan gate's connections included, so the resources
     # block lists every connection the run opened.

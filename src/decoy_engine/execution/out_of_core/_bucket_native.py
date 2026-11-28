@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_PANDAS, RUST_COMPANION
@@ -40,6 +41,7 @@ from decoy_engine.execution.native._bucket_perturb_ext import (
 from decoy_engine.execution.native._operator_config_rejections import (
     bucket_perturb_config_rejection,
 )
+from decoy_engine.internal.pandas_compat import arrow_to_series
 from decoy_engine.transforms.date_preserve import PreserveSet, preserve_set_from_config
 
 if TYPE_CHECKING:
@@ -260,7 +262,13 @@ def native_bucket_perturb_array(
         if n == 0 or values.null_count == n:
             return pa.nulls(n)
         array = values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
-        preserved = preserve.mask(array.to_pandas()) if preserve is not None else None
+        preserved = (
+            preserve.mask(
+                arrow_to_series(array, on_unrepresentable=source_column_unrepresentable())
+            )
+            if preserve is not None
+            else None
+        )
         if preserved is not None and preserved.any():
             native.decision.preserved_rows += int(preserved.sum())
             guarded = array.filter(pa.array(~preserved))

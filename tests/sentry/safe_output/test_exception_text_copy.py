@@ -37,7 +37,7 @@ SENTRY_ID = "engine-exception-text-copies"
 BASELINE = _baseline_sources.baseline_path(SENTRY_ID)
 # The F31 audit figure after AE5, less the copies removed since (AE3: the memory monitor log). A
 # change that removes a copy lowers it with the baseline entries.
-AUDIT_PARITY = 42
+AUDIT_PARITY = 40
 
 
 def _total(counts: dict[str, int], bucket: str) -> int:

@@ -261,7 +261,7 @@ class _ExtensionBacked:
     def __init__(self, cells: list[str | None]) -> None:
         self._cells = cells
 
-    def to_pandas(self) -> pd.Series:
+    def to_pandas(self, types_mapper: object = None) -> pd.Series:
         return pd.Series(self._cells, dtype="string[python]")
 
 

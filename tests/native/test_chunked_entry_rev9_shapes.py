@@ -14,9 +14,9 @@ import pandas
 import pyarrow as pa
 import pytest
 
-from decoy_engine import run_mask_chunked
+from decoy_engine import reasons, run_mask_chunked
 from decoy_engine.errors import RowErrorsFailedError
-from decoy_engine.execution import _pandas_adapter
+from decoy_engine.execution import ExecutionError, _pandas_adapter
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.profile import _walk
 from tests.native._b8_support import run_mask_chunked_below_gate
@@ -107,14 +107,33 @@ def test_both_routes_yield_equal_tables(
 @pytest.mark.parametrize("pos", [0, 2])
 @pytest.mark.parametrize("shape", SHAPES, ids=SHAPE_IDS)
 def test_public_oracle_behavior_is_unchanged(shape: Shape, pos: int, configured: bool) -> None:
-    """The documented exception: what the public oracle still refuses or alters."""
+    """The documented exception: what the public oracle still refuses or alters. A refused shape
+    raises a coded error, which names the table and column and carries no value or
+    pandas text (it was the raw conversion error named by `shape.public`)."""
     config = config_for(configured=configured)
     chunks = stream(shape, pos)
     public = run_public if configured else run_public_below_gate
     if shape.public not in ("exact", "altered"):
-        with pytest.raises(Exception) as info:
+        with pytest.raises(ExecutionError) as info:
             public(config, chunks)
-        assert type(info.value).__name__ == shape.public, PINNED_UNDER
+        err = info.value
+        # A bad first chunk fails the oracle's profile read; a later one fails the full-frame
+        # conversion of the chunk. Both are coded and value-free.
+        # `dict_uint64_indices` is read by the profile whichever chunk is bad.
+        expected = (
+            reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE
+            if pos == 0 or shape.name == "dict_uint64_indices"
+            else reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE
+        )
+        assert err.code == expected, PINNED_UNDER
+        assert err.column == "x", PINNED_UNDER
+        assert err.message.startswith(f"table {TABLE!r} column 'x' holds a value pandas cannot"), (
+            PINNED_UNDER
+        )
+        # No cell, offset or Arrow/pandas wording: a message with a digit would quote a value.
+        assert not any(ch.isdigit() for ch in err.message), PINNED_UNDER
+        assert not any(w in str(err) for w in ("out of bounds", "Wrapping", "Invalid", "Casting"))
+        assert err.__cause__ is None and err.__context__ is None, PINNED_UNDER
         return
     out = public(config, chunks)
     for i, (got, src) in enumerate(zip(out, chunks, strict=True)):
@@ -182,9 +201,9 @@ class _Spy:
             spy.adapter_types.append({f.name: f.type for f in sources[TABLE].schema})
             return real_run(self, plan, sources, **kw)
 
-        def conv(table: pa.Table, fk: Any) -> Any:
+        def conv(table: pa.Table, fk: Any, **kw: Any) -> Any:
             spy.fk_safe_types.append({f.name: f.type for f in table.schema})
-            return real_conv(table, fk)
+            return real_conv(table, fk, **kw)
 
         def walk(df: Any, *a: Any, **kw: Any) -> Any:
             spy.walk_values.append({c: list(df[c]) for c in df.columns})
