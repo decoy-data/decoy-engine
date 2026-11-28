@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 from pandas.api.types import is_float_dtype
@@ -87,13 +88,15 @@ def _whole(key: pd.DataFrame) -> pd.DataFrame:
 
 
 def _integral(column: pd.Series) -> bool:
-    values = column.dropna()
+    # One NumPy view for every float dtype: a nullable Float column casts to Int64 by truncating.
+    values = pd.Series(column.to_numpy(dtype="float64", na_value=np.nan)).dropna()
     # An all-null column carries no evidence that it was an integer column.
     if values.empty:
         return False
     # pandas' safe cast refuses a fraction, an infinity and a value outside the Int64 range.
     try:
-        values.astype("Int64")
+        with np.errstate(invalid="ignore"):
+            values.astype("Int64")
     except (TypeError, ValueError, OverflowError):
         return False
     return True
