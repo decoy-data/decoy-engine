@@ -9,7 +9,6 @@ Public API:
         ExecutionAdapter,
         PandasExecutionAdapter,
         ExecutionResult,
-        ExecutionEvent,
         ExecutionError,
         StrategyError,
     )
@@ -77,7 +76,6 @@ from decoy_engine.execution._chunked import (
     run_mask_pipeline_chunked,
 )
 from decoy_engine.execution._errors import ExecutionError, StrategyError
-from decoy_engine.execution._events import ExecutionEvent
 from decoy_engine.execution._governor import (
     GovernorResult,
     GovernorRoute,
@@ -136,7 +134,6 @@ __all__ = [
     "CapacityVerdict",
     "ExecutionAdapter",
     "ExecutionError",
-    "ExecutionEvent",
     "ExecutionPlan",
     "ExecutionResult",
     "GovernorResult",

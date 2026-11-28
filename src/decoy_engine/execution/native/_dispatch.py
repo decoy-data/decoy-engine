@@ -491,7 +491,12 @@ def plan_native_route(
             # Admission rests on the first chunk's real Arrow types and each
             # provider's output type, never the profile's coarse dtype labels.
             real = real_type_decline(
-                config, decision.node_routes, first_schema, table=table, profile=profile
+                config,
+                decision.node_routes,
+                first_schema,
+                table=table,
+                profile=profile,
+                registry=registry,
             )
             if real is not None:
                 decision = _downgrade_to_oracle(decision, real.reason, real.record)

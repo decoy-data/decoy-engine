@@ -445,10 +445,13 @@ _FINGERPRINT_BEFORE_DRAW = "59125c9a0376ff4262b8064e9d2408256b0deb34d785b9269019
 
 
 def test_registry_fingerprint_moves_only_because_the_matrix_gained_draw(tmp_path: Path) -> None:
-    """The one-time move of `plan_hash` and `activation_hash` has a single cause: the `draw` key.
+    """The one-time move of `plan_hash` and `activation_hash` comes from two reviewed causes.
 
-    Rebuilding the fingerprint from the shipped registry with `draw` dropped from each dump
-    gives the digest main produced before the field existed, so no other provider fact moved."""
+    The `draw` key is new, and `lorem_text` became poolable (GEN-NONFAKER-DRAWS S2, plan
+    2026-11-22-gen-nonfaker-draws section 12, owner decision 2026-11-23). Rebuilding the
+    fingerprint from the shipped registry with `draw` dropped and `lorem_text` set back to not
+    poolable gives the digest main produced before either change, so no other provider fact
+    moved."""
     import hashlib
     from dataclasses import replace
 
@@ -461,7 +464,10 @@ def test_registry_fingerprint_moves_only_because_the_matrix_gained_draw(tmp_path
             tuple(
                 sorted(
                     (k, v)
-                    for k, v in registry.get_capabilities(name).model_dump().items()
+                    for k, v in {
+                        **registry.get_capabilities(name).model_dump(),
+                        **({"poolable": False} if name == "lorem_text" else {}),
+                    }.items()
                     if k != "draw"
                 )
             ),

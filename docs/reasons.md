@@ -18,7 +18,7 @@ Namespaces: `config`, `plan`, `runtime`, `provider`, `quality`, `connector`, `su
 
 ### Versioning
 
-`registry_version` (`1.34.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
+`registry_version` (`1.35.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
 
 Codes are append-only: a code never disappears or changes meaning. A retired code stays as a tombstone with its replacement link.
 
@@ -129,7 +129,7 @@ except Exception as exc:
 
 ## Versioned progress events
 
-`event_to_dict(event)` is version 1 and is a strict additive superset of the version 0 keys that `event_to_legacy_dict(event)` keeps emitting. Version 1 adds `event_schema_version`, `registry_version`, a stream-local `sequence`, `phase`, `object_ref`, byte counters with their basis, and the optional `reason`, `retry`, `checkpoint` and `publication` groups. Existing positional constructors are unchanged: every new field is keyword-only.
+`event_to_dict(event)` is version 1 and is a strict additive superset of the version 0 keys (the pre-F29 event fields). Version 1 adds `event_schema_version`, `registry_version`, a stream-local `sequence`, `phase`, `object_ref`, byte counters with their basis, and the optional `reason`, `retry`, `checkpoint` and `publication` groups. Existing positional constructors are unchanged: every new field is keyword-only.
 
 | Field group | Contract |
 |---|---|
