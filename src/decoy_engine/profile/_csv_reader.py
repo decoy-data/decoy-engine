@@ -38,10 +38,10 @@ import os
 import stat
 import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from functools import partial
 from typing import TYPE_CHECKING, Any, TextIO, overload
 
 import pandas as pd
-from pandas.io.common import infer_compression
 
 from decoy_engine import fileaccess
 from decoy_engine._lexeme import pandas_lexeme_kwargs
@@ -50,6 +50,14 @@ from decoy_engine.errors import ConfigError, PipelineValidationError
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import pandas as pandas_adapter
 from decoy_engine.fileaccess.adapters.memory import MemoryHandle
+from decoy_engine.profile._csv_columns import _projection, _shaped
+from decoy_engine.profile._csv_decode import (
+    csv_compression,
+    csv_is_compressed,
+    decompressed,
+    is_decoder_failure,
+    refusing,
+)
 from decoy_engine.validation_result import CODES
 
 if TYPE_CHECKING:
@@ -234,7 +242,12 @@ def _positional_lexemes(columns: tuple[str, ...], names: list[str]) -> dict[str,
 
 
 def _scan_record_widths(
-    open_handle: OpenHandle, dialect: CsvDialect, *, table: str, nrows: int | None
+    open_handle: OpenHandle,
+    dialect: CsvDialect,
+    *,
+    table: str,
+    nrows: int | None,
+    compression: str | None = "infer",
 ) -> None:
     """Refuse when a consumed record's field count differs from the declared names.
 
@@ -243,8 +256,12 @@ def _scan_record_widths(
     """
     expected = len(dialect.column_names or ())
     consumed = 0
-    with open_handle() as handle, handle.open_binary() as raw:
-        text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
+    with (
+        open_handle() as handle,
+        handle.open_binary() as raw,
+        decompressed(raw, compression) as plain,
+    ):
+        text = io.TextIOWrapper(plain, encoding="utf-8-sig", newline="")
         reader = _record_reader(
             text,
             dialect.delimiter,
@@ -319,73 +336,22 @@ def _named(frame: pd.DataFrame, names: list[str], table: str) -> pd.DataFrame:
     return frame
 
 
-def _ordered(frame: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
-    """`frame` holding exactly `columns`, in that order. pandas ignores the order of `usecols`,
-    so the requested order is restored here, once, for every frame and chunk."""
-    if len(frame.columns) != len(columns) or set(frame.columns) != set(columns):
-        raise ValueError("read_csv_source: columns names a column the file does not have")
-    return frame[list(columns)]
-
-
-def _shaped(result: Any, columns: Sequence[str]) -> Any:
-    """`_ordered` over one frame, or lazily over each chunk of an iterator."""
-    if isinstance(result, pd.DataFrame):
-        return _ordered(result, columns)
-    return _shaped_chunks(result, columns)
-
-
-def _shaped_chunks(
-    chunks: Iterator[pd.DataFrame], columns: Sequence[str]
-) -> Iterator[pd.DataFrame]:
-    # A generator expression would reach `chunks` only through reference counting when it is
-    # closed; the finally closes the file handle at the call that closes this.
-    try:
-        for chunk in chunks:
-            yield _ordered(chunk, columns)
-    finally:
-        close = getattr(chunks, "close", None)
-        if close is not None:
-            close()
-
-
-def _projection(
-    dialect: CsvDialect, columns: Sequence[str]
-) -> tuple[dict[str, Any], list[str] | None]:
-    """The pandas `usecols` for `columns`, and the names the kept columns carry in file order
-    (headerless only; with a header pandas names them itself).
-
-    With a header a callable keeps a missing name from raising a pandas error that quotes it;
-    `_ordered` then refuses the mismatch with a fixed message."""
-    if not columns:
-        raise ValueError("read_csv_source: columns names no column")
-    if len(set(columns)) != len(columns):
-        raise ValueError("read_csv_source: columns names a column more than once")
-    if dialect.has_header:
-        wanted = frozenset(columns)
-        return {"usecols": lambda name: name in wanted}, None
-    declared = list(dialect.column_names or ())
-    if any(c not in declared for c in columns):
-        raise ValueError("read_csv_source: columns names a column the file does not have")
-    positions = sorted(declared.index(c) for c in columns)
-    return {"usecols": positions}, [declared[p] for p in positions]
-
-
 def _read_whole(
     open_handle: OpenHandle,
     kwargs: dict[str, Any],
     names: list[str] | None,
     table: str,
     kept: list[str] | None = None,
+    passes: Callable[[Exception], bool] | None = None,
 ) -> pd.DataFrame:
     # Headerless, the adapter lets a pandas parser error through a strict policy (its text can
-    # carry a cell) so it is replaced here by the coded refusal, which chains nothing. With a
-    # header there is no coded refusal: the plain adapter maps it to a read error, and the
-    # ambient policy keeps the library error as before.
+    # carry a cell) and it is replaced here by the coded refusal. With a header the plain adapter
+    # maps it to a read error, and the ambient policy keeps the library error as before.
     read = pandas_adapter.read_csv if names is None else pandas_adapter.read_csv_parser_errors
     failed = False
     try:
         with open_handle() as handle:
-            frame = read(handle, **kwargs)
+            frame = read(handle, decoder_passthrough=passes, **kwargs)
     except _PARSER_ERRORS:
         if names is None:
             raise
@@ -401,6 +367,7 @@ def _read_chunks(
     names: list[str] | None,
     table: str,
     kept: list[str] | None = None,
+    passes: Callable[[Exception], bool] | None = None,
 ) -> Iterator[pd.DataFrame]:
     read = (
         pandas_adapter.read_csv_chunks
@@ -410,7 +377,7 @@ def _read_chunks(
     failed = False
     try:
         with open_handle() as handle:
-            for chunk in read(handle, **kwargs):
+            for chunk in read(handle, decoder_passthrough=passes, **kwargs):
                 yield chunk if names is None else _named(chunk, kept or names, table)
     except _PARSER_ERRORS:
         if names is None:
@@ -425,12 +392,28 @@ def _read_csv_rows(
     dialect: CsvDialect,
     *,
     table: str,
+    refuse_decoder: bool = True,
+    **options: Any,
+) -> pd.DataFrame | Iterator[pd.DataFrame]:
+    """`_read_rows` with a decoder failure replaced by the one coded refusal: every CSV read goes
+    through here. `refuse_decoder=False` is the bytes seam, which keeps `FileAccessReadError`."""
+    call = partial(_read_rows, open_handle, dialect, table=table, refuse_decoder=refuse_decoder)
+    return refusing(table, lambda: call(**options)) if refuse_decoder else call(**options)
+
+
+def _read_rows(
+    open_handle: OpenHandle,
+    dialect: CsvDialect,
+    *,
+    table: str,
     nrows: int | None = None,
     chunksize: int | None = None,
     dtype: type[str] | None = None,
     lexeme_columns: tuple[str, ...] = (),
     columns: Sequence[str] | None = None,
     exact_text: bool = False,
+    compression: str | None,
+    refuse_decoder: bool = True,
 ) -> pd.DataFrame | Iterator[pd.DataFrame]:
     """The shared core: one frame, or an iterator of frames when `chunksize` is set.
 
@@ -463,20 +446,25 @@ def _read_csv_rows(
                 names if columns is None else list(columns),
                 chunked=chunksize is not None,
             )
-        _scan_record_widths(open_handle, dialect, table=table, nrows=nrows)
+        _scan_record_widths(open_handle, dialect, table=table, nrows=nrows, compression=compression)
         read_opts = {"header": None, **_positional_lexemes(lexeme_columns, names)}
+    passes = is_decoder_failure if refuse_decoder else None
     kwargs: dict[str, Any] = {"sep": dialect.delimiter, "dtype": dtype, **read_opts, **use}
+    if compression != "infer":
+        kwargs["compression"] = compression
     if exact_text:
         kwargs = {**kwargs, "keep_default_na": False, "na_filter": False}
     if nrows is not None:
         kwargs["nrows"] = nrows
     if chunksize is None:
-        frame = _read_whole(open_handle, kwargs, names, table, kept)
+        frame = _read_whole(open_handle, kwargs, names, table, kept, passes)
         return frame if columns is None else _shaped(frame, columns)
     if dialect.has_header:
         with open_handle() as handle:  # a missing or denied file fails at the call, as headerless
             handle.stat()
-    chunks = _read_chunks(open_handle, {**kwargs, "chunksize": chunksize}, names, table, kept)
+    chunks = _read_chunks(
+        open_handle, {**kwargs, "chunksize": chunksize}, names, table, kept, passes
+    )
     return chunks if columns is None else _shaped(chunks, columns)
 
 
@@ -492,6 +480,7 @@ def read_csv_source(
     file_access: FileAccess | None = ...,
     field_key: str = ...,
     columns: Sequence[str] | None = ...,
+    compression: str | None = ...,
 ) -> pd.DataFrame: ...
 
 
@@ -507,6 +496,7 @@ def read_csv_source(
     file_access: FileAccess | None = ...,
     field_key: str = ...,
     columns: Sequence[str] | None = ...,
+    compression: str | None = ...,
 ) -> Iterator[pd.DataFrame]: ...
 
 
@@ -522,6 +512,7 @@ def read_csv_source(
     file_access: FileAccess | None = None,
     field_key: str = "source.path",
     columns: Sequence[str] | None = None,
+    compression: str | None = "infer",
 ) -> pd.DataFrame | Iterator[pd.DataFrame]:
     """Read the CSV file at `path` under `dialect`.
 
@@ -536,6 +527,10 @@ def read_csv_source(
     is an iterator of frames of at most `chunksize` rows, bound to the call's file-access
     policy. A parser disagreement the scan cannot see (an unterminated quote) surfaces on
     the step that reads it.
+
+    `compression` is pandas' own argument. The default infers from `path`, the declared name,
+    before pandas sees the handle: a rooted policy hands pandas a descriptor path with no suffix,
+    so pandas could not infer it there. A caller that knows the format says so.
 
     `columns` parses only the named columns and returns every frame or chunk with exactly
     them, in the order given (not file order). A name the file lacks, or a repeated name, is a
@@ -559,6 +554,7 @@ def read_csv_source(
         chunksize=chunksize,
         dtype=dtype,
         columns=columns,
+        compression=csv_compression(path) if compression == "infer" else compression,
     )
 
 
@@ -573,24 +569,22 @@ def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") ->
     only `field_key`, never a cell. `table` names the source in any `PipelineValidationError`.
     """
     handle = MemoryHandle(raw, field_key)
-    frame = _read_csv_rows(lambda: handle, CsvDialect(), table=table, dtype=str, exact_text=True)
+    frame = _read_csv_rows(
+        lambda: handle,
+        CsvDialect(),
+        table=table,
+        dtype=str,
+        exact_text=True,
+        compression=None,
+        refuse_decoder=False,
+    )
     assert isinstance(frame, pd.DataFrame)  # noqa: S101 - chunksize is None
     return frame
 
 
-def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
-    """What pandas infers from the name of `path` (`compression="infer"`): True when its
-    suffix names a compression format.
-
-    Taken from pandas' own inference, so a pandas upgrade changes the answer with it. It looks at
-    the name only and opens nothing. It makes no claim about `read_csv_source` under every file
-    policy: a rooted policy hands pandas a descriptor path with no suffix, so that read infers
-    no compression."""
-    return infer_compression(os.fspath(path), "infer") is not None
-
-
 __all__ = [
     "CsvDialect",
+    "csv_compression",
     "csv_is_compressed",
     "read_csv_bytes",
     "read_csv_source",

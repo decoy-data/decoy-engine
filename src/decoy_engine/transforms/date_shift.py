@@ -10,6 +10,7 @@ detects a format: it is required), and the one shift-window resolver
 """
 
 from collections.abc import Mapping
+from datetime import datetime, timedelta
 from typing import Any
 
 from decoy_engine import reasons
@@ -124,3 +125,18 @@ _COMMON_FORMATS = [
     "%Y-%m-%dT%H:%M:%S",
     "%Y-%m-%d %H:%M:%S",
 ]
+
+
+def shift_date_text(dt: datetime, days: int, fmt: str) -> str | None:
+    """`dt` plus `days` printed with `fmt`, or None when the sum leaves years 1 to 9999.
+
+    The None is returned after the handler closes, so no OverflowError context is kept.
+    glibc strftime drops the zero padding of ``%Y`` below year 1000, so the year is padded here.
+    """
+    try:
+        shifted = dt + timedelta(days=days)
+    except OverflowError:
+        shifted = None
+    if shifted is None:
+        return None
+    return shifted.strftime(fmt.replace("%Y", f"{shifted.year:04d}"))

@@ -18,7 +18,7 @@ from tests.sentry.defects import _defect_scan as scan
 PRIVATE = "_target_identity"
 PUBLIC = "duplicate_target_groups"
 OWNER = "config/_targets.py"
-CALLERS = ("config/_pipeline.py", "profiling/_starter_config.py")
+CALLERS = ("config/_pipeline.py", "profiling/_starter_targets.py")
 
 
 def private_uses(tree: ast.AST) -> list[int]:

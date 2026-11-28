@@ -20,6 +20,11 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.strategy_requirements import (
+    SHAPE_REQUIREMENTS_BY_STRATEGY,
+    shape_declaration_needed,
+)
 from decoy_engine.profiling import recommendations
 
 __all__ = ["StarterDecision", "confident_matches", "detected_date_config", "infer_starter_strategy"]
@@ -94,16 +99,41 @@ def detected_date_config(
     return {**choice.provider_config, "date_format": fmt}
 
 
-def _from_descriptor(detector_id: str, bucket: str | None, match: Any = None) -> StarterDecision:
+def format_needed(strategy: str, shape: ColumnShape) -> bool | None:
+    """Whether the starter writes the detected date format for a column of ``shape``.
+
+    True for text and unknown shapes, False for a shape the strategy reads natively, and None
+    for a shape it does not admit at all: no config can make that strategy read the column, so
+    the starter picks another. Read from the shape table the plan check uses.
+    """
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy)
+    if shaped is None:
+        return True
+    if shape not in shaped.admitted:
+        return None
+    return shape_declaration_needed(shaped, shape, config_only=False)
+
+
+def _from_descriptor(
+    detector_id: str,
+    bucket: str | None,
+    match: Any = None,
+    shape: ColumnShape = ColumnShape.UNKNOWN,
+) -> StarterDecision:
     choice = recommendations.starter_choice(detector_id)
     if choice is None:
         return _FALLBACK
     provider_config: Mapping[str, Any] = choice.provider_config
+    # A typed date is read natively and needs no format; text and `unknown` keep it (fail closed).
     if choice.detected_date_format:
-        detected = detected_date_config(choice, match)
-        if detected is None:
+        needed = format_needed(choice.strategy, shape)
+        if needed is None:
             return _FALLBACK
-        provider_config = MappingProxyType(detected)
+        if needed:
+            detected = detected_date_config(choice, match)
+            if detected is None:
+                return _FALLBACK
+            provider_config = MappingProxyType(detected)
     return StarterDecision(
         strategy=choice.strategy,
         provider=choice.provider,
@@ -148,8 +178,12 @@ def infer_starter_strategy(field_stats: Any) -> StarterDecision:
     if confident:
         top = confident[0]
         bucket = getattr(top, "confidence", None)
+        shape = getattr(field_stats, "shape", ColumnShape.UNKNOWN)
         base = _from_descriptor(
-            getattr(top, "detector_id", ""), bucket if isinstance(bucket, str) else None, top
+            getattr(top, "detector_id", ""),
+            bucket if isinstance(bucket, str) else None,
+            top,
+            shape if isinstance(shape, ColumnShape) else ColumnShape.UNKNOWN,
         )
         ambiguous = (
             len(confident) > 1

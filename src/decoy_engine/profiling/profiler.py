@@ -11,11 +11,13 @@ analysis offline and from the CLI without depending on the platform.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
 
 from decoy_engine.context import ExecutionContext, emit_lineage, emit_step
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.detection.detectors import (
     _series_str,
     hits_custom_name_hint,
@@ -192,17 +194,19 @@ def _profile_column(
     series: pd.Series,
     total_rows: int,
     custom_detectors: list[CustomDetectorSpec] | None = None,
+    shape: ColumnShape = ColumnShape.UNKNOWN,
 ) -> FieldStats:
     # One stringify + factorize per column, shared by the length stats, the
     # detectors and the sentinel scan.
     with prepared_scope(series):
-        return _profile_column_stats(series, total_rows, custom_detectors)
+        return _profile_column_stats(series, total_rows, custom_detectors, shape)
 
 
 def _profile_column_stats(
     series: pd.Series,
     total_rows: int,
     custom_detectors: list[CustomDetectorSpec] | None,
+    shape: ColumnShape,
 ) -> FieldStats:
     name = str(series.name)
     dtype_raw = str(series.dtype)
@@ -239,6 +243,7 @@ def _profile_column_stats(
         unique_rate=unique_rate,
         is_likely_unique=is_likely_unique,
         top_values=_top_values(series, total_rows),
+        shape=shape,
     )
 
     # Numeric stats.
@@ -315,8 +320,12 @@ def profile_columns(
     extra_name_hints: dict[str, list[str]] | None = None,
     ctx: ExecutionContext | None = None,
     file_access: FileAccess | None = None,
+    shapes: Mapping[str, ColumnShape] | None = None,
 ) -> ColumnProfile:
     """Scan a DataFrame and produce a ColumnProfile.
+
+    `shapes` maps a column name to what the source says it holds (`FieldStats.shape`); a column
+    with no entry reads `unknown`, so the starter fails closed.
 
     `basis` on the result is `whole` when the strategy is `full`, there is no cap, or the frame
     is shorter than the cap. Two edges are the caller's statement: a frame that is already a
@@ -389,6 +398,7 @@ def profile_columns(
             sample_row_cap=sample_row_cap,
             custom_detectors=custom_detectors,
             logger=logger,
+            shapes=shapes or {},
         )
 
 
@@ -400,6 +410,7 @@ def _profile_columns_inner(
     sample_row_cap: int | None,
     custom_detectors: list[CustomDetectorSpec] | None,
     logger: Any,
+    shapes: Mapping[str, ColumnShape],
 ) -> ColumnProfile:
     """The original profiling body. Split out so profile_columns() can wrap
     it in the name_hint_extras() context manager without indenting
@@ -419,7 +430,9 @@ def _profile_columns_inner(
         # a one-line summary of which detectors fired -- saves the
         # operator from manually counting in the field table.
         for col in df.columns:
-            f = _profile_column(df[col], total, custom_detectors)
+            f = _profile_column(
+                df[col], total, custom_detectors, shapes.get(str(col), ColumnShape.UNKNOWN)
+            )
             fields.append(f)
             for dm in f.detector_matches or []:
                 detector_hits[dm.detector_id] = detector_hits.get(dm.detector_id, 0) + 1

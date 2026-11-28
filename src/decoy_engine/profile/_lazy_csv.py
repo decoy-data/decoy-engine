@@ -13,6 +13,11 @@ facts pass and around the batch read: a file replaced or edited in between is re
 
 Row groups do not exist in CSV; the facts report none, and the layout is part of the facts
 comparison like any other fact.
+
+A compressed file (gzip, bzip2, xz, zip, tar, zstd) is read the same way: pandas decompresses it
+as a stream, one chunk in memory. The format is inferred once from the declared name, because a
+rooted file policy hands pandas a descriptor path with no suffix. A decoder failure is the coded
+refusal below, never the decoder's own text, which can quote the bytes it choked on.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ import pyarrow as pa
 
 from decoy_engine._execution_error import lazy_source_changed as lazy_source_changed
 from decoy_engine.config._csv_dialect import CsvDialect
-from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect
+from decoy_engine.profile._csv_reader import csv_compression, read_csv_source, resolve_csv_dialect
 from decoy_engine.profile._lazy_identity import LazyFileIdentity, check_batch_rows
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
 
@@ -105,6 +110,9 @@ class CsvLazySource(LazyFileIdentity, LazySource):
 
     dialect: CsvDialect = field(default_factory=CsvDialect)
     table: str = field(default="source", compare=False)
+    # pandas' name for the codec (`gzip`, `bz2`, ...), None for plain text, or "infer" to read it
+    # from the declared name (the reader's rule, so a rooted policy still sees the suffix).
+    compression: str | None = field(default="infer", compare=False)
     # Facts and the identity they were taken under, from the last `footer_facts()` call.
     _seen: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
@@ -126,6 +134,7 @@ class CsvLazySource(LazyFileIdentity, LazySource):
             field_key=field_key,
             dialect=dialect,
             table=table,
+            compression=csv_compression(descriptor["path"]),
         )
 
     def _chunks(self, batch_rows: int, columns: list[str] | None = None) -> Iterator[pd.DataFrame]:
@@ -138,6 +147,7 @@ class CsvLazySource(LazyFileIdentity, LazySource):
             file_access=self.access,
             field_key=self.field_key,
             columns=columns,
+            compression=self.compression,
         )
 
     def preflight(self) -> pa.Schema:
@@ -150,6 +160,7 @@ class CsvLazySource(LazyFileIdentity, LazySource):
             nrows=0,
             file_access=self.access,
             field_key=self.field_key,
+            compression=self.compression,
         )
         return _text_schema([str(name) for name in header.columns])
 

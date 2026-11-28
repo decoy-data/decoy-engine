@@ -416,6 +416,7 @@ def test_signature_keyword_only_tail() -> None:
         "file_access",
         "field_key",
         "columns",
+        "compression",
     ]
 
 

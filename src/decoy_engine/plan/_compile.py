@@ -58,7 +58,6 @@ from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._checks import (
     check_basic_uniqueness_pre_flight,
     check_composite_columns_length_match,
-    check_fpe_checksum_scheme,
     check_null_bearing_int_unsupported,
     check_text_mask_ner_available,
     check_text_redact_ner_available,
@@ -82,7 +81,7 @@ from decoy_engine.plan._checks_date_shift import (
 from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
 from decoy_engine.plan._checks_dp import check_dp_generate_contract
 from decoy_engine.plan._checks_faker import check_faker_requires_provider
-from decoy_engine.plan._checks_fpe import check_fpe_charset_config
+from decoy_engine.plan._checks_fpe import check_fpe_charset_config, check_fpe_checksum_scheme
 from decoy_engine.plan._checks_fpe_join import check_fpe_join_groups
 from decoy_engine.plan._checks_freetext_advisory import check_freetext_advisory
 from decoy_engine.plan._checks_top_code import check_top_code_config
