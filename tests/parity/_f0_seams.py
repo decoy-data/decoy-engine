@@ -27,6 +27,7 @@ import pytest
 
 from decoy_engine.generation import _faker_pool
 from tests.parity._f0_canonical import column_digest
+from tests.parity.support.pick_spy import install_pick_spy, picked_values
 
 
 @dataclass
@@ -122,18 +123,17 @@ def observe_pool_seam(mp: pytest.MonkeyPatch) -> Iterator[PoolSeamLog]:
             sampled=[],
         )
         log.calls.append(call)
-        real_select = selector.select
-
-        def select_spy(size: int) -> Any:
-            picked = real_select(size)
-            call.n += size
-            assert call.sampled is not None
-            call.sampled.extend(picked)
-            return picked
-
-        selector.select = select_spy  # type: ignore[method-assign]
+        calls_by_selector[id(selector)] = call
         return selector
 
+    def picked(_method: str, selector: Any, size: int, out: Any) -> None:
+        call = calls_by_selector[id(selector)]
+        call.n += size
+        assert call.sampled is not None
+        call.sampled.extend(picked_values(out))
+
+    calls_by_selector: dict[int, PoolCall] = {}
+    install_pick_spy(mp, picked)
     mp.setattr(_faker_pool, "build_pool_values", build_spy)
     mp.setattr(_faker_pool, "_build_and_sample_returning_pool", returning_spy)
     mp.setattr(_faker_pool, "open_pooled_selector", open_spy)

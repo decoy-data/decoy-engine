@@ -253,19 +253,3 @@ def validation_problems(exc: ValidationError) -> tuple[ConfigProblem, ...]:
     is read: not ``input``, not the rendered ``msg``, not ``ctx`` beyond the allowlisted keys.
     """
     return tuple(_problem(e) for e in exc.errors(include_url=False, include_input=False))
-
-
-def yaml_error_text(exc: Exception) -> str:
-    """A leak-safe one-line description of a YAML parse failure.
-
-    PyYAML's message and snippet echo the offending source line, which can hold a password or
-    PII. Only the integer line and column of the error mark are read. Accepts any exception so a
-    broad ``except`` cannot pass a non-YAML error's text through.
-    """
-    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
-    line = getattr(mark, "line", None)
-    column = getattr(mark, "column", None)
-    if isinstance(line, int) and isinstance(column, int):
-        # PyYAML marks are 0-indexed; editors count from 1.
-        return f"could not parse YAML: invalid syntax at line {line + 1}, column {column + 1}"
-    return "could not parse YAML: the file is not valid YAML"

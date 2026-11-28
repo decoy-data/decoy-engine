@@ -240,9 +240,10 @@ def test_plan_reads_the_dump_of_a_validated_pipeline_config() -> None:
         "targets": {
             n: {"type": "file", "format": "csv", "path": f"./out/{n}.csv"} for n in ("p", "c")
         },
-        "delivery": {"mode": "best_effort"},
     }
     config = PipelineConfig.model_validate(raw).model_dump(mode="python")
+    # BE0 refuses best_effort in the validated config, so the plan reads it from the dump.
+    config["delivery"] = {"mode": "best_effort"}
     d = plan_delivery(config, {"p": FAIL, "c": None})
     assert _states(d) == {"p": "failed", "c": "dropped"}
     assert d.tables["c"].dropped_because == "p"

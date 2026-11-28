@@ -328,7 +328,7 @@ def _register_list_provider(provider_name: str, values: list[str]) -> None:
     frozen = list(values)
 
     def _provider(fake: Faker) -> str:
-        return str(fake.random.choice(frozen))
+        return str(fake.factories[0].random.choice(frozen))  # fake.random raises on a locale list
 
     with _PROVIDER_LOCK:
         _CUSTOM_FAKER_PROVIDER_VALUES[provider_name] = list(frozen)
@@ -459,6 +459,9 @@ def _reflect(fake: Faker, name: str, attr: Callable[..., Any]) -> Callable[..., 
         from decoy_engine.generation._dob_anchor import anchored_date_of_birth
 
         return _make_reflected_provider(partial(anchored_date_of_birth, fake))
+    if len(fake.factories) > 1:
+        # The proxy picks a factory per lookup from its RNG: look up after the seed, not before.
+        return lambda **kwargs: _make_reflected_provider(getattr(fake, name))(**kwargs)
     return _make_reflected_provider(attr)
 
 
@@ -499,7 +502,10 @@ def get_faker_providers(
             continue
         if name in _FAKER_DENYLIST:
             continue
-        attr = getattr(fake, name, None)
+        try:
+            attr = getattr(fake, name, None)
+        except NotImplementedError:
+            continue  # a multi-locale proxy raises on its single-factory helpers; not providers
         if not callable(attr):
             continue
         providers[name] = _reflect(fake, name, attr)
@@ -643,13 +649,8 @@ def make_faker(locale: str | list[str] | None = None) -> Faker:
     locale. Invalid locales fall back to `en_US` so a single bad pipeline
     rule doesn't poison the run.
 
-    QA-internal-synth-providers F7 (2026-06-01, MEDIUM correctness):
-    a typo like `faker_locale: de_AT` no longer silently produces en_US
-    output; the fallback now logs a warning so an operator who picked
-    the locale on purpose can see that their request was ignored.
-    Names, addresses, and phone numbers from a wrong-locale Faker can
-    fail downstream format validations + break anonymization contracts
-    that rely on locale-appropriate output.
+    QA-internal-synth-providers F7 (2026-06-01): the fallback logs a warning, so an operator who
+    picked a locale on purpose (`faker_locale: de_AT`) can see that the request was ignored.
 
     Caller is responsible for seeding the returned instance via
     `seed_instance(...)` for deterministic output."""

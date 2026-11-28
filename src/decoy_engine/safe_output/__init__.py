@@ -11,6 +11,7 @@ handler prints exception type labels, never exception text.
 
 from __future__ import annotations
 
+from decoy_engine._config_text import yaml_error_text
 from decoy_engine.safe_output._event import EventKind, Flag, SafeEvent, StepRef
 from decoy_engine.safe_output._exception import SafeErrorType, safe_error_type
 from decoy_engine.safe_output._file_metadata import (
@@ -20,7 +21,7 @@ from decoy_engine.safe_output._file_metadata import (
     sanitized_schema_metadata,
 )
 from decoy_engine.safe_output._log_filter import SafeRecordFilter
-from decoy_engine.safe_output._validation import ConfigProblem, validation_problems, yaml_error_text
+from decoy_engine.safe_output._validation import ConfigProblem, validation_problems
 
 __all__ = [
     "ConfigProblem",

@@ -67,6 +67,7 @@ def test_group_key_has_no_target_resident_types_and_faker_has_the_allowlist() ->
             "synthetic_account_number",
             "synthetic_member_id",
             "synthetic_plan_id",
+            "lorem_text",
         }
     )
     assert OPERATORS["passthrough"].unified_resident_types == frozenset(

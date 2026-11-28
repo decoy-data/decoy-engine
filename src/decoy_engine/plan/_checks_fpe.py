@@ -38,10 +38,14 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Name, Problem, config_position, config_refusal
+from decoy_engine._error_base import raise_bare
 from decoy_engine.errors import FpeUnencryptableError
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.transforms.fpe import (
     _CHARSETS,
+    FPE_CHARSET_DUPLICATE_TEXT,
+    FPE_CHARSET_NON_ASCII_TEXT,
     check_charset_ascii_printable,
     check_charset_unique,
 )
@@ -94,22 +98,31 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
             resolved = _CHARSETS.get(charset_spec, charset_spec)
             if not isinstance(resolved, str):
                 resolved = str(resolved)
+            at_charset = config_position(
+                "tables", Name(table_name), "columns", Name(col_name), "provider_config", "charset"
+            )
+            duplicate = False
             try:
                 check_charset_unique(charset_spec, resolved)
-            except FpeUnencryptableError as exc:
-                raise PlanCompileError(
-                    code=reasons.plan.FPE_CHARSET_DUPLICATE_SYMBOLS,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.charset",
-                    message=(f"fpe column {col_name!r} in table {table_name!r}: {exc}"),
-                ) from exc
+            except FpeUnencryptableError:
+                duplicate = True
+            if duplicate:
+                duplicate_refusal = config_refusal(
+                    at_charset, Problem.NOT_ALLOWED, hint=FPE_CHARSET_DUPLICATE_TEXT
+                )
+                raise_bare(
+                    refusal_error(reasons.plan.FPE_CHARSET_DUPLICATE_SYMBOLS, duplicate_refusal)
+                )
+            non_ascii = False
             try:
                 check_charset_ascii_printable(resolved)
-            except FpeUnencryptableError as exc:
-                raise PlanCompileError(
-                    code=reasons.plan.FPE_CHARSET_NON_ASCII,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.charset",
-                    message=(f"fpe column {col_name!r} in table {table_name!r}: {exc}"),
-                ) from exc
+            except FpeUnencryptableError:
+                non_ascii = True
+            if non_ascii:
+                ascii_refusal = config_refusal(
+                    at_charset, Problem.NOT_ALLOWED, hint=FPE_CHARSET_NON_ASCII_TEXT
+                )
+                raise_bare(refusal_error(reasons.plan.FPE_CHARSET_NON_ASCII, ascii_refusal))
             if len(resolved) < 2:
                 raise PlanCompileError(
                     code=reasons.plan.FPE_CHARSET_DEGENERATE,

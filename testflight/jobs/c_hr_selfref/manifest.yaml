@@ -168,6 +168,7 @@ config:
           namespace: hire_date_ns
           provider_config:
             bucket: month
+            date_format: "%Y-%m-%d"
 
         # notes: text_mask (span-level redaction). The us_phone detector fires
         # on the sentinel phone "800-555-0100" planted in row 0 and replaces it.

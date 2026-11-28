@@ -24,14 +24,14 @@ from __future__ import annotations
 import datetime
 import pathlib
 
-from ._runner import InvariantResult, JobResult
+from ._runner import InvariantResult, JobResult, failed_invariant_fields, failure_text
 
 
 def format_job_section(result: JobResult) -> str:
     """Render the per-job evidence section.
 
     One line per invariant family with PASS/FAIL and (on failure) the
-    first line of the detail message indented below.
+    a fixed category (never the detail text, which can quote cell values).
 
     Args:
         result: JobResult from run_job.
@@ -44,14 +44,17 @@ def format_job_section(result: JobResult) -> str:
     lines.append(f"=== Job: {result.job_name} [{verdict}] ===")
     lines.append(f"    elapsed: {result.elapsed_s:.2f}s")
 
-    if result.error:
-        lines.append(f"    ERROR: {result.error}")
+    if result.error is not None:
+        lines.append(f"    ERROR: {failure_text(result)}")
         return "\n".join(lines)
 
     for ir in result.invariant_results:
         mark = "[SKIP]" if ir.skipped else ("[PASS]" if ir.passed else "[FAIL]")
-        # Show detail for both PASS (expected-vs-found counts) and FAIL cases.
-        if ir.detail:
+        if not ir.passed:
+            # A failure detail can quote a cell value; show a fixed category only.
+            family, category = failed_invariant_fields(ir)
+            lines.append(f"  {mark}  {family}  ({category})")
+        elif ir.detail:
             lines.append(f"  {mark}  {ir.family}  ({ir.detail.splitlines()[0]})")
             for detail_line in ir.detail.splitlines()[1:5]:
                 lines.append(f"           {detail_line}")
