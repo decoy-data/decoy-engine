@@ -22,7 +22,6 @@ table admits, and on the pandas oracle otherwise, behind one contract:
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Iterable, Iterator
 from typing import Any
 
@@ -31,9 +30,9 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine._pandas_meta import stored_index_fields
 from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts
-from decoy_engine.execution import _chunked, _chunked_oracle
 from decoy_engine.execution import _chunked_bucket_perturb as bucket_perturb_gate
 from decoy_engine.execution import _chunked_dgrn as dgrn
+from decoy_engine.execution import _chunked_oracle
 from decoy_engine.execution import _chunked_text_mask as text_mask_gate
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._chunked import _chain_first
@@ -56,7 +55,6 @@ from decoy_engine.execution.native._chunked_evidence import (
     chunk_route_evidence,
     plan_column_backends,
 )
-from decoy_engine.execution.native._chunked_oracle_rows import _oracle_preserved_rows
 from decoy_engine.execution.native._chunked_pools import (
     prepared_categoricals,
     resolve_admitted_pools,
@@ -85,6 +83,7 @@ from decoy_engine.execution.native._route_decline_codes import (
     table_decline,
 )
 from decoy_engine.execution.native._when_mask import plan_when_masks
+from decoy_engine.execution.native.chunked._oracle_route import _oracle_route
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool import PoolCache, ValuePool
 from decoy_engine.instrumentation.timing import StrategyTimingRecord
@@ -108,72 +107,6 @@ def _validate_native_threads(native_threads: Any) -> None:
                 f"got {native_threads!r}."
             ),
         )
-
-
-def _oracle_route(
-    state: Any,
-    *,
-    config: dict[str, Any],
-    table: str,
-    vault_writer: Any,
-    chunk_result_sink: list[Any] | None,
-    base_row_offset: int,
-    rule: SchemaRule | None,
-    columns: tuple[ColumnPlan, ...],
-    decision: NativeRouteEvidence,
-    read_passthrough: tuple[str, ...],
-) -> Iterator[pa.Table]:
-    # Eager, like the oracle's own preflight: a provider failure surfaces now.
-    _chunked._warm_faker_pools(
-        state.plan, table=table, registry=state.registry, pool_cache=state.pool_cache
-    )
-    if rule is None:
-        return _chunked_oracle._oracle_masked(
-            state,
-            config=config,
-            table=table,
-            vault_writer=vault_writer,
-            chunk_result_sink=chunk_result_sink,
-            base_row_offset=base_row_offset,
-        )
-    produced = 0
-
-    def on_chunk(result: Any, chunk: pa.Table) -> pa.Table:
-        nonlocal produced
-        out = normalize_chunk(rule, result.outputs[table], chunk, table=table, chunk_index=produced)
-        produced += 1
-        if chunk_result_sink is not None:
-            elapsed: dict[str, float] = {}
-            for rec in result.timings:
-                elapsed[rec.column] = elapsed.get(rec.column, 0.0) + rec.elapsed_ms
-            evidence = chunk_route_evidence(
-                table=table,
-                native_admitted=False,
-                reroute_reason=decision.reroute_reason,
-                decline_records=decision.decline_records,
-                columns=columns,
-                elapsed_ms=elapsed,
-                pandas_read_passthrough=read_passthrough,
-                preserved_rows=_oracle_preserved_rows(result.quality_metrics),
-            )
-            chunk_result_sink.append(
-                dataclasses.replace(
-                    result,
-                    outputs={**result.outputs, table: out},
-                    quality_metrics={**result.quality_metrics, "chunked_route": evidence},
-                )
-            )
-        return out
-
-    return _chunked_oracle._oracle_masked(
-        state,
-        config=config,
-        table=table,
-        vault_writer=vault_writer,
-        chunk_result_sink=chunk_result_sink,
-        base_row_offset=base_row_offset,
-        on_chunk=on_chunk,
-    )
 
 
 def _native_chunk_result(

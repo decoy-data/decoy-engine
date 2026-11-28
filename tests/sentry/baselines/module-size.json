@@ -60,11 +60,11 @@
   },
   "src/decoy_engine/execution/native/_chunked_entry.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
-   "max": 689
+   "max": 641
   },
   "src/decoy_engine/execution/native/_dispatch.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
-   "max": 688
+   "max": 651
   },
   "src/decoy_engine/execution/native/_requirements.py": {
    "reason": "initial X0a inventory of test_module_size.py; existing entry, reviewed by its own sentry",
